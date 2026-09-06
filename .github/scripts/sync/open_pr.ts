@@ -299,17 +299,15 @@ const needsReview =
 
 // The PR-URL prints below reach the PUBLIC log even for a hidden target -
 // accepted by design. The URL carries the slug plus a PR number and no
-// target details, and the slug is the NAME-redaction side's job, not
-// hideDetails': for a wildcard-discovered private target,
-// resolve_private_repo.ts registered the slug (canonical and lowercase
-// forms) with the runner's masker before anything printed, so the URL
-// renders as https://github.com/***/pull/N - docs/private-repos.md names
-// PR URLs as a masker-covered surface - while a hide-details target whose
-// name is NOT masked is self-disclosed (an explicit repos.yml entry,
-// already plain in the public job name). The mask is a point-in-time
-// snapshot taken at the resolve step: a target renamed mid-run surfaces
-// here under its new canonical slug, which no mask covers - the
-// documented residual (a rename BEFORE resolve fails closed there).
+// target details, and the slug is the masker's job, not hideDetails': for
+// a private target, resolve_private_repo.ts registered the slug
+// (canonical and lowercase forms) with the runner's masker before
+// anything printed, so the URL renders as https://github.com/***/pull/N -
+// docs/private-repos.md names PR URLs as a masker-covered surface. The
+// mask is a point-in-time snapshot taken at the resolve step: a target
+// renamed mid-run surfaces here under its new canonical slug, which no
+// mask covers - the documented residual (a rename BEFORE resolve fails
+// closed there).
 const existing = mustCapture([
   "gh",
   "pr",

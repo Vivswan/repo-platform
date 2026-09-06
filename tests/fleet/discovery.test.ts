@@ -159,18 +159,18 @@ describe("scrubSlug", () => {
   });
 });
 
-// The notice builders replaced inline literals in both selectors; these
-// pin the emitted text byte-for-byte to the pre-extraction strings.
+// The notice builders are the selectors' shared literals; these pin the
+// emitted text byte-for-byte.
 describe("notice builders", () => {
-  test("pushProbeSkipNotice matches the selectors' shared literal exactly", () => {
+  test("pushProbeSkipNotice names the repo a non-member, hint first", () => {
     expect(pushProbeSkipNotice("h**-l**d", 403)).toBe(
-      "h**-l**d: skipped - the fleet token has no write access (push probe HTTP 403). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this.",
+      "h**-l**d: not in the fleet - the fleet token cannot push to it (push probe HTTP 403). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it.",
     );
   });
 
   test("notAdoptedNotice without a consequence matches the sync selector's literal exactly", () => {
     expect(notAdoptedNotice("Vivswan/unadopted")).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or add it to repos.yml's exclude list to silence this.",
+      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's access to silence this.",
     );
   });
 
@@ -184,7 +184,7 @@ describe("notice builders", () => {
       "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not " +
         "adopted the template. If it carries .github/settings.yml, the central nightly heal no " +
         "longer applies it. Generate it with copier (see the repo-platform README) to opt in, or " +
-        "add the repo to repos.yml's exclude list to silence this.",
+        "revoke the fleet token's access to silence this.",
     );
   });
 });
@@ -253,7 +253,7 @@ describe("readDispatchRepo", () => {
     },
     {
       reason:
-        "a comma list is trimmed and owner-prefixed per entry; empties survive for the registry to reject",
+        "a comma list is trimmed and owner-prefixed per entry; empties survive for the scope parser to reject",
       onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",
       eventBody: undefined,
       owner: "Vivswan",
@@ -379,9 +379,9 @@ describe("readDispatchRepo", () => {
   });
 });
 
-// discoverWritableRepos and runStage exit the process on failure, so both
-// run behind a subprocess entry file with a stub gh on PATH.
-describe("discoverWritableRepos and runStage", () => {
+// discoverWritableRepos exits the process on failure, so it runs behind a
+// subprocess entry file with a stub gh on PATH.
+describe("discoverWritableRepos", () => {
   const root = temp.dir("discovery-proc-");
   const bin = join(root, "bin");
   const discoveryPath = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
@@ -480,55 +480,5 @@ describe("discoverWritableRepos and runStage", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discovery.test: user/repos response: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-  });
-
-  const stageEntry = join(root, "stage_entry.ts");
-  writeFileSync(
-    stageEntry,
-    [
-      `import { runStage } from ${JSON.stringify(discoveryPath)};`,
-      'runStage(JSON.parse(process.env.STAGE_CMD ?? "[]"), process.env.STAGE_OUT ?? "");',
-      'console.log("after-stage");',
-      "",
-    ].join("\n"),
-  );
-
-  function runStageEntry(command: string[], outFile: string) {
-    const proc = boundedSpawnSync(["bun", stageEntry], {
-      env: { ...process.env, STAGE_CMD: JSON.stringify(command), STAGE_OUT: outFile },
-    });
-    return {
-      exitCode: proc.exitCode,
-      stdout: proc.stdout,
-      stderr: proc.stderr,
-    };
-  }
-
-  test("runStage tees the stage's stdout to the out file and continues", () => {
-    const outFile = join(root, "stage-ok.json");
-    const r = runStageEntry(["bun", "-e", "console.log('stage-out')"], outFile);
-    expect(r.exitCode).toBe(0);
-    expect(readFileSync(outFile, "utf-8")).toBe("stage-out\n");
-    expect(r.stdout).toContain("after-stage");
-  });
-
-  test("a failing stage forwards its captured stdout and exits with the stage's code", () => {
-    // The runner only parses workflow commands from stdout, so a failing
-    // stage's ::error:: lines must be written through before exiting.
-    const outFile = join(root, "stage-fail.json");
-    writeFileSync(outFile, "");
-    const r = runStageEntry(
-      [
-        "bun",
-        "-e",
-        "console.log('::error::stage-failed'); console.error('stage-diagnostic'); process.exit(3)",
-      ],
-      outFile,
-    );
-    expect(r.exitCode).toBe(3);
-    expect(r.stdout).toContain("::error::stage-failed");
-    expect(r.stderr).toContain("stage-diagnostic");
-    expect(r.stdout).not.toContain("after-stage");
-    expect(readFileSync(outFile, "utf-8")).toBe("");
   });
 });

@@ -5269,7 +5269,6 @@ const rules: Rule[] = [
         "bun run generate:check",
         "bun run dogfood:check",
         "bun run gitignore:topology",
-        "bun .github/scripts/fleet/repos_registry.ts validate",
         "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
         // The copier-render oracle for the generated dogfood copies: its
         // only home is a step of the smoke-generate job (dogfood-oracle
@@ -6193,22 +6192,24 @@ const rules: Rule[] = [
     run: () => {
       // The layer render and the merge run BEFORE the settings action, so
       // the action's own redaction cannot cover their output, and both
-      // quote repo-owned content on their diagnostic paths. hide_details
-      // must therefore reach them: it has to ride the matrix AND be
-      // handed to both steps, which pass it to run_hidden.ts. This was
-      // dropped once already, with a comment explaining why it was safe -
-      // it was not, so the invariant is pinned rather than commented.
+      // quote repo-owned content on their diagnostic paths. The row's
+      // private flag must therefore reach them: it has to ride the matrix
+      // AND be handed to both steps, which pass it to run_hidden.ts. This
+      // was dropped once already, with a comment explaining why it was
+      // safe - it was not, so the invariant is pinned rather than
+      // commented.
       const mismatches: Mismatch[] = [];
       const matrix = read(".github/scripts/fleet/build_settings_matrix.ts");
       if (
         !intersectionCarriesType(matrix, "RedactionState") ||
-        !propertyAssignmentCarries(matrix, "hide_details", "row.hide_details")
+        !propertyAssignmentCarries(matrix, "private", "true") ||
+        !propertyAssignmentCarries(matrix, "verify", "row.verify")
       ) {
         mismatches.push({
           file: ".github/scripts/fleet/build_settings_matrix.ts",
           expected:
-            "the matrix Target carries the row's RedactionState (redact.ts), hide_details copied from the row",
-          got: "the flag is not on the matrix",
+            "the matrix Target carries the row's RedactionState (redact.ts): a private arm setting private: true and copying row.verify",
+          got: "the redaction pair is not on the matrix",
         });
       }
       const workflow = read(".github/workflows/settings-repos.yml");
@@ -6242,7 +6243,7 @@ const rules: Rule[] = [
           });
         }
       }
-      if (!/^\s+HIDE_DETAILS: \$\{\{ matrix\.hide_details \}\}$/m.test(workflow)) {
+      if (!/^\s+HIDE_DETAILS: \$\{\{ matrix\.private \}\}$/m.test(workflow)) {
         mismatches.push({
           file: ".github/workflows/settings-repos.yml",
           expected: "the apply job takes HIDE_DETAILS from the matrix row",

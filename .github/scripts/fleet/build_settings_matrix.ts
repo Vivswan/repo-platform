@@ -9,16 +9,15 @@
 //     --targets targets.json [--self owner/name] [--only owner/name[,owner/name...]]
 //
 // Targets come from --targets, a JSON array of the selector's enriched
-// rows ({repo, redact_name, hide_details, display, verify, ...}) - the
-// enrolled, adopted repos (a readable .repo-platform.yml). --self appends
-// the operator repository itself: it
-// is not adopted (no .repo-platform.yml), but its settings are managed by
-// the same run (its baseline facts come from .repo-platform-answers.yml -
-// see render_managed_settings.ts). Prints a JSON array of
-// {repo, name, redact_name, verify} entries sorted by the emitted repo; a
-// redacted row's `repo`/`name` carry its display hint so the matrix, the
-// job name it becomes, and the called steps never see the slug (the apply
-// leg re-resolves it from `verify`).
+// rows ({repo, private, display, verify, ...}) - the enrolled, adopted
+// repos (a readable .repo-platform.yml). --self appends the operator
+// repository itself: it is not adopted (no .repo-platform.yml), but its
+// settings are managed by the same run (its baseline facts come from
+// .repo-platform-answers.yml - see render_managed_settings.ts). Prints a
+// JSON array of {repo, name, private, verify} entries sorted by the
+// emitted repo; a private row's `repo`/`name` carry its display hint so
+// the matrix, the job name it becomes, and the called steps never see the
+// slug (the apply leg re-resolves it from `verify`).
 
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
@@ -44,22 +43,20 @@ export function declaredModules(registrationText: string): string[] | null {
   return readModules(data).modules;
 }
 
-// hide_details rides the matrix because the apply leg DOES have
-// consumers for it now: the layer render and the merge run as workflow
-// steps BEFORE the action, and their diagnostics quote repo-owned
-// content (duplicate label and ruleset names, tracking-label values,
-// parser errors). The action's own private-repos redaction cannot cover
-// output produced before it runs, and a self-disclosed private repo
-// (redact_name false, hide_details true) would otherwise have that
-// content printed to a public log. settings-repos.yml passes this to
-// run_hidden.ts, which is the boundary that keeps it out.
+// `private` rides the matrix because the apply leg's steps consume it: the
+// layer render and the merge run as workflow steps BEFORE the action, and
+// their diagnostics quote repo-owned content (duplicate label and ruleset
+// names, tracking-label values, parser errors). The action's own
+// private-repos redaction cannot cover output produced before it runs, so
+// settings-repos.yml hands the flag to run_hidden.ts (as HIDE_DETAILS),
+// which is the boundary that keeps that content out of the public log.
 //
-// The redaction triple keeps EnrichedRow's discriminated-union shape
-// (RedactionState is derived from the row schema in redact.ts) instead
-// of flattening to three independent fields: a redacted row always hides
-// its details and always carries a resolution tag, so `redact_name:
-// true, hide_details: false` - the combination the selector's schema
-// exists to prevent - stays unrepresentable here too.
+// The redaction pair keeps EnrichedRow's discriminated-union shape
+// (RedactionState is derived from the row schema in redact.ts) instead of
+// flattening to two independent fields: a private row always carries a
+// resolution tag and a public one never does, so a tagless private row -
+// the shape the selector's schema exists to prevent - stays
+// unrepresentable here too.
 export type Target = { repo: string; name: string } & RedactionState;
 
 /** The operator repository's own matrix row: committed workflows disclose
@@ -68,8 +65,7 @@ export function selfTarget(self: string): Target {
   return {
     repo: self,
     name: self.split("/").pop() ?? self,
-    redact_name: false,
-    hide_details: false,
+    private: false,
     verify: "",
   };
 }
@@ -86,19 +82,12 @@ export function buildMatrix(rows: EnrichedRow[], self: Target | null): Target[] 
     // Branch on the discriminant rather than copying field by field, so
     // the row's union arm carries through to the Target unchanged.
     targets.push(
-      row.redact_name
-        ? {
-            repo: row.display,
-            name: row.display,
-            redact_name: true,
-            hide_details: true,
-            verify: row.verify,
-          }
+      row.private
+        ? { repo: row.display, name: row.display, private: true, verify: row.verify }
         : {
             repo: row.repo,
             name: row.repo.split("/").pop() ?? row.repo,
-            redact_name: false,
-            hide_details: row.hide_details,
+            private: false,
             verify: "",
           },
     );

@@ -1,5 +1,6 @@
-# Push sync fan-out: resolves which managed repos to sync (repos.yml
-# registry x live discovery) and runs reusable-template-sync.yml against
+# Push sync fan-out: resolves which repos to sync (every discovered repo
+# the REPO_PLATFORM_TOKEN can push to - the grant is the only membership
+# fact) and runs reusable-template-sync.yml against
 # each one, in parallel. Managed repos carry no sync workflow and no
 # sync secret; their update PRs are pushed from here with the
 # REPO_PLATFORM_TOKEN PAT.
@@ -176,7 +177,7 @@ jobs:
     strategy:
       fail-fast: false
       # Every leg writes with the same PAT, and PR creation is
-      # content-creating (secondary rate limits): bound the wildcard-grown
+      # content-creating (secondary rate limits): bound the
       # fleet's burst. Costs a single-repo dispatch nothing.
       max-parallel: 5
       matrix:
@@ -188,8 +189,7 @@ jobs:
     uses: ./.github/workflows/reusable-template-sync.yml
     with:
       target_repo: ${{ matrix.repo }}
-      target_redact_name: ${{ matrix.redact_name }}
-      target_hide_details: ${{ matrix.hide_details }}
+      target_private: ${{ matrix.private }}
       target_verify: ${{ matrix.verify }}
       # The dispatch default is the literal "none"; only "recopy" means
       # recovery downstream.

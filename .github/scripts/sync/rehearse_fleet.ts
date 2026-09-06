@@ -1,21 +1,19 @@
 #!/usr/bin/env bun
 // Fleet-wide sync rehearsal: a read-only dry run of the template sync
-// across every managed repo. Enumerates the fleet from repos.yml (the
-// exclude list is respected; the "*" wildcard uses the same owner-scoped
-// discovery the sync's plan job runs), then rehearses each PUBLIC repo
-// the fleet token is enrolled in (production's push-probe skip is
-// mirrored, so a repo the sync would never touch cannot red the gate)
+// across every managed repo. Enumerates the fleet with the same
+// owner-scoped discovery the sync's plan job runs, then rehearses each
+// PUBLIC repo the fleet token is enrolled in (production's push-probe skip
+// is mirrored, so a repo the sync would never touch cannot red the gate)
 // with rehearse.ts's core - quiet, workspace removed after each repo.
 //
 // PRIVATE REPOS ARE NEVER TOUCHED: visibility is established BEFORE any
-// git command aims at the repo (the discovery listing carries it; explicit
-// managed entries outside that slice get one gh api read), and anything
-// but a definitive `private: false` - including a failed lookup - counts
-// as private (fail-closed, the same rule discovery.ts pins). A private
-// repo prints "<repo>  skipped (private)" and is neither cloned nor
-// fetched. Public repos inherit rehearse.ts's read-only guarantees: the
-// clone's origin URLs go unroutable before any leg runs, and nothing
-// opens PRs or writes to any remote.
+// git command aims at the repo (the discovery listing carries it), and
+// anything but a definitive `private: false` counts as private
+// (fail-closed, the same rule discovery.ts pins). A private repo prints
+// "<repo>  skipped (private)" and is neither cloned nor fetched. Public
+// repos inherit rehearse.ts's read-only guarantees: the clone's origin
+// URLs go unroutable before any leg runs, and nothing opens PRs or writes
+// to any remote.
 //
 // One summary line prints per repo as it completes, then a final
 // repo | status | detail table. Repos that have not adopted the template
@@ -47,7 +45,6 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { pushProbeStatus } from "../fleet/push_probe.ts";
 import { assignHints } from "../fleet/redact.ts";
-import { loadRegistry, type Registry, selectRepos } from "../fleet/repos_registry.ts";
 import { error, warning } from "../shared/gha.ts";
 import { parseJsonWith, parseJsonWithThrow } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
@@ -76,52 +73,35 @@ export interface FleetRow {
 }
 
 export interface FleetEnumeration {
-  /** Selected slugs, sorted (wildcard x discovered, union explicit
-   * managed entries, minus exclude - selectRepos's contract). */
+  /** The discovered slugs, sorted - production's plan rows in the same
+   * order (redact.ts's enrich). */
   slugs: string[];
   /** Lowercased slug -> private flag, from the discovery listing. */
   visibility: Map<string, boolean>;
-  /** repos.yml exclude entries (already removed from slugs). */
-  excluded: number;
 }
 
-/** Resolve repos.yml against the discovery listing (null when managed has
- * no wildcard and none is needed). Throws on an invalid registry or
- * selection: without a trustworthy fleet list nothing may run. */
-export function enumerateFleet(
-  registry: Registry,
-  discovered: { repo: string; private: boolean }[] | null,
-): FleetEnumeration {
-  const { selection, errors } = selectRepos(registry, {
-    discovered: discovered === null ? null : discovered.map((row) => row.repo),
-  });
-  if (errors.length > 0) throw new Error(errors.join("; "));
+/** The fleet as the discovery listing reports it: the PAT's grant is the
+ * only membership fact, so there is nothing else to consult. */
+export function enumerateFleet(discovered: { repo: string; private: boolean }[]): FleetEnumeration {
   return {
-    slugs: selection.map((row) => row.repo),
-    visibility: new Map((discovered ?? []).map((row) => [row.repo.toLowerCase(), row.private])),
-    excluded: registry.exclude.length,
+    slugs: discovered.map((row) => row.repo).sort(),
+    visibility: new Map(discovered.map((row) => [row.repo.toLowerCase(), row.private])),
   };
 }
 
 const PRIVATE_SKIP = "skipped (private)";
 
 /** Display names for the report's private rows. This repo's Actions logs
- * are PUBLIC, so under --gate a wildcard-DISCOVERED private slug renders
- * as its redact.ts hint - the same partial pseudonymization the sync's
- * own logs use. Two deliberate exemptions, from redact.ts's design: a
- * name committed in repos.yml (managed/exclude entries) is public by
- * definition, so hinting it would be theater; and the local CLI (no
- * --gate) prints raw to the operator's own terminal. Public repos always
- * print raw - their names are public. */
+ * are PUBLIC, so under --gate a private slug renders as its redact.ts
+ * hint - the same partial pseudonymization the sync's own logs use. The
+ * local CLI (no --gate) prints raw to the operator's own terminal, and
+ * public repos always print raw - their names are public. */
 export function privateDisplayNames(
   gate: boolean,
-  discovered: { repo: string; private: boolean }[] | null,
-  committed: Set<string>,
+  discovered: { repo: string; private: boolean }[],
 ): (slug: string) => string {
-  if (!gate || discovered === null) return (slug) => slug;
-  const hidden = discovered
-    .filter((row) => row.private && !committed.has(row.repo.toLowerCase()))
-    .map((row) => row.repo);
+  if (!gate) return (slug) => slug;
+  const hidden = discovered.filter((row) => row.private).map((row) => row.repo);
   const hints = new Map([...assignHints(hidden)].map(([slug, hint]) => [slug.toLowerCase(), hint]));
   return (slug) => hints.get(slug.toLowerCase()) ?? slug;
 }
@@ -403,20 +383,6 @@ function discoverFleet(): { repo: string; private: boolean }[] {
   return parseJsonWith(discoveredRows, listing, "rehearse_fleet: discovered.json");
 }
 
-// Visibility for a slug the discovery slice does not cover (an explicit
-// managed entry outside the owner scope): one direct read, fail-closed -
-// only a clean `false` counts as public.
-function lookupPrivate(slug: string): boolean | null {
-  const probe = capture(["gh", "api", `repos/${slug}`, "--jq", ".private"], {
-    timeoutMs: NETWORK_TIMEOUT_MS,
-  });
-  if (probe.exitCode !== 0) return null;
-  const value = probe.stdout.trim();
-  if (value === "false") return false;
-  if (value === "true") return true;
-  return null;
-}
-
 // Production's enrollment signal, so the fleet gate never reds a repo the
 // sync would skip: select_sync_repos.ts skips repos the fleet token
 // cannot push to (401/403/404 from the read-only push probe). The probe
@@ -565,18 +531,9 @@ async function main(): Promise<number> {
     fail("copier is not on PATH (pipx install copier); the rehearsal runs real copier updates");
   }
 
-  const { registry, errors } = loadRegistry(readFileSync(join(REPO_ROOT, "repos.yml"), "utf-8"));
-  if (registry === null) fail(`repos.yml: ${errors.join("; ")}`);
-  const discovered = registry.managed.wildcard ? discoverFleet() : null;
-  let fleet: FleetEnumeration;
-  try {
-    fleet = enumerateFleet(registry, discovered);
-  } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
-  }
-  console.log(
-    `rehearsing ${fleet.slugs.length} repo(s), ${FLEET_CONCURRENCY} in flight; ${fleet.excluded} excluded by repos.yml\n`,
-  );
+  const discovered = discoverFleet();
+  const fleet = enumerateFleet(discovered);
+  console.log(`rehearsing ${fleet.slugs.length} repo(s), ${FLEET_CONCURRENCY} in flight\n`);
 
   // The validator's deps install ONCE here, serially, before any lane
   // spawns: four lanes racing `bun install` into the shared
@@ -596,15 +553,14 @@ async function main(): Promise<number> {
   }
   process.env.REHEARSE_SKIP_VALIDATE_INSTALL = "1";
 
-  const committed = new Set(
-    [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),
-  );
   const envelopeTemp = mkdtempSync(join(tmpdir(), "rehearse-fleet-outcomes-"));
   let rows: FleetRow[];
   try {
     rows = await rehearseFleet(fleet.slugs, {
-      isPrivate: (slug) => fleet.visibility.get(slug.toLowerCase()) ?? lookupPrivate(slug),
-      display: privateDisplayNames(gate, discovered, committed),
+      // Every slug came from the same listing as the visibility map, so a
+      // miss is a lookup failure (error under --gate), never a public.
+      isPrivate: (slug) => fleet.visibility.get(slug.toLowerCase()) ?? null,
+      display: privateDisplayNames(gate, discovered),
       enrollment: makeEnrollment(),
       rehearse: (slug) => rehearseInSubprocess(slug, envelopeTemp),
       concurrency: FLEET_CONCURRENCY,

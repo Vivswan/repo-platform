@@ -139,7 +139,7 @@ When a human does the merging, your job ends with the branch resolved, pushed, a
 
 Closing the PR is not an opt-out: the next sync run pushes the branch again and opens a fresh PR, with the same conflicts (the local edits that caused them are still there). Close-and-wait only makes sense when you know the conflicting local edit is about to move to its proper home or land in the template itself.
 
-To actually pause sync PRs: add the repo to `exclude:` in repo-platform's `repos.yml`, or delete `.repo-platform.yml` from the repo (sync skips repos without it, with a notice). Both also pause the nightly settings heal for in-repo settings. To detach permanently, see repo-platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
+To actually pause sync PRs: revoke the fleet PAT's access to the repo (the grant is the only membership fact), or delete `.repo-platform.yml` from the repo (sync skips repos without it, with a notice). Both also pause the nightly settings heal for in-repo settings. To detach permanently, see repo-platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
 
 ## Recovery: the recorded base is unusable
 

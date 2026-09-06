@@ -79,7 +79,7 @@ describe("resolve_private_repo.ts", () => {
   test("public rows pass through untouched", () => {
     const r = run("public", {
       TARGET_INPUT: "Vivswan/pub-repo",
-      REDACT_NAME: "false",
+      HIDE_DETAILS: "false",
       VERIFY: "",
     });
     expect(r.exitCode).toBe(0);
@@ -93,7 +93,7 @@ describe("resolve_private_repo.ts", () => {
   test("an empty PAT fails closed before any derivation", () => {
     const r = run("empty-pat", {
       TARGET_INPUT: "hidden-x",
-      REDACT_NAME: "true",
+      HIDE_DETAILS: "true",
       VERIFY: "deadbeef",
       PAT: "",
     });
@@ -106,7 +106,7 @@ describe("resolve_private_repo.ts", () => {
   test("resolves a redacted row by tag and masks before anything else", () => {
     const r = run("resolve", {
       TARGET_INPUT: "h**-s**r",
-      REDACT_NAME: "true",
+      HIDE_DETAILS: "true",
       VERIFY: verifyTag(PAT, RUN_ID, "Vivswan/hidden-server"),
     });
     expect(r.exitCode).toBe(0);
@@ -130,7 +130,7 @@ describe("resolve_private_repo.ts", () => {
   test("masks lowercase forms of a mixed-case slug", () => {
     const r = run("case", {
       TARGET_INPUT: "S**-P**e",
-      REDACT_NAME: "true",
+      HIDE_DETAILS: "true",
       VERIFY: verifyTag(PAT, RUN_ID, "other/shared-private"),
     });
     expect(r.exitCode).toBe(0);
@@ -144,7 +144,7 @@ describe("resolve_private_repo.ts", () => {
   test("zero matches fails closed naming only the hint", () => {
     const r = run("zero", {
       TARGET_INPUT: "g**-r**d",
-      REDACT_NAME: "true",
+      HIDE_DETAILS: "true",
       VERIFY: verifyTag(PAT, RUN_ID, "Vivswan/gone-renamed"),
     });
     expect(r.exitCode).toBe(1);
@@ -157,7 +157,7 @@ describe("resolve_private_repo.ts", () => {
   test("an empty verify on a redacted row fails closed", () => {
     const r = run("noverify", {
       TARGET_INPUT: "h**-s**r",
-      REDACT_NAME: "true",
+      HIDE_DETAILS: "true",
       VERIFY: "",
     });
     expect(r.exitCode).toBe(1);

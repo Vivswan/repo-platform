@@ -1,5 +1,5 @@
-// Unit tests for the fleet rehearsal driver: repos.yml enumeration with
-// exclude handling, the fail-closed private-skip decision (the rehearsal
+// Unit tests for the fleet rehearsal driver: the discovery-listing
+// enumeration, the fail-closed private-skip decision (the rehearsal
 // function must never run for a private or visibility-unknown repo), the
 // failure-continues-loop contract, the summary formatting for every
 // status shape, and the --gate severity model (what fails CI, what only
@@ -7,7 +7,6 @@
 // network.
 
 import { describe, expect, test } from "bun:test";
-import { loadRegistry, type Registry } from "../../.github/scripts/fleet/repos_registry.ts";
 import {
   NotManagedError,
   RecoveryNeededError,
@@ -46,61 +45,37 @@ function outcome(overrides: Partial<RehearsalOutcome> = {}): RehearsalOutcome {
   };
 }
 
-function registryOf(text: string): Registry {
-  const { registry, errors } = loadRegistry(text);
-  if (registry === null) throw new Error(errors.join("; "));
-  return registry;
-}
-
 describe("enumerateFleet", () => {
-  const registry = registryOf(
-    ["managed:", '  - "*"', "  - Other/extra", "exclude:", "  - Vivswan/paused"].join("\n"),
-  );
-
-  test("unions the wildcard discovery with explicit entries and drops the exclude list", () => {
-    const fleet = enumerateFleet(registry, [
-      { repo: "Vivswan/app", private: false },
-      { repo: "Vivswan/secret", private: true },
-      { repo: "Vivswan/paused", private: false },
-    ]);
-    // Visibility is keyed by lowercased slug and covers the discovery
-    // slice only: the explicit Other/extra entry has no key.
-    expect(fleet).toEqual({
-      slugs: ["Other/extra", "Vivswan/app", "Vivswan/secret"],
+  test("the discovery listing IS the fleet: slugs sorted, visibility keyed by folded slug", () => {
+    expect(
+      enumerateFleet([
+        { repo: "Vivswan/secret", private: true },
+        { repo: "Vivswan/app", private: false },
+      ]),
+    ).toEqual({
+      slugs: ["Vivswan/app", "Vivswan/secret"],
       visibility: new Map([
         ["vivswan/app", false],
         ["vivswan/secret", true],
-        ["vivswan/paused", false],
       ]),
-      excluded: 1,
     });
   });
 
-  test("exclusion matches ignoring case, like GitHub repo identity", () => {
-    expect(enumerateFleet(registry, [{ repo: "vivswan/PAUSED", private: false }])).toEqual({
-      slugs: ["Other/extra"],
-      visibility: new Map([["vivswan/paused", false]]),
-      excluded: 1,
-    });
-  });
-
-  test("a wildcard registry without a discovery listing throws instead of guessing", () => {
-    expect(() => enumerateFleet(registry, null)).toThrow(/--discovered/);
+  test("an empty listing is an empty fleet, not an error", () => {
+    expect(enumerateFleet([])).toEqual({ slugs: [], visibility: new Map() });
   });
 });
 
 describe("privateDisplayNames", () => {
-  // This repo's Actions logs are public: a wildcard-discovered private
-  // slug must never print raw under --gate, on ANY output path.
+  // This repo's Actions logs are public: a private slug must never print
+  // raw under --gate, on ANY output path.
   const discovered = [
     { repo: "Vivswan/hidden-server", private: true },
-    { repo: "Vivswan/committed-private", private: true },
     { repo: "Vivswan/app", private: false },
   ];
-  const committed = new Set(["vivswan/committed-private"]);
 
-  test("gate mode hints a wildcard-discovered private slug on every output path", async () => {
-    const display = privateDisplayNames(true, discovered, committed);
+  test("gate mode hints a private slug on every output path", async () => {
+    const display = privateDisplayNames(true, discovered);
     const deps = {
       display,
       enrollment: () => "enrolled" as const,
@@ -125,16 +100,10 @@ describe("privateDisplayNames", () => {
 
   test.each([
     {
-      reason: "a wildcard-discovered private slug is hinted under the gate",
+      reason: "a private slug is hinted under the gate",
       gate: true,
       slug: "Vivswan/hidden-server",
       expected: "h**-s**r",
-    },
-    {
-      reason: "a committed registry entry keeps its raw name (hinting a public name is theater)",
-      gate: true,
-      slug: "Vivswan/committed-private",
-      expected: "Vivswan/committed-private",
     },
     {
       reason: "the local CLI (no --gate) prints raw slugs to the operator's terminal",
@@ -149,7 +118,7 @@ describe("privateDisplayNames", () => {
       expected: "Vivswan/app",
     },
   ])("$reason", ({ gate, slug, expected }) => {
-    expect(privateDisplayNames(gate, discovered, committed)(slug)).toBe(expected);
+    expect(privateDisplayNames(gate, discovered)(slug)).toBe(expected);
   });
 });
 

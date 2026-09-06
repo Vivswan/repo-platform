@@ -13,19 +13,20 @@
 // renamed/deleted, grant revoked, or PAT rotated since the plan job), or
 // an ambiguous match errors out naming only the hint.
 //
-// Env in: TARGET_INPUT (slug, or hint when REDACT_NAME=true), REDACT_NAME,
-// VERIFY, PAT, GITHUB_RUN_ID, GITHUB_ENV, GITHUB_OUTPUT.
+// Env in: TARGET_INPUT (slug, or hint when HIDE_DETAILS=true - the one
+// private flag the matrix row carries), HIDE_DETAILS, VERIFY, PAT,
+// GITHUB_RUN_ID, GITHUB_ENV, GITHUB_OUTPUT.
 // Out: TARGET + TARGET_DISPLAY via GITHUB_ENV, repo= via GITHUB_OUTPUT.
 
 import { appendFileSync } from "node:fs";
-import { addMask, env, error, requireEnv, setOutput } from "../shared/gha.ts";
+import { addMask, env, error, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { discoverWritableRepos } from "./discovery.ts";
 import { verifyTag } from "./redact.ts";
 
 const targetInput = requireEnv("TARGET_INPUT");
 const githubEnv = requireEnv("GITHUB_ENV");
 
-if (env("REDACT_NAME", "false") !== "true") {
+if (!hideDetails()) {
   appendFileSync(githubEnv, `TARGET=${targetInput}\nTARGET_DISPLAY=${targetInput}\n`);
   setOutput("repo", targetInput);
   process.exit(0);
@@ -50,9 +51,9 @@ if (pat === "") {
 }
 const runId = requireEnv("GITHUB_RUN_ID");
 
-// Every writable repo, regardless of owner: repos.yml accepts explicit
-// entries under other owners, so the search must not assume the fleet
-// owner. The candidate slugs are never printed - any may be private.
+// Every writable repo, every owner: the tag identifies the target on its
+// own, so no owner filter is needed and none could hide a match. The
+// candidate slugs are never printed - any may be private.
 const candidates = discoverWritableRepos("resolve_private_repo: user/repos response");
 
 const matches = candidates

@@ -10,22 +10,19 @@ on:
       target_repo:
         description: >-
           owner/name of the managed repo to sync - or its redaction hint
-          when target_redact_name is true (the resolve step recovers the
+          when target_private is true (the resolve step recovers the
           real repository from target_verify; docs/private-repos.md)
         required: true
         type: string
-      target_redact_name:
-        description: target_repo is a hint, not a slug
-        required: false
-        type: boolean
-        default: false
-      target_hide_details:
-        description: hide target-derived values from this public log
+      target_private:
+        description: >-
+          the target is private: target_repo is a hint, not a slug, and
+          target-derived values stay out of this public log
         required: false
         type: boolean
         default: false
       target_verify:
-        description: HMAC resolution tag for a redacted target_repo
+        description: HMAC resolution tag for a private target_repo
         required: false
         type: string
         default: ""
@@ -62,7 +59,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      HIDE_DETAILS: ${{ inputs.target_hide_details }}
+      # The one private flag: hint-not-slug for the resolve step, and
+      # hidden target-derived output for every step after it.
+      HIDE_DETAILS: ${{ inputs.target_private }}
     steps:
       # No token presence check: the secret is required above, and
       # sync-repos.yml's plan job fails loudly when it is unset.
@@ -79,17 +78,16 @@ jobs:
           bun-version-file: .bun-version
 
       # Before the resolve step: the resolver is a bun script and imports
-      # the registry/redaction modules, which need the yaml dependency.
+      # the redaction module, which needs the zod dependency.
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      # Sets TARGET and TARGET_DISPLAY for every later step. A redacted
+      # Sets TARGET and TARGET_DISPLAY for every later step. A private
       # target's slug registers with the runner's masker FIRST, so later
       # prints, checkout logs, and API error bodies render it as ***.
       - name: Resolve the target repository
         env:
           TARGET_INPUT: ${{ inputs.target_repo }}
-          REDACT_NAME: ${{ inputs.target_redact_name }}
           VERIFY: ${{ inputs.target_verify }}
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}

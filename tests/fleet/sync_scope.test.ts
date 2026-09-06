@@ -9,8 +9,6 @@ import {
   type ScopeSource,
   scopeRefusal,
   scopeSelects,
-  undiscoveredCount,
-  undiscoveredWarning,
 } from "../../.github/scripts/fleet/sync_scope.ts";
 
 const CALL: ScopeSource = { kind: "call", sha: "8096c4920f84ec4122d14c5bd884703dd0d382ba" };
@@ -166,48 +164,11 @@ describe("scopeRefusal", () => {
       scope: list([], ["o/priv", "o/nope"]),
       source: CALL,
       expected:
-        "1 of 2 scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)",
+        "1 of 2 scoped repos matched no fleet repository (values withheld - they may be private slugs): " +
+        "a repo you scoped to was not discovered this run - the fleet token cannot push to it, or it is " +
+        "archived - or the slug is misspelled (matching ignores case)",
     },
   ])("$reason", ({ scope, source, expected }) => {
     expect(scopeRefusal(scope, known, source)).toBe(expected);
-  });
-});
-
-describe("undiscoveredWarning", () => {
-  test.each([
-    [
-      1,
-      "1 targeted repository was not discovered this run and counts as private; a `public` scope skips them until the next run",
-    ],
-    [
-      3,
-      "3 targeted repositories were not discovered this run and count as private; a `public` scope skips them until the next run",
-    ],
-  ])("%d", (count, expected) => {
-    expect(undiscoveredWarning(count)).toBe(expected);
-  });
-});
-
-describe("undiscoveredCount", () => {
-  // Targets o/a, o/b, o/c; discovery listed only o/a.
-  const targets = ["o/a", "o/B", "o/c"];
-  const discovered = new Set(["o/a"]);
-  test.each<{ reason: string; scope: Scope; expected: number }>([
-    { reason: "all sees every target", scope: ALL, expected: 2 },
-    { reason: "a token sees every target", scope: list(["public"], []), expected: 2 },
-    {
-      reason: "a token beside a slug still sees every target",
-      scope: list(["private"], ["o/a"]),
-      expected: 2,
-    },
-    { reason: "slugs alone see only themselves, folded", scope: list([], ["o/b"]), expected: 1 },
-    { reason: "a discovered slug alone sees nothing", scope: list([], ["o/a"]), expected: 0 },
-    {
-      reason: "an unknown slug is not a target and is not counted",
-      scope: list([], ["o/nope"]),
-      expected: 0,
-    },
-  ])("$reason", ({ scope, expected }) => {
-    expect(undiscoveredCount(scope, targets, discovered)).toBe(expected);
   });
 });

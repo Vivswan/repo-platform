@@ -9,8 +9,8 @@ const temp = tempDirs();
 // End-to-end harness for the sync plan's discovery step, stub-gh style
 // (see discovery.test.ts). This script replaced sync-repos.yml's inline
 // jq pipeline, so the tests pin its two output contracts: the
-// {repo, private} rows in discovered.json (redact.ts's enrich and
-// repos_registry's select parse them; `private` drives redaction) and
+// {repo, private} rows in discovered.json (the selector parses them and
+// hands them to redact.ts's enrich; `private` drives redaction) and
 // the public log line, byte-identical to the jq era, which prints only
 // a count and the owner login.
 describe("discover_repos.ts", () => {
@@ -91,8 +91,7 @@ describe("discover_repos.ts", () => {
     // Row shape and key order pinned to the retired jq step's
     // `{repo: .full_name, private: (.private != false)}` projection.
     // Deliberately no trailing newline (jq -c emitted one): the file's
-    // consumers JSON.parse it, and select_settings_repos.ts writes its
-    // discovered.json the same way.
+    // consumer JSON.parses it.
     expect(readFileSync(r.discoveredPath, "utf-8")).toBe(
       '[{"repo":"Vivswan/hidden","private":true},{"repo":"Vivswan/pub","private":false}]',
     );

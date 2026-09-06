@@ -5,7 +5,7 @@
 // fix to the discovery contract, the dispatch-input read, or the slug
 // scrub protects every consumer at the same time (docs/private-repos.md).
 
-import { readFileSync, writeFileSync, writeSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
@@ -85,10 +85,10 @@ export function discoverWritableRepos(label: string) {
 }
 
 /** The discovered fleet scoped to `owner` and projected to the {repo,
- * private} rows the selection pipeline consumes (repos_registry select,
- * redact enrich). Visibility rides along fail-closed - anything but
- * private: false counts as private - because the flag drives the
- * selectors' redaction of their public logs (docs/private-repos.md). */
+ * private} rows the selection pipeline consumes (redact.ts's enrich).
+ * Visibility rides along fail-closed - anything but private: false counts
+ * as private - because the flag drives the selectors' redaction of their
+ * public logs (docs/private-repos.md). */
 export function discoverOwnerRepos(
   owner: string,
   label: string,
@@ -129,7 +129,7 @@ export function readDispatchRepo(owner?: string): string {
     );
     repo = event.inputs?.repo ?? "";
   }
-  // Empty entries survive on purpose (",", "a/b,,c/d"): the registry
+  // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
   // rejects them loudly, where dropping one here would silently widen or
   // narrow the scope.
   return repo
@@ -151,29 +151,6 @@ export function readDispatchRepo(owner?: string): string {
  *  judged commit in `shaEnv` (the writer's own name for the call's sha input). */
 export function scopeSource(shaEnv: string): ScopeSource {
   return env("ONLY_REPO") === "" ? { kind: "dispatch" } : { kind: "call", sha: env(shaEnv) };
-}
-
-/** Run one selection-pipeline stage, teeing its stdout to `outFile`. A
- * failing stage exits this process with the stage's own code, first writing
- * the captured stdout through: the runner only parses workflow commands
- * (::error::) from stdout, and the stages' own diagnostics already follow
- * the redaction discipline this public log requires - they never print an
- * undisclosed private name. Stderr is captured (proc.ts's hang bound needs
- * the pipe) and re-emitted whole, success or failure - buffered rather than
- * streamed, same content. writeSync, not process.stderr.write: an async
- * stream write racing the process.exit below truncates at the pipe buffer
- * (~64 KiB); a natural exit drains, but this function cannot know its
- * caller exits later. */
-export function runStage(command: string[], outFile: string): void {
-  const proc = capture(command);
-  writeSync(2, proc.stderr);
-  if (proc.exitCode !== 0) {
-    // Program name only: the argv tail can carry a private slug.
-    if (proc.timedOut) console.error(`${command[0]} timed out (proc.ts hang bound)`);
-    writeSync(1, proc.stdout);
-    process.exit(proc.exitCode);
-  }
-  writeFileSync(outFile, proc.stdout);
 }
 
 // Case-insensitive replaceAll: GitHub identity is case-insensitive, so a
@@ -198,18 +175,16 @@ export function scrubSlug(detail: string, slug: string, display: string): string
   return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
-/** Skip notice for a repo the fleet token cannot push to; `code` is the
- * probe's definitive-negative HTTP status (401/403/404). */
+/** Skip notice for a repo the fleet token cannot push to - by definition
+ * not a fleet member, since the PAT's grant is the only membership fact;
+ * `code` is the probe's definitive-negative HTTP status (401/403/404). */
 export function pushProbeSkipNotice(display: string, code: number): string {
-  return `${display}: skipped - the fleet token has no write access (push probe HTTP ${code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this.`;
+  return `${display}: not in the fleet - the fleet token cannot push to it (push probe HTTP ${code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it.`;
 }
 
 /** Skip notice for a repo without .repo-platform.yml on its default
- * branch. The settings heal inserts a consequence sentence; that sentence
- * introduces ".github/settings.yml" as a nearer referent, so the closing
- * clause switches from "it" to "the repo". */
+ * branch. The settings heal inserts a consequence sentence. */
 export function notAdoptedNotice(display: string, consequence?: string): string {
   const inserted = consequence === undefined ? "" : `${consequence} `;
-  const subject = consequence === undefined ? "it" : "the repo";
-  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. ${inserted}Generate it with copier (see the repo-platform README) to opt in, or add ${subject} to repos.yml's exclude list to silence this.`;
+  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. ${inserted}Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's access to silence this.`;
 }

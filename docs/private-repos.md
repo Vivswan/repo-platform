@@ -2,15 +2,14 @@
 
 repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step summaries, and job outputs are as readable as the repository they run in. Without countermeasures, a Sync Repos or Settings Repos run would print every private repo's name - in the job list itself (`sync (Vivswan/hidden-server)`) - plus its description, module selection, file paths, and whatever a failing tool dumped.
 
-The redaction that closes that leak follows a self-disclosure rule (names already committed in this public repository cannot be un-published):
+The redaction that closes that leak has one axis, the repo's visibility. Nothing in this public repository names a fleet member (membership is the fleet PAT's grant), so a private repo's name is never published here and every private repo gets the same treatment:
 
-| How the repo is named here | Name in logs | Details |
+| Repo visibility | Name in logs | Details |
 |---|---|---|
-| wildcard discovery only | hint | hidden |
-| explicit `managed:`/`exclude:` entry in repos.yml | plain | hidden |
-| public repo | plain | shown |
+| private | hint | hidden |
+| public | plain | shown |
 
-Only wildcard-discovered private repos get true non-disclosure. Today repos.yml commits no explicit entries (the wildcard is the whole registry), so in practice every private repo is hinted. The design mirrors github-settings-as-code's `private-repos: redact`, with one difference: instead of anonymous `private repository #N` placeholders, repo-platform shows a name hint, so you can tell the jobs apart.
+The design mirrors github-settings-as-code's `private-repos: redact`, with one difference: instead of anonymous `private repository #N` placeholders, repo-platform shows a name hint, so you can tell the jobs apart.
 
 ## The hint
 
@@ -24,9 +23,9 @@ bun .github/scripts/fleet/redact.ts hint hidden-server   # h**-s**r
 
 ## What is hidden, and from what
 
-Discovery already knows each repo's visibility, and the decision fails closed: a repo the discovery payload does not positively mark `private: false` is treated as private. A selected repo that does not appear in discovery at all (an explicit cross-owner entry) gets one live `gh api repos/<slug>` probe, and only a probe positively answering `private: false` reads as public - a failed probe or any other answer stays private.
+Discovery already knows each repo's visibility, and the decision fails closed: a repo the discovery payload does not positively mark `private: false` is treated as private.
 
-A private repo's redaction has two independent parts:
+A private repo's redaction rides one flag (`private` on the matrix row, `HIDE_DETAILS` inside the leg) and has two effects:
 
 - **Name redaction**: the matrix row (which becomes the public job name and the auto-printed workflow inputs) carries the hint, never the slug. Inside the per-repo job, a resolve step recovers the real repository and registers its name with the runner's secret masker before anything else prints, so checkout logs, API error bodies, and PR URLs render it as `***`. The mask is a point-in-time snapshot taken at that resolve step: a repo renamed after it, while the run is still in flight, surfaces under its new name, which no mask covers - the one open window (a rename before the resolve step fails closed there instead).
 - **Details hiding**: target-derived values stay out of the public log. Tools that read the target's checkout (copier, the template validator, the retired-file cleanup, the tail tripwire) run behind a capture boundary ([run_hidden.ts](../.github/scripts/sync/run_hidden.ts)) that publishes only a generic outcome; module lists print as counts; drift warnings name the changed field but not the values; conflict dumps go to the PR body only. The private home for detail is the sync PR (and its CI) in the target repo itself.
@@ -72,7 +71,7 @@ A hidden sync step failure ("output hidden: private repository") routes its capt
 - When no PR carries them (a copier or cleanup crash, a validation failure with nothing delivered, or a branch lease/push failure - [commit_push.ts](../.github/scripts/sync/commit_push.ts) records its own redacted git error output on this channel), a bounded excerpt of each capture becomes the body of a reused issue on the target repo titled `[automated] repo-platform sync: private failure report` - found by that exact title, not a marker label, because the settings apply deletes undeclared labels.
 - One issue per repo, forever: each delivery replaces the body (earlier reports stay in the edit history), open means the sync needs attention, and the next fully healthy run closes it.
 - The delivery assigns the repo's owner at creation (best-effort - a failed assignment never fails the delivery): assigning here guarantees the owner regardless of what the target's automation would do with the PAT-fired `issues: opened` event, and a still-unassigned reused issue is picked up the same way.
-- Unlike the settings channel, delivery does not wait for a proven private visibility: hide-details is fail-closed, so a public repo missing from discovery can get its excerpt posted to its own public issue tracker - which never widens access, since the issue's readers are exactly the repo's readers, the same audience an un-hidden run log would have had.
+- Unlike the settings channel, delivery does not wait for a proven private visibility: the flag is the plan's snapshot of discovery, so a repo flipped public after the plan ran can get its excerpt posted to its own public issue tracker - which never widens access, since the issue's readers are exactly the repo's readers, the same audience an un-hidden run log would have had.
 - If delivery only warns, reproduce locally: check out the target repo and run the same copier update against `gh:Vivswan/repo-platform` ([new-repo.md](new-repo.md#2-apply-the-template) has the copier invocations), or re-run the failing script from this repo with the target checked out under `target/`.
 
 ## Limits, stated plainly

@@ -4,12 +4,12 @@
 // repo must not appear there by name or detail. This module owns the two
 // mechanisms:
 //
-// - hintName/assignHints: the display placeholder for a redacted name.
+// - hintName/assignHints: the display placeholder for a private name.
 //   "hidden-server" -> "h**-s**r": deterministic, so the operator can tell
 //   which repo a job is without the log disclosing it. Hints are partial
 //   pseudonymization, not encryption (docs/private-repos.md).
 // - verifyTag: the resolution verifier. Matrix values become public job
-//   names and reusable-workflow inputs are auto-printed, so a redacted
+//   names and reusable-workflow inputs are auto-printed, so a private
 //   row carries the hint plus an HMAC tag instead of the slug; the leg
 //   re-discovers the fleet and picks the unique tag match
 //   (resolve_private_repo.ts). Keyed by a value derived from the fleet
@@ -17,34 +17,18 @@
 //   the tag is safe to print: without the PAT it cannot be brute-forced
 //   into a name, and it fingerprints nothing across runs.
 //
-// The `enrich` subcommand decorates a repos_registry selection with the
-// redaction decision per row. Fail closed: a repo whose discovery entry
-// does not positively say `private: false` is treated as private. A
-// private repo whose name is already committed in this public repository
-// (an explicit/exclude/config entry in repos.yml) is self-disclosed: its
-// name stays visible - hinting a committed name would be theater - but
-// its details are still hidden (redact_name=false, hide_details=true).
+// `enrich` turns the discovered fleet into the plan's rows, one redaction
+// decision each. Visibility is discovery's, fail-closed: a repo whose
+// discovery entry does not positively say `private: false` is private,
+// and a private repo is hinted AND hidden - one axis, since no fleet name
+// is committed anywhere in this public repository.
 //
-// Usage:
-//   bun .github/scripts/fleet/redact.ts hint <name>
-//   bun .github/scripts/fleet/redact.ts enrich --selection <selection.json>
-//     --discovered <discovered.json> [--registry repos.yml]
-//
-// `enrich` needs PAT and GITHUB_RUN_ID in the environment. It prints
-// {rows}: one row per selection entry, in order, as
-// {repo, redact_name, hide_details, display, verify} (`repo` is
-// always the real slug - the CALLER must emit `display` in its matrix
-// instead for redact_name rows). Errors print as ::error:: workflow
-// commands (on stdout, where the runner parses them) with a nonzero exit.
+// CLI: bun .github/scripts/fleet/redact.ts hint <name>
 
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { z } from "zod";
-import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-import { parseJson, parseWith } from "../shared/json.ts";
-import { captureNetwork } from "./discovery.ts";
-import { loadRegistry } from "./repos_registry.ts";
+import { parseWith } from "../shared/json.ts";
 
 // One implementation for both sides: the plan job tags rows here and the
 // per-repo legs import verifyTag (fleet/resolve_private_repo.ts), so the
@@ -121,34 +105,33 @@ export interface DiscoveredRepo {
   private: boolean;
 }
 
-// The redaction invariant as a type, owned here alone: a redacted row
-// hides its slug behind a hint plus a resolution tag, an unredacted row
-// displays the slug itself and carries no tag. Consumers reading enrich's
-// output back from a file re-enter a trust boundary and must parse it
-// with parseEnriched/parseEnrichedRows instead of casting.
+// The redaction invariant as a type, owned here alone: a private row
+// hides its slug behind a hint plus a resolution tag (and its details
+// behind run_hidden.ts), a public row displays the slug itself and
+// carries no tag. Consumers reading rows back from a file re-enter a
+// trust boundary and must parse them with parseEnrichedRows instead of
+// casting.
 export const enrichedRowSchema = z
-  .discriminatedUnion("redact_name", [
+  .discriminatedUnion("private", [
     z.object({
       repo: z.string(),
-      redact_name: z.literal(true),
-      hide_details: z.literal(true),
+      private: z.literal(true),
       display: z.string(),
       verify: z.string().min(1),
     }),
     z.object({
       repo: z.string(),
-      redact_name: z.literal(false),
-      hide_details: z.boolean(),
+      private: z.literal(false),
       display: z.string(),
       verify: z.literal(""),
     }),
   ])
   // A hint always contains "*" (illegal in repo names), so this rejects a
-  // slug leaking through the display of a redacted row - and a hint
-  // masquerading as the slug of an unredacted one. The issue names the
-  // field but never the value: this fires exactly where quoting is unsafe.
-  .refine((row) => (row.redact_name ? row.display.includes("*") : row.display === row.repo), {
-    message: "display must be a masked hint on a redacted row (the slug itself otherwise)",
+  // slug leaking through the display of a private row - and a hint
+  // masquerading as the slug of a public one. The issue names the field
+  // but never the value: this fires exactly where quoting is unsafe.
+  .refine((row) => (row.private ? row.display.includes("*") : row.display === row.repo), {
+    message: "display must be a masked hint on a private row (the slug itself otherwise)",
     path: ["display"],
   });
 
@@ -158,92 +141,44 @@ export type EnrichedRow = z.infer<typeof enrichedRowSchema>;
  *  instead of collapsing into one widened object. */
 type DistributedOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-/** The redaction triple alone, DERIVED from the row schema so a consumer
+/** The redaction pair alone, DERIVED from the row schema so a consumer
  *  carrying it (build_settings_matrix.ts's Target) can never drift from
- *  the invariant: a redacted row hides its details and carries a
- *  resolution tag, an unredacted one carries neither. */
+ *  the invariant: a private row carries a resolution tag, a public one
+ *  carries none. */
 export type RedactionState = DistributedOmit<EnrichedRow, "repo" | "display">;
 
-const enrichedSchema = z.object({ rows: z.array(enrichedRowSchema) });
-
-export type Enriched = z.infer<typeof enrichedSchema>;
-
-/** Parse enrich's {rows} output at a consumer boundary; a violation of
- * the row shape or the redaction invariant exits with ::error::. */
-export function parseEnriched(data: unknown, label: string): Enriched {
-  return parseWith(enrichedSchema, data, label);
-}
-
-/** Same boundary for a bare row array (the selector's in-repo target
- * file, which carries enriched rows verbatim). */
+/** Parse a row array at a consumer boundary (the settings selector's
+ * target file carries enriched rows verbatim); a violation of the row
+ * shape or the redaction invariant exits with ::error::. */
 export function parseEnrichedRows(data: unknown, label: string): EnrichedRow[] {
   return parseWith(z.array(enrichedRowSchema), data, label);
 }
 
 /**
- * Decorate a selection with the redaction decision per row. Visibility
- * fails closed: a discovery entry decides when present; a selected repo
- * absent from discovery (an explicit registry entry under another owner,
- * which the owner-filtered discovery never lists) is asked of
- * `probePrivate`, whose default answers private. `isSelfDisclosed`
- * answers whether the slug's name is already committed in this
- * repository.
+ * The plan rows for the discovered fleet, sorted by slug: a private repo
+ * is hinted and tagged, a public one displays its slug. The hint table
+ * spans every private repo discovered, so a hint stays stable however a
+ * scope later narrows the run (a single-repo dispatch numbers collisions
+ * the same way a full run does).
  */
 export function enrich(
-  selection: { repo: string }[],
   discovered: DiscoveredRepo[],
-  isSelfDisclosed: (slug: string) => boolean,
   tagFor: (slug: string) => string,
-  probePrivate: (slug: string) => boolean = () => true,
-): Enriched {
-  const known = new Map(discovered.map((d) => [d.repo.toLowerCase(), d.private]));
-  const probed = new Map<string, boolean>();
-  const isPrivate = (slug: string) => {
-    const listed = known.get(slug.toLowerCase());
-    if (listed !== undefined) return listed;
-    let answer = probed.get(slug.toLowerCase());
-    if (answer === undefined) {
-      answer = probePrivate(slug);
-      probed.set(slug.toLowerCase(), answer);
-    }
-    return answer;
-  };
-
-  // One hint table over every discovered private name that is not
-  // self-disclosed, selected or not: hints stay stable when the
-  // selection narrows (a single-repo dispatch numbers collisions the
-  // same way a full run does).
-  const hinted = discovered
-    .map((d) => d.repo)
-    .filter((slug) => isPrivate(slug) && !isSelfDisclosed(slug));
-  for (const row of selection) {
-    // A selected repo absent from discovery (single-repo dispatch of an
-    // explicit registry entry) still needs a hint when redacted.
-    if (isPrivate(row.repo) && !isSelfDisclosed(row.repo) && !hinted.includes(row.repo)) {
-      hinted.push(row.repo);
-    }
-  }
-  const hints = assignHints(hinted);
-
-  const rows = selection.map((row): EnrichedRow => {
-    const priv = isPrivate(row.repo);
-    return priv && !isSelfDisclosed(row.repo)
-      ? {
-          repo: row.repo,
-          redact_name: true,
-          hide_details: true,
-          display: hints.get(row.repo) ?? hintName(row.repo),
-          verify: tagFor(row.repo),
-        }
-      : {
-          repo: row.repo,
-          redact_name: false,
-          hide_details: priv,
-          display: row.repo,
-          verify: "",
-        };
-  });
-  return { rows };
+): EnrichedRow[] {
+  const hints = assignHints(discovered.filter((d) => d.private).map((d) => d.repo));
+  return [...discovered]
+    .sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0))
+    .map(
+      (entry): EnrichedRow =>
+        entry.private
+          ? {
+              repo: entry.repo,
+              private: true,
+              display: hints.get(entry.repo) ?? hintName(entry.repo),
+              verify: tagFor(entry.repo),
+            }
+          : { repo: entry.repo, private: false, display: entry.repo, verify: "" },
+    );
 }
 
 // The discovered list a caller hands to `enrich`. Fail closed at the
@@ -254,101 +189,23 @@ export function enrich(
 const discoveredListSchema = z.array(z.looseObject({ repo: z.string(), private: z.boolean() }));
 
 /** Parse a discovered list at the trust boundary; null when the shape is
- * wrong (the CLI then fails without quoting the payload, which can carry
- * private repo names). */
+ * wrong (the caller then fails without quoting the payload, which can
+ * carry private repo names). */
 export function parseDiscoveredList(data: unknown): DiscoveredRepo[] | null {
   const result = discoveredListSchema.safeParse(data);
   return result.success ? result.data : null;
 }
 
-// The selection rows from repos_registry select. Only `repo` is load
-// bearing here; extra keys ride along - the legacy fail-open tolerance,
-// kept exactly.
-const selectionListSchema = z.array(z.looseObject({ repo: z.string() }));
-
-/** Parse a selection list at the trust boundary; null when the shape is
- * wrong. */
-export function parseSelectionList(data: unknown): { repo: string }[] | null {
-  const result = selectionListSchema.safeParse(data);
-  return result.success ? (result.data as { repo: string }[]) : null;
-}
-
-function readJson(path: string, what: string): unknown {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf-8");
-  } catch (err) {
-    // An fs error's message carries the errno and the path (already in
-    // this diagnostic), never file content, so it may print. The parse
-    // failure may NOT: a SyntaxError quotes the payload, which carries
-    // private slugs, so parseJson keeps that diagnostic value-free.
-    const detail = err instanceof Error ? err.message : String(err);
-    fail(`${path}: cannot read ${what}: ${detail}`);
-  }
-  return parseJson(text, `${path}: ${what}`);
-}
-
-function loadDiscovered(path: string): DiscoveredRepo[] {
-  const parsed = parseDiscoveredList(readJson(path, "the discovered list"));
-  if (parsed === null) {
-    fail(`${path}: the discovered list must be a JSON array of {repo, private} objects`);
-  }
-  return parsed;
-}
-
-function loadSelection(path: string): { repo: string }[] {
-  const parsed = parseSelectionList(readJson(path, "the selection"));
-  if (parsed === null) {
-    fail(`${path}: the selection must be a JSON array of {repo, ...} objects`);
-  }
-  return parsed;
-}
-
 function main(args: string[]): void {
   const [command, ...rest] = args;
-  switch (command) {
-    case "hint": {
-      const name = rest[0];
-      if (name === undefined || name === "" || rest.length > 1) {
-        fail("usage: redact.ts hint <bare-repo-name>");
-      }
-      console.log(hintName(name.includes("/") ? (name.split("/").pop() ?? name) : name));
-      return;
-    }
-    case "enrich": {
-      const flags = parseFlags(rest, ["--selection", "--discovered"], ["--registry"]);
-      const pat = process.env.PAT;
-      const runId = process.env.GITHUB_RUN_ID;
-      if (!pat || !runId) {
-        fail("enrich needs PAT and GITHUB_RUN_ID in the environment");
-      }
-      const registryPath = flags["--registry"] ?? "repos.yml";
-      const { registry, errors } = loadRegistry(readFileSync(registryPath, "utf-8"), registryPath);
-      if (registry === null) {
-        fail(errors);
-      }
-      const committed = new Set(
-        [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),
-      );
-      const isSelfDisclosed = (slug: string) => committed.has(slug.toLowerCase());
-      const result = enrich(
-        loadSelection(flags["--selection"]),
-        loadDiscovered(flags["--discovered"]),
-        isSelfDisclosed,
-        (slug) => verifyTag(pat, runId, slug),
-        // A selected repo the owner-filtered discovery never saw (an
-        // explicit cross-owner entry): one live probe, failing closed.
-        (slug) => {
-          const proc = captureNetwork(["gh", "api", `repos/${slug}`, "--jq", ".private"]);
-          return proc.exitCode !== 0 || proc.stdout.trim() !== "false";
-        },
-      );
-      console.log(JSON.stringify(result));
-      return;
-    }
-    default:
-      fail(`unknown subcommand ${JSON.stringify(command ?? "")} - usage: redact.ts hint|enrich`);
+  if (command !== "hint") {
+    fail(`unknown subcommand ${JSON.stringify(command ?? "")} - usage: redact.ts hint <name>`);
   }
+  const name = rest[0];
+  if (name === undefined || name === "" || rest.length > 1) {
+    fail("usage: redact.ts hint <bare-repo-name>");
+  }
+  console.log(hintName(name.includes("/") ? (name.split("/").pop() ?? name) : name));
 }
 
 if (import.meta.main) {

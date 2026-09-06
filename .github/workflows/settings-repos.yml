@@ -128,7 +128,7 @@ jobs:
 
       # One matrix entry per target repo. Probes retry and then
       # warn-and-skip a repo they cannot answer for; only
-      # selection-infrastructure failures (unreadable registry, failed
+      # selection-infrastructure failures (failed
       # discovery) fail this job.
       # ONLY_REPO carries only the workflow_call scope ("all", or public
       # text off a main commit; empty on cron and dispatch runs). The
@@ -167,9 +167,11 @@ jobs:
     name: apply (${{ matrix.repo }})
     # Job level so the deliver step's `if:` can read it - a step-level env
     # is invisible to another step's condition. Rendered as the string
-    # "true"/"false", which is what the comparison below expects.
+    # "true"/"false", which is what the comparison below expects. The one
+    # private flag: hint-not-slug for the resolve step, and hidden
+    # target-derived output for every step after it.
     env:
-      HIDE_DETAILS: ${{ matrix.hide_details }}
+      HIDE_DETAILS: ${{ matrix.private }}
       # Distinct from the template sync's report: failure_issue.ts matches
       # by exact title, so a shared one would let either workflow's green
       # run close the other's open report.
@@ -189,18 +191,17 @@ jobs:
           bun-version-file: .bun-version
 
       # Before the resolve step: the resolver is a bun script and imports
-      # the registry/redaction modules, which need the yaml dependency.
+      # the redaction module, which needs the zod dependency.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Recovers the real slug for a redacted target and registers it with
+      # Recovers the real slug for a private target and registers it with
       # the runner's masker before anything else prints; public rows pass
       # straight through.
       - name: Resolve the target repository
         id: resolve
         env:
           TARGET_INPUT: ${{ matrix.repo }}
-          REDACT_NAME: ${{ matrix.redact_name }}
           VERIFY: ${{ matrix.verify }}
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -217,10 +218,8 @@ jobs:
       # private-repos redaction cannot cover what they print, and both
       # quote repo-owned content on their diagnostic paths. run_hidden.ts
       # is the boundary: it passes output through untouched for a public
-      # target and captures it for a hide-details one, publishing only a
-      # generic outcome. HIDE_DETAILS is independent of redact_name - a
-      # private repo can disclose its NAME and still need its content
-      # hidden.
+      # target and captures it for a private one, publishing only a
+      # generic outcome.
       - name: Render the managed settings baseline
         id: render
         env:
