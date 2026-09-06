@@ -623,19 +623,15 @@ function actionManifests(actionsDir: string): { dir: string; file: string; text:
   return found;
 }
 
-/** Whether an action manifest carries its bun-setup region's BEGIN marker
- *  (the name its variant derives, so a ready-output action fenced as the
- *  plain variant does not count and the actions-bun-guard rule names the
- *  region it lacks). */
+/** Whether an action manifest carries the BEGIN marker of the bun-setup
+ *  region its variant derives. */
 export function carriesBunSetupRegion(file: string, text: string): boolean {
   const { begin } = markerLines(bunSetupRegionName(file), "#", "", BUN_SETUP_SOURCES);
   return text.split("\n").some((line) => line.trim() === begin);
 }
 
-/** The action manifests carrying their bun-setup region, sorted - the
- *  generator's roster (the markers are hand-placed once, like every
- *  region's; the actions-bun-guard rule makes a bun-running action without
- *  them loud). */
+/** The action manifests carrying their bun-setup region, sorted: the
+ *  generator's roster. */
 export function bunSetupActionFiles(actionsDir: string): string[] {
   return actionManifests(actionsDir)
     .filter(({ file, text }) => carriesBunSetupRegion(file, text))
