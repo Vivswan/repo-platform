@@ -23,9 +23,9 @@ on:
       before:
         description: >-
           The push payload's `before` (all zeros for a branch-creating
-          push): the read-directives and settings-inputs legs' FALLBACK
-          base, used only when no build branch exists yet or its every
-          stamp is sha itself (the first publish, landed by this run).
+          push): the read-directives leg's FALLBACK base, used only when
+          no build branch exists yet or its every stamp is sha itself
+          (the first publish, landed by this run).
           Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
@@ -179,46 +179,12 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # Did a settings input change? The diff base is judged_range.ts's newest earlier build stamp;
-  # `before` is only the first-publish fallback (fleet/settings_inputs_changed.ts; docs/all-green.md).
-  settings-inputs:
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      changed: ${{ steps.inputs.outputs.changed }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.sha }}
-          fetch-depth: 0
-
-      - name: Set up bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-
-      - name: Install script dependencies
-        run: bun install --frozen-lockfile --silent
-
-      - name: Diff for settings inputs since the last published green main
-        id: inputs
-        env:
-          SOURCE_SHA: ${{ inputs.sha }}
-          BEFORE_SHA: ${{ inputs.before }}
-        run: bun .github/scripts/fleet/settings_inputs_changed.ts
-
-  # The fleet-wide settings apply, called once per run when an input changed OR the sync ran: a red
-  # diff never blocks or widens a completed sync's apply. Holds the settings-repos lane while the
-  # called run keys a per-run group (the deadlock law above). Model: docs/all-green.md.
+  # Every target on EVERY called run: the apply is idempotent and reads each target's own state,
+  # so no diff decides it. Ordered behind sync-fleet whatever its result, so a synced repo is
+  # applied after its sync. Holds the settings-repos lane the called run keys around (deadlock law).
   settings-fleet:
-    needs: [settings-inputs, read-directives, sync-fleet]
-    if: >-
-      !cancelled() &&
-      ((needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true') ||
-      needs.sync-fleet.result == 'success' || needs.sync-fleet.result == 'failure')
+    needs: [sync-fleet]
+    if: github.event_name != 'workflow_dispatch' && !cancelled()
     concurrency:
       group: settings-repos
       cancel-in-progress: false
@@ -227,7 +193,7 @@ jobs:
       checks: read
     uses: ./.github/workflows/settings-repos.yml
     with:
-      repos: ${{ needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true' && 'all' || needs.read-directives.outputs.repos }}
+      repos: all
       sha: ${{ inputs.sha }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
