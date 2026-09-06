@@ -101,10 +101,6 @@ import {
 } from "../../scripts/check_ssot";
 import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
-import { actionStepArgv } from "../shared/action_shell";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { tempDirs } from "../shared/temp_dir";
-const temp = tempDirs();
 
 describe("applyDivergences", () => {
   const entry = {
