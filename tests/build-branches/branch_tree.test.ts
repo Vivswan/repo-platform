@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import {
+  actionDirNames,
   assembleBranchTree,
   canonicalize,
   copyActions,
@@ -220,6 +221,28 @@ describe("copyActions", () => {
     ]);
   });
 
+  test("a directory holding only ignored leftovers is invisible; one tracked stray file is the broken state", () => {
+    // After a pull that retired an action, its ignored node_modules/ stays
+    // behind in every checkout that had installed it: not an action, not an
+    // error. The control: one real file there and the manifest guard fires.
+    const root = actionsFixture();
+    const ghost = join(root, "actions", "ghost");
+    mkdirSync(join(ghost, "node_modules", "yaml"), { recursive: true });
+    writeFileSync(join(ghost, "node_modules", "yaml", "index.js"), "module.exports={};\n");
+    mkdirSync(join(ghost, "dist"));
+    writeFileSync(join(ghost, "dist", "bundle.js"), "module.exports={};\n");
+    writeFileSync(join(ghost, `run${TEST_FILE_SUFFIX}`), "export {};\n");
+    expect(actionDirNames(root)).toEqual(["check-typography"]);
+    const dest = temp.dir("branch-actions-dest-");
+    expect(copyActions(root, dest)).toBe(4);
+    expect(existsSync(join(dest, "actions", "ghost"))).toBe(false);
+
+    writeFileSync(join(ghost, "run.ts"), "export {};\n");
+    expect(actionDirNames(root)).toEqual(["check-typography", "ghost"]);
+    expect(() => copyActions(root, dest)).toThrow("actions/ghost");
+    expect(() => copyActions(root, dest)).toThrow("no action.yml");
+  });
+
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
     // The exclusion filter tests segments relative to the action root: a
     // checkout parked under some node_modules/ ancestor must still publish.
@@ -252,11 +275,7 @@ describe("assembleBranchTree", () => {
     ]);
     // Every action directory of this checkout ships (the shared zone
     // included) and nothing else does.
-    const checkoutActions = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
-      .map((entry) => entry.name)
-      .sort();
-    expect(readdirSync(join(dest, "actions")).sort()).toEqual(checkoutActions);
+    expect(readdirSync(join(dest, "actions")).sort()).toEqual(actionDirNames(REPO_ROOT));
     // No installed dependency or build output under any action.
     const excluded = walk(join(dest, "actions")).filter((path) =>
       relative(dest, path)
@@ -289,10 +308,7 @@ describe("assembleBranchTree", () => {
       expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
   test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships nested in the report action", () => {
-    const actions = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
-      .map((entry) => entry.name)
-      .sort();
+    const actions = actionDirNames(REPO_ROOT);
     const manifestFree = actions.filter(
       (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
     );
