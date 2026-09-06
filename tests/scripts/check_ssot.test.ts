@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import {
+  ACTIONS_BASH_SHELL,
   ACTIONS_BUN_RESOLVER,
   ACTIONS_BUN_SETUP_GUARD,
   ALL_GREEN_ROSTER,
@@ -104,6 +105,7 @@ import {
 } from "../../scripts/check_ssot";
 import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
+import { actionStepArgv } from "../shared/action_shell";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -1297,8 +1299,9 @@ describe("stepCarriesWithKey", () => {
 
 describe("actionsBunGuardMismatches", () => {
   const RESOLVER_RUN = ACTIONS_BUN_RESOLVER.map((line) => `        ${line}`).join("\n");
-  const NEUTRAL_ENV = '        BASH_ENV: ""\n        SHELLOPTS: ""';
-  const PIN_ENV = `      env:\n${NEUTRAL_ENV}\n        PIN_FILE: \${{ github.action_path }}/.bun-version`;
+  const SHELL = ACTIONS_BASH_SHELL;
+  const PIN_ENV = "      env:\n        PIN_FILE: ${{ github.action_path }}/.bun-version";
+  const RUN_HEAD = `    - name: Run\n      shell: ${SHELL}\n`;
   // The Run step's bun binding and invocation, replaced per case below.
   const RUN_ENV = "        ACTION_BUN: ${{ steps.action-bun.outputs.path }}";
   const RUN_LINE = `      run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'`;
@@ -1309,7 +1312,7 @@ describe("actionsBunGuardMismatches", () => {
   steps:
     - name: Check for a bun matching the action's pin
       id: bun
-      shell: bash
+      shell: ${SHELL}
 ${PIN_ENV}
       run: |
 ${RESOLVER_RUN}
@@ -1333,15 +1336,12 @@ ${RESOLVER_RUN}
     - name: Resolve the action's bun
       id: action-bun
       if: always()
-      shell: bash
+      shell: ${SHELL}
 ${PIN_ENV}
       run: |
 ${RESOLVER_RUN}
 
-    - name: Run
-      shell: bash
-      env:
-${NEUTRAL_ENV}
+${RUN_HEAD}      env:
 ${RUN_ENV}
 ${RUN_LINE}
 `;
@@ -1373,7 +1373,7 @@ ${RUN_LINE}
     got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
   };
   const FORMS =
-    '"$VAR" <data>..., exec "$VAR" <data>..., if [ -n "$VAR" ]; then, else, fi, NAME=<data>, echo|printf <data>..., /bin/rm -rf <data>... (each with an optional > or >> <data> tail)';
+    '"$VAR" <data>..., exec "$VAR" <data>..., if [ -n "$VAR" ]; then, else, fi, NAME=<data>, printf <static-format> <data>..., /bin/rm -rf "<clean runner-scratch path>"... (each with an optional > or >> <data> tail)';
   const outsideMismatch = (line: string, step = "Run") => ({
     file: "actions/x/action.yml",
     expected: `every run line in step '${step}' one of the forms this rule reads (${FORMS}); longer logic belongs in a script the recorded bun runs`,
@@ -1384,10 +1384,10 @@ ${RUN_LINE}
     expected: `every Actions expression in step '${step}''s run block (comments included: substitution precedes bash) one of \${{ github.action_path }} or \${{ runner.temp }} - dynamic values reach a step through env`,
     got: expression,
   });
-  const unneutralizedMismatch = (step = "Run") => ({
+  const shellMismatch = (shell: string, step = "Run") => ({
     file: "actions/x/action.yml",
-    expected: `step '${step}' carrying BASH_ENV and SHELLOPTS emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)`,
-    got: 'env: {"BASH_ENV":null,"SHELLOPTS":null}',
+    expected: `step '${step}' running under shell: ${SHELL} (privileged bash ignores a caller's BASH_ENV, SHELLOPTS and env-exported functions, so what this rule reads is what runs)`,
+    got: `shell: '${shell}'`,
   });
   const shadowMismatch = (line: string, step = "Run") => ({
     file: "actions/x/action.yml",
@@ -1443,21 +1443,19 @@ ${RUN_LINE}
     const at = canonical.lastIndexOf(from);
     return canonical.slice(0, at) + to + canonical.slice(at + from.length);
   };
-  // A drifted resolver is no resolver: beyond the block mismatch its lines
-  // are judged by the grammar like any other step's, so nothing carrying a
-  // canonical id is ever excused unread. These are the resolver's lines
-  // the grammar has no form for (the rest are a plain assignment and echo
-  // lines of data).
+  // A drifted resolver is judged by the grammar like any other step, so a
+  // canonical id excuses nothing unread. These are the resolver's lines the
+  // grammar has no form for (the rest: an assignment, a printf of data).
   const PROBE = "Check for a bun matching the action's pin";
   const RESOLVE = "Resolve the action's bun";
   const RESOLVER_OUTSIDE = [
     'pin="$(<"$PIN_FILE")"',
     'path="$(command -v bun || true)"',
-    'case "$path" in /*) ;; *) path="" ;; esac',
+    'case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac',
     EXIT_CHECK,
     'if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi',
-    'echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"',
-    'echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+    "printf '%s\\n' \"bun ${pin:-(no pin)}: ${path:-none on PATH}\"",
+    'printf \'%s\\n\' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"',
   ];
   const RETIRED_LOOKUP = 'have="$(command -v bun >/dev/null && bun --version || true)"';
   const swapped = (lines: string[], from: string, to: string) =>
@@ -1480,7 +1478,7 @@ ${RUN_LINE}
         [
           '        pin="$(<"$PIN_FILE")"',
           `        ${RETIRED_LOOKUP}`,
-          '        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+          `        printf '%s\\n' "pinned=$([ "$have" = "$pin" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"`,
         ].join("\n"),
       ),
       [
@@ -1488,7 +1486,7 @@ ${RUN_LINE}
         outsideMismatch('pin="$(<"$PIN_FILE")"', PROBE),
         outsideMismatch(RETIRED_LOOKUP, PROBE),
         outsideMismatch(
-          'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+          `printf '%s\\n' "pinned=$([ "$have" = "$pin" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"`,
           PROBE,
         ),
       ],
@@ -1518,10 +1516,7 @@ ${RUN_LINE}
       "the post-setup resolver carries no condition (skipped after an earlier failure, while an always() consumer still runs)",
       canonical
         .replace("      id: action-bun\n      if: always()\n", () => "      id: action-bun\n")
-        .replace(
-          "    - name: Run\n      shell: bash\n",
-          () => "    - name: Run\n      if: always()\n      shell: bash\n",
-        ),
+        .replace(RUN_HEAD, () => `    - name: Run\n      if: always()\n      shell: ${SHELL}\n`),
       [
         resolveStepMismatch,
         {
@@ -1545,20 +1540,20 @@ ${RUN_LINE}
     ],
     [
       "the post-setup resolver records a differently named output",
-      resolveStepOnly('echo "pinned=$([', 'echo "ready=$(['),
+      resolveStepOnly('"pinned=$([', '"ready=$(['),
       [
         resolveStepMismatch,
         ...swapped(
           RESOLVER_OUTSIDE,
-          'echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
-          'echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+          `printf '%s\\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"`,
+          `printf '%s\\n' "ready=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"`,
         ).map((line) => outsideMismatch(line, RESOLVE)),
         bindingMismatch("${{ steps.action-bun.outputs.path }}"),
       ],
     ],
     [
       "the post-setup resolver reads a pin no setup-bun installs",
-      resolveStepOnly(PIN_ENV, `      env:\n${NEUTRAL_ENV}\n        PIN_FILE: .bun-version`),
+      resolveStepOnly(PIN_ENV, "      env:\n        PIN_FILE: .bun-version"),
       [resolveStepMismatch, bindingMismatch("${{ steps.action-bun.outputs.path }}")],
     ],
     [
@@ -1567,7 +1562,7 @@ ${RUN_LINE}
         `    - name: Resolve the action's bun
       id: action-bun
       if: always()
-      shell: bash
+      shell: ${SHELL}
 ${PIN_ENV}
       run: |
 ${RESOLVER_RUN}
@@ -1582,11 +1577,9 @@ ${RESOLVER_RUN}
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual(expected);
   });
 
-  // Every run line of a non-resolver step must read as one of the grammar's
-  // forms. A line outside them is refused whatever it does, so no spelling
-  // of a PATH lookup - by name, by path, quoted, through a wrapper, an
-  // interpreter, a substitution, an expansion, a pipeline, a heredoc -
-  // needs recognising; each row below once evaded a spelling-based check.
+  // Refused whatever it does: the grammar names its forms, so no spelling
+  // of a PATH lookup needs recognising (each row once evaded a
+  // spelling-based check); echo is out since POSIXLY_CORRECT makes it expand.
   test.each([
     'bun "${{ github.action_path }}/x.ts"',
     "bun install --frozen-lockfile --production",
@@ -1636,6 +1629,16 @@ ${RESOLVER_RUN}
     "then",
     'cd "$DIR"',
     "echo $((1 + 1))",
+    "echo hi",
+    'echo "integrity=failure" >> "$GITHUB_OUTPUT"',
+    '"$ACTION_BUN" $ARGS',
+    "printf '%s' $VALUE",
+    "reason=$OTHER",
+    '/bin/rm -rf "$HOME"',
+    "/bin/rm -rf --no-preserve-root /",
+    '/bin/rm -rf "/tmp/other"',
+    '/bin/rm -rf "${{ runner.temp }}/../work"',
+    "/bin/rm -rf",
     "echo hi # a trailing comment",
     "cat <<EOF",
     "readonly ACTION_BUN",
@@ -1660,6 +1663,7 @@ ${RESOLVER_RUN}
     "echo\u00a0ok",
     '"$ACTION_BUN"\u00a0x.ts',
     "\u00a0echo ok",
+    "echo\rhi",
     "printf '%n' ACTION_BUN",
     'printf "%5.2n" ACTION_BUN',
     "printf '%*n' 0 ACTION_BUN",
@@ -1685,11 +1689,9 @@ ${RESOLVER_RUN}
     ]);
   });
 
-  // An Actions expression in a run block is substituted before bash reads
-  // it, in a comment line as much as a code line; only the runner's own
-  // fixed contexts are admitted, and a pinned resolver step is no exception.
-  // (An echo whose first argument opens with an expression is also outside
-  // the grammar on its own: the first argument may not start with `$`.)
+  // An Actions expression is substituted before bash reads the block, in a
+  // comment line as much as a code line; only the runner's own fixed
+  // contexts are admitted, a pinned resolver step included.
   test.each<[string, string, boolean]>([
     ['echo "${{ inputs.path }}"', "${{ inputs.path }}", true],
     ['"$ACTION_BUN" "${{ inputs.script }}"', "${{ inputs.script }}", false],
@@ -1699,7 +1701,8 @@ ${RESOLVER_RUN}
       true,
     ],
     ['echo "${{ github.action_path }}" "${{ env.X }}"', "${{ env.X }}", true],
-    ['echo "path=${{ env.X }}"', "${{ env.X }}", false],
+    ['echo "path=${{ env.X }}"', "${{ env.X }}", true],
+    ['printf "%s" "path=${{ env.X }}"', "${{ env.X }}", false],
   ])("%s is refused for its expression", (line, expression, alsoOutside) => {
     const text = canonical.replace(RUN_LINE, () => `      run: ${JSON.stringify(line)}`);
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
@@ -1753,12 +1756,13 @@ ${RESOLVER_RUN}
     'reason="the action\'s pinned bun is unavailable"',
     'have=""',
     "count=3",
-    'echo "::error::$reason"',
-    'echo "integrity=failure" >> "$GITHUB_OUTPUT"',
-    'echo "path=$PATH" >> "$GITHUB_OUTPUT"',
-    'echo "bun by name is refused"',
-    'echo "(bun x.ts)"',
-    "echo '$(bun --version)'",
+    `printf '%s\\n' "::error::$reason"`,
+    `printf '%s\\n' "integrity=failure" >> "$GITHUB_OUTPUT"`,
+    `printf '%s\\n' "path=$PATH" >> "$GITHUB_OUTPUT"`,
+    `printf '%s\\n' "bun by name is refused"`,
+    `printf '%s\\n' "(bun x.ts)"`,
+    "printf '%s\\n' '$(bun --version)'",
+    "printf ok",
     'printf \'### Template check\\n\\n%s\\n\' "$reason" "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"',
     '/bin/rm -rf "${{ runner.temp }}/aligned-validator"',
   ])("%s is inside the grammar", (line) => {
@@ -1770,7 +1774,7 @@ ${RESOLVER_RUN}
     const text = canonical.replace(
       RUN_LINE,
       () =>
-        '      run: |\n        # the guard\n        if [ -n "$ACTION_BUN" ]; then\n          exec "$ACTION_BUN" "$ACTION_PATH/report.ts"\n        fi\n\n        reason="unavailable"\n        echo "::error::$reason"\n',
+        `      run: |\n        # the guard\n        if [ -n "$ACTION_BUN" ]; then\n          exec "$ACTION_BUN" "$ACTION_PATH/report.ts"\n        fi\n\n        reason="unavailable"\n        printf '%s\\n' "::error::$reason"\n`,
     );
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
   });
@@ -1823,14 +1827,21 @@ ${RESOLVER_RUN}
   test("a stale binding used only as data (an echo argument) is not an invocation", () => {
     const text = canonical
       .replace(RUN_ENV, () => "        ACTION_BUN: ${{ steps.bun.outputs.path }}")
-      .replace(RUN_LINE, () => '      run: echo "recorded=$ACTION_BUN"');
+      .replace(RUN_LINE, () => `      run: printf '%s\\n' "recorded=$ACTION_BUN"`);
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
   });
 
-  test("a step without the neutralizers is refused (a caller's BASH_ENV would run before its lines)", () => {
-    const text = canonical.replace(`${NEUTRAL_ENV}\n${RUN_ENV}`, () => RUN_ENV);
+  test("a step under plain bash is refused (a caller's BASH_ENV, SHELLOPTS or exported functions would reach it)", () => {
+    const text = canonical.replace(RUN_HEAD, () => "    - name: Run\n      shell: bash\n");
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
-      unneutralizedMismatch(),
+      shellMismatch("bash"),
+    ]);
+  });
+
+  test("a run line whose words a carriage return joins is outside (YAML's \\r escape lands a real CR)", () => {
+    const text = canonical.replace(RUN_LINE, () => '      run: "echo\\rhi"');
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
+      outsideMismatch("echo\rhi"),
     ]);
   });
 
@@ -1849,14 +1860,14 @@ ${RESOLVER_RUN}
     ]);
   });
 
-  test("a resolver step without the neutralizers is no resolver", () => {
+  test("a resolver step under plain bash is no resolver", () => {
     const text = canonical.replace(
-      `      id: action-bun\n      if: always()\n      shell: bash\n      env:\n${NEUTRAL_ENV}\n`,
-      () => "      id: action-bun\n      if: always()\n      shell: bash\n      env:\n",
+      `      id: action-bun\n      if: always()\n      shell: ${SHELL}\n`,
+      () => "      id: action-bun\n      if: always()\n      shell: bash\n",
     );
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
       resolveStepMismatch,
-      unneutralizedMismatch(RESOLVE),
+      shellMismatch("bash", RESOLVE),
       ...RESOLVER_OUTSIDE.map((line) => outsideMismatch(line, RESOLVE)),
       bindingMismatch("${{ steps.action-bun.outputs.path }}"),
     ]);
@@ -1874,10 +1885,7 @@ ${RESOLVER_RUN}
   });
 
   test("a step running the recorded bun BEFORE the resolver that records it is refused", () => {
-    const runStep = `    - name: Run
-      shell: bash
-      env:
-${NEUTRAL_ENV}
+    const runStep = `${RUN_HEAD}      env:
 ${RUN_ENV}
 ${RUN_LINE}
 `;
@@ -1894,38 +1902,34 @@ ${RUN_LINE}
 
   test("an always() consumer of the always() resolver passes", () => {
     const text = canonical.replace(
-      "    - name: Run\n      shell: bash\n",
-      () => "    - name: Run\n      if: always()\n      shell: bash\n",
+      RUN_HEAD,
+      () => `    - name: Run\n      if: always()\n      shell: ${SHELL}\n`,
     );
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
   });
 
-  // The rule reads bash; a step under another shell runs its block through a
-  // lookup the rule never sees.
-  test.each(["bun {0}", "sh", "pwsh", "python {0}", undefined])(
-    "a run step under shell %j is refused",
-    (shell) => {
-      const text = canonical.replace(
-        "    - name: Run\n      shell: bash\n",
-        () => `    - name: Run\n${shell === undefined ? "" : `      shell: ${shell}\n`}`,
-      );
-      expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
-        {
-          file: "actions/x/action.yml",
-          expected: "step 'Run' running under shell: bash, the shell this rule reads",
-          got: `shell: '${shell ?? ""}'`,
-        },
-      ]);
-    },
-  );
+  // The rule reads privileged bash; a step under another shell runs its block
+  // through a lookup the rule never sees, or with a caller's shell env live.
+  test.each([
+    "bun {0}",
+    "sh",
+    "bash",
+    "bash --noprofile --norc -eo pipefail {0}",
+    "pwsh",
+    "python {0}",
+    undefined,
+  ])("a run step under shell %j is refused", (shell) => {
+    const text = canonical.replace(
+      RUN_HEAD,
+      () => `    - name: Run\n${shell === undefined ? "" : `      shell: ${shell}\n`}`,
+    );
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
+      shellMismatch(shell ?? ""),
+    ]);
+  });
 
   // Scope is by declaration: every action not listed in BUN_FREE_ACTIONS is
   // under the full contract, however it spells (or does not spell) bun.
-  const shellMismatch = (shell: string, step = "Run") => ({
-    file: "actions/x/action.yml",
-    expected: `step '${step}' running under shell: bash, the shell this rule reads`,
-    got: `shell: '${shell}'`,
-  });
   test.each<[string, string, ReturnType<typeof actionsBunGuardMismatches>]>([
     [
       "a step carrying a resolver's id but not its body",
@@ -1933,7 +1937,7 @@ ${RUN_LINE}
       [
         canonicalBlockMismatch,
         resolveStepMismatch,
-        unneutralizedMismatch("Probe"),
+        shellMismatch("bash", "Probe"),
         outsideMismatch('bun "x.ts"', "Probe"),
       ],
     ],
@@ -1943,7 +1947,7 @@ ${RUN_LINE}
       [
         canonicalBlockMismatch,
         resolveStepMismatch,
-        unneutralizedMismatch(),
+        shellMismatch("bash"),
         outsideMismatch('bash -c "bun x.ts"'),
       ],
     ],
@@ -1954,18 +1958,17 @@ ${RUN_LINE}
         canonicalBlockMismatch,
         resolveStepMismatch,
         shellMismatch("bun {0}"),
-        unneutralizedMismatch(),
         outsideMismatch("console.log(1)"),
       ],
     ],
     [
       "a step that never spells bun at all",
-      '    - name: Run\n      shell: bash\n      env:\n        BASH_ENV: ""\n        SHELLOPTS: ""\n      run: echo "nothing here"\n',
+      `${RUN_HEAD}      run: printf '%s\\n' "nothing here"\n`,
       [canonicalBlockMismatch, resolveStepMismatch],
     ],
     [
       'a split spelling (b\\un, b"u"n)',
-      '    - name: Run\n      shell: bash\n      env:\n        BASH_ENV: ""\n        SHELLOPTS: ""\n      run: |\n        b\\un x.ts\n        b"u"n y.ts\n',
+      `${RUN_HEAD}      run: |\n        b\\un x.ts\n        b"u"n y.ts\n`,
       [
         canonicalBlockMismatch,
         resolveStepMismatch,
@@ -1975,7 +1978,7 @@ ${RUN_LINE}
     ],
     [
       "bun split across a continuation",
-      '    - name: Run\n      shell: bash\n      env:\n        BASH_ENV: ""\n        SHELLOPTS: ""\n      run: |\n        bu\\\n        n x.ts\n',
+      `${RUN_HEAD}      run: |\n        bu\\\n        n x.ts\n`,
       [canonicalBlockMismatch, resolveStepMismatch, outsideMismatch("bun x.ts")],
     ],
   ])("%s: an undeclared action is in scope", (_name, step, expected) => {
@@ -2126,9 +2129,9 @@ ${RUN_LINE}
     },
   );
 
-  // A runner-scratch pin needs an earlier bash step that removes the pin's
-  // root by a fixed rm on the literal path, shell knobs emptied, and that the
-  // setup's condition requires; anything less lets a caller plant the pin.
+  // A runner-scratch pin needs an earlier step under the canonical shell
+  // that removes the pin's root by a fixed rm on the literal path, and that
+  // the setup's condition requires; anything less lets a caller plant the pin.
   const PIN = "${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version";
   const REQUIRED = "      if: steps.clear.outcome == 'success'\n";
   const fetchedSetup = (condition = REQUIRED) => `    - name: Set up the fetched tree's bun
@@ -2136,27 +2139,15 @@ ${condition}      uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${PIN}
 `;
-  const NEUTRAL = 'BASH_ENV: ""\n        SHELLOPTS: ""';
-  const clearingStep = (
-    run: string,
-    extra = "",
-    shell = "bash",
-    env = NEUTRAL,
-  ) => `    - name: Clear
+  const clearingStep = (run: string, extra = "", shell = SHELL, env?: string) => `    - name: Clear
       id: clear
 ${extra}      shell: ${shell}
-      env:
-        ${env}
-      run: ${run}
+${env === undefined ? "" : `      env:\n        ${env}\n`}      run: ${run}
 `;
   const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
   const noClearing = {
     file: "actions/x/action.yml",
-    expected:
-      `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch ` +
-      `root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one ` +
-      `/bin/rm -rf of clean paths under that root, and whose success this setup's condition ` +
-      `requires)`,
+    expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a step under the canonical privileged bash shell whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
     got: "no such step - a caller could plant that pin before the action runs",
   };
   const cases: [string, string, ReturnType<typeof actionsBunGuardMismatches>, string?, string?][] =
@@ -2198,25 +2189,25 @@ ${extra}      shell: ${shell}
         ],
       ],
       // Every operand is judged, not only the one covering the pin: a
-      // second operand the shell expands or a caller supplies is refused
-      // (the grammar refuses a substitution or a caller-shaped expression
-      // on its own account too).
-      ...(
-        [
-          ['"$HOME/x"', []],
-          ['"$(echo /)"', [outsideMismatch(`${REMOVAL} "$(echo /)"`, "Clear")]],
-          ['"`echo /`"', [outsideMismatch(`${REMOVAL} "\`echo /\`"`, "Clear")]],
-          [
-            '"${{ inputs.cleanup-path }}"',
-            [expressionMismatch("${{ inputs.cleanup-path }}", "Clear")],
-          ],
-          ['"${{ runner.temp }}/../work"', []],
-          ['"/tmp/other"', []],
-        ] as [string, ReturnType<typeof actionsBunGuardMismatches>][]
-      ).map(([operand, grammar]): (typeof cases)[number] => [
+      // second operand the shell expands or a caller supplies is refused,
+      // and the grammar's removal form refuses it on its own account too.
+      ...[
+        '"$HOME/x"',
+        '"$(echo /)"',
+        '"`echo /`"',
+        '"${{ inputs.cleanup-path }}"',
+        '"${{ runner.temp }}/../work"',
+        '"/tmp/other"',
+      ].map((operand): (typeof cases)[number] => [
         `a clearing of the root beside the operand ${operand}`,
         clearingStep(`${REMOVAL} ${operand}`),
-        [noClearing, ...grammar],
+        [
+          noClearing,
+          ...(operand.includes("inputs.")
+            ? [expressionMismatch("${{ inputs.cleanup-path }}", "Clear")]
+            : []),
+          outsideMismatch(`${REMOVAL} ${operand}`, "Clear"),
+        ],
       ]),
       [
         "a required clearing step allowed to fail (its success is still required)",
@@ -2262,66 +2253,12 @@ ${extra}      shell: ${shell}
       [
         "a clearing under a shell that is not bash",
         clearingStep(REMOVAL, "", "true {0}"),
-        [
-          noClearing,
-          {
-            file: "actions/x/action.yml",
-            expected: "step 'Clear' running under shell: bash, the shell this rule reads",
-            got: "shell: 'true {0}'",
-          },
-        ],
+        [noClearing, shellMismatch("true {0}", "Clear")],
       ],
       [
-        "a clearing step that leaves BASH_ENV inherited",
-        clearingStep(REMOVAL, "", "bash", 'SHELLOPTS: ""'),
-        [
-          noClearing,
-          {
-            file: "actions/x/action.yml",
-            expected:
-              "step 'Clear' carrying BASH_ENV and SHELLOPTS emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)",
-            got: `env: ${JSON.stringify({ BASH_ENV: null, SHELLOPTS: "" })}`,
-          },
-        ],
-      ],
-      [
-        "a clearing step that leaves SHELLOPTS inherited",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""'),
-        [
-          noClearing,
-          {
-            file: "actions/x/action.yml",
-            expected:
-              "step 'Clear' carrying BASH_ENV and SHELLOPTS emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)",
-            got: `env: ${JSON.stringify({ BASH_ENV: "", SHELLOPTS: null })}`,
-          },
-        ],
-      ],
-      [
-        "a clearing step that sets BASH_ENV to a file",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: /tmp/x\n        SHELLOPTS: ""'),
-        [
-          noClearing,
-          {
-            file: "actions/x/action.yml",
-            expected:
-              "step 'Clear' carrying BASH_ENV and SHELLOPTS emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)",
-            got: `env: ${JSON.stringify({ BASH_ENV: "/tmp/x", SHELLOPTS: "" })}`,
-          },
-        ],
-      ],
-      [
-        "a clearing step that sets SHELLOPTS to noexec",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""\n        SHELLOPTS: noexec'),
-        [
-          noClearing,
-          {
-            file: "actions/x/action.yml",
-            expected:
-              "step 'Clear' carrying BASH_ENV and SHELLOPTS emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)",
-            got: `env: ${JSON.stringify({ BASH_ENV: "", SHELLOPTS: "noexec" })}`,
-          },
-        ],
+        "a clearing under plain bash (a caller's BASH_ENV, SHELLOPTS or exported functions reach it)",
+        clearingStep(REMOVAL, "", "bash"),
+        [noClearing, shellMismatch("bash", "Clear")],
       ],
       [
         "a clearing by rm from PATH rather than /bin/rm",
@@ -2333,14 +2270,14 @@ ${extra}      shell: ${shell}
         clearingStep(
           '/bin/rm -rf "$ALIGNED_DIR"',
           "",
-          "bash",
-          `${NEUTRAL}\n        ALIGNED_DIR: \${{ runner.temp }}/aligned-validator`,
+          SHELL,
+          "ALIGNED_DIR: ${{ runner.temp }}/aligned-validator",
         ),
-        [noClearing],
+        [noClearing, outsideMismatch('/bin/rm -rf "$ALIGNED_DIR"', "Clear")],
       ],
       [
         "a clearing commented out",
-        clearingStep(`|\n        # ${REMOVAL}\n        echo skipped`),
+        clearingStep(`|\n        # ${REMOVAL}\n        printf skipped`),
         [noClearing],
       ],
       [
@@ -2350,7 +2287,7 @@ ${extra}      shell: ${shell}
       ],
       [
         "a clearing followed by another command",
-        clearingStep(`|\n        ${REMOVAL}\n        echo done`),
+        clearingStep(`|\n        ${REMOVAL}\n        printf done`),
         [noClearing],
       ],
       [
@@ -2397,20 +2334,19 @@ ${extra}      shell: ${shell}
     expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
   });
 
-  test("an action that runs bun by name with no setup block at all is refused for both missing blocks and the lookup", () => {
+  test("an action that runs bun by name with no setup block at all is refused for both missing blocks, the shell, and the lookup", () => {
     const text =
       'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
       canonicalBlockMismatch,
       resolveStepMismatch,
-      unneutralizedMismatch(),
+      shellMismatch("bash"),
       outsideMismatch('bun "x.ts"'),
     ]);
   });
 
   test("an undeclared action touching no bun is under the guard all the same (scope is declared, not detected)", () => {
-    const text =
-      'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      env:\n        BASH_ENV: ""\n        SHELLOPTS: ""\n      run: echo ok\n';
+    const text = `runs:\n  using: composite\n  steps:\n${RUN_HEAD}      run: printf ok\n`;
     expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
       canonicalBlockMismatch,
       resolveStepMismatch,
@@ -2438,7 +2374,8 @@ ${extra}      shell: ${shell}
     ["else", { kind: "keyword" }],
     ['reason="pinned bun is unavailable"', { kind: "assignment", name: "reason" }],
     ['have=""', { kind: "assignment", name: "have" }],
-    ["echo hi > out", { kind: "data-command" }],
+    ["printf hi > out", { kind: "data-command" }],
+    ["echo hi > out", { kind: "outside" }],
     ['printf \'%s\\n\' "$reason" >> "$GITHUB_STEP_SUMMARY"', { kind: "data-command" }],
     ['/bin/rm -rf "${{ runner.temp }}/x"', { kind: "removal" }],
     ['echo "unterminated', { kind: "outside" }],
@@ -2449,6 +2386,10 @@ ${extra}      shell: ${shell}
     ['"$ACTION_BUN" x.ts >', { kind: "outside" }],
     ['x="a" "b"', { kind: "outside" }],
     ["/bin/rm -r x", { kind: "outside" }],
+    ['/bin/rm -rf "$HOME"', { kind: "outside" }],
+    ["/bin/rm -rf --no-preserve-root /", { kind: "outside" }],
+    ['/bin/rm -rf "${{ runner.temp }}/x" "${{ runner.temp }}/y.md"', { kind: "removal" }],
+    ['"$ACTION_BUN" $ARGS', { kind: "outside" }],
     ["exec", { kind: "outside" }],
     ["jq . file", { kind: "outside" }],
     ["printf -v X y", { kind: "outside" }],
@@ -2456,9 +2397,10 @@ ${extra}      shell: ${shell}
     ['printf "$FORMAT" X y', { kind: "outside" }],
     ['echo "$X"', { kind: "outside" }],
     ["echo $X", { kind: "outside" }],
-    ["echo '$X'", { kind: "data-command" }],
-    ['echo "x=$X"', { kind: "data-command" }],
-    ['echo "x=$[X=1]"', { kind: "outside" }],
+    ["printf '%s' '$X'", { kind: "data-command" }],
+    ['printf "%s" "x=$X"', { kind: "data-command" }],
+    ['printf "x=$X"', { kind: "outside" }],
+    ['printf "%s" "x=$[X=1]"', { kind: "outside" }],
     ["printf '%%n' X", { kind: "data-command" }],
     ["printf '%s %s\\n' a b", { kind: "data-command" }],
     ["printf '%*n' 0 X", { kind: "outside" }],
@@ -2466,8 +2408,9 @@ ${extra}      shell: ${shell}
     ["printf '%n' X", { kind: "outside" }],
     ['"$BASH" x.ts', { kind: "outside" }],
     ['"$ALIGNED_BUN" x.ts', { kind: "invocation", variable: "ALIGNED_BUN" }],
-    ["echo '$[X=1]'", { kind: "data-command" }],
+    ["printf '%s' '$[X=1]'", { kind: "data-command" }],
     ["echo\u00a0ok", { kind: "outside" }],
+    ["echo\rhi", { kind: "outside" }],
     ['x="${Y:=z}"', { kind: "outside" }],
     [
       '"$ACTION_BUN" "${{ github.action_path }}/x.ts"',
@@ -2485,12 +2428,9 @@ ${extra}      shell: ${shell}
     ).toEqual(["echo one     two", 'printf "%s\\\\" x', 'echo "\\\\"', "last"]);
   });
 
-  // The resolver block itself, executed as the runner would: a path is
-  // recorded exactly when an absolute executable on PATH prints the pinned
-  // version AND exits 0, and `pinned` derives from the path. A bun that
-  // lies about its version, one found through a relative PATH entry,
-  // another version, no bun at all, and an empty pin all read as no path.
-  const RUNNER_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
+  // The resolver block executed as the runner would: a path is recorded
+  // exactly when an absolute executable on PATH prints the pinned version
+  // AND exits 0; every other row reads as no path.
   const BUN_DIR = realpathSync(join(process.execPath, ".."));
   const NONE = "path=\npinned=false\n";
   const noneLogged = (pin: string) => `bun ${pin}: none on PATH\n`;
@@ -2557,6 +2497,20 @@ ${extra}      shell: ${shell}
       noneLogged(Bun.version),
     ],
     [
+      "the pinned version reached through a PATH entry containing a newline (it would forge a second output record)",
+      Bun.version,
+      (dir) => {
+        const entry = join(dir, "a\nb");
+        mkdirSync(entry);
+        writeFileSync(join(entry, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\n`, {
+          mode: 0o755,
+        });
+        return { path: `${entry}:/usr/bin:/bin` };
+      },
+      NONE,
+      noneLogged(Bun.version),
+    ],
+    [
       "an empty pin file",
       "",
       () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
@@ -2575,7 +2529,7 @@ ${extra}      shell: ${shell}
       writeFileSync(pinFile, pinned === "" ? "" : `${pinned}\n`);
       const outputs = join(root, "outputs.txt");
       writeFileSync(outputs, "");
-      const proc = boundedSpawnSync([...RUNNER_BASH, ACTIONS_BUN_RESOLVER.join("\n")], {
+      const proc = boundedSpawnSync(actionStepArgv(ACTIONS_BUN_RESOLVER.join("\n"), root), {
         cwd,
         env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs },
       });
@@ -2587,6 +2541,84 @@ ${extra}      shell: ${shell}
       ]);
     },
   );
+
+  // The shell is load-bearing: privileged bash ignores an env-exported
+  // `command` function and BASH_ENV, where the runner's plain `shell: bash`
+  // expansion would run both and record whatever bun the caller's env names.
+  test("under the canonical shell a hostile caller env is inert; under plain bash it picks the bun", () => {
+    const root = temp.dir("actions-bun-resolver-hostile-");
+    // /bin/sh: a bash fake would source the hostile BASH_ENV itself under
+    // plain bash and print the hook's line into its version.
+    const fake = join(root, "fake-bun");
+    writeFileSync(fake, `#!/bin/sh\necho "${Bun.version}"\n`, { mode: 0o755 });
+    const hook = join(root, "bash-env.sh");
+    writeFileSync(hook, "echo BASH_ENV-ran\n");
+    const pinFile = join(root, ".bun-version");
+    writeFileSync(pinFile, `${Bun.version}\n`);
+    const hostile = {
+      PATH: `${BUN_DIR}:/usr/bin:/bin`,
+      PIN_FILE: pinFile,
+      "BASH_FUNC_command%%": `() { builtin echo "${fake}"; }`,
+      BASH_ENV: hook,
+    };
+    const resolveUnder = (argv: string[]) => {
+      const outputs = join(root, `${argv.length}-outputs.txt`);
+      writeFileSync(outputs, "");
+      const proc = boundedSpawnSync(argv, { env: { ...hostile, GITHUB_OUTPUT: outputs } });
+      return [proc.exitCode, readFileSync(outputs, "utf8"), proc.stdout];
+    };
+    const canonical = actionStepArgv(ACTIONS_BUN_RESOLVER.join("\n"), root);
+    expect(resolveUnder(canonical)).toEqual([
+      0,
+      `path=${process.execPath}\npinned=true\n`,
+      `bun ${Bun.version}: ${process.execPath}\n`,
+    ]);
+    // The runner's own `shell: bash` expansion is the canonical argv less -p.
+    expect(resolveUnder(canonical.filter((word) => word !== "-p"))).toEqual([
+      0,
+      `path=${fake}\npinned=true\n`,
+      `BASH_ENV-ran\nbun ${Bun.version}: ${fake}\n`,
+    ]);
+  });
+
+  // -p leaves POSIXLY_CORRECT live, and in POSIX mode echo expands backslash
+  // escapes: a PATH entry spelling `\n` would forge a second output record
+  // through echo, where the resolver's printf keeps one.
+  test("under POSIXLY_CORRECT the resolver's printf records one line where echo would forge two", () => {
+    const root = temp.dir("actions-bun-resolver-posix-");
+    const entry = join(root, "a\\nb");
+    mkdirSync(entry);
+    writeFileSync(join(entry, "bun"), `#!/bin/sh\necho "${Bun.version}"\n`, { mode: 0o755 });
+    const pinFile = join(root, ".bun-version");
+    writeFileSync(pinFile, `${Bun.version}\n`);
+    const recordedBy = (run: string) => {
+      const outputs = join(root, `${run.length}-outputs.txt`);
+      writeFileSync(outputs, "");
+      const proc = boundedSpawnSync(actionStepArgv(run, root), {
+        env: {
+          PATH: `${entry}:/usr/bin:/bin`,
+          PIN_FILE: pinFile,
+          GITHUB_OUTPUT: outputs,
+          POSIXLY_CORRECT: "1",
+        },
+      });
+      return [proc.exitCode, readFileSync(outputs, "utf8")];
+    };
+    expect(recordedBy(ACTIONS_BUN_RESOLVER.join("\n"))).toEqual([
+      0,
+      `path=${entry}/bun\npinned=true\n`,
+    ]);
+    const viaEcho = ACTIONS_BUN_RESOLVER.map((line) =>
+      line.replace(`printf '%s\\n' "path=$path"`, 'echo "path=$path"'),
+    ).join("\n");
+    expect(viaEcho).not.toBe(ACTIONS_BUN_RESOLVER.join("\n"));
+    expect(recordedBy(viaEcho)).toEqual([0, `path=${join(root, "a")}\nb/bun\npinned=true\n`]);
+  });
+
+  test("a carriage return is a content character to bash (the control for the space-and-tab word split)", () => {
+    const proc = boundedSpawnSync(["bash", "--noprofile", "--norc", "-c", "echo\rhi"], {});
+    expect([proc.exitCode, proc.stdout]).toEqual([127, ""]);
+  });
 
   test("the manifest walk sees nested actions and both manifest spellings (the rule then refuses .yaml)", () => {
     expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");

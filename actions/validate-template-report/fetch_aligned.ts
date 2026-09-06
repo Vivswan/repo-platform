@@ -1,12 +1,7 @@
 #!/usr/bin/env bun
-// The integrity leg's FETCH of the build tree at the recorded `_commit`. Its
-// build-branch compare both admits the sha and feeds freshness; a second
-// holds `_commit` at or ahead of the base ref's (the vintage floor). The
-// compare's outputs are published only once both have passed.
-//
-// Env: GH_TOKEN, ALIGNED_DIR (cleared here), VERDICT_FILE (cleared here),
-// GITHUB_OUTPUT, GITHUB_REPOSITORY, BASE_REF (the vintage floor's ref).
-// Runs from the caller's checkout.
+// The integrity leg's FETCH, run from the caller's checkout: `_commit` must
+// be on the build branch and, when BASE_REF has an answers file, at or ahead
+// of its recorded `_commit`; only then is the compare published for freshness.
 
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
