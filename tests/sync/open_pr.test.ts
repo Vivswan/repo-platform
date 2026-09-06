@@ -69,7 +69,6 @@ function run(opts: Options = {}) {
     "CARRIED_FILE",
     "CARRY_REVIEW_FILE",
     "REMOVED_PATHS_FILE",
-    "WITHHELD_FILE",
     "MANIFEST_LICENSE_FILE",
     "SUMMARY_FILE",
   ];
@@ -199,15 +198,6 @@ describe("open_pr sections and auto-merge", () => {
       where: "temp",
       name: MIGRATIONS_REVIEW_NAME,
       content: "> [!WARNING]\n> MIGRATION m0002_example: the rewrite needs a look\n",
-      forcesReview: true,
-    },
-    {
-      reason: "withheld workflow files: the update is incomplete",
-      where: "files",
-      name: "WITHHELD_FILE",
-      content: ".github/workflows/ci.yml\n",
-      section:
-        "> [!WARNING]\n> Workflow-file changes were WITHHELD from this update: the sync\n> token lacks the Workflows scope. Grant Workflows read/write to\n> the REPO_PLATFORM_TOKEN and re-run the sync to include them.\n\n- .github/workflows/ci.yml",
       forcesReview: true,
     },
     {

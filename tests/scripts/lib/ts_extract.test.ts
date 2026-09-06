@@ -261,13 +261,13 @@ describe("wrappedArgvLabels", () => {
       "const ok = passthrough([",
       '  "bun",',
       '  join(import.meta.dir, "run_hidden.ts"),',
-      '  "post-withhold re-validation",',
+      '  "template validation",',
       '  "--",',
       '  "bun",',
       '  "validator.ts",',
       "]);",
     ].join("\n");
-    expect(wrappedArgvLabels(source, "run_hidden.ts")).toEqual(["post-withhold re-validation"]);
+    expect(wrappedArgvLabels(source, "run_hidden.ts")).toEqual(["template validation"]);
   });
 
   test("a missing -- separator, a different script, or a comment copy yields nothing", () => {

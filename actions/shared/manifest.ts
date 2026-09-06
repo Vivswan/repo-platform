@@ -24,24 +24,16 @@
 // inside freshly rendered repositories - node builtins and zone-internal
 // imports only.
 
-import { GRAMMAR, type GrammarId, type SplitShapes } from "./grammar.ts";
+import {
+  type AssertNever,
+  GRAMMAR,
+  type GrammarId,
+  MANAGED_REGION_WIRE_FIELDS,
+  type SplitShapes,
+} from "./grammar.ts";
 
 /** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
-
-/** The one directory a push token without the Workflows scope cannot
- *  write, so the only paths the sync ever withholds: a withheld marker
- *  (ManifestEntryShape.withheld) is valid on a clean relative path under
- *  it alone (no empty, `.`, or `..` segment - a lexical prefix could
- *  otherwise alias a path outside the directory). The stamper writes and
- *  keeps markers there only; the validator rejects one anywhere else as a
- *  hand edit. */
-export function withholdable(path: string): boolean {
-  return (
-    path.startsWith(".github/workflows/") &&
-    path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
-  );
-}
 
 /** What an entry needs to be emitted: the declared class, with the
  *  grammar fields for splits (structural twins of the ownership schema's
@@ -184,28 +176,36 @@ export type ManifestEntryShape = {
   hash?: unknown;
   grammar?: unknown;
   commit?: unknown;
-  /** `true` on a hash-null entry of a withholdable path whose file the
-   *  sync could not deliver (the push token lacked the Workflows scope, so
-   *  the added workflow was withheld and removed from the pushed tree).
-   *  Written and cleared only by the stamper (stamp_manifest.ts), never
-   *  rendered by the template. */
-  withheld?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
 
-/** Whether an entry's withheld marker has its one valid shape: `true` on a
- *  hash-null managed or split entry of a withholdable path other than the
- *  manifest's own. The stamper writes nothing else and keeps an existing
- *  marker only in this shape; the validator rejects any other withheld
- *  field as a hand edit - one predicate, so the two cannot disagree. */
-export function withheldMarkerValid(path: string, entry: ManifestEntryShape): boolean {
-  return (
-    entry.withheld === true &&
-    path !== MANIFEST_NAME &&
-    withholdable(path) &&
-    (entry.class === "managed" || entry.class === "split") &&
-    "hash" in entry &&
-    entry.hash === null
-  );
+/** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
+ *  a stranger and the AssertNever pin refuses an omission (a new grammar's tuple joins here or the
+ *  build fails). The stamper re-emits entries from these keys alone; the validator reports others. */
+export const ENTRY_FIELDS = [
+  "class",
+  "hash",
+  "grammar",
+  "commit",
+  ...MANAGED_REGION_WIRE_FIELDS,
+] as const satisfies readonly (keyof ManifestEntryShape)[];
+export type EntryFieldsExhaustive = AssertNever<
+  Exclude<keyof ManifestEntryShape, (typeof ENTRY_FIELDS)[number]>
+>;
+const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
+
+/** Whether `key` is in the entry-field vocabulary. */
+export function isEntryField(key: string): boolean {
+  return ENTRY_FIELD_SET.has(key);
+}
+
+/** Each entry carrying a field outside ENTRY_FIELDS, with the offending keys, in manifest order. */
+export function unknownEntryFields(
+  files: Record<string, ManifestEntryShape>,
+): { path: string; fields: string[] }[] {
+  return Object.entries(files).flatMap(([path, entry]) => {
+    const fields = Object.keys(entry).filter((key) => !isEntryField(key));
+    return fields.length === 0 ? [] : [{ path, fields }];
+  });
 }
 
 /** The manifest's files mapping parsed from `text` (conflict blocks

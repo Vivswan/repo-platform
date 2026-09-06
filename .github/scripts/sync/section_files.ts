@@ -115,18 +115,6 @@ export const PR_BODY_SECTIONS: readonly PrBodySection[] = [
     forcesReview: true,
   },
   {
-    env: "WITHHELD_FILE",
-    file: "withheld-workflows.txt",
-    title: "Workflow files withheld (the sync token lacks the Workflows scope)",
-    render: (text) => `> [!WARNING]
-> Workflow-file changes were WITHHELD from this update: the sync
-> token lacks the Workflows scope. Grant Workflows read/write to
-> the REPO_PLATFORM_TOKEN and re-run the sync to include them.
-
-${bulleted(text)}`,
-    forcesReview: true,
-  },
-  {
     env: "MANIFEST_LICENSE_FILE",
     file: "manifest-license-warnings.md",
     title: "Registry metadata conflicting with the fleet license",

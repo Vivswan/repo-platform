@@ -6,18 +6,9 @@
 // error shapes; the assertions are on the script's whole public output.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
-import { MANIFEST_NAME } from "../../actions/shared/manifest.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const fixtures = tempDirs();
@@ -31,11 +22,8 @@ const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@g
 // must match first. STUB_MODE=lease-fail fails the lease probe; push-fail
 // serves the lease and fails the push itself; stale-push-fail fails the
 // push with stale-lease evidence flanked by 403-shaped progress bytes;
-// protect-push-fail fails it quoting a file whose NAME says "stale info".
-// The withhold-* modes drive the Workflows-scope fallback end to end: the
-// FIRST push fails with the workflow-permission shape (STUB_STATE marks
-// it spent), the diff calls report the named workflow file as the
-// withheld change, and the retry push succeeds.
+// protect-push-fail fails it quoting a file whose NAME says "stale info";
+// workflow-refused fails it with GitHub's Workflows-scope refusal.
 const STUB_GIT = `#!/bin/sh
 case "$*" in
   *ls-remote*)
@@ -55,39 +43,19 @@ case "$*" in
       echo 'remote: error: GH013: Repository rule violations found for "(stale info).txt".' >&2
       exit 1
     fi
-    case "$STUB_MODE" in
-      withhold-*)
-        if [ -f "$STUB_STATE" ]; then exit 0; fi
-        : > "$STUB_STATE"
-        echo "refusing to allow a Personal Access Token to create or update workflow files without workflows permission" >&2
-        exit 1 ;;
-    esac
+    if [ "$STUB_MODE" = "workflow-refused" ]; then
+      echo "refusing to allow a Personal Access Token to create or update workflow files without workflows permission" >&2
+      exit 1
+    fi
+    if [ "$STUB_MODE" = "push-ok" ]; then exit 0; fi
     echo "${GIT_ERROR}" >&2
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
     exit 1 ;;
-  *"--diff-filter=A"*)
-    # The added-files query: only withhold-added ADDS a workflow (the
-    # other withhold fixtures' file pre-exists, so reporting it here would
-    # have the restore path rmSync the very file the checkout case just
-    # restored).
-    if [ "$STUB_MODE" = "withhold-added" ]; then echo ".github/workflows/release.yml"; fi
+  *" checkout "*|*" rm "*|*" reset "*)
+    # A tree rewrite after a refused push would be a partial-delivery
+    # fallback, which no longer exists; make one observable.
+    echo "TREE-REWRITE $*" >> "$STUB_STATE.calls"
     exit 0 ;;
-  *"diff --name-only"*)
-    if [ "$STUB_MODE" = "withhold-added" ]; then echo ".github/workflows/release.yml"; fi
-    if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
-    if [ "$STUB_MODE" = "withhold-restore" ]; then echo ".github/workflows/ci.yml"; fi
-    exit 0 ;;
-  *" checkout "*)
-    # The withhold-restore mode makes the workflow-dir restore OBSERVABLE:
-    # the restored ci.yml references a different label than the pre-restore
-    # copy, so a consumer reading the tree too early is caught.
-    if [ "$STUB_MODE" = "withhold-restore" ]; then
-      mkdir -p target/.github/workflows
-      printf 'jobs:\\n  close:\\n    steps:\\n      - with:\\n          stale-issue-label: restored-label\\n' > target/.github/workflows/ci.yml
-    fi
-    exit 0 ;;
-  *"diff --quiet"*)
-    exit 1 ;;
   *) exit 0 ;;
 esac
 `;
@@ -125,7 +93,6 @@ function runCommitPush(
       TARGET_DISPLAY: hideDetails === "true" ? "repo #1" : "",
       BRANCH: "automation/repo-platform",
       DISPLAY: "v1 (abcdef012345)",
-      BASE_BRANCH: "main",
       PAT: SENTINEL,
       HIDE_DETAILS: hideDetails,
       RUNNER_TEMP: runnerTemp,
@@ -236,217 +203,73 @@ describe("commit_push failure diagnostics", () => {
   });
 });
 
-// A public base + release-please render complete enough for validate-template, stamped the way
-// the workflow's stamping step leaves it. Split files carry nothing outside their marker pair,
-// so every hash is the sha256 of the whole file.
-const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
-const HB = "# BEGIN REPO-PLATFORM MANAGED";
-const HE = "# END REPO-PLATFORM MANAGED";
-const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
-const E = "<!-- END REPO-PLATFORM MANAGED -->";
-const COMMIT = "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01";
-const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
-const managed = (content: string) => ({
-  content,
-  entry: `{"class": "managed", "hash": "${sha256(content)}"}`,
-});
-const split = (begin: string, end: string, body: string) => {
-  const content = `${begin}\n${body}${end}\n`;
-  return {
-    content,
-    entry: `{"class": "split", "grammar": "managed-region", "begin": "${begin}", "end": "${end}", "hash": "${sha256(content)}"}`,
-  };
-};
-const RENDER: Record<string, { content: string; entry: string }> = {
-  ".repo-platform.yml": { content: "modules: [release-please]\n", entry: '{"class": "starter"}' },
-  ".github/.copier-answers.yml": managed(
-    `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\nprivate: false\n`,
-  ),
-  ".editorconfig": split(HB, HE, "root = true\n"),
-  ".gitattributes": split(HB, HE, "* text=auto eol=lf\n"),
-  ".gitignore": split(HB, HE, ""),
-  ".github/CODEOWNERS": split(HB, HE, "* @vivswan\n"),
-  ".github/SECURITY.md": split(B, E, "# Security policy\n"),
-  "CONTRIBUTING.md": split(B, E, "# Contributing\n"),
-  "LICENSE.md": split(B, E, "# License\n"),
-  "AGENTS.md": split(B, E, "# AGENTS.md\n"),
-  // The agent-file aliases are symlinks in a real render; content-hashed
-  // regular files stand in here.
-  "CLAUDE.md": managed("AGENTS.md\n"),
-  ".github/agents.md": managed("AGENTS.md\n"),
-  ".github/copilot-instructions.md": managed("AGENTS.md\n"),
-  ".github/instructions/review.instructions.md": managed(`${MANAGED_HEADER}# Review\n`),
-  ".github/workflows/auto-assign.yml": managed(`${MANAGED_HEADER}name: Auto Assign\n`),
-  ".github/workflows/settings-sync.yml": managed(`${MANAGED_HEADER}name: Settings Sync\n`),
-  ".github/CODE_OF_CONDUCT.md": managed(`${MANAGED_HEADER}# Code of Conduct\n`),
-  ".github/dependabot.yml": managed(`${MANAGED_HEADER}version: 2\nupdates: []\n`),
-  ".typography-allow": managed(MANAGED_HEADER),
-  ".yamllint": managed(`${MANAGED_HEADER}extends: default\n`),
-  ".github/workflows/ci.yml": managed(
-    [
-      MANAGED_HEADER.trimEnd(),
-      "name: CI",
-      "on: push",
-      "jobs:",
-      "  checks:",
-      "    uses: ./.github/workflows/checks.yml",
-      "  ci:",
-      "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
-      "  all-green:",
-      "    needs: [checks, ci]",
-      "    if: always()",
-      "    runs-on: ubuntu-latest",
-      "    steps:",
-      "      - uses: Vivswan/repo-platform/actions/all-green@build",
-      "        with:",
-      "          needs: ${{ toJSON(needs) }}",
-      "",
-    ].join("\n"),
-  ),
-  ".github/workflows/release.yml": managed(`${MANAGED_HEADER}name: release\n`),
-};
-const WITHHELD_WORKFLOW = ".github/workflows/release.yml";
-const RENDER_ENTRIES: Record<string, string> = {
-  [MANIFEST_NAME]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
-  ...Object.fromEntries(Object.entries(RENDER).map(([rel, { entry }]) => [rel, entry])),
-};
-const manifestOf = (entries: Record<string, string>) =>
-  `{\n  "files": {\n${Object.entries(entries)
-    .map(([rel, entry]) => `    ${JSON.stringify(rel)}: ${entry}`)
-    .join(",\n")}\n  }\n}\n`;
-
-describe("commit_push Workflows-scope withhold reconciliation", () => {
-  const WITHHELD_WARNING =
-    "::warning::o/r: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured.";
-  const WITHHELD_ADVISORY =
-    `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from ` +
-    `the repo - the sync's push token lacked the Workflows scope, so it could not create the ` +
-    `workflow file; grant Workflows read/write to the sync token and run a recovery sync ` +
-    `(recover=recopy), which re-renders it`;
+describe("commit_push refuses a partial delivery", () => {
+  const REFUSED =
+    "exit 1; GitHub refused a workflow-file change - the REPO_PLATFORM_TOKEN must grant " +
+    "Workflows read/write on the target (README.md)";
+  // A workflow-file change pushed with a token lacking Workflows write: GitHub refuses the
+  // push and the step goes red naming the target and the scope. The tree still holds the change,
+  // no tree-rewriting git call runs, no output is written. Each row pins the whole outcome.
   test.each([
     {
-      layout: "one line",
-      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
-      crlf: false,
-      warnings: [WITHHELD_WARNING],
-      validation: "ok",
-      diagnostics: [WITHHELD_ADVISORY],
+      hideDetails: "false",
+      publicLines: [
+        `::error::pushing to o/r#automation/repo-platform failed (${REFUSED}). git's output is in the log above.`,
+      ],
+      stderrCarriesRefusal: true,
+      hiddenManifest: null,
     },
     {
-      // The stamper refuses a CRLF manifest by name and writes nothing, so the pushed tree's parity
-      // check sees the withheld workflow as a deleted managed file: validation fails, loudly.
-      layout: "one line, CRLF endings",
-      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
-      crlf: true,
-      warnings: [
-        `::warning::o/r: ${MANIFEST_NAME} uses CRLF line endings; the generator writes LF; left unstamped for validate-template's parity check to report`,
-        WITHHELD_WARNING,
+      hideDetails: "true",
+      publicLines: [
+        "(push output hidden: private repository)",
+        `::error::pushing to repo #1#automation/repo-platform failed (${REFUSED}). git's output is hidden ` +
+          "from this log (private repository); the redacted error output is delivered to the " +
+          "target's failure-report issue (docs/private-repos.md).",
       ],
-      validation: "failed",
-      diagnostics: [
-        `error: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)`,
-      ],
-    },
-    {
-      // The stamper cannot reach a spread entry: the restamp is partial, still written (the
-      // withheld marker must land), and the sync log says so.
-      layout: "spread over lines",
-      crlf: false,
-      validation: "ok",
-      diagnostics: [WITHHELD_ADVISORY],
-      selfEntry: `{\n      "class": "managed", "hash": null, "commit": "${COMMIT}"\n    }`,
-      warnings: [
-        `::warning::o/r: ${MANIFEST_NAME} has 1 files entry not on a one-object line of its own, which the stamper cannot rewrite; validate-template's parity check reports the unstamped entries`,
-        WITHHELD_WARNING,
-      ],
+      stderrCarriesRefusal: false,
+      hiddenManifest: ["branch push", "1"],
     },
   ])(
-    "a withheld ADDED workflow is removed and the manifest restamped to describe the pushed tree (self entry $layout)",
-    ({ selfEntry, crlf, warnings, validation, diagnostics }) => {
-      // The manifest must describe the tree that is pushed: where the stamper reaches the withheld
-      // entry, it goes hash-null with the marker and the re-validation passes with the withheld
-      // advisory alone; each row pins that run's whole outcome. validator/ is this repository.
-      const entries = { ...RENDER_ENTRIES, [MANIFEST_NAME]: selfEntry };
+    "a refused workflow-file push is a red step with the tree untouched (hide details: $hideDetails)",
+    ({ hideDetails, publicLines, stderrCarriesRefusal, hiddenManifest }) => {
       const work = fixtures.dir("work-");
-      const targetDir = join(work, "target");
-      for (const [rel, { content }] of Object.entries(RENDER)) {
-        mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
-        writeFileSync(join(targetDir, rel), content);
-      }
-      const written = crlf ? manifestOf(entries).replace(/\n/g, "\r\n") : manifestOf(entries);
-      writeFileSync(join(targetDir, MANIFEST_NAME), written);
-      symlinkSync(REPO_ROOT, join(work, "validator"));
-      const result = runCommitPush("withhold-added", "false", {}, work);
+      const workflow = join(work, "target", ".github/workflows/new.yml");
+      mkdirSync(dirname(workflow), { recursive: true });
+      writeFileSync(workflow, "name: new\n");
+      const result = runCommitPush("workflow-refused", hideDetails, {}, work);
+      const manifestPath = join(result.runnerTemp, "hidden-failures.tsv");
       expect({
         exitCode: result.exitCode,
-        withheldFileExists: existsSync(join(targetDir, WITHHELD_WORKFLOW)),
-        manifest: readFileSync(join(targetDir, MANIFEST_NAME), "utf-8"),
+        workflowStillInTree: readFileSync(workflow, "utf-8"),
+        treeRewrites: existsSync(join(result.runnerTemp, "push-state.calls")),
         outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
-        withheld: readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8"),
-        warnings: result.stdout.split("\n").filter((line) => line.startsWith("::warning::")),
+        publicLines: result.stdout.split("\n").filter((line) => line !== ""),
+        stderrCarriesRefusal: result.stderr.includes("create or update workflow files"),
+        hiddenManifest: existsSync(manifestPath)
+          ? readFileSync(manifestPath, "utf-8").trimEnd().split("\t").slice(0, 2)
+          : null,
       }).toEqual({
-        exitCode: 0,
-        withheldFileExists: false,
-        manifest: crlf
-          ? written
-          : manifestOf({
-              ...entries,
-              [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
-            }),
-        outputs: `pushed=true\nvalidation=${validation}\n`,
-        withheld: `${WITHHELD_WORKFLOW}\n`,
-        warnings,
+        exitCode: 1,
+        workflowStillInTree: "name: new\n",
+        treeRewrites: false,
+        outputs: "",
+        publicLines,
+        stderrCarriesRefusal,
+        hiddenManifest,
       });
-      expect(
-        (result.stdout + result.stderr)
-          .split("\n")
-          .filter((line) => /^(advisory|error): /.test(line)),
-      ).toEqual(diagnostics);
     },
   );
 
-  test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
-    // The workflow's check step ran BEFORE the restore rewrote
-    // .github/workflows, so its report may claim label references the
-    // pushed tree no longer carries. With no settings.yml here, this pins
-    // that the recompute RUNS and overwrites the stale note with the tree's
-    // honest verdict (empty: not applicable); the ordering pin is the next test.
-    const staleNote = '> [!WARNING]\n> REFERENCED LABELS: "answered" is missing\n';
-    writeFileSync(join(scratch, "work", "target", ".repo-platform.yml"), "modules: []\n");
-    mkdirSync(join(scratch, "work", "target", ".github"), { recursive: true });
-    writeFileSync(
-      join(scratch, "work", "target", ".github/.copier-answers.yml"),
-      "private: false\n",
-    );
-    const result = runCommitPush("withhold-other", "false", {
-      [REFERENCED_LABELS_NAME]: staleNote,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(result.runnerTemp, REFERENCED_LABELS_NAME), "utf-8")).toBe("");
-    expect(result.stdout).toContain("referenced labels: not applicable");
-  });
-
-  test("the recompute reads the RESTORED workflow content, never the pre-restore tree", () => {
-    // A full settings fixture (registration, answers, settings.yml), with a
-    // workflow whose label reference
-    // the stub git's checkout REWRITES (pre-restore-label ->
-    // restored-label). The recomputed report must name the restored
-    // reference; the pre-restore one surviving would mean the recompute
-    // ran before the restore and the PR body describes a tree that was
-    // never pushed.
-    const targetDir = join(scratch, "work", "target");
-    mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
-    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules:\n  - uv\n");
-    writeFileSync(join(targetDir, ".github/.copier-answers.yml"), "private: false\n");
-    writeFileSync(join(targetDir, ".github", "settings.yml"), "repository:\n  private: false\n");
-    writeFileSync(
-      join(targetDir, ".github", "workflows", "ci.yml"),
-      "jobs:\n  close:\n    steps:\n      - with:\n          stale-issue-label: pre-restore-label\n",
-    );
-    const result = runCommitPush("withhold-restore", "false");
-    expect(result.exitCode).toBe(0);
-    const report = readFileSync(join(result.runnerTemp, REFERENCED_LABELS_NAME), "utf-8");
-    expect(report).toContain('"restored-label"');
-    expect(report).not.toContain("pre-restore-label");
+  test("control: an accepted push reports pushed=true and touches nothing else", () => {
+    const work = fixtures.dir("work-");
+    mkdirSync(join(work, "target"), { recursive: true });
+    const result = runCommitPush("push-ok", "false", {}, work);
+    expect({
+      exitCode: result.exitCode,
+      outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
+      notices: result.stdout.split("\n").filter((line) => line.startsWith("::")),
+      treeRewrites: existsSync(join(result.runnerTemp, "push-state.calls")),
+    }).toEqual({ exitCode: 0, outputs: "pushed=true\n", notices: [], treeRewrites: false });
   });
 });

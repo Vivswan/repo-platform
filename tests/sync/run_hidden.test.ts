@@ -33,9 +33,7 @@ function run(
 describe("run_hidden.ts", () => {
   test("captureName squeezes non-alphanumeric runs and trims the edges", () => {
     expect(captureName("leak test")).toBe("hidden-leak-test.log");
-    expect(captureName(" post-withhold re-validation!")).toBe(
-      "hidden-post-withhold-re-validation.log",
-    );
+    expect(captureName(" template  validation!")).toBe("hidden-template-validation.log");
   });
 
   test("parseHiddenFailures is total: malformed rows are counted, never returned", () => {

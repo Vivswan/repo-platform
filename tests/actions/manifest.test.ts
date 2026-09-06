@@ -9,9 +9,11 @@ import type { GrammarId, SplitShapes } from "../../actions/shared/grammar";
 import {
   entryLine,
   MANIFEST_NAME,
+  type ManifestEntryShape,
   type ParsedEntryLine,
   parseEntry,
   parseManifestFiles,
+  unknownEntryFields,
 } from "../../actions/shared/manifest";
 
 describe("parseManifestFiles problem strings are value-free", () => {
@@ -45,6 +47,33 @@ describe("parseManifestFiles problem strings are value-free", () => {
       resolved: text,
       problem: null,
     });
+  });
+});
+
+describe("unknownEntryFields", () => {
+  test("names each entry's keys outside the closed vocabulary; the vocabulary itself is clean", () => {
+    // ENTRY_FIELDS is the runtime twin of the emitted shapes: every key entryLine writes for any
+    // class or grammar is known, so a stamped render reports nothing.
+    const rendered = parseManifestFiles(
+      `{"files": {\n${[
+        entryLine("a.md", { class: "starter" }),
+        entryLine("b.md", { class: "managed" }),
+        entryLine(MANIFEST_NAME, { class: "managed" }),
+        entryLine("c.md", { class: "split", grammar: "managed-region", begin: "# b", end: "# e" }),
+      ].join(",\n")}\n}}`,
+    );
+    expect(rendered.problem).toBeNull();
+    expect(unknownEntryFields(rendered.files ?? {})).toEqual([]);
+    expect(
+      unknownEntryFields({
+        "x.yml": { class: "managed", hash: null, withheld: true } as ManifestEntryShape,
+        "y.yml": { class: "starter" },
+        "z.yml": { class: "starter", note: 1, withheld: true } as ManifestEntryShape,
+      }),
+    ).toEqual([
+      { path: "x.yml", fields: ["withheld"] },
+      { path: "z.yml", fields: ["note", "withheld"] },
+    ]);
   });
 });
 

@@ -1,22 +1,14 @@
 #!/usr/bin/env bun
-// Commits the copier output and pushes the rolling automation branch to
-// the target, withholding .github/workflows changes when the token lacks
-// the Workflows scope. Invoked by reusable-template-sync.yml's "Commit and
-// push" step from the repo-platform checkout root.
-//
-// Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET), BRANCH,
-// DISPLAY, BASE_BRANCH, PAT, HIDE_DETAILS, RUNNER_TEMP, GITHUB_OUTPUT.
+// Commits the copier output and pushes the rolling automation branch; a push GitHub refuses is a
+// red step with GitHub's error (a refused workflow-file change names the Workflows scope, README).
+// Env: TARGET, TARGET_DISPLAY (log label), BRANCH, DISPLAY, PAT, HIDE_DETAILS, RUNNER_TEMP, GITHUB_OUTPUT.
 
-import { existsSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
-import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
-import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
-import { writeReferencedLabelsReport } from "./referenced_labels.ts";
+import { capture, must, mustCapture, redactText } from "../shared/proc.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
-import { REFERENCED_LABELS_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const targetDisplay = env("TARGET_DISPLAY") || target;
@@ -49,17 +41,20 @@ function failureShape(result: { exitCode: number; timedOut: boolean }, stderr: s
   // Stale-lease evidence first, matched against git's structured
   // rejection line ("! [rejected] ... (stale info)") so quoted content
   // elsewhere in the output - a file named "(stale info)", say, in a
-  // push-protection message - cannot mislabel the failure. The
-  // authorization pattern stays second: its bare-number alternative also
+  // push-protection message - cannot mislabel the failure. GitHub's
+  // workflow-file refusal is its own exact phrase, so it comes next. The
+  // authorization pattern stays last: its bare-number alternative also
   // matches 403-shaped bytes inside ordinary git output (progress counts
   // like "(403/403)", sha fragments like "a403b" - the flanking class is
-  // non-digit, not non-alphanumeric), which a stale-lease failure's
-  // stderr can carry.
+  // non-digit, not non-alphanumeric), which the other failures' stderr
+  // can carry.
   const flavor = /\[rejected\][^\n]*\(stale info\)/i.test(stderr)
     ? "; the lease was stale - another push landed on the branch during this run, so re-running the sync usually heals it"
-    : /(^|[^0-9])(401|403)([^0-9]|$)|permission|denied|not authorized|write access/i.test(stderr)
-      ? "; the error looks authorization-shaped - check that the REPO_PLATFORM_TOKEN grants Contents read/write on the target"
-      : "";
+    : /create or update workflow/i.test(stderr)
+      ? "; GitHub refused a workflow-file change - the REPO_PLATFORM_TOKEN must grant Workflows read/write on the target (README.md)"
+      : /(^|[^0-9])(401|403)([^0-9]|$)|permission|denied|not authorized|write access/i.test(stderr)
+        ? "; the error looks authorization-shaped - check that the REPO_PLATFORM_TOKEN grants Contents read/write on the target"
+        : "";
   return `exit ${result.exitCode}${flavor}`;
 }
 
@@ -83,11 +78,9 @@ if (mustCapture(git("status", "--porcelain")) !== "") {
 }
 
 // The checkout kept no credentials (persist-credentials: false);
-// authenticate this push alone. The lease is captured ONCE and reused on
-// the retry: the branch is regenerated every run, so remote commits are
-// overwritten by design, but any push racing this run - including one
-// landing between the two attempts - fails the lease loudly instead of
-// vanishing.
+// authenticate this push alone. The lease: the branch is regenerated every
+// run, so remote commits are overwritten by design, but any push racing
+// this run fails the lease loudly instead of vanishing.
 const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${target}.git`;
 // Captured, not mustCapture (inherited stderr would stream git's failure
 // text raw): git strips URL userinfo only version-dependently, and even
@@ -130,143 +123,12 @@ function doPush(): { exitCode: number; timedOut: boolean; stderr: string } {
   return { exitCode: push.exitCode, timedOut: push.timedOut, stderr: pushStderr };
 }
 
-function revalidate(): void {
-  // The validator's diagnostics name target paths and values; for a
-  // hidden target run_hidden.ts captures them.
-  const ok = passthrough([
-    "bun",
-    join(import.meta.dir, "run_hidden.ts"),
-    "post-withhold re-validation",
-    "--",
-    "bun",
-    "validator/actions/validate-template-report/validator/validate_generated_files.ts",
-    "target",
-  ]);
-  setOutput("validation", ok === 0 ? "ok" : "failed");
-}
-
-writeFileSync(join(runnerTemp, "withheld-workflows.txt"), "");
-const first = doPush();
-if (first.exitCode === 0) {
-  setOutput("pushed", "true");
-  process.exit(0);
-}
-
-// Permission-adaptive fallback: a token without the Workflows scope cannot
-// create or update .github/workflows files. Withhold those changes,
-// deliver the rest, and say so in the PR - the scope is optional by
-// design, not an error.
-if (!/create or update workflow/i.test(first.stderr)) {
-  if (hideDetails()) recordHiddenFailure("branch push", first.exitCode, first.stderr);
+const push = doPush();
+if (push.exitCode !== 0) {
+  if (hideDetails()) recordHiddenFailure("branch push", push.exitCode, push.stderr);
   console.log(
-    `::error::pushing to ${targetDisplay}#${branch} failed (${failureShape(first, first.stderr)}). ${diagnosticsChannel()}`,
+    `::error::pushing to ${targetDisplay}#${branch} failed (${failureShape(push, push.stderr)}). ${diagnosticsChannel()}`,
   );
-  process.exit(first.exitCode);
-}
-const baseSha = mustCapture(git("rev-parse", `origin/${requireEnv("BASE_BRANCH")}`));
-// --no-renames: a rename into .github/workflows must count as an addition
-// here, or its destination file would survive the restore and the retry
-// would be rejected again.
-const withheld = mustCapture(
-  git("diff", "--name-only", "--no-renames", baseSha, "HEAD", "--", ".github/workflows"),
-);
-writeFileSync(join(runnerTemp, "withheld-workflows.txt"), withheld === "" ? "" : `${withheld}\n`);
-// Restore the workflow dir to the base state: modified/deleted files come
-// back via checkout, newly added ones are removed.
-capture(git("checkout", baseSha, "--", ".github/workflows"));
-const added = mustCapture(
-  git(
-    "diff",
-    "--name-only",
-    "--no-renames",
-    "--diff-filter=A",
-    baseSha,
-    "HEAD",
-    "--",
-    ".github/workflows",
-  ),
-);
-const addedPaths = added.split("\n").filter((line) => line !== "");
-for (const file of addedPaths) {
-  rmSync(join("target", file), { force: true });
-}
-// Retired workflow files were restored too - drop them from the PR body's
-// deleted list so it stays truthful.
-const removedPaths = join(runnerTemp, "removed-paths.txt");
-if (existsSync(removedPaths) && readFileSync(removedPaths, "utf-8") !== "") {
-  const kept = readFileSync(removedPaths, "utf-8")
-    .split("\n")
-    .filter((line) => line !== "" && !line.startsWith(".github/workflows/"));
-  writeFileSync(removedPaths, kept.length > 0 ? `${kept.join("\n")}\n` : "");
-}
-// The referenced-labels report was computed against the PRE-restore tree;
-// the restore just rewrote .github/workflows, whose label references are
-// half of that report's input, so recompute it against the tree that is
-// actually pushed (issue forms are untouched by the restore, but the
-// check is cheap and a full re-run cannot go stale).
-writeReferencedLabelsReport("target", join(runnerTemp, REFERENCED_LABELS_NAME), hideDetails());
-// The restore rewrote workflow files after the workflow's stamping step, so
-// the ownership manifest must follow the tree that is actually pushed:
-// restamp in place (idempotent) so withheld modifications hash the restored
-// base content, and the removed added workflows stamp hash-null with the
-// withheld marker - the one listed-but-missing state validate-template
-// reports as an advisory instead of a deleted managed file.
-const manifestPath = join("target", MANIFEST_NAME);
-if (existsSync(manifestPath)) {
-  const stamped = stampManifestText(
-    readFileSync(manifestPath, "utf-8"),
-    "target",
-    new Set(addedPaths),
-  );
-  switch (stamped.status) {
-    case "stamped":
-      writeFileSync(manifestPath, stamped.out);
-      break;
-    case "partial":
-      console.log(
-        `::warning::${targetDisplay}: ${MANIFEST_NAME} ${stamped.problem}; validate-template's parity check reports the unstamped entries`,
-      );
-      writeFileSync(manifestPath, stamped.partialOut);
-      break;
-    case "rejected":
-      console.log(
-        `::warning::${targetDisplay}: ${MANIFEST_NAME} ${stamped.problem}; left unstamped for validate-template's parity check to report`,
-      );
-      break;
-    default: {
-      const unhandled: never = stamped;
-      throw new Error(`unhandled stamp result ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
-must(git("add", "--all"));
-if (capture(git("diff", "--quiet", baseSha)).exitCode === 0) {
-  console.log(
-    `::warning::${targetDisplay}: this update only changes .github/workflows files, and the ` +
-      `REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant ` +
-      `Workflows read/write to sync workflow files, or ignore this if that is intentional.`,
-  );
-  setOutput("pushed", "false");
-  // The full-tree validation verdict no longer applies to anything pushed;
-  // re-validate the restored tree (== the default branch) so a real
-  // default-branch problem still surfaces.
-  revalidate();
-  process.exit(0);
-}
-// --quiet: a non-quiet amend prints created/deleted paths of the target.
-must(git("commit", "--amend", "--no-edit", "--quiet"));
-const retry = doPush();
-if (retry.exitCode !== 0) {
-  if (hideDetails()) recordHiddenFailure("branch push", retry.exitCode, retry.stderr);
-  console.log(
-    `::error::pushing to ${targetDisplay}#${branch} failed even after withholding workflow files (${failureShape(retry, retry.stderr)}). ${diagnosticsChannel()}`,
-  );
-  process.exit(retry.exitCode);
+  process.exit(push.exitCode);
 }
 setOutput("pushed", "true");
-// The earlier validation judged the full tree including the withheld
-// files; re-validate what was actually pushed.
-revalidate();
-console.log(
-  `::warning::${targetDisplay}: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured.`,
-);

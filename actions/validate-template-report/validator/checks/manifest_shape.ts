@@ -1,4 +1,4 @@
-import { MANIFEST_NAME } from "../../../shared/manifest.ts";
+import { MANIFEST_NAME, unknownEntryFields } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { coveredPaths } from "../ownership.ts";
@@ -56,6 +56,18 @@ export function checkManifestShape(ctx: Context): Finding[] {
   }
   const files = ctx.manifest.files;
   const findings: Finding[] = [];
+  // No emitter writes a field outside the vocabulary, so one is a hand edit
+  // or a retired sync's leftover; the next stamp drops it.
+  for (const { path, fields } of unknownEntryFields(files)) {
+    findings.push(
+      error(
+        `${MANIFEST_NAME}: entry '${path}' carries field(s) ${fields
+          .map((field) => JSON.stringify(field))
+          .join(", ")} outside the manifest's vocabulary - no sync writes them; the next ` +
+          "template sync restamps the entry without them, or revert the edit",
+      ),
+    );
+  }
   if (!(MANIFEST_NAME in files)) {
     findings.push(
       error(
