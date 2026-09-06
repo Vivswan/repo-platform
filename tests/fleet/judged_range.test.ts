@@ -1,13 +1,13 @@
-// The post-green range's base resolution, proven against real git: the
-// build tip's stamped source over the push's own `before` (the coalescing
-// case that motivates it), a tip already stamped with the judged sha, a
-// deep unstamped walk, the no-stamp fallbacks, and every refusal.
+// The post-green range's base resolution on real git: the stamped source over the push's own
+// `before` (the coalescing case), the no-stamp fallbacks, every refusal, and the env refusal
+// through the read-directives leg's entry point.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { rangeCommits, rangeLabel, resolveBase } from "../../.github/scripts/fleet/judged_range.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -24,10 +24,9 @@ describe("resolveBase", () => {
     return fixtureGit(cwd, ["-c", "user.name=t", "-c", "user.email=t@x.test", ...args]);
   }
 
-  // main's history, one empty commit per squash merge, plus a side branch
-  // off the root: a base that is no ancestor of main's tip. The leg's
-  // checkout sees the build branch as refs/remotes/origin/build, so each
-  // scenario is a clone of a bare origin carrying (or lacking) one.
+  // main's history plus a side branch off the root (a base that is no ancestor of main's tip);
+  // each scenario is a clone of a bare origin carrying (or lacking) a build branch, which the
+  // leg's checkout sees as refs/remotes/origin/build.
   const source = join(root, "source");
   mkdirSync(source);
   git(source, ["init", "-q", "-b", "main"]);
@@ -190,5 +189,23 @@ describe("resolveBase", () => {
     expect(() => resolveBase(shallow, c4, c2)).toThrow(
       `the push base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
     );
+  });
+
+  test("a malformed base is refused by the leg's entry point before any git read, with no output line", () => {
+    // judgedRangeEnv fails the process, so the whole outcome is the leg's:
+    // fleet_sync_marker.ts is the one script that reads the range env.
+    const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
+    const outputFile = join(root, "malformed-before-output.txt");
+    writeFileSync(outputFile, "");
+    const result = boundedSpawnSync(["bun", script], {
+      cwd: publishedC1,
+      env: { ...process.env, SOURCE_SHA: c3, BEFORE_SHA: "main", GITHUB_OUTPUT: outputFile },
+    });
+    expect({ ...result, output: readFileSync(outputFile, "utf-8") }).toEqual({
+      exitCode: 1,
+      stdout: "::error::BEFORE_SHA is not a full commit sha (got 'main')\n",
+      stderr: "",
+      output: "",
+    });
   });
 });
