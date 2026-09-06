@@ -463,8 +463,8 @@ if (import.meta.main) {
     verdict = check(root, { rendered });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    emit({ state: "error", message });
     console.error(`::error::check-file-size did not run to completion: ${message}`);
+    emit({ state: "error", message });
     process.exit(1);
   }
   for (const warning of verdict.warnings) console.log(`::warning::${describe(warning)}`);
