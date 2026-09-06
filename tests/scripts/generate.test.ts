@@ -397,7 +397,10 @@ describe("docs region builders", () => {
     const lines = readmeModuleRoster([BUN, UV, RUST]);
     expect(lines).toEqual([
       "",
-      "- Modules (pick any combination): `bun`, `uv`, `rust`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.",
+      "- Modules (pick any combination): `bun`, `uv`, `rust`. Modules with parameters (like " +
+        "`pages`) ask follow-up questions only when selected. After generation, module selection " +
+        "lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next " +
+        "sync applies the change.",
     ]);
     // The same extraction check_ssot's module-list rule performs.
     const region = lines[1].match(/Modules \(pick any combination\):([\s\S]*?)\. /);
@@ -414,7 +417,10 @@ describe("docs region builders", () => {
     // Single-line: the span opens with a separating space and ends the
     // sentence itself.
     expect(text).toBe(
-      " multiselect (any combination of `bun`, `rust`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.",
+      " multiselect (any combination of `bun`, `rust`), follow-up parameters for modules that " +
+        "have them (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), " +
+        "[docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and " +
+        "[docs/nightly.md](nightly.md)), and visibility.",
     );
     // The same extraction check_ssot's module-list rule performs.
     const region = text.match(/any combination of([\s\S]*?)\)/);

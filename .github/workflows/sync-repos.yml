@@ -106,7 +106,10 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other repos. Create a fine-grained PAT with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
+            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other"\
+              "repos. Create a fine-grained PAT with the permissions pre-selected at"\
+              "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write"\
+              "scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
             exit 1
           fi
 

@@ -1,0 +1,98 @@
+name: Check File Size
+description: >-
+  Caps file length and line width in two tiers: sensible sizes warn, hard
+  caps fail (caps and kinds: check-file-size.ts). Findings are written ONCE
+  as one table and reported through two sinks - the step summary and the
+  log annotations on every event, plus a sticky PR comment on pull_request
+  events (deleted when there is nothing to say); the fleet rule for any
+  check that reports findings. Files carrying repo-platform's managed
+  header are skipped and counted (the caller cannot fix them). Repo-owned
+  exemptions live in .file-size-allow.local, one path per line with a
+  `# reason`. The calling job needs pull-requests: write for the comment.
+
+inputs:
+  path:
+    description: Directory to scan (a git checkout)
+    required: false
+    default: "."
+  rendered-dir:
+    description: >-
+      A rendered template tree under path, judged with the managed-file skip
+      off so an oversize render fails at its source (repo-platform's own
+      job); empty skips it.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a bun matching the action's pin
+      id: bun
+      shell: bash
+      run: |
+        pin="$(cat "${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # The script runs on the action-local .bun-version pin, never on the
+    # caller's bun resolution (an older caller bun cannot parse this repo's
+    # lockfiles); reuse skips the fetch only on an exact pin match.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.pinned != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
+
+    # No install step (no runtime dependencies). continue-on-error so the
+    # comment steps run first; the last step re-raises. The script records
+    # report=findings|clean|error itself; dying before that reads as error.
+    - name: Check file sizes
+      id: check
+      continue-on-error: true
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        RENDERED_DIR: ${{ inputs.rendered-dir }}
+        REPORT_PATH: ${{ runner.temp }}/check-file-size-report.md
+      run: |
+        status=0
+        bun "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" ${RENDERED_DIR:+--rendered "$RENDERED_DIR"} || status=$?
+        grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
+        exit "$status"
+
+    # The comment is a convenience sink: the summary and annotations carry
+    # the same table, so a token without pull-requests write (a fork or
+    # Dependabot PR) must not turn the verdict red. Only the check itself
+    # fails the action, in the last step.
+    - name: Post the findings as a sticky PR comment
+      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'findings'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-file-size
+        path: ${{ runner.temp }}/check-file-size-report.md
+
+    - name: Remove a stale sticky comment
+      if: github.event_name == 'pull_request' && steps.check.outputs.report == 'clean'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        header: repo-platform/check-file-size
+        delete: true
+
+    - name: Fail on a hard-cap finding
+      if: steps.check.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::error::check-file-size failed; see the annotations above, the step summary, or the PR comment."
+        exit 1

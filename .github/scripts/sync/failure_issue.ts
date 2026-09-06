@@ -240,7 +240,10 @@ if (mode === "deliver") {
   }
   sections.push(
     "",
-    `This issue is reused by every ${REPORT_KIND} run: each delivery replaces the body (earlier reports stay in the edit history), open means the ${REPORT_KIND} needs attention, and the next fully healthy run closes it. Local reproduction: https://github.com/${repository}/blob/main/docs/private-repos.md`,
+    `This issue is reused by every ${REPORT_KIND} run: each delivery replaces the body ` +
+      `(earlier reports stay in the edit history), open means the ${REPORT_KIND} needs ` +
+      `attention, and the next fully healthy run closes it. Local reproduction: ` +
+      `https://github.com/${repository}/blob/main/docs/private-repos.md`,
   );
   writeFileSync(bodyFile, `${sections.join("\n")}\n`);
 

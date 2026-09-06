@@ -152,7 +152,9 @@ function publish(sourceSha: string): void {
   // The staleness check cannot catch it when that source IS the tip's own.
   if (!hasActionManifest(join(scratch.tree, "actions"))) {
     fail(
-      `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree with an action.yml, so the source predates the unified build branch. Re-run the workflow for a main commit that carries the unification.`,
+      `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree ` +
+        `with an action.yml, so the source predates the unified build branch. Re-run the workflow ` +
+        `for a main commit that carries the unification.`,
     );
   }
   // --checksum: the quick size+mtime check can miss a changed file when

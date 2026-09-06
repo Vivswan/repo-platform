@@ -109,7 +109,10 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set - GITHUB_TOKEN can never hold the Administration write that settings mutation needs. Create a fine-grained PAT for the fleet via https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write and add it as an Actions secret named REPO_PLATFORM_TOKEN in this repository."
+            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set - GITHUB_TOKEN can never hold the Administration"\
+              "write that settings mutation needs. Create a fine-grained PAT for the fleet via"\
+              "https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write"\
+              "and add it as an Actions secret named REPO_PLATFORM_TOKEN in this repository."
             exit 1
           fi
 
@@ -356,7 +359,8 @@ jobs:
           if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
             echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
           elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there"\
+              "is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
           else
             echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
           fi

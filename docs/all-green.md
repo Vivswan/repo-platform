@@ -26,7 +26,7 @@ The judgment, whole: every needed result must be `success` or `skipped` (a modul
 ## What gates what
 
 - A managed repository's ci.yml carries three gating jobs: `checks` (calls the repo-owned checks.yml), `ci` (calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the module selection), and `all-green` needing both - plus the gate-downstream `post-green` caller ([after the gate](#after-the-gate)), which gates nothing. The membership rule: what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
-- Inside fleet-ci.yml, module- and visibility-conditioned jobs skip via job-level `if:` when they do not apply; a skipped job leaves the called run green. Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself.
+- Inside fleet-ci.yml, module- and visibility-conditioned jobs skip via job-level `if:` when they do not apply; a skipped job leaves the called run green. The base checks there are `typography`, `file-size` ([new-repo.md](new-repo.md#file-size-caps)), `commit-names`, `actionlint`, `yamllint`, and `gitleaks` (one `base-checks` job on private repositories), beside `validate-template` and the module jobs. Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself.
 - A repo-owned advisory check opts out with `continue-on-error: true` on its job in checks.yml (the retired verdict's `info-*` naming opt-out died with it).
 
 ## The rosters (how a deleted gate stays loud)

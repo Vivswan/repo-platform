@@ -37,14 +37,20 @@ has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 # any-toolchain gates (dependabot prefix, the AGENTS.md Toolchain section).
 has_codeql_toolchain() { has bun || has node || has deno || has uv; }
 has_any_toolchain() { has_codeql_toolchain || has rust; }
-present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
-present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
+present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for"\
+  "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
+present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for"\
+  "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
-absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES"\
+  "private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 # Every `deno fmt` in a rendered file must carry --prose-wrap preserve: the
 # default hard-wraps markdown prose at 80 columns, and documents carry no
 # width limit. (Formatter drift into a new bare spelling fails here.)
-prose_preserved() { test -r "$1" || { echo "::error::gating check failed: cannot read $1 (modules=$MODULES private=$PRIVATE)."; exit 1; }; if awk '/deno[[:space:]]+fmt/ && !/--prose-wrap preserve/ { bare = 1 } END { exit !bare }' "$1"; then echo "::error::gating check failed: a 'deno fmt' in $1 lacks '--prose-wrap preserve' (modules=$MODULES private=$PRIVATE): markdown prose would be hard-wrapped at 80 columns. Fix the deno fragment in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+prose_preserved() { test -r "$1" || { echo "::error::gating check failed: cannot read $1 (modules=$MODULES private=$PRIVATE)."; exit 1; }; if awk \
+  '/deno[[:space:]]+fmt/ && !/--prose-wrap preserve/ { bare = 1 } END { exit !bare }' "$1"; then echo "::error::gating check failed: a 'deno fmt'"\
+  "in $1 lacks '--prose-wrap preserve' (modules=$MODULES private=$PRIVATE): markdown prose would be hard-wrapped at 80 columns. Fix the deno"\
+  "fragment in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 
 # Single-call CI: the rendered ci.yml is a thin caller of fleet-ci.yml at
 # the green-gated @build ref, handing over the module selection as a JSON
@@ -336,7 +342,8 @@ if has auto-assign; then
     present "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
     # Exactly once: only the alerts caller job may carry the scope.
     if [ "$(grep -cF -- "security-events: write" "$wf/auto-assign.yml")" != "1" ]; then
-      echo "::error::gating check failed: 'security-events: write' must appear exactly once (on the alerts caller job) in $wf/auto-assign.yml for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
+      echo "::error::gating check failed: 'security-events: write' must appear exactly once (on the alerts caller job) in $wf/auto-assign.yml for"\
+        "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
       exit 1
     fi
   else
@@ -391,7 +398,9 @@ fi
 if has bun || has node || has deno; then
   node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" "$SMOKE/.gitignore" || true)"
   if [ "$node_sections" -ne 1 ]; then
-    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in $SMOKE/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/generate/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
+    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in $SMOKE/.gitignore but found"\
+      "$node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix"\
+      "the fragment guards emitted by scripts/generate/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 else
@@ -426,9 +435,19 @@ if has agents; then
   # The pinned-toolchain modules also emit their dotfile line (the dotfile
   # itself carries no header, so this is the only place an agent learns
   # it is managed); asserted exactly, like the command bullet.
-  if has bun; then present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; present_line '- `.bun-version` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`bun install`' "$SMOKE/AGENTS.md"; absent '.bun-version' "$SMOKE/AGENTS.md"; fi
-  if has node; then present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; present_line '- `.node-version` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`npm install`' "$SMOKE/AGENTS.md"; absent '.node-version' "$SMOKE/AGENTS.md"; fi
-  if has deno; then present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"; present_line '- `.dvmrc` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
+  pinned_by_sync() { printf -- '- `%s` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$1"; }
+  if has bun; then
+    present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
+    present_line "$(pinned_by_sync .bun-version)" "$SMOKE/AGENTS.md"
+  else absent '`bun install`' "$SMOKE/AGENTS.md"; absent '.bun-version' "$SMOKE/AGENTS.md"; fi
+  if has node; then
+    present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
+    present_line "$(pinned_by_sync .node-version)" "$SMOKE/AGENTS.md"
+  else absent '`npm install`' "$SMOKE/AGENTS.md"; absent '.node-version' "$SMOKE/AGENTS.md"; fi
+  if has deno; then
+    present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"
+    present_line "$(pinned_by_sync .dvmrc)" "$SMOKE/AGENTS.md"
+  else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
   if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
   if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
   # Merge policy and the ruleset requiring all-green are managed only with
@@ -436,8 +455,12 @@ if has agents; then
   # settings bullet (edit .github/settings.yml, never the UI) is absent.
   if has settings-sync; then
     present "PRs are squash-merged, so the PR title becomes the commit subject." "$SMOKE/AGENTS.md"
-    present_line '- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository'"'"'s test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.' "$SMOKE/AGENTS.md"
-    present_line '- Repository settings are applied from Vivswan/repo-platform'"'"'s layers plus this repository'"'"'s own `.github/settings.yml`. Edit that file, never the GitHub UI; the merge rules are in repo-platform'"'"'s docs/settings.md.' "$SMOKE/AGENTS.md"
+    gate_line='- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository'"'"'s test and '
+    gate_line+='lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.'
+    present_line "$gate_line" "$SMOKE/AGENTS.md"
+    settings_line='- Repository settings are applied from Vivswan/repo-platform'"'"'s layers plus this repository'"'"'s own `.github/settings.yml`. '
+    settings_line+='Edit that file, never the GitHub UI; the merge rules are in repo-platform'"'"'s docs/settings.md.'
+    present_line "$settings_line" "$SMOKE/AGENTS.md"
   else
     absent "squash-merged" "$SMOKE/AGENTS.md"
     present_line '- CI gates on the `all-green` check. Under `.github/workflows/`, this repository'"'"'s test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.' "$SMOKE/AGENTS.md"
@@ -744,7 +767,9 @@ expect_class ".github/workflows/post-green.yml" starter
 # selection, the mirrors declaration) the file exists for.
 expect_class ".repo-platform.yml" starter
 if [ "$(mf ".repo-platform.yml" hash)" != "missing" ]; then
-  echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE - starters make no byte-parity promise. Fix the manifest emission in scripts/compose/manifest.ts or stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE"\
+    "- starters make no byte-parity promise. Fix the manifest emission in scripts/compose/manifest.ts or stamp_manifest.ts (or this expectation in"\
+    "verify_smoke_gating.sh)."
   exit 1
 fi
 expect_class ".github/SECURITY.md" split
@@ -768,7 +793,9 @@ if has custom-license; then expect_class "LICENSE.md" absent; else expect_class 
 want_ci="$(python3 -c 'import hashlib, sys
 print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$wf/ci.yml")"
 if [ "$(mf ".github/workflows/ci.yml" hash)" != "$want_ci" ]; then
-  echo "::error::manifest check failed: the recorded hash for ci.yml in $manifest does not match the file's sha256 for modules=$MODULES private=$PRIVATE - the post-render stamp task did not stamp it. Fix stamp_manifest.ts or the copier.yml hook wiring (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the recorded hash for ci.yml in $manifest does not match the file's sha256 for modules=$MODULES"\
+    "private=$PRIVATE - the post-render stamp task did not stamp it. Fix stamp_manifest.ts or the copier.yml hook wiring (or this expectation in"\
+    "verify_smoke_gating.sh)."
   exit 1
 fi
 # The slice mirrors the stamper's contract independently: lines are split
@@ -795,7 +822,8 @@ ei = next(i for i, (s, e) in enumerate(bounds) if i > bi and data[s:e].strip(ws)
 print(hashlib.sha256(data[bounds[bi][0] : bounds[ei][1]]).hexdigest())' \
   "$SMOKE/.github/SECURITY.md" "$(mf .github/SECURITY.md begin)" "$(mf .github/SECURITY.md end)")"
 if [ "$(mf .github/SECURITY.md hash)" != "$want_security" ]; then
-  echo "::error::manifest check failed: the recorded hash for .github/SECURITY.md in $manifest does not cover its managed region (BEGIN line through END line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the recorded hash for .github/SECURITY.md in $manifest does not cover its managed region (BEGIN line"\
+    "through END line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
@@ -812,10 +840,14 @@ answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" "$SMOKE/.github/.copier-an
 # The full sha, never git's 7-char abbreviation or a tag name: the stamp
 # hook rewrites the line from copier's vcs_ref_hash on every render.
 if ! printf '%s' "$answers_commit" | grep -Eq '^[0-9a-f]{40}$'; then
-  echo "::error::manifest check failed: the _commit recorded in .github/.copier-answers.yml ('$answers_commit') is not a full 40-hex sha for modules=$MODULES private=$PRIVATE. copier.yml's hooks must pass --commit {{ _copier_conf.vcs_ref_hash }} to stamp_manifest.ts, which rewrites the line."
+  echo "::error::manifest check failed: the _commit recorded in .github/.copier-answers.yml ('$answers_commit') is not a full 40-hex sha for"\
+    "modules=$MODULES private=$PRIVATE. copier.yml's hooks must pass --commit {{ _copier_conf.vcs_ref_hash }} to stamp_manifest.ts, which rewrites"\
+    "the line."
   exit 1
 fi
 if [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
-  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .github/.copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
+  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in"\
+    ".github/.copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote"\
+    "stripping), then stamp_manifest.ts."
   exit 1
 fi

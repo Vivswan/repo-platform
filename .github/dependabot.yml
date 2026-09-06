@@ -13,6 +13,7 @@ updates:
     directories:
       - "/"
       - "/actions/all-green"
+      - "/actions/check-file-size"
       - "/actions/check-typography"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
@@ -39,6 +40,17 @@ updates:
   # Root tooling manifest (biome, husky).
   - package-ecosystem: "bun"
     directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the check-file-size action.
+  - package-ecosystem: "bun"
+    directory: "/actions/check-file-size"
     schedule:
       interval: "monthly"
     cooldown:

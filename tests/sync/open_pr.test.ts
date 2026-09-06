@@ -272,7 +272,10 @@ describe("open_pr sections and auto-merge", () => {
       name: "SUMMARY_FILE",
       content: "## docs/x.md\n\n```\nlocal line\n```\n",
       section:
-        "> [!WARNING]\n> copier hit merge conflicts, resolved below in favor of the\n> template where possible. Restore any dropped local lines that\n> should stay, and hand-edit anything marked unresolved, before\n> merging.\n\n## docs/x.md\n\n```\nlocal line\n```",
+        "> [!WARNING]\n> copier hit merge conflicts, resolved below in favor of the\n" +
+        "> template where possible. Restore any dropped local lines that\n" +
+        "> should stay, and hand-edit anything marked unresolved, before\n" +
+        "> merging.\n\n## docs/x.md\n\n```\nlocal line\n```",
       forcesReview: true,
     },
   ];

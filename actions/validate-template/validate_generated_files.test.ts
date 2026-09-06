@@ -1508,7 +1508,10 @@ describe("ownership-manifest byte parity", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr.split("\n").filter((line) => line.includes(`'${path}'`))).toEqual([
-      `error: ${MANIFEST}: entry '${path}' carries a withheld marker outside its one shape (\`true\` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)`,
+      `error: ${MANIFEST}: entry '${path}' carries a withheld marker outside its one shape ` +
+        `(\`true\` on a hash-null managed or split entry under .github/workflows/) - the sync ` +
+        `writes the marker only for a workflow it could not deliver; revert the entry (git ` +
+        `history has the stamped original) or run a recovery sync (recover=recopy)`,
     ]);
     expect(stdout).not.toContain(path);
   });
@@ -1942,7 +1945,10 @@ describe("ownership-manifest byte parity", () => {
     // Exactly one diagnostic names the path: no stale flip advisory and no
     // second parity report ride along.
     expect(stderr.split("\n").filter((line) => line.includes(path))).toEqual([
-      `error: ${path}: content does not match the sha256 recorded in ${MANIFEST} - the file drifted from the last stamped sync state; local edits to a managed file are replaced by the next template sync (move them to a repo-owned location), and intended template-side updates restamp on that sync`,
+      `error: ${path}: content does not match the sha256 recorded in ${MANIFEST} - the file ` +
+        `drifted from the last stamped sync state; local edits to a managed file are replaced by ` +
+        `the next template sync (move them to a repo-owned location), and intended template-side ` +
+        `updates restamp on that sync`,
     ]);
     expect(stdout).not.toContain(path);
   });

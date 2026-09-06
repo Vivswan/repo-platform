@@ -1,0 +1,10 @@
+# Paths exempt from the check-file-size action (both tiers), one per line,
+# relative to the repository root, each with a `# reason` on the same line.
+# Repo-owned: sync never touches this file. A reason a reader accepts is
+# required (vendored or upstream-shaped, generated but missed by the header
+# exemption, a split that would break an external contract, a file that
+# predates the cap and names the PR its split waits on); an entry whose
+# file is back under every cap fails the check as stale.
+scripts/check_ssot.ts # predates the cap: 51 ssot rules in one file; splits per rule group once PRs #76, #84 and #86, which rewrite it, have landed
+tests/scripts/check_ssot.test.ts # predates the cap: the rule suite of check_ssot.ts; splits with it
+.github/scripts/ci/upgrade_path_test.sh # predates the cap: every upgrade transition in one harness; splits per leg once PR #76, which rewrites it, has landed

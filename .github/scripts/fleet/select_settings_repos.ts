@@ -228,7 +228,10 @@ if (scope !== null) {
   const missing = scope.filter((entry) => !known.has(entry)).length;
   if (missing > 0) {
     console.log(
-      `::error::${missing} of ${scope.length} scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)`,
+      `::error::${missing} of ${scope.length} scoped repos matched no managed repository ` +
+        `(values withheld - they may be private slugs): a repo you scoped to is not in managed ` +
+        `(or the discovered list), or it is listed in exclude; check the spelling (matching ` +
+        `ignores case)`,
     );
     process.exit(1);
   }

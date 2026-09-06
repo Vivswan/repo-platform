@@ -80,27 +80,44 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry '.github/repo-platform-manifest.json' carries a withheld marker outside its one shape (`true` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry '.github/repo-platform-manifest.json' " +
+          "carries a withheld marker outside its one shape (`true` on a hash-null managed or split " +
+          "entry under .github/workflows/) - the sync writes the marker only for a workflow it " +
+          "could not deliver; revert the entry (git history has the stamped original) or run a " +
+          "recovery sync (recover=recopy)",
       },
       {
         severity: "error",
         message:
-          "docs/drifted.md: content does not match the sha256 recorded in .github/repo-platform-manifest.json - the file drifted from the last stamped sync state; local edits to a managed file are replaced by the next template sync (move them to a repo-owned location), and intended template-side updates restamp on that sync",
+          "docs/drifted.md: content does not match the sha256 recorded in " +
+          ".github/repo-platform-manifest.json - the file drifted from the last stamped sync " +
+          "state; local edits to a managed file are replaced by the next template sync (move them " +
+          "to a repo-owned location), and intended template-side updates restamp on that sync",
       },
       {
         severity: "error",
         message:
-          "docs/broken-region.md: the managed-region marker lines ('<!-- BEGIN REPO-PLATFORM MANAGED -->' ... '<!-- END REPO-PLATFORM MANAGED -->') recorded in .github/repo-platform-manifest.json are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified - restore the single marker pair or run a template sync",
+          "docs/broken-region.md: the managed-region marker lines ('<!-- BEGIN REPO-PLATFORM " +
+          "MANAGED -->' ... '<!-- END REPO-PLATFORM MANAGED -->') recorded in " +
+          ".github/repo-platform-manifest.json are missing, duplicated, or out of order in the " +
+          "file, so managed-region parity cannot be verified - restore the single marker pair or " +
+          "run a template sync",
       },
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/old-grammar.md' declares split grammar \"tail-marker\", which this validator does not read (one grammar exists: managed-region) - the manifest predates this validator; run a template sync to restamp it",
+          ".github/repo-platform-manifest.json: entry 'docs/old-grammar.md' declares split grammar " +
+          '"tail-marker", which this validator does not read (one grammar exists: ' +
+          "managed-region) - the manifest predates this validator; run a template sync to restamp " +
+          "it",
       },
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/no-grammar.md' lacks the split grammar field every render stamps - a hand edit, and sync baselines manifest edits instead of healing them; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry 'docs/no-grammar.md' lacks the split grammar " +
+          "field every render stamps - a hand edit, and sync baselines manifest edits instead of " +
+          "healing them; revert the entry (git history has the stamped original) or run a recovery " +
+          "sync (recover=recopy)",
       },
       {
         severity: "error",
@@ -140,17 +157,29 @@ describe("checkManifestParity", () => {
       {
         severity: "advisory",
         message:
-          ".github/workflows/withheld.yml: listed as managed in .github/repo-platform-manifest.json but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it",
+          ".github/workflows/withheld.yml: listed as managed in " +
+          ".github/repo-platform-manifest.json but withheld from the repo - the sync's push token " +
+          "lacked the Workflows scope, so it could not create the workflow file; grant Workflows " +
+          "read/write to the sync token and run a recovery sync (recover=recopy), which re-renders " +
+          "it",
       },
       {
         severity: "advisory",
         message:
-          ".github/workflows/split-withheld.yml: listed as split in .github/repo-platform-manifest.json but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it",
+          ".github/workflows/split-withheld.yml: listed as split in " +
+          ".github/repo-platform-manifest.json but withheld from the repo - the sync's push token " +
+          "lacked the Workflows scope, so it could not create the workflow file; grant Workflows " +
+          "read/write to the sync token and run a recovery sync (recover=recopy), which re-renders " +
+          "it",
       },
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/withheld.md' carries a withheld marker outside its one shape (`true` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry 'docs/withheld.md' carries a withheld marker " +
+          "outside its one shape (`true` on a hash-null managed or split entry under " +
+          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
+          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
+          "(recover=recopy)",
       },
       {
         severity: "error",
@@ -160,17 +189,29 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/bad-marker.md' carries a withheld marker outside its one shape (`true` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry 'docs/bad-marker.md' carries a withheld " +
+          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
+          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
+          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
+          "(recover=recopy)",
       },
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/marked-stamped.md' carries a withheld marker outside its one shape (`true` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry 'docs/marked-stamped.md' carries a withheld " +
+          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
+          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
+          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
+          "(recover=recopy)",
       },
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/marked-starter.md' carries a withheld marker outside its one shape (`true` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)",
+          ".github/repo-platform-manifest.json: entry 'docs/marked-starter.md' carries a withheld " +
+          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
+          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
+          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
+          "(recover=recopy)",
       },
     ]);
   });

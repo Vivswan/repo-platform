@@ -1412,7 +1412,11 @@ ${extra}      shell: ${shell}
   const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
   const noClearing = {
     file: "actions/x/action.yml",
-    expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
+    expected:
+      `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch ` +
+      `root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one ` +
+      `/bin/rm -rf of clean paths under that root, and whose success this setup's condition ` +
+      `requires)`,
     got: "no such step - a caller could plant that pin before the action runs",
   };
   const cases: [string, string, ReturnType<typeof actionsBunGuardMismatches>, string?, string?][] =
@@ -2527,7 +2531,10 @@ describe("preflightInvocation", () => {
     const segments = shellSegments(
       [
         "cat <<EOF",
-        'bun platform/.github/scripts/fleet/label_preflight.ts --merged "$RUNNER_TEMP/merged-settings.yml" --repo "$GITHUB_REPOSITORY" --target-dir . --sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" --mode "$MODE" --on-missing-permission "$ON_MISSING_PERMISSION"',
+        "bun platform/.github/scripts/fleet/label_preflight.ts --merged " +
+          '"$RUNNER_TEMP/merged-settings.yml" --repo "$GITHUB_REPOSITORY" --target-dir . ' +
+          '--sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" --mode "$MODE" ' +
+          '--on-missing-permission "$ON_MISSING_PERMISSION"',
         "EOF",
       ].join("\n"),
     );

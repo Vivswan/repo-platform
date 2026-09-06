@@ -21,6 +21,7 @@ describe("bunLockDirs", () => {
   test("the live tree: the root plus every action committing a bun.lock", () => {
     expect(bunLockDirs(root)).toEqual([
       ".",
+      "actions/check-file-size",
       "actions/check-typography",
       "actions/fuzz-issue",
       "actions/pages-site",

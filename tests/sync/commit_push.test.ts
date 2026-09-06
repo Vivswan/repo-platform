@@ -309,7 +309,11 @@ const manifestOf = (entries: Record<string, string>) =>
 describe("commit_push Workflows-scope withhold reconciliation", () => {
   const WITHHELD_WARNING =
     "::warning::o/r: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured.";
-  const WITHHELD_ADVISORY = `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`;
+  const WITHHELD_ADVISORY =
+    `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from ` +
+    `the repo - the sync's push token lacked the Workflows scope, so it could not create the ` +
+    `workflow file; grant Workflows read/write to the sync token and run a recovery sync ` +
+    `(recover=recopy), which re-renders it`;
   test.each([
     {
       layout: "one line",

@@ -305,7 +305,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "head-split-unknown-grammar-refusal",
     hazard:
-      "a HEAD manifest declares a split grammar this sync does not read (a retired vintage the deleted conversion shim once served, or anything unknown); without the refusal the entry is silently skipped, the tripwire never compares the file, and a retirement could delete its repo-owned content unheld",
+      "a HEAD manifest declares a split grammar this sync does not read (a retired vintage the " +
+      "deleted conversion shim once served, or anything unknown); without the refusal the " +
+      "entry is silently skipped, the tripwire never compares the file, and a retirement could " +
+      "delete its repo-owned content unheld",
     guardFile: ".github/scripts/sync/head_manifest.ts",
     snippet:
       "    throw new Error(\n      `${where}: a split entry declares a grammar this sync does not read",
@@ -350,7 +353,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "fleet-release-verdict-gate",
     hazard:
-      "the gate clause deleted from the release leg's if: GitHub still implies success() on the needs edge, but the remaining event clauses alone would release on a PR/dispatch/schedule shape the moment someone widens them - the spelled-out result clause is the belt the pinned block keeps honest",
+      "the gate clause deleted from the release leg's if: GitHub still implies success() on " +
+      "the needs edge, but the remaining event clauses alone would release on a " +
+      "PR/dispatch/schedule shape the moment someone widens them - the spelled-out result " +
+      "clause is the belt the pinned block keeps honest",
     guardFile: "templates/release-please/fragments/all-green-release.jinja",
     snippet: "      needs.all-green.result == 'success' &&",
     mutated: "",
@@ -361,7 +367,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "fleet-release-judged-sha-pass",
     hazard:
-      "the sha input deleted from the release leg's call: release.yml falls back to its own github.sha - equal today because the leg runs in the judged commit's own run, but the EXPLICIT pass is what keeps a future caller from silently handing the pipeline a different commit",
+      "the sha input deleted from the release leg's call: release.yml falls back to its own " +
+      "github.sha - equal today because the leg runs in the judged commit's own run, but the " +
+      "EXPLICIT pass is what keeps a future caller from silently handing the pipeline a " +
+      "different commit",
     guardFile: "templates/release-please/fragments/all-green-release.jinja",
     snippet: "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     mutated: "",
@@ -453,7 +462,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "docs-site-caller-theme-refusal",
     hazard:
-      "a fleet repo ships docs/.vitepress expecting it to style its site: the central build root ignores caller theme files by construction, so without the refusal the deploy stays green while silently discarding what the repo authored - the central-theme invariant rots into a lie",
+      "a fleet repo ships docs/.vitepress expecting it to style its site: the central build " +
+      "root ignores caller theme files by construction, so without the refusal the deploy " +
+      "stays green while silently discarding what the repo authored - the central-theme " +
+      "invariant rots into a lie",
     guardFile: "actions/pages-site/build.ts",
     snippet: 'if (existsSync(join(docsTree, ".vitepress"))) {',
     mutated: "if (false) {",
@@ -463,7 +475,9 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "docs-site-strict-links-wiring",
     hazard:
-      "the deploy's dead-link strictness rewired to always-lenient: every tier then builds with dead internal links ignored, so current docs rot ships on a green run and the PR check's promise (a dead link fails before merge, or at worst at deploy) quietly dies",
+      "the deploy's dead-link strictness rewired to always-lenient: every tier then builds " +
+      "with dead internal links ignored, so current docs rot ships on a green run and the PR " +
+      "check's promise (a dead link fails before merge, or at worst at deploy) quietly dies",
     guardFile: "actions/pages-site/build.ts",
     snippet: 'return tier.ref === "HEAD";',
     mutated: "return false;",
@@ -473,7 +487,9 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "pages-legacy-tag-skip-narrow",
     hazard:
-      "the structural probe rewired to skip every tag: versioned tiers and their versions.json entries silently vanish from the deployed site on a green run, and the loud failure a broken-but-declared build owes the operator never fires because nothing builds at all",
+      "the structural probe rewired to skip every tag: versioned tiers and their versions.json " +
+      "entries silently vanish from the deployed site on a green run, and the loud failure a " +
+      "broken-but-declared build owes the operator never fires because nothing builds at all",
     guardFile: "actions/pages-site/lib.ts",
     snippet: 'return typeof pkg.scripts[script] === "string";',
     mutated: "return false;",
@@ -491,7 +507,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
   {
     id: "actions-bun-pin",
     hazard:
-      "a composite action's bun floats on the CONSUMER repository's version resolution (a bare setup-bun reads the caller checkout's version files): a repo-platform bun bump that rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in repo-platform's own",
+      "a composite action's bun floats on the CONSUMER repository's version resolution (a bare " +
+      "setup-bun reads the caller checkout's version files): a repo-platform bun bump that " +
+      "rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in " +
+      "repo-platform's own",
     guardFile: "actions/check-typography/action.yml",
     snippet:
       "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ github.action_path }}/.bun-version",
