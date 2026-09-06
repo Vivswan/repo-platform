@@ -4820,16 +4820,9 @@ const LICENSE_CENSUS =
 const ALL_GREEN_INVERSION =
   "the all-green inversion: the gate became the all-green action's verdict check run; no rung: copier re-renders ci.yml (census: every render on the single-call shape)";
 
-/** Identifying tokens of shapes the platform once tolerated and no longer
- *  does, one line per token with what retired it: the retired split
- *  grammars, their manifest fields and marker vocabulary, the retired
- *  ownership class (as a class value, so a gh `--json mergeable` field
- *  stays legal), the retired one-shot transition script, the bare
- *  LICENSE spelling, and the inline all-green gate (its rendered step name
- *  and the validator predicate that read it). No compatibility code lives outside the migration
- *  ladder (docs/migrations.md), so none of these may appear in the sync,
- *  the actions, the scripts, or their tests. A tripwire for the audited
- *  shapes, not a proof of the policy: a new tolerance needs a new line. */
+/** Identifying tokens of retired shapes, one line each with what retired it (docs/migrations.md).
+ *  A tripwire for the audited shapes, not a proof of the policy: a new tolerance needs a new line;
+ *  the class token matches a class VALUE only, so a gh `--json mergeable` field stays legal. */
 export const RETIRED_SHAPE_TOKENS: readonly RetiredShape[] = [
   bounded("tail-marker", ONE_GRAMMAR, splitEntry("tail-marker")),
   bounded("bounded-region", ONE_GRAMMAR, splitEntry("bounded-region")),
@@ -4858,12 +4851,8 @@ export const RETIRED_SHAPE_TOKENS: readonly RetiredShape[] = [
   bounded("judgesInline", ALL_GREEN_INVERSION),
 ];
 
-/** Where the no-retired-shapes rule looks: the workflow script zones and
- *  workflows, the shipped actions, the repo scripts, the template sources
- *  with copier.yml, and every test - minus the ladder directory and its
- *  tests (the one place a retired shape may be named: a rung exists to
- *  move a repository off it), this rule's own file (the token list) and
- *  its test (the planted controls). */
+/** The no-retired-shapes scan set. Exempt: the ladder and its tests (a rung exists to name the
+ *  shape it moves repositories off), the token list's own file, and its planted controls. */
 export const RETIRED_SHAPE_SCAN = {
   dirs: [".github/scripts", ".github/workflows", "actions", "scripts", "templates", "tests"],
   files: ["copier.yml"],
