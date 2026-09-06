@@ -11,11 +11,13 @@ import { walkParents } from "./checkout_path.ts";
 
 export interface CopierAnswers {
   /** The recorded _commit VERBATIM, or "" when absent or not a string.
-   * Read under the failsafe schema: copier writes with PyYAML (YAML 1.1),
-   * which leaves short shas like 1626e53 or 0089012 bare, and the default
-   * YAML 1.2 schema would resolve them as numbers ("1.626e+56", "89012").
-   * Failsafe keeps every scalar a string while still undoing copier's
-   * to_nice_yaml quoting of ambiguous values. */
+   * Read under the failsafe schema: the file is written with PyYAML (YAML
+   * 1.1), which leaves a sha of digits around one e (1626e53...) bare,
+   * and the default YAML 1.2 schema would resolve it as a number
+   * ("1.626e+56"); an all-digit sha arrives quoted (the stamp hook and
+   * copier both quote it) and failsafe undoes that quoting. The stamp
+   * hook records the full 40-hex sha; a repo rendered before it did
+   * still carries the 7-char abbreviation until its next sync. */
   commit: string;
   /** Every recorded answer, for field-specific consumers reading TYPED
    * values (settings_drift's boolean private, rehearse's description).
@@ -262,4 +264,22 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
     }
   }
   return out;
+}
+
+/** Why the `_commit` copier's hooks just recorded is not the commit the
+ * sync pinned copier to, or null when it is: the stamp hook rewrites the
+ * line from copier's vcs_ref_hash, so a mismatch means the hook did not
+ * run (a build tree whose copier.yml lost the --commit wiring, or
+ * --skip-tasks) and the abbreviation or tag name copier writes itself is
+ * what landed. The postcondition apply_update.ts enforces after every
+ * copier run. */
+export function recordedCommitMismatch(recorded: string, targetSha: string): string | null {
+  if (recorded === targetSha) return null;
+  const got = recorded === "" ? "no readable _commit" : `_commit '${recorded}'`;
+  return (
+    `copier recorded ${got} in .github/.copier-answers.yml, but the sync pinned it to ` +
+    `commit ${targetSha}. The template's stamp hook rewrites that line from copier's ` +
+    "vcs_ref_hash on every render, so it did not run - check the build tree's copier.yml " +
+    "hook lines (copier.yml on main carries the wiring)."
+  );
 }

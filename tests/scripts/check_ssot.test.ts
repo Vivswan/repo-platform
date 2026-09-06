@@ -32,6 +32,7 @@ import {
   fleetCiRenderMismatches,
   fleetWorkflowPinMismatches,
   gatesOnModule,
+  hookCommandParts,
   inlineFunctionCopies,
   isOwnPagesOrigin,
   labelPreflightFileMismatches,
@@ -55,6 +56,8 @@ import {
   rosterMismatches,
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
+  STAMP_HOOK_ARGV,
+  STAMP_HOOK_WHEN,
   semanticLines,
   setMismatch,
   settingsHealShaPlumbingMismatches,
@@ -62,6 +65,7 @@ import {
   shellSegments,
   spawnSyncHazard,
   spawnSyncSites,
+  stampHookSiteMismatches,
   stepCarriesWithKey,
   stripGeneratedRegions,
   templateSelfPins,
@@ -3298,5 +3302,135 @@ describe("isOwnPagesOrigin", () => {
     expect(isOwnPagesOrigin(bareIo, at(bareIo), "io", "Vivswan")).toBe(false);
     // Only the io segment is ever a Pages origin.
     expect(isOwnPagesOrigin("x/repo-platform", 0, "x", "Vivswan")).toBe(false);
+  });
+});
+
+describe("hookCommandParts", () => {
+  const script = "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts";
+  test.each([
+    {
+      command: ["bun", script, ...STAMP_HOOK_ARGV],
+      expected: {
+        path: "actions/shared/stamp_manifest.ts",
+        args: [...STAMP_HOOK_ARGV],
+        form: "argv",
+      },
+    },
+    {
+      command: ["bun", script],
+      expected: { path: "actions/shared/stamp_manifest.ts", args: [], form: "argv" },
+    },
+    {
+      command: `bun "${script}" --flag x`,
+      expected: { path: "actions/shared/stamp_manifest.ts", args: ["--flag", "x"], form: "shell" },
+    },
+    {
+      command: 'bun "{{ _copier_conf.src_path }}/actions/other/task.ts"',
+      expected: { path: "actions/other/task.ts", args: [], form: "shell" },
+    },
+  ])("$command", ({ command, expected }) => {
+    expect(hookCommandParts(command)).toEqual(expected);
+  });
+
+  test("a hook that is not the src_path-anchored bun shape is a lost anchor", () => {
+    for (const command of [
+      "bun actions/shared/stamp_manifest.ts",
+      `python "{{ _copier_conf.src_path }}/x.py"`,
+      ["python", `{{ _copier_conf.src_path }}/x.py`],
+      ["bun", "actions/shared/stamp_manifest.ts"],
+      ["bun"],
+    ]) {
+      expect(() => hookCommandParts(command)).toThrow(
+        "anchor for a src_path-anchored bun hook command",
+      );
+    }
+  });
+});
+
+describe("stampHookSiteMismatches", () => {
+  const STAMP = "actions/shared/stamp_manifest.ts";
+  const script = `{{ _copier_conf.src_path }}/${STAMP}`;
+  const good = { command: ["bun", script, ...STAMP_HOOK_ARGV], when: STAMP_HOOK_WHEN._tasks };
+  const other = { command: 'bun "{{ _copier_conf.src_path }}/actions/other/task.ts"', when: "" };
+  const without = (flag: string) => {
+    const i = STAMP_HOOK_ARGV.indexOf(flag as (typeof STAMP_HOOK_ARGV)[number]);
+    return ["bun", script, ...STAMP_HOOK_ARGV.slice(0, i), ...STAMP_HOOK_ARGV.slice(i + 2)];
+  };
+  const gotOf = (hooks: { command: string | readonly string[]; when: string }[]) =>
+    stampHookSiteMismatches("_tasks", hooks, STAMP).map((m) => `${m.expected} | ${m.got}`);
+
+  test("the wired shape passes, other hooks beside it are ignored", () => {
+    expect(gotOf([good])).toEqual([]);
+    expect(gotOf([other, good])).toEqual([]);
+  });
+
+  test.each([
+    { reason: "no stamp hook", hooks: [other], expected: "none - renders on that path" },
+    { reason: "a duplicate stamp hook", hooks: [good, good], expected: "2 stamp hooks" },
+    {
+      reason: "missing when",
+      hooks: [{ ...good, when: "" }],
+      expected: "no when (the destination would be stamped twice on update)",
+    },
+    {
+      reason: "the other site's when",
+      hooks: [{ ...good, when: STAMP_HOOK_WHEN._migrations }],
+      expected: `when: "${STAMP_HOOK_WHEN._migrations}"`,
+    },
+    {
+      reason: "missing --root",
+      hooks: [{ ...good, command: without("--root") }],
+      expected: "carrying",
+    },
+    {
+      reason: "missing --commit",
+      hooks: [{ ...good, command: without("--commit") }],
+      expected: "carrying",
+    },
+    {
+      reason: "missing --answers",
+      hooks: [{ ...good, command: without("--answers") }],
+      expected: "carrying",
+    },
+    {
+      reason: "dst_path instead of . for the root",
+      hooks: [
+        {
+          ...good,
+          command: [
+            "bun",
+            script,
+            "--root",
+            "{{ _copier_conf.dst_path }}",
+            ...STAMP_HOOK_ARGV.slice(2),
+          ],
+        },
+      ],
+      expected: '"{{ _copier_conf.dst_path }}"',
+    },
+    {
+      reason: "no arguments at all",
+      hooks: [{ ...good, command: ["bun", script] }],
+      expected: "no arguments",
+    },
+  ])("$reason -> a named mismatch", ({ hooks, expected }) => {
+    const got = gotOf(hooks);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toContain(expected);
+  });
+
+  test("the shell-string form is refused even with the right arguments (injection surface)", () => {
+    const shell = {
+      ...good,
+      command: `bun "${script}" ${STAMP_HOOK_ARGV.map((a) => (a.startsWith("--") || a === "." ? a : `"${a}"`)).join(" ")}`,
+    };
+    const got = gotOf([shell]);
+    expect(got.some((line) => line.includes("a shell string"))).toBe(true);
+  });
+
+  test("the migrations site is judged against its own when", () => {
+    const hook = { command: good.command, when: STAMP_HOOK_WHEN._migrations };
+    expect(stampHookSiteMismatches("_migrations", [hook], STAMP)).toEqual([]);
+    expect(stampHookSiteMismatches("_migrations", [good], STAMP)).toHaveLength(1);
   });
 });

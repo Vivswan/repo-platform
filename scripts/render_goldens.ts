@@ -31,15 +31,16 @@
 //   .github/.copier-answers.yml and stamped into the ownership manifest's
 //   provenance slot - is still a pure function of the WHOLE tree content,
 //   so every template edit would move it; normalizeRenderedTree therefore
-//   rewrites the `_commit` answer to the fixed sentinel "xxxxxxx" before
-//   the write/diff step and re-runs the manifest stamp hook against the
-//   result (which carries the sentinel into the commit slot and the
-//   answers hash), gated on the render's stamp being honest so the
+//   rewrites the `_commit` answer to the fixed sentinel SHA_SENTINEL
+//   before the write/diff step and re-runs the manifest stamp hook
+//   against the result (which carries the sentinel into the commit slot
+//   and the answers hash), gated on the render's stamp being honest so the
 //   re-stamp cannot heal a lying hook. Those two provenance fields are the
 //   ONLY normalized bytes - everything else is snapshot verbatim - and
-//   only the true sha is rewritten: a bug that stamps a WRONG sha shows as
-//   drift, and a render already carrying the sentinel is rejected
-//   outright.
+//   only the true FULL sha is rewritten: a bug that stamps a WRONG sha
+//   shows as drift, a render that kept copier's abbreviated describe
+//   output (the hook's --commit rewrite did not run) shows as drift, and
+//   a render already carrying the sentinel is rejected outright.
 // - copier runs from the scratch directory with a RELATIVE src path, so
 //   the recorded `_src_path` is the fixed string "./tree", never a temp
 //   path. The same /dev/null git config is passed to copier for its
@@ -79,7 +80,7 @@ import {
 } from "../.github/scripts/shared/proc.ts";
 import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { MANIFEST_NAME } from "../actions/shared/manifest.ts";
-import { stampManifestText } from "../actions/shared/stamp_manifest.ts";
+import { FULL_SHA_HEX, stampManifestText } from "../actions/shared/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -126,31 +127,31 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
 type Entry = { kind: "file"; bytes: Buffer; exec: boolean } | { kind: "symlink"; target: string };
 
 /** The fixed value the `_commit` provenance is rewritten to in every
- *  golden: the width of the short sha copier stamps, in a NON-hex
+ *  golden: the width of the full sha the stamp hook records, in a NON-hex
  *  character, so no honest commit sha can ever read as the sentinel (a
- *  hex sentinel like "0000000" would reject a genuine scratch commit that
- *  happens to start with seven zeros via the pre-stamped guard below). */
-export const SHA_SENTINEL = "xxxxxxx";
+ *  hex sentinel of zeros would reject a genuine all-zero scratch commit
+ *  via the pre-stamped guard below). */
+export const SHA_SENTINEL = "x".repeat(FULL_SHA_HEX);
 
 /** The answers file copier records the render provenance in; must match
  *  the name stamp_manifest.ts's recordedCommit reads. */
 const ANSWERS_NAME = ".github/.copier-answers.yml";
 
 /** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records
- *  the scratch tree's commit sha (or any 7-plus-char prefix of it - copier
- *  stamps the short form). The value may arrive YAML-quoted: when the
- *  short sha happens to be all decimal digits (~4% of commits), copier's
- *  yaml writer quotes it to keep it a string, so the quotes must be
- *  unwrapped before comparing or the render drifts exactly and only on
- *  those commits. This is the ONLY substitution the runner performs,
- *  addressed to the one field that carries provenance by design: a
- *  tree-wide byte substitution would corrupt unrelated content, because
- *  7-hex-char runs occur in English prose ("feedback" starts with hex
- *  "feedbac"). Three properties are the point: the `_commit` key stays in
- *  the goldens (dropping or renaming it still shows as drift), a value
- *  that is anything but the true sha is left alone and shows as drift, and
- *  a value already reading as the sentinel throws - a pre-stamped sentinel
- *  would false-match the committed goldens. */
+ *  the scratch tree's FULL commit sha - the form the stamp hook writes; a
+ *  prefix is a render whose hook rewrite did not run and stays put so it
+ *  shows as drift. The value may arrive YAML-quoted (the hook quotes an
+ *  all-digit sha so PyYAML keeps it a string - vanishingly rare at 40
+ *  hex, but a quoted true sha must not drift). This is the ONLY
+ *  substitution the runner performs, addressed to the one field that
+ *  carries provenance by design: a tree-wide byte substitution would
+ *  corrupt unrelated content, because hex-looking runs occur in English
+ *  prose ("feedback" starts with hex "feedbac"). Three properties are the
+ *  point: the `_commit` key stays in the goldens (dropping or renaming it
+ *  still shows as drift), a value that is anything but the true sha is
+ *  left alone and shows as drift, and a value already reading as the
+ *  sentinel throws - a pre-stamped sentinel would false-match the
+ *  committed goldens. */
 export function normalizeAnswers(text: string, fullSha: string): string {
   if (!/^[0-9a-f]{40}$/.test(fullSha)) throw new Error(`not a full sha1: ${fullSha}`);
   return text.replace(/^(_commit:[ \t]*)(\S*)([ \t]*)$/m, (line, key, value, pad) => {
@@ -162,8 +163,7 @@ export function normalizeAnswers(text: string, fullSha: string): string {
           "false-match the committed goldens)",
       );
     }
-    const isTrueSha = unquoted.length >= 7 && fullSha.startsWith(unquoted);
-    return isTrueSha ? `${key}${SHA_SENTINEL}${pad}` : line;
+    return unquoted === fullSha ? `${key}${SHA_SENTINEL}${pad}` : line;
   });
 }
 

@@ -1,12 +1,13 @@
 // Unit tests for render_goldens' provenance normalization. The renderer
 // itself runs against real copier output (bun run renders:check gates the
 // committed goldens); these pin the contract's edges: only the `_commit`
-// answer recording the true scratch sha (or a 7-plus-char prefix of it)
-// becomes the sentinel, every other byte survives verbatim (7-hex-char
-// runs occur in English prose), a pre-stamped sentinel is rejected
-// instead of false-matching the committed goldens, the re-stamped
-// manifest carries the sentinel provenance and the normalized answers
-// hash, and a lying stamp hook fails loudly instead of being healed.
+// answer recording the true FULL scratch sha becomes the sentinel (an
+// abbreviation is a render whose hook rewrite did not run and must show
+// as drift), every other byte survives verbatim (hex-looking runs occur in
+// English prose), a pre-stamped sentinel is rejected instead of
+// false-matching the committed goldens, the re-stamped manifest carries
+// the sentinel provenance and the normalized answers hash, and a lying
+// stamp hook fails loudly instead of being healed.
 
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -39,43 +40,40 @@ describe("normalizeAnswers", () => {
   });
 
   const SENTINEL_LINE = `_commit: ${SHA_SENTINEL}\n`;
+  const DECIMAL_SHA = "2753404".repeat(6).slice(0, 40);
   test.each([
-    {
-      reason: "the short form copier records",
-      text: `_commit: ${SHORT}\n`,
-      sha: SHA,
-      expected: SENTINEL_LINE,
-    },
     { reason: "the full sha", text: `_commit: ${SHA}\n`, sha: SHA, expected: SENTINEL_LINE },
     {
-      reason: "a prefix between short and full",
-      text: `_commit: ${SHA.slice(0, 12)}\n`,
-      sha: SHA,
-      expected: SENTINEL_LINE,
-    },
-    {
       reason: "nothing but the _commit value (other keys verbatim)",
-      text: `_commit: ${SHORT}\n_src_path: ./tree\nproject_name: Golden Render\n`,
+      text: `_commit: ${SHA}\n_src_path: ./tree\nproject_name: Golden Render\n`,
       sha: SHA,
       expected: `_commit: ${SHA_SENTINEL}\n_src_path: ./tree\nproject_name: Golden Render\n`,
     },
     {
-      reason: "a sub-7-char value: untouched",
-      text: `_commit: ${SHA.slice(0, 6)}\n`,
+      // copier's default abbreviation: a render whose hook rewrite did
+      // not run, which must surface as drift rather than normalize.
+      reason: "the 7-char abbreviation of the true sha: untouched",
+      text: `_commit: ${SHORT}\n`,
       sha: SHA,
-      expected: `_commit: ${SHA.slice(0, 6)}\n`,
+      expected: `_commit: ${SHORT}\n`,
     },
     {
-      reason: "a wrong short sha: untouched, so a mis-stamped render shows as drift",
-      text: `_commit: ${"f".repeat(7)}\n`,
+      reason: "a longer prefix of the true sha: untouched",
+      text: `_commit: ${SHA.slice(0, 12)}\n`,
       sha: SHA,
-      expected: `_commit: ${"f".repeat(7)}\n`,
+      expected: `_commit: ${SHA.slice(0, 12)}\n`,
     },
     {
-      reason: "a value continuing past the prefix wrongly: untouched",
-      text: `_commit: ${SHORT}ff\n`,
+      reason: "a wrong full sha: untouched, so a mis-stamped render shows as drift",
+      text: `_commit: ${"f".repeat(40)}\n`,
       sha: SHA,
-      expected: `_commit: ${SHORT}ff\n`,
+      expected: `_commit: ${"f".repeat(40)}\n`,
+    },
+    {
+      reason: "a value continuing past the sha wrongly: untouched",
+      text: `_commit: ${SHA}ff\n`,
+      sha: SHA,
+      expected: `_commit: ${SHA}ff\n`,
     },
     {
       reason: "no _commit key at all: untouched",
@@ -84,34 +82,33 @@ describe("normalizeAnswers", () => {
       expected: "_src_path: ./tree\n",
     },
     {
-      // A hex sentinel ("0000000") would make the already-sentinel guard
+      // A hex sentinel of zeros would make the already-sentinel guard
       // reject this genuine commit; the sentinel being non-hex keeps the
       // two disjoint.
-      reason: "an honest sha of seven zeros: the non-hex sentinel cannot collide",
-      text: "_commit: 0000000\n",
-      sha: `0000000${"a".repeat(33)}`,
+      reason: "an honest all-zero sha: the non-hex sentinel cannot collide",
+      text: `_commit: ${"0".repeat(40)}\n`,
+      sha: "0".repeat(40),
       expected: SENTINEL_LINE,
     },
     {
-      // ~4% of commits have an all-decimal 7-char prefix, which copier
-      // quotes to keep it a string; before the unwrap, exactly those
-      // renders drifted while every other commit passed.
-      reason: "a single-quoted all-decimal short sha: unwrapped",
-      text: "_commit: '2753404'\n",
-      sha: `2753404${"a".repeat(33)}`,
+      // the hook quotes an all-digit sha to keep it a string for PyYAML;
+      // the unwrap keeps exactly those renders from drifting.
+      reason: "a single-quoted all-decimal sha: unwrapped",
+      text: `_commit: '${DECIMAL_SHA}'\n`,
+      sha: DECIMAL_SHA,
       expected: SENTINEL_LINE,
     },
     {
-      reason: "a double-quoted all-decimal short sha: unwrapped",
-      text: '_commit: "2753404"\n',
-      sha: `2753404${"a".repeat(33)}`,
+      reason: "a double-quoted all-decimal sha: unwrapped",
+      text: `_commit: "${DECIMAL_SHA}"\n`,
+      sha: DECIMAL_SHA,
       expected: SENTINEL_LINE,
     },
     {
       reason: "a quoted WRONG sha: untouched",
-      text: "_commit: '9999999'\n",
+      text: `_commit: '${"9".repeat(40)}'\n`,
       sha: SHA,
-      expected: "_commit: '9999999'\n",
+      expected: `_commit: '${"9".repeat(40)}'\n`,
     },
   ])("$reason", ({ text, sha, expected }) => {
     expect(normalizeAnswers(text, sha)).toBe(expected);
@@ -139,7 +136,7 @@ describe("normalizeRenderedTree", () => {
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(
       join(root, ".github/.copier-answers.yml"),
-      `_commit: ${SHORT}\n_src_path: ./tree\n`,
+      `_commit: ${SHA}\n_src_path: ./tree\n`,
     );
     writeFileSync(join(root, "notes.md"), "<!-- b -->\nnotes\n<!-- e -->\nrepo half\n");
     symlinkSync("AGENTS.md", join(root, "link"));
@@ -206,7 +203,7 @@ describe("normalizeRenderedTree", () => {
       const sha = `feedbac${"0123456789abcdef0123456789abcdef0"}`;
       const prose = "We welcome feedback; a feedback-driven process feeds back.\n";
       mkdirSync(join(root, ".github"), { recursive: true });
-      writeFileSync(join(root, ".github/.copier-answers.yml"), `_commit: ${sha.slice(0, 7)}\n`);
+      writeFileSync(join(root, ".github/.copier-answers.yml"), `_commit: ${sha}\n`);
       writeFileSync(join(root, "CODE_OF_CONDUCT.md"), prose);
       writeFileSync(
         join(root, MANIFEST),
@@ -246,7 +243,10 @@ describe("normalizeRenderedTree", () => {
       const honest = readFileSync(path, "utf-8");
       // A hook bug that stamps a wrong provenance into the manifest only
       // (the answers file still carries the true sha).
-      writeFileSync(path, honest.replace(`"commit": "${SHORT}"`, '"commit": "abcdef1"'));
+      writeFileSync(
+        path,
+        honest.replace(`"commit": "${SHA}"`, `"commit": "${"abcdef1".repeat(6).slice(0, 40)}"`),
+      );
       expect(() => normalizeRenderedTree(root, SHA)).toThrow("not honestly stamped");
       // A hook bug that stamps a wrong hash.
       writeFileSync(
