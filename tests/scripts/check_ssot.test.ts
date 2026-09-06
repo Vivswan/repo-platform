@@ -1579,7 +1579,7 @@ ${RESOLVER_RUN}
 
   // Refused whatever it does: the grammar names its forms, so no spelling
   // of a PATH lookup needs recognising (each row once evaded a
-  // spelling-based check); echo is out since POSIXLY_CORRECT makes it expand.
+  // spelling-based check); echo is out since xpg_echo makes it expand escapes.
   test.each([
     'bun "${{ github.action_path }}/x.ts"',
     "bun install --frozen-lockfile --production",
@@ -2581,10 +2581,10 @@ ${env === undefined ? "" : `      env:\n        ${env}\n`}      run: ${run}
     ]);
   });
 
-  // -p leaves POSIXLY_CORRECT live, and in POSIX mode echo expands backslash
-  // escapes: a PATH entry spelling `\n` would forge a second output record
-  // through echo, where the resolver's printf keeps one.
-  test("under POSIXLY_CORRECT the resolver's printf records one line where echo would forge two", () => {
+  // -p does not ignore POSIXLY_CORRECT, which makes echo expand escapes on
+  // some bash builds. Force xpg_echo so `\n` forges a second output record
+  // through echo on every build while printf keeps it data.
+  test("with escape-expanding echo the resolver's printf records one line where echo would forge two", () => {
     const root = temp.dir("actions-bun-resolver-posix-");
     const entry = join(root, "a\\nb");
     mkdirSync(entry);
@@ -2604,15 +2604,19 @@ ${env === undefined ? "" : `      env:\n        ${env}\n`}      run: ${run}
       });
       return [proc.exitCode, readFileSync(outputs, "utf8")];
     };
-    expect(recordedBy(ACTIONS_BUN_RESOLVER.join("\n"))).toEqual([
+    const expanding = (lines: readonly string[]) => ["shopt -s xpg_echo", ...lines].join("\n");
+    expect(recordedBy(expanding(ACTIONS_BUN_RESOLVER))).toEqual([
       0,
       `path=${entry}/bun\npinned=true\n`,
     ]);
     const viaEcho = ACTIONS_BUN_RESOLVER.map((line) =>
       line.replace(`printf '%s\\n' "path=$path"`, 'echo "path=$path"'),
-    ).join("\n");
-    expect(viaEcho).not.toBe(ACTIONS_BUN_RESOLVER.join("\n"));
-    expect(recordedBy(viaEcho)).toEqual([0, `path=${join(root, "a")}\nb/bun\npinned=true\n`]);
+    );
+    expect(viaEcho).not.toEqual(ACTIONS_BUN_RESOLVER);
+    expect(recordedBy(expanding(viaEcho))).toEqual([
+      0,
+      `path=${join(root, "a")}\nb/bun\npinned=true\n`,
+    ]);
   });
 
   test("a carriage return is a content character to bash (the control for the space-and-tab word split)", () => {
