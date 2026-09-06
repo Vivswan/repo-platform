@@ -59,6 +59,8 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
     end: "# END REPO-PLATFORM MANAGED",
   },
   { path: ".github/.copier-answers.yml", kind: "header" },
+  { path: ".github/agents.md", kind: "class-only" },
+  { path: ".github/copilot-instructions.md", kind: "class-only" },
   { path: ".github/CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
   {
     path: ".github/CODEOWNERS",
@@ -67,13 +69,16 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
     end: "# END REPO-PLATFORM MANAGED",
   },
   { path: ".github/dependabot.yml", kind: "header" },
+  { path: ".github/instructions/review.instructions.md", kind: "header" },
   {
     path: ".github/SECURITY.md",
     kind: "region",
     begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
     end: "<!-- END REPO-PLATFORM MANAGED -->",
   },
+  { path: ".github/workflows/auto-assign.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
+  { path: ".github/workflows/settings-sync.yml", kind: "header" },
   {
     path: ".gitignore",
     kind: "region",
@@ -82,6 +87,13 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
   },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
+  {
+    path: "AGENTS.md",
+    kind: "region",
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    end: "<!-- END REPO-PLATFORM MANAGED -->",
+  },
+  { path: "CLAUDE.md", kind: "class-only" },
   {
     path: "CONTRIBUTING.md",
     kind: "region",
@@ -101,7 +113,6 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
 
 // BEGIN GENERATED: known-modules (scripts/generate.ts - edit module.yml manifests, not this block)
 export const KNOWN_MODULES: ReadonlySet<string> = new Set([
-  "agents",
   "bun",
   "node",
   "deno",
@@ -113,10 +124,8 @@ export const KNOWN_MODULES: ReadonlySet<string> = new Set([
   "issue-templates",
   "skills",
   "pr-title",
-  "auto-assign",
   "fuzzer",
   "nightly",
-  "settings-sync",
   "custom-license",
 ]);
 // END GENERATED: known-modules
@@ -134,18 +143,6 @@ export const TOOLCHAIN_PINS: Readonly<Partial<Record<string, ToolchainPin>>> = {
 // moduleOwnershipEntries in scripts/ownership.ts).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module.yml ownership declarations and the module templates, not this block)
 export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {
-  agents: [
-    { path: ".github/agents.md", kind: "class-only" },
-    { path: ".github/copilot-instructions.md", kind: "class-only" },
-    { path: ".github/instructions/review.instructions.md", kind: "header" },
-    {
-      path: "AGENTS.md",
-      kind: "region",
-      begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-      end: "<!-- END REPO-PLATFORM MANAGED -->",
-    },
-    { path: "CLAUDE.md", kind: "class-only" },
-  ],
   bun: [
     { path: ".bun-version", kind: "class-only" },
     { path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" },
@@ -160,8 +157,6 @@ export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFil
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
   "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
-  "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
-  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
 // END GENERATED: module-ownership
 

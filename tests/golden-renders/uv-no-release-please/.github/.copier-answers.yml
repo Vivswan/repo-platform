@@ -5,8 +5,10 @@ _src_path: ./tree
 copyright_holder: Vivswan Shah (https://github.com/Vivswan)
 description: Golden render fixture
 github_username: Vivswan
+homepage: ''
 modules:
 - uv
 private: false
 project_name: Golden Render
 project_slug: golden-render
+topics: ''

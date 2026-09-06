@@ -757,7 +757,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // repo file stops carrying it.
   const manifests = loadManifests();
   const privateFleet = managedSettings(
-    { modules: ["settings-sync"], private: true, trackingLabels: [] },
+    { modules: [], private: true, trackingLabels: [] },
     manifests,
   );
   const mainRuleTypes = (repoText: string) => {

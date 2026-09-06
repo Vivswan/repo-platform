@@ -2,11 +2,10 @@
 // Preserves repo-owned files after an update.
 //
 // settings.yml is a repo-owned starter (_skip_if_exists) wherever it
-// exists: deselecting the settings-sync module de-renders it, but the
-// sync must never delete a repo's settings file - repo-platform's
-// settings-repos run merges it over the centrally computed managed
-// baseline and applies the result. A recovery re-render can de-render the
-// file too, so it is restored outright there.
+// exists, and the sync must never delete a repo's settings file -
+// repo-platform's settings-repos run merges it over the centrally computed
+// managed baseline and applies the result. A recovery re-render can
+// de-render the file, so it is restored outright there.
 //
 // LICENSE.md leaves the render when a repo selects the custom-license
 // module;

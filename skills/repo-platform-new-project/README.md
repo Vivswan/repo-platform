@@ -11,8 +11,8 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 ## What It Does
 
 - Applies the copier template from the generated `build` branch
-- Walks the copier questions: modules multiselect, per-module follow-ups (pages, fuzzer, settings-sync), visibility
-- Publishes the repo, enrolls it (fleet PAT access is the enrollment), and opts it into managed settings (the settings-sync module; the baseline assembles each module's labels automatically)
+- Walks the copier questions: modules multiselect, per-module follow-ups (pages, docs-site, fuzzer, nightly, skills), the settings identity keys, visibility
+- Publishes the repo and enrolls it (fleet PAT access is the enrollment); its settings are managed from then on (adoption is the opt-in; the baseline assembles each module's labels automatically)
 - Explains what runs on the first PR (the all-green gate) and which files are managed vs repo-owned
 
 ## Plugin-Ready Layout

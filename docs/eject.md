@@ -15,7 +15,7 @@ Either of these stops sync PRs:
 - add the repo to the `exclude:` list in `repos.yml`, or
 - revoke the fleet PAT's access to the repo (discovery only enrolls repos the token can write to).
 
-Settings stop being applied too: the nightly heal only manages enrolled repos whose `.repo-platform.yml` selects the settings-sync module ([settings.md](settings.md)).
+Settings stop being applied too: the nightly heal only manages enrolled repos with a `.repo-platform.yml` ([settings.md](settings.md)).
 
 ## 2. (Optional) Strip the managed files in the repo
 

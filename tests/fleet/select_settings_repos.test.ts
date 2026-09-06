@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { selectsSettingsSync } from "../../.github/scripts/fleet/build_settings_matrix";
+import { declaredModules } from "../../.github/scripts/fleet/build_settings_matrix";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -9,21 +9,26 @@ const temp = tempDirs();
 // End-to-end harness for the selector: the script runs against stub `gh`
 // and `curl` binaries on PATH (plus a no-op `sleep`, so the retry loop
 // costs no wall time). Personas, all enrolled unless probed otherwise;
-// the opt-in is the settings-sync module in .repo-platform.yml:
+// adoption (a .repo-platform.yml with a readable modules list) is the
+// opt-in to managed settings, whether or not the list still names the
+// folded settings-sync module:
 //   deadapi       - .repo-platform.yml fetch fails HTTP 502 every attempt
 //   deadprobe     - push probe answers HTTP 500 every attempt
-//   flaky         - push probe 500s once then 200s; the opt-in fetch 502s
+//   flaky         - push probe 500s once then 200s; the adoption fetch 502s
 //                   once then succeeds (both must be healed by the retries)
-//   steady        - every probe answers first try; opts in
-//   nomodule      - adopted but does not select settings-sync: a routine
-//                   notice-level skip, never a warning
-//   hidden-server - PRIVATE, wildcard-discovered: healthy opt-in, must
+//   steady        - every probe answers first try; adopted (its list still
+//                   names settings-sync, the pre-fold shape)
+//   nomodule      - adopted with a list naming no folded module: a target
+//                   like any other
+//   unadopted     - no .repo-platform.yml (404): a routine notice-level
+//                   skip, never a warning
+//   hidden-server - PRIVATE, wildcard-discovered: healthy adoption, must
 //                   reach the matrix as its hint with a verify tag, never
 //                   as a slug
 //   hidden-nomods - PRIVATE, wildcard-discovered: its .repo-platform.yml
 //                   has no readable modules list, so the unmanaged
 //                   warning and summary line must carry the hint
-//   hidden-deadapi - PRIVATE, wildcard-discovered: the opt-in fetch 502s
+//   hidden-deadapi - PRIVATE, wildcard-discovered: the adoption fetch 502s
 //                   every attempt with the slug and bare name in the
 //                   error text; the retry lines and the final warning
 //                   must carry only the hint
@@ -32,20 +37,22 @@ const temp = tempDirs();
 // repos.yml (self-disclosed), so they still print plainly with
 // hide_details riding the matrix row. The operator repository itself
 // (GITHUB_REPOSITORY) always joins the matrix as the builder's self row.
-// The heal must select flaky, steady, and hidden-server, warn about
+// The heal must select flaky, steady, nomodule, and hidden-server, warn about
 // deadapi, deadprobe, hidden-nomods, and hidden-deadapi (skipped this
 // run, retried nightly), and exit 0; only an unreadable registry or a
 // failed discovery still exits 1.
-describe("selectsSettingsSync", () => {
-  test("answers true/false for a readable modules list", () => {
-    expect(selectsSettingsSync("modules:\n  - settings-sync\n")).toBe(true);
-    expect(selectsSettingsSync("modules: [uv]\n")).toBe(false);
+describe("declaredModules", () => {
+  test("answers the list for a readable declaration, in the sync's grammar", () => {
+    expect(declaredModules("modules:\n  - settings-sync\n")).toEqual(["settings-sync"]);
+    expect(declaredModules("modules: [uv]\n")).toEqual(["uv"]);
+    expect(declaredModules("modules: []\n")).toEqual([]);
   });
 
   test("answers null for an unreadable list, never guessing", () => {
-    expect(selectsSettingsSync("notmodules: true\n")).toBeNull();
-    expect(selectsSettingsSync("modules: notalist\n")).toBeNull();
-    expect(selectsSettingsSync(": broken\n")).toBeNull();
+    expect(declaredModules("notmodules: true\n")).toBeNull();
+    expect(declaredModules("modules: notalist\n")).toBeNull();
+    expect(declaredModules("modules: [uv, uv]\n")).toBeNull();
+    expect(declaredModules(": broken\n")).toBeNull();
   });
 });
 
@@ -88,6 +95,10 @@ describe("select_settings_repos.ts", () => {
         "    ;;",
         "  repos/Vivswan/nomodule/contents/.repo-platform.yml)",
         '    echo "modules: [uv, release-please]"',
+        "    ;;",
+        "  repos/Vivswan/unadopted/contents/.repo-platform.yml)",
+        '    echo "HTTP 404 from stub" >&2',
+        "    exit 1",
         "    ;;",
         "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml)",
         '    echo "notmodules: true"',
@@ -151,6 +162,7 @@ describe("select_settings_repos.ts", () => {
         "  - Vivswan/flaky",
         "  - Vivswan/nomodule",
         "  - Vivswan/steady",
+        "  - Vivswan/unadopted",
         "",
       ].join("\n"),
     );
@@ -248,7 +260,7 @@ describe("select_settings_repos.ts", () => {
 
   test("a probe that flakes once is retried and the repo stays selected", () => {
     expect(main.stdout).toContain("Vivswan/flaky: push-permission probe failed (attempt 1/3");
-    expect(main.stdout).toContain("Vivswan/flaky: settings opt-in check failed (attempt 1/3");
+    expect(main.stdout).toContain("Vivswan/flaky: settings adoption check failed (attempt 1/3");
     expect(main.stdout).not.toContain("::warning::Vivswan/flaky");
     expect(targetsOf(main).map((t) => t.repo)).toContain("Vivswan/flaky");
   });
@@ -256,7 +268,7 @@ describe("select_settings_repos.ts", () => {
   test("a persistently failing repo is skipped with a warning naming repo, probe, and error", () => {
     for (const [repo, probe, error] of [
       ["Vivswan/deadprobe", "push-permission probe", "HTTP 500"],
-      ["Vivswan/deadapi", "settings opt-in check", "HTTP 502"],
+      ["Vivswan/deadapi", "settings adoption check", "HTTP 502"],
     ]) {
       const warning = main.stdout
         .split("\n")
@@ -270,15 +282,29 @@ describe("select_settings_repos.ts", () => {
     }
   });
 
-  test("a repo without the settings-sync module is a routine notice-level skip", () => {
+  test("every adopted repository is a target, whatever its list names; an unadopted one is not", () => {
+    // The whole selection for the fixture fleet: adoption is the opt-in,
+    // so a declaration still naming settings-sync (steady, the pre-fold
+    // shape) and one that never did (nomodule) select alike, the 404
+    // (unadopted) is a routine notice-level skip, and the repos whose
+    // probes never answered stay out with their warnings. The operator
+    // repository joins as the builder's self row.
+    expect(targetsOf(main).map((t) => t.repo)).toEqual([
+      "Vivswan/flaky",
+      "Vivswan/nomodule",
+      "Vivswan/repo-platform",
+      "Vivswan/steady",
+      "h**-s**r",
+    ]);
     const notice = main.stdout
       .split("\n")
-      .find((line) => line.startsWith("::notice::Vivswan/nomodule"));
+      .find((line) => line.startsWith("::notice::Vivswan/unadopted"));
     expect(notice).toBeDefined();
-    expect(notice).toContain("does not select the settings-sync");
-    expect(main.stdout).not.toContain("::warning::Vivswan/nomodule");
+    expect(notice).toContain("no .repo-platform.yml on its default branch");
+    expect(main.stdout).not.toContain("::warning::Vivswan/unadopted");
+    expect(main.stdout).not.toContain("::notice::Vivswan/nomodule");
     expect(main.summary).not.toContain("Vivswan/nomodule");
-    expect(targetsOf(main).map((t) => t.repo)).not.toContain("Vivswan/nomodule");
+    expect(main.summary).not.toContain("Vivswan/unadopted");
   });
 
   test("the matrix is intact: skips never drop their neighbors, self included", () => {
@@ -291,6 +317,13 @@ describe("select_settings_repos.ts", () => {
       {
         repo: "Vivswan/flaky",
         name: "flaky",
+        redact_name: false,
+        hide_details: true,
+        verify: "",
+      },
+      {
+        repo: "Vivswan/nomodule",
+        name: "nomodule",
         redact_name: false,
         hide_details: true,
         verify: "",
@@ -337,7 +370,7 @@ describe("select_settings_repos.ts", () => {
     // test above) and this warning must render both as the hint.
     const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-d**i"));
     expect(warning).toBeDefined();
-    expect(warning).toContain("settings opt-in check");
+    expect(warning).toContain("settings adoption check");
     expect(warning).toContain(
       "https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable",
     );
@@ -590,15 +623,15 @@ describe("select_settings_repos.ts", () => {
   );
 
   test(
-    "a scope of known repos that decline the module selects nothing, green, with the notice",
+    "a scope of known repos that are not adopted selects nothing, green, with the notice",
     () => {
-      // A synced repo need not manage its settings here: the settings
-      // apply that follows a fleet sync must not go red for it.
-      const r = run("list-declined", { env: { ONLY_REPO: "Vivswan/nomodule" } });
+      // A scoped run may legitimately select nothing: the settings apply
+      // that follows a fleet sync must not go red for an unadopted repo.
+      const r = run("list-declined", { env: { ONLY_REPO: "Vivswan/unadopted" } });
       expect(r.exitCode).toBe(0);
       expect(targetsOf(r)).toEqual([]);
       expect(r.stdout).toContain(
-        "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module",
+        "::notice::Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch",
       );
       expect(r.stdout).toContain("settings targets: (none)");
       expect(r.stdout).not.toContain("::error::");

@@ -57,7 +57,7 @@ build branch (first-parent, oldest to newest)
 
 Because the source is history, pruning an old rung from main is an ordinary PR for every repository with a usable recorded base: one that detaches and re-attaches years later still runs it. The one cost is recovery: a repository with no usable base runs only the delivered tip's rungs, so a pruned rung's postcondition is not re-established there. Prune only rungs whose postcondition a fresh render carries anyway (a rename copier re-renders), never one that rewrites repository-owned content. The rung's source is fetched with `git show <commit>:migrations/<file>` into `$RUNNER_TEMP` and loaded from there.
 
-Rungs run before the module selection and before copier updates the tree: a rung may rewrite `.repo-platform.yml`, and a file a rung moves is committed first, so the split-file rebuild finds its repository-owned half at the new path. Their notes land in two PR-body reports: the informational one and the one that keeps the PR on the manual-review path.
+Rungs run before the module selection and before copier updates the tree: a rung may rewrite `.repo-platform.yml` (m0002 drops names the delivered template no longer offers, which selection would otherwise refuse), and a file a rung moves is committed first, so the split-file rebuild finds its repository-owned half at the new path. Their notes land in two PR-body reports: the informational one and the one that keeps the PR on the manual-review path.
 
 ## A usable base
 
@@ -88,6 +88,7 @@ A rung is code the sync runs from the build branch, the same channel copier's st
 One entry per file, in ladder order; a rung pruned from main moves to the list below.
 
 - `m0001_security_policy_to_github`: moves a root `SECURITY.md` to `.github/SECURITY.md` byte-for-byte (`git mv`, committed ahead of copier so the split-file rebuild finds the repository-owned half at the new path); a policy at both paths, a non-file, or a symlinked `.github` is the error arm; a stale `mirrors` source at the old path gets advice in the note.
+- `m0002_fold_base_modules`: drops `agents`, `auto-assign`, and `settings-sync` from `.repo-platform.yml`'s `modules` list (the three became unconditional base content, and a name that is not a template choice fails module selection), staged ahead of selection and copier so copier records the shorter selection itself; a line-level edit of the list alone, so comments and the `mirrors` declaration are untouched (an emptied list renders `[]`), verified by re-parsing before the write; a declaration selection cannot read is left to the selection step's diagnosis (`unreadable`), a missing file is `missing`, a non-file or a list shape the edit does not understand (a flow list spanning lines, an alias or tagged item) is the error arm; the note is informational (no rendered file moves or leaves). Until a repository's sync PR merges, the settings apply refuses its stale declaration (unknown module) and skips nothing silently.
 
 ## Pruned from main
 

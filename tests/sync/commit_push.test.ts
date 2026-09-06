@@ -269,6 +269,15 @@ const RENDER: Record<string, { content: string; entry: string }> = {
   ".github/SECURITY.md": split(B, E, "# Security policy\n"),
   "CONTRIBUTING.md": split(B, E, "# Contributing\n"),
   "LICENSE.md": split(B, E, "# License\n"),
+  "AGENTS.md": split(B, E, "# AGENTS.md\n"),
+  // The agent-file aliases are symlinks in a real render; content-hashed
+  // regular files stand in here.
+  "CLAUDE.md": managed("AGENTS.md\n"),
+  ".github/agents.md": managed("AGENTS.md\n"),
+  ".github/copilot-instructions.md": managed("AGENTS.md\n"),
+  ".github/instructions/review.instructions.md": managed(`${MANAGED_HEADER}# Review\n`),
+  ".github/workflows/auto-assign.yml": managed(`${MANAGED_HEADER}name: Auto Assign\n`),
+  ".github/workflows/settings-sync.yml": managed(`${MANAGED_HEADER}name: Settings Sync\n`),
   ".github/CODE_OF_CONDUCT.md": managed(`${MANAGED_HEADER}# Code of Conduct\n`),
   ".github/dependabot.yml": managed(`${MANAGED_HEADER}version: 2\nupdates: []\n`),
   ".typography-allow": managed(MANAGED_HEADER),
@@ -399,11 +408,11 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
     // .github/workflows, so its report may claim label references the
-    // pushed tree no longer carries. This fixture opts out of
-    // settings-sync (the shared scratch target is not a full checkout),
-    // so it pins that the recompute RUNS and overwrites - the stale note
-    // is replaced with that tree's honest verdict (empty: not
-    // applicable). The ordering pin is the next test.
+    // pushed tree no longer carries. This fixture has no settings.yml
+    // (the shared scratch target is not a full checkout), so it pins that
+    // the recompute RUNS and overwrites - the stale note is replaced with
+    // that tree's honest verdict (empty: not applicable). The ordering pin
+    // is the next test.
     const staleNote = '> [!WARNING]\n> REFERENCED LABELS: "answered" is missing\n';
     writeFileSync(join(scratch, "work", "target", ".repo-platform.yml"), "modules: []\n");
     mkdirSync(join(scratch, "work", "target", ".github"), { recursive: true });
@@ -420,7 +429,8 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
   });
 
   test("the recompute reads the RESTORED workflow content, never the pre-restore tree", () => {
-    // Full settings-sync fixture, with a workflow whose label reference
+    // A full settings fixture (registration, answers, settings.yml), with a
+    // workflow whose label reference
     // the stub git's checkout REWRITES (pre-restore-label ->
     // restored-label). The recomputed report must name the restored
     // reference; the pre-restore one surviving would mean the recompute
@@ -428,7 +438,7 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
     // never pushed.
     const targetDir = join(scratch, "work", "target");
     mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
-    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules:\n  - settings-sync\n");
+    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules:\n  - uv\n");
     writeFileSync(join(targetDir, ".github/.copier-answers.yml"), "private: false\n");
     writeFileSync(join(targetDir, ".github", "settings.yml"), "repository:\n  private: false\n");
     writeFileSync(

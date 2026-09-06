@@ -10,7 +10,6 @@ fuzzer_label: fuzz-nightly
 github_username: Vivswan
 homepage: ''
 modules:
-- agents
 - bun
 - node
 - deno
@@ -22,10 +21,8 @@ modules:
 - issue-templates
 - skills
 - pr-title
-- auto-assign
 - fuzzer
 - nightly
-- settings-sync
 nightly_label: nightly-failure
 pages_build_command: bun run build
 pages_dist_dir: dist

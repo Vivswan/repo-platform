@@ -31,7 +31,9 @@ const ANSWERS = (extra = "") =>
   `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n${extra}`;
 // A public render of the base alone (modules: [uv] adds no owned file):
 // every roster path the tables expect is present, because the manifest
-// cross-check errors on any roster path the manifest does not list.
+// cross-check errors on any roster path the manifest does not list. The
+// agent-file aliases (symlinks in a real render) are content-hashed regular
+// files here; the link tests below plant real symlinks.
 const BASELINE: Record<string, string> = {
   ".github/.copier-answers.yml": ANSWERS(),
   // A repo-owned starter (generated once, never rewritten): no managed
@@ -48,6 +50,14 @@ const BASELINE: Record<string, string> = {
   ".yamllint": `${MANAGED_HEADER}extends: default\n`,
   "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
   "LICENSE.md": `${B}\n# License\n${E}\n`,
+  "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
+  "CLAUDE.md": "AGENTS.md\n",
+  ".github/agents.md": "AGENTS.md\n",
+  ".github/copilot-instructions.md": "AGENTS.md\n",
+  ".github/instructions/review.instructions.md":
+    '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
+  ".github/workflows/auto-assign.yml": `${MANAGED_HEADER}name: Auto Assign\non: [issues]\n`,
+  ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: Settings Sync\non: [push]\n`,
   ".github/workflows/ci.yml": [
     "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
@@ -91,6 +101,13 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".gitattributes", kind: "region", begin: HB, end: HE },
   { path: ".github/CODEOWNERS", kind: "region", begin: HB, end: HE },
   { path: ".github/dependabot.yml", kind: "header" },
+  { path: ".github/agents.md", kind: "class-only" },
+  { path: ".github/copilot-instructions.md", kind: "class-only" },
+  { path: ".github/instructions/review.instructions.md", kind: "header" },
+  { path: ".github/workflows/auto-assign.yml", kind: "header" },
+  { path: ".github/workflows/settings-sync.yml", kind: "header" },
+  { path: "AGENTS.md", kind: "region", begin: B, end: E },
+  { path: "CLAUDE.md", kind: "class-only" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   { path: ".gitignore", kind: "region", begin: HB, end: HE },
   { path: ".typography-allow", kind: "header" },
@@ -101,13 +118,6 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".github/SECURITY.md", kind: "region", begin: B, end: E },
 ];
 const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
-  agents: [
-    { path: ".github/agents.md", kind: "class-only" },
-    { path: ".github/copilot-instructions.md", kind: "class-only" },
-    { path: ".github/instructions/review.instructions.md", kind: "header" },
-    { path: "AGENTS.md", kind: "region", begin: B, end: E },
-    { path: "CLAUDE.md", kind: "class-only" },
-  ],
   bun: [
     { path: ".bun-version", kind: "class-only" },
     { path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" },
@@ -122,8 +132,6 @@ const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
   "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
-  "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
-  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
 
 const shaLatin1 = (text: string) =>
@@ -1142,17 +1150,6 @@ describe("release-please-config.json never pins a version", () => {
   });
 });
 
-// The agents module's roster besides AGENTS.md: the two class-only copies
-// (symlinks in a real render; content-hashed regular files here) and the
-// headed review instructions, so an agents fixture lists every roster path.
-const AGENTS_SIDE_FILES: Record<string, string> = {
-  ".github/agents.md": "AGENTS.md\n",
-  ".github/copilot-instructions.md": "AGENTS.md\n",
-  "CLAUDE.md": "AGENTS.md\n",
-  ".github/instructions/review.instructions.md":
-    '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
-};
-
 describe("ownership self-declarations", () => {
   const C1 =
     "# This file is managed by Vivswan/repo-platform.\n" +
@@ -1327,21 +1324,14 @@ describe("ownership self-declarations", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("the agents module's AGENTS.md carries the region markers", () => {
-    const agentsRender = {
-      ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
-        "modules: [uv]",
-        "modules: [uv, agents]",
-      ),
-      ...AGENTS_SIDE_FILES,
-    };
-    const bare = runValidator({ ...agentsRender, "AGENTS.md": "# AGENTS.md\n" });
+  test("AGENTS.md carries the region markers on every render (an ungated base region)", () => {
+    const bare = runValidator({ "AGENTS.md": "# AGENTS.md\n" });
     expect(bare.exitCode).toBe(1);
     expect(bare.stderr).toContain(`AGENTS.md: marker '${B}' appears 0 times`);
-    const marked = runValidator({
-      ...agentsRender,
-      "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
-    });
+    const missing = runValidator({}, [], { omit: ["AGENTS.md"] });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain("AGENTS.md is missing - the template always generates it");
+    const marked = runValidator({ "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n` });
     expect(marked.stderr).toBe("");
     expect(marked.exitCode).toBe(0);
   });
@@ -1716,16 +1706,10 @@ describe("ownership-manifest byte parity", () => {
 
   test("a tree carrying the base marker roster passes against the mirror-stamped manifest", () => {
     // The mirror-coverage claim's teeth: this fixture carries every base
-    // marker/header path the mirror declares (plus the agents module's
-    // AGENTS.md and review instructions), all validated through the auto-stamped manifest - a
-    // drifted mirror entry for any of them fails the roster cross-check
-    // here instead of sitting inert.
-    const registration = BASELINE[".repo-platform.yml"].replace(
-      "modules: [uv]",
-      "modules: [uv, agents]",
-    );
+    // marker/header path the mirror declares, all validated through the
+    // auto-stamped manifest - a drifted mirror entry for any of them fails
+    // the roster cross-check here instead of sitting inert.
     const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": registration,
       ".editorconfig": `${HB}\n[*]\nindent_size = 2\n${HE}\n`,
       ".gitattributes": `${HB}\n*.bin binary\n${HE}\n`,
       ".github/CODEOWNERS": `${HB}\n/docs/ @Vivswan\n${HE}\n`,
@@ -1737,7 +1721,10 @@ describe("ownership-manifest byte parity", () => {
       "LICENSE.md": `${B}\n# License\n${E}\n`,
       ".github/SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
-      ...AGENTS_SIDE_FILES,
+      ".github/instructions/review.instructions.md":
+        '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review rules\n',
+      ".github/workflows/auto-assign.yml": `${MANAGED_HEADER}name: assign\non: [issues]\n`,
+      ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: settings\non: [push]\n`,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
@@ -1960,16 +1947,6 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).not.toContain(path);
   });
 
-  // The settings-sync module's one roster path, so a settings-sync fixture
-  // lists every roster path.
-  const SETTINGS_SYNC_WORKFLOW = {
-    ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: settings\non: [push]\n`,
-  };
-  const SETTINGS_SYNC_ENTRY = {
-    ".github/workflows/settings-sync.yml": managedEntry(
-      SETTINGS_SYNC_WORKFLOW[".github/workflows/settings-sync.yml"],
-    ),
-  };
   test("a legacy mergeable entry is an error naming the retirement", () => {
     // Old renders' manifests still class settings.yml mergeable; the class
     // is retired (the file is a starter now), and a manifest claiming it
@@ -1979,12 +1956,7 @@ describe("ownership-manifest byte parity", () => {
       ".github/settings.yml": '{"class": "mergeable"}',
     };
     const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
-        "modules: [uv]",
-        "modules: [uv, settings-sync]",
-      ),
-      ...SETTINGS_SYNC_WORKFLOW,
-      [MANIFEST]: manifestOf({ ...entries, ...SETTINGS_SYNC_ENTRY }),
+      [MANIFEST]: manifestOf(entries),
       ".github/settings.yml": "repository:\n  has_issues: true\n",
     });
     expect(exitCode).toBe(1);
@@ -1992,18 +1964,12 @@ describe("ownership-manifest byte parity", () => {
   });
 
   test("a settings.yml starter entry passes: the file is repo-owned", () => {
-    const registration = BASELINE[".repo-platform.yml"].replace(
-      "modules: [uv]",
-      "modules: [uv, settings-sync]",
-    );
     const entries = {
       ...stampedBaseline(),
       ".github/settings.yml": '{"class": "starter"}',
     };
     const { exitCode, stdout, stderr } = runValidator({
-      ".repo-platform.yml": registration,
-      ...SETTINGS_SYNC_WORKFLOW,
-      [MANIFEST]: manifestOf({ ...entries, ...SETTINGS_SYNC_ENTRY }),
+      [MANIFEST]: manifestOf(entries),
       ".github/settings.yml": "repository:\n  has_issues: true\n  custom_addition: true\n",
     });
     expect(stderr).toBe("");
@@ -2122,23 +2088,16 @@ describe("ownership-manifest byte parity", () => {
     expect(exitCode).toBe(0);
   });
 
-  // The agents module's CLAUDE.md is a symlink: a class-only roster path
-  // with no comment channel. These fixtures select agents and land the
-  // link so both the parity rule and the cross-check see a real symlink.
+  // CLAUDE.md and the two .github aliases are symlinks in a real render:
+  // class-only roster paths with no comment channel. These fixtures land
+  // the links so both the parity rule and the cross-check see real symlinks.
   const agentsLinkTree = (claudeEntry: string): string => {
     const root = temp.dir("validate-template-link-");
-    const registration = BASELINE[".repo-platform.yml"].replace(
-      "modules: [uv]",
-      "modules: [uv, agents]",
-    );
-    const agentsMd = `${B}\n# AGENTS.md\n${E}\n`;
-    const review = AGENTS_SIDE_FILES[".github/instructions/review.instructions.md"];
-    const tree = {
-      ...BASELINE,
-      ".repo-platform.yml": registration,
-      "AGENTS.md": agentsMd,
-      ".github/instructions/review.instructions.md": review,
-    };
+    const agentsMd = BASELINE["AGENTS.md"];
+    const tree: Record<string, string> = { ...BASELINE };
+    for (const link of ["CLAUDE.md", ".github/agents.md", ".github/copilot-instructions.md"]) {
+      delete tree[link];
+    }
     for (const [rel, content] of Object.entries(tree)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
@@ -2153,7 +2112,6 @@ describe("ownership-manifest byte parity", () => {
         "AGENTS.md":
           `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
           `"end": ${JSON.stringify(E)}, "hash": "${sha(agentsMd)}"}`,
-        ".github/instructions/review.instructions.md": managedEntry(review),
         ".github/agents.md": managedEntry("../AGENTS.md"),
         ".github/copilot-instructions.md": managedEntry("../AGENTS.md"),
         "CLAUDE.md": claudeEntry,

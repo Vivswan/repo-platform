@@ -4,7 +4,7 @@
 #
 # The marker label github-settings-as-code's private reporting pins its
 # report issue with. The central apply redacts private targets and injects
-# the label into its managed set automatically; the settings-sync
+# the label into its managed set automatically; a repository's own
 # self-apply is never redacted and injects nothing - so this layer
 # declares it, keeping the self-apply from deleting what the next central
 # run recreates.

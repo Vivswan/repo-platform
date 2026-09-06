@@ -17,13 +17,13 @@ import {
   factsFromOperatorAnswers,
   factsFromTargetDir,
   layerPaths,
+  leftManagementReason,
   managedLabelNames,
   managedLabels,
   managedRulesets,
   managedSettings,
   modulesFrom,
   type RepoFacts,
-  renderDecision,
   renderManagedYaml,
   trackingLabelsFrom,
 } from "../../.github/scripts/fleet/render_managed_settings";
@@ -265,9 +265,9 @@ describe("layerPaths", () => {
       ],
     },
     {
-      // agents ships no settings layer at all, so it must not appear.
+      // issue-templates ships no settings layer at all, so it must not appear.
       reason: "a module with no layer files contributes none",
-      facts: facts({ modules: ["agents"] }),
+      facts: facts({ modules: ["issue-templates"] }),
       paths: [".github/settings-baseline.yml", ".github/settings-public.yml"],
     },
   ])("$reason", ({ facts: f, paths }) => {
@@ -355,14 +355,14 @@ describe("enableCodeql", () => {
   });
 });
 
-describe("the render CLI acts on the recheck", () => {
-  // renderDecision being right proves nothing if main() stops calling it,
-  // so these drive the script itself and assert what the workflow gates
-  // on: the output file's content, and whether a document was written at
-  // all.
+describe("the render CLI acts on the adoption recheck", () => {
+  // A null fact source being right proves nothing if main() stops acting
+  // on it, so these drive the script itself and assert what the workflow
+  // gates on: the output file's content, and whether a document was
+  // written at all.
   const script = resolve(import.meta.dir, "../../.github/scripts/fleet/render_managed_settings.ts");
 
-  function runCli(modules: string): {
+  function runCli(modules: string | null): {
     exitCode: number | null;
     outputs: string;
     document: string | null;
@@ -382,7 +382,8 @@ describe("the render CLI acts on the recheck", () => {
     git(["git", "-C", root, "config", "user.name", "t"]);
     git(["git", "-C", root, "config", "commit.gpgsign", "false"]);
     git(["git", "-C", root, "config", "core.hooksPath", "/dev/null"]);
-    writeFileSync(join(root, ".repo-platform.yml"), `modules: [${modules}]\n`);
+    if (modules !== null)
+      writeFileSync(join(root, ".repo-platform.yml"), `modules: [${modules}]\n`);
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".github/settings.yml"), "repository:\n  private: false\n");
     writeFileSync(join(root, ".github/.copier-answers.yml"), "github_username: o\n");
@@ -404,22 +405,22 @@ describe("the render CLI acts on the recheck", () => {
     };
   }
 
-  test("dropping settings-sync writes NO document and publishes skipped=true", () => {
-    const result = runCli("uv");
+  test("a checkout without .repo-platform.yml writes NO document and publishes skipped=true", () => {
+    const result = runCli(null);
     expect(result.exitCode).toBe(0);
     expect(result.document).toBeNull();
     expect(result.outputs).toContain("skipped=true");
   });
 
-  test("keeping it writes the document and publishes skipped=false", () => {
-    const result = runCli("uv, settings-sync");
+  test("an adopted checkout writes the document and publishes skipped=false", () => {
+    const result = runCli("uv");
     expect(result.exitCode).toBe(0);
     // The written file IS the render for the checkout's facts - the
     // document the workflow applies - and it carries the generator's
     // self-identifying header.
-    expect(result.document).toBe(
-      renderManagedYaml(factsFromTargetDir(result.root, manifests), manifests),
-    );
+    const factsRead = factsFromTargetDir(result.root, manifests);
+    expect(factsRead).not.toBeNull();
+    expect(result.document).toBe(renderManagedYaml(factsRead as RepoFacts, manifests));
     expect(result.document).toContain("render_managed_settings.ts");
     expect(result.outputs).toContain("skipped=false");
     // The pin the freshness step compares against: without it that step
@@ -428,43 +429,41 @@ describe("the render CLI acts on the recheck", () => {
   });
 });
 
-describe("renderDecision rechecks the opt-in at the pinned commit", () => {
-  test.each([
-    {
-      // Selection ran in the plan job against an older revision. Applying
-      // now would reconcile - and delete - labels on a repository that
-      // has turned central settings off.
-      reason: "a fetched target that dropped settings-sync is REFUSED",
+describe("adoption is rechecked at the pinned commit", () => {
+  // Selection ran in the plan job against an older revision. A repository
+  // whose .repo-platform.yml left in between has no selection to compute
+  // a baseline from, and applying one built from the older revision would
+  // reconcile - and delete - labels on a repository that left management.
+  test("a fetched target without .repo-platform.yml at the pin is null; nothing else is read", () => {
+    const seen: string[] = [];
+    const fetcher = (_repo: string, path: string): string | null => {
+      seen.push(path);
+      return null;
+    };
+    expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toBeNull();
+    expect(seen).toEqual([".repo-platform.yml"]);
+  });
+
+  test("the self-apply's local fact source is null without the file, facts with it", () => {
+    const dir = temp.dir("adoption-");
+    mkdirSync(join(dir, ".github"));
+    writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
+    expect(factsFromTargetDir(dir, manifests)).toBeNull();
+    writeFileSync(join(dir, ".repo-platform.yml"), "modules: [uv]\n");
+    expect(factsFromTargetDir(dir, manifests)).toEqual({
       modules: ["uv"],
-      source: "fetch" as const,
-      expected: {
-        kind: "skip",
-        reason: expect.stringContaining(
-          "owner/name: the settings-sync module is not selected at the revision these facts " +
-            "were read from, so settings are no longer managed here",
-        ),
-      },
-    },
-    {
-      reason: "a fetched target that still selects it renders",
-      modules: ["uv", "settings-sync"],
-      source: "fetch" as const,
-      expected: { kind: "render" },
-    },
-    {
-      reason: "the self-apply's local fact source is rechecked too",
-      modules: ["uv"],
-      source: "target-dir" as const,
-      expected: { kind: "skip", reason: expect.stringContaining("no longer managed") },
-    },
-    {
-      reason: "the operator repository is exempt: it has no .repo-platform.yml",
-      modules: [],
-      source: "operator" as const,
-      expected: { kind: "render" },
-    },
-  ])("$reason", ({ modules, source, expected }) => {
-    expect(renderDecision(facts({ modules }), source, "owner/name")).toEqual(expected);
+      private: false,
+      trackingLabels: [],
+      prTitleWorkflowPresent: false,
+    });
+  });
+
+  test("the skip reason names the repository and the deletion it avoids", () => {
+    expect(leftManagementReason("owner/name")).toBe(
+      "owner/name: no .repo-platform.yml at the revision these facts were read from - the " +
+        "repository left management, so this apply is SKIPPED. Applying anyway would reconcile " +
+        "- and delete - labels on a repository that is no longer managed.",
+    );
   });
 });
 
@@ -477,13 +476,13 @@ describe("factsFromFetch pins every read to one ref", () => {
     const seen: { path: string; ref: string }[] = [];
     const fetcher = (_repo: string, path: string, ref: string): string | null => {
       seen.push({ path, ref });
-      if (path === ".repo-platform.yml") return "modules: [uv, fuzzer, settings-sync]\n";
+      if (path === ".repo-platform.yml") return "modules: [uv, fuzzer]\n";
       if (path === ".github/settings.yml") return "repository:\n  private: false\n";
       if (path === ".github/.copier-answers.yml") return "fuzzer_label: my-fuzz\n";
       return null;
     };
     expect(factsFromFetch("owner/name", manifests, PIN, fetcher)).toEqual({
-      modules: ["uv", "fuzzer", "settings-sync"],
+      modules: ["uv", "fuzzer"],
       private: false,
       trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
       prTitleWorkflowPresent: false,
@@ -501,21 +500,17 @@ describe("factsFromFetch pins every read to one ref", () => {
 
 describe("fact resolvers", () => {
   test("modulesFrom reads the top-level list and refuses anything else", () => {
-    expect(modulesFrom("modules: [uv, settings-sync]\n", "f")).toEqual(["uv", "settings-sync"]);
+    expect(modulesFrom("modules: [uv, pages]\n", "f")).toEqual(["uv", "pages"]);
     expect(() => modulesFrom("notmodules: true\n", "f")).toThrow("modules list");
+    // The sync's registration grammar: a duplicate entry is unreadable.
+    expect(() => modulesFrom("modules: [uv, uv]\n", "f")).toThrow("modules list");
     // A typo must be LOUD: layerPaths finds no layer files for it, so the
     // document would look valid while missing that module's labels, and
     // the apply deletes undeclared labels off the live repository.
-    expect(() => modulesFrom("modules: [uv, setings-sync]\n", "f")).toThrow("unknown module");
-    // A retired module is tolerated, matching sync/modules.ts.
-    expect(
-      modulesFrom(
-        "modules: [uv, gone]\n",
-        "f",
-        manifests.filter((m) => m.module === "uv"),
-        new Set(["gone"]),
-      ),
-    ).toEqual(["uv"]);
+    expect(() => modulesFrom("modules: [uv, pgaes]\n", "f")).toThrow("unknown module");
+    // A folded name is unknown too: the repository's pending sync PR drops
+    // it (its rung), and the message says so instead of tolerating it.
+    expect(() => modulesFrom("modules: [uv, settings-sync]\n", "f")).toThrow("merge that PR first");
     expect(() => modulesFrom("a: [unclosed\n", "f")).toThrow("YAML parse error");
   });
 
@@ -541,13 +536,13 @@ describe("fact resolvers", () => {
   test("factsFromTargetDir prefers the checkout's declared visibility over the recorded answer", () => {
     const dir = temp.dir("facts-");
     mkdirSync(join(dir, ".github"));
-    writeFileSync(join(dir, ".repo-platform.yml"), "modules: [settings-sync]\n");
+    writeFileSync(join(dir, ".repo-platform.yml"), "modules: [uv]\n");
     writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
     writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
-    expect(factsFromTargetDir(dir, manifests).private).toBe(true);
+    expect(factsFromTargetDir(dir, manifests)?.private).toBe(true);
     // Undeclared falls back to the recorded answer.
     writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
-    expect(factsFromTargetDir(dir, manifests).private).toBe(false);
+    expect(factsFromTargetDir(dir, manifests)?.private).toBe(false);
   });
 
   test("the operator's own selection is validated too", () => {

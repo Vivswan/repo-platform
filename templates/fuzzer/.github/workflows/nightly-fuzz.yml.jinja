@@ -24,13 +24,13 @@ concurrency:
   group: nightly-fuzz
   cancel-in-progress: false
 
-# issues: write lets the fuzz-issue action file/close the tracking issue{% if 'auto-assign' in modules %};
-# actions: write lets the failure path dispatch auto-assign at it{% endif %}.
+# issues: write lets the fuzz-issue action file/close the tracking issue;
+# actions: write lets the failure path dispatch auto-assign at it.
 permissions:
   contents: read
   issues: write
-{% if 'auto-assign' in modules %}  actions: write
-{% endif %}
+  actions: write
+
 jobs:
   fuzz:
     runs-on: ubuntu-latest
@@ -89,7 +89,7 @@ jobs:
           artifacts-dir: .fuzz-failures
           artifact-name: fuzz-failures-{% raw %}${{ github.run_attempt }}{% endraw %}
 
-{% if 'auto-assign' in modules %}      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
+      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue
         if: {% raw %}failure() && steps.file-issue.outputs.issue-number != ''{% endraw %}
         env:
@@ -100,7 +100,7 @@ jobs:
           ISSUE_NUMBER: {% raw %}${{ steps.file-issue.outputs.issue-number }}{% endraw %}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
-{% endif %}      - name: Close the fuzz issue on a green night
+      - name: Close the fuzz issue on a green night
         if: success()
         uses: {{ github_username }}/repo-platform/actions/fuzz-issue@build
         with:

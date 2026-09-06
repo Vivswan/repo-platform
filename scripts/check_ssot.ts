@@ -1233,7 +1233,7 @@ function managedLabelRoster(): Label[] {
   return allLayerLabels(loadManifests());
 }
 
-/** The identity keys the settings-sync starter seeds (description,
+/** The identity keys the settings starter seeds (description,
  *  homepage, topics, private); the key list lives with the merge dialect
  *  (identityKeyIssues) - this wrapper applies the same contract to
  *  repo-platform's own .github/settings.yml so the two checkers cannot
@@ -5581,18 +5581,18 @@ const rules: Rule[] = [
         return found;
       };
       const rootTrio = aliases("", "AGENTS.md");
-      const templateTrio = aliases("templates/agents", "AGENTS.md.jinja");
+      const templateTrio = aliases("templates/base", "AGENTS.md.jinja");
       if (rootTrio.length === 0 || templateTrio.length === 0) {
         throw new Error("no AGENTS.md symlink aliases found - anchor lost");
       }
-      mismatches.push(...setMismatch("templates/agents/ symlink aliases", rootTrio, templateTrio));
+      mismatches.push(...setMismatch("templates/base/ symlink aliases", rootTrio, templateTrio));
 
       const repoAttrs = new Set(semanticLines(read(".gitattributes")));
       const tplAttrs = new Set(semanticLines(read("templates/base/.gitattributes.jinja")));
       for (const alias of rootTrio) {
         for (const [line, file] of [
           [`${alias} -text`, ".gitattributes"],
-          [`templates/agents/${alias} -text`, ".gitattributes"],
+          [`templates/base/${alias} -text`, ".gitattributes"],
         ]) {
           if (!repoAttrs.has(line)) {
             mismatches.push({ file, expected: `line ${JSON.stringify(line)}`, got: "missing" });
@@ -5611,7 +5611,7 @@ const rules: Rule[] = [
   },
 
   {
-    // The settings-sync starter and repo-platform's own .github/settings.yml
+    // The base settings starter and repo-platform's own .github/settings.yml
     // are the two independently-authored repo layers this repo controls;
     // the managed baseline document (.github/settings-baseline.yml) is the
     // single home of the fleet-generic content, so no baseline pair exists
@@ -5627,9 +5627,7 @@ const rules: Rule[] = [
       const vars = jinjaVars();
       const starter = asRecord(
         parseYaml(
-          placeholderJinja(
-            normalizeJinja(read("templates/settings-sync/.github/settings.yml.jinja"), vars),
-          ),
+          placeholderJinja(normalizeJinja(read("templates/base/.github/settings.yml.jinja"), vars)),
         ),
         "settings.yml.jinja",
       );
@@ -5637,7 +5635,7 @@ const rules: Rule[] = [
       for (const key of ["description", "homepage", "topics", "private"]) {
         if (!(key in starterRepository)) {
           mismatches.push({
-            file: "templates/settings-sync/.github/settings.yml.jinja",
+            file: "templates/base/.github/settings.yml.jinja",
             expected: `repository.${key} seeded from the copier answers`,
             got: "missing - the starter must declare all four identity keys",
           });
@@ -5649,7 +5647,7 @@ const rules: Rule[] = [
       for (const section of ["labels", "rulesets"]) {
         if (starter[section] !== undefined) {
           mismatches.push({
-            file: "templates/settings-sync/.github/settings.yml.jinja",
+            file: "templates/base/.github/settings.yml.jinja",
             expected: `no ${section} section (the managed baseline supplies it; the starter only shows commented examples)`,
             got: "declared",
           });
@@ -6575,7 +6573,7 @@ const rules: Rule[] = [
     // enforces, and every later stream's validator must carry the
     // case-insensitive cross-answer collision clause against each earlier
     // answer - the validator is the ONLY collision boundary for
-    // settings-sync repos (the fleet preflight covers central ones), so
+    // the repositories' self-apply (the fleet preflight covers central ones), so
     // deleting the clause must fail here.
     name: "tracking-label-regex",
     run: () => {

@@ -798,7 +798,7 @@ describe("split templates carry one ordered marker pair", () => {
       [join(templatesDir, "base", ".editorconfig.jinja"), HB, HE],
       [join(templatesDir, "base", ".github", "CODEOWNERS.jinja"), HB, HE],
       [join(templatesDir, "base", ".gitignore.jinja"), HB, HE],
-      [join(templatesDir, "agents", "AGENTS.md.jinja"), B, E],
+      [join(templatesDir, "base", "AGENTS.md.jinja"), B, E],
     ];
     for (const [path, begin, end] of templated) {
       const source = readFileSync(path, "utf-8");
@@ -1530,7 +1530,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         "-d",
         "description=Y",
         "-d",
-        "modules=[agents, uv]",
+        "modules=[uv]",
         "-d",
         "private=false",
       ];

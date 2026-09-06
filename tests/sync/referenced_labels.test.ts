@@ -17,7 +17,7 @@ const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/referenced_labels.ts");
 
-const REGISTRATION = "modules:\n  - settings-sync\n";
+const REGISTRATION = "modules:\n  - uv\n";
 const ANSWERS = "_commit: build@sha\nprivate: false\n";
 const SETTINGS = "repository:\n  private: false\n";
 
@@ -134,9 +134,8 @@ describe("referenced_labels", () => {
     expect(clean.output).toContain("every referenced label is declared");
   });
 
-  test("not applicable without the settings-sync module (nothing reconciles labels)", () => {
+  test("not applicable without a .repo-platform.yml (the repo is no settings target)", () => {
     const root = makeTarget({
-      ".repo-platform.yml": "modules: []\n",
       ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": SETTINGS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
@@ -144,7 +143,7 @@ describe("referenced_labels", () => {
     const r = runScript(root);
     expect(r.exitCode).toBe(0);
     expect(r.report).toBe("");
-    expect(r.output).toContain("not applicable");
+    expect(r.output).toContain("no .repo-platform.yml");
   });
 
   test("not applicable without a settings.yml (the apply skips, deleting nothing)", () => {

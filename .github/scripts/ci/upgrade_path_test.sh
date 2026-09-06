@@ -10,8 +10,10 @@
 # survives - including settings.yml, which is repo-owned wherever it exists
 # (protected from cleanup and restored if copier de-renders it). A second
 # leg proves the recover=recopy semantics on a corrupted _commit, and a
-# third runs an update where visibility flips public -> private (its own
-# fixture, so this leg's settings-sync deselection coverage stays intact).
+# third runs an update where visibility flips public -> private on its own
+# fixture. The module fold (agents, auto-assign, settings-sync into base)
+# rides the main leg as the m0002 rung, with an arrival leg below for a
+# repository onboarded without the three.
 #
 # Both template refs must live in ONE clone (copier re-renders the old
 # version from _src_path), so build trees are committed to local orphan
@@ -204,6 +206,61 @@ grep -qF '"SECURITY.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json
 test -f "$OLD_TREE/migrations/m0001_security_policy_to_github.ts" \
   || fail "the fresh build tree carries no rung file for m0001_security_policy_to_github (is the rung still on the ladder?)"
 rm "$OLD_TREE/migrations/m0001_security_policy_to_github.ts"
+# The old build predates the fold of agents, auto-assign, and settings-sync
+# into the base tree: the three were module CHOICES, their files landed only
+# when selected (the generated _exclude gates and the manifest template's
+# module gates), and the ladder's rung for the fold was absent - so the
+# runner below must find m0002 pending. Modeled on the current tree: the
+# rendered files are byte-identical to today's base render, which is what
+# lets the main leg assert they land UNCHANGED.
+test -f "$OLD_TREE/migrations/m0002_fold_base_modules.ts" \
+  || fail "the fresh build tree carries no rung file for m0002_fold_base_modules (is the rung still on the ladder?)"
+rm "$OLD_TREE/migrations/m0002_fold_base_modules.ts"
+[ "$(grep -c '^  choices:$' "$OLD_TREE/copier.yml")" = "1" ] \
+  || fail "the old fixture's copier.yml does not carry exactly one 'choices:' block to model the folded choices in"
+awk '{ print } $0 == "  choices:" && !done {
+  print "    agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style: agents"
+  print "    auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign"
+  print "    settings-sync - centrally managed repo settings + repo-owned settings.yml starter: settings-sync"
+  done = 1 }' "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.fold.tmp"
+mv "$OLD_TREE/copier.fold.tmp" "$OLD_TREE/copier.yml"
+awk '{ print } /^  # BEGIN GENERATED: conditional-excludes/ && !done {
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}.github/agents.md{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}.github/copilot-instructions.md{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}.github/instructions/review.instructions.md{% endif %}\""
+  print "  - \"{% if not ('"'"'settings-sync'"'"' in modules) %}.github/settings.yml{% endif %}\""
+  print "  - \"{% if not ('"'"'auto-assign'"'"' in modules) %}.github/workflows/auto-assign.yml{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}.github/workflows/copilot-setup-steps.yml{% endif %}\""
+  print "  - \"{% if not ('"'"'settings-sync'"'"' in modules) %}.github/workflows/settings-sync.yml{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}/AGENTS.md{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}/CLAUDE.md{% endif %}\""
+  print "  - \"{% if not ('"'"'agents'"'"' in modules) %}.github/instructions{% endif %}\""
+  done = 1 }' "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.fold.tmp"
+mv "$OLD_TREE/copier.fold.tmp" "$OLD_TREE/copier.yml"
+grep -qF "settings-sync - centrally managed" "$OLD_TREE/copier.yml" \
+  || fail "could not model the pre-fold module choices in the old fixture's copier.yml"
+grep -qF "%}/AGENTS.md{%" "$OLD_TREE/copier.yml" \
+  || fail "could not model the pre-fold _exclude gates in the old fixture's copier.yml"
+# The two settings questions were asked only with settings-sync selected.
+awk '/^[a-z_]+:$/ { key = $1 }
+  $0 == "  default: \"\"" && (key == "homepage:" || key == "topics:") { print; print "  when: \"{{ '"'"'settings-sync'"'"' in modules }}\""; next }
+  { print }' "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.fold.tmp"
+mv "$OLD_TREE/copier.fold.tmp" "$OLD_TREE/copier.yml"
+[ "$(grep -cF "when: \"{{ 'settings-sync' in modules }}\"" "$OLD_TREE/copier.yml")" = "2" ] \
+  || fail "could not gate the old fixture's homepage and topics questions on settings-sync"
+gate_old_entry() { # <landed path> <module>: wrap the manifest template's entry in the module's gate
+  local tpl="$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+  awk -v needle="\"$1\":" -v gate="{%- if '$2' in modules -%}" \
+    '{ if (index($0, needle) && !done) { print gate; print; print "{%- endif -%}"; done = 1 } else print }' \
+    "$tpl" > "$tpl.tmp"
+  mv "$tpl.tmp" "$tpl"
+  grep -B1 -F "\"$1\":" "$tpl" | grep -qF "'$2' in modules" \
+    || fail "could not gate the old fixture's manifest entry for $1 on the $2 module"
+}
+for p in .github/agents.md .github/copilot-instructions.md .github/instructions/review.instructions.md \
+  .github/workflows/copilot-setup-steps.yml AGENTS.md CLAUDE.md; do gate_old_entry "$p" agents; done
+gate_old_entry .github/workflows/auto-assign.yml auto-assign
+for p in .github/settings.yml .github/workflows/settings-sync.yml; do gate_old_entry "$p" settings-sync; done
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # Model the fleet state before the Copilot gate moved into the ruleset: the
 # old template shipped a managed rerun-copilot-gate.yml (the re-arm half of
@@ -276,6 +333,13 @@ copier copy "$GITHUB_WORKSPACE" "$PROJECT" \
 cd "$PROJECT"
 test -f .github/settings.yml || fail "fixture render is missing .github/settings.yml"
 test -f .github/workflows/settings-sync.yml || fail "fixture render is missing settings-sync.yml"
+test -f AGENTS.md || fail "fixture render is missing AGENTS.md"
+# The recorded answers name the three folded modules: the premise of the
+# stale-answer proof below (copier must accept them on update).
+for m in agents auto-assign settings-sync; do
+  grep -qE -- "^- \"?$m\"?\$" .github/.copier-answers.yml \
+    || fail "the fixture's recorded answers do not list the $m module"
+done
 test -f .github/retired-sentinel.txt || fail "synthetic fixture is missing the retired sentinel"
 test -f .github/workflows/rerun-copilot-gate.yml \
   || fail "synthetic fixture is missing the retired rerun-copilot-gate.yml"
@@ -289,9 +353,8 @@ git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
 # Local modifications a real repo carries into a sync:
-# - settings.yml gains a line AND leaves the render (module deselected):
-#   it is repo-owned and must SURVIVE with the edit (protected in
-#   retired_paths.ts plus the preserve step below)
+# - settings.yml gains a line: it is repo-owned and must SURVIVE with the
+#   edit (protected in retired_paths.ts plus the preserve step below)
 # - checks.yml is generated-once (_skip_if_exists): local edits must survive
 # - bug_report.yml is generated-once (_skip_if_exists issue forms): local
 #   tailoring must survive the update
@@ -303,8 +366,9 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 #   resurrected after the update so its deletion provably comes from
 #   retired_cleanup.ts
 # - src/keep_me.txt is repo-owned content the template never rendered
-# - .repo-platform.yml drops settings-sync (the module-deselection edit a
-#   repo merges before the sync)
+# - .repo-platform.yml still names agents, auto-assign, and settings-sync:
+#   the pre-fold selection the m0002 rung must drop (selection would
+#   refuse the names against the new template)
 # - a pending migration rung's input (the root SECURITY.md tail below)
 echo "# local settings note" >> .github/settings.yml
 # SECURITY.md carries a repository-owned tail below its END marker: the
@@ -322,14 +386,20 @@ echo "Repo-owned custom license" > LICENSE.md
 echo "# local sentinel note" >> .github/retired-sentinel.txt
 mkdir -p src
 echo "repo-owned sentinel" > src/keep_me.txt
-sed -e 's/, "settings-sync"//' -e 's/]$/, "custom-license"]/' \
-  .repo-platform.yml > .repo-platform.yml.tmp
+sed -e 's/]$/, "custom-license"]/' .repo-platform.yml > .repo-platform.yml.tmp
 mv .repo-platform.yml.tmp .repo-platform.yml
-if grep -q 'settings-sync' .repo-platform.yml; then
-  fail "could not drop settings-sync from .repo-platform.yml"
-fi
 grep -q 'custom-license' .repo-platform.yml \
   || fail "could not add custom-license to .repo-platform.yml"
+for m in agents auto-assign settings-sync; do
+  grep -qF "\"$m\"" .repo-platform.yml || fail "the fixture's .repo-platform.yml does not name $m"
+done
+# The folded files must land UNCHANGED (their templates moved to base with
+# the same content), so their pre-sync bytes are the oracle.
+mkdir -p "$WORK/folded-before/.github/workflows" "$WORK/folded-before/.github/instructions"
+for f in .github/workflows/auto-assign.yml .github/workflows/settings-sync.yml \
+  .github/workflows/copilot-setup-steps.yml .github/instructions/review.instructions.md .github/settings.yml; do
+  cp "$f" "$WORK/folded-before/$f"
+done
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
@@ -387,20 +457,60 @@ for report in migrations.md migrations-review.md; do
 done
 test -f "$PROJECT/SECURITY.md" \
   || fail "the ladder moved SECURITY.md although both trees carry the m0001_security_policy_to_github rung"
+grep -qF '"settings-sync"' "$PROJECT/.repo-platform.yml" \
+  || fail "the ladder rewrote .repo-platform.yml although both trees carry the m0002_fold_base_modules rung"
 cp "$PROJECT/SECURITY.md" "$WORK/security-before-move.md"
+cp "$PROJECT/.repo-platform.yml" "$WORK/registration-before-ladder.yml"
+# The rung's NECESSITY: against the new template's choices, the pre-rung
+# declaration is refused by module selection (a name that is not a choice
+# is never silently dropped), so without m0002 the sync could not proceed.
+if bun .github/scripts/sync/modules.ts --repo-file "$WORK/registration-before-ladder.yml" \
+  --template-copier "$WORK/copier-new.yml" > "$WORK/selection-before-ladder.out" 2>&1; then
+  fail "module selection accepted the pre-fold declaration against the new template (the m0002 rung would be unnecessary)"
+fi
+grep -qF "is not a choice of the selected template version" "$WORK/selection-before-ladder.out" \
+  || fail "module selection refused the pre-fold declaration for another reason: $(cat "$WORK/selection-before-ladder.out")"
 # THE MIGRATION LADDER (sync/run_migrations.ts), replayed BEFORE the update
 # like the workflow: every rung that appears in build history after the
 # old build acts on the fixture, committed so copier sees a clean tree.
 RUNNER_TEMP="$WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts \
   || fail "run_migrations.ts failed on the old-vintage fixture"
 assert_clean_tree "$PROJECT" "the migration ladder left the tree dirty (copier update refuses a dirty tree)"
-# The rung's own commit: exactly one, as the sync identity, a pure rename.
-[ "$(git -C "$PROJECT" rev-list --count "${control_head}..HEAD")" = "1" ] \
-  || fail "the ladder did not add exactly one commit for the pending rung"
-[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0001_security_policy_to_github" ] \
-  || fail "the rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s')"
-[ "$(git -C "$PROJECT" log -1 --name-status --format=)" = "$(printf 'R100\tSECURITY.md\t.github/SECURITY.md')" ] \
-  || fail "the rung's commit is not a pure rename of SECURITY.md"
+# One commit per pending rung, in ladder order, each as the sync identity:
+# m0001's pure rename, then m0002's declaration rewrite.
+[ "$(git -C "$PROJECT" rev-list --count "${control_head}..HEAD")" = "2" ] \
+  || fail "the ladder did not add exactly two commits for the two pending rungs"
+[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0001_security_policy_to_github" ] \
+  || fail "the first rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)"
+[ "$(git -C "$PROJECT" log -1 --name-status --format= HEAD~1)" = "$(printf 'R100\tSECURITY.md\t.github/SECURITY.md')" ] \
+  || fail "the first rung's commit is not a pure rename of SECURITY.md"
+[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0002_fold_base_modules" ] \
+  || fail "the second rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s')"
+[ "$(git -C "$PROJECT" log -1 --name-status --format=)" = "$(printf 'M\t.repo-platform.yml')" ] \
+  || fail "the second rung's commit is not a plain edit of .repo-platform.yml"
+# THE MODULE FOLD: the three names left the declaration, nothing else did
+# (the header comment and every other name ride through), and the note
+# landed in the informational report.
+for m in agents auto-assign settings-sync; do
+  if grep -qF "\"$m\"" "$PROJECT/.repo-platform.yml"; then
+    fail "the fold rung left $m in .repo-platform.yml"
+  fi
+done
+for m in uv release-please issue-templates pr-title custom-license; do
+  grep -qF "\"$m\"" "$PROJECT/.repo-platform.yml" || fail "the fold rung dropped $m from .repo-platform.yml"
+done
+grep -q "^# Generated once by" "$PROJECT/.repo-platform.yml" \
+  || fail "the fold rung lost .repo-platform.yml's header comment"
+# Exactly the three items left the rendered flow list (each item removed with
+# its separating comma wherever copier's choice order put it); every other
+# byte of the file is the pre-ladder copy's.
+sed -e 's/"agents", //' -e 's/, "agents"//' -e 's/"auto-assign", //' -e 's/, "auto-assign"//' -e 's/"settings-sync", //' -e 's/, "settings-sync"//' \
+  "$WORK/registration-before-ladder.yml" | cmp -s - "$PROJECT/.repo-platform.yml" \
+  || fail "the fold rung's rewrite of .repo-platform.yml is not the pre-ladder copy minus exactly the three items: $(diff <(sed -e 's/"agents", //' -e 's/, "agents"//' -e 's/"auto-assign", //' -e 's/, "auto-assign"//' -e 's/"settings-sync", //' -e 's/, "settings-sync"//' "$WORK/registration-before-ladder.yml") "$PROJECT/.repo-platform.yml")"
+grep -qF "MODULE FOLD" "$WORK/migrations.md" \
+  || fail "the fold rung did not write its PR-body note"
+[ ! -s "$WORK/migrations-review.md" ] \
+  || fail "a rung held the PR for review on a routine update: $(cat "$WORK/migrations-review.md")"
 # The pending rung moved the policy byte-for-byte (tail included), so the
 # split-file rebuild finds the previous copy at the new path.
 test ! -e "$PROJECT/SECURITY.md" \
@@ -418,7 +528,7 @@ MODULES="$(select_modules \
   --retired-summary "$WORK/retired-modules.txt")"
 echo "selected modules: ${MODULES}"
 case "$MODULES" in
-  *settings-sync*) fail "sync/modules.ts kept settings-sync after the deselection" ;;
+  *agents* | *auto-assign* | *settings-sync*) fail "sync/modules.ts kept a folded module name after the m0002 rung: $MODULES" ;;
 esac
 case "$MODULES" in
   *custom-license*) : ;;
@@ -499,26 +609,44 @@ cd "$PROJECT"
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')" \
   = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
   || fail ".github/.copier-answers.yml does not record the commit $NEW_TAG names"
-# Files the template retired must be gone: settings-sync.yml left the
-# render with the module deselection, the synthetic sentinel left the
+# Files the template retired must be gone: the synthetic sentinel left the
 # template between builds despite its local edit, and the managed
 # rerun-copilot-gate.yml was retired outright when the Copilot review
 # wait moved into the ruleset's required checks.
-for f in .github/workflows/settings-sync.yml .github/retired-sentinel.txt \
-  .github/workflows/rerun-copilot-gate.yml; do
+for f in .github/retired-sentinel.txt .github/workflows/rerun-copilot-gate.yml; do
   test ! -e "$f" || fail "retired file survived the update: $f"
 done
-# settings.yml is repo-owned (PROTECTED_PATHS + the preserve step):
-# deselecting the module must leave the file AND its local edit alone.
+# THE MODULE FOLD's postcondition on a repository that selected the three:
+# their files are base content now and land UNCHANGED (byte-identical to
+# the pre-sync render; the starter is untouched by construction), the
+# declaration keeps the rung's rewrite, and the answers file - which copier
+# rewrote from the filtered -d selection, accepting the stale recorded
+# list that still named the three - carries the filtered list.
+for f in .github/workflows/auto-assign.yml .github/workflows/settings-sync.yml \
+  .github/workflows/copilot-setup-steps.yml .github/instructions/review.instructions.md .github/settings.yml; do
+  cmp -s "$WORK/folded-before/$f" "$f" || fail "the folded file $f did not land unchanged"
+done
+[ "$(readlink CLAUDE.md)" = "AGENTS.md" ] \
+  && [ "$(readlink .github/agents.md)" = "../AGENTS.md" ] \
+  && [ "$(readlink .github/copilot-instructions.md)" = "../AGENTS.md" ] \
+  || fail "an agent-file symlink did not survive the fold with its target"
+for m in agents auto-assign settings-sync; do
+  if grep -qF "\"$m\"" .repo-platform.yml; then
+    fail ".repo-platform.yml still lists $m after the update"
+  fi
+done
+# The recorded `modules` block itself (the items under that key, quotes
+# stripped, in copier's choice order), not any list in the file.
+recorded_modules="$(awk '/^modules:/ { on = 1; next } on && /^- / { sub(/^- /, ""); sub(/^["\x27]/, ""); sub(/["\x27]$/, ""); print; next } on { exit }' .github/.copier-answers.yml | tr '\n' ' ')"
+[ "$recorded_modules" = "uv release-please issue-templates pr-title custom-license " ] \
+  || fail "the recorded modules list is not exactly the five surviving modules in choice order: ${recorded_modules}"
+# settings.yml is repo-owned (PROTECTED_PATHS + the preserve step): the
+# update must leave the file AND its local edit alone.
 test -f .github/settings.yml || fail "repo-owned settings.yml was deleted"
 grep -qF "# local settings note" .github/settings.yml \
   || fail "repo-owned settings.yml lost its local modification"
-# .repo-platform.yml keeps the slimmed selection without settings-sync.
 grep -q '^modules:' .repo-platform.yml \
   || fail ".repo-platform.yml has no top-level modules key"
-if grep -q 'settings-sync' .repo-platform.yml; then
-  fail ".repo-platform.yml still lists settings-sync"
-fi
 # Repo-owned sentinels survive untouched.
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "repo-owned src/keep_me.txt was modified"
@@ -622,7 +750,7 @@ if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
   fail "copier left .rej files behind"
 fi
 # The ownership manifest survives the update stamped for the NEW tree:
-# entries follow the new selection (settings-sync deselected, the
+# entries follow the new selection (the folded files as base entries, the
 # custom-license opt-out de-rendering LICENSE.md), starters stay hashless,
 # the managed ci.yml hash matches the updated file byte-for-byte, and the
 # manifest's own entry stays null (its content includes every other hash,
@@ -641,8 +769,12 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 }
 [ "$(mf ".github/workflows/ci.yml" class)" = "managed" ] \
   || fail "the manifest lost ci.yml's managed entry across the update"
-[ "$(mf ".github/workflows/settings-sync.yml" class)" = "absent" ] \
-  || fail "the manifest still lists settings-sync.yml after the module deselection"
+[ "$(mf ".github/workflows/settings-sync.yml" class)" = "managed" ] \
+  || fail "the manifest does not list settings-sync.yml as managed base content"
+[ "$(mf "AGENTS.md" class)" = "split" ] \
+  || fail "the manifest does not list AGENTS.md as a split base file"
+[ "$(mf ".github/settings.yml" class)" = "starter" ] \
+  || fail "the manifest does not list the settings.yml starter"
 [ "$(mf "LICENSE.md" class)" = "absent" ] \
   || fail "the manifest still lists LICENSE.md despite the custom-license opt-out"
 [ "$(mf ".github/workflows/checks.yml" class)" = "starter" ] \
@@ -657,7 +789,7 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 # _commit, which is what lets the validator tell skew from deletion.
 [ "$(mf ".github/repo-platform-manifest.json" commit)" = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
   || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
-echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
+echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept, folded modules dropped from the declaration"
 
 # --- Recovery mode (recover=recopy) -----------------------------------
 # A repo whose recorded _commit is unusable gets a full re-render via
@@ -777,8 +909,9 @@ echo "recovery recopy OK: skip_if_exists, repo-owned files, and repo-local conte
 # drop the conditional-filename CONTRIBUTING.md render, leave the repo-owned
 # settings.yml starter alone (the managed baseline follows live visibility
 # centrally), and strip the codeql machinery from ci.yml. Runs on a fresh
-# public fixture through the same workflow scripts as the main leg, with
-# settings-sync KEPT selected - only the visibility changes.
+# public fixture (selected on the pre-fold build with settings-sync, the
+# fleet's real shape; the fold rung drops the name) through the same
+# workflow scripts as the main leg - only the visibility changes.
 VIS="$RUN_DIR/upgrade-vis"
 VIS_WORK="$RUN_DIR/upgrade-vis-work"
 mkdir -p "$VIS_WORK"
@@ -930,7 +1063,7 @@ copier copy "$GITHUB_WORKSPACE" "$DEL" \
   --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="License Deletion" \
   -d description="License-deletion project" \
-  -d 'modules=[agents]' \
+  -d 'modules=[]' \
   -d private="false"
 cd "$DEL"
 git init -q -b main
@@ -939,7 +1072,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 git rm -q LICENSE.md
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: delete LICENSE.md"
 cd "$GITHUB_WORKSPACE"
-export MODULES='["agents"]'
+export MODULES='[]'
 export PRIVATE=false
 export DESCRIPTION="License-deletion project"
 export TARGET_DIR="$DEL"
@@ -1007,7 +1140,7 @@ copier copy "$GITHUB_WORKSPACE" "$SPLIT" \
   --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="Split Rebuild" \
   -d description="Split-rebuild project" \
-  -d 'modules=[agents]' \
+  -d 'modules=[]' \
   -d private="false"
 cd "$SPLIT"
 git init -q -b main
@@ -1055,7 +1188,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifi
 # rebuild split files, resolve conflicts, retired cleanup, preserve,
 # materialize mirrors, stamp, validate.
 cd "$GITHUB_WORKSPACE"
-export MODULES='["agents"]'
+export MODULES='[]'
 export PRIVATE=false
 export DESCRIPTION="Split-rebuild project"
 export TARGET_DIR="$SPLIT"
@@ -1216,7 +1349,7 @@ copier copy "$GITHUB_WORKSPACE" "$UNSEL" \
   --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="Unselected Paths" \
   -d description="Unselected-path project" \
-  -d 'modules=[agents, custom-license]' \
+  -d 'modules=[custom-license]' \
   -d private="false"
 cd "$UNSEL"
 # The unselected paths must not have rendered in the first place.
@@ -1230,7 +1363,7 @@ git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with repo-owned files"
 cd "$GITHUB_WORKSPACE"
-export MODULES='["agents", "custom-license"]'
+export MODULES='["custom-license"]'
 export PRIVATE=false
 export DESCRIPTION="Unselected-path project"
 export TARGET_DIR="$UNSEL"
@@ -1279,7 +1412,7 @@ copier copy "$GITHUB_WORKSPACE" "$TRIP" \
   --vcs-ref "$TRIP_REF" --defaults --trust \
   -d project_name="Tripwire" \
   -d description="Tripwire project" \
-  -d 'modules=[agents]' \
+  -d 'modules=[]' \
   -d private="false"
 cd "$TRIP"
 printf '\n## Local agent docs\n\ntrip-local tail line\n' >> AGENTS.md
@@ -1341,45 +1474,47 @@ if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
 fi
 echo "tail tripwire OK: report produced, PR-body section present, manual review forced"
 
-# --- Split-file retirement (module deselection) ----------------------------
-# Deselecting a module retires its files from the render, and a retired
-# file HEAD's manifest classes `split` carries a repository-owned half
-# that leaves WITH the deletion (copier resolves delete-vs-modify by
-# dropping the file; retired_cleanup rms retired paths outright). The
-# class-level hold (preserve_repo_owned.ts -> removed-splits.md ->
-# open_pr.ts) must name the leaving content and keep the PR manual - on
-# this rule ALONE: no license machinery is involved in this leg, and the
-# tail tripwire must stay clear (the retired path is absent from the
-# post-sync manifest by design, so the wire never visits it).
+# --- Split-file retirement (a visibility flip de-renders CONTRIBUTING.md) --
+# A render condition turning false retires a file from the render, and a
+# retired file HEAD's manifest classes `split` carries a repository-owned
+# half that leaves WITH the deletion (copier resolves delete-vs-modify by
+# dropping the file; retired_cleanup rms retired paths outright). No module
+# ships a split file, so the public-only CONTRIBUTING.md going private is
+# the case. The class-level hold (preserve_repo_owned.ts ->
+# removed-splits.md -> open_pr.ts) must name the leaving content and keep
+# the PR manual - on this rule ALONE: no license machinery is involved in
+# this leg, and the tail tripwire must stay clear (the retired path is
+# absent from the post-sync manifest by design, so the wire never visits
+# it).
 DESEL="$RUN_DIR/upgrade-deselect"
 DESEL_WORK="$RUN_DIR/upgrade-deselect-work"
 mkdir -p "$DESEL_WORK"
 cd "$GITHUB_WORKSPACE"
 copier copy "$GITHUB_WORKSPACE" "$DESEL" \
   --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Module Deselection" \
-  -d description="Module-deselection project" \
-  -d 'modules=[agents, uv]' \
+  -d project_name="Split Retirement" \
+  -d description="Split-retirement project" \
+  -d 'modules=[uv]' \
   -d private="false"
 cd "$DESEL"
-printf '\n## Local agent docs\n\ndeselect-local agents tail\n' >> AGENTS.md
+printf '\n## Local contributing docs\n\ndeselect-local contributing tail\n' >> CONTRIBUTING.md
 git init -q -b main
 git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with agents tail"
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with contributing tail"
 
-# The deselection edit a repo merges before the sync, then the workflow's
-# leg order: apply update, materialize renders, rebuild split files,
+# The live data says PRIVATE=true (the flip that de-renders the file), then
+# the workflow's leg order: apply update, materialize renders, rebuild split files,
 # resolve conflicts, retired cleanup, preserve, stamp, tripwire.
 cd "$GITHUB_WORKSPACE"
 export MODULES='["uv"]'
-export PRIVATE=false
-export DESCRIPTION="Module-deselection project"
+export PRIVATE=true
+export DESCRIPTION="Split-retirement project"
 export TARGET_DIR="$DESEL"
 export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 answers_desel="$(git -C "$DESEL" show HEAD:.github/.copier-answers.yml)"
 src_path_desel="$(sed -n 's/^_src_path: //p' <<<"$answers_desel")"
-test -n "$src_path_desel" || fail "deselection fixture records no _src_path"
+test -n "$src_path_desel" || fail "split-retirement fixture records no _src_path"
 RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/clean_renders.ts
@@ -1396,19 +1531,19 @@ git show "$NEW_TAG:copier.yml" > "$DESEL_WORK/copier-new.yml"
 RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
-test ! -e "$DESEL/AGENTS.md" \
-  || fail "the deselected agents module's AGENTS.md survived retirement"
+test ! -e "$DESEL/CONTRIBUTING.md" \
+  || fail "the de-rendered CONTRIBUTING.md survived retirement on the flip to private"
 RECOVER="" RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$DESEL"
 RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$DESEL"
 if [ -s "$DESEL_WORK/tail-shrank.md" ]; then
-  fail "the tail tripwire fired on a clean module deselection (the hold must come from the removal rule alone)"
+  fail "the tail tripwire fired on a clean split-file retirement (the hold must come from the removal rule alone)"
 fi
 test -s "$DESEL_WORK/removed-splits.md" \
-  || fail "deleting the split-classed AGENTS.md produced no removed-splits hold"
-grep -qF '`AGENTS.md`' "$DESEL_WORK/removed-splits.md" \
-  || fail "the removed-splits hold does not name AGENTS.md"
-grep -qF "deselect-local agents tail" "$DESEL_WORK/removed-splits.md" \
+  || fail "deleting the split-classed CONTRIBUTING.md produced no removed-splits hold"
+grep -qF '`CONTRIBUTING.md`' "$DESEL_WORK/removed-splits.md" \
+  || fail "the removed-splits hold does not name CONTRIBUTING.md"
+grep -qF "deselect-local contributing tail" "$DESEL_WORK/removed-splits.md" \
   || fail "the removed-splits hold does not name the leaving repository-owned content"
 
 # The chain's tail: open_pr.ts must append the section and refuse to arm
@@ -1419,7 +1554,7 @@ grep -qF "deselect-local agents tail" "$DESEL_WORK/removed-splits.md" \
 echo "build@old" > "$DESEL_WORK/old_commit.txt"
 : > "$DESEL_WORK/empty.txt"
 GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
-  TARGET="Vivswan/deselect" RUNNER_TEMP="$DESEL_WORK" \
+  TARGET="Vivswan/split-retirement" RUNNER_TEMP="$DESEL_WORK" \
   GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$DESEL_WORK/gh-output.txt" \
   BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" VALIDATION=passed HIDE_DETAILS="" \
@@ -1430,12 +1565,12 @@ GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   bun .github/scripts/sync/open_pr.ts > "$DESEL_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$DESEL_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a deleted split-classed file"
-grep -qF "deselect-local agents tail" "$DESEL_WORK/gh-calls.txt" \
+grep -qF "deselect-local contributing tail" "$DESEL_WORK/gh-calls.txt" \
   || fail "the PR body does not name the repository-owned content the deletion takes with it"
 if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
   fail "open_pr attempted to arm auto-merge on a removed-splits hold"
 fi
-echo "module deselection OK: retired split file deleted, hold raised, leaving content named, manual review forced"
+echo "split-file retirement OK: de-rendered split file deleted, hold raised, leaving content named, manual review forced"
 
 # --- Pages answer retirement (pages_production / pages_staging) ---------
 # A repo rendered in the production/staging era carries that pages.yml
@@ -1469,6 +1604,9 @@ git show "$NEW_TAG":copier.yml > "$PAGES_WORK/copier-new.yml"
 export TARGET_DIR="$PAGES_FIX"
 export TARGET_REF="$NEW_TAG"
 RUNNER_TEMP="$PAGES_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts
+if grep -qF '"auto-assign"' "$PAGES_FIX/.repo-platform.yml"; then
+  fail "the fold rung left auto-assign in the pages fixture's .repo-platform.yml"
+fi
 MODULES="$(select_modules \
   --repo-file "$PAGES_FIX/.repo-platform.yml" \
   --template-copier "$PAGES_WORK/copier-new.yml" \
@@ -1508,6 +1646,147 @@ grep -qF -- "repo-platform/.github/workflows/reusable-auto-assign.yml@build" \
   "$PAGES_FIX/.github/workflows/auto-assign.yml" \
   || fail "updated auto-assign.yml does not call reusable-auto-assign at the build ref"
 echo "pages answer retirement OK: mounts interface rendered, retired answers dropped, surviving answers kept"
+
+# --- Module fold arrival (a repo onboarded without the three modules) -------
+# A repository rendered before the fold WITHOUT agents, auto-assign, or
+# settings-sync has none of their files, and may carry its OWN AGENTS.md.
+# The update delivers the files as base content; the m0002 rung finds
+# nothing to drop (the control: in-place, no commit); the repository's own
+# AGENTS.md rides below the fresh managed region under the recovery
+# appendix (HEAD's manifest never declared the path, so its copy cannot be
+# split by markers), flagged for manual review; .repo-platform.yml is
+# untouched; and the answers file gains the two settings questions every
+# repository is asked now.
+ARR="$RUN_DIR/upgrade-arrival"
+ARR_WORK="$RUN_DIR/upgrade-arrival-work"
+mkdir -p "$ARR_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$ARR" \
+  --vcs-ref "$prev" --defaults --trust \
+  -d project_name="Fold Arrival" \
+  -d description="Fold-arrival project" \
+  -d 'modules=[uv]' \
+  -d private="false"
+cd "$ARR"
+# The premise: the old build gated the folded files on selection, so none
+# of them rendered (`test ! -e` follows symlinks; assert not-a-link too).
+for f in AGENTS.md CLAUDE.md .github/agents.md .github/copilot-instructions.md \
+  .github/instructions/review.instructions.md .github/workflows/auto-assign.yml \
+  .github/workflows/settings-sync.yml .github/workflows/copilot-setup-steps.yml .github/settings.yml; do
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    fail "the pre-fold fixture rendered $f without selecting its module (the old fixture's gates are not modeled)"
+  fi
+done
+if grep -qF '"AGENTS.md"' .github/repo-platform-manifest.json; then
+  fail "the pre-fold fixture's manifest lists AGENTS.md although the file was not rendered"
+fi
+if grep -qE '^(homepage|topics):' .github/.copier-answers.yml; then
+  fail "the pre-fold fixture recorded the settings questions without settings-sync (the old fixture's gates are not modeled)"
+fi
+printf '# House rules\n\narrival-local agents note\n' > AGENTS.md
+cp AGENTS.md "$ARR_WORK/agents-before.md"
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with the repository's own AGENTS.md"
+cp .repo-platform.yml "$ARR_WORK/registration-before.yml"
+
+cd "$GITHUB_WORKSPACE"
+git show "${prev}:copier.yml" > "$ARR_WORK/copier-old.yml"
+git show "$NEW_TAG":copier.yml > "$ARR_WORK/copier-new.yml"
+export TARGET_DIR="$ARR"
+export TARGET_REF="$NEW_TAG"
+arrival_head="$(git -C "$ARR" rev-parse HEAD)"
+arrival_out="$(RUNNER_TEMP="$ARR_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts)" \
+  || fail "run_migrations.ts failed on the arrival fixture"
+# The control: nothing to drop, so the fold rung reports in-place without a
+# commit; the pending m0001 still moves the root SECURITY.md (one commit).
+grep -qF "migration m0002_fold_base_modules -> in-place" <<<"$arrival_out" \
+  || fail "the fold rung did not report in-place for a declaration naming none of the three: $arrival_out"
+if grep -qF "migration m0002_fold_base_modules -> in-place (committed)" <<<"$arrival_out"; then
+  fail "the fold rung committed although it had nothing to drop"
+fi
+[ "$(git -C "$ARR" rev-list --count "${arrival_head}..HEAD")" = "1" ] \
+  || fail "the ladder did not add exactly one commit (m0001's rename) on the arrival fixture"
+cmp -s "$ARR_WORK/registration-before.yml" "$ARR/.repo-platform.yml" \
+  || fail "the fold rung rewrote a .repo-platform.yml naming none of the three"
+MODULES="$(select_modules \
+  --repo-file "$ARR/.repo-platform.yml" \
+  --template-copier "$ARR_WORK/copier-new.yml" \
+  --retired-summary "$ARR_WORK/retired-modules.txt")"
+export MODULES
+export PRIVATE=false
+export DESCRIPTION="Fold-arrival project"
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+answers_arr="$(git -C "$ARR" show HEAD:.github/.copier-answers.yml)"
+src_path_arr="$(sed -n 's/^_src_path: //p' <<<"$answers_arr")"
+test -n "$src_path_arr" || fail "arrival fixture records no _src_path"
+RUNNER_TEMP="$ARR_WORK" SRC_PATH="$src_path_arr" OLD_SHA="$OLD_SHA_RESOLVED" \
+  bun .github/scripts/sync/clean_renders.ts
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$ARR_WORK/local-carryover.md" --root "$ARR" \
+  --needs-review "$ARR_WORK/carry-review.txt" \
+  --rebuilt-paths "$ARR_WORK/split-rebuilt-paths.txt" \
+  --render-dir "$ARR_WORK/render-new" --old-render-dir "$ARR_WORK/render-old"
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$ARR_WORK/dropped-local-hunks.md" --root "$ARR" \
+  --skip "$ARR_WORK/split-rebuilt-paths.txt"
+RUNNER_TEMP="$ARR_WORK" SRC_PATH="$src_path_arr" OLD_SHA="$OLD_SHA_RESOLVED" \
+  bun .github/scripts/sync/retired_cleanup.ts
+RECOVER="" RUNNER_TEMP="$ARR_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+bun actions/shared/stamp_manifest.ts --root "$ARR"
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$ARR"
+
+cd "$ARR"
+# The folded files ARRIVE as base content: the managed ones, the two
+# starters, and the three agent-file symlinks.
+test -f AGENTS.md || fail "AGENTS.md did not arrive with the update"
+# The arriving files are byte-identical to the clean render at the new ref
+# (the managed ones and the two fresh starters alike; nothing merged into
+# them, the repository had none of them).
+for f in .github/instructions/review.instructions.md .github/workflows/auto-assign.yml \
+  .github/workflows/settings-sync.yml .github/workflows/copilot-setup-steps.yml .github/settings.yml; do
+  test -f "$f" || fail "the folded file $f did not arrive with the update"
+  cmp -s "$ARR_WORK/render-new/$f" "$f" || fail "the arriving $f is not byte-identical to the clean render at the new ref"
+done
+[ "$(readlink CLAUDE.md)" = "AGENTS.md" ] \
+  && [ "$(readlink .github/agents.md)" = "../AGENTS.md" ] \
+  && [ "$(readlink .github/copilot-instructions.md)" = "../AGENTS.md" ] \
+  || fail "an agent-file symlink did not arrive with the update pointing at AGENTS.md"
+# The repository's own AGENTS.md: preserved in full BELOW the fresh managed
+# region's END marker under the recovery appendix (one marker pair in the
+# file), and the carry flagged for manual review.
+# The previous copy carried no marker text, so the appendix is the copy
+# verbatim: the file ENDS with its exact bytes.
+tail -c "$(wc -c < "$ARR_WORK/agents-before.md")" AGENTS.md | cmp -s - "$ARR_WORK/agents-before.md" \
+  || fail "the repository's own AGENTS.md was not preserved verbatim below the managed region when the managed file arrived"
+grep -qF "repo-platform:recovery-appendix" AGENTS.md \
+  || fail "the repository's own AGENTS.md copy was not marked as a recovery appendix"
+# region_marker, not marker: $marker is the copier conflict marker the check
+# below still reads.
+for region_marker in "<!-- BEGIN REPO-PLATFORM MANAGED -->" "<!-- END REPO-PLATFORM MANAGED -->"; do
+  [ "$(grep -cF -- "$region_marker" AGENTS.md)" = "1" ] \
+    || fail "AGENTS.md does not carry exactly one '$region_marker' after the arrival"
+done
+[ "$(grep -nF -- "<!-- END REPO-PLATFORM MANAGED -->" AGENTS.md | head -n 1 | cut -d: -f1)" -lt \
+  "$(grep -nF "arrival-local agents note" AGENTS.md | head -n 1 | cut -d: -f1)" ] \
+  || fail "the repository's own AGENTS.md content does not sit below the managed region's END marker"
+grep -q '^AGENTS\.md:' "$ARR_WORK/carry-review.txt" \
+  || fail "the appendix carry of the repository's own AGENTS.md was not flagged for review"
+grep -qF "recovery-appendix" "$ARR_WORK/local-carryover.md" \
+  || fail "the carry summary does not state the appendix disposition"
+if grep -rIqF "$marker" . --exclude-dir=.git; then
+  fail "the arrival left unresolved copier conflict markers"
+fi
+# .repo-platform.yml is the repository's (nothing to drop, nothing rewritten);
+# the answers file GAINS homepage and topics (absent above), asked of every
+# repository now.
+cmp -s "$ARR_WORK/registration-before.yml" .repo-platform.yml \
+  || fail "the arrival update rewrote a .repo-platform.yml naming none of the three"
+for key in homepage topics; do
+  grep -qE "^$key:" .github/.copier-answers.yml \
+    || fail "the answers file did not record the $key answer after the update"
+done
+echo "module fold arrival OK: folded files delivered, the repository's own AGENTS.md preserved as a reviewed appendix, rung in-place"
 
 # --- Migration history walk (a rung pruned from the delivered tree) --------
 # The ladder runs a rung from the NEWEST build commit that carries it, so a
@@ -1555,7 +1834,7 @@ walk_fixture() { # <dir> <build tag> -> a rendered, committed repo at that build
     --vcs-ref "$2" --defaults --trust \
     -d project_name="History Walk" \
     -d description="History-walk project" \
-    -d 'modules=[agents]' \
+    -d 'modules=[]' \
     -d private="false"
   git -C "$1" init -q -b main
   git -C "$1" add --all

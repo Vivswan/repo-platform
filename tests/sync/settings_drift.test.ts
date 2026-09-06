@@ -185,26 +185,26 @@ describe("driftSummary", () => {
     expect(summary).toContain('`description`: "old" -> "line one\\nline two"');
   });
 
-  test("tells an unmanaged repo that nothing enforces the values", () => {
+  test("without a settings.yml the heal is not offered as the way back", () => {
     const summary = driftSummary(
       "Vivswan/demo",
       [{ field: "private", recorded: "false", live: "true" }],
       false,
     );
-    expect(summary).toContain("does not select the settings-sync module");
-    expect(summary).toContain("Nothing enforces them either way");
+    // The heal skips a repository with no repo layer, so the UI is the
+    // only revert; the consequence text still names all three outcomes.
     expect(summary).toContain("flip the setting back in the GitHub UI");
-    // No apply run targets this repo, so the heal is not a way back.
+    expect(summary).toContain("the heal skips this repository until it");
     expect(summary).not.toContain("settings-repos heal");
-    expect(summary).not.toContain("RATIFIES");
+    expect(summary).toContain("does NOT decide the");
   });
 
   test("every body line is blockquoted so the section survives concatenation", () => {
-    for (const managed of [true, false]) {
+    for (const settingsPresent of [true, false]) {
       const summary = driftSummary(
         "Vivswan/demo",
         [{ field: "private", recorded: "false", live: "true" }],
-        managed,
+        settingsPresent,
       );
       for (const line of summary.split("\n")) {
         expect(line).toStartWith(">");

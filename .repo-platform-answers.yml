@@ -27,27 +27,25 @@ copyright_holder: Vivswan Shah (https://github.com/Vivswan)
 # toolchain module makes enable_codeql true.
 private: false
 
-# The modules this repository actually dogfoods: agents (AGENTS.md, the
-# agent-file symlinks, and the Copilot review instructions), bun (dependabot-bun-lockfile.yml; the toolchain
-# feeding enable_codeql), skills (the hosted agent skills under skills/
-# and the validate-skills.yml discovery workflow; the .claude-plugin
-# manifests are generated-once starters this repo owns), pr-title (the
-# required pr-title.yml workflow), auto-assign (auto-assign.yml),
+# The modules this repository actually dogfoods: bun
+# (dependabot-bun-lockfile.yml; the toolchain feeding enable_codeql),
+# skills (the hosted agent skills under skills/ and the validate-skills.yml
+# discovery workflow; the .claude-plugin manifests are generated-once
+# starters this repo owns), pr-title (the required pr-title.yml workflow),
 # docs-site (docs-site.yml: this repo's docs/ deployed as its own
-# VitePress site through the central theme). release-please is
-# deliberately absent: repo-platform ships the module to clients but runs
-# no release pipeline of its own. The tracking-stream modules (fuzzer,
-# nightly) are deliberately absent too - their release-gating rode the
-# release-please machinery this repo dropped - and so is
-# settings-sync: this operator repo hand-writes its .github/settings.yml
-# (extra rulesets the starter never renders), and settings-repos.yml
-# heals it as its always-included self target.
+# VitePress site through the central theme). The base content this repo
+# dogfoods (the Copilot review instructions, auto-assign.yml) needs no
+# selection. release-please is deliberately absent: repo-platform ships
+# the module to clients but runs no release pipeline of its own. The
+# tracking-stream modules (fuzzer, nightly) are deliberately absent too -
+# their release-gating rode the release-please machinery this repo
+# dropped. This operator repo hand-writes its .github/settings.yml (extra
+# rulesets the starter never renders), and settings-repos.yml heals it as
+# its always-included self target.
 modules:
-  - agents
   - bun
   - skills
   - pr-title
-  - auto-assign
   - docs-site
 
 # The skills module's directory answer (asked by copier only while skills

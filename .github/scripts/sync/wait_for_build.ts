@@ -140,7 +140,7 @@ const targetLabel = targetSha !== "" ? "the judged commit" : "main HEAD";
  * failure degrades to the stamp-only poll (a plan-job hiccup here must
  * never hard-fail the sync). The hash comes through a scratch index
  * (rebuild_tree.ts's write-tree), ON PURPOSE: file modes and the
- * templates/agents/ symlinks are part of the comparison, which a plain
+ * templates/base/ agent-file symlinks are part of the comparison, which a plain
  * content diff would miss. */
 function rebuiltTreeAtHead(): string {
   let workDir = "";

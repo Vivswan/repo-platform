@@ -1,6 +1,0 @@
-# yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
-description: centrally managed repo settings + repo-owned settings.yml starter
-ownership:
-  - { path: .github/settings.yml, class: starter }
-  - { path: .github/workflows/settings-sync.yml, class: managed }

@@ -7,9 +7,9 @@
 # The check job builds docs/ strictly on every PR touching it (dead
 # internal links fail there instead of at deploy time); paths-filtered by
 # design, so it is never in the all-green roster and never a required
-# check. One-time setup without the settings-sync module: repo
-# Settings -> Pages -> Source: GitHub Actions (with it, the module's
-# settings layer enables Pages automatically).
+# check. Pages is enabled by this module's settings layer on
+# the next fleet settings apply; a deploy before that needs repo
+# Settings -> Pages -> Source: GitHub Actions.
 name: Docs Site
 
 on:

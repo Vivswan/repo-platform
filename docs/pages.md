@@ -13,11 +13,9 @@ Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release
 
 The workflow deploys on every push to the default branch, nightly (04:23 UTC), and on manual dispatch. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
-## One-time setup
+## Pages enablement
 
-With the settings-sync module selected: nothing - the pages module's settings layer enables Pages with Actions-workflow builds on the next apply ([settings.md](settings.md)).
-
-Without it: Settings -> Pages -> Source: GitHub Actions. No `github-pages` environment tag rule is needed anymore - deploys never run on tag refs.
+Nothing to do: the pages module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. No `github-pages` environment tag rule is needed anymore - deploys never run on tag refs.
 
 ## Module parameters (copier questions)
 

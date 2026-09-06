@@ -7,12 +7,11 @@
 # .github/settings.yml and the fleet override on top, and runs
 # Vivswan/github-settings-as-code in
 # single-repo mode once per repository in a fail-fast-free matrix. Targets
-# are enrolled, adopted repos whose .repo-platform.yml selects the
-# settings-sync module - the module selection is the opt-in - plus this
-# repository itself (its baseline facts come from
+# are enrolled, adopted repos (a readable .repo-platform.yml is the
+# opt-in) plus this repository itself (its baseline facts come from
 # .repo-platform-answers.yml). Repos heal independently: one target's
 # failure is its own red "apply (<repo>)" job and never blocks the others.
-# The settings-sync module also adds push-time self-apply via
+# Every render also carries settings-sync.yml, push-time self-apply via
 # reusable-apply-settings.yml, which computes the same merge.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
@@ -357,10 +356,10 @@ jobs:
           steps.freshness.outputs.moved == 'true'
         run: |
           if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it carries no .repo-platform.yml at the revision this run read (it left management), so its settings are not managed here any more."
           elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there"\
-              "is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it has no .github/settings.yml yet, so there is nothing to layer"\
+              "over the fleet defaults. The settings starter seeds the file on its next template sync."
           else
             echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
           fi
@@ -411,8 +410,8 @@ jobs:
 
       - name: Apply repository settings
         id: apply
-        # Skipped for a target that selected settings-sync but has no
-        # settings.yml yet: the merge step writes no document, because
+        # Skipped for a target that has no settings.yml yet: the merge
+        # step writes no document, because
         # applying the baseline alone would delete the repo's own labels.
         if: steps.freshness.outputs.moved == 'false'
         # Pinned to an immutable commit; bump to @v1 once the action cuts

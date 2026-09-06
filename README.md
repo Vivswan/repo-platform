@@ -12,13 +12,13 @@ Sources on `main`, a generated build branch, sync PRs into each repo:
 - Every green `main` commit rebuilds the orphan `build` branch - the one generated delivery channel: `template/` is the composed tree copier renders, `actions/` carries the composite actions the rendered workflows pin `@build`, and every path is extraction-safe. `main` itself is not copier-consumable.
 - [sync-repos.yml](.github/workflows/sync-repos.yml) runs `copier update` against each managed repo on a weekly cron or a dispatch, then pushes a branch and PR into it with the fleet PAT. Clean updates arm squash auto-merge and land on their own once the repo's `all-green` check passes; anything a human should see (auto-resolved conflicts, withheld workflow files, failed validation, recovery runs) stays for review.
 
-Repository settings are not part of that render, and a repo opts into them by selecting the settings-sync module in its own `.repo-platform.yml` - a repo that does not select it keeps its settings entirely to itself. For those that do, [settings-repos.yml](.github/workflows/settings-repos.yml) computes each repo's settings at apply time as a six-layer merge of plain YAML documents - fleet baseline, fleet visibility overlay, the selected modules' layers and their visibility overlays, the repo's own `.github/settings.yml`, then a fleet override layer no repo can weaken - and applies the result ([docs/settings.md](docs/settings.md)).
+Repository settings are not part of that render: for every managed repo (one with a `.repo-platform.yml`), [settings-repos.yml](.github/workflows/settings-repos.yml) computes each repo's settings at apply time as a six-layer merge of plain YAML documents - fleet baseline, fleet visibility overlay, the selected modules' layers and their visibility overlays, the repo's own `.github/settings.yml`, then a fleet override layer no repo can weaken - and applies the result ([docs/settings.md](docs/settings.md)).
 
 Which files the template owns, and how strongly, is declared as data rather than described in prose: `templates/base/ownership.yml` and each manifest's `ownership:` block. Every render stamps the resulting map into the repo as `.github/repo-platform-manifest.json`, so a repo always carries the classification of its own files.
 
 ## Modules<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
+- Modules (pick any combination): `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
 
 ## Onboarding a repo
 
@@ -36,7 +36,7 @@ One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `RE
 
 Contents, Pull requests, Administration, and Issues write are hard requirements: without them sync legs or settings runs fail loudly, because a section the token cannot reach must not hide drift behind a green run. Workflows write is the one scope the machinery adapts to - drop it and changes to `.github/workflows/` are withheld from the sync PR and listed in its body, while everything else still lands. A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
 
-Managed repos need no secret. Two optional features carry their own token: a `settings-sync` repo that wants push-time self-apply, and a `bun` repo that registers the token as a *Dependabot* secret so the lockfile fixer's push re-runs CI. Missing that token warns and degrades the feature rather than failing the run.
+Managed repos need no secret. Two optional features carry their own token: a repo that wants push-time settings self-apply (the rendered `settings-sync.yml`), and a `bun` repo that registers the token as a *Dependabot* secret so the lockfile fixer's push re-runs CI. Missing that token warns and degrades the feature rather than failing the run.
 
 ## Going deeper
 

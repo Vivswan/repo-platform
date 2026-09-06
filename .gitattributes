@@ -28,6 +28,6 @@ CLAUDE.md -text
 
 # The template sources' agent-file symlinks stay symlinks too (copier
 # preserves them via _preserve_symlinks; see CLAUDE.md's editing rules).
-templates/agents/CLAUDE.md -text
-templates/agents/.github/copilot-instructions.md -text
-templates/agents/.github/agents.md -text
+templates/base/CLAUDE.md -text
+templates/base/.github/copilot-instructions.md -text
+templates/base/.github/agents.md -text

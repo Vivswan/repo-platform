@@ -43,11 +43,11 @@ export const PAIRS: { repo: string; tpl: string }[] = [
   { repo: ".github/CODEOWNERS", tpl: "templates/base/.github/CODEOWNERS.jinja" },
   {
     repo: ".github/instructions/review.instructions.md",
-    tpl: "templates/agents/.github/instructions/review.instructions.md.jinja",
+    tpl: "templates/base/.github/instructions/review.instructions.md.jinja",
   },
   {
     repo: ".github/workflows/auto-assign.yml",
-    tpl: "templates/auto-assign/.github/workflows/auto-assign.yml.jinja",
+    tpl: "templates/base/.github/workflows/auto-assign.yml.jinja",
   },
   {
     repo: ".github/workflows/dependabot-bun-lockfile.yml",

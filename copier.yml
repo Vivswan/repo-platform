@@ -27,13 +27,7 @@ _exclude:
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/bug_report.yml{% endif %}"
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/config.yml{% endif %}"
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/feature_request.yml{% endif %}"
-  - "{% if not ('agents' in modules) %}.github/agents.md{% endif %}"
-  - "{% if not ('agents' in modules) %}.github/copilot-instructions.md{% endif %}"
-  - "{% if not ('agents' in modules) %}.github/instructions/review.instructions.md{% endif %}"
-  - "{% if not ('settings-sync' in modules) %}.github/settings.yml{% endif %}"
-  - "{% if not ('auto-assign' in modules) %}.github/workflows/auto-assign.yml{% endif %}"
   - "{% if not (has_toolchain) %}.github/workflows/auto-format.yml{% endif %}"
-  - "{% if not ('agents' in modules) %}.github/workflows/copilot-setup-steps.yml{% endif %}"
   - "{% if not ('deno' in modules) %}.github/workflows/deno-audit.yml{% endif %}"
   - "{% if not ('bun' in modules) %}.github/workflows/dependabot-bun-lockfile.yml{% endif %}"
   - "{% if not ('docs-site' in modules) %}.github/workflows/docs-site.yml{% endif %}"
@@ -42,20 +36,16 @@ _exclude:
   - "{% if not ('pages' in modules) %}.github/workflows/pages.yml{% endif %}"
   - "{% if not ('pr-title' in modules) %}.github/workflows/pr-title.yml{% endif %}"
   - "{% if not ('release-please' in modules) %}.github/workflows/release.yml{% endif %}"
-  - "{% if not ('settings-sync' in modules) %}.github/workflows/settings-sync.yml{% endif %}"
   - "{% if not ('release-please' in modules) %}.github/workflows/update-release-pr.yml{% endif %}"
   - "{% if not ('release-please' in modules) %}.github/workflows/update-release.yml{% endif %}"
   - "{% if not ('skills' in modules) %}.github/workflows/validate-skills.yml{% endif %}"
   - "{% if not ('node' in modules) %}/.node-version{% endif %}"
   - "{% if not ('release-please' in modules) %}/.release-please-manifest.json{% endif %}"
-  - "{% if not ('agents' in modules) %}/AGENTS.md{% endif %}"
-  - "{% if not ('agents' in modules) %}/CLAUDE.md{% endif %}"
   - "{% if not (not private) %}/CONTRIBUTING.md{% endif %}"
   - "{% if not ('custom-license' not in modules) %}/LICENSE.md{% endif %}"
   - "{% if not ('release-please' in modules) %}/release-please-config.json{% endif %}"
   - "{% if not ('skills' in modules) %}/.claude-plugin{% endif %}"
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE{% endif %}"
-  - "{% if not ('agents' in modules) %}.github/instructions{% endif %}"
   # END GENERATED: conditional-excludes
 
 # Repo-owned starters: generated when absent, never overwritten by template
@@ -97,8 +87,8 @@ _skip_if_exists:
   # repo-owned after the first render (repos list their skills there).
   - .claude-plugin/plugin.json
   - .claude-plugin/marketplace.json
-  # The settings-sync module's starter: identity keys plus local overrides,
-  # repo-owned after the first render. The managed baseline (policy block,
+  # The settings starter: identity keys plus local overrides, repo-owned
+  # after the first render. The managed baseline (policy block,
   # labels, rulesets) is computed centrally at apply time and merged UNDER
   # this file (.github/scripts/fleet/render_managed_settings.ts), so sync
   # never rewrites it.
@@ -165,7 +155,6 @@ modules:
   multiselect: true
   # BEGIN GENERATED: module-choices (scripts/generate.ts - edit module.yml manifests, not this block)
   choices:
-    agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style: agents
     bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
     node - JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS): node
     deno - Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS): deno
@@ -177,31 +166,24 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
     pr-title - Conventional Commit PR title check, its own required workflow: pr-title
-    auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     nightly - nightly CI starter with failure issue filing and auto-close: nightly
-    settings-sync - centrally managed repo settings + repo-owned settings.yml starter: settings-sync
     custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
   # END GENERATED: module-choices
-  # settings-sync is deliberately NOT a default: selecting it is the
-  # opt-in to centrally managed settings (the nightly heal computes the
-  # baseline and merges the repo's settings.yml over it).
-  default: [agents, release-please, issue-templates, pr-title, auto-assign]
+  default: [release-please, issue-templates, pr-title]
 
-# --- settings-sync module parameters (asked only when it is selected) ---
-# Both feed the module's rendered .github/settings.yml.
+# --- settings starter parameters ---
+# Both feed the rendered .github/settings.yml identity starter.
 
 homepage:
   type: str
   help: Homepage URL (optional, used in settings.yml)
   default: ""
-  when: "{{ 'settings-sync' in modules }}"
 
 topics:
   type: str
   help: Comma-separated GitHub topics (used in settings.yml)
   default: ""
-  when: "{{ 'settings-sync' in modules }}"
 
 # --- pages module parameters (asked only when pages is selected) ---
 
@@ -276,7 +258,7 @@ fuzzer_label:
   help: Label for the deduplicated nightly-fuzz tracking issue
   default: fuzz-nightly
   # The value lands in gh args (a leading dash would parse as a flag), in the
-  # rendered workflow's YAML, and in the settings-sync label list, so the
+  # rendered workflow's YAML, and in the settings label list, so the
   # generated validator keeps it to plain label characters within GitHub's
   # 50-char limit (the fuzz-issue action enforces the same shape) and
   # rejects the label names the template already manages (the settings

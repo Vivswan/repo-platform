@@ -59,7 +59,7 @@ jobs:
           title: Nightly CI failures
           # No artifacts directory: this stream files the generic report,
           # not the fuzzer's failure-report contract. The label tuple is
-          # used only at creation and matches the settings-sync one.
+          # used only at creation and matches the settings layer's.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
 

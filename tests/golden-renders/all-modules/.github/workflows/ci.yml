@@ -45,7 +45,7 @@ jobs:
       issues: read
       vulnerability-alerts: read
     with:
-      modules: '["agents", "bun", "node", "deno", "uv", "rust", "pages", "docs-site", "release-please", "issue-templates", "skills", "pr-title", "auto-assign", "fuzzer", "nightly", "settings-sync"]'
+      modules: '["bun", "node", "deno", "uv", "rust", "pages", "docs-site", "release-please", "issue-templates", "skills", "pr-title", "fuzzer", "nightly"]'
       private: false
       skills-dir: "skills"
       codeql-languages: '["javascript-typescript", "python"]'
