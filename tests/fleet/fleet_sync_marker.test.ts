@@ -164,6 +164,49 @@ describe("parseDirectives", () => {
       },
     },
     {
+      reason: "a trailing-only backtick fails",
+      body: message("[fleet-sync]`", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync]`" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
+        ],
+      },
+    },
+    {
+      reason: "uneven backtick counts fail",
+      body: message("`[fleet-sync]``", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"`[fleet-sync]``" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
+        ],
+      },
+    },
+    {
+      reason: "a backtick inside the scope list is not a slug",
+      body: message("[fleet-sync: `o/r`, o/s]", PROSE),
+      expected: {
+        kind: "error",
+        errors: ['"[fleet-sync: `o/r`, o/s]" lists entries that are not owner/name slugs: `o/r`'],
+      },
+    },
+    {
+      reason: "a marker inside a fenced code block is misplaced, never prose",
+      body: message(PROSE, "```text\n[fleet-sync]\n```"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
+      reason: "a valid block AND a backticked marker in a fenced example: the fenced one fails",
+      body: message("[fleet-sync]", PROSE, "```text\n`[fleet-sync: o/r]`\n```"),
+      expected: misplaced("`[fleet-sync: o/r]`"),
+    },
+    {
+      reason: "a fenced example written with the [keyword] placeholder is prose",
+      body: message(PROSE, "```text\n`[keyword]`\n```"),
+      expected: NONE,
+    },
+    {
       reason: "an unknown keyword fails, naming the known ones",
       body: message("[fleet-synk]", PROSE),
       expected: {
