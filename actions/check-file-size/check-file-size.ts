@@ -1,24 +1,8 @@
 #!/usr/bin/env bun
 
-// Caps on file length and line width across the fleet, in two tiers: a
-// WARN tier ("sensible sizes") that annotates, and a HARD tier that fails.
-// Walks the git index of the directory given as the first argument
-// (default: cwd), so ignored and untracked files never count, classifies
-// each tracked file by kind, and reports one line per finding. Repo-owned
-// exemptions live in .file-size-allow.local, one path per line with a
-// `# reason` on the same line, suppressing both tiers; an entry without a
-// reason, or whose file has no finding left, fails so the list stays honest.
-//
-// Files repo-platform manages (the "This file is managed by" header) are
-// skipped and counted: a fleet repository cannot fix them. `--rendered
-// <dir>` (repo-platform's own job) also judges a rendered template tree
-// with that skip and the golden-directory exemption OFF, so an oversize
-// render fails at its source.
-//
-// Reporting is one table with two sinks - the fleet rule for any check
-// that reports findings: the step summary and log annotations on every
-// event, and the sticky PR comment (action.yml) on pull requests. The
-// table goes to REPORT_PATH (the comment body) and GITHUB_STEP_SUMMARY.
+// Two-tier caps (HARD fails, WARN annotates) on file length and line width
+// over the tracked files of a checkout; .file-size-allow.local exempts by
+// path with a mandatory `# reason`. Policy and exemptions: docs/new-repo.md.
 
 import {
   appendFileSync,
@@ -154,10 +138,30 @@ function splitLines(text: string): string[] {
   return lines;
 }
 
-/** A line wrapping cannot fix: its longest whitespace-delimited token (a
- *  URL, a sha, a path, a jinja expression) is itself over the cap. */
-export function isUnbreakable(line: string, cap: number): boolean {
-  return line.split(/\s+/).some((token) => [...token].length > cap);
+/** A line wrapping cannot fix: one whitespace-free token (a URL, a sha, a
+ *  path, a jinja expression), indentation aside. */
+export function isUnbreakable(line: string): boolean {
+  const token = line.trim();
+  return token !== "" && !/\s/.test(token);
+}
+
+/** Which lines sit inside a matched BEGIN/END GENERATED pair, markers
+ *  included (both markers on one line fence that line); an unmatched BEGIN
+ *  fences nothing, and regions do not nest. */
+function generatedRegionMask(lines: string[]): boolean[] {
+  const mask = lines.map(() => false);
+  let begin = -1;
+  lines.forEach((line, index) => {
+    if (begin === -1) {
+      if (!REGION_BEGIN.test(line)) return;
+      if (REGION_END.test(line)) mask[index] = true;
+      else begin = index;
+    } else if (REGION_END.test(line)) {
+      for (let i = begin; i <= index; i++) mask[i] = true;
+      begin = -1;
+    }
+  });
+  return mask;
 }
 
 /** A line that is one string or regex literal, optionally assigned,
@@ -189,34 +193,28 @@ function tierOf(value: number, hard: number, warn: number): Tier | null {
   return null;
 }
 
-/** Every finding for one file: its line count against the kind's caps, and
- *  each line's width outside generated regions. A line lands in the
- *  highest tier whose cap it exceeds and whose cap wrapping could meet. */
+/** Every finding for one file, generated regions excluded from both
+ *  measures: the line count against the kind's caps, and each line's width.
+ *  A line lands in the highest tier whose cap it exceeds. */
 export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
   const findings: Finding[] = [];
   const lines = splitLines(text);
-  const lineTier = tierOf(lines.length, HARD.lines[kind], WARN.lines[kind]);
+  const generated = generatedRegionMask(lines);
+  const counted = generated.filter((inRegion) => !inRegion).length;
+  const lineTier = tierOf(counted, HARD.lines[kind], WARN.lines[kind]);
   if (lineTier !== null) {
     const cap = lineTier === "hard" ? HARD.lines[kind] : WARN.lines[kind];
-    findings.push({ path, kind, tier: lineTier, measure: "lines", value: lines.length, cap });
+    findings.push({ path, kind, tier: lineTier, measure: "lines", value: counted, cap });
   }
   if (!WIDTH_KINDS.has(kind)) return findings;
-  let inRegion = false;
   lines.forEach((line, index) => {
-    if (inRegion) {
-      if (REGION_END.test(line)) inRegion = false;
-      return;
-    }
-    if (REGION_BEGIN.test(line)) {
-      inRegion = true;
-      return;
-    }
+    if (generated[index] || isUnbreakable(line)) return;
     const width = [...line].length;
     for (const [tier, cap] of [
       ["hard", HARD.width],
       ["warn", WARN.width],
     ] as const) {
-      if (width > cap && !isUnbreakable(line, cap)) {
+      if (width > cap) {
         if (tier === "warn" && isLiteralLine(line)) return;
         findings.push({ path, kind, tier, line: index + 1, measure: "width", value: width, cap });
         return;
@@ -383,31 +381,49 @@ export function check(root: string, options: CheckOptions = {}): Verdict {
   };
 }
 
-/** The sticky comment / step summary body: hard failures first, then
- *  warnings; empty when there is nothing to say. */
-export function report(verdict: Verdict): string {
-  const { failures, warnings, allowlistErrors, managedSkipped } = verdict;
-  if (failures.length + warnings.length + allowlistErrors.length === 0) return "";
-  const rows = [...failures, ...warnings].map((finding) => {
-    const where = finding.measure === "lines" ? finding.path : `${finding.path}:${finding.line}`;
-    const value = finding.measure === "lines" ? `${finding.value} lines` : `${finding.value} chars`;
-    return `| \`${where}\` | ${value} | ${finding.tier} | ${finding.cap} |`;
-  });
-  const parts = [
-    "## File size check",
-    "",
-    `${failures.length} over a hard cap (fails), ${warnings.length} over a sensible size (warns).`,
-  ];
-  if (rows.length > 0) {
-    parts.push("", "| File | Size | Tier | Cap |", "| --- | --- | --- | --- |", ...rows);
+/** The three outcomes the action distinguishes (its `report` output). */
+export type Outcome =
+  | { state: "findings" | "clean"; verdict: Verdict }
+  | { state: "error"; message: string };
+
+export function outcomeOf(verdict: Verdict): Outcome {
+  const { failures, warnings, allowlistErrors } = verdict;
+  const silent = failures.length + warnings.length + allowlistErrors.length === 0;
+  return { state: silent ? "clean" : "findings", verdict };
+}
+
+/** The step summary body on every outcome, and the sticky comment's on
+ *  findings: hard failures first, then warnings. */
+export function report(outcome: Outcome): string {
+  const parts = ["## File size check", ""];
+  if (outcome.state === "error") {
+    parts.push(`The check did not run to completion: ${outcome.message}`);
+    return `${parts.join("\n")}\n`;
   }
-  if (allowlistErrors.length > 0) {
-    parts.push("", `### ${ALLOWLIST_FILE}`, "", ...allowlistErrors.map((error) => `- ${error}`));
+  const { failures, warnings, allowlistErrors, managedSkipped } = outcome.verdict;
+  if (outcome.state === "clean") {
+    parts.push("Every file is under its caps.");
+  } else {
+    parts.push(
+      `${failures.length} over a hard cap (fails), ${warnings.length} over a sensible size (warns).`,
+    );
+    const rows = [...failures, ...warnings].map((finding) => {
+      const where = finding.measure === "lines" ? finding.path : `${finding.path}:${finding.line}`;
+      const value =
+        finding.measure === "lines" ? `${finding.value} lines` : `${finding.value} chars`;
+      return `| \`${where}\` | ${value} | ${finding.tier} | ${finding.cap} |`;
+    });
+    if (rows.length > 0) {
+      parts.push("", "| File | Size | Tier | Cap |", "| --- | --- | --- | --- |", ...rows);
+    }
+    if (allowlistErrors.length > 0) {
+      parts.push("", `### ${ALLOWLIST_FILE}`, "", ...allowlistErrors.map((error) => `- ${error}`));
+    }
+    parts.push(
+      "",
+      `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+    );
   }
-  parts.push(
-    "",
-    `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
-  );
   if (managedSkipped > 0) {
     parts.push("", `${managedSkipped} managed file(s) skipped; repo-platform owns them.`);
   }
@@ -431,16 +447,25 @@ export function parseArgs(argv: string[]): { root: string; rendered: string[] } 
 }
 
 if (import.meta.main) {
-  // Cleared first, so a crash below leaves no file and the action reads
-  // "error", never a previous run's verdict.
+  // Cleared first, so a crash below leaves no comment body behind.
   const reportPath = process.env.REPORT_PATH;
   if (reportPath) rmSync(reportPath, { force: true });
-  const { root, rendered } = parseArgs(process.argv.slice(2));
-  const verdict = check(root, { rendered });
-  const body = report(verdict);
-  if (reportPath) writeFileSync(reportPath, body);
-  if (process.env.GITHUB_STEP_SUMMARY && body !== "") {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+  const emit = (outcome: Outcome): void => {
+    const body = report(outcome);
+    if (reportPath && outcome.state === "findings") writeFileSync(reportPath, body);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+    if (process.env.GITHUB_OUTPUT)
+      appendFileSync(process.env.GITHUB_OUTPUT, `report=${outcome.state}\n`);
+  };
+  let verdict: Verdict;
+  try {
+    const { root, rendered } = parseArgs(process.argv.slice(2));
+    verdict = check(root, { rendered });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emit({ state: "error", message });
+    console.error(`::error::check-file-size did not run to completion: ${message}`);
+    process.exit(1);
   }
   for (const warning of verdict.warnings) console.log(`::warning::${describe(warning)}`);
   const failures = [...verdict.failures.map(describe), ...verdict.allowlistErrors];
@@ -449,9 +474,12 @@ if (import.meta.main) {
     console.error(
       `${failures.length} finding(s). Split the file, wrap the line, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
     );
-    process.exit(1);
+  } else {
+    console.log(
+      `File size check passed (${verdict.warnings.length} warning(s), ${verdict.managedSkipped} managed file(s) skipped).`,
+    );
   }
-  console.log(
-    `File size check passed (${verdict.warnings.length} warning(s), ${verdict.managedSkipped} managed file(s) skipped).`,
-  );
+  // Last, so nothing after it can leave a recorded state the run's exit contradicts.
+  emit(outcomeOf(verdict));
+  process.exit(failures.length > 0 ? 1 : 0);
 }

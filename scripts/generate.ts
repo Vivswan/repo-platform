@@ -385,7 +385,11 @@ export function pagesSetup(withPages: PagesManifest[]): string[] {
   const tokenProse = names.length === 1 ? `${names[0]} or none` : `${names.join(", ")}, or none`;
   return [
     `  default: "{{ (${defaultExpr}) | join(',') or 'none' }}"`,
-    `  validator: "{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}pages_setup must be comma-separated with no spaces or empty tokens{% elif ts | reject('in', [${tokenList}]) | list %}pages_setup tokens must be ${tokenProse}{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}"`,
+    `  validator: "{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}` +
+      "pages_setup must be comma-separated with no spaces or empty tokens" +
+      `{% elif ts | reject('in', [${tokenList}]) | list %}pages_setup tokens must be ${tokenProse}` +
+      "{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique" +
+      `{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}"`,
   ];
 }
 

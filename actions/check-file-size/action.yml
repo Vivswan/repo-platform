@@ -34,12 +34,9 @@ runs:
         have="$(command -v bun >/dev/null && bun --version || true)"
         echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-    # Skipped only when the caller's bun already IS the pinned version
-    # (reuse then just skips a second network fetch): the action's scripts
-    # and lockfile run on the action-local .bun-version pin (generated
-    # from the manifests' bun pin), never on whatever the CALLER resolves
-    # - a caller pinning an older bun cannot parse the lockfiles
-    # repo-platform's bun writes.
+    # The script runs on the action-local .bun-version pin, never on the
+    # caller's bun resolution (an older caller bun cannot parse this repo's
+    # lockfiles); reuse skips the fetch only on an exact pin match.
     - name: Set up bun
       id: setup-bun
       if: steps.bun.outputs.pinned != 'true'
@@ -56,13 +53,9 @@ runs:
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
-    # No install step: the script has no runtime dependencies.
-    #
-    # continue-on-error so the comment steps run first; the last step
-    # re-raises the verdict. The script clears the report file first and
-    # writes it when it ran to completion (empty when clean), so `report`
-    # is three-valued: findings, clean, or error (no file: the script
-    # crashed, and the comment is left alone).
+    # No install step (no runtime dependencies). continue-on-error so the
+    # comment steps run first; the last step re-raises. The script records
+    # report=findings|clean|error itself; dying before that reads as error.
     - name: Check file sizes
       id: check
       continue-on-error: true
@@ -74,11 +67,7 @@ runs:
       run: |
         status=0
         bun "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" ${RENDERED_DIR:+--rendered "$RENDERED_DIR"} || status=$?
-        if [ -s "$REPORT_PATH" ]; then report=findings
-        elif [ -f "$REPORT_PATH" ]; then report=clean
-        else report=error
-        fi
-        echo "report=$report" >> "$GITHUB_OUTPUT"
+        grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
         exit "$status"
 
     # The comment is a convenience sink: the summary and annotations carry

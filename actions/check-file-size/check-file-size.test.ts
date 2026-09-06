@@ -11,13 +11,16 @@ import {
   HARD,
   isGenerated,
   isManaged,
+  isUnbreakable,
   judgeFile,
   type Kind,
+  type Outcome,
   parseAllowlist,
   parseArgs,
   REASON_RULE,
   report,
   type Tier,
+  type Verdict,
   WARN,
 } from "./check-file-size.ts";
 
@@ -144,20 +147,49 @@ describe("isGenerated / isManaged", () => {
 
 describe("judgeFile line counts", () => {
   const kinds: Kind[] = ["source", "test", "workflow", "shell", "markdown"];
+  // A 50-line matched generated region rides along in every fixture and
+  // never counts; the same fixtures without it would judge identically.
+  const region = `# BEGIN GENERATED: x\n${lines(48)}# END GENERATED: x\n`;
   test.each(kinds)("%s: at each cap passes, one over lands in that tier", (kind) => {
     const hard = HARD.lines[kind];
     const warn = WARN.lines[kind];
     const path = `file.${kind}`;
-    expect(judgeFile(path, kind, lines(warn))).toEqual([]);
-    expect(judgeFile(path, kind, lines(warn + 1))).toEqual([
+    expect(judgeFile(path, kind, `${region}${lines(warn)}`)).toEqual([]);
+    expect(judgeFile(path, kind, `${lines(warn + 1)}${region}`)).toEqual([
       { path, kind, tier: "warn", measure: "lines", value: warn + 1, cap: warn },
     ]);
-    expect(judgeFile(path, kind, lines(hard))).toEqual([
+    expect(judgeFile(path, kind, `${region}${lines(hard)}`)).toEqual([
       { path, kind, tier: "warn", measure: "lines", value: hard, cap: warn },
     ]);
-    expect(judgeFile(path, kind, lines(hard + 1))).toEqual([
+    expect(judgeFile(path, kind, `${lines(hard + 1)}${region}`)).toEqual([
       { path, kind, tier: "hard", measure: "lines", value: hard + 1, cap: hard },
     ]);
+  });
+
+  test("an unmatched BEGIN GENERATED fences nothing (control); both markers on one line fence that line", () => {
+    const cap = HARD.lines.source;
+    const finding = (value: number): Finding => ({
+      path: "a.ts",
+      kind: "source",
+      tier: "hard",
+      measure: "lines",
+      value,
+      cap,
+    });
+    expect(judgeFile("a.ts", "source", `// BEGIN GENERATED: x\n${lines(cap)}`)).toEqual([
+      finding(cap + 1),
+    ]);
+    // The warn boundary, where one uncounted marker line decides.
+    expect(
+      judgeFile(
+        "a.ts",
+        "source",
+        `// BEGIN GENERATED: x END GENERATED: x\n${lines(WARN.lines.source)}`,
+      ),
+    ).toEqual([]);
+    expect(
+      judgeFile("a.ts", "source", `// BEGIN GENERATED: x END GENERATED: x\n${lines(cap + 1)}`),
+    ).toEqual([finding(cap + 1)]);
   });
 
   test("a missing trailing newline still counts the last line; a trailing newline adds none", () => {
@@ -177,14 +209,19 @@ describe("judgeFile line width", () => {
       "a".repeat(each - (i < tokens - 1 ? 1 : 0)),
     ).join(" ");
   };
-  const at = (finding: Finding) => [
-    finding.tier,
-    "line" in finding ? finding.line : undefined,
-    finding.value,
-    finding.cap,
-  ];
+  /** Expected rows as [tier, line, width, cap]; expanded to whole width
+   *  findings on "f" before comparing. */
+  const widthFinding = (kind: Kind, [tier, line, value, cap]: (Tier | number)[]): Finding => ({
+    path: "f",
+    kind,
+    tier: tier as Tier,
+    measure: "width",
+    line: line as number,
+    value: value as number,
+    cap: cap as number,
+  });
 
-  test.each<[string, Kind, string, (Tier | number | undefined)[][]]>([
+  test.each<[string, Kind, string, (Tier | number)[][]]>([
     ["a breakable line over the hard cap", "source", `${wide(300)}\n`, [["hard", 1, 300, 256]]],
     [
       "a breakable line over the warn cap only",
@@ -195,17 +232,32 @@ describe("judgeFile line width", () => {
     ["a line at the warn cap", "source", `${wide(WARN.width)}\n`, []],
     ["a CRLF line at the warn cap", "source", `${wide(WARN.width)}\r\n`, []],
     ["a single unbreakable token over the hard cap", "source", `${"u".repeat(300)}\n`, []],
+    ["an indented single token over the hard cap", "source", `    ${"u".repeat(300)}\n`, []],
     [
-      "a key whose value token alone exceeds the cap",
-      "workflow",
-      `  run: ${"u".repeat(300)}\n`,
-      [],
+      "a literal assigned on one line is two tokens and fails (control for the single-token rule)",
+      "source",
+      `const x = "${"a".repeat(280)}";\n`,
+      [["hard", 1, 293, 256]],
     ],
     [
-      "a line over the warn cap whose longest token exceeds the warn cap",
+      "an unmatched BEGIN GENERATED fences no width either",
+      "source",
+      `// BEGIN GENERATED: x\n${wide(300)}\n`,
+      [["hard", 2, 300, 256]],
+    ],
+    [
+      "a key with a wide value is two tokens and fails",
+      "workflow",
+      `  run: ${"u".repeat(300)}
+`,
+      [["hard", 1, 307, 256]],
+    ],
+    [
+      "a line over the warn cap with one wide token among others still warns",
       "shell",
-      `echo ${"u".repeat(160)} ${"v".repeat(30)}\n`,
-      [],
+      `echo ${"u".repeat(160)} ${"v".repeat(30)}
+`,
+      [["warn", 1, 196, 150]],
     ],
     [
       "a wide line inside a generated region, then the same line outside it",
@@ -254,8 +306,27 @@ describe("judgeFile line width", () => {
       [["warn", 1, 215, 150]],
     ],
     ["a warn-wide python raw literal", "source", `pattern = r"${"a ".repeat(100)}"\n`, []],
+    [
+      "both markers on one line fence that line alone",
+      "source",
+      `// BEGIN GENERATED: x ${wide(300)} END GENERATED: x\n${wide(300)}\n`,
+      [["hard", 2, 300, 256]],
+    ],
   ])("%s", (_name, kind, text, expected) => {
-    expect(judgeFile("f", kind, text).map(at)).toEqual(expected);
+    expect(judgeFile("f", kind, text)).toEqual(expected.map((row) => widthFinding(kind, row)));
+  });
+});
+
+describe("isUnbreakable", () => {
+  test.each<[string, boolean]>([
+    ["https://example.com/a/very/long/path", true],
+    ["    indented-token", true],
+    ["two tokens", false],
+    ["  run: value", false],
+    ["", false],
+    ["   ", false],
+  ])("%j", (line, unbreakable) => {
+    expect(isUnbreakable(line)).toBe(unbreakable);
   });
 });
 
@@ -422,91 +493,126 @@ describe("check", () => {
 });
 
 describe("the CLI", () => {
-  const run = (root: string, reportPath: string, ...args: string[]) => {
-    const env: Record<string, string | undefined> = { ...process.env, REPORT_PATH: reportPath };
-    delete env.GITHUB_STEP_SUMMARY;
-    const proc = Bun.spawnSync(["bun", SCRIPT, root, ...args], {
+  const hardBody = (hardLines: number) =>
+    [
+      "## File size check",
+      "",
+      "1 over a hard cap (fails), 1 over a sensible size (warns).",
+      "",
+      "| File | Size | Tier | Cap |",
+      "| --- | --- | --- | --- |",
+      `| \`src/big.ts\` | ${hardLines} lines | hard | ${HARD.lines.source} |`,
+      "| `src/warm.sh:1` | 199 chars | warn | 150 |",
+      "",
+      `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+      "",
+    ].join("\n");
+  const warmBody = [
+    "## File size check",
+    "",
+    "0 over a hard cap (fails), 1 over a sensible size (warns).",
+    "",
+    "| File | Size | Tier | Cap |",
+    "| --- | --- | --- | --- |",
+    "| `src/warm.sh:1` | 199 chars | warn | 150 |",
+    "",
+    `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+    "",
+  ].join("\n");
+  const cleanBody = [
+    "## File size check",
+    "",
+    "Every file is under its caps.",
+    "",
+    "1 managed file(s) skipped; repo-platform owns them.",
+    "",
+  ].join("\n");
+
+  /** Runs the script as action.yml does, over a planted stale comment body
+   *  (so a run that leaves one behind shows). */
+  const run = (root: string) => {
+    const scratch = temp.dir("check-file-size-cli-");
+    const reportPath = join(scratch, "report.md");
+    const summaryPath = join(scratch, "summary.md");
+    const outputPath = join(scratch, "output.txt");
+    writeFileSync(reportPath, "stale\n");
+    writeFileSync(summaryPath, "");
+    writeFileSync(outputPath, "");
+    const proc = Bun.spawnSync(["bun", SCRIPT, root], {
       stdout: "pipe",
       stderr: "pipe",
-      env,
+      env: {
+        ...process.env,
+        REPORT_PATH: reportPath,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        GITHUB_OUTPUT: outputPath,
+      },
     });
     return {
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString().trimEnd().split("\n"),
       stderr: proc.stderr.toString().trimEnd().split("\n"),
+      comment: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : null,
+      summary: readFileSync(summaryPath, "utf-8"),
+      output: readFileSync(outputPath, "utf-8"),
     };
   };
 
-  test("a hard finding exits 1 with ::error:: lines and the table in REPORT_PATH; a warning-only tree exits 0 with the table; a clean tree writes an empty report", () => {
+  test("findings: exit 1, ::error:: lines, the table as comment body, summary, and report=findings", () => {
+    const hardLines = HARD.lines.source + 1;
     const wide = `${"a ".repeat(100).trim()}\n`;
-    const root = checkout({ "src/big.ts": lines(HARD.lines.source + 1), "src/warm.sh": wide });
-    const reportPath = join(temp.dir("check-file-size-report-"), "report.md");
-    expect(run(root, reportPath)).toEqual({
+    const root = checkout({ "src/big.ts": lines(hardLines), "src/warm.sh": wide });
+    expect(run(root)).toEqual({
       exitCode: 1,
       stdout: ["::warning::src/warm.sh:1: 199 chars (cap 150)"],
       stderr: [
-        `::error::src/big.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`,
+        `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
         `1 finding(s). Split the file, wrap the line, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
       ],
+      comment: hardBody(hardLines),
+      summary: hardBody(hardLines),
+      output: "report=findings\n",
     });
-    expect(readFileSync(reportPath, "utf-8")).toBe(
-      [
-        "## File size check",
-        "",
-        "1 over a hard cap (fails), 1 over a sensible size (warns).",
-        "",
-        "| File | Size | Tier | Cap |",
-        "| --- | --- | --- | --- |",
-        `| \`src/big.ts\` | ${HARD.lines.source + 1} lines | hard | ${HARD.lines.source} |`,
-        "| `src/warm.sh:1` | 199 chars | warn | 150 |",
-        "",
-        `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
-        "",
-      ].join("\n"),
-    );
+  });
 
-    const warm = checkout({ "src/warm.sh": wide });
-    const warmReport = join(temp.dir("check-file-size-report-"), "report.md");
-    expect(run(warm, warmReport)).toEqual({
+  test("warnings only: exit 0 with the same three sinks", () => {
+    const root = checkout({ "src/warm.sh": `${"a ".repeat(100).trim()}\n` });
+    expect(run(root)).toEqual({
       exitCode: 0,
       stdout: [
         "::warning::src/warm.sh:1: 199 chars (cap 150)",
         "File size check passed (1 warning(s), 0 managed file(s) skipped).",
       ],
       stderr: [""],
+      comment: warmBody,
+      summary: warmBody,
+      output: "report=findings\n",
     });
-    expect(readFileSync(warmReport, "utf-8")).toBe(
-      [
-        "## File size check",
-        "",
-        "0 over a hard cap (fails), 1 over a sensible size (warns).",
-        "",
-        "| File | Size | Tier | Cap |",
-        "| --- | --- | --- | --- |",
-        "| `src/warm.sh:1` | 199 chars | warn | 150 |",
-        "",
-        `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
-        "",
-      ].join("\n"),
-    );
+  });
 
-    // A crash (here: a root that is not a git checkout) leaves NO report,
-    // a previous run's file included, so the action reads "error".
-    const notGit = temp.dir("check-file-size-notgit-");
-    const staleReport = join(temp.dir("check-file-size-report-"), "report.md");
-    writeFileSync(staleReport, "stale\n");
-    expect(run(notGit, staleReport).exitCode).toBe(1);
-    expect(existsSync(staleReport)).toBe(false);
-
-    const clean = checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` });
-    const cleanReport = join(temp.dir("check-file-size-report-"), "report.md");
-    expect(run(clean, cleanReport)).toEqual({
+  test("clean: exit 0, a summary, no comment body (the action deletes the comment), report=clean", () => {
+    const root = checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` });
+    expect(run(root)).toEqual({
       exitCode: 0,
       stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
       stderr: [""],
+      comment: null,
+      summary: cleanBody,
+      output: "report=clean\n",
     });
-    // Written empty, so the action can tell "clean" from "never ran".
-    expect(readFileSync(cleanReport, "utf-8")).toBe("");
+  });
+
+  test("error: a root that is no checkout exits 1 with the failure in the summary, no comment body, report=error", () => {
+    const root = temp.dir("check-file-size-notgit-");
+    const message = `git ls-files failed in ${root}: fatal: not a git repository (or any of the parent directories): .git`;
+    expect(run(root)).toEqual({
+      exitCode: 1,
+      stdout: [""],
+      stderr: [`::error::check-file-size did not run to completion: ${message}`],
+      comment: null,
+      summary: `## File size check\n\nThe check did not run to completion: ${message}\n`,
+      output: "report=error\n",
+    });
   });
 
   test("parseArgs takes a root and repeatable --rendered directories", () => {
@@ -520,27 +626,29 @@ describe("the CLI", () => {
 });
 
 describe("report", () => {
-  test("an empty verdict yields no body; findings render hard first as one table, allowlist errors and the managed count after", () => {
-    expect(report({ failures: [], warnings: [], allowlistErrors: [], managedSkipped: 3 })).toBe("");
-    const body = report({
-      failures: [
-        { path: "a.ts", kind: "source", tier: "hard", measure: "lines", value: 2100, cap: 2000 },
-      ],
-      warnings: [
-        {
-          path: "b.sh",
-          kind: "shell",
-          tier: "warn",
-          line: 7,
-          measure: "width",
-          value: 180,
-          cap: 150,
-        },
-      ],
-      allowlistErrors: [`${ALLOWLIST_FILE}:1: 'c.ts' is stale`],
-      managedSkipped: 3,
-    });
-    expect(body).toBe(
+  const verdict: Verdict = {
+    failures: [
+      { path: "a.ts", kind: "source", tier: "hard", measure: "lines", value: 2100, cap: 2000 },
+    ],
+    warnings: [
+      {
+        path: "b.sh",
+        kind: "shell",
+        tier: "warn",
+        line: 7,
+        measure: "width",
+        value: 180,
+        cap: 150,
+      },
+    ],
+    allowlistErrors: [`${ALLOWLIST_FILE}:1: 'c.ts' is stale`],
+    managedSkipped: 3,
+  };
+
+  test.each<[string, Outcome, string[]]>([
+    [
+      "findings render hard first as one table, allowlist errors and the managed count after",
+      { state: "findings", verdict },
       [
         "## File size check",
         "",
@@ -559,7 +667,26 @@ describe("report", () => {
         "",
         "3 managed file(s) skipped; repo-platform owns them.",
         "",
-      ].join("\n"),
-    );
+      ],
+    ],
+    [
+      "clean says so and keeps the managed count",
+      { state: "clean", verdict: { ...verdict, failures: [], warnings: [], allowlistErrors: [] } },
+      [
+        "## File size check",
+        "",
+        "Every file is under its caps.",
+        "",
+        "3 managed file(s) skipped; repo-platform owns them.",
+        "",
+      ],
+    ],
+    [
+      "an error names what stopped the check",
+      { state: "error", message: "boom" },
+      ["## File size check", "", "The check did not run to completion: boom", ""],
+    ],
+  ])("%s", (_name, outcome, expected) => {
+    expect(report(outcome)).toBe(expected.join("\n"));
   });
 });
