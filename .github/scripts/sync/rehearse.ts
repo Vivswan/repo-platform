@@ -737,10 +737,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         passthrough(["git", "-C", targetDir, "diff", "--cached", origHead]);
       }
 
-      // open_pr.ts's roster, rendered as the PR would render it: each
-      // replayed step wrote its report under the RUNNER_TEMP twin (the
-      // fixed name, or the workflow's own name for an env-named file).
-      // Review-only flags render no section, as in the PR.
+      // open_pr.ts's roster rendered as the PR would: each replayed step
+      // wrote its report under the RUNNER_TEMP twin of the roster's file.
       section("would-be PR-body sections");
       let anySection = false;
       for (const { file, title, render, forcesReview } of PR_BODY_SECTIONS) {

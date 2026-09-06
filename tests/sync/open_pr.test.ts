@@ -93,7 +93,6 @@ function run(opts: Options = {}) {
       BASE_BRANCH: "main",
       DISPLAY: "build@newsha",
       RECOVER: "",
-      RESOLVED: "",
       VALIDATION: "passed",
       HIDE_DETAILS: "",
       ...fileEnv,

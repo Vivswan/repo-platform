@@ -69,10 +69,9 @@ const bulleted = (text: string): string =>
     .map((rel) => `- ${rel}`)
     .join("\n");
 
-/** The PR-body sections in body order. An absent or empty file is no
- * section. The env-named files are written by the workflow's own steps;
- * the conflict resolver's dropped-hunks summary being non-empty is also
- * what the workflow's `resolved` output means. */
+/** The PR-body sections in body order; an absent or empty file is no
+ * section. A non-empty dropped-hunks summary is also what the workflow's
+ * `resolved` output means. */
 export const PR_BODY_SECTIONS: readonly PrBodySection[] = [
   {
     env: "CARRIED_FILE",

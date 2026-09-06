@@ -1,7 +1,6 @@
-// The PR-body roster's contracts nothing typechecks: its env-named rows are
-// exactly the workflow's open-PR step files, and its fixed-name rows are
-// exactly the report constants. Renders and review flags run through
-// open_pr.ts in tests/sync/open_pr.test.ts.
+// The roster contracts nothing typechecks: env-named rows == the workflow's
+// open-PR files, fixed-name rows == the report constants. Renders and review
+// flags are exercised through open_pr.ts in open_pr.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";

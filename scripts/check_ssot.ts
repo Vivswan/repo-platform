@@ -953,18 +953,16 @@ function lineDiffMismatch(
   ];
 }
 
-/** The two skills' file-ownership references. Skills install standalone
- *  (no cross-skill link resolves after `npx skills add`), so each ships
- *  its own table; the Class and Files columns are one roster, the third
- *  column is each skill's own reading of it. */
+/** The skills' twin ownership tables: skills install standalone, so each
+ *  ships its own; Class and Files are one roster, the third column is each
+ *  skill's own. */
 export const SKILL_OWNERSHIP_TABLES = [
   "skills/repo-platform-new-project/references/file-ownership.md",
   "skills/repo-platform-sync-pr/references/file-ownership.md",
 ] as const;
 
-/** Every table row's first two cells (`| Class | Files |`), header and
- *  separator included, trimmed - the roster the twin tables share. A file
- *  with no table rows is a lost anchor, not an empty roster. */
+/** Each table row's Class and Files cells, header and separator included;
+ *  a file with no table rows is a lost anchor, not an empty roster. */
 export function ownershipTableRoster(file: string, markdown: string): string[] {
   const rows = markdown.split("\n").filter((line) => line.startsWith("|"));
   if (rows.length === 0) throw new Error(`${file}: no markdown table rows - anchor lost`);
