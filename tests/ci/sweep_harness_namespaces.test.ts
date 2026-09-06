@@ -25,9 +25,9 @@ interface Fixture {
   planted: string[];
 }
 
-/** A scratch bare repo holding five namespaces: one owned by this process
- * (live), one by a dead pid, one by another host, one with a lightweight
- * `/run` tag, one with no `/run` tag at all. */
+/** A scratch bare repo holding six namespaces: one owned by this process
+ * (live), one by a dead pid, one by an out-of-range pid, one by another
+ * host, one with a lightweight `/run` tag, one with no `/run` tag at all. */
 function plant(): Fixture {
   const repo = temp.dir("sweep-namespaces-");
   fixtureGit(repo, ["init", "-q", "--bare"]);
@@ -57,6 +57,10 @@ function plant(): Fixture {
     fixtureGit(repo, ["update-ref", `refs/heads/ci-build-${name}`, commit]);
     for (const tag of tags) fixtureGit(repo, ["tag", `ci-build-${name}/${tag}`, commit]);
   };
+  // process.kill throws ERR_INVALID_ARG_TYPE for this pid; a sweeper that
+  // reads any throw as "dead" deletes the namespace.
+  own("badpid", 2147483648, HOST);
+  refs("badpid", "old");
   own("dead1", dead, HOST);
   refs("dead1", "old", "new");
   fixtureGit(repo, ["tag", "ci-build-lite/run", commit]);
@@ -90,26 +94,30 @@ const DEAD1 = [
   "refs/tags/ci-build-dead1/run",
 ];
 const UNOWNED = [
+  "refs/heads/ci-build-badpid",
   "refs/heads/ci-build-lite",
   "refs/heads/ci-build-noRun",
+  "refs/tags/ci-build-badpid/old",
+  "refs/tags/ci-build-badpid/run",
   "refs/tags/ci-build-lite/old",
   "refs/tags/ci-build-lite/run",
   "refs/tags/ci-build-noRun/old",
 ];
 
 function expectedPlan(fixture: Fixture, mode: string, force: boolean): string[] {
-  const unownedWhy =
-    "no owner record (killed before writing its /run tag, or a pre-owner leftover)";
-  const unowned = (name: string, refs: number) =>
+  const noRecord = "killed before writing its /run tag, or a pre-owner leftover";
+  const unowned = (name: string, why: string, detail: string, refs: number) =>
     force
-      ? `delete  ci-build-${name}: no owner record (--force-unowned); ${refs} refs`
-      : `keep    ci-build-${name}: ${unownedWhy}; ${refs} refs, --force-unowned deletes`;
+      ? `delete  ci-build-${name}: ${why} (--force-unowned); ${refs} refs`
+      : `keep    ci-build-${name}: ${why} (${detail}); ${refs} refs, --force-unowned deletes`;
+  const badPid = "pid 2147483648, started 2026-09-06T10:00:00Z, dir /tmp/upgrade-path.badpid";
   return [
-    `5 ci-build-* namespace(s) in ${fixture.repo} (${mode})`,
+    `6 ci-build-* namespace(s) in ${fixture.repo} (${mode})`,
+    `  ${unowned("badpid", "owner liveness unknown", badPid, 3)}`,
     `  delete  ci-build-dead1: owner dead (pid ${fixture.deadPid}, started 2026-09-06T10:00:00Z); 4 refs; dir /tmp/upgrade-path.dead1 gone`,
-    `  ${unowned("lite", 3)}`,
+    `  ${unowned("lite", "no owner record", noRecord, 3)}`,
     `  refuse  ci-build-live1: owner alive (pid ${fixture.livePid}, started 2026-09-06T10:00:00Z, dir /tmp/upgrade-path.live1)`,
-    `  ${unowned("noRun", 2)}`,
+    `  ${unowned("noRun", "no owner record", noRecord, 2)}`,
     `  keep    ci-build-other: owned on host another-host.local (pid ${fixture.deadPid}, started 2026-09-06T10:00:00Z); sweep it from there`,
   ];
 }
@@ -144,7 +152,7 @@ describe("sweep_harness_namespaces", () => {
       mode: "execute",
       force: true,
       removed: [...DEAD1, ...UNOWNED],
-      trailer: "deleted 9 refs",
+      trailer: "deleted 12 refs",
     },
   ])("$args", ({ args, mode, force, removed, trailer }) => {
     const fixture = plant();

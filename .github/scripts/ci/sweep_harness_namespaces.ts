@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
-// Sweeps the `ci-build-<token>` ref namespaces a SIGKILLed
-// upgrade_path_test.sh run leaves behind (its EXIT trap never fires).
-// Linked worktrees share one ref store and the tokens are random, so
-// ownership comes from the namespace's own annotated `/run` tag (pid,
-// host, start time, fixture dir), never from the name.
+// Sweeps the `ci-build-<token>` ref namespaces a SIGKILLed upgrade_path_test.sh
+// run leaves in the ref store every linked worktree shares; ownership comes
+// from the namespace's own annotated `/run` tag, never from its random name.
 //
 // Usage: bun .github/scripts/ci/sweep_harness_namespaces.ts [--execute] [--force-unowned] [--repo <path>]
 
@@ -92,41 +90,53 @@ export function groupNamespaces(listing: string): Namespace[] {
     }));
 }
 
-/** `kill -0` semantics: alive when the signal is deliverable, and also when
- * it is refused (EPERM), which only a live process of another user does. */
-export function processAlive(pid: number): boolean {
+/** "dead" only on ESRCH: EPERM is a live process of another user, and any
+ * other outcome (a pid outside 1..2^31-1, which kill(0) would read as a
+ * process group or reject) leaves the owner unknown, never dead. */
+export type Liveness = "alive" | "dead" | "unknown";
+
+export function processLiveness(pid: number): Liveness {
+  if (!Number.isInteger(pid) || pid < 1 || pid > 0x7fffffff) return "unknown";
   try {
     process.kill(pid, 0);
-    return true;
+    return "alive";
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ESRCH" ? "dead" : code === "EPERM" ? "alive" : "unknown";
   }
 }
 
 export interface Judge {
   host: string;
-  alive: (pid: number) => boolean;
+  liveness: (pid: number) => Liveness;
   dirPresent: (dir: string) => boolean;
   forceUnowned: boolean;
 }
 
+/** `started` is informational only: liveness is the pid alone, so a recycled
+ * pid (an unrelated live process with that number) refuses the sweep even
+ * under --force-unowned, by design; the fixture dir names the run to check. */
 export function judge(namespace: Namespace, by: Judge): Verdict {
   const { owner, refs } = namespace;
   const count = `${refs.length} ref${refs.length === 1 ? "" : "s"}`;
+  const unowned = (why: string, detail: string): Verdict =>
+    by.forceUnowned
+      ? { kind: "delete", reason: `${why} (--force-unowned); ${count}` }
+      : { kind: "keep", reason: `${why} (${detail}); ${count}, --force-unowned deletes` };
   if (owner === null) {
-    return by.forceUnowned
-      ? { kind: "delete", reason: `no owner record (--force-unowned); ${count}` }
-      : {
-          kind: "keep",
-          reason: `no owner record (killed before writing its /run tag, or a pre-owner leftover); ${count}, --force-unowned deletes`,
-        };
+    return unowned(
+      "no owner record",
+      "killed before writing its /run tag, or a pre-owner leftover",
+    );
   }
   const who = `pid ${owner.pid}, started ${owner.started}`;
   if (owner.host !== by.host) {
     return { kind: "keep", reason: `owned on host ${owner.host} (${who}); sweep it from there` };
   }
-  if (by.alive(owner.pid))
+  const liveness = by.liveness(owner.pid);
+  if (liveness === "alive")
     return { kind: "refuse", reason: `owner alive (${who}, dir ${owner.dir})` };
+  if (liveness === "unknown") return unowned("owner liveness unknown", `${who}, dir ${owner.dir}`);
   const dir = by.dirPresent(owner.dir)
     ? `dir ${owner.dir} still present: rm -rf it, then git worktree prune`
     : `dir ${owner.dir} gone`;
@@ -164,7 +174,7 @@ function main(argv: string[]): number {
   }
   const by: Judge = {
     host: hostname(),
-    alive: processAlive,
+    liveness: processLiveness,
     dirPresent: existsSync,
     forceUnowned: options.forceUnowned,
   };
