@@ -45,6 +45,7 @@ inputs:
 runs:
   using: composite
   steps:
+    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -68,12 +69,21 @@ runs:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
-    # on nightly reporting paths a flake here turns a green night red.
+    # on nightly paths a flake here turns a green night red.
     - name: Set up bun (retry)
+      id: setup-bun-retry
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
+
+    # Recorded once after the setup: later steps run this path, never `bun`
+    # through PATH, where a later setup-bun can put another bun first.
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+    # END GENERATED: bun-setup
 
     - name: Check release health
       shell: bash
@@ -84,4 +94,5 @@ runs:
         BLOCKER_LABEL: ${{ inputs.blocker-label }}
         OVERRIDE_LABEL: ${{ inputs.override-label }}
         SECURITY_SEVERITY: ${{ inputs.security-severity }}
-      run: bun "${{ github.action_path }}/release-health.ts"
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/release-health.ts"'

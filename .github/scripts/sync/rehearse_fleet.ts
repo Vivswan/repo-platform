@@ -580,18 +580,18 @@ async function main(): Promise<number> {
 
   // The validator's deps install ONCE here, serially, before any lane
   // spawns: four lanes racing `bun install` into the shared
-  // actions/validate-template/node_modules on a fresh checkout is
+  // actions/validate-template-report/node_modules on a fresh checkout is
   // nondeterministic. With this done, the lanes carry
   // REHEARSE_SKIP_VALIDATE_INSTALL and skip their own install. A hard
   // prerequisite like the PATH checks above - a validator with no deps
   // cannot validate anything.
   const install = capture(["bun", "install", "--frozen-lockfile", "--silent"], {
-    cwd: join(REPO_ROOT, "actions/validate-template"),
+    cwd: join(REPO_ROOT, "actions/validate-template-report"),
     timeoutMs: NETWORK_TIMEOUT_MS,
   });
   if (install.exitCode !== 0) {
     fail(
-      `installing the validator's deps (actions/validate-template) failed: ${install.stderr.trim().split("\n").pop() ?? ""}`,
+      `installing the validator's deps (actions/validate-template-report) failed: ${install.stderr.trim().split("\n").pop() ?? ""}`,
     );
   }
   process.env.REHEARSE_SKIP_VALIDATE_INSTALL = "1";

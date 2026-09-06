@@ -73,6 +73,7 @@ runs:
       shell: bash
       run: echo "path=$PATH" >> "$GITHUB_OUTPUT"
 
+    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -96,16 +97,27 @@ runs:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
-    # on nightly deploy paths a flake here turns a green night red.
+    # on nightly paths a flake here turns a green night red.
     - name: Set up bun (retry)
+      id: setup-bun-retry
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
+    # Recorded once after the setup: later steps run this path, never `bun`
+    # through PATH, where a later setup-bun can put another bun first.
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+    # END GENERATED: bun-setup
+
     - name: Install the pinned site toolchain
       shell: bash
-      run: bun install --frozen-lockfile --cwd "${{ github.action_path }}"
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --cwd "${{ github.action_path }}"'
 
     - name: Build and assemble the site
       id: assemble
@@ -122,4 +134,5 @@ runs:
         MAX_VERSIONS: ${{ inputs.max-versions }}
         CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      run: bun "${{ github.action_path }}/build.ts"
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/build.ts"'

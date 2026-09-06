@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import {
+  actionDirNames,
   assembleBranchTree,
   canonicalize,
   copyActions,
@@ -20,6 +21,7 @@ import {
   MIGRATIONS_SRC_REL,
   parseArgs,
   SHARED_DIR,
+  TEST_FILE_SUFFIX,
   UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
 import { tempDirs } from "../shared/temp_dir";
@@ -118,6 +120,7 @@ function actionsFixture(): string {
   writeFileSync(join(action, "package.json"), "{}\n");
   writeFileSync(join(action, "bun.lock"), "\n");
   writeFileSync(join(action, "lib", "helper.ts"), "export {};\n");
+  writeFileSync(join(action, "lib", `helper${TEST_FILE_SUFFIX}`), "export {};\n");
   writeFileSync(join(action, "node_modules", "monaco-editor", "index.js"), "module.exports={};\n");
   // One file under every excluded name, spelled here rather than read from
   // EXCLUDED_DIRS so a name dropped from the set fails the listing below.
@@ -136,7 +139,7 @@ describe("copyActions", () => {
 
     // The whole published tree: the manifests ship because the action
     // installs from them when it runs, nested source survives the filter,
-    // and nothing under an EXCLUDED_DIRS name lands.
+    // and nothing under an EXCLUDED_DIRS name or ending in .test.ts lands.
     expect(listing(join(dest, "actions", "check-typography"))).toEqual([
       "action.yml",
       "bun.lock",
@@ -191,6 +194,51 @@ describe("copyActions", () => {
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
   });
 
+  test("an action's subdirectories ship whole, excluded directories filtered at every depth", () => {
+    // The exclusion filter applies wherever an excluded name sits, not only
+    // at the action root: a subdirectory's sources publish, a node_modules
+    // planted inside it does not.
+    const root = actionsFixture();
+    const nested = join(root, "actions", "check-typography", "validator");
+    mkdirSync(join(nested, "node_modules", "yaml"), { recursive: true });
+    writeFileSync(join(nested, "run.ts"), "export {};\n");
+    writeFileSync(join(nested, "node_modules", "yaml", "index.js"), "module.exports={};\n");
+    const dest = temp.dir("branch-actions-dest-");
+    expect(copyActions(root, dest)).toBe(5);
+    expect(listing(join(dest, "actions", "check-typography"))).toEqual([
+      "action.yml",
+      "bun.lock",
+      "lib/helper.ts",
+      "package.json",
+      "validator/run.ts",
+    ]);
+  });
+
+  test("a directory holding only ignored leftovers is invisible; one tracked stray file is the broken state", () => {
+    // After a pull that retired an action, its ignored node_modules/ stays
+    // behind in every checkout that had installed it: not an action, not an
+    // error. The control: one real file there and the manifest guard fires.
+    const root = actionsFixture();
+    const ghost = join(root, "actions", "ghost");
+    mkdirSync(join(ghost, "node_modules", "yaml"), { recursive: true });
+    writeFileSync(join(ghost, "node_modules", "yaml", "index.js"), "module.exports={};\n");
+    mkdirSync(join(ghost, "dist"));
+    writeFileSync(join(ghost, "dist", "bundle.js"), "module.exports={};\n");
+    writeFileSync(join(ghost, `run${TEST_FILE_SUFFIX}`), "export {};\n");
+    // A top-level excluded name is never an action root, whatever it holds.
+    mkdirSync(join(root, "actions", "node_modules", "pkg"), { recursive: true });
+    writeFileSync(join(root, "actions", "node_modules", "pkg", "index.js"), "module.exports={};\n");
+    expect(actionDirNames(root)).toEqual(["check-typography"]);
+    const dest = temp.dir("branch-actions-dest-");
+    expect(copyActions(root, dest)).toBe(4);
+    expect(existsSync(join(dest, "actions", "ghost"))).toBe(false);
+
+    writeFileSync(join(ghost, "run.ts"), "export {};\n");
+    expect(actionDirNames(root)).toEqual(["check-typography", "ghost"]);
+    expect(() => copyActions(root, dest)).toThrow("actions/ghost");
+    expect(() => copyActions(root, dest)).toThrow("no action.yml");
+  });
+
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
     // The exclusion filter tests segments relative to the action root: a
     // checkout parked under some node_modules/ ancestor must still publish.
@@ -223,11 +271,7 @@ describe("assembleBranchTree", () => {
     ]);
     // Every action directory of this checkout ships (the shared zone
     // included) and nothing else does.
-    const checkoutActions = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
-      .map((entry) => entry.name)
-      .sort();
-    expect(readdirSync(join(dest, "actions")).sort()).toEqual(checkoutActions);
+    expect(readdirSync(join(dest, "actions")).sort()).toEqual(actionDirNames(REPO_ROOT));
     // No installed dependency or build output under any action.
     const excluded = walk(join(dest, "actions")).filter((path) =>
       relative(dest, path)
@@ -259,6 +303,41 @@ describe("assembleBranchTree", () => {
     for (const name of shipped) {
       expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
+  });
+
+  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships inside the report action's one package", () => {
+    const actions = actionDirNames(REPO_ROOT);
+    const manifestFree = actions.filter(
+      (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
+    );
+    expect(manifestFree).toEqual([SHARED_DIR]);
+    // The retired script directory is gone (the report action's presence is
+    // the control); validator/ ships as a plain script directory, package
+    // files only at the action root, no dependencies, no tests.
+    expect(actions).not.toContain("validate-template");
+    expect(actions).toContain("validate-template-report");
+    const report = join(dest, "actions", "validate-template-report");
+    expect(
+      [
+        "action.yml",
+        "bun.lock",
+        ".bun-version",
+        "package.json",
+        "src/report.ts",
+        "validator/validate_generated_files.ts",
+        "validator/bun.lock",
+        "validator/.bun-version",
+        "validator/package.json",
+        "node_modules",
+      ].map((name) => existsSync(join(report, name))),
+    ).toEqual([true, true, true, true, true, true, false, false, false, false]);
+    expect(walk(join(dest, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX))).toEqual(
+      [],
+    );
+    // The control: the checkout does carry colocated action tests for the filter to drop.
+    expect(
+      walk(join(REPO_ROOT, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX)),
+    ).not.toEqual([]);
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {

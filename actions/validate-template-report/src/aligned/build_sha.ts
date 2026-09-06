@@ -5,7 +5,7 @@
 // from the commit that actually rendered the tree, and the sync PR that
 // rewrites the value is the fix in any case.
 
-import { recordedCommit } from "../shared/stamp_manifest.ts";
+import { recordedCommit } from "../../../shared/stamp_manifest.ts";
 
 /** The operator repository whose build branch every leg reads: the same
  *  repository the latest leg's `uses:` names, which no input can follow. */

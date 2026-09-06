@@ -489,8 +489,8 @@ RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 # ownership manifest, so the sync stamps once more when the tree is final.
 bun actions/shared/stamp_manifest.ts --root "$PROJECT"
 
-bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template-report"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 
 cd "$PROJECT"
 # _commit must record the build commit's full sha (the stamp hook rewrites
@@ -765,7 +765,7 @@ for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes .editorconfig
   grep -qF "$carried" "$WORK/local-carryover.md" \
     || fail "the local-content carry summary does not list $carried"
 done
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 # The recopy carry steps run after copier's own stamp hook, so the final
 # stamp must leave the managed ci.yml hash matching the re-rendered file.
 [ "$(mf ".github/workflows/ci.yml" hash)" = "$(file_sha .github/workflows/ci.yml)" ] \
@@ -859,7 +859,7 @@ fi
 grep -qF '`CONTRIBUTING.md`' "$VIS_WORK/removed-splits.md" \
   || fail "the removed-splits hold does not name the deleted split-classed CONTRIBUTING.md"
 
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$VIS"
 
 cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
@@ -1085,7 +1085,7 @@ RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owne
 # copies from the freshly delivered tree, before the final stamp.
 RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/materialize_mirrors.ts --root "$SPLIT"
 bun actions/shared/stamp_manifest.ts --root "$SPLIT"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$SPLIT"
 
 cd "$SPLIT"
 # AGENTS.md: managed region byte-equal to render-new, the local tail
@@ -1248,7 +1248,7 @@ RUNNER_TEMP="$UNSEL_WORK" SRC_PATH="$src_path_unsel" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$UNSEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$UNSEL"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$UNSEL"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$UNSEL"
 cd "$UNSEL"
 cmp -s "$UNSEL_WORK/license-before.md" LICENSE.md \
   || fail "the repo-owned LICENSE.md at the unselected path was not byte-identical after the update"

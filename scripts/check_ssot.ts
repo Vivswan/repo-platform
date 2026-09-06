@@ -52,12 +52,15 @@ import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { RUNG_FILE_RE, RUNG_ID_BODY } from "../.github/scripts/sync/run_migrations.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
+import { ACTION_BUN_PIN, bunSetupRegionName, RESOLVER_STEP_ID } from "./action_bun_setup.ts";
+import { bunLockDirs } from "./bootstrap.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
 import { ANCHOR_RE } from "./compose/splice.ts";
 import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
 import {
   actionSetsUpBun,
   actionSteps,
+  bunSetupRegionProblem,
   MARKER_TOKENS,
   trackingStreams,
   usesSetupBun,
@@ -1126,6 +1129,75 @@ function smokeMatrixRow(name: string): Record<string, unknown> {
 /** A row's `modules` value (a YAML list serialized as a string). */
 function smokeRowModules(row: Record<string, unknown>): string[] {
   return (parseYaml(String(row.modules)) as unknown[]).map(String);
+}
+
+/** The ci.yml typecheck job's loop: keyed on tsconfig.json so a new
+ *  action joins without an edit. */
+export const TYPECHECK_TSCONFIG_LOOP = "for tsconfig in tsconfig.json actions/*/tsconfig.json";
+
+export interface BunDirsInputs {
+  /** Directories committing a bun.lock, "." for the root. */
+  lockDirs: string[];
+  /** Directories dependabot's bun ecosystem entries name, "." for the root. */
+  dependabotBunDirs: string[];
+  /** package.json's typecheck script. */
+  typecheckScript: string;
+  /** The ci.yml typecheck job's run blocks, joined. */
+  typecheckRuns: string;
+  /** Directories carrying a tsconfig.json, "." for the root. */
+  tsconfigDirs: string[];
+}
+
+/** Every directory committing a bun.lock is under dependabot, in the local
+ *  typecheck script, and carries the tsconfig.json the CI loop keys on. */
+export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const dir of inputs.lockDirs) {
+    if (!inputs.dependabotBunDirs.includes(dir)) {
+      mismatches.push({
+        file: ".github/dependabot.yml",
+        expected: `a bun ecosystem entry for ${dir} (it commits bun.lock)`,
+        got: "no entry",
+      });
+    }
+  }
+  for (const dir of inputs.lockDirs.filter((d) => d !== ".")) {
+    if (!inputs.typecheckScript.includes(`cd ${dir}`)) {
+      mismatches.push({
+        file: "package.json",
+        expected: `typecheck to cover ${dir}`,
+        got: "not in the typecheck script",
+      });
+    }
+  }
+  if (!inputs.typecheckRuns.includes(TYPECHECK_TSCONFIG_LOOP)) {
+    mismatches.push({
+      file: "ci.yml typecheck",
+      expected: `a glob loop ${TYPECHECK_TSCONFIG_LOOP}`,
+      got: "no such loop",
+    });
+  }
+  for (const dir of inputs.lockDirs) {
+    if (!inputs.tsconfigDirs.includes(dir)) {
+      mismatches.push({
+        file: `${dir}/tsconfig.json`,
+        expected: "present (the ci.yml typecheck glob keys on it)",
+        got: "missing",
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** The action directories carrying `file`, as sorted repo-relative paths:
+ *  every package under actions/ sits at the action root (the ci.yml
+ *  typecheck glob and the root postinstall loop key on that level). */
+function actionDirsCarrying(file: string): string[] {
+  return readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !EXCLUDED_ACTION_DIRS.has(entry.name))
+    .map((entry) => `actions/${entry.name}`)
+    .filter((dir) => existsSync(join(REPO_ROOT, dir, file)))
+    .sort();
 }
 
 /** All non-directory paths below `rel` (repo-relative), sorted; skips
@@ -2973,34 +3045,6 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
-/** The canonical pinned-bun setup block every bun-touching composite
- *  action carries, as trimmed semantic lines (comments and blank lines
- *  excused, so per-action prose stays free). The generated action-local
- *  .bun-version both setup steps read is what decouples the action's
- *  runtime from the CALLING repository's bun resolution; the exact-match
- *  probe keeps the reuse fast path from resurrecting that coupling. */
-export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
-  "- name: Check for a bun matching the action's pin",
-  "id: bun",
-  "shell: bash",
-  "run: |",
-  'pin="$(cat "${{ github.action_path }}/.bun-version")"',
-  'have="$(command -v bun >/dev/null && bun --version || true)"',
-  'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
-  "- name: Set up bun",
-  "id: setup-bun",
-  "if: steps.bun.outputs.pinned != 'true'",
-  "continue-on-error: true",
-  "uses: oven-sh/setup-bun@v2",
-  "with:",
-  "bun-version-file: ${{ github.action_path }}/.bun-version",
-  "- name: Set up bun (retry)",
-  "if: steps.setup-bun.outcome == 'failure'",
-  "uses: oven-sh/setup-bun@v2",
-  "with:",
-  "bun-version-file: ${{ github.action_path }}/.bun-version",
-];
-
 /** Every action manifest under actions/, nested actions included - one
  *  walk shared by the actions-bun-guard rule and its forcing test, so
  *  the two can never judge different rosters; branch_tree.ts's
@@ -3095,58 +3139,69 @@ export function pinRootCleared(
 }
 
 /** How one action.yml violates the pinned-bun setup contract: any action
- *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
- *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
+ *  that runs bun (a `bun ` line, a step bound to the resolver's outputs)
+ *  OR sets it up must carry its generated bun-setup region (the marker
+ *  pair scripts/generate.ts fills from scripts/action_bun_setup.ts;
+ *  generate:check holds the content, so only the region's PRESENCE is
+ *  judged here), and EVERY setup-bun step (generated or extra, quoted or
  *  plain) must read the action-local pin, or a clean .bun-version path
  *  under the runner scratch root (fetchedTreePin) - so a bare setup added
- *  beside a canonical block is as loud as a drifted block. Triggers and the
+ *  beside the region is as loud as a missing region. Triggers and the
  *  per-step pin are judged on the PARSED steps (actionSteps), the way
- *  Actions itself reads the manifest; only the canonical block stays a
- *  byte comparison, because pinning exact bytes is its point. The
- *  setup-bun trigger is what makes a reintroduced BARE setup loud even
- *  before anything runs the bun it installs. */
+ *  Actions itself reads the manifest. Past the region, every step runs
+ *  the absolute path the resolver recorded, never `bun` by name (a later
+ *  setup-bun can put another bun first on PATH). */
 export function actionsBunGuardMismatches(file: string, text: string): Mismatch[] {
   const steps = actionSteps(text);
   // A run line starting with "bun " counts, block scalars included; a
   // prose line shaped that way would over-demand the guard, which fails
   // closed.
-  const runsBun = steps.some(
-    (step) =>
-      typeof step.run === "string" &&
-      step.run.split("\n").some((line) => line.trimStart().startsWith("bun ")),
+  const bareBunLines = steps.flatMap((step) =>
+    typeof step.run === "string"
+      ? step.run
+          .split("\n")
+          .filter((line) => line.trimStart().startsWith("bun "))
+          .map((line) => ({ step: String(step.name ?? step.id), line: line.trim() }))
+      : [],
   );
   const setupSteps = steps.filter(usesSetupBun);
-  if (!runsBun && setupSteps.length === 0) return [];
+  const runsRecordedBun = text.includes(`steps.${RESOLVER_STEP_ID}.outputs.`);
+  if (bareBunLines.length === 0 && setupSteps.length === 0 && !runsRecordedBun) return [];
   const mismatches: Mismatch[] = [];
-  // Trimmed: the guard sits at different depths across actions.
-  const lines = semanticLines(text).map((line) => line.trim());
-  const carried = lines.some((_, i) =>
-    ACTIONS_BUN_SETUP_GUARD.every((line, j) => lines[i + j] === line),
-  );
-  if (!carried) {
+  const regionProblem = bunSetupRegionProblem(file, text);
+  if (regionProblem !== null) {
     mismatches.push({
       file,
       expected:
-        "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
-        "both setup steps reading the action-local generated .bun-version)",
-      got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
+        `the generated bun setup region '${bunSetupRegionName(file)}' (exactly one BEGIN/END GENERATED marker pair at step depth, ` +
+        "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
+      got: `${regionProblem} - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer`,
     });
   }
-  // The canonical block's pin line doubles as the per-step requirement,
-  // so the two judgments can never demand different bytes. A pin under
-  // the runner's scratch directory is the one other anchor accepted: a
-  // tree the action fetched there itself (validate-template-report runs
-  // an older validator on that tree's own bun) is no more the caller's
-  // than the action path is.
-  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
-  const pinValue = pinLine.slice("bun-version-file: ".length);
+  // `bun` by name resolves through PATH, where a later setup-bun (a fetched
+  // tree's, a caller's) can put another bun first; every step runs the
+  // absolute path the action's resolver step recorded.
+  for (const { step, line } of bareBunLines) {
+    mismatches.push({
+      file,
+      expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the resolver step's path output), never \`bun\` by name`,
+      got: line,
+    });
+  }
+  // The generated steps' pin doubles as the per-step requirement, so the
+  // two judgments can never demand different bytes. A pin under the
+  // runner's scratch directory is the one other anchor accepted: a tree
+  // the action fetched there itself (validate-template-report runs an
+  // older validator on that tree's own bun) is no more the caller's than
+  // the action path is.
+  const pinLine = `bun-version-file: ${ACTION_BUN_PIN}`;
   for (const step of setupSteps) {
     const withBlock = step.with;
     const value =
       typeof withBlock === "object" && withBlock !== null
         ? (withBlock as Record<string, unknown>)["bun-version-file"]
         : undefined;
-    if (value === pinValue) continue;
+    if (value === ACTION_BUN_PIN) continue;
     if (fetchedTreePin(value)) {
       // The scratch path is predictable, so a caller could plant the pin
       // before the action runs; only an earlier step of THIS action
@@ -3154,11 +3209,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
       mismatches.push({
         file,
-        expected:
-          `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch ` +
-          `root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one ` +
-          `/bin/rm -rf of clean paths under that root, and whose success this setup's condition ` +
-          `requires)`,
+        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
         got: "no such step - a caller could plant that pin before the action runs",
       });
       continue;
@@ -4908,68 +4959,30 @@ const rules: Rule[] = [
   },
 
   {
+    // Lockfiles come from the bootstrap's recursive walk, the other homes
+    // from one level down: a package nested inside an action fails here.
     name: "bun-dirs",
     run: () => {
-      const mismatches: Mismatch[] = [];
-      const lockDirs = [
-        ".",
-        ...readdirSync(join(REPO_ROOT, "actions"))
-          .sort()
-          .map((name) => `actions/${name}`)
-          .filter((dir) => existsSync(join(REPO_ROOT, dir, "bun.lock"))),
-      ];
-
       const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
-      const bunDirs = (dependabot.updates as Record<string, unknown>[])
-        .filter((entry) => entry["package-ecosystem"] === "bun")
-        .map((entry) => String(entry.directory).replace(/^\//, "") || ".");
-      for (const dir of lockDirs) {
-        if (!bunDirs.includes(dir)) {
-          mismatches.push({
-            file: ".github/dependabot.yml",
-            expected: `a bun ecosystem entry for ${dir} (it commits bun.lock)`,
-            got: "no entry",
-          });
-        }
-      }
-
-      const scripts = packageScripts();
-      for (const dir of lockDirs.filter((d) => d !== ".")) {
-        if (!scripts.typecheck.includes(`cd ${dir}`)) {
-          mismatches.push({
-            file: "package.json",
-            expected: `typecheck to cover ${dir}`,
-            got: "not in the typecheck script",
-          });
-        }
-      }
-
       const typecheckJob = asRecord(ciJobs(repoCi(), "ci.yml").typecheck, "typecheck job");
-      const runs = (typecheckJob.steps as Record<string, unknown>[])
-        .map((step) => String(step.run ?? ""))
-        .join("\n");
-      // The job iterates a tsconfig glob, so it cannot drift when actions
-      // are added; pin the glob shape, and require every bun dir to carry
-      // the tsconfig.json the glob keys on so none skips typechecking.
-      if (!runs.includes("for tsconfig in tsconfig.json actions/*/tsconfig.json")) {
-        mismatches.push({
-          file: "ci.yml typecheck",
-          expected: "a glob loop over tsconfig.json actions/*/tsconfig.json",
-          got: "no such loop",
-        });
-      }
-      for (const dir of lockDirs) {
-        if (!existsSync(join(REPO_ROOT, dir, "tsconfig.json"))) {
-          mismatches.push({
-            file: `${dir}/tsconfig.json`,
-            expected: "present (the ci.yml typecheck glob keys on it)",
-            got: "missing",
-          });
-        }
-      }
-
-      mismatches.push(...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS));
-      return mismatches;
+      const scripts = packageScripts();
+      return [
+        ...bunDirsMismatches({
+          lockDirs: bunLockDirs(REPO_ROOT),
+          dependabotBunDirs: (dependabot.updates as Record<string, unknown>[])
+            .filter((entry) => entry["package-ecosystem"] === "bun")
+            .map((entry) => String(entry.directory).replace(/^\//, "") || "."),
+          typecheckScript: scripts.typecheck ?? "",
+          typecheckRuns: (typecheckJob.steps as Record<string, unknown>[])
+            .map((step) => String(step.run ?? ""))
+            .join("\n"),
+          tsconfigDirs: [
+            ...(existsSync(join(REPO_ROOT, "tsconfig.json")) ? ["."] : []),
+            ...actionDirsCarrying("tsconfig.json"),
+          ],
+        }),
+        ...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS),
+      ];
     },
   },
 
@@ -5104,14 +5117,8 @@ const rules: Rule[] = [
         throw new Error("templates/bun/module.yml declares no toolchain.pin - anchor lost");
       }
       const types: { file: string; version: string }[] = [];
-      for (const dir of [
-        ".",
-        ...readdirSync(join(REPO_ROOT, "actions"))
-          .sort()
-          .map((name) => `actions/${name}`),
-      ]) {
+      for (const dir of [".", ...actionDirsCarrying("package.json")]) {
         const pkgRel = dir === "." ? "package.json" : `${dir}/package.json`;
-        if (!existsSync(join(REPO_ROOT, pkgRel))) continue;
         const pkg = asRecord(JSON.parse(read(pkgRel)), pkgRel);
         const declares = ["dependencies", "devDependencies"].some(
           (key) => (pkg[key] as Record<string, unknown> | undefined)?.["@types/bun"] !== undefined,
@@ -5291,7 +5298,7 @@ const rules: Rule[] = [
         "bun run dogfood:check",
         "bun run gitignore:topology",
         "bun .github/scripts/fleet/repos_registry.ts validate",
-        "bun actions/validate-template/validate_generated_files.ts --self .",
+        "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
         // The copier-render oracle for the generated dogfood copies: its
         // only home is a step of the smoke-generate job (dogfood-oracle
         // row), so losing the step would fail the gate open silently.
@@ -7012,22 +7019,23 @@ const rules: Rule[] = [
   },
 
   {
-    // Every composite action that touches bun carries the same three-step
-    // setup guard: probe for a bun already AT the action's pin, install
-    // the pinned version when the probe misses, retry the install once (a
-    // setup-bun fetch flake on a nightly reporting path turns a green
-    // night red). The pin is the load-bearing part: both setup steps read
-    // the action-local generated .bun-version (bun-version-file against
-    // github.action_path), because a BARE setup-bun resolves the CALLING
-    // repository's version files - and a consumer pinning an older bun
-    // cannot parse the lockfiles repo-platform's bun writes (the
+    // Every bun-touching composite action opens with the generated
+    // bun-setup region (scripts/action_bun_setup.ts is the source): a pin
+    // probe, a pinned install, one retry, and the resolver recording the
+    // bun's absolute path. The pin is the load-bearing part: both setup
+    // steps read the action-local generated .bun-version (bun-version-file
+    // against github.action_path), because a BARE setup-bun resolves the
+    // CALLING repository's version files - and a consumer pinning an older
+    // bun cannot parse the lockfiles repo-platform's bun writes (the
     // cloud-speech class: bun < 1.4.0 dying on a lockfileVersion-2
-    // bun.lock with the message swallowed by --silent). The block cannot
+    // bun.lock with the message swallowed by --silent). The steps cannot
     // be hoisted into a shared action - a relative `uses:` inside a
     // composite action resolves against the CALLER's workspace, not this
-    // repo - so the copies are load-bearing; this rule keeps every copy
-    // present and identical (nested actions included), and catches a
-    // future bun-touching action shipped bare.
+    // repo - so every action carries a copy, generated: generate:check
+    // holds each region's content, and this rule catches a bun-touching
+    // action shipped without the region (nested actions included), an
+    // extra setup-bun outside it reading anything but the pin, and any
+    // step running `bun` by name instead of the recorded path.
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();

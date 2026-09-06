@@ -35,16 +35,16 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { recordedBuildSha } from "../../../actions/validate-template-report/src/aligned/build_sha";
 import {
+  ACTION_DIR,
+  actionOf,
   BUN_VERSION_FILE,
   TREE_DIR,
-  VALIDATOR_DIR,
   VALIDATOR_SCRIPT,
-  validatorOf,
-} from "../../actions/validate-template-report/aligned_tree";
-import { recordedBuildSha } from "../../actions/validate-template-report/build_sha";
+} from "../../../actions/validate-template-report/src/aligned/tree";
 import {
   type ChildExit,
   capture,
@@ -52,19 +52,19 @@ import {
   failureDetail,
   run,
   succeeded,
-} from "../../actions/validate-template-report/runtime";
+} from "../../../actions/validate-template-report/src/runtime";
 import {
   classify,
   type Integrity,
   readVerdict,
   writeVerdict,
-} from "../../actions/validate-template-report/verdict";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../actions/validate-template-report/src/verdict";
+import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
-const ACTION = join(import.meta.dir, "../../actions/validate-template-report");
+const ACTION = join(import.meta.dir, "../../../actions/validate-template-report");
 const MARKER = "<!-- repo-platform:validate-template -->";
 const SHA = "6bf545284a2f8e32d82fdc663d4b3333f8fb37bf";
 const REMEDY = "merge this repository's pending template sync PR";
@@ -122,7 +122,7 @@ if (!process.env.FAKE_SKIP_REPORT) {
   writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
   writeFileSync(process.env.ADVISORIES_FILE, process.env.FAKE_ADVISORIES ?? "");
 }
-console.log("validated " + process.argv[2]);
+console.log("validated " + process.argv[2] + " from " + process.cwd());
 if (process.env.FAKE_SIGNAL) process.kill(process.pid, process.env.FAKE_SIGNAL);
 process.exit(Number(process.env.FAKE_EXIT ?? "0"));
 `;
@@ -188,16 +188,17 @@ function writeAnswers(root: string, answers: string | undefined): void {
   writeFileSync(join(root, ".github/.copier-answers.yml"), answers);
 }
 
-/** A fake validate-template action directory at `dir`. */
+/** A fake report action package at `dir`: the validator script under its
+ *  validator/, the manifest, bun pin and lockfile at the root. */
 function layValidator(dir: string, opts: { lockfile?: string; bunVersion?: boolean }): void {
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dirname(join(dir, VALIDATOR_SCRIPT)), { recursive: true });
   writeFileSync(join(dir, VALIDATOR_SCRIPT), fakeValidator);
   writeFileSync(join(dir, "package.json"), '{"name":"validate-template","private":true}\n');
   if (opts.bunVersion ?? true) writeFileSync(join(dir, BUN_VERSION_FILE), "1.3.0\n");
   if (opts.lockfile !== undefined) writeFileSync(join(dir, "bun.lock"), opts.lockfile);
 }
 
-// --- report.ts ---------------------------------------------------------------
+// --- src/report.ts -----------------------------------------------------------
 
 interface ReportOptions {
   /** The integrity leg's verdict; "absent" = no file, "garbage" = not a verdict. */
@@ -594,11 +595,9 @@ describe("the action's reporting script", () => {
     });
   });
 
-  // The two steps wired as action.yml wires them: the report reads the
-  // verdict the fetch wrote and the outputs it published (an unpublished
-  // output reads as empty). A vintage-floor refusal comes AFTER the
-  // build-branch compare said `ahead 3`; the report must still tell one
-  // story, not a blocking refusal beside "behind by 3, nothing to do here".
+  // The fetch and report steps wired as action.yml wires them (an
+  // unpublished step output reaches the report as empty). A floor refusal
+  // after `ahead 3` must render one story: not judged, freshness not checked.
   test("a vintage-floor refusal renders one story: not judged, freshness not checked", () => {
     const BASE = "1111111111111111111111111111111111111111";
     const reason = `_commit moves backwards from main's ${BASE} to ${SHA} (compare: behind)`;
@@ -855,7 +854,7 @@ describe("how a child ended", () => {
   });
 });
 
-// --- build_sha.ts ------------------------------------------------------------
+// --- src/aligned/build_sha.ts ------------------------------------------------
 
 describe("the recorded build sha", () => {
   // Read the way the stamp hook reads it (quoted or bare), then accepted
@@ -906,14 +905,14 @@ describe("the recorded build sha", () => {
   });
 });
 
-// --- fetch_aligned.ts --------------------------------------------------------
+// --- src/aligned/fetch.ts ----------------------------------------------------
 
 interface FetchOptions {
   /** undefined = no .github/.copier-answers.yml at all. */
   answers?: string;
-  /** false = the served build tree ships no validate-template action. */
+  /** false = the served build tree ships no report action (so no validator). */
   validator?: boolean;
-  /** false = the served validator ships no .bun-version. */
+  /** false = the served action ships no .bun-version. */
   bunVersion?: boolean;
   /** true = gh serves bytes that are not a tarball. */
   corrupt?: boolean;
@@ -935,7 +934,7 @@ function buildTarball(root: string, opts: FetchOptions): string {
   mkdirSync(join(top, "actions", "shared"), { recursive: true });
   writeFileSync(join(top, "copier.yml"), "_subdirectory: template\n");
   if (opts.validator ?? true) {
-    layValidator(join(top, VALIDATOR_DIR), { bunVersion: opts.bunVersion });
+    layValidator(join(top, ACTION_DIR), { bunVersion: opts.bunVersion });
   }
   const tarball = join(root, "tree.tgz");
   if (opts.corrupt) {
@@ -956,7 +955,7 @@ function runFetch(opts: FetchOptions = {}) {
   const alignedDir = join(root, "aligned");
   const verdict = join(root, "verdict.json");
   if (opts.stale) {
-    layValidator(validatorOf(alignedDir), {});
+    layValidator(actionOf(alignedDir), {});
     writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
   }
   // A planted link's target: a validator tree with content of its own, so
@@ -964,8 +963,8 @@ function runFetch(opts: FetchOptions = {}) {
   const elsewhere = join(root, "elsewhere");
   let planted = "";
   if (opts.symlinked) {
-    layValidator(validatorOf(elsewhere), {});
-    writeFileSync(join(validatorOf(elsewhere), VALIDATOR_SCRIPT), "// planted, not fetched\n");
+    layValidator(actionOf(elsewhere), {});
+    writeFileSync(join(actionOf(elsewhere), VALIDATOR_SCRIPT), "// planted, not fetched\n");
     planted = snapshot(elsewhere);
     symlinkSync(elsewhere, alignedDir);
   }
@@ -1006,7 +1005,7 @@ function runFetch(opts: FetchOptions = {}) {
     verdict: verdictIn(verdict),
     /** The tree the judge step would run: its script and bun pin in place. */
     tree: [VALIDATOR_SCRIPT, BUN_VERSION_FILE].every((name) =>
-      existsSync(join(validatorOf(alignedDir), name)),
+      existsSync(join(actionOf(alignedDir), name)),
     ),
     /** The scratch root is gone or a real directory of ours (never a link),
      *  and a planted link's target was left alone. */
@@ -1167,31 +1166,19 @@ describe("the action's fetch script", () => {
     [
       "a build tree without the validator fails closed",
       { answers: `_commit: ${SHA}\n`, validator: false },
-      refused(
-        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
-        fetched,
-        AHEAD,
-      ),
+      refused(`${OPERATOR} at ${SHA} ships no ${ACTION_DIR}/${VALIDATOR_SCRIPT}`, fetched, AHEAD),
     ],
     // The setup-bun step behind this one reads the tree's pin; a tree
     // without one would make that step fail hard instead of the gate.
     [
       "a validator without its bun pin fails closed",
       { answers: `_commit: ${SHA}\n`, bunVersion: false },
-      refused(
-        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${BUN_VERSION_FILE}`,
-        fetched,
-        AHEAD,
-      ),
+      refused(`${OPERATOR} at ${SHA} ships no ${ACTION_DIR}/${BUN_VERSION_FILE}`, fetched, AHEAD),
     ],
     [
       "a tree and verdict left by an earlier run are cleared, never judged by",
       { answers: `_commit: ${SHA}\n`, validator: false, stale: true },
-      refused(
-        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
-        fetched,
-        AHEAD,
-      ),
+      refused(`${OPERATOR} at ${SHA} ships no ${ACTION_DIR}/${VALIDATOR_SCRIPT}`, fetched, AHEAD),
     ],
     [
       "a scratch root planted as a symlink is replaced, never written through",
@@ -1226,7 +1213,7 @@ describe("the action's fetch script", () => {
   });
 });
 
-// --- judge_aligned.ts --------------------------------------------------------
+// --- src/aligned/judge.ts ----------------------------------------------------
 
 interface JudgeOptions {
   /** A bun.lock to ship beside the fake validator (none by default). */
@@ -1241,7 +1228,7 @@ function runJudge(opts: JudgeOptions = {}) {
   const repo = join(root, "repo");
   mkdirSync(repo);
   const alignedDir = join(root, "aligned");
-  layValidator(validatorOf(alignedDir), { lockfile: opts.lockfile });
+  layValidator(actionOf(alignedDir), { lockfile: opts.lockfile });
   const verdict = join(root, "verdict.json");
   const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("integrity")], {
     cwd: repo,
@@ -1361,6 +1348,88 @@ describe("the action's judge script", () => {
   });
 });
 
+// --- the latest leg ------------------------------------------------------------
+
+interface LatestOptions {
+  /** A bun.lock to ship beside the fake validator (none by default). */
+  lockfile?: string;
+  env?: Record<string, string>;
+}
+
+/** The latest step's run block as the runner would execute it, against a
+ *  fake action package: the poisoned `bun` on PATH would exit 97. */
+function runLatest(opts: LatestOptions = {}) {
+  const { root, bin } = scratch();
+  const repo = join(root, "repo");
+  mkdirSync(repo);
+  const action = join(root, "action");
+  layValidator(action, { lockfile: opts.lockfile });
+  const findings = join(root, "latest-findings.md");
+  const advisories = join(root, "latest-advisories.md");
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("latest")], {
+    cwd: repo,
+    timeoutMs: 60_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      ACTION_BUN: process.execPath,
+      ACTION_PATH: action,
+      FINDINGS_FILE: findings,
+      ADVISORIES_FILE: advisories,
+      ...opts.env,
+    },
+  });
+  return {
+    exitCode: proc.exitCode,
+    // realpath: the fake prints its cwd, and tmpdir may be a symlink.
+    judged: (proc.stdout + proc.stderr).includes(`validated . from ${realpathSync(repo)}`),
+    findings: existsSync(findings) ? read(findings) : null,
+    advisories: existsSync(advisories) ? read(advisories) : null,
+  };
+}
+
+describe("the action's latest leg", () => {
+  // Judged whole: exit code (the step's colour only), whether the validator
+  // judged the caller's checkout, and the report pair as report.ts finds it
+  // (null = never written, which report.ts tells apart from empty).
+  const runs: [string, LatestOptions, ReturnType<typeof runLatest>][] = [
+    [
+      "a clean run writes an empty pair",
+      {},
+      { exitCode: 0, judged: true, findings: "", advisories: "" },
+    ],
+    [
+      "findings ride the validator's exit 1 into the pair",
+      {
+        env: {
+          FAKE_FINDINGS: "#### Errors (1)\n\n- ci.yml drifted\n",
+          FAKE_ADVISORIES: "#### Advisories (1)\n\n- consider a codeql job\n",
+          FAKE_EXIT: "1",
+        },
+      },
+      {
+        exitCode: 1,
+        judged: true,
+        findings: "#### Errors (1)\n\n- ci.yml drifted\n",
+        advisories: "#### Advisories (1)\n\n- consider a codeql job\n",
+      },
+    ],
+    [
+      "a lockfile the frozen install rejects stops the step before the validator runs",
+      { lockfile: "not a lockfile {\n" },
+      { exitCode: 1, judged: false, findings: null, advisories: null },
+    ],
+    [
+      "a validator that exits before reporting leaves no pair",
+      { env: { FAKE_SKIP_REPORT: "1" } },
+      { exitCode: 0, judged: true, findings: null, advisories: null },
+    ],
+  ];
+  test.each(runs)("%s", (_name, opts, expected) => {
+    expect(runLatest(opts)).toEqual(expected);
+  });
+});
+
 // --- action.yml --------------------------------------------------------------
 
 // --- the clear step ------------------------------------------------------------
@@ -1378,7 +1447,7 @@ describe("the action's clear step", () => {
     const verdict = join(runnerTemp, "aligned-verdict.json");
     const latestFindings = join(runnerTemp, "latest-findings.md");
     const latestAdvisories = join(runnerTemp, "latest-advisories.md");
-    layValidator(validatorOf(alignedDir), {});
+    layValidator(actionOf(alignedDir), {});
     writeFileSync(latestFindings, "#### Errors (1)\n\n- stale finding\n");
     writeFileSync(latestAdvisories, "#### Advisories (1)\n\n- stale advisory\n");
     if (lockVerdict) {
@@ -1458,8 +1527,8 @@ describe("the action's wiring", () => {
       "latest",
       "report",
     ]);
-    // The operator repository is a constant, not an input: the latest
-    // leg's `uses:` could never follow one.
+    // One input, the token: the build tip's validator ships inside this
+    // action, not at a ref an input could move.
     expect(Object.keys(action.inputs)).toEqual(["github-token"]);
     // ONE writer of integrity: the report step's output, never a step outcome.
     expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
@@ -1489,20 +1558,22 @@ describe("the action's wiring", () => {
     expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
     const READY = "steps.action-bun.outputs.ready == 'true'";
     expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
-    expect(byId("latest")?.if).toBe(READY);
+    expect(byId("latest")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
 
     // Every action script runs by the recorded absolute path, never `bun`
     // by name: later setups put other buns on PATH.
     const BUN_PATH = "${{ steps.action-bun.outputs.path }}";
     const fetch = byId("fetch");
-    expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
+    expect(String(fetch?.run)).toBe(
+      '"$ACTION_BUN" "${{ github.action_path }}/src/aligned/fetch.ts"',
+    );
     // Every predictable scratch path is cleared by ONE fixed rm on the
     // literal paths with BASH_ENV emptied (no variable or PATH entry a
     // caller could poison; one rm fails when any removal did): the aligned
     // tree and verdict, which both aligned setups require (the
     // actions-bun-guard rule reads it), and the latest leg's report pair,
     // so an aborted latest validator leaves nothing stale.
-    const latestWith = byId("latest")?.with as Record<string, string>;
+    const latest = byId("latest");
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
       id: "clear",
@@ -1512,8 +1583,8 @@ describe("the action's wiring", () => {
       run: `/bin/rm -rf ${[
         envOf(fetch).ALIGNED_DIR,
         envOf(fetch).VERDICT_FILE,
-        latestWith["findings-file"],
-        latestWith["advisories-file"],
+        envOf(latest).FINDINGS_FILE,
+        envOf(latest).ADVISORIES_FILE,
       ]
         .map((path) => `"${path}"`)
         .join(" ")}`,
@@ -1529,10 +1600,10 @@ describe("the action's wiring", () => {
     expect(alignedDir).toMatch(/^\$\{\{ runner\.temp \}\}\//);
     expect(verdictFile).toMatch(/^\$\{\{ runner\.temp \}\}\//);
 
-    // The tree's bun: both setup steps read the pin where fetch_aligned.ts
+    // The tree's bun: both setup steps read the pin where the fetch script
     // lays it (the layout constants), only behind a successful fetch, and
     // the resolver behind them reads the same pin.
-    const pin = `${alignedDir}/${TREE_DIR}/${VALIDATOR_DIR}/${BUN_VERSION_FILE}`;
+    const pin = `${alignedDir}/${TREE_DIR}/${ACTION_DIR}/${BUN_VERSION_FILE}`;
     const setups = steps.filter(
       (step) =>
         String(step.uses ?? "").startsWith("oven-sh/setup-bun@") &&
@@ -1548,7 +1619,7 @@ describe("the action's wiring", () => {
     expect(envOf(byId("aligned-bun-path")).PIN_FILE).toBe(pin);
 
     const judge = byId("integrity");
-    expect(String(judge?.run)).toContain("judge_aligned.ts");
+    expect(String(judge?.run)).toContain("src/aligned/judge.ts");
     expect(judge?.if).toBe("steps.fetch.outcome == 'success'");
     expect(judge?.["continue-on-error"]).toBe(true);
     // The judge runs on the bun the fetch step recorded, and hands the
@@ -1560,12 +1631,43 @@ describe("the action's wiring", () => {
       ALIGNED_BUN: "${{ steps.aligned-bun-path.outputs.path }}",
     });
     expect(String(judge?.run)).toBe(
-      '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"',
+      '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/src/aligned/judge.ts"',
     );
 
-    const latest = byId("latest");
-    expect(String(latest?.uses)).toBe("Vivswan/repo-platform/actions/validate-template@build");
-    expect(latest?.["continue-on-error"]).toBe(true);
+    // The latest leg: a frozen install of the action's lockfile, then the
+    // validator under it on the recorded bun, only behind a cleared scratch.
+    expect(latest).toEqual({
+      name: "Run the build tip's validator",
+      id: "latest",
+      if: `${READY} && steps.clear.outcome == 'success'`,
+      "continue-on-error": true,
+      shell: "bash",
+      env: {
+        ACTION_BUN: BUN_PATH,
+        ACTION_PATH: "${{ github.action_path }}",
+        FINDINGS_FILE: "${{ runner.temp }}/latest-findings.md",
+        ADVISORIES_FILE: "${{ runner.temp }}/latest-advisories.md",
+      },
+      run: [
+        '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"',
+        `"$ACTION_BUN" "$ACTION_PATH/${VALIDATOR_SCRIPT}" .`,
+        "",
+      ].join("\n"),
+    });
+    // One package: the fetch leg's layout constant names this action's
+    // directory, and manifest, pin and lockfile sit only at its root.
+    expect(join(ACTION, "..", "..", ACTION_DIR)).toBe(ACTION);
+    expect(
+      [
+        VALIDATOR_SCRIPT,
+        "action.yml",
+        BUN_VERSION_FILE,
+        "bun.lock",
+        "validator/package.json",
+        "validator/bun.lock",
+        `validator/${BUN_VERSION_FILE}`,
+      ].map((name) => existsSync(join(ACTION, name))),
+    ).toEqual([true, true, true, true, false, false, false]);
 
     // The report runs whatever happened above, reads the verdict the
     // integrity leg wrote, the latest pair where that leg wrote it, and
@@ -1579,23 +1681,72 @@ describe("the action's wiring", () => {
       ACTION_PATH: "${{ github.action_path }}",
       VERDICT: verdictFile,
       CLEAR_OUTCOME: "${{ steps.clear.outcome }}",
-      LATEST_FINDINGS: latestWith["findings-file"],
-      LATEST_ADVISORIES: latestWith["advisories-file"],
+      LATEST_FINDINGS: envOf(latest).FINDINGS_FILE,
+      LATEST_ADVISORIES: envOf(latest).ADVISORIES_FILE,
       COMPARE_STATUS: "${{ steps.fetch.outputs.compare }}",
       AHEAD_BY: "${{ steps.fetch.outputs.ahead-by }}",
     });
     expect(String(report?.run)).not.toContain("${{");
     expect(envOf(report).BUN_READY).toBeUndefined();
     expect(String(report?.run)).toContain(
-      'if [ -n "$ACTION_BUN" ]; then\n  exec "$ACTION_BUN" "$ACTION_PATH/report.ts"',
+      'if [ -n "$ACTION_BUN" ]; then\n  exec "$ACTION_BUN" "$ACTION_PATH/src/report.ts"',
     );
     expect(String(report?.run)).not.toMatch(/^\s*(exec\s+)?bun\s/m);
 
     // No leg renders: a copier run here would cost every fleet repo a
     // render per push, and freshness is the fetch step's compare.
-    for (const name of ["fetch_aligned.ts", "judge_aligned.ts", "report.ts"]) {
+    for (const name of ["src/aligned/fetch.ts", "src/aligned/judge.ts", "src/report.ts"]) {
       expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
     }
+  });
+
+  test("nothing resolves validate-template as an action any more: this action runs the script", () => {
+    // A `uses:` of the retired manifest would 404 at job start. One strict
+    // scan (an unreadable file throws) serves the assertion and its control;
+    // the pattern spans every spelling actionlint accepts (the rows below).
+    const REPO_ROOT = join(import.meta.dir, "../../..");
+    const usesOf = (action: string) =>
+      new RegExp(
+        `(?:uses|"uses"|'uses')\\s*:\\s*(?:[>|][-+0-9]*(?:[ \\t]*#[^\\n]*)?\\s*)?["']?(?:\\./|[\\w./-]*/)actions/${action}/?(?:@|["']|\\s|$)`,
+        "i",
+      );
+    for (const spelling of [
+      "uses: Vivswan/repo-platform/actions/validate-template@build",
+      'uses: "Vivswan/repo-platform/actions/validate-template@build"',
+      "uses: >-\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses: |\n        VIVSWAN/Repo-Platform/actions/validate-template@build",
+      "uses: >- # the build tip\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses: |+2\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses : ./actions/validate-template",
+      '"uses": ./actions/validate-template',
+      "'uses': Vivswan/repo-platform/actions/validate-template@build",
+      "uses: ./actions/validate-template/",
+      'uses: "./actions/validate-template/"\n      with:',
+    ]) {
+      expect(usesOf("validate-template").test(spelling)).toBe(true);
+    }
+    for (const spelling of [
+      "uses: x/actions/validate-template-report@build",
+      "uses: ./actions/validate-template-report",
+      "uses: ./actions/validate-template-report/",
+      '"uses": ./actions/validate-template-report',
+    ]) {
+      expect(usesOf("validate-template").test(spelling)).toBe(false);
+    }
+    const filesCarrying = (pattern: RegExp): string[] =>
+      ["templates", ".github/workflows", "tests/golden-renders", "actions"].flatMap((root) =>
+        readdirSync(join(REPO_ROOT, root), { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile() && !entry.parentPath.includes("/node_modules"))
+          .map((entry) => join(entry.parentPath, entry.name))
+          .filter((path) => pattern.test(readFileSync(path, "utf8")))
+          .map((path) => path.slice(REPO_ROOT.length + 1)),
+      );
+    expect(filesCarrying(usesOf("validate-template"))).toEqual([]);
+    // The control: the same scan sees the report action's own ref in the
+    // fleet-ci workflow, so an empty list is a scan that looked.
+    expect(filesCarrying(usesOf("validate-template-report"))).toContain(
+      ".github/workflows/fleet-ci.yml",
+    );
   });
 
   // The one resolver block (both steps carry it), executed as the runner

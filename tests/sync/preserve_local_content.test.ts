@@ -1605,7 +1605,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       // The whole carried tree must still validate.
       const validate = boundedSpawnSync([
         "bun",
-        join(repoRoot, "actions/validate-template/validate_generated_files.ts"),
+        join(repoRoot, "actions/validate-template-report/validator/validate_generated_files.ts"),
         target,
       ]);
       expect(validate.exitCode).toBe(0);

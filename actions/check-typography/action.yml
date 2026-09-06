@@ -14,6 +14,7 @@ inputs:
 runs:
   using: composite
   steps:
+    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -37,24 +38,36 @@ runs:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
-    # on nightly reporting paths a flake here turns a green night red.
+    # on nightly paths a flake here turns a green night red.
     - name: Set up bun (retry)
+      id: setup-bun-retry
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
+    # Recorded once after the setup: later steps run this path, never `bun`
+    # through PATH, where a later setup-bun can put another bun first.
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+    # END GENERATED: bun-setup
+
     - name: Install character tables (monaco-editor)
       shell: bash
       working-directory: ${{ github.action_path }}
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       # --production: dev deps (@types/node, typescript) are editor/typecheck
       # tooling, not needed to run the check. No --silent: a failed install
       # must name itself in the caller's log (a lockfile the caller's bun
       # could not parse once hid behind a bare exit 1).
-      run: bun install --frozen-lockfile --production
+      run: '"$ACTION_BUN" install --frozen-lockfile --production'
 
     - name: Check typography
       shell: bash
       env:
         SCAN_PATH: ${{ inputs.path }}
-      run: bun "${{ github.action_path }}/check-typography.ts" "$SCAN_PATH"
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-typography.ts" "$SCAN_PATH"'

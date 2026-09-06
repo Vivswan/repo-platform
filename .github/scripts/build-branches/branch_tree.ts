@@ -146,10 +146,43 @@ Consume the template with copier, e.g.:
  *  dependencies, both reproducible from what is published. */
 export const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".turbo"]);
 
+/** Test files never publish either: nothing on the branch runs them, and
+ *  they import fixtures from tests/, which the branch does not carry. */
+export const TEST_FILE_SUFFIX = ".test.ts";
+
 /** The dependency-free library zone under actions/: shared code the
  *  composite actions and the shipped hooks import relatively, not an
- *  action of its own - the one actions/ directory with no action.yml. */
+ *  action of its own, so it ships with no action.yml. */
 export const SHARED_DIR = "shared";
+
+/** Whether a path under an action root publishes: outside every excluded
+ *  directory segment (relative to the root, so an ancestor named
+ *  node_modules does not filter the whole copy away) and not a test file. */
+export function publishes(actionRoot: string, src: string): boolean {
+  const segments = relative(actionRoot, src).split("/");
+  if (segments.some((segment) => EXCLUDED_DIRS.has(segment))) return false;
+  return !basename(src).endsWith(TEST_FILE_SUFFIX);
+}
+
+function hasPublishableFile(actionRoot: string, dir = actionRoot): boolean {
+  return readdirSync(dir, { withFileTypes: true }).some((entry) => {
+    const path = join(dir, entry.name);
+    if (!publishes(actionRoot, path)) return false;
+    return entry.isDirectory() ? hasPublishableFile(actionRoot, path) : true;
+  });
+}
+
+/** The action directories under `<repoRoot>/actions`, sorted: those with at
+ *  least one publishable file. A directory holding only ignored leftovers
+ *  (the node_modules of a retired action, after a pull) is invisible. */
+export function actionDirNames(repoRoot: string): string[] {
+  const source = join(repoRoot, "actions");
+  return readdirSync(source, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
+    .filter((entry) => hasPublishableFile(join(source, entry.name)))
+    .map((entry) => entry.name)
+    .sort();
+}
 
 /** Copies every action directory (the shared zone included) to
  *  `<dest>/actions`, returning the number of files written. Throws when
@@ -165,10 +198,7 @@ export function copyActions(repoRoot: string, dest: string): number {
         "fleet CI run; check the checkout before publishing",
     );
   }
-  const names = readdirSync(source, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
-    .map((entry) => entry.name)
-    .sort();
+  const names = actionDirNames(repoRoot);
   if (!names.some((name) => name !== SHARED_DIR)) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
@@ -176,8 +206,8 @@ export function copyActions(repoRoot: string, dest: string): number {
   // intentional retirement - retiring an action deletes its whole
   // directory. Publishing it anyway would succeed here and then fail every
   // fleet `uses: .../<name>@build` at resolve time, so refuse loudly
-  // before anything is copied. The shared zone is the declared exception:
-  // it is imported by path, never resolved as an action.
+  // before anything is copied. The shared zone is reached by path, never
+  // resolved as an action.
   for (const name of names) {
     if (name === SHARED_DIR) continue;
     if (!existsSync(join(source, name, "action.yml"))) {
@@ -194,13 +224,7 @@ export function copyActions(repoRoot: string, dest: string): number {
     const actionRoot = join(source, name);
     cpSync(actionRoot, join(dest, "actions", name), {
       recursive: true,
-      // Segments RELATIVE to the action's own root: an ancestor directory
-      // named node_modules (say, a checkout parked under one) must not
-      // filter the whole copy away.
-      filter: (src) => {
-        const segments = relative(actionRoot, src).split("/");
-        return !segments.some((segment) => EXCLUDED_DIRS.has(segment));
-      },
+      filter: (src) => publishes(actionRoot, src),
     });
     files += countFiles(join(dest, "actions", name));
   }

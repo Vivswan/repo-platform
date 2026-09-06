@@ -3,7 +3,7 @@
 // per render are pinned here once (this suite absorbed the retired
 // per-render validate-template/yamllint job-shape suite - the reporting
 // bash itself lives in the validate-template-report action, pinned by
-// tests/actions/validate_template_report.test.ts). The validate-template
+// tests/actions/validate-template-report/validate_template_report.test.ts). The validate-template
 // and yamllint jobs are THIN callers of their @build actions (the
 // predicates live in the actions and are their suites' job to police);
 // module- and visibility-conditioned jobs carry job-level guards (a

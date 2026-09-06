@@ -5,10 +5,19 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import {
+  ACTION_BUN_PIN,
+  bunSetupRegionName,
+  bunSetupSteps,
+  READY_OUTPUT_ACTIONS,
+} from "../../scripts/action_bun_setup";
 import {
   actionSetsUpBun,
   baseOwnershipRegion,
-  bunSetupActionDirs,
+  bunPinnedActionDirs,
+  bunSetupActionFiles,
+  bunSetupRegionProblem,
   bunToolchainPin,
   dependabotLabelGroups,
   dependabotLabelsSpan,
@@ -35,8 +44,10 @@ import {
   skillModuleRosterRows,
   spliceInlineRegion,
   spliceRegion,
+  stepListIndent,
   strayActionPinFiles,
   strayPinFiles,
+  targets,
   toolchainPinRows,
   toolchainPins,
   toolchainPinsRegion,
@@ -50,6 +61,19 @@ import { skipIfExistsMatchers } from "../../scripts/ownership";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
+
+/** A composite manifest fenced for its bun-setup region, `body` inside. */
+function fenced(file: string, body: string[], indent = 4): string {
+  const { begin, end } = markerLines(
+    bunSetupRegionName(file),
+    "#",
+    "",
+    "scripts/action_bun_setup.ts",
+  );
+  const pad = " ".repeat(indent);
+  const region = body.map((line) => `${line}\n`).join("");
+  return `runs:\n  using: composite\n  steps:\n${pad}${begin}\n${region}${pad}${end}\n${pad}- name: Run\n${pad}  shell: bash\n${pad}  run: echo ok\n`;
+}
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
   return { module, description: `${module} module`, ...extra };
@@ -600,7 +624,7 @@ describe("toolchain pins", () => {
     expect(actionSetsUpBun("runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n")).toBe(false);
   });
 
-  test("bunSetupActionDirs finds setup-bun actions, nested ones included, commented uses excused", () => {
+  test("bunPinnedActionDirs finds setup-bun actions (nested ones included, commented uses excused); a manifest-free directory is never one", () => {
     const dir = temp.dir("action-pins-");
     const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
     mkdirSync(join(dir, "typo"));
@@ -618,14 +642,22 @@ describe("toolchain pins", () => {
     // Never scanned: installed dependencies.
     mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
     writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
-    expect(bunSetupActionDirs(dir)).toEqual([
+    // Fenced for the generated setup but not yet filled: pinned in the
+    // same run that fills it.
+    mkdirSync(join(dir, "fresh"));
+    writeFileSync(join(dir, "fresh", "action.yml"), fenced("actions/fresh/action.yml", []));
+    // A script directory with no manifest: not an action, so not pinned.
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(join(dir, "scripts", "run.ts"), "export {};\n");
+    expect(bunPinnedActionDirs(dir)).toEqual([
+      "actions/fresh",
       "actions/pages",
       "actions/pages/links",
       "actions/typo",
     ]);
   });
 
-  test("strayActionPinFiles flags a .bun-version whose action.yml sets up no bun", () => {
+  test("strayActionPinFiles flags a .bun-version whose directory sets up no bun", () => {
     const dir = temp.dir("action-strays-");
     const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
     mkdirSync(join(dir, "typo"));
@@ -635,7 +667,240 @@ describe("toolchain pins", () => {
     mkdirSync(join(dir, "gate"));
     writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
     writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
-    expect(strayActionPinFiles(dir)).toEqual(["actions/gate/.bun-version"]);
+    // A manifest-free directory: stray, whatever it holds.
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(join(dir, "scripts", ".bun-version"), "1.4.0\n");
+    expect(strayActionPinFiles(dir)).toEqual([
+      "actions/gate/.bun-version",
+      "actions/scripts/.bun-version",
+    ]);
+  });
+});
+
+describe("the actions' generated bun setup", () => {
+  const steps = (body: string[]) =>
+    parseYaml(`runs:\n  using: composite\n  steps:\n${body.join("\n")}\n`).runs.steps as Record<
+      string,
+      unknown
+    >[];
+  const probe = {
+    name: "Check for a bun matching the action's pin",
+    id: "bun",
+    shell: "bash",
+    run: `pin="$(cat "${ACTION_BUN_PIN}")"\nhave="$(command -v bun >/dev/null && bun --version || true)"\necho "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"\n`,
+  };
+  const setup = {
+    name: "Set up bun",
+    id: "setup-bun",
+    if: "steps.bun.outputs.pinned != 'true'",
+    "continue-on-error": true,
+    uses: "oven-sh/setup-bun@v2",
+    with: { "bun-version-file": ACTION_BUN_PIN },
+  };
+  const retry = {
+    name: "Set up bun (retry)",
+    id: "setup-bun-retry",
+    if: "steps.setup-bun.outcome == 'failure'",
+    uses: "oven-sh/setup-bun@v2",
+    with: { "bun-version-file": ACTION_BUN_PIN },
+  };
+
+  // The whole parsed region per variant: the plain one fails at a double
+  // setup failure and records whatever bun the setup left on PATH; the
+  // ready one never ends the action and records a path only when it
+  // prints the pin, exporting `ready` for the steps behind it.
+  test.each([
+    [
+      "bun-setup",
+      [
+        probe,
+        setup,
+        retry,
+        {
+          name: "Resolve the action's bun",
+          id: "action-bun",
+          shell: "bash",
+          run: 'echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"',
+        },
+      ],
+    ],
+    [
+      "bun-setup-ready",
+      [
+        probe,
+        setup,
+        { ...retry, "continue-on-error": true },
+        {
+          name: "Resolve the action's bun",
+          id: "action-bun",
+          shell: "bash",
+          env: { PIN_FILE: ACTION_BUN_PIN },
+          run: [
+            'pin="$(cat "$PIN_FILE")"',
+            'path="$(command -v bun || true)"',
+            'case "$path" in /*) ;; *) path="" ;; esac',
+            'have=""',
+            'if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi',
+            'if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi',
+            'echo "path=$path" >> "$GITHUB_OUTPUT"',
+            'echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+            "",
+          ].join("\n"),
+        },
+      ],
+    ],
+  ] as const)(
+    "bunSetupSteps(%s) renders the four steps at the given step depth",
+    (variant, expected) => {
+      for (const indent of [4, 6]) {
+        const body = bunSetupSteps(variant, indent);
+        const pad = " ".repeat(indent);
+        expect(body.every((line) => line === "" || line.startsWith(pad))).toBe(true);
+        expect(body.some((line) => line.startsWith(`${pad}- name:`))).toBe(true);
+        expect(steps(body)).toEqual(expected);
+      }
+    },
+  );
+
+  test("the region name follows the declared ready-output roster", () => {
+    expect([...READY_OUTPUT_ACTIONS]).toEqual(["actions/validate-template-report/action.yml"]);
+    expect(bunSetupRegionName("actions/validate-template-report/action.yml")).toBe(
+      "bun-setup-ready",
+    );
+    expect(bunSetupRegionName("actions/check-typography/action.yml")).toBe("bun-setup");
+  });
+
+  // Splicing is the --check judgment: a hand edit inside the region is
+  // whatever differs from the splice, and a second splice changes nothing.
+  test("a fenced action regenerates to one fixed point; a hand edit inside the region is drift", () => {
+    const file = "actions/x/action.yml";
+    const name = bunSetupRegionName(file);
+    const splice = (text: string) =>
+      spliceRegion(
+        text,
+        file,
+        name,
+        "#",
+        bunSetupSteps(name, 4),
+        "",
+        "scripts/action_bun_setup.ts",
+      );
+    const once = splice(fenced(file, []));
+    expect(splice(once)).toBe(once);
+    const edited = once.replace(
+      "bun-version-file: ${{ github.action_path }}/.bun-version",
+      "bun-version-file: .bun-version",
+    );
+    expect(edited).not.toBe(once);
+    expect(splice(edited)).toBe(once);
+  });
+
+  // The registration control: every fenced manifest in the live tree is a
+  // generator target under its region name, so dropping the action
+  // targets from the roster (leaving a hand edit inside a region unheld by
+  // generate:check) is red here, not silent.
+  test("every fenced action in the live tree is a generator target under its region name", () => {
+    const fenced = bunSetupActionFiles(join(import.meta.dir, "../../actions"));
+    expect(fenced.length).toBeGreaterThanOrEqual(8);
+    const fencedFiles = fenced.map(({ file }) => file);
+    const actionTargets = targets(loadManifests()).flatMap((target) =>
+      target.syntax === "line" && fencedFiles.includes(target.file)
+        ? [
+            [
+              target.file,
+              target.prefix,
+              target.regions.map(([name, body, sources]) => [name, body({} as never), sources]),
+            ],
+          ]
+        : [],
+    );
+    expect(actionTargets).toEqual(
+      fenced.map(({ file, indent }) => {
+        const name = bunSetupRegionName(file);
+        return [file, "#", [[name, bunSetupSteps(name, indent), "scripts/action_bun_setup.ts"]]];
+      }),
+    );
+  });
+
+  test("bunSetupActionFiles lists the manifests fenced under THEIR region name, nested ones included", () => {
+    const dir = temp.dir("action-fences-");
+    mkdirSync(join(dir, "typo"));
+    writeFileSync(join(dir, "typo", "action.yml"), fenced("actions/typo/action.yml", []));
+    mkdirSync(join(dir, "pages", "links"), { recursive: true });
+    writeFileSync(join(dir, "pages", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
+    writeFileSync(
+      join(dir, "pages", "links", "action.yml"),
+      fenced("actions/pages/links/action.yml", bunSetupSteps("bun-setup", 4)),
+    );
+    // The ready-output action fenced as the plain variant: not its region.
+    mkdirSync(join(dir, "validate-template-report"));
+    const plain = fenced("actions/typo/action.yml", []);
+    writeFileSync(join(dir, "validate-template-report", "action.yml"), plain);
+    expect(bunSetupRegionProblem("actions/validate-template-report/action.yml", plain)).toBe(
+      "no 'bun-setup-ready' marker pair",
+    );
+    // Never scanned: installed dependencies.
+    mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
+    writeFileSync(
+      join(dir, "typo", "node_modules", "dep", "action.yml"),
+      fenced("actions/typo/node_modules/dep/action.yml", []),
+    );
+    expect(bunSetupActionFiles(dir)).toEqual([
+      { file: "actions/pages/links/action.yml", indent: 4 },
+      { file: "actions/typo/action.yml", indent: 4 },
+    ]);
+    writeFileSync(
+      join(dir, "validate-template-report", "action.yml"),
+      fenced("actions/validate-template-report/action.yml", []),
+    );
+    expect(bunSetupActionFiles(dir)).toContainEqual({
+      file: "actions/validate-template-report/action.yml",
+      indent: 4,
+    });
+  });
+
+  // The rendered depth is the detected depth: a six-space step list gets a
+  // six-space region that parses to the same steps, and regenerating it
+  // (what --check computes) changes nothing.
+  test("a six-space action regenerates to valid YAML with its region at six spaces, a fixed point", () => {
+    const dir = temp.dir("action-six-");
+    const file = "actions/six/action.yml";
+    const name = bunSetupRegionName(file);
+    mkdirSync(join(dir, "six"));
+    writeFileSync(join(dir, "six", "action.yml"), fenced(file, [], 6));
+    const roster = bunSetupActionFiles(dir);
+    expect(roster).toEqual([{ file, indent: 6 }]);
+    const render = (text: string) =>
+      spliceRegion(
+        text,
+        file,
+        name,
+        "#",
+        bunSetupSteps(name, roster[0].indent),
+        "",
+        "scripts/action_bun_setup.ts",
+      );
+    const once = render(fenced(file, [], 6));
+    expect(render(once)).toBe(once);
+    expect(bunSetupRegionProblem(file, once)).toBeNull();
+    expect(stepListIndent(once.split("\n"))).toBe(6);
+    const { begin, end } = markerLines(name, "#", "", "scripts/action_bun_setup.ts");
+    const region = once.split("\n");
+    const inside = region.slice(
+      region.indexOf(`      ${begin}`) + 1,
+      region.indexOf(`      ${end}`),
+    );
+    expect(inside.every((line) => line === "" || line.startsWith("      "))).toBe(true);
+    expect(parseYaml(once).runs.steps.map((step: Record<string, unknown>) => step.id)).toEqual([
+      "bun",
+      "setup-bun",
+      "setup-bun-retry",
+      "action-bun",
+      undefined,
+    ]);
+    expect(parseYaml(once).runs.steps.slice(0, 4)).toEqual(
+      parseYaml(fenced(file, bunSetupSteps(name, 4), 4)).runs.steps.slice(0, 4),
+    );
   });
 });
 
