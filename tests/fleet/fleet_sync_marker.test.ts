@@ -265,6 +265,16 @@ describe("parseDirectives", () => {
       expected: misplaced("The sync leg is untouched, so no [fleet-sync]."),
     },
     {
+      reason: "a mismatched delimiter run is no code span: the mention stays bare and misplaced",
+      body: message(PROSE, "No `[fleet-sync]`` here."),
+      expected: misplaced("No `[fleet-sync]`` here."),
+    },
+    {
+      reason: "an unclosed run before a closed span leaves only the span's mention hidden",
+      body: message(PROSE, "See `` `x` and `[fleet-sync]` there."),
+      expected: NONE,
+    },
+    {
       reason: "a double-backtick span holding a single-backtick span is one code span",
       body: message(PROSE, "Write ``[fleet-sync: all] `why` here`` on one line."),
       expected: NONE,
@@ -356,6 +366,17 @@ describe("parseDirectives", () => {
   ])("$reason", ({ body, expected }) => {
     expect(parseDirectives(body)).toEqual(expected);
   });
+});
+
+test("a 100k-backtick run is scanned in linear time: the unclosed run leaves the mention bare", () => {
+  // The control for the scanner: the regex it replaced backtracked
+  // quadratically on one long run (about a second at this length).
+  const line = `${"`".repeat(100_000)} [fleet-sync]`;
+  const started = performance.now();
+  const parsed = parseDirectives(message(PROSE, line));
+  const elapsed = performance.now() - started;
+  expect(parsed).toEqual(misplaced(line));
+  expect(elapsed).toBeLessThan(300);
 });
 
 describe("main", () => {

@@ -30,13 +30,48 @@ const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
-// A code span (a backtick run closed by the same run) is prose: a body may
-// describe the grammar; a bare [fleet-sync outside the block may not.
-const CODE_SPAN = /(`+).*?\1/g;
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
+
+/** `line` without its code spans (CommonMark: a run of N backticks closes at the next run of
+ *  exactly N; an unclosed run is literal text). A body may describe the grammar in code spans; a
+ *  bare [fleet-sync outside the block may not. Linear: the runs are tokenized once and each one's
+ *  next equal-length run is found in one right-to-left pass. */
+function withoutCodeSpans(line: string): string {
+  const runs: { start: number; end: number }[] = [];
+  for (let i = 0; i < line.length; ) {
+    if (line[i] !== "`") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < line.length && line[j] === "`") j++;
+    runs.push({ start: i, end: j });
+    i = j;
+  }
+  const nextSame = new Array<number>(runs.length).fill(-1);
+  const nearest = new Map<number, number>();
+  for (let r = runs.length - 1; r >= 0; r--) {
+    const length = runs[r].end - runs[r].start;
+    nextSame[r] = nearest.get(length) ?? -1;
+    nearest.set(length, r);
+  }
+  let out = "";
+  let cursor = 0;
+  for (let r = 0; r < runs.length; ) {
+    const close = nextSame[r];
+    if (close === -1) {
+      r++;
+      continue;
+    }
+    out += line.slice(cursor, runs[r].start);
+    cursor = runs[close].end;
+    r = close + 1;
+  }
+  return out + line.slice(cursor);
+}
 
 function paragraphs(body: string): string[][] {
   const lines = body
@@ -81,7 +116,7 @@ export function parseDirectives(body: string): Directives {
     if (block !== null && index === BLOCK_INDEX) return;
     const shaped = isBlockShaped(para);
     for (const line of para) {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(line.replace(CODE_SPAN, ""))) {
+      if (shaped || FLEET_SYNC_ANYWHERE.test(withoutCodeSpans(line))) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
     }
