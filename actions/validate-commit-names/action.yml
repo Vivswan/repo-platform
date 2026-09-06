@@ -8,6 +8,7 @@ description: >-
 runs:
   using: composite
   steps:
+    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -31,8 +32,9 @@ runs:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
-    # on nightly reporting paths a flake here turns a green night red.
+    # on nightly paths a flake here turns a green night red.
     - name: Set up bun (retry)
+      id: setup-bun-retry
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
@@ -44,6 +46,7 @@ runs:
       id: action-bun
       shell: bash
       run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+    # END GENERATED: bun-setup
 
     - name: Validate commit subjects
       shell: bash
