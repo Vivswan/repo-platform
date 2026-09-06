@@ -13,6 +13,7 @@ import {
   MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
+  NEW_STARTERS_REVIEW_NAME,
   PR_BODY_SECTIONS,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
@@ -247,6 +248,14 @@ describe("open_pr sections and auto-merge", () => {
       name: REMOVED_SPLITS_NAME,
       content:
         "> [!WARNING]\n> This update DELETES file(s) whose previous copy carries a\n> repository-owned half.\n\n- `AGENTS.md`: this repository-owned content leaves with the deletion:\n\n  ````text\n  local agents tail\n  ````\n",
+      forcesReview: true,
+    },
+    {
+      reason: "new starter at an owned path: copier kept the repository's copy unreviewed",
+      where: "temp",
+      name: NEW_STARTERS_REVIEW_NAME,
+      content:
+        "> [!WARNING]\n> NEW STARTER at a path this repository already owns.\n\n- `.github/workflows/post-green.yml`: kept as this repository's own file\n",
       forcesReview: true,
     },
     {

@@ -280,6 +280,15 @@ grep -vF "workflows/pr-title.yml" \
   > "$OLD_TREE/manifest.jinja.tmp"
 mv "$OLD_TREE/manifest.jinja.tmp" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+# Model the fleet state before the post-green starter existed, so the update
+# introduces a NEW generated-once starter: rendered where absent (the main
+# leg, the control), HELD where the repo owns a file (the visibility-flip leg).
+rm "$OLD_TREE/template/.github/workflows/post-green.yml.jinja"
+grep -vF "workflows/post-green.yml" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.jinja.tmp"
+mv "$OLD_TREE/manifest.jinja.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
 # Model the fleet state before the versioned-pages cutover: the old
 # template's pages.yml spoke reusable-pages' retired production/staging
 # interface. Plain content by design - the era's copier questions are gone,
@@ -714,9 +723,14 @@ grep -qxF -- "  post-green:" .github/workflows/ci.yml \
   || fail "the updated ci.yml lacks the post-green hook caller"
 # The caller's target must arrive with it: the repo-owned starter, callable
 # with the sha input the caller passes (a caller rendered without its
-# starter fails every push to main).
+# starter fails every push to main). The old fixture never rendered it, so
+# this is the new-starter CONTROL: a target without the file gets the
+# template's starter and no hold is raised.
 test -f .github/workflows/post-green.yml \
   || fail "the update rendered the post-green caller without the post-green.yml starter"
+if [ -s "$WORK/new-starters-review.md" ]; then
+  fail "the new-starter hold fired for a target that never had post-green.yml (the control must stay clear)"
+fi
 grep -qxF -- "  workflow_call:" .github/workflows/post-green.yml \
   || fail "the updated post-green.yml starter is not workflow_call-triggered"
 awk '$0 == "  workflow_call:" { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on { print }' \
@@ -954,6 +968,17 @@ git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
+# A repo-owned workflow at the path the NEW post-green starter lands on:
+# copier keeps it without a conflict, so the sync must hold the PR and name
+# the file, its template caller, and the template's starter.
+test ! -e .github/workflows/post-green.yml \
+  || fail "the synthetic old fixture already renders post-green.yml (the new-starter hold assertions would be vacuous)"
+printf 'name: Own Hook\non: push\njobs:\n  own:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo own\n' \
+  > .github/workflows/post-green.yml
+cp .github/workflows/post-green.yml "$VIS_WORK/own-post-green.yml"
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: own post-green hook"
+
 # Same pipeline as the main leg, but the live data says PRIVATE=true while
 # the recorded answers still say false - the drift the sync re-renders.
 cd "$GITHUB_WORKSPACE"
@@ -988,6 +1013,19 @@ grep -qF '"CONTRIBUTING.md"' "$VIS_WORK/retired-paths.json" \
   || fail "retired_paths did not flag CONTRIBUTING.md on the public->private flip"
 grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
+# THE NEW-STARTER HOLD: the kept repo-owned post-green.yml is byte-intact
+# (skip_if_exists), and the hold names it, its caller ci.yml, and the
+# template's starter interface (the sha input) for the reviewer.
+cmp -s "$VIS_WORK/own-post-green.yml" "$VIS/.github/workflows/post-green.yml" \
+  || fail "the repo-owned post-green.yml did not survive the update byte-for-byte"
+test -s "$VIS_WORK/new-starters-review.md" \
+  || fail "a new starter at a path the repo already owns raised no new-starters hold"
+grep -qF '`.github/workflows/post-green.yml`' "$VIS_WORK/new-starters-review.md" \
+  || fail "the new-starters hold does not name post-green.yml"
+grep -qF 'named by `.github/workflows/ci.yml`' "$VIS_WORK/new-starters-review.md" \
+  || fail "the new-starters hold does not name the template caller ci.yml"
+grep -qF "        sha:" "$VIS_WORK/new-starters-review.md" \
+  || fail "the new-starters hold does not show the template starter's sha input"
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$VIS"
 # Deleting a split-classed file takes its repository-owned half with it,

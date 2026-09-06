@@ -1,12 +1,7 @@
 #!/usr/bin/env bun
-// Deletes files the template retired from the target's working tree.
-// Invoked from the repo-platform checkout root by reusable-template-sync.yml's
-// "Remove files the template retired" step and by ci/upgrade_path_test.sh;
-// deletion candidates come from retired_paths.ts (see its header for the
-// safety rules), diffing the clean renders clean_renders.ts materialized
-// (ensureRenders is idempotent, so callers that never ran the materialize
-// step - rehearse.ts, older harness legs - still work; they just pay for
-// the renders here).
+// Deletes files the template retired from the target's working tree and raises the new-starter
+// hold (new_starters.ts), both read off the diff of the two clean renders (retired_paths.ts has
+// the deletion rules; ensureRenders materializes on demand for callers that skipped the step).
 //
 // Env: RUNNER_TEMP, MODULES; TARGET_DIR (default target); plus, when the
 // renders are not already materialized, ensureRenders' inputs (OLD_SHA,
@@ -20,24 +15,26 @@ import { parseJson } from "../shared/json.ts";
 import { parseModules } from "../shared/modules.ts";
 import { capture } from "../shared/proc.ts";
 import { ensureRenders, run } from "./clean_renders.ts";
+import { newStarterHolds, newStartersReport } from "./new_starters.ts";
 import { customLicenseFlipError } from "./retired_paths.ts";
+import { NEW_STARTERS_REVIEW_NAME } from "./section_files.ts";
 
 function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
-/** Whether the target's HEAD carries `name`. A deadline expiry must fail
- * the step, not read as "license absent": absent is what lets the
- * custom-license flip guard stand down. Exported, with `timeoutMs` as the
- * tests' injection seam, so the fail-closed contract is behaviorally
- * testable without waiting out the production hang bound; the production
- * caller passes no timeout and gets proc.ts's default. */
-export function licensePresentAtHead(dir: string, name: string, timeoutMs?: number): boolean {
-  const probe = capture(["git", "-C", dir, "cat-file", "-e", `HEAD:${name}`], { timeoutMs });
+/** Whether the target's HEAD carries `path`, via ls-tree (absent = exit 0 with no output), so a
+ * timeout or any git failure fails the step instead of reading as absent, which stands the flip
+ * guard down and clears a hold. `timeoutMs` is the tests' seam; production takes the default. */
+export function presentAtHead(dir: string, path: string, timeoutMs?: number): boolean {
+  const probe = capture(["git", "-C", dir, "ls-tree", "HEAD", "--", path], { timeoutMs });
   if (probe.timedOut) {
-    fail(`git cat-file timed out probing HEAD:${name}`);
+    fail(`git ls-tree timed out probing HEAD:${path}`);
   }
-  return probe.exitCode === 0;
+  if (probe.exitCode !== 0) {
+    fail(`git ls-tree failed probing HEAD:${path} (exit ${probe.exitCode})`);
+  }
+  return probe.stdout.trim() !== "";
 }
 
 function main(): void {
@@ -68,7 +65,7 @@ function main(): void {
     );
   }
   const oldModules = isStringList(recordedModules) ? recordedModules : [];
-  const presentLicenses = ["LICENSE.md"].filter((name) => licensePresentAtHead(targetDir, name));
+  const presentLicenses = ["LICENSE.md"].filter((name) => presentAtHead(targetDir, name));
   const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
   if (flipError !== null) {
     fail(flipError);
@@ -123,6 +120,15 @@ function main(): void {
       // paths come from clean template renders, never the target's tree.
       console.log(`removed retired file: ${path}`);
     }
+  }
+
+  // The new-starter hold; the paths are the renders' own, so the log line is public-safe.
+  const holds = newStarterHolds(renderOld, renderNew, (path) => presentAtHead(targetDir, path));
+  writeFileSync(join(runnerTemp, NEW_STARTERS_REVIEW_NAME), newStartersReport(holds));
+  for (const hold of holds) {
+    console.log(
+      `::warning::new starter ${hold.path} already exists in the repository; held for review`,
+    );
   }
 }
 

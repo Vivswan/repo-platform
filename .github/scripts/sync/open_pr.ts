@@ -288,7 +288,7 @@ body = capBody(body);
 // markers), a tripped tail tripwire, withheld workflow files, failed
 // validation, a recovery re-render, a dispatch that forced manual review,
 // a deleted split-class file (its repository-owned half leaves with it),
-// out-of-band settings drift, a
+// a new starter at a path the repository already owns, out-of-band settings drift, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
 // so the reference breaks), a refused mirror declaration (its copies are
 // stale in this update), a migration rung whose verdict needs a human -
@@ -383,7 +383,8 @@ if (!needsReview) {
     "auto-merge left off: this PR needs review (conflicts, split-file carries needing " +
       "review, a tripped tail tripwire, withheld files, failed validation, out-of-band " +
       "settings drift, a referenced-but-undeclared label, a refused mirror declaration, a " +
-      "migration rung needing review, a recovery re-render, a forced-manual dispatch, or a " +
-      "deleted split-class file whose repository-owned half leaves with it).",
+      "migration rung needing review, a recovery re-render, a forced-manual dispatch, a " +
+      "deleted split-class file whose repository-owned half leaves with it, or a new starter " +
+      "at a path this repository already owns).",
   );
 }
