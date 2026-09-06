@@ -25,7 +25,7 @@ The judgment, whole: every needed result must be `success` or `skipped` (a modul
 
 ## What gates what
 
-- A managed repository's ci.yml carries three managed jobs: `checks` (calls the repo-owned checks.yml), `ci` (calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the module selection), and `all-green` needing both. The membership rule: what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
+- A managed repository's ci.yml carries three gating jobs: `checks` (calls the repo-owned checks.yml), `ci` (calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the module selection), and `all-green` needing both - plus the gate-downstream `post-green` caller ([after the gate](#after-the-gate)), which gates nothing. The membership rule: what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
 - Inside fleet-ci.yml, module- and visibility-conditioned jobs skip via job-level `if:` when they do not apply; a skipped job leaves the called run green. Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself.
 - A repo-owned advisory check opts out with `continue-on-error: true` on its job in checks.yml (the retired verdict's `info-*` naming opt-out died with it).
 
@@ -37,7 +37,7 @@ The gate judges only what its `needs` list names, so a job deleted from ci.yml A
 | --- | --- |
 | `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and `toJSON(needs)` wiring. |
 | `fleet-ci-roster` | fleet-ci.yml's job set, both directions - deleting `codeql` there would drop the gate for every managed repository at once. |
-| `fleet-ci-render-roster` | The rendered ci.yml's shape at [the source](https://github.com/Vivswan/repo-platform/blob/main/templates/base/.github/workflows/ci.yml.jinja): exactly the `checks`/`ci`/`all-green` jobs, the gate's exact lines, and the release leg's condition block, judged-sha pass, and concurrency lane. |
+| `fleet-ci-render-roster` | The rendered ci.yml's shape at [the source](https://github.com/Vivswan/repo-platform/blob/main/templates/base/.github/workflows/ci.yml.jinja): exactly the `checks`/`ci`/`all-green`/`post-green` jobs, the gate's exact lines, the post-green caller's condition block, judged-sha pass, `contents: read` ceiling, and absence of a lane, and the release leg's condition block (gate AND hook), judged-sha pass, and concurrency lane. |
 | `all-green-name` | The check NAME, pinned once as data: the ruleset's required context (Actions-pinned by `integration_id`), the `all-green` job id at both sources, `all_green.ts`'s CHECK_NAME, and the sentence this page opens with. |
 
 ## Consuming the gate
@@ -53,7 +53,12 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 - Repo-platform's `post-green` job calls [post-green.yml](../.github/workflows/post-green.yml) (workflow_call only), whose publish job advances the `build` branch - and re-verifies the check at the source commit before any mutation ([build-provenance.md](build-provenance.md)). The file's header has the coalescing contract every leg there must satisfy.
 - Its `read-directives` leg reads the merged commit's directives block, and when a PR opted in, `sync-fleet` calls sync-repos.yml in the same run, needs-ordered behind the publish, holding the `sync-repos` lane the weekly cron also holds. The opt-in grammar is below.
-- On release-please repos, the rendered ci.yml's `release` leg calls the managed release pipeline the same way ([new-repo.md](new-repo.md#the-release-pipeline-release-please)), holding the `post-green-release` lane; release.yml's head gate skips when main has moved on.
+- Every rendered ci.yml carries a `post-green` job calling the repo-owned starter `post-green.yml` (workflow_call only, seeded once, never resynced) with the judged sha: the repository's own green-gated work goes there - applying settings, refreshing generated artifacts. The caller caps `GITHUB_TOKEN` at `contents: read` (a called job cannot raise above its caller) and passes every repository secret through, and holds no concurrency lane of its own: the repo's jobs take theirs, and a caller holding a lane a called job needs deadlocks the call against itself.
+- On release-please repos, the rendered ci.yml's `release` leg needs the gate AND the hook, so the repo's post-green work lands before the tag is minted, then calls the managed release pipeline the same way ([new-repo.md](new-repo.md#the-release-pipeline-release-please)), holding the `post-green-release` lane; release.yml's head gate skips when main has moved on.
+
+```text
+checks + ci -> all-green -> post-green (repo-owned hook) -> release (release-please module)
+```
 
 ### Opting a PR into an immediate fleet sync
 

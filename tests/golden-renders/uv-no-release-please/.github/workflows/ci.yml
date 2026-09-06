@@ -63,3 +63,22 @@ jobs:
       - uses: Vivswan/repo-platform/actions/all-green@build
         with:
           needs: ${{ toJSON(needs) }}
+
+  # Repo-owned: edit post-green.yml, not this file. The slot for this
+  # repository's own green-gated work, downstream of the gate and
+  # upstream of the release (same run, so github.sha IS the judged
+  # commit). No job lane here: the called jobs take their own, and a
+  # caller holding a lane a called job needs deadlocks the call against
+  # itself (post-green.yml's header names the lane this run already holds).
+  post-green:
+    needs: [all-green]
+    if: >-
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/post-green.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit

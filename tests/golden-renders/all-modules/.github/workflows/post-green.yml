@@ -1,0 +1,32 @@
+# Repo-owned: generated once by Vivswan/repo-platform, never
+# overwritten by template sync - edit freely. ci.yml's post-green job calls
+# this workflow on every push to main whose all-green gate passed, on the
+# judged commit, BEFORE the release leg (release-please repos) - the slot
+# for this repository's own green-gated work (applying settings, refreshing
+# generated artifacts, priming caches). GITHUB_TOKEN is capped at
+# contents: read by the caller and a called job cannot raise above it, so
+# anything needing more uses a repository secret (the caller passes them
+# all through). A failing job here blocks the release, never the merge.
+# Never key a concurrency group here on github.workflow: inside a called
+# workflow it resolves to the CALLER's name, so <workflow>-<ref> is the
+# lane this very run holds at workflow level, and a job waiting on it
+# deadlocks the run.
+
+name: Post Green
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The green main commit the calling run judged.
+        required: true
+        type: string
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          SHA: ${{ inputs.sha }}
+        run: echo "post-green hook for $SHA - nothing configured"

@@ -33,6 +33,7 @@ ownership:
   - { path: .github/workflows/auto-format.yml, class: starter }
   - { path: .github/workflows/checks.yml, class: starter }
   - { path: .github/workflows/ci.yml, class: managed }
+  - { path: .github/workflows/post-green.yml, class: starter }
   - path: .gitignore
     class: split
     grammar: managed-region

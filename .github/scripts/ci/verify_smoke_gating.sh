@@ -93,6 +93,20 @@ present_line '          needs: ${{ toJSON(needs) }}' "$wf/ci.yml"
 test ! -e "$wf/all-green.yml"
 absent "reusable-all-green" "$wf/ci.yml"
 
+# The repo-owned post-green hook: ci.yml's post-green caller runs the
+# starter post-green.yml downstream of the gate on a push to main, with
+# the judged sha, a contents: read ceiling, and NO lane of its own (the
+# called jobs take theirs; a shared name would deadlock the call).
+test -f "$wf/post-green.yml"
+present_line "  post-green:" "$wf/ci.yml"
+present_line "    needs: [all-green]" "$wf/ci.yml"
+present_line "      needs.all-green.result == 'success' &&" "$wf/ci.yml"
+present_line "    uses: ./.github/workflows/post-green.yml" "$wf/ci.yml"
+present_line '      sha: ${{ github.sha }}' "$wf/ci.yml"
+present_line "  workflow_call:" "$wf/post-green.yml"
+present_line "      sha:" "$wf/post-green.yml"
+present "Repo-owned: generated once" "$wf/post-green.yml"
+
 # pr-title is its own natively-required workflow: the module renders
 # pr-title.yml (the module's settings layer requires its job's check run),
 # and the modules input still records the selection.
@@ -552,8 +566,10 @@ if has release-please; then
   # green all-green on a push to main.
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   present_line "  release:" "$wf/ci.yml"
-  present_line "    needs: [all-green]" "$wf/ci.yml"
-  present_line "      needs.all-green.result == 'success' &&" "$wf/ci.yml"
+  # The release needs the gate AND the repo-owned hook, so the repo's own
+  # post-green work lands before the tag is minted.
+  present_line "    needs: [all-green, post-green]" "$wf/ci.yml"
+  present_line "      needs.post-green.result == 'success' &&" "$wf/ci.yml"
   present_line "      github.event_name == 'push' &&" "$wf/ci.yml"
   # The judged commit rides into release.yml; its head gate reads it.
   present_line '      sha: ${{ github.sha }}' "$wf/ci.yml"
@@ -704,6 +720,7 @@ expect_class() { # <path> <expected class, or "absent">
 }
 expect_class ".github/workflows/ci.yml" managed
 expect_class ".github/workflows/checks.yml" starter
+expect_class ".github/workflows/post-green.yml" starter
 # The registration file is a repo-owned starter (generated once, the sync
 # reads it and never rewrites it), so its entry must carry NO hash key at
 # all - a hash would re-arm the drift check against the very edits (module

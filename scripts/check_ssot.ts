@@ -2773,21 +2773,142 @@ export const FLEET_CI_ROSTER = [
   "release-health",
 ];
 
+/** The folded job-level condition every gate-downstream caller in the
+ *  rendered ci.yml carries: released only by green results (spelled out,
+ *  never GitHub's implied-success rule alone) on a push to main.
+ *  `upstream` names the jobs whose results the caller reads. */
+export function downstreamGateBlock(upstream: string[]): string {
+  return [
+    "    if: >-",
+    ...upstream.map((job) => `      needs.${job}.result == 'success' &&`),
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+  ].join("\n");
+}
+
+/** Pins a downstream caller's condition as one ADJACENT block that also
+ *  ENDS the folded scalar: a continuation line appended after it (an ||
+ *  arm, even past blank lines - a folded scalar keeps them as content)
+ *  would weaken the gate while the block pin stayed satisfied. */
+function pinDownstreamGate(
+  text: string,
+  block: string,
+  file: string,
+  what: string,
+  mismatches: Mismatch[],
+): void {
+  const at = text.indexOf(block);
+  if (at === -1) {
+    mismatches.push({
+      file,
+      expected: `${what} carrying the verbatim gate block (${block
+        .split("\n")
+        .slice(1)
+        .map((line) => line.trim().replace(/ &&$/, ""))
+        .join(
+          ", ",
+        )}) - dropping any clause releases post-gate work off unjudged, red, or PR-shaped runs`,
+      got: "missing or reshaped",
+    });
+    return;
+  }
+  const nextLine =
+    text
+      .slice(at + block.length)
+      .split("\n")
+      .slice(1)
+      .find((line) => line.trim() !== "") ?? "";
+  if (/^ {6,}/.test(nextLine)) {
+    mismatches.push({
+      file,
+      expected: `${what}'s gate block ending the if: scalar (a continuation line after it could re-weaken the gate)`,
+      got: nextLine.trim(),
+    });
+  }
+}
+
+/** The grants under a job-level `    permissions:` at `start`: every line
+ *  of the block (blanks and comments skipped) until the first dedent. A
+ *  line that is not a bare `      scope: read|write` grant is returned
+ *  verbatim so the ceiling census fails CLOSED on it - a quoted value
+ *  (`pull-requests: "write"`) is a grant to GitHub all the same. */
+function permissionGrants(lines: string[], start: number): string[] {
+  const grants: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    if (!/^ {6}/.test(line)) break;
+    grants.push(/^ {6}([a-z-]+: (?:read|write))$/.exec(line)?.[1] ?? line.trim());
+  }
+  return grants;
+}
+
+/** The lines of the job `id`'s own block: from its key to the next
+ *  job-indent key or compose anchor. Empty when the job is absent. */
+function jobBlock(lines: string[], id: string): string[] {
+  const at = lines.indexOf(`  ${id}:`);
+  if (at === -1) return [];
+  const end = lines.findIndex(
+    (line, index) =>
+      index > at && (/^ {2}[A-Za-z0-9_-]+:/.test(line) || line.startsWith("{# compose:")),
+  );
+  return lines.slice(at + 1, end === -1 ? undefined : end);
+}
+
+/** A mapping key with whitespace before its colon (`key :`), at any depth
+ *  and in a sequence item alike: YAML reads it as `key:`, while every
+ *  key census here reads the key form `key:` only. */
+const SPACED_KEY = /^\s*(?:-\s+)?[A-Za-z0-9_-]+\s+:(?:\s|$)/;
+
+/** The mapping keys appearing more than once under the same parent in one
+ *  job's block, at any depth (`uses`, `with.sha`, `steps[0].with.needs`):
+ *  YAML's last duplicate wins silently, so a second key after the pinned
+ *  one would ship while every exact-line pin stayed satisfied. Each `- `
+ *  sequence item opens its own mapping, so two steps both carrying `uses:`
+ *  are not duplicates of each other. Indent-driven over the source lines
+ *  (the file is jinja, so no YAML parse); jinja and comment lines never
+ *  match the key form. */
+export function duplicateJobKeys(block: string[]): string[] {
+  const seen = new Map<string, number>();
+  const stack: { indent: number; path: string }[] = [];
+  let items = 0;
+  for (const line of block) {
+    const match = /^( *)(-\s+)?([A-Za-z0-9_-]+):/.exec(line);
+    if (match === null) continue;
+    const dashAt = match[1].length;
+    const keyAt = dashAt + (match[2]?.length ?? 0);
+    if (match[2] !== undefined) {
+      while (stack.length > 0 && stack[stack.length - 1].indent >= dashAt) stack.pop();
+      const parent = stack.length > 0 ? stack[stack.length - 1].path : "";
+      stack.push({ indent: dashAt, path: `${parent}[${items++}]` });
+    }
+    while (stack.length > 0 && stack[stack.length - 1].indent >= keyAt) stack.pop();
+    const parent = stack.length > 0 ? stack[stack.length - 1].path : "";
+    const path = parent === "" ? match[3] : `${parent}.${match[3]}`;
+    seen.set(path, (seen.get(path) ?? 0) + 1);
+    stack.push({ indent: keyAt, path });
+  }
+  return [...seen.entries()].filter(([, count]) => count > 1).map(([path]) => path);
+}
+
 /** The fleet gate's render shape at the SOURCE. The template ci.yml.jinja
- *  carries exactly the `checks` and `ci` caller jobs plus the `all-green`
+ *  carries exactly the `checks` and `ci` caller jobs, the `all-green`
  *  gate job (its check run is the ruleset's required context), whose
  *  needs edge, always() condition, and shared-action judgment are pinned
- *  as exact lines - each fails OPEN at run time if lost. The
- *  release-please leg (fragments/all-green-release.jinja, spliced after
- *  the gate) must keep `needs: [all-green]` plus the spelled-out
- *  gate-result condition scoped to pushes to main (dropping any clause
- *  releases off unjudged, red, or PR-shaped runs), must pass the judged
- *  sha explicitly (github.sha - the leg runs in the judged commit's own
- *  run; the explicit input is what keeps a future caller honest), and
- *  must hold a concurrency group no job inside the called release.yml
- *  takes (a shared name self-deadlocks: the caller would hold the group
- *  its called job waits for). release.yml must declare the sha input and
- *  read it in the head gate, or the pass rots into a silent
+ *  as exact lines - each fails OPEN at run time if lost - and the
+ *  `post-green` caller of the repo-owned post-green.yml hook: gate-
+ *  downstream with the spelled-out condition, the judged sha passed
+ *  explicitly, a contents: read ceiling, and NO lane (the called jobs
+ *  are the repo's own; a caller holding a lane a called job takes
+ *  deadlocks the call against itself). The release-please leg
+ *  (fragments/all-green-release.jinja, spliced after the hook) must need
+ *  BOTH the gate and the hook with both results spelled out (dropping
+ *  any clause releases off unjudged, red, or PR-shaped runs, or before
+ *  the repo's post-green work landed), must pass the judged sha
+ *  explicitly (github.sha - the leg runs in the judged commit's own run;
+ *  the explicit input is what keeps a future caller honest), and must
+ *  hold a concurrency group no job inside the called release.yml takes
+ *  (a shared name self-deadlocks). release.yml must declare the sha
+ *  input and read it in the head gate, or the pass rots into a silent
  *  release-from-tip. Pure over the three texts for the suite's forcing
  *  cases. */
 export function fleetCiRenderMismatches(
@@ -2804,45 +2925,49 @@ export function fleetCiRenderMismatches(
   const jobIds = [...ciTemplateText.slice(jobsAt).matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
     (match) => match[1],
   );
-  if (canonical(jobIds) !== canonical(["checks", "ci", "all-green"])) {
+  if (canonical(jobIds) !== canonical(["checks", "ci", "all-green", "post-green"])) {
     mismatches.push({
       file: ciRel,
       expected:
-        "exactly the 'checks' and 'ci' caller jobs plus the 'all-green' gate (every fleet gate lives inside the two calls; the release leg splices through its anchor, and a job added here would gate every repo with no roster to make it loud)",
+        "exactly the 'checks' and 'ci' caller jobs, the 'all-green' gate, and the gate-downstream 'post-green' hook caller (every fleet gate lives inside the two calls; the release leg splices through its anchor, and a job added here would gate every repo with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }
   // No job-level name: anywhere (the all-green job's id is the required
   // check-run name; a caller rename would silently reshape the gate),
-  // and the ONLY job-level if: is the gate's own always() - a condition
-  // on a caller job skips it, and skipped stands down.
-  // Line censuses over the whole jobs region: every needs: line must be
-  // a pinned one (a second needs key on a job silently wins in YAML),
-  // every if: must be the gate's exact always() (step-level conditions
-  // included - a conditioned judgment step is a green no-op gate), and
-  // strategy/continue-on-error are banned outright (a matrix suffixes
-  // the check name away from the required context; softening waves a
-  // failure through).
+  // and the ONLY job-level if: lines are the gate's own always() and the
+  // post-green hook's folded gate condition (pinned inside its block
+  // below) - a condition on a caller job skips it, and skipped stands
+  // down. Line censuses over the whole jobs region: every needs: line
+  // must be a pinned one (a second needs key on a job silently wins in
+  // YAML), no step-level if: (a conditioned judgment step is a green
+  // no-op gate), and strategy/continue-on-error/concurrency are banned
+  // outright (a matrix suffixes the check name away from the required
+  // context; softening waves a failure through; a caller lane deadlocks
+  // against any repo-owned post-green job taking the same name).
   // 4-space only: the gate's with-block passes a `needs:` INPUT at step
   // depth, which is data, not a YAML job key.
   const needsLines = ciTemplateText
     .slice(jobsAt)
     .split("\n")
     .filter((line) => /^ {4}needs:/.test(line));
-  if (canonical(needsLines) !== canonical(["    needs: [checks, ci]"])) {
+  if (
+    canonical([...needsLines].sort()) !==
+    canonical(["    needs: [all-green]", "    needs: [checks, ci]"])
+  ) {
     mismatches.push({
       file: ciRel,
       expected:
-        'exactly one needs: line, "    needs: [checks, ci]" (a rival needs key on any job silently wins in YAML and un-gates a caller)',
+        'exactly two needs: lines, "    needs: [checks, ci]" on the gate and "    needs: [all-green]" on the post-green hook (a rival needs key on any job silently wins in YAML and un-gates a caller)',
       got: needsLines.join(" | ") || "no needs lines",
     });
   }
   for (const line of ciTemplateText.slice(jobsAt).split("\n")) {
-    if (/^\s+(strategy|continue-on-error):/.test(line)) {
+    if (/^\s+(strategy|continue-on-error|concurrency):/.test(line)) {
       mismatches.push({
         file: ciRel,
         expected:
-          "no strategy: or continue-on-error: anywhere in ci.yml's jobs (a matrixed gate renames its check; softening waves failures through)",
+          "no strategy:, continue-on-error:, or concurrency: anywhere in ci.yml's jobs (a matrixed gate renames its check; softening waves failures through; a caller lane self-deadlocks against a repo-owned post-green job taking the same name)",
         got: line.trim(),
       });
     }
@@ -2862,11 +2987,11 @@ export function fleetCiRenderMismatches(
         got: line.trim(),
       });
     }
-    if (/^ {4}if:/.test(line) && line !== "    if: always()") {
+    if (/^ {4}if:/.test(line) && line !== "    if: always()" && line !== "    if: >-") {
       mismatches.push({
         file: ciRel,
         expected:
-          "no job-level if: beyond the gate's exact `if: always()` (a condition on a caller job skips it, and a skipped caller stands down from the gate)",
+          "no job-level if: beyond the gate's exact `if: always()` and the post-green hook's folded `if: >-` (a condition on a caller job skips it, and a skipped caller stands down from the gate)",
         got: line.trim(),
       });
     }
@@ -2886,11 +3011,19 @@ export function fleetCiRenderMismatches(
         got: line.trim(),
       });
     }
-    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:(?: |$)/.test(line)) {
+    if (SPACED_KEY.test(line)) {
       mismatches.push({
         file: ciRel,
         expected:
-          "every job-indent line spelled as a bare `key:` (any other spelling is a job the census cannot see)",
+          "no whitespace before a mapping colon at any depth (`key :` parses as `key:` but evades every key census)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:$/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "every job-indent line spelled as a bare `key:` with nothing after it (an inline flow mapping carries if:/needs: keys the line censuses cannot see; any other spelling is a job the census cannot see)",
         got: line.trim(),
       });
     }
@@ -2910,48 +3043,77 @@ export function fleetCiRenderMismatches(
       });
     }
   }
-  // The gate's shape, pinned as exact lines - each exactly once in the
-  // whole file (YAML's last duplicate wins silently, so a compliant copy
-  // next to a gutted one must be loud) AND, for the job-body pins, INSIDE
-  // the all-green job's own block: a pin satisfied from another job's
-  // body (if: always() moved onto a caller) is the same disarm.
+  // The gate's and the hook caller's shapes, pinned as exact lines - each
+  // exactly once in the whole file (YAML's last duplicate wins silently,
+  // so a compliant copy next to a gutted one must be loud) AND, for the
+  // job-body pins, INSIDE the named job's own block: a pin satisfied from
+  // another job's body (if: always() moved onto a caller) is the same
+  // disarm.
   const ciLines = ciTemplateText.split("\n");
-  const gateAt = ciLines.indexOf("  all-green:");
-  const gateEnd = ciLines.findIndex(
-    (line, index) =>
-      index > gateAt && (/^ {2}[A-Za-z0-9_-]+:/.test(line) || line.startsWith("{# compose:")),
-  );
-  const gateBlock =
-    gateAt === -1 ? [] : ciLines.slice(gateAt + 1, gateEnd === -1 ? undefined : gateEnd);
-  const ciPins: [string, string, boolean][] = [
-    ["  all-green:", "the gate job whose check run the ruleset requires, by this exact id", false],
+  const blocks = {
+    "all-green": jobBlock(ciLines, "all-green"),
+    "post-green": jobBlock(ciLines, "post-green"),
+  };
+  for (const id of jobIds) {
+    for (const key of duplicateJobKeys(jobBlock(ciLines, id))) {
+      mismatches.push({
+        file: `${ciRel} job '${id}'`,
+        expected: `the key '${key}' once (YAML's last duplicate wins silently, shadowing the pinned value)`,
+        got: "a duplicate key",
+      });
+    }
+  }
+  const ciPins: [string, string, keyof typeof blocks | null][] = [
+    ["  all-green:", "the gate job whose check run the ruleset requires, by this exact id", null],
     [
       "    needs: [checks, ci]",
       "the gate must need BOTH caller jobs - dropping one un-gates every job of that call, fleet-wide",
-      true,
+      "all-green",
     ],
     [
       "    if: always()",
       "a failed caller must FAIL the gate, not skip it (a skipped required check leaves the merge box waiting)",
-      true,
+      "all-green",
     ],
     [
       "      - uses: {{ github_username }}/repo-platform/actions/all-green@build",
       "the shared judgment at the green-gated build ref - any other target is not the fleet's gate",
-      true,
+      "all-green",
     ],
     [
       "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
       "the needs context is what the action judges - anything else judges a fiction of the run",
-      true,
+      "all-green",
+    ],
+    ["  post-green:", "the repo-owned hook's caller, by the id the release leg needs", null],
+    ["    needs: [all-green]", "the hook runs downstream of the gate, nothing else", "post-green"],
+    [
+      "    if: >-",
+      "the hook's folded gate condition (a bare needs edge would run the hook on PR-shaped runs too)",
+      "post-green",
+    ],
+    [
+      "    uses: ./.github/workflows/post-green.yml",
+      "the caller calls the repo-owned hook by local path",
+      "post-green",
+    ],
+    [
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+      "the JUDGED commit, explicit - same-run today, and the explicit pass is what keeps a future caller honest",
+      "post-green",
+    ],
+    [
+      "    secrets: inherit",
+      "the repo's own post-green work needs the repo's secrets",
+      "post-green",
     ],
     [
       "{# compose:all-green-release #}",
       "the release-please leg's anchor (splices the gate-downstream release job on selecting repos)",
-      false,
+      null,
     ],
   ];
-  for (const [line, why, inGate] of ciPins) {
+  for (const [line, why, block] of ciPins) {
     const count = ciLines.filter((candidate) => candidate === line).length;
     if (count !== 1) {
       mismatches.push({
@@ -2959,13 +3121,40 @@ export function fleetCiRenderMismatches(
         expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
         got: count === 0 ? "missing" : `${count} occurrences`,
       });
-    } else if (inGate && !gateBlock.includes(line)) {
+    } else if (block !== null && !blocks[block].includes(line)) {
       mismatches.push({
         file: ciRel,
-        expected: `the line ${JSON.stringify(line)} inside the all-green job's own block (${why})`,
+        expected: `the line ${JSON.stringify(line)} inside the ${block} job's own block (${why})`,
         got: "present, but on another job",
       });
     }
+  }
+  pinDownstreamGate(
+    blocks["post-green"].join("\n"),
+    downstreamGateBlock(["all-green"]),
+    ciRel,
+    "the post-green hook caller",
+    mismatches,
+  );
+  // The hook caller's ceiling: contents: read and nothing else. A called
+  // job cannot raise above its caller, so this line is what keeps
+  // repo-owned post-green work on the default token at read scope;
+  // privileged work rides a repository secret instead.
+  const hookPermissionsAt = blocks["post-green"].indexOf("    permissions:");
+  if (hookPermissionsAt === -1) {
+    mismatches.push({
+      file: `${ciRel} job 'post-green'`,
+      expected: "a job-level permissions: ceiling for the called repo-owned hook",
+      got: "missing",
+    });
+  } else {
+    mismatches.push(
+      ...setMismatch(
+        `${ciRel} post-green permissions ceiling`,
+        ["contents: read"],
+        permissionGrants(blocks["post-green"], hookPermissionsAt),
+      ),
+    );
   }
   // The release leg is jinja-minimal by design: inline {% raw %} pairs
   // wrap the judged-sha expression, and everything else is banned -
@@ -3011,11 +3200,19 @@ export function fleetCiRenderMismatches(
         got: line.trim(),
       });
     }
-    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:(?: |$)/.test(line)) {
+    if (SPACED_KEY.test(line)) {
       mismatches.push({
         file: legRel,
         expected:
-          "every job-indent line spelled as a bare `key:` (any other spelling is a job the census cannot see)",
+          "no whitespace before a mapping colon at any depth (`key :` parses as `key:` but evades every key census)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:$/.test(line)) {
+      mismatches.push({
+        file: legRel,
+        expected:
+          "every job-indent line spelled as a bare `key:` with nothing after it (an inline flow mapping carries if:/needs: keys the line censuses cannot see; any other spelling is a job the census cannot see)",
         got: line.trim(),
       });
     }
@@ -3036,12 +3233,19 @@ export function fleetCiRenderMismatches(
       got: legJobs.join(", "),
     });
   }
+  for (const key of duplicateJobKeys(jobBlock(releaseLegText.split("\n"), "release"))) {
+    mismatches.push({
+      file: `${legRel} job 'release'`,
+      expected: `the key '${key}' once (YAML's last duplicate wins silently, shadowing the pinned value)`,
+      got: "a duplicate key",
+    });
+  }
   const legNeedsLines = releaseLegText.split("\n").filter((line) => /^ {4}needs:/.test(line));
-  if (canonical(legNeedsLines) !== canonical(["    needs: [all-green]"])) {
+  if (canonical(legNeedsLines) !== canonical(["    needs: [all-green, post-green]"])) {
     mismatches.push({
       file: legRel,
       expected:
-        'exactly one needs: line, "    needs: [all-green]" (a rival needs key silently wins in YAML)',
+        'exactly one needs: line, "    needs: [all-green, post-green]" (a rival needs key silently wins in YAML; dropping post-green mints the tag before the repo\'s own post-green work landed)',
       got: legNeedsLines.join(" | ") || "no needs lines",
     });
   }
@@ -3062,41 +3266,22 @@ export function fleetCiRenderMismatches(
       got: `${ifCount} if: lines`,
     });
   }
-  // The gate condition, pinned as one ADJACENT block: released only by a
-  // green all-green (spelled out, never GitHub's implied-success rule
-  // alone) on a push to main.
-  const releaseGate = [
-    "    if: >-",
-    "      needs.all-green.result == 'success' &&",
-    "      github.event_name == 'push' &&",
-    "      github.ref == 'refs/heads/main'",
-  ].join("\n");
-  const gateBlockAt = releaseLegText.indexOf(releaseGate);
-  if (gateBlockAt === -1) {
-    mismatches.push({
-      file: legRel,
-      expected:
-        "the release job carrying the verbatim gate block (needs.all-green.result 'success', event push, ref refs/heads/main) - dropping any clause releases off unjudged, red, or PR-shaped runs",
-      got: "missing or reshaped",
-    });
-  } else {
-    // The folded scalar must END with the block: a continuation line
-    // appended after it (an || arm) would weaken the gate while the
-    // block pin stayed satisfied.
-    const nextLine = releaseLegText.slice(gateBlockAt + releaseGate.length).split("\n")[1] ?? "";
-    if (/^ {6,}/.test(nextLine)) {
-      mismatches.push({
-        file: legRel,
-        expected:
-          "the gate block ending the if: scalar (a continuation line after it could re-weaken the gate)",
-        got: nextLine.trim(),
-      });
-    }
-  }
+  // The gate condition: released only by a green all-green AND a green
+  // post-green hook on a push to main.
+  pinDownstreamGate(
+    releaseLegText,
+    downstreamGateBlock(["all-green", "post-green"]),
+    legRel,
+    "the release job",
+    mismatches,
+  );
   // The per-line pins: each exactly once (YAML's last duplicate wins
   // silently, so a compliant copy next to a gutted one must be loud).
   const legPins: [string, string][] = [
-    ["    needs: [all-green]", "the release leg runs downstream of the gate, nothing else"],
+    [
+      "    needs: [all-green, post-green]",
+      "the release leg runs downstream of the gate and the repo-owned hook, nothing else",
+    ],
     [
       "    concurrency:",
       "releases serialize in their own lane; an unserialized pair can double-publish",
@@ -3139,13 +3324,6 @@ export function fleetCiRenderMismatches(
       got: "missing",
     });
   } else {
-    const grants: string[] = [];
-    for (const line of legLines.slice(permissionsAt + 1)) {
-      if (line.trim() === "" || line.trim().startsWith("#")) continue;
-      const grant = /^ {6}([a-z-]+: (?:read|write))$/.exec(line)?.[1];
-      if (grant === undefined) break;
-      grants.push(grant);
-    }
     mismatches.push(
       ...setMismatch(
         `${legRel} release permissions ceiling`,
@@ -3158,7 +3336,7 @@ export function fleetCiRenderMismatches(
           "issues: read",
           "vulnerability-alerts: read",
         ],
-        grants,
+        permissionGrants(legLines, permissionsAt),
       ),
     );
   }
@@ -4634,9 +4812,10 @@ const rules: Rule[] = [
   {
     // The fleet gate's render shape at the source
     // (fleetCiRenderMismatches has the model): the template ci.yml
-    // carries exactly the two caller jobs plus the pinned all-green gate,
-    // and the release leg splicing after it must stay gate-downstream
-    // with the judged sha passed through.
+    // carries exactly the two caller jobs, the pinned all-green gate, and
+    // the gate-downstream post-green hook caller, and the release leg
+    // splicing after them must need both with the judged sha passed
+    // through.
     name: "fleet-ci-render-roster",
     run: () =>
       fleetCiRenderMismatches(

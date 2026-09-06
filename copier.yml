@@ -70,6 +70,9 @@ _exclude:
 # components, labels, contact links, etc.).
 _skip_if_exists:
   - .github/workflows/checks.yml
+  # The repo's own green-gated work: ci.yml's post-green job calls it after
+  # the all-green gate on a push to main, before the release leg.
+  - .github/workflows/post-green.yml
   - .github/workflows/update-release.yml
   # Its release-PR twin: release.yml calls it when release-please creates or
   # refreshes the release PR (files regenerated into the release commit).
