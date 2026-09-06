@@ -32,7 +32,10 @@ jobs:
       - name: Fail if the repository is private
         if: github.event.repository.private
         run: |
-          echo "::error::CodeQL cannot run: this repository is private, but its CI still carries CodeQL jobs from when it was public (private repositories get no CodeQL without GitHub Code Security). Either restore public visibility (if the repo carries .github/settings.yml declaring 'private: false', the settings heal does this on its next run), or merge the template-sync visibility-drift PR so the CodeQL jobs are removed. CI stays red until one of those lands."
+          echo "::error::CodeQL cannot run: this repository is private, but its CI still carries CodeQL jobs from when it was public (private"\
+            "repositories get no CodeQL without GitHub Code Security). Either restore public visibility (if the repo carries .github/settings.yml"\
+            "declaring 'private: false', the settings heal does this on its next run), or merge the template-sync visibility-drift PR so the CodeQL"\
+            "jobs are removed. CI stays red until one of those lands."
           exit 1
 
       - uses: actions/checkout@v7

@@ -2510,7 +2510,10 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
   "actions/release-health/release-health.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "tests/build-branches/publish_behavior.test.ts":
-    "one publish.ts child runs in the background, parked inside a PATH-stubbed rsync while a second publish runs to completion in the foreground; a timer SIGKILLs the child at SPAWN_TIMEOUT_MS, the stub bounds its own wait, and a killed child throws instead of yielding an outcome",
+    "one publish.ts child runs in the background, parked inside a PATH-stubbed rsync while a " +
+    "second publish runs to completion in the foreground; a timer SIGKILLs the child at " +
+    "SPAWN_TIMEOUT_MS, the stub bounds its own wait, and a killed child throws instead of " +
+    "yielding an outcome",
   "scripts/run_tests.ts":
     "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child, fails a run that left entries in the per-run TMPDIR, and removes that TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
 };
@@ -3151,7 +3154,11 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
       mismatches.push({
         file,
-        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
+        expected:
+          `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch ` +
+          `root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one ` +
+          `/bin/rm -rf of clean paths under that root, and whose success this setup's condition ` +
+          `requires)`,
         got: "no such step - a caller could plant that pin before the action runs",
       });
       continue;
@@ -3559,7 +3566,10 @@ export function fleetCiRenderMismatches(
     mismatches.push({
       file: ciRel,
       expected:
-        "exactly the 'checks' and 'ci' caller jobs, the 'all-green' gate, and the gate-downstream 'post-green' hook caller (every fleet gate lives inside the two calls; the release leg splices through its anchor, and a job added here would gate every repo with no roster to make it loud)",
+        "exactly the 'checks' and 'ci' caller jobs, the 'all-green' gate, and the " +
+        "gate-downstream 'post-green' hook caller (every fleet gate lives inside the two calls; " +
+        "the release leg splices through its anchor, and a job added here would gate every repo " +
+        "with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }

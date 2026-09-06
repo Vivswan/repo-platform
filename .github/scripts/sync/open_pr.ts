@@ -380,6 +380,10 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, a referenced-but-undeclared label, a refused mirror declaration, a migration rung needing review, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing " +
+      "review, a tripped tail tripwire, withheld files, failed validation, out-of-band " +
+      "settings drift, a referenced-but-undeclared label, a refused mirror declaration, a " +
+      "migration rung needing review, a recovery re-render, a forced-manual dispatch, or a " +
+      "deleted split-class file whose repository-owned half leaves with it).",
   );
 }

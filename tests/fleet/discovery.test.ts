@@ -181,7 +181,10 @@ describe("notice builders", () => {
         "If it carries .github/settings.yml, the central nightly heal no longer applies it.",
       ),
     ).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. If it carries .github/settings.yml, the central nightly heal no longer applies it. Generate it with copier (see the repo-platform README) to opt in, or add the repo to repos.yml's exclude list to silence this.",
+      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not " +
+        "adopted the template. If it carries .github/settings.yml, the central nightly heal no " +
+        "longer applies it. Generate it with copier (see the repo-platform README) to opt in, or " +
+        "add the repo to repos.yml's exclude list to silence this.",
     );
   });
 });

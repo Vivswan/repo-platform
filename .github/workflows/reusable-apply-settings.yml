@@ -71,7 +71,10 @@ jobs:
           if [ -n "$PAT" ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings either way."
+            echo "::warning::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To"\
+              "opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo"\
+              "as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings"\
+              "either way."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -122,7 +125,8 @@ jobs:
               echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "::error::refusing to run repo-platform scripts from $WORKFLOW_SHA: the commit carries no provenance stamp and is not main history (compare status: $status). Pin this workflow @build (the green-gated delivery branch) or to a main commit."
+              echo "::error::refusing to run repo-platform scripts from $WORKFLOW_SHA: the commit carries no provenance stamp and is not main"\
+                "history (compare status: $status). Pin this workflow @build (the green-gated delivery branch) or to a main commit."
               exit 1
               ;;
           esac

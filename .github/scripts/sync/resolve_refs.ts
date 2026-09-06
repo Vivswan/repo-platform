@@ -136,7 +136,10 @@ must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
 const notGreen = allGreenFailure(repository, validateRef);
 if (notGreen !== null) {
   console.log(
-    `::error::the build branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main (its post-green publish follows), or dispatch post-green.yml with sha=<green main commit>, then re-run.`,
+    `::error::the build branch tip ${targetSha.slice(0, 12)} was built from ` +
+      `${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships ` +
+      `builds of green main commits; get CI to a successful run on main (its post-green publish ` +
+      `follows), or dispatch post-green.yml with sha=<green main commit>, then re-run.`,
   );
   process.exit(1);
 }
@@ -160,7 +163,10 @@ if (recorded.kind === "ok") {
   oldSha = recorded.sha;
 } else if (recover !== "recopy") {
   console.log(
-    `::error::${targetDisplay}'s .github/.copier-answers.yml ${unusableReason(recorded, hideUnlessRefShaped(oldCommit))}, so there is no base to update from. Fix the _commit, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
+    `::error::${targetDisplay}'s .github/.copier-answers.yml ` +
+      `${unusableReason(recorded, hideUnlessRefShaped(oldCommit))}, so there is no base to update from. ` +
+      `Fix the _commit, or dispatch Sync Repos with repo=<the repository's real owner/name> ` +
+      `(shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
   );
   process.exit(1);
 }

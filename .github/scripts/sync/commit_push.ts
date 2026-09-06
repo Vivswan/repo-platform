@@ -242,7 +242,9 @@ if (existsSync(manifestPath)) {
 must(git("add", "--all"));
 if (capture(git("diff", "--quiet", baseSha)).exitCode === 0) {
   console.log(
-    `::warning::${targetDisplay}: this update only changes .github/workflows files, and the REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant Workflows read/write to sync workflow files, or ignore this if that is intentional.`,
+    `::warning::${targetDisplay}: this update only changes .github/workflows files, and the ` +
+      `REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant ` +
+      `Workflows read/write to sync workflow files, or ignore this if that is intentional.`,
   );
   setOutput("pushed", "false");
   // The full-tree validation verdict no longer applies to anything pushed;

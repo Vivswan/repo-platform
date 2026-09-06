@@ -123,7 +123,9 @@ jobs:
 
       - name: Require registration files
         run: |
-          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
+          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is"\
+            "missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} ."\
+            "--vcs-ref build'."; exit 1; }
 
       # Live visibility and description feed the render on purpose (the
       # visibility-gated renders must follow the repo's real state), so a
@@ -459,9 +461,13 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
           if [ "$HIDE_DETAILS" = "true" ]; then
-            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body ONLY (this log hides them: private repository). Review the PR, restore anything that should stay local, then merge."
+            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The"\
+              "dropped local lines are listed in the PR body ONLY (this log hides them: private repository). Review the PR, restore anything that"\
+              "should stay local, then merge."
           else
-            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
+            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The"\
+              "dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything"\
+              "that should stay local, then merge."
           fi
 
       # A hidden failure with no PR to carry its captured diagnostics
