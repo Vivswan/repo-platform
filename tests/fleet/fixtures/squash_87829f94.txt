@@ -1,0 +1,138 @@
+feat(settings)!: delete the per-repo settings self-apply path (#107)
+
+[fleet-sync: all] every repository renders settings-sync.yml today; the
+retirement must reach all of them in this merge's own run
+
+## Before
+
+Every fleet render carried a workflow that never did anything:
+
+```text
+managed repo                                  repo-platform (build branch)
+.github/workflows/settings-sync.yml  ----->   reusable-apply-settings.yml@build
+  needs secrets.REPO_PLATFORM_TOKEN             two-hops to main for the scripts
+  (no fleet repo holds one)                     ::warning:: settings apply skipped
+```
+
+Settings were already applied centrally by `settings-repos.yml`
+(post-green when inputs change or a sync ran, and nightly).
+
+## After
+
+```text
+managed repo                                  repo-platform
+.github/settings.yml (starter, repo-owned)    settings-repos.yml applies it
+(no apply workflow, no token)
+```
+
+Deleted:
+
+| File | Why |
+| --- | --- |
+| `templates/base/.github/workflows/settings-sync.yml.jinja` | the
+rendered caller |
+| `.github/workflows/reusable-apply-settings.yml` | the reusable it
+called |
+| `tests/fleet/apply_settings_scripts_ref.test.ts` | pinned the
+reusable's two-hop |
+| `templates/base/ownership.yml` entry, validator roster, goldens |
+regenerated (`bun run regen`) |
+| `self-apply-fact-source` rule + the reusable's rows in `PREFLIGHT_*`
+tables (scripts/check_ssot.ts) | policed only the deleted file |
+| the `job.workflow_sha` actionlint ignore | only the reusable read that
+context |
+
+Narrowed to `settings-repos.yml` alone: `settings-apply-skip-gate`,
+`settings-apply-merged-input`, `settings-label-preflight`,
+`pins-and-identities` (the reusable's pin comparison). Docs, skills, and
+comments no longer describe self-apply, the two-hop, or a per-repo PAT.
+
+## How
+
+- Fleet transition: no rung. docs/migrations.md scopes rungs to "a
+rendered file moving, a repo-owned file needing a rewrite"; a retired
+managed file is deleted by the sync's retired-file cleanup. The sentence
+relied on, from `.github/scripts/sync/retired_paths.ts`: "This script
+computes the deletion candidates from two clean renders of the template:
+paths present in the OLD render and absent from the NEW render, minus
+the union of both template versions' `_skip_if_exists` lists". Same path
+`rerun-copilot-gate.yml` took. docs/migrations.md now says so in one
+sentence and the AGENTS.md rung rule reads "retires a repo-owned one".
+- `upgrade_path_test.sh` plants `settings-sync.yml` (its own module
+gate, its own manifest entry) in the synthetic old build, resurrects it
+after `copier update`, and asserts `retired_paths.ts` lists it and
+`retired_cleanup.ts` deletes it; the manifest no longer classes it; the
+arrival leg never delivers it.
+- `--target-dir` stays on `render_managed_settings.ts`:
+`verify_smoke_gating.sh` renders the smoke output's baseline with it
+(found in review, round 1).
+
+## Proof
+
+`bun run check`:
+
+```text
+ssot: all 55 rules green
+golden renders match (3 selections)
+ 3288 pass
+ 0 fail
+Ran 3288 tests across 116 files. [105.39s]
+```
+
+`.github/scripts/ci/upgrade_path_test.sh`:
+
+```text
+removed retired file: .github/workflows/settings-sync.yml
+upgrade path OK: retired files deleted, sentinels preserved, configuration kept, folded modules dropped from the declaration
+recovery recopy OK: skip_if_exists, repo-owned files, and repo-local content preserved, managed files re-rendered
+visibility flip OK: CONTRIBUTING.md retired, settings starter untouched, codeql stripped
+module fold arrival OK: folded files delivered, the repository's own AGENTS.md and Copilot rules preserved as a reviewed appendix
+migration history walk OK: a pruned rung ran from the build commit that carried it; the crossed control ran nothing
+```
+
+Smoke gate, `MODULES=[uv] PRIVATE=false` (build tree, copier copy,
+`verify_smoke_gating.sh`):
+
+```text
+build tree workflows: fleet-ci.yml reusable-auto-assign-alerts.yml reusable-auto-assign.yml reusable-codeql.yml reusable-pages.yml
+rendered workflows:   auto-assign.yml auto-format.yml checks.yml ci.yml copilot-setup-steps.yml post-green.yml
+Validation passed.
+smoke gate OK for MODULES=[uv] PRIVATE=false
+```
+
+Leftover grep
+(`settings-sync.yml|reusable-apply-settings|self-apply|two-hop`,
+excluding the harnesses that model the retirement):
+
+```text
+.github/scripts/sync/migrations/m0002_fold_base_modules.ts   (rung: permanent history)
+tests/sync/migrations/m0002_fold_base_modules.test.ts        (its test)
+docs/migrations.md:91                                        (m0002's ladder entry)
+```
+
+## Deviations from the brief
+
+- `settings-read-pin` is untouched: it pins `?ref=` on the central
+path's fetches and never referenced the reusable.
+- `settings-apply-merged-input` is narrowed, not deleted: it also guards
+the central apply's `settings-file` input.
+
+## Recorded, not built
+
+- `recover=recopy` skips retired cleanup, so a repository recovered that
+way keeps a stale `settings-sync.yml` (which would then fail to resolve
+the reusable on a push touching `settings.yml`). Pre-existing behaviour
+for every retired managed file; recovery has not been run in the fleet.
+A rung would exist only for that path.
+- Between this build's publish and each repository's sync PR merging, a
+push touching `.github/settings.yml` or a manual dispatch in a fleet
+repo fails to resolve `reusable-apply-settings.yml@build` instead of
+warning. The `[fleet-sync: all]` directive shortens that window to this
+merge's own run.
+- Unkeying the single-entry `PREFLIGHT_*` Record tables in
+scripts/check_ssot.ts: other builders edit that file in parallel and the
+brief limits this change to the named rules.
+
+Review: codex rubber-duck, 3 rounds; round 1 found the smoke-gate
+`--target-dir` caller (fixed) and the "after each green push" wording
+(fixed); rounds 2 and 3 found only stale two-workflow comments (fixed).

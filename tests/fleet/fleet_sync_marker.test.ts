@@ -291,6 +291,166 @@ describe("parseDirectives", () => {
       expected: NONE,
     },
     {
+      reason:
+        "the same span wrapped over three lines (GitHub's 72-column squash body) is still one code span",
+      body: message(
+        PROSE,
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a\njustification; use `public` unless private repos need this now - write\n[fleet-sync: all] <why every repo needs this now>``',
+      ),
+      expected: NONE,
+    },
+    {
+      reason:
+        "the wrapped span without its closer is literal text: both mentions are bare (the control)",
+      body: message(
+        PROSE,
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a\njustification; use `public` unless private repos need this now - write\n[fleet-sync: all] <why every repo needs this now>',
+      ),
+      expected: misplaced(
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a',
+        "[fleet-sync: all] <why every repo needs this now>",
+      ),
+    },
+    {
+      reason:
+        "a span never crosses a blank line: the paragraph after an unclosed run is scanned on its own",
+      body: message(PROSE, "See ``x", "and [fleet-sync] here``."),
+      expected: misplaced("and [fleet-sync] here``."),
+    },
+    {
+      reason:
+        "a span never crosses a fence line: the bare mention inside the fence stays misplaced",
+      body: message(PROSE, "Before `\n```text\n[fleet-sync]\n```\nAfter `"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
+      reason: "a tilde fence line ends a span the same way: the mention inside it stays misplaced",
+      body: message(PROSE, "Before `\n~~~text\n[fleet-sync]\n~~~\nAfter `"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
+      reason:
+        "the merged body of #89 as GitHub wrapped it (the observed red read-directives on main)",
+      body: readFileSync(join(import.meta.dir, "fixtures", "squash_731d2d37.txt"), "utf8"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "the merged body of #107, its one-line justification wrapped over two lines by GitHub (the observed malformed block on main)",
+      body: readFileSync(join(import.meta.dir, "fixtures", "squash_87829f94.txt"), "utf8"),
+      expected: FLEET,
+    },
+    {
+      reason: "a justification wrapped over three lines is one justified line",
+      body: message(
+        "[fleet-sync: all] every repository renders the workflow today; the\nretirement must reach all of them in this merge's own run, not on\nTuesday",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason:
+        "a wrapped line whose continuation starts with a code span is still the justification",
+      body: message("[fleet-sync: all] every repo renders\n`ci.yml` from this template", PROSE),
+      expected: FLEET,
+    },
+    {
+      reason: "a wrapped justification whose continuation opens with a markdown link is one line",
+      body: message(
+        "[fleet-sync: all] every repo needs the shared workflow updated; see\n[details](https://x.test)",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason:
+        "a quoted directive after a justified line is not a continuation: misplaced, as before",
+      body: message("[fleet-sync: all] why\n> [fleet-sync: public]", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "> [fleet-sync: public]"),
+    },
+    {
+      reason: "an indented directive after a justified line is not a continuation either",
+      body: message("[fleet-sync: all] why\n   [fleet-sync: public]", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "[fleet-sync: public]"),
+    },
+    {
+      reason:
+        "a bracketed lead-in after a justified line is its own line, not a continuation: prose, misplaced",
+      body: message("[fleet-sync: all] why; see\n[RFC] section 2", PROSE),
+      expected: misplaced("[fleet-sync: all] why; see"),
+    },
+    {
+      reason:
+        "a wrapped code span holding a justified line elsewhere stays prose (folding is for the block position)",
+      body: message(PROSE, "`[Context]\n[fleet-sync: all] why\nmore`"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a fence line after a justified line never folds, mention or not: the paragraph is prose",
+      body: message("[fleet-sync: all] why\n~~~", PROSE),
+      expected: misplaced("[fleet-sync: all] why"),
+    },
+    {
+      reason:
+        "a fenced example after a justified line never folds: its bare mention is misplaced, as before",
+      body: message("[fleet-sync: all] why\n```text\nexample [fleet-sync: public]\n```", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "example [fleet-sync: public]"),
+    },
+    {
+      reason: "a continuation carrying a bare mention never folds: misplaced, as before",
+      body: message(
+        "[fleet-sync: all] why: the\ndefault [fleet-sync: public] is too narrow",
+        PROSE,
+      ),
+      expected: misplaced(
+        "[fleet-sync: all] why: the",
+        "default [fleet-sync: public] is too narrow",
+      ),
+    },
+    {
+      reason: "a continuation carrying the mention in a code span folds (the control)",
+      body: message(
+        "[fleet-sync: all] why: the\n`[fleet-sync: public]` default is too narrow",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason: "a continuation line that is itself a directive is a second block line: duplicate",
+      body: message("[fleet-sync: all] every repo changed\n[fleet-sync: public]", PROSE),
+      expected: {
+        kind: "error",
+        errors: ["duplicate directive [fleet-sync]: one line per keyword"],
+      },
+    },
+    {
+      reason:
+        "a backticked directive after a justified line is a second block line, not a continuation",
+      body: message("[fleet-sync: all] every repo changed\n`[fleet-synk]`", PROSE),
+      expected: {
+        kind: "error",
+        errors: ['unknown directive keyword in "`[fleet-synk]`"; known: fleet-sync'],
+      },
+    },
+    {
+      reason:
+        "a wrapped justification on a scope other than all is still red, quoting the rejoined line",
+      body: message("[fleet-sync: public] because the\nci changed", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync: public] because the ci changed" carries text after the directive: only [fleet-sync: all] takes a justification',
+        ],
+      },
+    },
+    {
+      reason:
+        "prose after a bracket-only directive is not a continuation: the paragraph is prose, the mention misplaced",
+      body: message("[fleet-sync: public]\nbecause the ci changed", PROSE),
+      expected: misplaced("[fleet-sync: public]"),
+    },
+    {
       reason: "a code-span block at the bottom is still the misplaced block, not a mention",
       body: message(PROSE, "`[fleet-sync: public]`"),
       expected: misplaced("`[fleet-sync: public]`"),
@@ -391,14 +551,240 @@ describe("parseDirectives", () => {
   });
 });
 
-test("a 100k-backtick run is scanned in linear time: the unclosed run leaves the mention bare", () => {
+// The mention scan reads each line behind its leading whitespace and blockquote markers, so a
+// quoted fence is a fence and a quoted span a span; the block grammar reads the raw line, so a
+// quoted or indented directive is no block: misplaced, as before the container rule.
+describe("parseDirectives inside a container", () => {
+  const quoted = (prefix: string, para: string) =>
+    para
+      .split("\n")
+      .map((line) => (line === "" ? prefix.trimEnd() : `${prefix}${line}`))
+      .join("\n");
+  test.each(
+    [
+      {
+        shape: "a directive as the first paragraph arms only when written bare",
+        body: (p: string) => message(quoted(p, "[fleet-sync: public]"), PROSE),
+        expected: (p: string): Directives =>
+          p === ""
+            ? { kind: "fleet-sync", scope: ["public"] }
+            : misplaced(`${p}[fleet-sync: public]`.trim()),
+      },
+      {
+        shape: "a justified all-scope as the first paragraph arms only when written bare",
+        body: (p: string) => message(quoted(p, "[fleet-sync: all] every ci.yml changed"), PROSE),
+        expected: (p: string): Directives =>
+          p === "" ? FLEET : misplaced(`${p}[fleet-sync: all] every ci.yml changed`.trim()),
+      },
+      {
+        shape: "a fence line: the fenced mention stays misplaced",
+        body: (p: string) => message(PROSE, quoted(p, "```text\n[fleet-sync]\n```")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
+      {
+        shape: "a code span in prose",
+        body: (p: string) => message(PROSE, quoted(p, "No `[fleet-sync]` here.")),
+        expected: (): Directives => NONE,
+      },
+      {
+        shape: "a span never crosses a fence line (the Copilot input at the blockquote prefix)",
+        body: (p: string) =>
+          message(PROSE, quoted(p, "Before `\n```text\n[fleet-sync]\n```\nAfter `")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
+      {
+        shape: "a quote-only line is a paragraph break: a span never crosses it",
+        body: (p: string) => message(PROSE, quoted(p, "Before `\n\n[fleet-sync]\nAfter `")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
+    ].flatMap((row) =>
+      [
+        { container: "unprefixed", prefix: "" },
+        { container: "in a blockquote", prefix: "> " },
+        { container: "in a nested blockquote without spaces", prefix: ">>" },
+        { container: "in a nested blockquote with spaces", prefix: "> > " },
+        { container: "in a tab-separated blockquote", prefix: ">\t" },
+        { container: "in a tab-indented blockquote", prefix: "\t> " },
+        {
+          container: "in a blockquote with spaces and tabs mixed around the markers",
+          prefix: " \t> \t>  \t",
+        },
+        { container: "indented three spaces", prefix: "   " },
+        { container: "indented four spaces", prefix: "    " },
+      ].map((c) => ({ ...row, ...c })),
+    ),
+  )("$shape $container", ({ body, prefix, expected }) => {
+    expect(parseDirectives(body(prefix))).toEqual(expected(prefix));
+  });
+
+  test.each([
+    {
+      reason:
+        "entering a blockquote ends the inline run (the Copilot input): the quoted mention is bare",
+      body: message(PROSE, "Before `\n> [fleet-sync]\nAfter `"),
+      expected: misplaced("> [fleet-sync]"),
+    },
+    {
+      reason: "a deeper blockquote inside a quote ends the run the same way",
+      body: message(PROSE, "> a `\n> > [fleet-sync]\n> b `"),
+      expected: misplaced("> > [fleet-sync]"),
+    },
+    {
+      reason:
+        "leaving a blockquote is a lazy continuation (CommonMark): the span still pairs, the mention is code",
+      body: message(PROSE, "> Before `\n[fleet-sync]\n> After `"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a lazy continuation is never split, or its own backticks would re-pair and hide the bare mention",
+      body: message(PROSE, "> Before `\nend ` [fleet-sync] `"),
+      expected: misplaced("end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a `>` behind four spaces is text, not a marker: the paragraph continues and the span pairs as rendered",
+      body: message(PROSE, "Before `\n    > end ` [fleet-sync] `"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a `>` behind four spaces after a directive is prose in the same paragraph: misplaced, as before, never armed",
+      body: message("[fleet-sync: public]\n    > more", PROSE),
+      expected: misplaced("[fleet-sync: public]"),
+    },
+    {
+      reason:
+        "a deeper `>` inside a fenced block opens nothing: the fenced lines stay one run and the mention is bare",
+      body: message(PROSE, "```\na `\n> end ` [fleet-sync] `\n```"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason: "the same inside a tilde fence",
+      body: message(PROSE, "~~~\na `\n> end ` [fleet-sync] `\n~~~"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason: "a tilde line inside a backtick fence closes nothing: the fenced lines stay one run",
+      body: message(PROSE, "```\n~~~\na `\n> end ` [fleet-sync] `\n```"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a tab and spaces after the first marker leave the second `>` as text: one quoted paragraph, the span pairs as rendered",
+      body: message(PROSE, "> Before `\n>\t  > end ` [fleet-sync] `"),
+      expected: misplaced(">\t  > end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a nested quote resumed after a lazy line is the same paragraph (commonmark.js: one <code>): the span pairs, the mention is code",
+      body: message(PROSE, "> > Before `\n> middle\n> > [fleet-sync]\n> > After `"),
+      expected: NONE,
+    },
+    {
+      reason: "an ATX heading interrupts the paragraph (the Copilot input): the mention is bare",
+      body: message(PROSE, "Before `\n# [fleet-sync]\nAfter `"),
+      expected: misplaced("# [fleet-sync]"),
+    },
+    {
+      reason: "a thematic break ends the paragraph: the mention after it is bare",
+      body: message(PROSE, "Before `\n* * *\n[fleet-sync] `"),
+      expected: misplaced("[fleet-sync] `"),
+    },
+    {
+      reason: "a setext underline ends the paragraph: the mention after it is bare",
+      body: message(PROSE, "Before `\n===\n[fleet-sync] `"),
+      expected: misplaced("[fleet-sync] `"),
+    },
+    {
+      reason: "a bullet item interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n- [fleet-sync]\nAfter `"),
+      expected: misplaced("- [fleet-sync]"),
+    },
+    {
+      reason: "an ordered item interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n1. [fleet-sync]\nAfter `"),
+      expected: misplaced("1. [fleet-sync]"),
+    },
+    {
+      reason: "an HTML block start interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n<details>[fleet-sync]\nAfter `"),
+      expected: misplaced("<details>[fleet-sync]"),
+    },
+    {
+      reason: "a quoted heading interrupts the quoted paragraph the same way",
+      body: message(PROSE, "> Before `\n> # [fleet-sync]\n> After `"),
+      expected: misplaced("> # [fleet-sync]"),
+    },
+    {
+      reason:
+        "each boundary kind is its own reading: a heading inside a quote never re-pairs the backticks the quote reading left bare",
+      body: message(
+        "[fleet-sync: public]",
+        "Before `\n> start `\n> # extra `\n> [fleet-sync: private] `",
+      ),
+      expected: misplaced("> [fleet-sync: private] `"),
+    },
+    {
+      reason: "a hash without a space is text, not a heading: the span pairs (the control)",
+      body: message(PROSE, "Before `\n#[fleet-sync]\nAfter `"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a constant quote depth with the markers written differently is one paragraph: the span pairs",
+      body: message(PROSE, "> Before `\n>[fleet-sync]\n > After `"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a quoted prose line after a justified line folds as its continuation (the block grammar never splits on quotes)",
+      body: message("[fleet-sync: all] why\n> more", PROSE),
+      expected: FLEET,
+    },
+  ])("$reason", ({ body, expected }) => {
+    expect(parseDirectives(body)).toEqual(expected);
+  });
+
+  test("the quote-only-line input as reviewed, byte for byte", () => {
+    expect(
+      parseDirectives("feat: probe\n\nIntro.\n\n> Before `\n>\n> [fleet-sync]\n> After `"),
+    ).toEqual(misplaced("> [fleet-sync]"));
+  });
+});
+
+test.each([
+  {
+    shape: "100k backticks in prose (the run tokenizer)",
+    line: `x ${"`".repeat(100_000)} [fleet-sync]`,
+  },
+  {
+    shape: "100k backticks as a fence line (the fence regex)",
+    line: `${"`".repeat(100_000)} [fleet-sync]`,
+  },
+  {
+    // 400k markers: the repeated-replace scan this row retired took 1.8 s here and 130 ms at 100k.
+    shape: "400k blockquote markers (the container scan)",
+    line: `${">".repeat(400_000)} [fleet-sync]`,
+  },
+])("a run of $shape is scanned in linear time: the mention stays bare", ({ line }) => {
   // The control for the scanner: the regex it replaced backtracked
   // quadratically on one long run (about a second at this length).
-  const line = `${"`".repeat(100_000)} [fleet-sync]`;
   const started = performance.now();
   const parsed = parseDirectives(message(PROSE, line));
   const elapsed = performance.now() - started;
   expect(parsed).toEqual(misplaced(line));
+  expect(elapsed).toBeLessThan(300);
+});
+
+test("a justification wrapped over 100k lines folds in linear time and arms", () => {
+  // The control for the fold: rescanning the growing joined line on every
+  // continuation took 3.8 s here.
+  const body = message(`[fleet-sync: all] why\n${"more\n".repeat(100_000)}`.trimEnd(), PROSE);
+  const started = performance.now();
+  const parsed = parseDirectives(body);
+  const elapsed = performance.now() - started;
+  expect(parsed).toEqual(FLEET);
   expect(elapsed).toBeLessThan(300);
 });
 
@@ -571,11 +957,10 @@ describe("main", () => {
     expect(result).toEqual({ exitCode: 0, output, stdout, stderr: "" });
   });
 
-  // A malformed body on an OLDER commit already failed its own run; a
-  // docs-only commit leaves the build stamp in place, so failing again
-  // here would poison every later range. The judged commit's own body
-  // stays fatal.
-  const poisoned = `::warning::${short(bottom)} carries a malformed directives block (1 problem; its own run was red) and contributes nothing to this range`;
+  // A malformed body on an OLDER commit is a warning: a docs-only commit
+  // leaves the build stamp in place, so failing here would poison every
+  // later range. The judged commit's own body stays fatal.
+  const poisoned = `::warning::${short(bottom)} carries a malformed directives block (1 problem) and contributes nothing to this range; only the judged commit's body fails this leg`;
   test.each([
     {
       reason: "a malformed older body warns and the judged commit's valid block arms",

@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
-// (sync_scope.ts's grammar; only a bare `all` takes, and requires, a trailing justification), read over
-// judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
-// an older one already failed its own run and is a counts-only warning here.
+// (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
+// range and unioned. Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
 
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -36,19 +35,48 @@ const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 
-/** `line` without its code spans (CommonMark: a run of N backticks closes at the next run of
- *  exactly N; an unclosed run is literal text). A body may describe the grammar in code spans; a
- *  bare [fleet-sync outside the block may not. Linear: the runs are tokenized once and each one's
- *  next equal-length run is found in one right-to-left pass. */
-function withoutCodeSpans(line: string): string {
+// A fence line (CommonMark: three or more backticks with an info string free of backticks, or
+// three or more tildes) opens or closes a code block: its marks are never code-span delimiters,
+// and no span pairs across it. Read on the container-stripped line.
+const FENCE_LINE = /^(?:`{3,}[^`]*|~{3,}.*)$/;
+
+/** The line behind its leading whitespace and blockquote markers, in any mix: what the mention
+ *  scan reads (a quoted fence is a fence, a quoted span a span). The block grammar reads raw lines.
+ *  Generous on purpose: stripping more can only expose a mention, never hide one. */
+function containerBody(line: string): string {
+  return line.replace(/^[ \t]*(?:>[ \t]*)*/, "");
+}
+
+/** The blockquote markers in the line's container prefix, counted as generously as containerBody
+ *  strips them: bareMentions() keeps the pairing-across reading, so a blockquote start the body did not
+ *  have never hides a mention that reading exposes. */
+function quoteDepth(line: string): number {
+  return (/^[ \t]*(?:>[ \t]*)*/.exec(line)?.[0].match(/>/g) ?? []).length;
+}
+
+// What CommonMark lets interrupt a paragraph, on the container-stripped line: an ATX heading, a
+// thematic break or setext underline, a list item, an HTML block start. Generous where the spec is
+// fussy (any list number, any tag). Fences are hard boundaries everywhere; blockquotes are depth.
+const INTERRUPTS_PARAGRAPH = [
+  /^ {0,3}#{1,6}(?:[ \t]|$)/,
+  /^ {0,3}(?:([-*_])(?:[ \t]*\1){2,}|=+|-+)[ \t]*$/,
+  /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/,
+  /^ {0,3}<[A-Za-z/!?]/,
+];
+
+/** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
+ *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
+ *  unclosed run is literal text). Linear: one tokenizing pass, one right-to-left pairing pass. */
+function blankCodeSpans(lines: string[]): string[] {
+  const text = lines.join("\n");
   const runs: { start: number; end: number }[] = [];
-  for (let i = 0; i < line.length; ) {
-    if (line[i] !== "`") {
+  for (let i = 0; i < text.length; ) {
+    if (text[i] !== "`") {
       i++;
       continue;
     }
     let j = i;
-    while (j < line.length && line[j] === "`") j++;
+    while (j < text.length && text[j] === "`") j++;
     runs.push({ start: i, end: j });
     i = j;
   }
@@ -67,29 +95,115 @@ function withoutCodeSpans(line: string): string {
       r++;
       continue;
     }
-    out += line.slice(cursor, runs[r].start);
+    out += text.slice(cursor, runs[r].start);
+    out += text.slice(runs[r].start, runs[close].end).replace(/[^\n]/g, "");
     cursor = runs[close].end;
     r = close + 1;
   }
-  return out + line.slice(cursor);
+  return (out + text.slice(cursor)).split("\n");
 }
 
-function paragraphs(body: string): string[][] {
-  const lines = body
+/** One paragraph's lines with their code spans blanked: each stretch between fence lines, and
+ *  before a line `opensBlock` says starts a new block, is one inline run scanned as a whole (GitHub
+ *  wraps the squash body at 72 columns, so a one-line span in the PR body arrives as several lines
+ *  here); a fence line passes through as written. */
+function withoutCodeSpans(
+  lines: string[],
+  opensBlock: (at: number, runStart: number) => boolean,
+): string[] {
+  const bare: string[] = [];
+  let inline: string[] = [];
+  let runStart = 0;
+  const flush = () => {
+    bare.push(...blankCodeSpans(inline));
+    inline = [];
+  };
+  lines.forEach((line, at) => {
+    if (FENCE_LINE.test(line)) {
+      if (inline.length > 0) flush();
+      bare.push(line);
+      return;
+    }
+    if (inline.length === 0) runStart = at;
+    else if (opensBlock(at, runStart)) {
+      flush();
+      runStart = at;
+    }
+    inline.push(line);
+  });
+  if (inline.length > 0) flush();
+  return bare;
+}
+
+/** Per line, whether a bare mention survives span blanking under ANY reading of where inline runs
+ *  end: at fences only (main's reading), or also at one kind of paragraph-interrupting line. One
+ *  reading per kind, so adding a kind adds exposures and never hides one another reading shows. */
+function bareMentions(lines: string[]): boolean[] {
+  const body = lines.map(containerBody);
+  const depth = lines.map(quoteDepth);
+  const boundaries: ((at: number, runStart: number) => boolean)[] = [
+    () => false,
+    (at, runStart) => depth[at] > depth[runStart],
+    ...INTERRUPTS_PARAGRAPH.map((shape) => (at: number) => shape.test(body[at])),
+  ];
+  const readings = boundaries.map((opensBlock) => withoutCodeSpans(body, opensBlock));
+  return lines.map((_, at) => readings.some((bare) => FLEET_SYNC_ANYWHERE.test(bare[at])));
+}
+
+// A line opening with a bare bracket group that ends or continues with text is directive-shaped
+// (a directive, a typo of one, `[word] prose`); a link, `[text](url)`, or a code span is not.
+const DIRECTIVE_SHAPED = /^\[[^[\]]*\](?:\s|$)/;
+
+/** The lines as the PR body had them: GitHub re-wraps the squash body at 72 columns, so a line
+ *  after a justified directive is its continuation. A line the block grammar or the mention scan
+ *  would judge on its own never folds, so folding hides nothing. */
+function foldJustifications(lines: string[], mentions: boolean[]): string[] {
+  const folded: string[] = [];
+  let justified: string[] | null = null;
+  const flush = () => {
+    if (justified !== null) folded.push(justified.join(" "));
+    justified = null;
+  };
+  lines.forEach((line, at) => {
+    const body = containerBody(line);
+    const ownLine =
+      DIRECTIVE_SHAPED.test(body) || BLOCK_LINE.test(body) || FENCE_LINE.test(body) || mentions[at];
+    if (justified !== null && !ownLine) {
+      justified.push(line);
+      return;
+    }
+    flush();
+    if (JUSTIFIED_LINE.test(line)) justified = [line];
+    else folded.push(line);
+  });
+  flush();
+  return folded;
+}
+
+/** One computation per paragraph: `lines` as written (what errors quote), `folded` (the block
+ *  grammar's view), `mentions` (which lines carry a bare mention once container prefixes and code
+ *  spans are blanked). A line of only whitespace and blockquote markers is a break. */
+type Paragraph = { lines: string[]; folded: string[]; mentions: boolean[] };
+
+function paragraphs(text: string): Paragraph[] {
+  const lines = text
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => line.trimEnd());
-  const result: string[][] = [];
+  const result: Paragraph[] = [];
   let current: string[] = [];
-  for (const line of lines) {
-    if (line === "") {
-      if (current.length > 0) result.push(current);
-      current = [];
-    } else {
-      current.push(line);
+  const flush = () => {
+    if (current.length > 0) {
+      const mentions = bareMentions(current);
+      result.push({ lines: current, folded: foldJustifications(current, mentions), mentions });
     }
+    current = [];
+  };
+  for (const line of lines) {
+    if (containerBody(line) === "") flush();
+    else current.push(line);
   }
-  if (current.length > 0) result.push(current);
+  flush();
   return result;
 }
 
@@ -107,20 +221,24 @@ function unwrap(line: string): string | null {
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  const isBlockShaped = (para: string[]) =>
-    para.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
+  const isBlockShaped = (lines: string[]) =>
+    lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
-    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX].folded)
+      ? paras[BLOCK_INDEX].folded
+      : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
     if (block !== null && index === BLOCK_INDEX) return;
-    const shaped = isBlockShaped(para);
-    for (const line of para) {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(withoutCodeSpans(line))) {
+    // Folding is for the block position only: elsewhere the raw shape and the
+    // mention scan decide, so a wrapped code span holding brackets stays prose.
+    const shaped = isBlockShaped(para.lines);
+    para.lines.forEach((line, at) => {
+      if (shaped || para.mentions[at]) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
-    }
+    });
   });
   if (block === null) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
 
@@ -211,14 +329,13 @@ function main(): number {
     );
     if (parsed.kind === "none") continue;
     if (parsed.kind === "error") {
-      // Only the judged commit's body is this run's fault; an older one
-      // failed its own run, and failing here would poison every later
-      // range until the build tree changes.
+      // Only the judged commit's body is this run's fault; failing on an
+      // older one would poison every later range until the build tree changes.
       if (commit === sha) {
         return fail(parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
       }
       warning(
-        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}; its own run was red) and contributes nothing to this range`,
+        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}) and contributes nothing to this range; only the judged commit's body fails this leg`,
       );
       continue;
     }
