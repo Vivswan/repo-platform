@@ -97,7 +97,7 @@ The tree proof compares a scratch rebuild's hash against the tip's, so producers
 
 `$GIT_DIR/info/attributes` is the one axis no flag can close; no site plants one, so it stays a documented residual, not a covered vector (stage_tree.ts's header).
 
-Guards of this class - defenses against environmental hazards a hermetic test can never trip by accident - are registered in [scripts/check/guard_registry.ts](../scripts/check/guard_registry.ts), each bound to the hostile-fixture test that forces its failure branch: `bun run guards:binding` proves the binding on every commit, and the weekly [audit-guards.yml](../.github/workflows/audit-guards.yml) proves the arming by unarming each guard in a scratch clone and requiring the named test red. The registry header has the rules.
+Guards of this class - defenses against environmental hazards a hermetic test can never trip by accident - each ship with a hostile-fixture test that stages the hazard and forces the guard's failure branch, so a guard that stopped guarding goes red in the suite rather than silently passing.
 
 [shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts) reproduces the builder exactly - the source commit's own script and frozen-lockfile dependencies - and hashes through a scratch index's write-tree, so file modes and the `templates/base/` agent-file symlinks join the comparison too.
 

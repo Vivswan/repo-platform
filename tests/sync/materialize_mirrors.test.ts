@@ -1,9 +1,7 @@
 // materialize_mirrors.ts's resolver and writer: the declaration reader,
 // the path trust boundary, the glob expansion, the two-writer and escape
-// refusals, and the byte-copy semantics. The two REFUSAL tests named in
-// scripts/check/guard_registry.ts (mirror-target-escape-refusal,
-// mirror-managed-target-refusal) are the arming audit's forcing cases -
-// each must go red when its guard branch is stubbed out.
+// refusals, and the byte-copy semantics. The two REFUSAL tests are the
+// forcing cases: each must go red when its guard branch is stubbed out.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";

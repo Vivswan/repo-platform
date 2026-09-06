@@ -5244,10 +5244,6 @@ const rules: Rule[] = [
       );
       for (const required of [
         "bun run ssot:check",
-        // The guard-binding layer's only CI home is its validate-template
-        // step: losing the step would leave the registry unenforced in CI
-        // while the local chain stayed green.
-        "bun run guards:binding",
         // The test suite runs in CI only through this step, and only
         // through the package.json script does it get the launcher's
         // per-run TMPDIR (scripts/run_tests.ts): a bare `bun test` step

@@ -49,8 +49,8 @@ export interface RunResult {
    * `timeoutMs` or the default hang bound); `exitCode` is then always
    * nonzero. */
   timedOut: boolean;
-  /** The child's pid, recorded so cleanup-sensitive callers (the arming
-   * audit) can verify the process is gone after the run. */
+  /** The child's pid, recorded so cleanup-sensitive callers can verify
+   * the process is gone after the run. */
   pid: number;
 }
 
