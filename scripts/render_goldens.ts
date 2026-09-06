@@ -17,7 +17,7 @@
 //   allow (no validator requires a non-empty list; ci.yml's smoke "none"
 //   row exercises the same floor).
 // - uv-no-release-please: modules=[uv] - the dotfiles shape that exposed
-//   the anchor blank-line bug (compose_template.ts's collapse guard);
+//   the anchor blank-line bug (compose/splice.ts's collapse guard);
 //   its rendered .typography-allow must end with exactly one newline.
 //
 // DETERMINISM CONTRACT: a golden changes if and only if rendered content

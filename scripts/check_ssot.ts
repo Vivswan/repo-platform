@@ -51,11 +51,8 @@ import { capture } from "../.github/scripts/shared/proc.ts";
 import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
-import {
-  ANCHOR_RE,
-  TOOLCHAIN_SETUP_FRAGMENT,
-  TOOLCHAIN_SETUP_TARGETS,
-} from "./compose_template.ts";
+import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
+import { ANCHOR_RE } from "./compose/splice.ts";
 import {
   actionSetsUpBun,
   actionSteps,

@@ -73,7 +73,7 @@ interface SplitSpec {
 }
 
 /** A manifest carrying the given split entries, in the shape
- * compose_template.ts emits (one grammar: managed-region, begin/end). */
+ * compose/manifest.ts emits (one grammar: managed-region, begin/end). */
 function manifestJson(entries: SplitSpec[]): string {
   return JSON.stringify({
     files: Object.fromEntries(

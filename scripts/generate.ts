@@ -73,7 +73,9 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
-import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
+import { compose } from "./compose/compose.ts";
+import { dependabotLabels } from "./compose/data_anchors.ts";
+import { excludePatterns } from "./compose/exclude.ts";
 import {
   loadManifests,
   MODULE_ORDER,
@@ -217,10 +219,10 @@ export function moduleChoices(manifests: ModuleManifest[]): string[] {
 }
 
 /** copier.yml `_exclude`: the conditional-landing patterns (semantics in
- *  compose_template.ts's excludePatterns). Derived through the full
+ *  compose/exclude.ts's excludePatterns). Derived through the full
  *  composition - the gates live in module manifests and base filenames -
  *  so the region cannot disagree with the tree the build branch ships;
- *  compose_template.ts's build() re-checks the committed region at every
+ *  compose/compose.ts's build() re-checks the committed region at every
  *  branch assembly. JSON.stringify emits each pattern as a YAML
  *  double-quoted scalar (JSON strings are a YAML subset), so quoting and
  *  backslash escapes cannot drift from the pattern text. */

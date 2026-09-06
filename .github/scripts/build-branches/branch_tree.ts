@@ -6,7 +6,7 @@
 //
 // - copier.yml       (byte copy from this checkout's root; its generated
 //                     _exclude region carries the conditional-landing gates)
-// - template/        (composed from templates/ via compose_template.build -
+// - template/        (composed from templates/ via compose/compose.ts's build -
 //                     PLAIN filenames only; build() refuses a tree whose
 //                     copier.yml excludes are stale)
 // - actions/         (the composite actions' sources + dependency manifests,
@@ -71,7 +71,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { build, writeOutput } from "../../../scripts/compose_template.ts";
+import { build, writeOutput } from "../../../scripts/compose/compose.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 

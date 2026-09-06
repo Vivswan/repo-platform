@@ -26,7 +26,7 @@
     "regen": "bun run generate && bun run dogfood && bun run renders",
     "renders": "bun scripts/render_goldens.ts",
     "renders:check": "bun scripts/render_goldens.ts --check",
-    "compose": "bun scripts/compose_template.ts",
+    "compose": "bun scripts/compose/compose.ts",
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
     "rehearse:fleet": "bun .github/scripts/sync/rehearse_fleet.ts",
     "test": "bun scripts/run_tests.ts",

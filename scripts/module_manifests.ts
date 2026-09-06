@@ -8,7 +8,7 @@
 // composer's gate expression.
 //
 // scripts/generate.ts derives the marker-fenced GENERATED regions from
-// these; scripts/compose_template.ts, scripts/build_gitignore.ts, and the
+// these; scripts/compose/compose.ts, scripts/build_gitignore.ts, and the
 // fleet scripts read them at runtime. Every function throws (never exits)
 // on missing folders/manifests, unknown keys, or invalid values, so a typo
 // in a manifest fails whichever consumer touches it first.
