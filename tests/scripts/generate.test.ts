@@ -211,7 +211,12 @@ describe("region builders", () => {
     expect(() => pagesManifests([RUST])).toThrow("pages: {install, build}");
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    withPages: PagesManifest[];
+    defaultLine: string;
+    validatorLine: string;
+  }>([
     {
       reason: "two pages modules: the default unions both, the prose takes a serial comma",
       withPages: [BUN, UV],
@@ -469,7 +474,7 @@ describe("docs region builders", () => {
     const yarn = manifest("yarn", {
       dependabot: { ecosystem: "yarn", label: "javascript", color: "168700" },
     });
-    test.each([
+    test.each<{ reason: string; manifests: ModuleManifest[]; expected: string }>([
       {
         reason: "one ecosystem per label",
         manifests: [BUN, UV],

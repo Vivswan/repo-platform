@@ -76,7 +76,14 @@ describe("tempDirs", () => {
     expectOutcome(r, { exitCode: 0, fixtureSurvives: false });
   });
 
-  test.each([
+  test.each<{
+    shape: string;
+    body: string;
+    flags?: string[];
+    env?: Record<string, string | undefined>;
+    exitCode: number;
+    inner?: boolean;
+  }>([
     { shape: "failing test", body: 'test("f", () => expect(false).toBe(true));', exitCode: 1 },
     {
       shape: "beforeAll throw",
@@ -148,7 +155,13 @@ describe("tempDirs", () => {
   // launcher's per-run TMPDIR is what removes it. If the name-filter row
   // goes green-by-removal on a future bun, the launcher's filter
   // carve-out can go with it.
-  test.each([
+  test.each<{
+    shape: string;
+    body: string;
+    flags: string[];
+    env: Record<string, string | undefined>;
+    notice: RegExp;
+  }>([
     {
       shape: "a name filter matching nothing in the file",
       body: PASSING,

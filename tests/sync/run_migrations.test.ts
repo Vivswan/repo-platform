@@ -67,7 +67,7 @@ describe("pendingRungs: the walk over build history", () => {
       ["old", "b1", "b2", "new"].find((tag) => at(tag) === p.commit),
     ]);
 
-  test.each([
+  test.each<{ reason: string; old: string | null; expected: ReturnType<typeof pending> }>([
     {
       reason: "a rung pruned before the tip still runs, from the newest commit that carried it",
       old: "old",
@@ -223,9 +223,9 @@ describe("loadRung and applyRung: the rung contract", () => {
       kind: "error",
       message: expect.stringMatching(/^threw \(detail hidden: private repository\)/),
     });
-    expect(
-      applyRung(rung, { dir: repo({}), oldSha: null, newSha: "n" }, true).message,
-    ).not.toContain("leaked");
+    const again = applyRung(rung, { dir: repo({}), oldSha: null, newSha: "n" }, true);
+    if (again.kind !== "error") throw new Error("expected the error arm");
+    expect(again.message).not.toContain("leaked");
   });
 });
 
@@ -303,7 +303,12 @@ describe("runRungs, commitStaged, writeReports", () => {
     expect(reports(out)).toEqual({ info: "> a moved\n", review: "> b needs a look\n" });
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    files: Record<string, string>;
+    before?: Record<string, string>;
+    touch: (d: string) => void;
+  }>([
     {
       reason: "an unstaged edit",
       files: { "keep.txt": "k\n" },

@@ -34,7 +34,10 @@ const testSource = (id: string) =>
 const TEST_EXPECTATION = (id: string) =>
   `a bun:test test() reaching the default import from "${rungTestSpecifier(id)}"`;
 
-const consistent = {
+type Ladder = Parameters<typeof migrationLadderMismatches>[0];
+type Mismatches = ReturnType<typeof migrationLadderMismatches>;
+
+const consistent: Ladder = {
   rungFiles: { "m0001_a.ts": rungSource("m0001_a"), "m0002_b.ts": rungSource("m0002_b") },
   testFiles: { "m0001_a.test.ts": testSource("m0001_a"), "m0002_b.test.ts": testSource("m0002_b") },
   harness: "set -e\nrm old/m0001_a.ts\nrun_ladder\ntest -f moved # m0002_b\n",
@@ -46,7 +49,7 @@ describe("migrationLadderMismatches", () => {
     expect(migrationLadderMismatches(consistent)).toEqual([]);
   });
 
-  test.each([
+  test.each<{ reason: string; rungFiles: Record<string, string>; expected: Mismatches }>([
     {
       reason: "a file that is not a rung file",
       rungFiles: { ...consistent.rungFiles, "index.ts": "export const x = 1;\n" },
@@ -109,7 +112,7 @@ describe("migrationLadderMismatches", () => {
     expect(migrationLadderMismatches({ ...consistent, rungFiles })).toEqual(expected);
   });
 
-  test.each([
+  test.each<{ reason: string; testFiles: Record<string, string>; expected: Mismatches }>([
     {
       reason: "a rung without a test file",
       testFiles: { "m0001_a.test.ts": testSource("m0001_a") },
@@ -269,7 +272,7 @@ describe("migrationLadderMismatches", () => {
     expect(migrationLadderMismatches({ ...consistent, testFiles })).toEqual(expected);
   });
 
-  test.each([
+  test.each<{ reason: string; input: Partial<Ladder>; expected: Mismatches }>([
     {
       reason: "a rung with no harness case",
       input: { harness: "set -e\nrm old/m0001_a.ts\n" },

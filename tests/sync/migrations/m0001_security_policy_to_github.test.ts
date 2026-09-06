@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import rung from "../../../.github/scripts/sync/migrations/m0001_security_policy_to_github.ts";
-import type { Rung } from "../../../.github/scripts/sync/run_migrations.ts";
+import type { Rung, RungVerdict } from "../../../.github/scripts/sync/run_migrations.ts";
 import {
   MIGRATIONS_NAME,
   MIGRATIONS_REVIEW_NAME,
@@ -75,7 +75,7 @@ describe("m0001_security_policy_to_github", () => {
     expect(git(dir, "status", "--porcelain")).toBe("");
   });
 
-  test.each([
+  test.each<{ label: string; files: Record<string, string> } & RungVerdict>([
     {
       label: "moved, stale mirror source",
       files: { "SECURITY.md": POLICY, ".repo-platform.yml": STALE_MIRROR },
@@ -146,7 +146,7 @@ describe("m0001_security_policy_to_github", () => {
   // Either endpoint as something other than a regular file: lstat, not
   // stat, so a symlink pointing at a perfectly good file is still not the
   // policy - the carry would write through it.
-  test.each([
+  test.each<{ shape: string; files: Record<string, string>; link: [string, string] | null }>([
     {
       shape: "a directory at the root path",
       files: { "SECURITY.md/nested": "a directory, not the policy\n" },

@@ -23,7 +23,7 @@ import { tempDirs } from "../shared/temp_dir.ts";
 const temp = tempDirs();
 
 describe("issueFormLabels", () => {
-  test.each([
+  test.each<{ reason: string; text: string; names: string[] }>([
     {
       reason: "a list value is taken element-whole (the chromium-bridge shape)",
       text: 'name: Bug report\nlabels: ["type:bug", "needs triage, maybe"]\nbody: []\n',

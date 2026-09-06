@@ -9,7 +9,7 @@ const FILE = ".repo-platform.yml";
 // fixed strings, and a second spurious error must not hide behind a
 // substring or a null check.
 describe("readModules", () => {
-  test.each([
+  test.each<{ reason: string; yaml: string; modules: string[] }>([
     {
       reason: "the top-level modules list",
       yaml: "modules: [agents, uv]",

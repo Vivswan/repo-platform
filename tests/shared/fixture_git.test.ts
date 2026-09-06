@@ -58,7 +58,7 @@ describe("fixtureGit", () => {
     for (const key of Object.keys(AMBIENT)) delete process.env[key];
   });
 
-  test.each([
+  test.each<{ side: string; args: string[]; committed: boolean }>([
     {
       side: "commit (client-side auto maintenance)",
       args: ["commit", "-q", "-m", "a"],

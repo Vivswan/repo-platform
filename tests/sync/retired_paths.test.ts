@@ -34,7 +34,13 @@ describe("retiredPaths", () => {
   const newPaths = new Set([".github/workflows/ci.yml", "README.md"]);
   const WORKFLOWS = [".github/workflows/checks.yml", ".github/workflows/template-sync.yml"];
 
-  test.each([
+  test.each<{
+    reason: string;
+    extraOld: string[];
+    skip: string[];
+    modules: string[];
+    expected: string[];
+  }>([
     {
       reason: "a path in the old render but not the new one is a candidate",
       extraOld: [],
@@ -203,7 +209,7 @@ describe("listRenderPaths", () => {
 });
 
 describe("readSkipIfExists", () => {
-  test.each([
+  test.each<{ reason: string; yaml: string; expected: ReturnType<typeof readSkipIfExists> }>([
     {
       reason: "reads the list",
       yaml: "_skip_if_exists:\n  - .github/workflows/checks.yml\n  - release-please-config.json",

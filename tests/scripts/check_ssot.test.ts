@@ -57,6 +57,7 @@ import {
   mkdtempSites,
   mustMatch,
   ownershipTableMismatches,
+  type Pin,
   PREFLIGHT_APPLY_JOB_KEYS,
   PREFLIGHT_APPLY_RUNS_ON,
   PREFLIGHT_APPLY_WITH,
@@ -131,7 +132,7 @@ describe("ownershipTableMismatches", () => {
     ).toEqual([]);
   });
 
-  test.each([
+  test.each<{ reason: string; rows: string[]; expected: string; got: string }>([
     {
       reason: "a Files cell that drifted",
       rows: ["| Managed | `ci.yml` | never edit |", "| Split | `AGENTS.md` | ok |"],
@@ -695,7 +696,7 @@ describe("postGreenCallerMismatches", () => {
     expect(postGreenCallerMismatches(workflows(), OWNER)).toEqual([]);
   });
 
-  test.each([
+  test.each<{ reason: string; extra: Record<string, string>; got: string }>([
     {
       reason:
         "a second caller in another workflow (every post-green leg would run behind its trigger)",
@@ -876,7 +877,12 @@ describe("pinMismatches", () => {
     expect(pinMismatches(split, { "x/y": ["v1", "v2"] })).toEqual([]);
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    pins: Pin[];
+    expected: Mismatch;
+    allowed: Record<string, string[]>;
+  }>([
     {
       reason: "the allowlisted ref set differs from the pinned one",
       pins: split,
@@ -2868,7 +2874,7 @@ describe("labelPreflightJobMismatches", () => {
 
   test("the exported census and allowlist tables equal the suite's copies", () => {
     expect(PREFLIGHT_APPLY_WITH).toEqual({ [OPERATOR]: OPERATOR_CENSUS });
-    expect([...PREFLIGHT_FORBIDDEN_RUN_TOKENS]).toEqual(FORBIDDEN_TOKENS);
+    expect<readonly string[]>(PREFLIGHT_FORBIDDEN_RUN_TOKENS).toEqual(FORBIDDEN_TOKENS);
     expect(PREFLIGHT_STEP_KEYS).toEqual({
       [OPERATOR]: new Set(["name", "id", "if", "env", "run"]),
     });
@@ -4838,7 +4844,7 @@ describe("stampHookSiteMismatches", () => {
     expect(gotOf([other, good])).toEqual([]);
   });
 
-  test.each([
+  test.each<{ reason: string; hooks: Parameters<typeof gotOf>[0]; expected: string }>([
     { reason: "no stamp hook", hooks: [other], expected: "none - renders on that path" },
     { reason: "a duplicate stamp hook", hooks: [good, good], expected: "2 stamp hooks" },
     {
@@ -4994,14 +5000,24 @@ describe("sticky-pr-comments", () => {
     });
   });
 
-  test.each([
+  test.each<{
+    reason: string;
+    rel: string;
+    hosts: string[];
+    text: string;
+    mismatches: Mismatch[];
+  }>([
     {
       reason: "a moving major tag",
       rel: WORKFLOW,
       hosts: [HOST],
       text: step(HEADER, `${STICKY_COMMENT_ACTION}@v3`),
       mismatches: [
-        { file: `${WORKFLOW}:3`, expected: usesExpected, got: `uses: ${STICKY_COMMENT_ACTION}@v3` },
+        {
+          file: `${WORKFLOW}:3`,
+          expected: usesExpected,
+          got: `uses: ${STICKY_COMMENT_ACTION}@v3`,
+        },
       ],
     },
     {

@@ -29,7 +29,7 @@ function gateOfFor(manifests: ModuleManifest[]): (module: string) => string {
 describe("orChain", () => {
   const gateOf = gateOfFor([BUN, NODE]);
 
-  test.each([
+  test.each<{ reason: string; modules: string[]; gateOf: typeof gateOf; expected: string }>([
     {
       reason: "a single module renders its own gate",
       modules: ["bun"],

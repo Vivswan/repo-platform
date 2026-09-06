@@ -83,7 +83,11 @@ describe("resolveBase", () => {
     return { base, commits: rangeCommits(cwd, sha, base), label: rangeLabel(sha, base) };
   }
 
-  test.each([
+  type Row = { reason: string; cwd: string; sha: string; before: string } & Pick<
+    ReturnType<typeof read>,
+    "base" | "commits"
+  >;
+  test.each<Row>([
     {
       reason:
         "the coalescing case: a superseded push is covered from the stamped base, not the push's own before",

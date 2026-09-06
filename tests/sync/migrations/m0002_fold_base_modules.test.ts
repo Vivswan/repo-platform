@@ -183,7 +183,7 @@ describe("m0002_fold_base_modules", () => {
     expect(readFileSync(join(dir, REGISTRATION), "utf-8")).toBe(RENDERED_AFTER);
   });
 
-  test.each([
+  test.each<{ label: string; files: Record<string, string>; kind: string }>([
     {
       label: "none of the three declared",
       files: { [REGISTRATION]: 'modules: ["uv", "pages"]\n' },
@@ -255,7 +255,16 @@ describe("m0002_fold_base_modules", () => {
 
   // An own alias file is folded into AGENTS.md and removed, both staged, and
   // the note holds the PR; the declaration part keeps its own kind and note.
-  test.each([
+  test.each<{
+    label: string;
+    files: Record<string, string>;
+    untracked?: Record<string, string>;
+    kind: string;
+    noteText: string;
+    agents: string;
+    status: string;
+    again?: string;
+  }>([
     {
       label: "no AGENTS.md yet, nothing to drop: AGENTS.md is created from the alias",
       files: {
@@ -439,7 +448,12 @@ describe("m0002_fold_base_modules", () => {
     expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
   });
 
-  test.each([
+  test.each<{
+    label: string;
+    files: Record<string, string>;
+    link?: [string, string];
+    message: string;
+  }>([
     {
       label: "its own file at a managed arrival that is not an alias",
       files: {
@@ -475,7 +489,7 @@ describe("m0002_fold_base_modules", () => {
         [MANIFEST]: manifestOf(),
         "docs/agents.md": "elsewhere\n",
       },
-      link: ["docs/agents.md", "CLAUDE.md"] as [string, string],
+      link: ["docs/agents.md", "CLAUDE.md"],
       message: "something other than a regular file at CLAUDE.md",
     },
     {
@@ -516,7 +530,7 @@ describe("m0002_fold_base_modules", () => {
       // path beneath it is probed (m0001 refuses the same shape).
       label: "a symlinked .github",
       files: { [REGISTRATION]: RENDERED, "real-github/keep": "" },
-      link: ["real-github", ".github"] as [string, string],
+      link: ["real-github", ".github"],
       message: ".github is not a real directory",
     },
   ])("$label is the error arm before anything is staged", ({ files, message, link }) => {

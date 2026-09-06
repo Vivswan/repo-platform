@@ -210,7 +210,12 @@ describe("commit_push refuses a partial delivery", () => {
   // A workflow-file change pushed with a token lacking Workflows write: GitHub refuses the
   // push and the step goes red naming the target and the scope. The tree still holds the change,
   // no tree-rewriting git call runs, no output is written. Each row pins the whole outcome.
-  test.each([
+  test.each<{
+    hideDetails: string;
+    publicLines: string[];
+    stderrCarriesRefusal: boolean;
+    hiddenManifest: string[] | null;
+  }>([
     {
       hideDetails: "false",
       publicLines: [
