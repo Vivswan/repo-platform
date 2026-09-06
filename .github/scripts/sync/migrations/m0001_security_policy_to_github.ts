@@ -59,13 +59,23 @@ function entryKind(path: string): "file" | "dir" | "absent" | "other" {
   return "other";
 }
 
-function git(dir: string, ...args: string[]): { exitCode: number; stdout: string } {
+function git(dir: string, ...args: string[]): { exitCode: number; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
     stdout: "pipe",
     stderr: "pipe",
     timeout: 300_000,
   });
-  return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+  };
+}
+
+/** The last non-empty line of a git stderr, or "no output". */
+function lastLine(text: string): string {
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
+  return lines.length === 0 ? "no output" : lines[lines.length - 1].trim();
 }
 
 /** Whether HEAD's `.repo-platform.yml` names the retired path as a
@@ -143,7 +153,7 @@ export default {
       if (moved.exitCode !== 0) {
         return {
           kind: "error",
-          message: `git mv ${ROOT_COPY} ${CURRENT} failed (exit ${moved.exitCode})`,
+          message: `git mv ${ROOT_COPY} ${CURRENT} failed (exit ${moved.exitCode}: ${lastLine(moved.stderr)})`,
         };
       }
       kind = "moved";

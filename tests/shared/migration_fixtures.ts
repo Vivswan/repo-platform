@@ -109,11 +109,11 @@ export function ladderFixtures(temp: TempDirs) {
   }
 
   /** The runner CLI with OLD_SHA passed VERBATIM (for the runner's own
-   * shape guard). */
+   * shape guard), or left unset when `oldSha` is undefined. */
   function runLadderWithOldSha(
     platformDir: string,
     targetDir: string,
-    oldSha: string,
+    oldSha: string | undefined,
     newRef = "new",
   ) {
     const runnerTemp = temp.dir("ladder-temp-");
@@ -123,7 +123,7 @@ export function ladderFixtures(temp: TempDirs) {
         PLATFORM_DIR: platformDir,
         TARGET_DIR: targetDir,
         TARGET_DISPLAY: "Vivswan/demo",
-        OLD_SHA: oldSha,
+        ...(oldSha === undefined ? {} : { OLD_SHA: oldSha }),
         TARGET_REF: newRef,
         RUNNER_TEMP: runnerTemp,
       },

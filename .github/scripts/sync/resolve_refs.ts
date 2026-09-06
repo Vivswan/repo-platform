@@ -14,7 +14,7 @@ import { allGreenFailure } from "../shared/all_green.ts";
 import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { lastLine } from "../shared/lines.ts";
-import { capture, must, mustCapture } from "../shared/proc.ts";
+import { capture, DEFAULT_HANG_BOUND_MS, must, mustCapture } from "../shared/proc.ts";
 import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
 import { resolveRecordedCommit, unusableReason } from "./recorded_commit.ts";
 
@@ -55,8 +55,11 @@ const buildFetch = capture([
   "+refs/heads/build:refs/remotes/origin/build",
 ]);
 if (buildFetch.exitCode !== 0) {
+  const detail = buildFetch.timedOut
+    ? `timed out after ${DEFAULT_HANG_BOUND_MS}ms`
+    : `failed (${lastLine(buildFetch.stderr) || "no output"})`;
   console.log(
-    `::error::fetching ${repository}'s build branch failed (${lastLine(buildFetch.stderr)}); a stale local ref must not stand in for it. If the repository has no build branch yet, dispatch the Build Branches workflow, then re-run.`,
+    `::error::fetching ${repository}'s build branch ${detail}; a stale local ref must not stand in for it. If the repository has no build branch yet, dispatch the Build Branches workflow, then re-run.`,
   );
   process.exit(1);
 }

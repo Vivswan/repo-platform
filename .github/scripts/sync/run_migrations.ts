@@ -387,7 +387,16 @@ export function applyPending(run: LadderRun): RunOutcome {
 
 function main(): number {
   const display = env("TARGET_DISPLAY", "target");
-  const oldSha = env("OLD_SHA");
+  // The resolver always sets OLD_SHA ("" is its no-base signal); an unset
+  // variable is a wiring mistake or a bare local run, and must not read as
+  // recovery and run every rung by accident.
+  const oldSha = process.env.OLD_SHA;
+  if (oldSha === undefined) {
+    error(
+      `${display}: OLD_SHA is not set; the resolver sets it to the recorded build's full sha, or to "" on recovery`,
+    );
+    return 1;
+  }
   if (oldSha === "") {
     console.log(
       `${display}: no usable base; every rung on the delivered tree runs, each idempotent`,

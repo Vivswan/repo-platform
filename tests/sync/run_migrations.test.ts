@@ -464,6 +464,24 @@ describe("applyPending and the CLI", () => {
     );
   });
 
+  test("an UNSET OLD_SHA is a wiring mistake, never the no-base signal: nothing runs", () => {
+    const dir = chain();
+    const target = repo({});
+    const result = runLadderWithOldSha(dir, target, undefined);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("::error::Vivswan/demo: OLD_SHA is not set");
+    expect(result.stdout).not.toContain("no usable base");
+    expect(existsSync(join(target, ".github/m0001_a.txt"))).toBe(false);
+    expect(git(target, "rev-list", "--count", "HEAD").trim()).toBe("1");
+  });
+
+  test("ignoredPaths lists ignored files only: an untracked unignored file is dirtyPaths' business", () => {
+    const dir = repo({ ".gitignore": "*.log\n" });
+    writeFileSync(join(dir, "a.log"), "ignored\n");
+    writeFileSync(join(dir, "tmp.txt"), "untracked\n");
+    expect(ignoredPaths(dir)).toEqual(["a.log"]);
+  });
+
   test("a build commit carrying a non-rung path under migrations/ fails the step with ::error:: on stdout", () => {
     const dir = platform([
       { tag: "old", rungs: {} },

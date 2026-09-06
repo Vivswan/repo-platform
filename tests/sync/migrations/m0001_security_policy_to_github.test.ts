@@ -117,6 +117,20 @@ describe("m0001_security_policy_to_github", () => {
     if (kind !== "moved") expect(git(dir, "status", "--porcelain")).toBe("");
   });
 
+  test("a failed git mv names git's reason", () => {
+    // A root SECURITY.md that git does not track: `git mv` refuses it, and
+    // the arm must carry git's own words, not only an exit code.
+    const dir = repo({});
+    writeFileSync(join(dir, "SECURITY.md"), POLICY);
+    expect(apply(dir)).toEqual({
+      kind: "error",
+      message: expect.stringMatching(
+        /^git mv SECURITY\.md \.github\/SECURITY\.md failed \(exit 128: fatal: not under version control, source=SECURITY\.md, destination=\.github\/SECURITY\.md\)$/,
+      ),
+    });
+    expect(readFileSync(join(dir, "SECURITY.md"), "utf-8")).toBe(POLICY);
+  });
+
   test("a policy at both paths is the error arm (the sync must not guess which wins)", () => {
     const dir = repo({ "SECURITY.md": "root copy\n", ".github/SECURITY.md": POLICY });
     expect(apply(dir)).toMatchObject({ kind: "error", message: expect.stringContaining("BOTH") });
