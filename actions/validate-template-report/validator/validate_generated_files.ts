@@ -14,7 +14,6 @@ import { resolve } from "node:path";
 import { checkCiGate } from "./checks/ci_gate.ts";
 import { checkConflictMarkers } from "./checks/conflict_markers.ts";
 import { checkHeaders } from "./checks/headers.ts";
-import { checkLicense } from "./checks/license.ts";
 import { checkManifestParity } from "./checks/manifest_parity.ts";
 import { checkManifestShape } from "./checks/manifest_shape.ts";
 import { checkRegistration } from "./checks/registration.ts";
@@ -26,7 +25,6 @@ import { type Finding, print, writeReports } from "./findings.ts";
 
 const CHECKS: ((ctx: Context) => Finding[])[] = [
   checkRegistration,
-  checkLicense,
   checkReleasePlease,
   checkYaml,
   checkConflictMarkers,

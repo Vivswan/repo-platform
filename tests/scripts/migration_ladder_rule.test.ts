@@ -509,7 +509,7 @@ describe("selfContainedMismatches", () => {
 
 describe("retiredShapeMismatches", () => {
   const expected =
-    "no identifying token of a retired shape outside the migration ladder (the sync carries no compatibility code; a transition is a rung)";
+    "no identifying token of a retired shape outside the migration ladder (no compatibility code outside the ladder; a transition is a rung)";
 
   test("near misses are clean (the boundary control)", () => {
     expect(
@@ -538,6 +538,22 @@ describe("retiredShapeMismatches", () => {
       ]);
     },
   );
+
+  // The validator's control plants each manifestEntry and expects the token named back, so an
+  // entry that does not spell its own token would pass that control vacuously.
+  test.each(
+    RETIRED_SHAPE_TOKENS.flatMap((shape) =>
+      shape.manifestEntry === undefined
+        ? []
+        : [[shape.name, shape.manifestEntry, shape.re] as const],
+    ),
+  )(
+    "the manifest entry for %s spells the token and parses as one entry object",
+    (_name, entry, re) => {
+      expect(entry).toMatch(re);
+      expect(typeof (JSON.parse(entry) as { class: unknown }).class).toBe("string");
+    },
+  );
 });
 
 describe("the live repository", () => {
@@ -563,13 +579,33 @@ describe("the live repository", () => {
     ).toEqual([]);
   });
 
-  test("no retired-shape token in the sync's code, tests, harness, or workflows; the scan covers them", () => {
+  test("no retired-shape token in the sync, the actions, the scripts, or the tests; the scan covers them", () => {
     const files = retiredShapeScanFiles();
     const paths = Object.keys(files);
-    expect(RETIRED_SHAPE_SCAN.dirs).toContain(".github/scripts");
-    expect(paths).toContain(".github/workflows/reusable-template-sync.yml");
-    expect(paths).toContain(".github/scripts/sync/head_manifest.ts");
-    expect(paths).toContain(MIGRATIONS_HARNESS_REL);
+    expect(RETIRED_SHAPE_SCAN.dirs).toEqual(
+      expect.arrayContaining([
+        ".github/scripts",
+        ".github/workflows",
+        "actions",
+        "scripts",
+        "tests",
+      ]),
+    );
+    for (const covered of [
+      ".github/workflows/reusable-template-sync.yml",
+      ".github/scripts/sync/head_manifest.ts",
+      MIGRATIONS_HARNESS_REL,
+      "actions/shared/grammar.ts",
+      "actions/validate-template-report/validator/checks/manifest_parity.ts",
+      "scripts/ownership.ts",
+      "tests/actions/stamp_manifest.test.ts",
+    ]) {
+      expect(paths).toContain(covered);
+    }
+    // The token list and its planted controls are the two files allowed to spell the tokens.
+    for (const own of ["scripts/check_ssot.ts", "tests/scripts/migration_ladder_rule.test.ts"]) {
+      expect(paths).not.toContain(own);
+    }
     expect(paths.some((rel) => rel.startsWith(`${MIGRATIONS_DIR_REL}/`))).toBe(false);
     expect(paths.some((rel) => rel.startsWith(`${MIGRATIONS_TESTS_REL}/`))).toBe(false);
     expect(retiredShapeMismatches(files)).toEqual([]);

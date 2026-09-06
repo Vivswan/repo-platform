@@ -28,10 +28,9 @@ function render(): string {
     "docs/drifted.md": "edited content\n",
     "docs/notes.md": `preamble\n${region}tail\n`,
     "docs/broken-region.md": `${B}\n${B}\nno end\n`,
-    "docs/old-grammar.md": region,
+    "docs/unknown-grammar.md": region,
     "docs/unstamped.md": "content\n",
     "docs/starter.md": "repo-owned\n",
-    "docs/legacy.md": "settings\n",
     "docs/odd.md": "content\n",
   };
   for (const [rel, content] of Object.entries(files)) {
@@ -46,11 +45,10 @@ function render(): string {
     "docs/drifted.md": `{"class": "managed", "hash": "${sha("original content\n")}"}`,
     "docs/notes.md": split(B, E, sha(region)),
     "docs/broken-region.md": split(B, E, sha(region)),
-    "docs/old-grammar.md": split(B, E, sha(region), "tail-marker"),
+    "docs/unknown-grammar.md": split(B, E, sha(region), "prefix"),
     "docs/no-grammar.md": `{"class": "split", "begin": "# b", "end": "# e", "hash": "${"d".repeat(64)}"}`,
     "docs/unstamped.md": '{"class": "managed", "hash": null}',
     "docs/starter.md": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
-    "docs/legacy.md": '{"class": "mergeable"}',
     "docs/odd.md": '{"class": "bespoke"}',
     "docs/short-hash.md": '{"class": "managed", "hash": "abc"}',
     "docs/link.md": `{"class": "managed", "hash": "${sha("intact.md")}"}`,
@@ -91,10 +89,9 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/old-grammar.md' declares split grammar " +
-          '"tail-marker", which this validator does not read (one grammar exists: ' +
-          "managed-region) - the manifest predates this validator; run a template sync to restamp " +
-          "it",
+          ".github/repo-platform-manifest.json: entry 'docs/unknown-grammar.md' declares split " +
+          'grammar "prefix", which this validator does not read (one grammar exists: ' +
+          "managed-region); run a template sync to restamp the manifest",
       },
       {
         severity: "error",
@@ -113,11 +110,6 @@ describe("checkManifestParity", () => {
         severity: "error",
         message:
           ".github/repo-platform-manifest.json: entry 'docs/starter.md' is a starter carrying a hash - starters are repo-owned after the first render, so sync makes no byte-parity promise about them; run a template sync to regenerate the manifest",
-      },
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry 'docs/legacy.md' has class \"mergeable\", which is retired - the next template sync re-renders the manifest (settings.yml became a repo-owned starter)",
       },
       {
         severity: "error",

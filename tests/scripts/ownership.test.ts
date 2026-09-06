@@ -30,9 +30,6 @@ const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
-// Retired grammar spellings: the scan refuses them in every template source.
-const OLD_HTML_SENTINEL = "<!-- repo-platform:local-section -->";
-const OLD_HASH_SENTINEL = "# repo-platform:local-section";
 
 const managed = (path: string): OwnershipDeclaration => ({ path, class: "managed" });
 const headerless = (path: string): OwnershipDeclaration => ({
@@ -84,12 +81,12 @@ describe("ownershipEntrySchema", () => {
     }
   });
 
-  test("rejects a split without a grammar and a RETIRED or unknown grammar", () => {
+  test("rejects a split without a grammar and a split with an unknown grammar", () => {
     expect(
       ownershipEntrySchema.safeParse({ path: "X.md", class: "split", begin: "# b", end: "# e" })
         .success,
     ).toBe(false);
-    for (const grammar of ["prefix", "tail-marker", "bounded-region"]) {
+    for (const grammar of ["prefix", "ribbon"]) {
       expect(
         ownershipEntrySchema.safeParse({
           path: "X.md",
@@ -102,7 +99,7 @@ describe("ownershipEntrySchema", () => {
     }
   });
 
-  test("rejects extra fields per class (a retired marker field on a split entry)", () => {
+  test("rejects extra fields per class (a marker field no grammar declares)", () => {
     expect(
       ownershipEntrySchema.safeParse({
         ...split("X.md"),
@@ -321,24 +318,6 @@ describe("declarationTextErrors", () => {
     expect(errors[0]).toContain("declared managed but copier.yml's _skip_if_exists");
   });
 
-  test("a RETIRED grammar's marker spelling is refused in EVERY template source", () => {
-    // No code splits at the retired lines anymore: shipping one plants a
-    // dead ownership promise, and the scan is what stops the retired
-    // grammars from quietly growing back.
-    for (const retired of [
-      OLD_HTML_SENTINEL,
-      OLD_HASH_SENTINEL,
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-    ]) {
-      for (const declaration of [managed("X.md"), starter("X.md"), split("X.md")]) {
-        const errors = errorsOf(declaration, `top\n${retired}\ntail\n`, false);
-        expect(errors).toHaveLength(1);
-        expect(errors[0]).toContain("retired split marker");
-      }
-    }
-  });
-
   // Foreign markers match by TEXT PRESENCE: any occurrence of the full
   // marker string in a source that does not own it is a claim - a bare
   // line, glued to jinja tags, inside a tag or a comment, or a prose
@@ -386,12 +365,6 @@ describe("declarationTextErrors", () => {
     ]) {
       expect(errorsOf(managed("GUIDE.md"), source, false)).toEqual([]);
     }
-  });
-
-  test("a legacy mergeable marker line is inert: the class is retired", () => {
-    expect(
-      errorsOf(managed("GUIDE.md"), "# repo-platform:mergeable\nrepository: {}\n", false),
-    ).toEqual([]);
   });
 
   test("a managed-region split needs both markers exactly once, in order", () => {

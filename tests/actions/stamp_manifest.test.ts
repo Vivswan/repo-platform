@@ -908,8 +908,8 @@ describe("stampManifestText", () => {
   });
 
   test("fields outside the vocabulary are dropped on restamp, every entry kind in one manifest", () => {
-    // Two unknown keys on every entry kind (self, present managed, ABSENT managed, starter, split,
-    // legacy mergeable): one stamp emits the vocabulary alone, a second is a no-op. Red against the
+    // Two unknown keys on every entry kind (self, present managed, ABSENT managed, starter, split, a
+    // hashless unknown class): one stamp emits the vocabulary alone, a second is a no-op. Red against the
     // pre-rework stamper on `withheld` via the absent workflow (it kept that marker) and on `note`.
     const region = "# b\nmanaged\n# e\n";
     const root = tree({
@@ -923,7 +923,7 @@ describe("stampManifestText", () => {
       `    ".github/workflows/release.yml": {"class": "managed", "hash": null${stray}}`,
       `    ".github/workflows/checks.yml": {"class": "starter"${stray}}`,
       `    "docs/split.md": {"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null${stray}}`,
-      `    "docs/legacy.md": {"class": "mergeable"${stray}}`,
+      `    "docs/odd.md": {"class": "bespoke"${stray}}`,
     ]);
     const clean = manifestText([
       `    ${SELF}: {"class": "managed", "hash": null, "commit": null}`,
@@ -931,7 +931,7 @@ describe("stampManifestText", () => {
       `    ".github/workflows/release.yml": {"class": "managed", "hash": null}`,
       `    ".github/workflows/checks.yml": {"class": "starter"}`,
       `    "docs/split.md": {"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": "${sha256(region)}"}`,
-      `    "docs/legacy.md": {"class": "mergeable"}`,
+      `    "docs/odd.md": {"class": "bespoke"}`,
     ]);
     expect(stampManifestText(stale, root)).toEqual({ out: clean, status: "stamped" });
     expect(stampManifestText(clean, root)).toEqual({ out: clean, status: "stamped" });

@@ -56,17 +56,6 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
-    if (entry.class === "mergeable") {
-      // Retired class: settings.yml, its only member, is a repo-owned
-      // starter now, and its baseline is computed centrally at apply time.
-      findings.push(
-        error(
-          `${where} has class "mergeable", which is retired - the next template ` +
-            "sync re-renders the manifest (settings.yml became a repo-owned starter)",
-        ),
-      );
-      continue;
-    }
     if (entry.class !== "managed" && entry.class !== "split") {
       findings.push(
         error(
@@ -91,10 +80,8 @@ export function checkManifestParity(ctx: Context): Finding[] {
     if (entry.class === "split") {
       // Every render stamps the grammar field; the marker strings alone
       // cannot say which grammar the sync rebuild uses, so a split entry
-      // without one is a hand edit (or a manifest older than the stamped
-      // grammar itself). Checked BEFORE the marker-string shape: an
-      // older-vintage entry should draw the vintage diagnosis, not a
-      // field-shape complaint.
+      // without one is a hand edit. Checked BEFORE the marker-string shape
+      // so the grammar diagnosis comes first, not a field-shape complaint.
       if (!("grammar" in entry)) {
         findings.push(
           error(
@@ -106,15 +93,14 @@ export function checkManifestParity(ctx: Context): Finding[] {
         );
         continue;
       }
-      // A RETIRED grammar (tail-marker, the four-marker bounded-region) is
-      // older than this validator, and reading it by guess would verify the
-      // wrong region - loud refusal, mirroring the sync's own refusals.
+      // A grammar outside the GRAMMAR table cannot be read by guess without
+      // verifying the wrong region - loud refusal, mirroring the sync's own.
       if (knownGrammar(entry.grammar) === null) {
         findings.push(
           error(
             `${where} declares split grammar ${JSON.stringify(entry.grammar)}, which this ` +
-              "validator does not read (one grammar exists: managed-region) - the " +
-              "manifest predates this validator; run a template sync to restamp it",
+              "validator does not read (one grammar exists: managed-region); run a " +
+              "template sync to restamp the manifest",
           ),
         );
         continue;

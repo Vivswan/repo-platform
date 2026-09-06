@@ -74,9 +74,8 @@ import {
  *  rendered targets instead (normalizeSymlinkTargets below). */
 const JINJA_SUFFIX = ".jinja";
 
-/** The hash token inside an entry object; entries without one (starters,
- *  and legacy "mergeable" entries from renders that predate the class's
- *  retirement) are left alone. */
+/** The hash token inside an entry object; entries without one (starters)
+ *  are left alone. */
 const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
 
 /** The provenance token on the manifest's own entry: the render's recorded
@@ -351,7 +350,7 @@ export function stampManifestText(text: string, root: string): StampResult {
     const fields = entryFields(parsedLine.body);
     if (fields === null) return line;
     // Field order is kept; a key outside the vocabulary goes. Entries without a hash field
-    // (starters, and legacy "mergeable" entries) take no hash.
+    // (starters) take no hash.
     const known = Object.fromEntries(Object.entries(fields).filter(([key]) => isEntryField(key)));
     if (!("hash" in known)) {
       return Object.keys(known).length === Object.keys(fields).length

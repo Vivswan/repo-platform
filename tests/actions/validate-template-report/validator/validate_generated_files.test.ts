@@ -6,6 +6,7 @@ import {
   type BaseOwnedFile,
   MODULE_OWNERSHIP,
 } from "../../../../actions/validate-template-report/validator/ownership.ts";
+import { RETIRED_SHAPE_TOKENS } from "../../../../scripts/check_ssot.ts";
 import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 
@@ -1019,45 +1020,6 @@ describe("gitignored paths in self mode", () => {
   });
 });
 
-describe("one license file", () => {
-  test("LICENSE.md alone passes (fleet repos)", () => {
-    const { exitCode, stderr } = runValidator({
-      "LICENSE.md": `${B}\n# License\n${E}\n`,
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-  });
-
-  test("LICENSE alone passes with a rename advisory (custom-license repos)", () => {
-    // The custom-license module is what lets a render skip the fleet
-    // LICENSE.md, so it is the one selection where a lone LICENSE is a
-    // complete render.
-    const { exitCode, stdout, stderr } = runValidator(
-      {
-        LICENSE: "MIT License\n",
-        ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
-          "modules: [uv]",
-          "modules: [uv, custom-license]",
-        ),
-      },
-      [],
-      { omit: ["LICENSE.md"] },
-    );
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: LICENSE: the fleet convention is LICENSE.md");
-  });
-
-  test("both spellings together fail", () => {
-    const { exitCode, stderr } = runValidator({
-      LICENSE: "MIT License\n",
-      "LICENSE.md": "# License\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("LICENSE and LICENSE.md both exist");
-  });
-});
-
 describe("release-please-config.json never pins a version", () => {
   const config = (pkg: Record<string, unknown>, top: Record<string, unknown> = {}) =>
     JSON.stringify({ ...top, packages: { ".": { "release-type": "simple", ...pkg } } });
@@ -1690,8 +1652,8 @@ describe("ownership-manifest byte parity", () => {
       body: `${HB}\n# Security\n${HE}\ntail\n`,
     },
     {
-      reason: "a RETIRED grammar (tail-marker) on the declared pair",
-      entry: splitEntry("tail-marker", B, E, sha(`${B}\n# Security\n${E}\n`)),
+      reason: "an unknown grammar (prefix) on the declared pair",
+      entry: splitEntry("prefix", B, E, sha(`${B}\n# Security\n${E}\n`)),
       body: `${B}\n# Security\n${E}\ntail\n`,
     },
   ])(
@@ -1736,20 +1698,18 @@ describe("ownership-manifest byte parity", () => {
   });
 
   // An uncovered path, so the structural loop's grammar check is probed
-  // alone. A grammar this validator does not read - one that never existed
-  // or a RETIRED one from an older-vintage manifest (a repo not yet synced
-  // past the one-grammar change) - is refused loudly and never read by
-  // guess, mirroring the sync's own vintage refusals.
+  // alone. A grammar this validator does not read is refused loudly and
+  // never read by guess, mirroring the sync's own refusal.
   test.each([
     {
-      reason: "a grammar that never existed (prefix)",
+      reason: "a grammar carrying the managed-region fields",
       grammar: "prefix",
       entryFields: `"begin": "# b", "end": "# e"`,
       body: "# b\n# e\n",
     },
     {
-      reason: "the RETIRED tail-marker grammar with its own fields",
-      grammar: "tail-marker",
+      reason: "a grammar carrying its own fields",
+      grammar: "ribbon",
       entryFields: `"marker": "# m", "managed": "above"`,
       body: "# m\n",
     },
@@ -1770,7 +1730,30 @@ describe("ownership-manifest byte parity", () => {
       expect(stderr).toContain(
         `declares split grammar ${JSON.stringify(grammar)}, which this validator does not read`,
       );
-      expect(stderr).toContain("run a template sync to restamp it");
+      expect(stderr).toContain("run a template sync to restamp the manifest");
+    },
+  );
+
+  // The retired tokens' one home is RETIRED_SHAPE_TOKENS (the no-retired-shapes rule); every
+  // token that ever rode the manifest, planted on an uncovered path, draws exactly one error
+  // naming the entry and the token, through the generic checks alone.
+  test.each(
+    RETIRED_SHAPE_TOKENS.flatMap((shape) =>
+      shape.manifestEntry === undefined
+        ? []
+        : [[shape.name, shape.manifestEntry, shape.re] as const],
+    ),
+  )(
+    "a manifest entry spelling %s is an error naming the entry and the token",
+    (_name, entry, re) => {
+      const { exitCode, stderr } = runValidator({
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), "docs/notes.md": entry }),
+        "docs/notes.md": "# b\n# e\n",
+      });
+      expect(exitCode).toBe(1);
+      const naming = stderr.split("\n").filter((line) => line.includes("entry 'docs/notes.md'"));
+      expect(naming).toHaveLength(1);
+      expect(naming[0]).toMatch(re);
     },
   );
 
@@ -1865,22 +1848,6 @@ describe("ownership-manifest byte parity", () => {
         `updates restamp on that sync`,
     ]);
     expect(stdout).not.toContain(path);
-  });
-
-  test("a legacy mergeable entry is an error naming the retirement", () => {
-    // Old renders' manifests still class settings.yml mergeable; the class
-    // is retired (the file is a starter now), and a manifest claiming it
-    // predates that sync - the error says the next sync re-renders it.
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "mergeable"}',
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      ".github/settings.yml": "repository:\n  has_issues: true\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('has class "mergeable", which is retired');
   });
 
   test("a settings.yml starter entry passes: the file is repo-owned", () => {
