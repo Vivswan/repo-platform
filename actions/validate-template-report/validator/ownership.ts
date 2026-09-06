@@ -78,7 +78,6 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
   },
   { path: ".github/workflows/auto-assign.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
-  { path: ".github/workflows/settings-sync.yml", kind: "header" },
   {
     path: ".gitignore",
     kind: "region",

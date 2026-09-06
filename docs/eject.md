@@ -4,7 +4,7 @@ Detaching is cheap by design: managed repos degrade to normal repos, not broken 
 
 | Reference | Pinned at |
 |---|---|
-| every reusable-workflow call (fleet CI, auto-assign, pages, settings-sync), the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
+| every reusable-workflow call (fleet CI, auto-assign, pages), the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 
@@ -30,7 +30,7 @@ Settings stop being applied too: the nightly heal only manages enrolled repos wi
    - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist - the pinned references keep working unchanged. Otherwise:
-   - replace each thin caller (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`, the `ci` job's `fleet-ci.yml` call, the `all-green` job's action step) with a copy of the corresponding `reusable-*.yml`/fleet job/action from repo-platform
+   - replace each thin caller (`auto-assign.yml`, `pages.yml`, the `ci` job's `fleet-ci.yml` call, the `all-green` job's action step) with a copy of the corresponding `reusable-*.yml`/fleet job/action from repo-platform
    - replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts
    - CodeQL runs inside fleet-ci's `codeql` matrix; inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform
    - the `pr-title.yml` workflow needs nothing: it uses a public action directly (drop its required check from the `pr-title` ruleset if you delete it)

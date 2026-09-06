@@ -57,7 +57,6 @@ const BASELINE: Record<string, string> = {
   ".github/instructions/review.instructions.md":
     '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
   ".github/workflows/auto-assign.yml": `${MANAGED_HEADER}name: Auto Assign\non: [issues]\n`,
-  ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: Settings Sync\non: [push]\n`,
   ".github/workflows/ci.yml": [
     "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
@@ -105,7 +104,6 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".github/copilot-instructions.md", kind: "class-only" },
   { path: ".github/instructions/review.instructions.md", kind: "header" },
   { path: ".github/workflows/auto-assign.yml", kind: "header" },
-  { path: ".github/workflows/settings-sync.yml", kind: "header" },
   { path: "AGENTS.md", kind: "region", begin: B, end: E },
   { path: "CLAUDE.md", kind: "class-only" },
   { path: ".github/workflows/ci.yml", kind: "header" },
@@ -1644,7 +1642,6 @@ describe("ownership-manifest byte parity", () => {
       ".github/instructions/review.instructions.md":
         '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review rules\n',
       ".github/workflows/auto-assign.yml": `${MANAGED_HEADER}name: assign\non: [issues]\n`,
-      ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: settings\non: [push]\n`,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);

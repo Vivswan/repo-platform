@@ -38,7 +38,7 @@
 //   bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
 //     --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
 //
-// --repo-file reads the repo layer from a local path (the self-apply's
+// --repo-file reads the repo layer from a local path (the operator row's
 // own checkout); --repo-fetch reads it from the target via gh api (env:
 // GH_TOKEN), pinned to --repo-ref, the commit the render read its facts
 // at. Exactly one source is required - there is no baseline-only mode,

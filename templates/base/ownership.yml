@@ -44,7 +44,6 @@ ownership:
   - { path: .github/workflows/ci.yml, class: managed }
   - { path: .github/workflows/copilot-setup-steps.yml, class: starter }
   - { path: .github/workflows/post-green.yml, class: starter }
-  - { path: .github/workflows/settings-sync.yml, class: managed }
   - path: .gitignore
     class: split
     grammar: managed-region

@@ -110,10 +110,6 @@ The branch is both the copier source and the fleet's executable channel (`uses: 
 - The branch also carries `migrations/`, the [migration ladder](migrations.md)'s rung files verbatim: a sync walks the build commits between the target's recorded build and the delivered one and runs each rung that appeared, loading it from the newest build commit that carries it. Plain filenames outside `template/`, so copier never renders them.
 - Rungs are executable code the sync runs from the build branch, like the stamp hook copier runs from the delivered tree; a rung that is still on the tip loads from the tip, which the provenance proof covers. Any rung absent from the verified tip loads from an older commit, and that commit is trusted as history: the branch is append-only under a ruleset that blocks force-pushes and deletion, the same trust every `uses: ...@build` ref already places in the branch (the residuals table).
 
-## The settings self-apply's two-hop
-
-Every fleet-rendered reference to this repository rides `@build` (the `fleet-refs-ride-build` rule in scripts/check_ssot.ts is the categorical law), and the branch ships only workflow files, actions, and the composed template - never the repo scripts. [reusable-apply-settings.yml](../.github/workflows/reusable-apply-settings.yml) needs those scripts, so it hops twice: the workflow FILE resolves at the caller's `@build` pin, and its resolve step reads that build commit's provenance stamp and checks the scripts out at the stamped source - the exact green main commit the tree was composed from, so green-gating holds end to end. A stampless sha is used only when it is provably main history (a pre-two-hop caller pin); anything else fails closed (tests/fleet/apply_settings_scripts_ref.test.ts forces the refusal). Like every `uses:`, both hops trust the ref they resolved - the residuals table's first row covers them.
-
 ## Residuals
 
 | Residual | Why it stands | What bounds it |

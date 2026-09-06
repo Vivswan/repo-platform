@@ -1854,7 +1854,7 @@ describe("stepOutputGateMismatches (step-output-gates)", () => {
     const doc = parseYaml(yaml) as { jobs: Record<string, { steps?: Record<string, unknown>[] }> };
     return Object.values(doc.jobs).flatMap((job) => job.steps ?? []);
   };
-  // A refresh-style workflow (not one of the settings pair the rule once
+  // A refresh-style workflow (not the settings workflow the rule once
   // scanned alone) whose push step is gated on a step output.
   const refresh = (condition: string) => `
 on:
@@ -1938,7 +1938,7 @@ jobs:
     );
   });
 
-  test("every live workflow judges clean, and the scan reaches beyond the settings pair (ARMED)", () => {
+  test("every live workflow judges clean, and the scan reaches beyond settings-repos.yml (ARMED)", () => {
     const files = readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/.test(name));
     expect(files.length).toBeGreaterThan(2);
     for (const name of files) {
@@ -2566,7 +2566,7 @@ describe("preflightInvocation", () => {
   const hidden =
     '            bun .github/scripts/sync/run_hidden.ts "settings labels" --   bun .github/scripts/fleet/label_preflight.ts   --merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"';
 
-  test("recognizes both landed shapes", () => {
+  test("recognizes the direct and the run_hidden-wrapped shapes", () => {
     expect(preflightInvocation(direct)).toBe("direct");
     expect(preflightInvocation(hidden)).toBe("hidden");
   });
@@ -2701,7 +2701,6 @@ describe("preflightArgs", () => {
 
 describe("labelPreflightJobMismatches", () => {
   const OPERATOR = ".github/workflows/settings-repos.yml";
-  const REUSABLE = ".github/workflows/reusable-apply-settings.yml";
   const MODE = "${{ inputs.check_only && 'check' || 'apply' }}";
   const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
   type Job = { steps: Record<string, unknown>[]; [key: string]: unknown };
@@ -2736,49 +2735,14 @@ describe("labelPreflightJobMismatches", () => {
       },
     ],
   });
-  const reusableJob = (): Job => ({
-    "runs-on": "ubuntu-latest",
-    steps: [
-      {
-        name: "Preflight labels this repository still references",
-        if: "steps.freshness.outputs.moved == 'false'",
-        env: {
-          GH_TOKEN: TOKEN,
-          SECTIONS: "${{ inputs.sections }}",
-          REQUIRED_SECTIONS: "${{ inputs.required_sections }}",
-          MODE,
-          ON_MISSING_PERMISSION: "${{ inputs.on_missing_permission }}",
-        },
-        run: PREFLIGHT_EXPECTED_RUN[REUSABLE],
-      },
-      {
-        if: "steps.freshness.outputs.moved == 'false'",
-        uses: "Vivswan/github-settings-as-code@sha",
-        with: {
-          token: TOKEN,
-          mode: MODE,
-          repository: "${{ github.repository }}",
-          "settings-file": "${{ runner.temp }}/merged-settings.yml",
-          "on-missing-permission": "${{ inputs.on_missing_permission }}",
-          "required-sections": "${{ inputs.required_sections }}",
-          sections: "${{ inputs.sections }}",
-          "api-version": "${{ inputs.api_version }}",
-        },
-      },
-    ],
-  });
   const judged = (rel: string, job: Job) =>
     labelPreflightJobMismatches(rel, "apply", job)
       .mismatches.map((m) => `${m.expected} => ${m.got}`)
       .join("\n");
   const env = (job: Job) => job.steps[0].env as Record<string, string>;
 
-  test("the landed shapes judge clean (positive control)", () => {
+  test("the landed shape judges clean (positive control)", () => {
     expect(labelPreflightJobMismatches(OPERATOR, "apply", operatorJob())).toEqual({
-      applies: 1,
-      mismatches: [],
-    });
-    expect(labelPreflightJobMismatches(REUSABLE, "apply", reusableJob())).toEqual({
       applies: 1,
       mismatches: [],
     });
@@ -2791,12 +2755,12 @@ describe("labelPreflightJobMismatches", () => {
   });
 
   test("an extra --sections flag fires the argument allowlist", () => {
-    const job = reusableJob();
-    job.steps[0].run = PREFLIGHT_EXPECTED_RUN[REUSABLE].replace(
+    const job = operatorJob();
+    job.steps[0].run = PREFLIGHT_EXPECTED_RUN[OPERATOR].replace(
       '--mode "$MODE"',
       '--sections issues --mode "$MODE"',
     );
-    expect(judged(REUSABLE, job)).toContain("argument lists");
+    expect(judged(OPERATOR, job)).toContain("argument lists");
   });
 
   // The suite's OWN copies of the census and allowlist tables, asserted
@@ -2813,36 +2777,15 @@ describe("labelPreflightJobMismatches", () => {
     "private-report": { literal: "issue" },
     "on-missing-permission": { literal: "fail" },
   } as const;
-  const REUSABLE_CENSUS = {
-    token: { parity: "GH_TOKEN", value: TOKEN },
-    mode: { parity: "MODE", value: MODE },
-    repository: { literal: "${{ github.repository }}" },
-    "settings-file": { pinnedElsewhere: true },
-    "on-missing-permission": {
-      parity: "ON_MISSING_PERMISSION",
-      value: "${{ inputs.on_missing_permission }}",
-    },
-    "required-sections": {
-      parity: "REQUIRED_SECTIONS",
-      value: "${{ inputs.required_sections }}",
-    },
-    sections: { parity: "SECTIONS", value: "${{ inputs.sections }}" },
-    "api-version": { literal: "${{ inputs.api_version }}" },
-  } as const;
 
   test("the exported census and allowlist tables equal the suite's copies", () => {
-    expect(PREFLIGHT_APPLY_WITH).toEqual({
-      [OPERATOR]: OPERATOR_CENSUS,
-      [REUSABLE]: REUSABLE_CENSUS,
-    });
+    expect(PREFLIGHT_APPLY_WITH).toEqual({ [OPERATOR]: OPERATOR_CENSUS });
     expect([...PREFLIGHT_FORBIDDEN_RUN_TOKENS]).toEqual(FORBIDDEN_TOKENS);
     expect(PREFLIGHT_STEP_KEYS).toEqual({
       [OPERATOR]: new Set(["name", "id", "if", "env", "run"]),
-      [REUSABLE]: new Set(["name", "if", "env", "run"]),
     });
     expect(PREFLIGHT_JOB_ENV_KEYS).toEqual({
       [OPERATOR]: new Set(["HIDE_DETAILS", "SETTINGS_REPORT_TITLE"]),
-      [REUSABLE]: new Set<string>([]),
     });
     expect(PREFLIGHT_APPLY_JOB_KEYS).toEqual({
       [OPERATOR]: new Set([
@@ -2855,17 +2798,13 @@ describe("labelPreflightJobMismatches", () => {
         "timeout-minutes",
         "steps",
       ]),
-      [REUSABLE]: new Set(["runs-on", "timeout-minutes", "steps"]),
     });
     expect(PREFLIGHT_APPLY_RUNS_ON).toBe("ubuntu-latest");
   });
 
   // One mutation test per census entry and per forbidden token, driven
   // from the suite-side copies above.
-  const CENSUS_CASES = [
-    [OPERATOR, operatorJob, OPERATOR_CENSUS, 2],
-    [REUSABLE, reusableJob, REUSABLE_CENSUS, 1],
-  ] as const;
+  const CENSUS_CASES = [[OPERATOR, operatorJob, OPERATOR_CENSUS, 2]] as const;
   for (const [rel, build, census, applyIndex] of CENSUS_CASES) {
     const applyWith = (job: Job) => job.steps[applyIndex].with as Record<string, string>;
     for (const [key, expectation] of Object.entries(census) as [
@@ -2917,9 +2856,9 @@ describe("labelPreflightJobMismatches", () => {
   });
 
   test("a shell: key fires the step-key allowlist (`shell: true {0}` never runs the script)", () => {
-    const job = reusableJob();
+    const job = operatorJob();
     job.steps[0].shell = "true {0}";
-    expect(judged(REUSABLE, job)).toContain("pinned step keys");
+    expect(judged(OPERATOR, job)).toContain("pinned step keys");
   });
 
   test("working-directory and continue-on-error are the same rerouting class", () => {
@@ -2932,9 +2871,9 @@ describe("labelPreflightJobMismatches", () => {
   });
 
   test("an env var outside the mirrored census fires the env-key allowlist (BASH_ENV class)", () => {
-    const job = reusableJob();
+    const job = operatorJob();
     env(job).BASH_ENV = "evil.sh";
-    expect(judged(REUSABLE, job)).toContain("mirrored env keys");
+    expect(judged(OPERATOR, job)).toContain("mirrored env keys");
   });
 
   test("a job-level defaults: fires (defaults.run.shell reroutes every run step)", () => {
@@ -2971,15 +2910,15 @@ describe("labelPreflightJobMismatches", () => {
   test("a container: or services: job key fires the execution-context census", () => {
     // A container image's env (BASH_ENV again) and PATH arrive under
     // every step-level pin's sight, so the job's keys are allowlisted.
-    const contained = { ...reusableJob(), container: { image: "evil:latest" } };
-    expect(judged(REUSABLE, contained)).toContain("pinned job keys");
+    const contained = { ...operatorJob(), container: { image: "evil:latest" } };
+    expect(judged(OPERATOR, contained)).toContain("pinned job keys");
     const serviced = { ...operatorJob(), services: { db: { image: "evil:latest" } } };
     expect(judged(OPERATOR, serviced)).toContain("pinned job keys");
   });
 
   test("a drifted or missing runs-on fires the hosted-runner pin", () => {
-    const selfHosted = { ...reusableJob(), "runs-on": "self-hosted" };
-    expect(judged(REUSABLE, selfHosted)).toContain("runs-on: ubuntu-latest");
+    const selfHosted = { ...operatorJob(), "runs-on": "self-hosted" };
+    expect(judged(OPERATOR, selfHosted)).toContain("runs-on: ubuntu-latest");
     const { "runs-on": _, ...rest } = operatorJob();
     expect(judged(OPERATOR, rest as Job)).toContain("no runs-on");
   });
@@ -3018,24 +2957,21 @@ describe("labelPreflightJobMismatches", () => {
   });
 
   test("a second preflight step fires exactly-one", () => {
-    const job = reusableJob();
-    job.steps.unshift({
-      if: "steps.freshness.outputs.moved == 'false'",
-      run: PREFLIGHT_EXPECTED_RUN[REUSABLE],
-    });
-    expect(judged(REUSABLE, job)).toContain("exactly one label-preflight step");
+    const job = operatorJob();
+    job.steps.unshift({ ...operatorJob().steps[0] });
+    expect(judged(OPERATOR, job)).toContain("exactly one label-preflight step");
   });
 
   test("a preflight after the apply fires ordering", () => {
-    const job = reusableJob();
+    const job = operatorJob();
     job.steps.reverse();
-    expect(judged(REUSABLE, job)).toContain("BEFORE the settings apply");
+    expect(judged(OPERATOR, job)).toContain("BEFORE the settings apply");
   });
 
   test("a drifted condition fires the trim-normalized equality", () => {
-    const job = reusableJob();
+    const job = operatorJob();
     job.steps[0].if = "steps.render.outputs.skipped == 'false'";
-    expect(judged(REUSABLE, job)).toContain("identical (after trimming) to the apply step's");
+    expect(judged(OPERATOR, job)).toContain("identical (after trimming) to the apply step's");
   });
 
   test("an unwrapped operator invocation fires the run_hidden requirement", () => {
@@ -3054,15 +2990,15 @@ describe("labelPreflightJobMismatches", () => {
   });
 
   test("a second apply step fires exactly-one (a later apply would sit outside the guarded gap)", () => {
-    const job = reusableJob();
-    job.steps.push({ run: "echo tamper" }, { ...reusableJob().steps[1] });
-    expect(judged(REUSABLE, job)).toContain("exactly one settings apply step");
+    const job = operatorJob();
+    job.steps.push({ run: "echo tamper" }, { ...operatorJob().steps[2] });
+    expect(judged(OPERATOR, job)).toContain("exactly one settings apply step");
   });
 
   test("an intervening step between preflight and apply fires the gap pin", () => {
-    const job = reusableJob();
+    const job = operatorJob();
     job.steps.splice(1, 0, { run: "echo tamper" });
-    expect(judged(REUSABLE, job)).toContain("between the preflight and the apply");
+    expect(judged(OPERATOR, job)).toContain("between the preflight and the apply");
   });
 
   test("a drifted or over-keyed gap step fires the gap pin", () => {

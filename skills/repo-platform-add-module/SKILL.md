@@ -140,7 +140,7 @@ Deselecting works the same way: remove the name from `modules:` in `.repo-platfo
 - Dropping `custom-license` is guarded: the sync FAILS with instructions while the repo's own license file still exists, because the incoming fleet LICENSE.md cannot be reconciled with it. Delete the old license in the same commit that removes the module (git history records prior licensing; third-party notices go below the fleet LICENSE.md's END marker), then re-run the sync.
 - Label cleanup is automatic: the baseline stops declaring the dropped module's labels and the next apply deletes them from the repo. If you kept the module's starter workflow running, declare its tracking label in the repo's own `.github/settings.yml` first, or the apply strips the label off the open tracking issue.
 
-A module the TEMPLATE retired or folded into its base (`agents`, `auto-assign`, and `settings-sync` became base content every render carries) is handled by a migration rung: the sync rewrites `.repo-platform.yml` to drop the name before selecting modules and says so in the PR body (repo-platform's docs/migrations.md); a hand edit is only needed when the rung's note asks for one.
+A module the TEMPLATE retired or folded into its base (`agents`, `auto-assign`, and `settings-sync` were folded into the base; the settings-sync workflow was later retired outright, leaving the `.github/settings.yml` starter) is handled by a migration rung: the sync rewrites `.repo-platform.yml` to drop the name before selecting modules and says so in the PR body (repo-platform's docs/migrations.md); a hand edit is only needed when the rung's note asks for one.
 
 ## Verify
 

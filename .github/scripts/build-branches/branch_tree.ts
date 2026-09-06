@@ -100,15 +100,12 @@ export function canonicalize(path: string): string {
  *  reusable workflow a RENDERED workflow calls `@build`: the rendered
  *  ci.yml calls fleet-ci.yml (whose codeql job calls ./reusable-codeql.yml,
  *  resolving at fleet-ci's own ref - this branch), pages.yml and
- *  docs-site.yml call reusable-pages.yml, auto-assign.yml calls the
- *  reusable-auto-assign pair, and settings-sync.yml calls
- *  reusable-apply-settings.yml (which two-hops its scripts checkout to the
- *  tip's stamped source commit - its own header). A reusable-workflow
- *  `uses:` fetches the FILE at the named ref, so a build branch missing
- *  one 404s every fleet run that calls it. */
+ *  docs-site.yml call reusable-pages.yml, and auto-assign.yml calls the
+ *  reusable-auto-assign pair. A reusable-workflow `uses:` fetches the FILE
+ *  at the named ref, so a build branch missing one 404s every fleet run
+ *  that calls it. */
 export const FLEET_WORKFLOWS = [
   "fleet-ci.yml",
-  "reusable-apply-settings.yml",
   "reusable-auto-assign-alerts.yml",
   "reusable-auto-assign.yml",
   "reusable-codeql.yml",

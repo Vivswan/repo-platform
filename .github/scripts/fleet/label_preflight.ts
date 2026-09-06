@@ -27,9 +27,10 @@
 //     [--on-missing-permission fail|warn]
 //
 // --target-dir reads the reference files from a local checkout (the
-// self-apply, whose token has no Contents scope); --ref fetches them from
-// the target via gh api (env: GH_TOKEN) at the SAME pinned commit the
-// merged document's facts were read at. The optional flags mirror the
+// operator row of settings-repos.yml, whose facts came from its own
+// working tree); --ref fetches them from the target via gh api (env:
+// GH_TOKEN) at the SAME pinned commit the merged document's facts were
+// read at. The optional flags mirror the
 // ACTION's inputs so the preflight is never stricter OR looser than the
 // apply it guards: --sections stands the preflight down when a non-empty
 // allowlist does not select `labels` (that apply reconciles none); --mode

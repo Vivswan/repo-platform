@@ -601,8 +601,6 @@ export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/dependabot-bun-lockfile.yml": "pushes to THIS repository's dependabot PRs",
   ".github/workflows/refresh-gitignore.yml": "opens PRs in THIS repository",
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
-  ".github/workflows/reusable-apply-settings.yml":
-    "workflow_call-only; a managed repo's self-apply hands it its own PAT",
   ".github/workflows/reusable-template-sync.yml":
     "workflow_call-only; sync-repos.yml hands it the secret per target",
 };
@@ -1426,12 +1424,6 @@ export const PREFLIGHT_EXPECTED_RUN: Record<string, string> = {
     '    --merged "$RUNNER_TEMP/merged-settings.yml" \\\n' +
     '    --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"\n' +
     "fi\n",
-  ".github/workflows/reusable-apply-settings.yml":
-    "bun platform/.github/scripts/fleet/label_preflight.ts \\\n" +
-    '  --merged "$RUNNER_TEMP/merged-settings.yml" \\\n' +
-    '  --repo "$GITHUB_REPOSITORY" --target-dir . \\\n' +
-    '  --sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" \\\n' +
-    '  --mode "$MODE" --on-missing-permission "$ON_MISSING_PERMISSION"\n',
 };
 
 // The exact argument lists the invocations may carry, whitespace-
@@ -1446,9 +1438,6 @@ const PREFLIGHT_EXPECTED_ARGS: Record<string, string[]> = {
     '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"',
     '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"',
   ],
-  ".github/workflows/reusable-apply-settings.yml": [
-    '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$GITHUB_REPOSITORY" --target-dir . --sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" --mode "$MODE" --on-missing-permission "$ON_MISSING_PERMISSION"',
-  ],
 };
 
 /** One apply input's expectation in the census below: mirrored from a
@@ -1458,7 +1447,7 @@ const PREFLIGHT_EXPECTED_ARGS: Record<string, string[]> = {
  *  step's with, e.g. via github.action, so the census pins the one
  *  context-stable expression both sides must carry), a fixed literal,
  *  or presence-only because another rule owns the value
- *  (settings-apply-merged-input pins settings-file for both files -
+ *  (settings-apply-merged-input pins settings-file for the operator workflow -
  *  re-pinning it here would double-report one edit). */
 export type ApplyWithExpectation =
   | { parity: string; value: string }
@@ -1489,22 +1478,6 @@ export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpect
     "private-report": { literal: "issue" },
     "on-missing-permission": { literal: "fail" },
   },
-  ".github/workflows/reusable-apply-settings.yml": {
-    token: { parity: "GH_TOKEN", value: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
-    mode: { parity: "MODE", value: "${{ inputs.check_only && 'check' || 'apply' }}" },
-    repository: { literal: "${{ github.repository }}" },
-    "settings-file": { pinnedElsewhere: true },
-    "on-missing-permission": {
-      parity: "ON_MISSING_PERMISSION",
-      value: "${{ inputs.on_missing_permission }}",
-    },
-    "required-sections": {
-      parity: "REQUIRED_SECTIONS",
-      value: "${{ inputs.required_sections }}",
-    },
-    sections: { parity: "SECTIONS", value: "${{ inputs.sections }}" },
-    "api-version": { literal: "${{ inputs.api_version }}" },
-  },
 };
 
 /** The mirrored env names per file - the preflight's env-key allowlist. */
@@ -1522,7 +1495,6 @@ function preflightParityEnvNames(rel: string): Set<string> {
 // the same injection the step-level allowlist closes.
 export const PREFLIGHT_JOB_ENV_KEYS: Record<string, ReadonlySet<string>> = {
   ".github/workflows/settings-repos.yml": new Set(["HIDE_DETAILS", "SETTINGS_REPORT_TITLE"]),
-  ".github/workflows/reusable-apply-settings.yml": new Set([]),
 };
 
 // The job-level EXECUTION-CONTEXT census (decision: a rule, not an
@@ -1550,16 +1522,15 @@ export const PREFLIGHT_APPLY_JOB_KEYS: Record<string, ReadonlySet<string>> = {
     "timeout-minutes",
     "steps",
   ]),
-  ".github/workflows/reusable-apply-settings.yml": new Set(["runs-on", "timeout-minutes", "steps"]),
 };
 
-/** The one hosted runner the apply jobs may request. */
+/** The one hosted runner the apply job may request. */
 export const PREFLIGHT_APPLY_RUNS_ON = "ubuntu-latest";
 
 // The persisted-environment class: a PRIOR step's run block can write
 // `BASH_ENV=<hook> >> $GITHUB_ENV` (bash sources the hook before the
 // pinned run block executes - `exit 0` there skips the guard green) or
-// prepend a counterfeit bun via GITHUB_PATH. No landed step in either
+// prepend a counterfeit bun via GITHUB_PATH. No landed step in the
 // apply job touches these, so ANY mention in a run block mismatches.
 // Two recorded residuals bound what a textual scan can prove: the
 // scripts those steps call are this repository's own reviewed,
@@ -1575,8 +1546,8 @@ export const PREFLIGHT_FORBIDDEN_RUN_TOKENS = ["GITHUB_ENV", "BASH_ENV", "GITHUB
 // the merged document staying untouched until the apply reads it, so
 // the gap is part of the guarded shape (an intervening step could
 // rewrite $RUNNER_TEMP/merged-settings.yml after validation). The
-// operator's gap is exactly the stood-down notice
-// settings-hidden-step-notices requires; the reusable's is empty.
+// gap is exactly the stood-down notice settings-hidden-step-notices
+// requires.
 const PREFLIGHT_GAP_STEPS: Record<string, { if: string; run: string }[]> = {
   ".github/workflows/settings-repos.yml": [
     {
@@ -1584,7 +1555,6 @@ const PREFLIGHT_GAP_STEPS: Record<string, { if: string; run: string }[]> = {
       run: 'echo "::notice::label preflight stood down for ${{ matrix.repo }}: ${{ steps.labels.outputs.reason }}"\n',
     },
   ],
-  ".github/workflows/reusable-apply-settings.yml": [],
 };
 
 // Step keys the preflight may carry - an ALLOWLIST, because the
@@ -1594,7 +1564,6 @@ const PREFLIGHT_GAP_STEPS: Record<string, { if: string; run: string }[]> = {
 // guard the same way while the byte-pinned run block reads intact.
 export const PREFLIGHT_STEP_KEYS: Record<string, ReadonlySet<string>> = {
   ".github/workflows/settings-repos.yml": new Set(["name", "id", "if", "env", "run"]),
-  ".github/workflows/reusable-apply-settings.yml": new Set(["name", "if", "env", "run"]),
 };
 
 /** The whole per-job judgment for the settings-label-preflight rule,
@@ -1810,7 +1779,7 @@ export function labelPreflightJobMismatches(
     // TEXT parity only, deliberately: this check proves the guard and
     // the apply share ONE condition; the condition's pinned VALUE is the
     // sibling settings-apply-skip-gate rule's job (it pins every apply
-    // step's if: in both files), so a JOINT drift of both sides fires
+    // step's if: in the operator workflow), so a JOINT drift of both sides fires
     // there, not here - re-pinning the value here would double-report
     // every legitimate condition edit. That split is load-bearing
     // defense in depth: retiring the sibling rule (its roster entry
@@ -6219,32 +6188,6 @@ const rules: Rule[] = [
   },
 
   {
-    name: "self-apply-fact-source",
-    run: () => {
-      // The self-apply's REPO_PLATFORM_TOKEN grant is Administration and
-      // Issues only - no Contents - so reading the caller's
-      // .repo-platform.yml or .github/.copier-answers.yml over gh api fails on
-      // every private repository before anything renders. The caller is
-      // already checked out, so the render must take --target-dir and
-      // touch no network. The central run is the opposite case: it holds
-      // the fleet PAT and has no checkout of the target, so it fetches.
-      const mismatches: Mismatch[] = [];
-      const selfApply = read(".github/workflows/reusable-apply-settings.yml").replace(
-        /\\[ \t]*\n\s*/g,
-        " ",
-      );
-      if (!/render_managed_settings\.ts[^\n]*--target-dir/.test(selfApply)) {
-        mismatches.push({
-          file: ".github/workflows/reusable-apply-settings.yml",
-          expected: "the render reads the caller's checkout (--target-dir), not gh api",
-          got: "no --target-dir on the render",
-        });
-      }
-      return mismatches;
-    },
-  },
-
-  {
     name: "settings-hide-details",
     run: () => {
       // The layer render and the merge run BEFORE the settings action, so
@@ -6395,10 +6338,8 @@ const rules: Rule[] = [
           "steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'",
         apply: "steps.freshness.outputs.moved == 'false'",
       };
-      for (const rel of [
-        ".github/workflows/settings-repos.yml",
-        ".github/workflows/reusable-apply-settings.yml",
-      ]) {
+      {
+        const rel = ".github/workflows/settings-repos.yml";
         const steps = workflowSteps(rel);
         for (const [id, condition] of Object.entries(expected)) {
           // EVERY apply step, not the first: a second, ungated
@@ -6428,7 +6369,7 @@ const rules: Rule[] = [
   },
 
   {
-    // Every workflow, not only the settings pair: a condition that tests
+    // Every workflow, not only settings-repos.yml: a condition that tests
     // a step output negatively passes when the step never ran, wherever
     // the guarded step is a push, a PR, or an issue write.
     name: "step-output-gates",
@@ -6443,23 +6384,6 @@ const rules: Rule[] = [
     name: "pins-and-identities",
     run: () => {
       const mismatches: Mismatch[] = [];
-
-      const settingsActionRef = (rel: string) =>
-        mustMatch(
-          read(rel),
-          /\/github-settings-as-code@(\S+)/,
-          rel,
-          "github-settings-as-code pin",
-        )[1];
-      const applyRef = settingsActionRef(".github/workflows/settings-repos.yml");
-      const reusableRef = settingsActionRef(".github/workflows/reusable-apply-settings.yml");
-      if (applyRef !== reusableRef) {
-        mismatches.push({
-          file: ".github/workflows/reusable-apply-settings.yml",
-          expected: `github-settings-as-code@${applyRef} (settings-repos.yml)`,
-          got: `github-settings-as-code@${reusableRef}`,
-        });
-      }
 
       // No git-identity arm: every committer is TypeScript and imports
       // shared/git_identity.ts, so the import is the guarantee.
@@ -6575,9 +6499,9 @@ const rules: Rule[] = [
     // stream) must validate exactly the shape the fuzz-issue action
     // enforces, and every later stream's validator must carry the
     // case-insensitive cross-answer collision clause against each earlier
-    // answer - the validator is the ONLY collision boundary for
-    // the repositories' self-apply (the fleet preflight covers central ones), so
-    // deleting the clause must fail here.
+    // answer - the validator is the collision boundary at generation
+    // time (the fleet preflight covers the applies), so deleting the
+    // clause must fail here.
     name: "tracking-label-regex",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -7119,13 +7043,13 @@ const rules: Rule[] = [
   },
 
   {
-    // Both apply paths must hand github-settings-as-code the MERGED
-    // document. A one-line regression to managed-settings.yml ships a
-    // baseline-only apply - the exact document the merge pipeline exists
-    // to never produce, because the action's label reconciliation would
-    // delete every label the repository declares for itself - and every
-    // other gate stays green while it does. Self-contained on purpose:
-    // both workflows are parsed right here, leaning on no shared workflow
+    // The apply must hand github-settings-as-code the MERGED document. A
+    // one-line regression to managed-settings.yml ships a baseline-only
+    // apply - the exact document the merge pipeline exists to never
+    // produce, because the action's label reconciliation would delete
+    // every label the repository declares for itself - and every other
+    // gate stays green while it does. Self-contained on purpose: the
+    // workflow is parsed right here, leaning on no shared workflow
     // helpers.
     name: "settings-apply-merged-input",
     run: () => {
@@ -7135,10 +7059,8 @@ const rules: Rule[] = [
         typeof value === "object" && value !== null && !Array.isArray(value)
           ? (value as Record<string, unknown>)
           : {};
-      for (const rel of [
-        ".github/workflows/settings-repos.yml",
-        ".github/workflows/reusable-apply-settings.yml",
-      ]) {
+      {
+        const rel = ".github/workflows/settings-repos.yml";
         const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
         const applySteps: Record<string, unknown>[] = [];
         for (const job of Object.values(jobs)) {
@@ -7331,8 +7253,8 @@ const rules: Rule[] = [
   },
 
   {
-    // Referenced-label preflight: the FAIL-CLOSED guard both apply paths
-    // run before github-settings-as-code's reconciliation DELETES labels
+    // Referenced-label preflight: the FAIL-CLOSED guard the apply runs
+    // before github-settings-as-code's reconciliation DELETES labels
     // (fleet/label_preflight.ts). Dropping, reordering, softening, or
     // re-aiming the step is silent - the apply stays green while
     // referenced-label deletions go unchecked, or checked against the
@@ -7365,11 +7287,10 @@ const rules: Rule[] = [
     // unit-tested against the spoof shapes a live-file mutation cannot
     // isolate.
     name: "settings-label-preflight",
-    run: () =>
-      [
-        ".github/workflows/settings-repos.yml",
-        ".github/workflows/reusable-apply-settings.yml",
-      ].flatMap((rel) => labelPreflightFileMismatches(rel, asRecord(parseYaml(read(rel)), rel))),
+    run: () => {
+      const rel = ".github/workflows/settings-repos.yml";
+      return labelPreflightFileMismatches(rel, asRecord(parseYaml(read(rel)), rel));
+    },
   },
 
   {
@@ -7583,7 +7504,6 @@ export const RULE_ROSTER = [
   "pr-title-workflow",
   "dependabot-label-tuples",
   "settings-read-pin",
-  "self-apply-fact-source",
   "settings-hide-details",
   "settings-apply-skip-gate",
   "step-output-gates",
