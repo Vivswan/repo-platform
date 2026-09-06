@@ -2179,31 +2179,44 @@ ${extra}      shell: ${shell}
       [
         "a clearing preceded by a set -e line",
         clearingStep(`|\n        set -euo pipefail\n        ${REMOVAL}`),
-        [noClearing],
+        [noClearing, outsideMismatch("set -euo pipefail", "Clear")],
       ],
       [
         "a clearing whose operands touch (bash joins them into one word)",
         clearingStep(`${REMOVAL}"\${{ runner.temp }}/other"`),
-        [noClearing],
+        [noClearing, outsideMismatch(`${REMOVAL}"\${{ runner.temp }}/other"`, "Clear")],
       ],
       [
         "a clearing whose paths are not each quoted",
         clearingStep('/bin/rm -rf "${{ runner.temp }}/aligned-validator" ${{ runner.temp }}/other'),
-        [noClearing],
+        [
+          noClearing,
+          outsideMismatch(
+            '/bin/rm -rf "${{ runner.temp }}/aligned-validator" ${{ runner.temp }}/other',
+            "Clear",
+          ),
+        ],
       ],
       // Every operand is judged, not only the one covering the pin: a
-      // second operand the shell expands or a caller supplies is refused.
-      ...[
-        '"$HOME/x"',
-        '"$(echo /)"',
-        '"`echo /`"',
-        '"${{ inputs.cleanup-path }}"',
-        '"${{ runner.temp }}/../work"',
-        '"/tmp/other"',
-      ].map((operand): (typeof cases)[number] => [
+      // second operand the shell expands or a caller supplies is refused
+      // (the grammar refuses a substitution or a caller-shaped expression
+      // on its own account too).
+      ...(
+        [
+          ['"$HOME/x"', []],
+          ['"$(echo /)"', [outsideMismatch(`${REMOVAL} "$(echo /)"`, "Clear")]],
+          ['"`echo /`"', [outsideMismatch(`${REMOVAL} "\`echo /\`"`, "Clear")]],
+          [
+            '"${{ inputs.cleanup-path }}"',
+            [expressionMismatch("${{ inputs.cleanup-path }}", "Clear")],
+          ],
+          ['"${{ runner.temp }}/../work"', []],
+          ['"/tmp/other"', []],
+        ] as [string, ReturnType<typeof actionsBunGuardMismatches>][]
+      ).map(([operand, grammar]): (typeof cases)[number] => [
         `a clearing of the root beside the operand ${operand}`,
         clearingStep(`${REMOVAL} ${operand}`),
-        [noClearing],
+        [noClearing, ...grammar],
       ]),
       [
         "a required clearing step allowed to fail (its success is still required)",
