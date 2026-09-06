@@ -600,7 +600,7 @@ describe("toolchain pins", () => {
     expect(actionSetsUpBun("runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n")).toBe(false);
   });
 
-  test("bunPinnedActionDirs finds setup-bun actions (nested ones included, commented uses excused) and the declared script directories", () => {
+  test("bunPinnedActionDirs finds setup-bun actions (nested ones included, commented uses excused); a manifest-free directory is never one", () => {
     const dir = temp.dir("action-pins-");
     const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
     mkdirSync(join(dir, "typo"));
@@ -618,26 +618,17 @@ describe("toolchain pins", () => {
     // Never scanned: installed dependencies.
     mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
     writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
-    // A script directory: no manifest, pinned by declaration.
-    mkdirSync(join(dir, "validator"));
-    writeFileSync(join(dir, "validator", "run.ts"), "export {};\n");
-    expect(bunPinnedActionDirs(dir, new Set(["validator"]))).toEqual([
+    // A script directory with no manifest: not an action, so not pinned.
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(join(dir, "scripts", "run.ts"), "export {};\n");
+    expect(bunPinnedActionDirs(dir)).toEqual([
       "actions/pages",
       "actions/pages/links",
       "actions/typo",
-      "actions/validator",
     ]);
-    // A declaration is held to the tree: the directory must exist, and
-    // must not also be an action.
-    expect(() => bunPinnedActionDirs(dir, new Set(["gone"]))).toThrow(
-      "actions/gone is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) but does not exist",
-    );
-    expect(() => bunPinnedActionDirs(dir, new Set(["typo"]))).toThrow(
-      "actions/typo is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) yet carries an action.yml",
-    );
   });
 
-  test("strayActionPinFiles flags a .bun-version whose directory neither sets up bun nor is a declared script directory", () => {
+  test("strayActionPinFiles flags a .bun-version whose directory sets up no bun", () => {
     const dir = temp.dir("action-strays-");
     const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
     mkdirSync(join(dir, "typo"));
@@ -647,14 +638,13 @@ describe("toolchain pins", () => {
     mkdirSync(join(dir, "gate"));
     writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
     writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
-    // A manifest-free directory: stray unless declared.
-    mkdirSync(join(dir, "validator"));
-    writeFileSync(join(dir, "validator", ".bun-version"), "1.4.0\n");
-    expect(strayActionPinFiles(dir, new Set())).toEqual([
+    // A manifest-free directory: stray, whatever it holds.
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(join(dir, "scripts", ".bun-version"), "1.4.0\n");
+    expect(strayActionPinFiles(dir)).toEqual([
       "actions/gate/.bun-version",
-      "actions/validator/.bun-version",
+      "actions/scripts/.bun-version",
     ]);
-    expect(strayActionPinFiles(dir, new Set(["validator"]))).toEqual(["actions/gate/.bun-version"]);
   });
 });
 

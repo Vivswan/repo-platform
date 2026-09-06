@@ -52,6 +52,7 @@ import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { RUNG_FILE_RE, RUNG_ID_BODY } from "../.github/scripts/sync/run_migrations.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
+import { bunLockDirs } from "./bootstrap.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
 import { ANCHOR_RE } from "./compose/splice.ts";
 import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
@@ -1129,9 +1130,8 @@ function smokeRowModules(row: Record<string, unknown>): string[] {
 }
 
 /** The ci.yml typecheck job's loop: keyed on tsconfig.json so a new
- *  action, or a package nested one level inside one, joins without an edit. */
-export const TYPECHECK_TSCONFIG_LOOP =
-  "for tsconfig in tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json";
+ *  action joins without an edit. */
+export const TYPECHECK_TSCONFIG_LOOP = "for tsconfig in tsconfig.json actions/*/tsconfig.json";
 
 export interface BunDirsInputs {
   /** Directories committing a bun.lock, "." for the root. */
@@ -1187,21 +1187,15 @@ export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
   return mismatches;
 }
 
-/** Directories under actions/ carrying `file`, at any depth outside the
- *  published tree's exclusions, as sorted repo-relative paths: a package can
- *  sit nested inside an action (the report action's validator). */
+/** The action directories carrying `file`, as sorted repo-relative paths:
+ *  every package under actions/ sits at the action root (the ci.yml
+ *  typecheck glob and the root postinstall loop key on that level). */
 function actionDirsCarrying(file: string): string[] {
-  const dirs: string[] = [];
-  const visit = (rel: string): void => {
-    for (const entry of readdirSync(join(REPO_ROOT, rel), { withFileTypes: true })) {
-      if (!entry.isDirectory() || EXCLUDED_ACTION_DIRS.has(entry.name)) continue;
-      const sub = `${rel}/${entry.name}`;
-      if (existsSync(join(REPO_ROOT, sub, file))) dirs.push(sub);
-      visit(sub);
-    }
-  };
-  visit("actions");
-  return dirs.sort();
+  return readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !EXCLUDED_ACTION_DIRS.has(entry.name))
+    .map((entry) => `actions/${entry.name}`)
+    .filter((dir) => existsSync(join(REPO_ROOT, dir, file)))
+    .sort();
 }
 
 /** All non-directory paths below `rel` (repo-relative), sorted; skips
@@ -4993,6 +4987,10 @@ const rules: Rule[] = [
   },
 
   {
+    // The lockfile roster is the bootstrap's own (recursive under actions/):
+    // the other homes discover one level down, so a package nested inside
+    // an action installs locally yet fails here, never silently escaping
+    // dependabot and the typecheck glob.
     name: "bun-dirs",
     run: () => {
       const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
@@ -5000,7 +4998,7 @@ const rules: Rule[] = [
       const scripts = packageScripts();
       return [
         ...bunDirsMismatches({
-          lockDirs: [".", ...actionDirsCarrying("bun.lock")],
+          lockDirs: bunLockDirs(REPO_ROOT),
           dependabotBunDirs: (dependabot.updates as Record<string, unknown>[])
             .filter((entry) => entry["package-ecosystem"] === "bun")
             .map((entry) => String(entry.directory).replace(/^\//, "") || "."),

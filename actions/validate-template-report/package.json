@@ -1,7 +1,10 @@
 {
   "name": "validate-template-report",
   "private": true,
-  "description": "Dependency manifest for the validate-template-report action (dev-only: the scripts carry no runtime dependencies).",
+  "description": "Dependency manifest for the validate-template-report action: yaml is the validator's runtime dependency (it parses the workflow and registration files); the report scripts under src/ carry none.",
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"

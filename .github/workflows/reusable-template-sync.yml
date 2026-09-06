@@ -349,7 +349,7 @@ jobs:
       - name: Validate the updated tree
         id: validate
         run: |
-          (cd validator/actions/validate-template-report/validator && bun install --frozen-lockfile --silent)
+          (cd validator/actions/validate-template-report && bun install --frozen-lockfile --silent)
           if bun .github/scripts/sync/run_hidden.ts "template validation" -- \
             bun validator/actions/validate-template-report/validator/validate_generated_files.ts target; then
             echo "result=ok" >> "$GITHUB_OUTPUT"

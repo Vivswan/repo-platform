@@ -25,9 +25,9 @@
 //   derived from the zod schema in scripts/lib/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
-// - actions/<dir>/.bun-version for every action that sets up bun and every
-//   PINNED_SCRIPT_DIRS entry: WHOLE dotfiles carrying the manifests' bun
-//   pin, so the actions never ride the CALLER's bun resolution.
+// - actions/<dir>/.bun-version for every action that sets up bun: WHOLE
+//   dotfiles carrying the manifests' bun pin, so the actions never ride the
+//   CALLER's bun resolution.
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
@@ -603,20 +603,10 @@ export function actionSetsUpBun(text: string): boolean {
   return actionSteps(text).some(usesSetupBun);
 }
 
-/** Script directories under actions/ (paths relative to it) run by path on
- *  a pinned bun, never resolved as a `uses:` action, so with no action.yml
- *  of their own: each carries the generated .bun-version the actions carry. */
-export const PINNED_SCRIPT_DIRS: ReadonlySet<string> = new Set([
-  "validate-template-report/validator",
-]);
-
 /** Every directory under actions/ carrying a generated .bun-version, sorted:
  *  each whose action.yml sets up bun (EXCLUDED_DIRS bounds the walk as
- *  publication does) plus the declared script directories (manifest-free). */
-export function bunPinnedActionDirs(
-  actionsDir: string,
-  scriptDirs: ReadonlySet<string> = PINNED_SCRIPT_DIRS,
-): string[] {
+ *  publication does). */
+export function bunPinnedActionDirs(actionsDir: string): string[] {
   const dirs: string[] = [];
   const walk = (dir: string, rel: string) => {
     const manifest = join(dir, "action.yml");
@@ -627,32 +617,15 @@ export function bunPinnedActionDirs(
     }
   };
   walk(actionsDir, "actions");
-  for (const name of scriptDirs) {
-    if (!existsSync(join(actionsDir, name))) {
-      throw new Error(
-        `actions/${name} is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) but does not exist`,
-      );
-    }
-    if (existsSync(join(actionsDir, name, "action.yml"))) {
-      throw new Error(
-        `actions/${name} is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) yet carries an action.yml - it is one or the other`,
-      );
-    }
-    dirs.push(`actions/${name}`);
-  }
   return dirs.sort();
 }
 
 /** .bun-version files under actions/ that bunPinnedActionDirs no longer
- *  emits (the action.yml sets up no bun, or is gone and the directory is
- *  not a declared script directory): the generator would silently stop
- *  refreshing them while the stale pin keeps shipping on the build
- *  branch. Returned for the caller to throw on, like strayPinFiles. */
-export function strayActionPinFiles(
-  actionsDir: string,
-  scriptDirs: ReadonlySet<string> = PINNED_SCRIPT_DIRS,
-): string[] {
-  const emitted = new Set(bunPinnedActionDirs(actionsDir, scriptDirs));
+ *  emits (the action.yml sets up no bun, or is gone): the generator would
+ *  silently stop refreshing them while the stale pin keeps shipping on the
+ *  build branch. Returned for the caller to throw on, like strayPinFiles. */
+export function strayActionPinFiles(actionsDir: string): string[] {
+  const emitted = new Set(bunPinnedActionDirs(actionsDir));
   const strays: string[] = [];
   const visit = (dir: string, rel: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -1042,7 +1015,7 @@ function wholeFiles(
         `${dir}/.bun-version`,
         () => pinFileContent(bunToolchainPin(manifests)),
         "its content does not match the bun toolchain pin in templates/bun/module.yml " +
-          "(the composite actions and pinned script directories run on the manifests' bun pin, never the caller's)",
+          "(the composite actions run on the manifests' bun pin, never the caller's)",
       ],
     ),
   ];
@@ -1073,10 +1046,10 @@ function main(): number {
     const actionStrays = strayActionPinFiles(join(REPO_ROOT, "actions"));
     if (actionStrays.length > 0) {
       throw new Error(
-        `stray action .bun-version dotfile(s) whose directory neither sets up bun in an action.yml nor is a declared pinned script directory: ` +
+        `stray action .bun-version dotfile(s) whose directory sets up no bun in an action.yml: ` +
           `${actionStrays.join(", ")} - the generator would stop refreshing them ` +
           "while the stale pin keeps shipping on the build branch; delete the " +
-          "file (or restore the action's setup-bun step, or declare the directory in generate.ts PINNED_SCRIPT_DIRS)",
+          "file (or restore the action's setup-bun step)",
       );
     }
     const inputs: RegionInputs = {

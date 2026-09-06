@@ -194,28 +194,22 @@ describe("copyActions", () => {
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
   });
 
-  test("a package nested inside an action ships whole, its installed dependencies excluded", () => {
-    // The report action carries its validator as a nested package: script,
-    // lockfile and bun pin publish with the action, and the exclusion
-    // filter applies at every depth, not only at the action root.
+  test("an action's subdirectories ship whole, excluded directories filtered at every depth", () => {
+    // The exclusion filter applies wherever an excluded name sits, not only
+    // at the action root: a subdirectory's sources publish, a node_modules
+    // planted inside it does not.
     const root = actionsFixture();
     const nested = join(root, "actions", "check-typography", "validator");
     mkdirSync(join(nested, "node_modules", "yaml"), { recursive: true });
     writeFileSync(join(nested, "run.ts"), "export {};\n");
-    writeFileSync(join(nested, "package.json"), "{}\n");
-    writeFileSync(join(nested, "bun.lock"), "\n");
-    writeFileSync(join(nested, ".bun-version"), "1.4.0\n");
     writeFileSync(join(nested, "node_modules", "yaml", "index.js"), "module.exports={};\n");
     const dest = temp.dir("branch-actions-dest-");
-    expect(copyActions(root, dest)).toBe(8);
+    expect(copyActions(root, dest)).toBe(5);
     expect(listing(join(dest, "actions", "check-typography"))).toEqual([
       "action.yml",
       "bun.lock",
       "lib/helper.ts",
       "package.json",
-      "validator/.bun-version",
-      "validator/bun.lock",
-      "validator/package.json",
       "validator/run.ts",
     ]);
   });
@@ -311,37 +305,39 @@ describe("assembleBranchTree", () => {
     }
   });
 
-  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships nested in the report action", () => {
+  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships inside the report action's one package", () => {
     const actions = actionDirNames(REPO_ROOT);
     const manifestFree = actions.filter(
       (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
     );
     expect(manifestFree).toEqual([SHARED_DIR]);
     // The retired script directory is gone (the report action's presence is
-    // the control); its content ships as the action's validator/ - lockfile
-    // and pin included, no manifest, no dependencies, no tests.
+    // the control); its content ships as the action's validator/, a plain
+    // script directory: the lockfile, pin and manifest sit once at the
+    // action root, and neither dependencies nor tests ship.
     expect(actions).not.toContain("validate-template");
     expect(actions).toContain("validate-template-report");
-    const validator = join(dest, "actions", "validate-template-report", "validator");
+    const report = join(dest, "actions", "validate-template-report");
     expect(
       [
-        "validate_generated_files.ts",
+        "action.yml",
         "bun.lock",
         ".bun-version",
         "package.json",
-        "action.yml",
+        "src/report.ts",
+        "validator/validate_generated_files.ts",
+        "validator/bun.lock",
+        "validator/.bun-version",
+        "validator/package.json",
         "node_modules",
-        `validate_generated_files${TEST_FILE_SUFFIX}`,
-      ].map((name) => existsSync(join(validator, name))),
-    ).toEqual([true, true, true, true, false, false, false]);
+      ].map((name) => existsSync(join(report, name))),
+    ).toEqual([true, true, true, true, true, true, false, false, false, false]);
     expect(walk(join(dest, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX))).toEqual(
       [],
     );
-    // The control: the checkout does carry validator tests for the filter to drop.
+    // The control: the checkout does carry colocated action tests for the filter to drop.
     expect(
-      walk(join(REPO_ROOT, "actions", "validate-template-report", "validator")).filter((path) =>
-        path.endsWith(TEST_FILE_SUFFIX),
-      ),
+      walk(join(REPO_ROOT, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX)),
     ).not.toEqual([]);
   });
 

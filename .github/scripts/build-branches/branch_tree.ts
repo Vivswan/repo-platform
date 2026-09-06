@@ -11,8 +11,7 @@
 //                     copier.yml excludes are stale)
 // - actions/         (the composite actions' sources + dependency manifests,
 //                     node_modules and build output excluded - each action
-//                     installs at its own action_path when it runs, the
-//                     report action's nested validator package included; the
+//                     installs at its own action_path when it runs; the
 //                     actions/shared/ library zone ships with them,
 //                     dependency-free so the tarball stays install-free -
 //                     copier.yml's _tasks and _migrations run the manifest

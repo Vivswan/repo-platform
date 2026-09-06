@@ -1,12 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tempDirs } from "../../../tests/shared/temp_dir.ts";
-import { BASE_OWNERSHIP, type BaseOwnedFile, MODULE_OWNERSHIP } from "./ownership.ts";
+import {
+  BASE_OWNERSHIP,
+  type BaseOwnedFile,
+  MODULE_OWNERSHIP,
+} from "../../../../actions/validate-template-report/validator/ownership.ts";
+import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
+import { tempDirs } from "../../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 
-const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
+const VALIDATOR_DIR = join(
+  import.meta.dir,
+  "../../../../actions/validate-template-report/validator",
+);
+const VALIDATOR = join(VALIDATOR_DIR, "validate_generated_files.ts");
 
 // The smallest tree the validator accepts: registration files (opening with
 // the managed header checks/headers.ts requires), the marked .gitignore, and a ci.yml
@@ -239,22 +248,22 @@ function runValidator(
     writeFileSync(join(root, rel), content);
   }
   if (opts.gitInit) {
-    const init = Bun.spawnSync(["git", "-C", root, "init", "-q"], { env: gitFreeEnv() });
-    if (init.exitCode !== 0) throw new Error(`git init failed: ${init.stderr.toString()}`);
+    const init = boundedSpawnSync(["git", "-C", root, "init", "-q"], { env: gitFreeEnv() });
+    if (init.exitCode !== 0) throw new Error(`git init failed: ${init.stderr}`);
   }
   if (opts.gitAddForce?.length) {
-    const add = Bun.spawnSync(["git", "-C", root, "add", "-f", "--", ...opts.gitAddForce], {
+    const add = boundedSpawnSync(["git", "-C", root, "add", "-f", "--", ...opts.gitAddForce], {
       env: gitFreeEnv(),
     });
-    if (add.exitCode !== 0) throw new Error(`git add -f failed: ${add.stderr.toString()}`);
+    if (add.exitCode !== 0) throw new Error(`git add -f failed: ${add.stderr}`);
   }
-  const result = Bun.spawnSync([process.execPath, VALIDATOR, ...args, root], {
+  const result = boundedSpawnSync([process.execPath, VALIDATOR, ...args, root], {
     env: { ...gitFreeEnv(), ...opts.env },
   });
   return {
     exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
+    stdout: result.stdout,
+    stderr: result.stderr,
   };
 }
 
@@ -295,8 +304,8 @@ describe("the check roster", () => {
     // silently inert check.
     const entry = readFileSync(VALIDATOR, "utf-8");
     const roster = /const CHECKS[\s\S]*?= \[\n([\s\S]*?)\n\];/.exec(entry)?.[1] ?? "";
-    const modules = readdirSync(join(import.meta.dir, "checks"))
-      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    const modules = readdirSync(join(VALIDATOR_DIR, "checks"))
+      .filter((name) => name.endsWith(".ts"))
       .sort();
     const listed = modules.map((file) => {
       const imported = new RegExp(
@@ -1213,11 +1222,9 @@ describe("ownership self-declarations", () => {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
     }
-    const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(
-      ".editorconfig is missing - the template always generates it",
-    );
+    expect(result.stderr).toContain(".editorconfig is missing - the template always generates it");
   });
 
   test("the OTHER marker spelling does not satisfy the declared one", () => {
@@ -2157,8 +2164,8 @@ describe("ownership-manifest byte parity", () => {
 
   test("a managed symlink's hash covers the link target", () => {
     const root = agentsLinkTree(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`);
-    const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
-    expect(result.stderr.toString()).toBe("");
+    const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -2167,10 +2174,10 @@ describe("ownership-manifest byte parity", () => {
     // class-only roster entry this flip would disable CLAUDE.md's parity
     // permanently and invisibly (sync baselines manifest edits).
     const root = agentsLinkTree('{"class": "starter"}');
-    const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(`entry 'CLAUDE.md' claims class "starter"`);
-    expect(result.stderr.toString()).toContain("ownership tables declare it managed");
+    expect(result.stderr).toContain(`entry 'CLAUDE.md' claims class "starter"`);
+    expect(result.stderr).toContain("ownership tables declare it managed");
   });
 
   test("a headerless pin dotfile hand-flipped to starter fails the roster cross-check", () => {

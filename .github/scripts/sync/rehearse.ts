@@ -690,7 +690,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     });
 
     section("validating the updated tree");
-    // The validator installs into the SHARED actions/validate-template-report/validator dir.
+    // The validator installs into the SHARED actions/validate-template-report dir.
     // Under the fleet driver, four lanes reach this concurrently, and four
     // `bun install` racing into one fresh node_modules is nondeterministic
     // - so rehearse_fleet.ts does this install ONCE, serially, before it
@@ -699,7 +699,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // reaches the network for packages, so it gets the deadline.
     if (process.env.REHEARSE_SKIP_VALIDATE_INSTALL !== "1") {
       run(["bun", "install", "--frozen-lockfile", "--silent"], {
-        cwd: join(REPO_ROOT, "actions/validate-template-report/validator"),
+        cwd: join(REPO_ROOT, "actions/validate-template-report"),
         timeoutMs: NETWORK_TIMEOUT_MS,
       });
     }

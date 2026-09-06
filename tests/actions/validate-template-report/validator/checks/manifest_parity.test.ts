@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tempDirs } from "../../../../tests/shared/temp_dir.ts";
-import { MANIFEST_NAME } from "../../../shared/manifest.ts";
-import { loadContext } from "../context.ts";
-import { checkManifestParity } from "./manifest_parity.ts";
+import { MANIFEST_NAME } from "../../../../../actions/shared/manifest.ts";
+import { checkManifestParity } from "../../../../../actions/validate-template-report/validator/checks/manifest_parity.ts";
+import { loadContext } from "../../../../../actions/validate-template-report/validator/context.ts";
+import { tempDirs } from "../../../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 
