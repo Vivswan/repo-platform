@@ -10,7 +10,7 @@
 // ever synced into a client repo; the template renders the repo's own
 // settings.yml ONCE as a repo-owned identity starter.
 //
-// Consumers beyond the apply paths: scripts/generate.ts derives the
+// Consumers beyond the apply: scripts/generate.ts derives the
 // tracking-label validators' reserved-label roster from managedLabelNames,
 // and scripts/check_ssot.ts anchors its label/ruleset rules here.
 //
@@ -22,14 +22,15 @@
 // repo picks its own label name; the color/description tuples live in
 // the module manifests).
 //
-// CLI (the apply paths):
+// CLI (settings-repos.yml, and the smoke gate's black-box assembly):
 //   bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
 //     --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
 //
 // By default the facts come from the target repository's default branch
 // via gh api (env: GH_TOKEN); visibility is the DECLARED
 // repository.private in its settings.yml, live-probed when undeclared.
-// --target-dir reads the facts from a local checkout (no network);
+// --target-dir reads the facts from a local checkout (no network; the
+// smoke gate renders a bare copier output this way);
 // --operator-answers reads module selection and visibility from the
 // operator repository's recorded answers file - repo-platform is the one
 // fleet member with no .repo-platform.yml (it is not generated from the
@@ -540,9 +541,9 @@ export function factsFromFetch(
   return { modules, private: isPrivate, trackingLabels, prTitleWorkflowPresent };
 }
 
-/** Facts read from a local checkout: the self-apply
- *  (reusable-apply-settings.yml) and the sync's referenced-label check
- *  (referenced_labels.ts) read the target's tree this way. Null when the
+/** Facts read from a local checkout: the smoke gate (--target-dir) and the
+ *  sync's referenced-label check (referenced_labels.ts) read a tree this
+ *  way. Null when the
  *  checkout carries no .repo-platform.yml (it is not a settings target),
  *  like the fetched source. The private fact prefers the checkout's
  *  DECLARED repository.private (the same precedence as the fetch path),

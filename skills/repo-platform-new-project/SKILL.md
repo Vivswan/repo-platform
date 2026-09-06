@@ -131,7 +131,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-proje
 
 Repository settings (fields, topics, labels, rulesets) are applied FROM repo-platform for every managed repository - a `.repo-platform.yml` on the default branch is the opt-in; there is nothing to select. Apply them before relying on CI gating: the branch protection that makes `all-green` a REQUIRED check is the managed baseline's `main` ruleset, applied by the nightly heal (or immediately via `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project`).
 
-The fleet and module settings layers (shared defaults, every label the module selection requires, the fleet rulesets) are merged per repository at apply time; the repo's own `.github/settings.yml` - a generated-once identity starter carrying description, homepage, topics, private, plus local overrides - merges over them, and the fleet override layer merges over that. Nothing to hand-maintain: the labels each module needs come from that module's own `templates/<module>/settings.yml` layer automatically. For a dry run: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`. Every render also carries `settings-sync.yml`, a push-time self-apply workflow (needs a repo-scoped PAT and skips with a warning without one).
+The fleet and module settings layers (shared defaults, every label the module selection requires, the fleet rulesets) are merged per repository at apply time; the repo's own `.github/settings.yml` - a generated-once identity starter carrying description, homepage, topics, private, plus local overrides - merges over them, and the fleet override layer merges over that. Nothing to hand-maintain: the labels each module needs come from that module's own `templates/<module>/settings.yml` layer automatically. For a dry run: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`.
 
 ### 8. What runs on PRs
 
@@ -146,7 +146,6 @@ Collect these for the human with admin rights:
 - Grant the fleet PAT access to the new repo: the `REPO_PLATFORM_TOKEN` fine-grained PAT's repository access list at https://github.com/settings/personal-access-tokens - this is the enrollment step; nothing syncs without it.
 - pages or docs-site module: the modules' settings layers enable Pages on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
 - bun module: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` (prompts for the token value on stdin - the human runs it, or pass `--body "$TOKEN"` non-interactively). Without it the fix lands but each fixed PR needs a close/reopen for checks to appear.
-- settings self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it the rendered `settings-sync.yml` skips and the central heal still covers the repo.
 
 ## Private repositories
 

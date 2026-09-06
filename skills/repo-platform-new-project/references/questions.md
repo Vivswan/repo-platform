@@ -35,7 +35,7 @@ One line each, generated from the module manifests:<!-- BEGIN GENERATED: module-
 - `nightly`: nightly CI starter with failure issue filing and auto-close
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered<!-- END GENERATED: module-roster -->
 
-Every render also carries the base content no module gates: `AGENTS.md` with its agent-file symlinks, the Copilot review instructions and `copilot-setup-steps.yml` starter, `auto-assign.yml`, and the settings pair (`.github/settings.yml` starter plus `settings-sync.yml`). Repository settings are managed for every managed repository (docs/settings.md).
+Every render also carries the base content no module gates: `AGENTS.md` with its agent-file symlinks, the Copilot review instructions and `copilot-setup-steps.yml` starter, `auto-assign.yml`, and the `.github/settings.yml` starter. Repository settings are managed for every managed repository (docs/settings.md).
 
 ## Per-module follow-up questions
 

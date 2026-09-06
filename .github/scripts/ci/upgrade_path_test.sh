@@ -259,6 +259,27 @@ gate_old_entry() { # <landed path> <module>: wrap the manifest template's entry 
 }
 for p in .github/agents.md .github/copilot-instructions.md .github/instructions/review.instructions.md \
   .github/workflows/copilot-setup-steps.yml AGENTS.md CLAUDE.md; do gate_old_entry "$p" agents; done
+# Model the fleet state before the settings self-apply was retired: the old
+# build rendered a managed settings-sync.yml (the thin caller of the
+# reusable apply), gated on the settings-sync module before the fold. The
+# new build renders no such file, so the sync must DELETE it in every
+# managed repo through retired-file cleanup alone, no rung (a plain
+# non-jinja file: copier copies it verbatim, which is all the retirement
+# diff needs). Planted before the module gates below wrap the manifest
+# entries, so its entry rides its own gate, not auto-assign's.
+printf '# This file is managed by Vivswan/repo-platform.\nname: Settings Sync\non:\n  push:\n    branches: [main]\n' \
+  > "$OLD_TREE/template/.github/workflows/settings-sync.yml"
+python3 - "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+anchor = """{%- set _ = entries.append('    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": null}') -%}\n"""
+assert text.count(anchor) == 1, "the manifest template's auto-assign.yml entry is not where this harness expects it"
+entry = """{%- set _ = entries.append('    ".github/workflows/settings-sync.yml": {"class": "managed", "hash": null}') -%}\n"""
+open(path, "w").write(text.replace(anchor, anchor + entry))
+PY
+grep -qF '".github/workflows/settings-sync.yml":' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the old fixture's manifest entry for settings-sync.yml"
 gate_old_entry .github/workflows/auto-assign.yml auto-assign
 for p in .github/settings.yml .github/workflows/settings-sync.yml; do gate_old_entry "$p" settings-sync; done
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
@@ -405,7 +426,7 @@ done
 # The folded files must land UNCHANGED (their templates moved to base with
 # the same content), so their pre-sync bytes are the oracle.
 mkdir -p "$WORK/folded-before/.github/workflows" "$WORK/folded-before/.github/instructions"
-for f in .github/workflows/auto-assign.yml .github/workflows/settings-sync.yml \
+for f in .github/workflows/auto-assign.yml \
   .github/workflows/copilot-setup-steps.yml .github/instructions/review.instructions.md .github/settings.yml; do
   cp "$f" "$WORK/folded-before/$f"
 done
@@ -577,11 +598,13 @@ bun .github/scripts/sync/resolve_copier_conflicts.ts \
 # without help the rm loop below would run over an empty set and pass even
 # if it were broken. Resurrect the file the way an older copier (or a merge
 # driver) can leave it, so the loop must really delete it. Same for the
-# retired managed rerun-copilot-gate.yml: its retirement must provably come
-# from retired_cleanup, not only from copier's own delete.
+# retired managed rerun-copilot-gate.yml and settings-sync.yml: their
+# retirement must provably come from retired_cleanup, not only from
+# copier's own delete.
 echo "retired sentinel" > "$PROJECT/.github/retired-sentinel.txt"
 printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
   > "$PROJECT/.github/workflows/rerun-copilot-gate.yml"
+printf 'name: Settings Sync\non: [push]\n' > "$PROJECT/.github/workflows/settings-sync.yml"
 RUNNER_TEMP="$WORK" SRC_PATH="$src_path" OLD_SHA="$OLD_SHA_RESOLVED" \
   bun .github/scripts/sync/retired_cleanup.ts
 if grep -qF '.github/settings.yml' "$WORK/retired-paths.json"; then
@@ -601,6 +624,10 @@ grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/retired-paths.json" \
   || fail "retired_paths did not flag the retired rerun-copilot-gate.yml"
 grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected rerun-copilot-gate.yml"
+grep -qF '.github/workflows/settings-sync.yml' "$WORK/retired-paths.json" \
+  || fail "retired_paths did not flag the retired settings-sync.yml"
+grep -qF '.github/workflows/settings-sync.yml' "$WORK/removed-paths.txt" \
+  || fail "retired_cleanup's rm loop did not delete the resurrected settings-sync.yml"
 
 # The workflow's preserve step: settings.yml and the opted-out LICENSE.md
 # are repo-owned; if the update de-rendered and deleted either, it comes
@@ -623,10 +650,12 @@ cd "$PROJECT"
   = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
   || fail ".github/.copier-answers.yml does not record the commit $NEW_TAG names"
 # Files the template retired must be gone: the synthetic sentinel left the
-# template between builds despite its local edit, and the managed
+# template between builds despite its local edit, the managed
 # rerun-copilot-gate.yml was retired outright when the Copilot review
-# wait moved into the ruleset's required checks.
-for f in .github/retired-sentinel.txt .github/workflows/rerun-copilot-gate.yml; do
+# wait moved into the ruleset's required checks, and the managed
+# settings-sync.yml when settings became centrally applied only.
+for f in .github/retired-sentinel.txt .github/workflows/rerun-copilot-gate.yml \
+  .github/workflows/settings-sync.yml; do
   test ! -e "$f" || fail "retired file survived the update: $f"
 done
 # THE MODULE FOLD's postcondition on a repository that selected the three:
@@ -635,7 +664,7 @@ done
 # declaration keeps the rung's rewrite, and the answers file - which copier
 # rewrote from the filtered -d selection, accepting the stale recorded
 # list that still named the three - carries the filtered list.
-for f in .github/workflows/auto-assign.yml .github/workflows/settings-sync.yml \
+for f in .github/workflows/auto-assign.yml \
   .github/workflows/copilot-setup-steps.yml .github/instructions/review.instructions.md .github/settings.yml; do
   cmp -s "$WORK/folded-before/$f" "$f" || fail "the folded file $f did not land unchanged"
 done
@@ -793,8 +822,8 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 }
 [ "$(mf ".github/workflows/ci.yml" class)" = "managed" ] \
   || fail "the manifest lost ci.yml's managed entry across the update"
-[ "$(mf ".github/workflows/settings-sync.yml" class)" = "managed" ] \
-  || fail "the manifest does not list settings-sync.yml as managed base content"
+[ "$(mf ".github/workflows/settings-sync.yml" class)" = "absent" ] \
+  || fail "the manifest still lists the retired settings-sync.yml"
 [ "$(mf "AGENTS.md" class)" = "split" ] \
   || fail "the manifest does not list AGENTS.md as a split base file"
 [ "$(mf ".github/settings.yml" class)" = "starter" ] \
@@ -1812,10 +1841,13 @@ test -f AGENTS.md || fail "AGENTS.md did not arrive with the update"
 # (the managed ones and the two fresh starters alike; nothing merged into
 # them, the repository had none of them).
 for f in .github/instructions/review.instructions.md .github/workflows/auto-assign.yml \
-  .github/workflows/settings-sync.yml .github/workflows/copilot-setup-steps.yml .github/settings.yml; do
+  .github/workflows/copilot-setup-steps.yml .github/settings.yml; do
   test -f "$f" || fail "the folded file $f did not arrive with the update"
   cmp -s "$ARR_WORK/render-new/$f" "$f" || fail "the arriving $f is not byte-identical to the clean render at the new ref"
 done
+# The retired settings-sync.yml never arrives: the new build renders no such file.
+test ! -e .github/workflows/settings-sync.yml \
+  || fail "the retired settings-sync.yml arrived with the update"
 for link in CLAUDE.md:AGENTS.md .github/agents.md:../AGENTS.md .github/copilot-instructions.md:../AGENTS.md; do
   [ "$(readlink "${link%%:*}")" = "${link#*:}" ] \
     || fail "the agent-file symlink ${link%%:*} did not arrive with the update pointing at AGENTS.md (points at '$(readlink "${link%%:*}")')"

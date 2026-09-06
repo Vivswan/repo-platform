@@ -284,11 +284,10 @@ else
   absent '"skills"' "$wf/ci.yml"
 fi
 
-# The settings pair is base content: every render carries the identity
-# starter and the self-apply caller.
+# The settings starter is base content: every render carries the identity
+# starter, and no apply workflow (settings are applied centrally).
 test -f "$SMOKE/.github/settings.yml"
-test -f "$wf/settings-sync.yml"
-present "reusable-apply-settings.yml@build" "$wf/settings-sync.yml"
+test ! -e "$wf/settings-sync.yml"
 # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
 # identity keys and nothing else. description is the constant
 # smoke_generate.ts passes; visibility is declared even when public. The
@@ -740,7 +739,7 @@ expect_class ".github/repo-platform-manifest.json" managed
 expect_class "AGENTS.md" split
 expect_class "CLAUDE.md" managed
 expect_class ".github/workflows/auto-assign.yml" managed
-expect_class ".github/workflows/settings-sync.yml" managed
+expect_class ".github/workflows/settings-sync.yml" absent
 expect_class ".github/workflows/copilot-setup-steps.yml" starter
 if has release-please; then
   expect_class ".github/workflows/release.yml" managed

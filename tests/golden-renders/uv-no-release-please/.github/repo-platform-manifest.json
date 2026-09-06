@@ -20,7 +20,6 @@
     ".github/workflows/ci.yml": {"class": "managed", "hash": "c518f9f98aa49e3d51a366bb840a9d60c7faf3cfad8c662fec5719a170ed0601"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},
     ".github/workflows/post-green.yml": {"class": "starter"},
-    ".github/workflows/settings-sync.yml": {"class": "managed", "hash": "907e462b23412c0a4ed0a863386ec3c188f804002c1c3a2afd6ca91e4ac4ad85"},
     ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "4a88eda2f17368f4d63bb8f69513e17f6870d76173b051e8da682dfe61ee3738"},
     ".gitleaks.toml": {"class": "starter"},
     ".repo-platform.yml": {"class": "starter"},

@@ -444,7 +444,7 @@ describe("adoption is rechecked at the pinned commit", () => {
     expect(seen).toEqual([".repo-platform.yml"]);
   });
 
-  test("the self-apply's local fact source is null without the file, facts with it", () => {
+  test("the local fact source is null without the file, facts with it", () => {
     const dir = temp.dir("adoption-");
     mkdirSync(join(dir, ".github"));
     writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");

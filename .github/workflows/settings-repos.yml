@@ -11,8 +11,6 @@
 # opt-in) plus this repository itself (its baseline facts come from
 # .repo-platform-answers.yml). Repos heal independently: one target's
 # failure is its own red "apply (<repo>)" job and never blocks the others.
-# Every render also carries settings-sync.yml, push-time self-apply via
-# reusable-apply-settings.yml, which computes the same merge.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
 # this workflow in a green main push's own CI run (when the merge touched
@@ -420,7 +418,7 @@ jobs:
         # applying the baseline alone would delete the repo's own labels.
         if: steps.freshness.outputs.moved == 'false'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
-        # its first release. Bump together with reusable-apply-settings.yml.
+        # its first release.
         uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}

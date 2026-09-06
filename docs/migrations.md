@@ -1,6 +1,6 @@
 # Migrations: the ladder
 
-A one-shot fleet transition (a rendered file moving, a repo-owned file needing a rewrite) is one rung on the migration ladder: ONE self-contained file under `.github/scripts/sync/migrations/`, shipped verbatim on the `build` branch. The sync runs, for each repository, the rungs that appeared in build history after the build it last synced from. Rungs are never retired: the ladder is permanent history. Code is the source of truth; this page is the map.
+A one-shot fleet transition (a rendered file moving, a repo-owned file needing a rewrite) is one rung on the migration ladder: ONE self-contained file under `.github/scripts/sync/migrations/`, shipped verbatim on the `build` branch. Retiring a managed file needs no rung: [sync/retired_paths.ts](../.github/scripts/sync/retired_paths.ts) lists every path the old render carried and the new one does not, `_skip_if_exists` files excepted, and the sync deletes them. The sync runs, for each repository, the rungs that appeared in build history after the build it last synced from. Rungs are never retired: the ladder is permanent history. Code is the source of truth; this page is the map.
 
 | Question | Owner |
 | --- | --- |

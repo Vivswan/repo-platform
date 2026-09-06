@@ -35,7 +35,6 @@
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".github/workflows/pr-title.yml": {"class": "managed", "hash": "aed03ff29ddf3f8f46d1b6d1d82c0d70a5c23c4a52b001ea12264e43f6461ac8"},
     ".github/workflows/release.yml": {"class": "managed", "hash": "f7c3d276a3a4e7922ad7cf1357131046016ac0efe7682670bcb29404f6b3a841"},
-    ".github/workflows/settings-sync.yml": {"class": "managed", "hash": "907e462b23412c0a4ed0a863386ec3c188f804002c1c3a2afd6ca91e4ac4ad85"},
     ".github/workflows/update-release-pr.yml": {"class": "starter"},
     ".github/workflows/update-release.yml": {"class": "starter"},
     ".github/workflows/validate-skills.yml": {"class": "managed", "hash": "ca415822cc15050ad1b688b24c4852f7371b1574fbd0e57c2743939b5635a9b9"},
