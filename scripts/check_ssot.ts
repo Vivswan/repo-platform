@@ -6593,19 +6593,10 @@ const rules: Rule[] = [
   },
 
   {
-    // No bare mkdtemp in the test trees: a fixture removed only by its
-    // test's own finally or afterEach is missed as often as it is
-    // written, and the launcher's per-run TMPDIR covers only `bun run
-    // test` - a direct `bun test <file>` leaks under the real temp
-    // directory. TEMP_DIR_HELPER owns fixtures (removed per file in its
-    // afterAll, failures included) and is the one file that may call
-    // mkdtemp; every other script under tests/ and every file bun test
-    // discovers under actions/ takes its directories from it. A symlink
-    // among them cannot be audited in place and fails closed. Scope is
-    // the mkdtemp shape only; the launcher's leftover check is
-    // the runtime net for the rest (a fixed-name file written straight
-    // under os.tmpdir(), which no textual scan can tell from a poison
-    // or comparison path).
+    // No bare mkdtemp in the test trees: TEMP_DIR_HELPER owns fixtures
+    // and is the one file that may call it; the launcher's leftover check
+    // is the runtime net for shapes no textual scan sees (fixed-name
+    // writes under os.tmpdir()).
     name: "temp-dirs-through-helper",
     run: () => tempDirTreeMismatches([...walkFiles("tests"), ...walkFiles("actions")], read),
   },

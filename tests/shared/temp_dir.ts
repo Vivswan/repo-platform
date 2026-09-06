@@ -1,16 +1,14 @@
-// The one owner of temp fixtures in test files: every directory a test
-// makes under os.tmpdir() comes from here and is removed when its file's
-// tests are done, whatever they did. The ssot rule temp-dirs-through-helper
-// keeps bare mkdtemp out of the test trees; the launcher
-// (scripts/run_tests.ts) fails a run that leaves anything behind.
+// The one owner of temp fixtures in test files: `const temp = tempDirs()`
+// at a file's top level, `temp.dir(prefix)` anywhere in it, and one
+// afterAll removes everything the file made, whatever its tests did.
 //
-// One lifetime, the file's: bun:test binds hooks to the file whose
-// collection registers them (a hook registered by a module evaluated
-// once serves only its first importer), so each test file calls
-// tempDirs() at its top level and takes directories from the result.
-// Every directory is fresh, so tests stay isolated without a per-test
-// removal, and a shared fixture (a module-level repo, a beforeAll tree)
-// needs no second flavour that a call from the wrong place could misuse.
+// One lifetime, the file's, because bun:test binds hooks to the file
+// whose collection registers them (a hook registered by a module
+// evaluated once serves only its first importer). Fresh directories keep
+// tests isolated without a per-test flavour. Known gap, pinned by
+// tests/shared/temp_dir.test.ts: bun runs no hook in a file whose tests a
+// name filter (-t) all skipped, so such fixtures outlive the process; the
+// launcher's per-run TMPDIR is what removes them.
 
 import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -24,9 +22,6 @@ export interface TempDirs {
   dir(prefix: string): string;
 }
 
-/** Call once at the top level of a test file (collection time, where
- * bun:test binds hooks to the file). The returned handle mints
- * directories anywhere in the file: module level, hooks, or tests. */
 export function tempDirs(): TempDirs {
   const made: string[] = [];
   afterAll(() => {
