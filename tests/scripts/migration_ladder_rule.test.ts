@@ -7,8 +7,10 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  harnessSources,
   MIGRATIONS_DIR_REL,
   MIGRATIONS_DOC_REL,
+  MIGRATIONS_HARNESS_DIR_REL,
   MIGRATIONS_HARNESS_REL,
   MIGRATIONS_TESTS_REL,
   migrationIdTokens,
@@ -37,10 +39,22 @@ const TEST_EXPECTATION = (id: string) =>
 type Ladder = Parameters<typeof migrationLadderMismatches>[0];
 type Mismatches = ReturnType<typeof migrationLadderMismatches>;
 
+/** The harness input: the entry's text plus any leg files under the legs
+ *  directory (the entry sources a leg with a `source ".../<name>"` line). */
+const harnessOf = (entry: string, legs: Record<string, string> = {}): Ladder["harness"] => ({
+  [MIGRATIONS_HARNESS_REL]: entry,
+  ...legs,
+});
+const ENTRY_CASES = "set -e\nrm old/m0001_a.ts\nrun_ladder\ntest -f moved # m0002_b\n";
+const LEG_REL = `${MIGRATIONS_HARNESS_DIR_REL}/01_main_update.sh`;
+const SOURCES_LEG = 'source "$UPGRADE_PATH_DIR/01_main_update.sh"\n';
+const HARNESS_EXPECTATION = (id: string) =>
+  `a upgrade-path harness case (in the entry or a sourced file under ${MIGRATIONS_HARNESS_DIR_REL}/) naming migration ${id}`;
+
 const consistent: Ladder = {
   rungFiles: { "m0001_a.ts": rungSource("m0001_a"), "m0002_b.ts": rungSource("m0002_b") },
   testFiles: { "m0001_a.test.ts": testSource("m0001_a"), "m0002_b.test.ts": testSource("m0002_b") },
-  harness: "set -e\nrm old/m0001_a.ts\nrun_ladder\ntest -f moved # m0002_b\n",
+  harness: harnessOf(ENTRY_CASES),
   doc: `# Rungs\n\n- \`m0001_a\`: moves\n- \`m0002_b\`: rewrites\n\n${PRUNED_HEADING}\n\n- \`m0000_gone\`: pruned\n\n## After\n\nprose\n`,
 };
 
@@ -274,12 +288,45 @@ describe("migrationLadderMismatches", () => {
 
   test.each<{ reason: string; input: Partial<Ladder>; expected: Mismatches }>([
     {
-      reason: "a rung with no harness case",
-      input: { harness: "set -e\nrm old/m0001_a.ts\n" },
+      reason: "a rung with no harness case in the entry or any sourced leg",
+      input: {
+        harness: harnessOf(`set -e\nrm old/m0001_a.ts\n${SOURCES_LEG}`, {
+          [LEG_REL]: "run_ladder\n",
+        }),
+      },
       expected: [
         {
           file: MIGRATIONS_HARNESS_REL,
-          expected: "a upgrade-path harness case naming migration m0002_b",
+          expected: HARNESS_EXPECTATION("m0002_b"),
+          got: "none",
+        },
+      ],
+    },
+    {
+      reason: "a rung whose harness case lives in a sourced leg, not the entry",
+      input: {
+        harness: harnessOf(`set -e\nrm old/m0001_a.ts\n${SOURCES_LEG}`, {
+          [LEG_REL]: "test -f moved # m0002_b\n",
+        }),
+      },
+      expected: [],
+    },
+    {
+      reason: "a leg the entry never sources is red, and its case does not count",
+      input: {
+        harness: harnessOf("set -e\nrm old/m0001_a.ts\n", {
+          [LEG_REL]: "test -f moved # m0002_b\n",
+        }),
+      },
+      expected: [
+        {
+          file: LEG_REL,
+          expected: `a source line for it in ${MIGRATIONS_HARNESS_REL} (a leg the entry never sources runs no case)`,
+          got: "none",
+        },
+        {
+          file: MIGRATIONS_HARNESS_REL,
+          expected: HARNESS_EXPECTATION("m0002_b"),
           got: "none",
         },
       ],
@@ -309,7 +356,7 @@ describe("migrationLadderMismatches", () => {
     },
     {
       reason: "a synthetic rung in the harness is the harness's own business",
-      input: { harness: `${consistent.harness}cat > migrations/m9999_probe.ts\n` },
+      input: { harness: harnessOf(`${ENTRY_CASES}cat > migrations/m9999_probe.ts\n`) },
       expected: [],
     },
     {
@@ -328,7 +375,7 @@ describe("migrationLadderMismatches", () => {
       input: {
         rungFiles: { ...consistent.rungFiles, "m0002_c.ts": rungSource("m0002_c") },
         testFiles: { ...consistent.testFiles, "m0002_c.test.ts": testSource("m0002_c") },
-        harness: `${consistent.harness}# m0002_c\n`,
+        harness: harnessOf(`${ENTRY_CASES}# m0002_c\n`),
         doc: consistent.doc.replace(
           "- `m0002_b`: rewrites",
           "- `m0002_b`: rewrites\n- `m0002_c`: also",
@@ -576,10 +623,24 @@ describe("the live repository", () => {
             readFileSync(join(REPO_ROOT, MIGRATIONS_TESTS_REL, name), "utf-8"),
           ]),
         ),
-        harness: readFileSync(join(REPO_ROOT, MIGRATIONS_HARNESS_REL), "utf-8"),
+        harness: harnessSources(),
         doc: readFileSync(join(REPO_ROOT, MIGRATIONS_DOC_REL), "utf-8"),
       }),
     ).toEqual([]);
+  });
+
+  test("the harness scan covers the entry and every file under the legs directory, each sourced by the entry", () => {
+    const sources = harnessSources();
+    const legs = readdirSync(join(REPO_ROOT, MIGRATIONS_HARNESS_DIR_REL)).sort();
+    expect(legs).toContain("lib.sh");
+    expect(legs).toContain("01_main_update.sh");
+    expect(Object.keys(sources)).toEqual([
+      MIGRATIONS_HARNESS_REL,
+      ...legs.map((name) => `${MIGRATIONS_HARNESS_DIR_REL}/${name}`),
+    ]);
+    for (const name of legs) {
+      expect(sources[MIGRATIONS_HARNESS_REL]).toContain(`source "$UPGRADE_PATH_DIR/${name}"`);
+    }
   });
 
   test("no retired-shape token in the sync, the actions, the scripts, the templates, or the tests; the scan covers them", () => {
