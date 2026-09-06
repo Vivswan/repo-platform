@@ -5,8 +5,7 @@
 // exercises every pair).
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { renderJinjaFile } from "../../scripts/jinja_subset";
 import type { ModuleManifest } from "../../scripts/module_manifests";
@@ -24,6 +23,9 @@ import {
   pathExists,
   renderContext,
 } from "../../scripts/render_dogfood";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const answers: Answers = {
   project_name: "repo-platform",
@@ -160,16 +162,12 @@ describe("moduleOfPair", () => {
 
 describe("pathExists", () => {
   test("sees the dangling symlink existsSync misses, and a missing path as absent", () => {
-    const dir = mkdtempSync(join(tmpdir(), "render-dogfood-test-"));
-    try {
-      const link = join(dir, "dangling");
-      symlinkSync(join(dir, "missing-target"), link);
-      expect(existsSync(link)).toBe(false);
-      expect(pathExists(link)).toBe(true);
-      expect(pathExists(join(dir, "nothing"))).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const dir = temp.dir("render-dogfood-test-");
+    const link = join(dir, "dangling");
+    symlinkSync(join(dir, "missing-target"), link);
+    expect(existsSync(link)).toBe(false);
+    expect(pathExists(link)).toBe(true);
+    expect(pathExists(join(dir, "nothing"))).toBe(false);
   });
 });
 

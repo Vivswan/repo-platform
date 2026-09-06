@@ -8,8 +8,7 @@
 // the fleet override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   declaredPrivate,
@@ -31,6 +30,9 @@ import {
 import { capture } from "../../.github/scripts/shared/proc";
 import { loadManifests } from "../../scripts/module_manifests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const manifests = loadManifests();
 
@@ -369,7 +371,7 @@ describe("the render CLI acts on the recheck", () => {
   } {
     // A real checkout: a local fact source pins to its HEAD like a fetched
     // one does, and the freshness step refuses an empty pin.
-    const root = mkdtempSync(join(tmpdir(), "render-cli-"));
+    const root = temp.dir("render-cli-");
     const git = (command: string[]) => {
       const result = capture(command);
       if (result.exitCode !== 0) throw new Error(`${command.join(" ")}: ${result.stderr}`);
@@ -537,7 +539,7 @@ describe("fact resolvers", () => {
   });
 
   test("factsFromTargetDir prefers the checkout's declared visibility over the recorded answer", () => {
-    const dir = mkdtempSync(join(tmpdir(), "facts-"));
+    const dir = temp.dir("facts-");
     mkdirSync(join(dir, ".github"));
     writeFileSync(join(dir, ".repo-platform.yml"), "modules: [settings-sync]\n");
     writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
@@ -551,7 +553,7 @@ describe("fact resolvers", () => {
   test("the operator's own selection is validated too", () => {
     // repo-platform is always a settings target, so a typo in its answers
     // file is the same destructive path as one in a client repo.
-    const dir = mkdtempSync(join(tmpdir(), "operator-"));
+    const dir = temp.dir("operator-");
     const file = join(dir, "answers.yml");
     const real = readFileSync(".repo-platform-answers.yml", "utf-8");
     writeFileSync(file, real.replace("- bun", "- bnu"));

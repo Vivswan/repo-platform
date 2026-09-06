@@ -8,11 +8,14 @@
 // file content - the union keeps them out of the blob arm by construction.
 
 import { describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { headEntry } from "../../.github/scripts/shared/git_head.ts";
 import { capture } from "../../.github/scripts/shared/proc.ts";
+import { tempDirs } from "./temp_dir";
+
+const temp = tempDirs();
 
 /** Explicit env OVERLAY deleting every GIT_* variable, handed to this
  * file's own spawns at the call site (the repo's adopted style for tests
@@ -82,7 +85,7 @@ function thrownMessage(fn: () => unknown): string {
 
 /** A scratch repository whose HEAD carries one of each object kind. */
 function makeFixtureRepo(): string {
-  const root = mkdtempSync(join(tmpdir(), "head-entry-repo-"));
+  const root = temp.dir("head-entry-repo-");
   const run = (...args: string[]) => {
     // Through capture(): explicit scrub overlay, and the spawn stays
     // bounded (proc.ts's default hang bound) - a raw sync spawn blocks
@@ -128,7 +131,7 @@ function makeFixtureRepo(): string {
 function lsTreeStubDir(payload: string): string {
   const real = Bun.which("git");
   if (real === null) throw new Error("git not on PATH");
-  const dir = mkdtempSync(join(tmpdir(), "ls-tree-stub-"));
+  const dir = temp.dir("ls-tree-stub-");
   writeFileSync(
     join(dir, "git"),
     [
@@ -154,7 +157,7 @@ function lsTreeStubDir(payload: string): string {
  * process.env), but it would also poison every other spawn in this test
  * process. The same wiring timeout_fail_closed.test.ts uses. */
 function probeWithStubGit(root: string, payload: string): string {
-  const driver = join(mkdtempSync(join(tmpdir(), "ls-tree-driver-")), "driver.ts");
+  const driver = join(temp.dir("ls-tree-driver-"), "driver.ts");
   const probed = join(import.meta.dir, "../../.github/scripts/shared/git_head.ts");
   writeFileSync(
     driver,
@@ -209,7 +212,7 @@ describe("headEntry value-free failure", () => {
     // The whole line: it names the probe, git's exit code, and where the
     // withheld detail is - and nothing target-derived (the rel, the root,
     // git's own "not a git repository" stderr) can fit inside it.
-    const root = mkdtempSync(join(tmpdir(), "head-entry-not-a-repo-"));
+    const root = temp.dir("head-entry-not-a-repo-");
     const message = thrownMessage(() =>
       withoutGitEnv(() => headEntry(root, "super/secret-private-path.txt")),
     );

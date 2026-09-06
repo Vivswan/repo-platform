@@ -7,11 +7,13 @@
 // Uses the REAL fleet layers and manifests, like the render's own tests.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/referenced_labels.ts");
 
@@ -20,7 +22,7 @@ const ANSWERS = "_commit: build@sha\nprivate: false\n";
 const SETTINGS = "repository:\n  private: false\n";
 
 function makeTarget(files: Record<string, string>): string {
-  const root = join(mkdtempSync(join(tmpdir(), "referenced-labels-")), "target");
+  const root = join(temp.dir("referenced-labels-"), "target");
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), content);

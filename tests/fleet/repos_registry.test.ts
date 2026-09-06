@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   loadRegistry,
@@ -8,6 +7,9 @@ import {
   validateRegistry,
 } from "../../.github/scripts/fleet/repos_registry";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 function registry(overrides: Partial<Registry> = {}): Registry {
   return {
@@ -244,7 +246,7 @@ describe("CLI", () => {
   });
 
   test("select resolves the checked-in repos.yml against a discovered list", async () => {
-    const discovered = join(tmpdir(), "repos-registry-test-discovered.json");
+    const discovered = join(temp.dir("repos-registry-"), "discovered.json");
     await Bun.write(discovered, JSON.stringify(["Vivswan/dotfiles"]));
     const { exitCode, stdout } = run(["select", "--discovered", discovered]);
     expect(exitCode).toBe(0);
@@ -253,7 +255,7 @@ describe("CLI", () => {
   });
 
   test("validate fails with ::error:: annotations on a broken file", async () => {
-    const broken = join(tmpdir(), "repos-registry-test-broken.yml");
+    const broken = join(temp.dir("repos-registry-"), "broken.yml");
     await Bun.write(broken, "managed:\n  - bad slug\n  - a/b\n  - a/b\n");
     // Annotations parse from stdout only; that is where fail() prints -
     // one ::error:: line per problem, exact text, nothing else.
@@ -266,7 +268,7 @@ describe("CLI", () => {
   });
 
   test("select accepts discovered {repo, ...} objects with extra keys", async () => {
-    const discovered = join(tmpdir(), "repos-registry-test-discovered-objects.json");
+    const discovered = join(temp.dir("repos-registry-"), "discovered-objects.json");
     await Bun.write(
       discovered,
       JSON.stringify([{ repo: "Vivswan/dotfiles", private: false, extra: 1 }]),
@@ -279,7 +281,7 @@ describe("CLI", () => {
   });
 
   test("a discovered entry of the wrong shape fails naming its index, never its value", async () => {
-    const discovered = join(tmpdir(), "repos-registry-test-discovered-bad.json");
+    const discovered = join(temp.dir("repos-registry-"), "discovered-bad.json");
     await Bun.write(discovered, JSON.stringify(["Vivswan/dotfiles", { repo: 42 }]));
     const { exitCode, stdout } = run(["select", "--discovered", discovered]);
     expect(exitCode).toBe(1);
@@ -291,7 +293,7 @@ describe("CLI", () => {
     // The bare identifier is the leaking form: a raw JSON.parse error
     // quotes it ('Unexpected identifier "hiddenserver"') into this public
     // log, and discovered.json carries private slugs.
-    const discovered = join(tmpdir(), "repos-registry-test-discovered-unparseable.json");
+    const discovered = join(temp.dir("repos-registry-"), "discovered-unparseable.json");
     await Bun.write(discovered, '["Vivswan/dotfiles", hiddenserver]');
     const { exitCode, stdout, stderr } = run(["select", "--discovered", discovered]);
     expect(exitCode).toBe(1);
@@ -300,7 +302,7 @@ describe("CLI", () => {
   });
 
   test("excluded prints the exclude list as a JSON array", async () => {
-    const file = join(tmpdir(), "repos-registry-test-excluded.yml");
+    const file = join(temp.dir("repos-registry-"), "excluded.yml");
     await Bun.write(file, 'managed:\n  - "*"\nexclude:\n  - a/b\n  - a/c\n');
     const { exitCode, stdout } = run(["excluded", "--file", file]);
     expect(exitCode).toBe(0);

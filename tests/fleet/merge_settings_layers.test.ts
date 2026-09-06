@@ -5,8 +5,7 @@
 // semantics docs/settings.md promises.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
@@ -25,6 +24,9 @@ import {
 import { managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
 import { parseSettingsDoc } from "../../.github/scripts/fleet/settings_document";
 import { loadManifests } from "../../scripts/module_manifests";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const managed = {
   repository: {
@@ -712,7 +714,7 @@ describe("the override layer", () => {
       };
     };
     const load = (doc: Record<string, unknown>) => {
-      const file = join(mkdtempSync(join(tmpdir(), "override-")), "settings-override.yml");
+      const file = join(temp.dir("override-"), "settings-override.yml");
       writeFileSync(file, stringifyYaml(doc));
       return loadOverrideLayer(file);
     };

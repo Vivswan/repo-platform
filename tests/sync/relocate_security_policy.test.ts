@@ -2,16 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/relocate_security_policy.ts");
 const REGION =
@@ -43,7 +44,7 @@ function git(dir: string, ...args: string[]): string {
  * sync workflow's checkout lays it out; `files` maps relative paths to
  * content. */
 function makeRoot(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "relocate-security-"));
+  const root = temp.dir("relocate-security-");
   const target = join(root, "target");
   mkdirSync(join(target, ".github"), { recursive: true });
   for (const [rel, content] of Object.entries(files)) {

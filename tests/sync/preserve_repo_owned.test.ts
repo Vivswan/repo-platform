@@ -6,20 +6,14 @@
 // here first instead of seeding template text into a fleet repo.
 
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { decodeTrackedPathBytes } from "../../.github/scripts/sync/preserve_repo_owned.ts";
 import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -72,7 +66,7 @@ const TARGET_REF = "templates/v9.9.9";
 // The workspace repo stands in for the sync runner's repo-platform
 // checkout: the script resolves TARGET_REF:template/... against its CWD.
 function makeWorkspace(templateContent: string | Buffer): string {
-  const dir = mkdtempSync(join(tmpdir(), "preserve-owned-ws-"));
+  const dir = temp.dir("preserve-owned-ws-");
   const path = join(dir, fleetLicenseRel);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, templateContent);
@@ -85,7 +79,7 @@ function makeWorkspace(templateContent: string | Buffer): string {
 // precondition. A `symlinkTo` value plants a symlink instead of a file
 // (the shape managed repos carry by design: CLAUDE.md -> AGENTS.md).
 function makeTarget(files: Record<string, string | { symlinkTo: string }>): string {
-  const base = mkdtempSync(join(tmpdir(), "preserve-owned-target-"));
+  const base = temp.dir("preserve-owned-target-");
   const root = join(base, "target");
   mkdirSync(root);
   writeFileSync(join(root, "README.md"), "readme\n");
@@ -103,7 +97,7 @@ function runPreserve(
   target: string,
   hideDetails = false,
 ): { exitCode: number; stdout: string; license: string | null } {
-  const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-rt-"));
+  const runnerTemp = temp.dir("preserve-owned-rt-");
   const proc = boundedSpawnSync(["bun", script], {
     cwd: workspace,
     env: {
@@ -293,7 +287,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
 
   /** Run the script against a prepared target and read the hold report. */
   function runOn(target: string): { exitCode: number; stdout: string; report: string } {
-    const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-hold-"));
+    const runnerTemp = temp.dir("preserve-owned-hold-");
     const proc = boundedSpawnSync(["bun", script], {
       cwd: dirname(target),
       env: {

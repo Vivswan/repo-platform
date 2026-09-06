@@ -4,9 +4,9 @@
 // end-to-end over temporary fixture trees.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../../tests/shared/temp_dir";
 import {
   CheckFailure,
   kebabToTitle,
@@ -21,8 +21,10 @@ import {
   validateStructure,
 } from "./validate_skills";
 
+const temp = tempDirs();
+
 function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), "validate-skills-test-"));
+  return temp.dir("validate-skills-test-");
 }
 
 function tempFile(content: string, name = "SKILL.md"): string {

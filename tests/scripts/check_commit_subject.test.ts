@@ -14,15 +14,17 @@
 // consumer stays green in isolation.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { candidateSubjects } from "../../scripts/check_commit_subject.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const root = join(import.meta.dir, "../..");
 const bunExe = process.execPath;
-const scratch = mkdtempSync(join(tmpdir(), "commit-subject-"));
+const scratch = temp.dir("commit-subject-");
 let serial = 0;
 
 // The hook shells out to `git stripspace`, whose comment handling reads

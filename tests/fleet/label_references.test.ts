@@ -6,8 +6,7 @@
 // chromium-bridge one - the two real fleet breaks this guard exists for.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   collectReferences,
@@ -19,6 +18,9 @@ import {
   referenceNames,
   workflowLabelRefs,
 } from "../../.github/scripts/fleet/label_references.ts";
+import { tempDirs } from "../shared/temp_dir.ts";
+
+const temp = tempDirs();
 
 describe("issueFormLabels", () => {
   test.each([
@@ -232,7 +234,7 @@ describe("collectReferences and the roster comparisons", () => {
 
 describe("referenceFilesFromDir", () => {
   test("reads issue forms (config.yml excluded) and workflows; missing dirs are no files", () => {
-    const root = mkdtempSync(join(tmpdir(), "label-refs-"));
+    const root = temp.dir("label-refs-");
     mkdirSync(join(root, ".github/ISSUE_TEMPLATE"), { recursive: true });
     mkdirSync(join(root, ".github/workflows"), { recursive: true });
     writeFileSync(join(root, ".github/ISSUE_TEMPLATE/bug.yml"), "labels: [a]\n");
@@ -244,7 +246,7 @@ describe("referenceFilesFromDir", () => {
       [".github/workflows/ci.yaml", "workflow"],
     ]);
 
-    const bare = mkdtempSync(join(tmpdir(), "label-refs-bare-"));
+    const bare = temp.dir("label-refs-bare-");
     expect(referenceFilesFromDir(bare)).toEqual([]);
   });
 

@@ -15,10 +15,12 @@
 // happens once the stamp checks have passed.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/verify_build_provenance.ts");
 
@@ -62,7 +64,7 @@ const STAMP = (source: string, runId = "5") =>
   `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${source}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/${runId}\n`;
 
 function run(opts: Options = {}) {
-  const root = mkdtempSync(join(tmpdir(), "provenance-"));
+  const root = temp.dir("provenance-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "git"), gitStub, { mode: 0o755 });

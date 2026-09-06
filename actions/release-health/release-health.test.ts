@@ -5,10 +5,10 @@
  * a live GitHub).
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../../tests/shared/temp_dir";
 import {
   type Config,
   findReleasePr,
@@ -23,6 +23,8 @@ import {
   securityGate,
   severitiesAtOrAbove,
 } from "./release-health";
+
+const temp = tempDirs();
 
 /**
  * A recording gh runner: captures every command and answers issue-list,
@@ -102,16 +104,12 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
 }
 
 // Created at load so the parametrized tables below can name the path.
-const eventDir = mkdtempSync(join(tmpdir(), "release-health-"));
+const eventDir = temp.dir("release-health-");
 const eventPath = join(eventDir, "event.json");
 writeFileSync(
   eventPath,
   JSON.stringify({ pull_request: { number: 12, labels: [{ name: "autorelease: pending" }] } }),
 );
-
-afterAll(() => {
-  rmSync(eventDir, { recursive: true, force: true });
-});
 
 const baseEnv = {
   GITHUB_REPOSITORY: "o/r",

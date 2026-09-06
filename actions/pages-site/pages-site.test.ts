@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../../tests/shared/temp_dir.ts";
 import {
   deriveRewrites,
   deriveSidebar,
@@ -28,6 +28,8 @@ import {
   versionsIndex,
   versionTags,
 } from "./lib.ts";
+
+const temp = tempDirs();
 
 describe("parseMounts", () => {
   test("accepts the single docs mount and the composed pair", () => {
@@ -185,7 +187,7 @@ describe("layout helpers", () => {
 
 describe("assembly copies", () => {
   const tree = (spec: Record<string, string>) => {
-    const dir = mkdtempSync(join(tmpdir(), "site-"));
+    const dir = temp.dir("site-");
     for (const [rel, content] of Object.entries(spec)) {
       mkdirSync(join(dir, rel, ".."), { recursive: true });
       writeFileSync(join(dir, rel), content);
@@ -194,7 +196,7 @@ describe("assembly copies", () => {
   };
 
   test("a nested mount's directory survives: the shallower copy collides instead of mixing", () => {
-    const dest = mkdtempSync(join(tmpdir(), "dest-"));
+    const dest = temp.dir("dest-");
     copyInto(tree({ "index.html": "docs" }), join(dest, "docs"), "the docs mount");
     expect(() =>
       copyInto(tree({ "docs/index.html": "website's own docs" }), dest, "the website"),
@@ -202,7 +204,7 @@ describe("assembly copies", () => {
   });
 
   test("a root-tier build emitting a reserved layout name is refused", () => {
-    const dest = mkdtempSync(join(tmpdir(), "dest-"));
+    const dest = temp.dir("dest-");
     expect(() =>
       copyInto(
         tree({ "latest/index.html": "impostor" }),
@@ -216,7 +218,7 @@ describe("assembly copies", () => {
 
 describe("derive", () => {
   const fixture = () => {
-    const dir = mkdtempSync(join(tmpdir(), "derive-"));
+    const dir = temp.dir("derive-");
     writeFileSync(join(dir, "README.md"), "# Home\n");
     writeFileSync(join(dir, "setup.md"), "# Getting started\n");
     mkdirSync(join(dir, "guide"));
@@ -474,14 +476,14 @@ describe("central theme guard", () => {
   });
 
   test("a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform", () => {
-    const dir = mkdtempSync(join(tmpdir(), "docs-"));
+    const dir = temp.dir("docs-");
     writeFileSync(join(dir, "README.md"), "# Home\n");
     mkdirSync(join(dir, ".vitepress"));
     expect(() => assertCentralTheme(dir)).toThrow("theme changes belong in repo-platform");
   });
 
   test("a markdown-only docs tree passes", () => {
-    const dir = mkdtempSync(join(tmpdir(), "docs-"));
+    const dir = temp.dir("docs-");
     writeFileSync(join(dir, "README.md"), "# Home\n");
     expect(() => assertCentralTheme(dir)).not.toThrow();
   });
@@ -489,7 +491,7 @@ describe("central theme guard", () => {
 
 describe("link-rot reporting", () => {
   test("walkHtml enumerates every page, so unlinked version tiers still get crawled", () => {
-    const dir = mkdtempSync(join(tmpdir(), "site-"));
+    const dir = temp.dir("site-");
     mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
     writeFileSync(join(dir, "index.html"), "<html></html>");
     writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
@@ -541,7 +543,7 @@ describe("link-rot reporting", () => {
     // parent from result.links, and a major bump that reshapes them must
     // fail here, not in the nightly. Offline by construction - the crawl
     // stays on linkinator's local static server over this temp site.
-    const dir = mkdtempSync(join(tmpdir(), "crawl-"));
+    const dir = temp.dir("crawl-");
     writeFileSync(join(dir, "index.html"), '<a href="/other.html">o</a>');
     writeFileSync(join(dir, "other.html"), '<a href="/missing.html">m</a>');
     const { LinkChecker } = await import("linkinator");

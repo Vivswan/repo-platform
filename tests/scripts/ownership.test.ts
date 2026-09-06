@@ -4,8 +4,7 @@
 // derivations the generator consumes.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
@@ -22,6 +21,9 @@ import {
   skipIfExistsPatterns,
   translateGates,
 } from "../../scripts/ownership";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const HEADER = "# This file is managed by {{ github_username }}/repo-platform.\n";
 const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
@@ -225,7 +227,7 @@ describe("ownershipEntrySchema", () => {
 
 describe("loadBaseOwnership", () => {
   const withBase = (content: string | null): string => {
-    const dir = mkdtempSync(join(tmpdir(), "base-ownership-"));
+    const dir = temp.dir("base-ownership-");
     mkdirSync(join(dir, "base"));
     if (content !== null) writeFileSync(join(dir, "base", "ownership.yml"), content);
     return dir;
@@ -520,7 +522,7 @@ function moduleManifest(ownership: OwnershipDeclaration[] | undefined): ModuleMa
 }
 
 function writeTree(files: Record<string, string | { symlink: string }>): string {
-  const dir = mkdtempSync(join(tmpdir(), "ownership-tables-"));
+  const dir = temp.dir("ownership-tables-");
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, rel)), { recursive: true });
     if (typeof content === "string") writeFileSync(join(dir, rel), content);
@@ -540,55 +542,43 @@ describe("moduleOwnershipEntries", () => {
       "bun/fragments/agents-toolchain.jinja": "- x\n",
       "bun/module.yml": "ignored: by the walk\n",
     });
-    try {
-      const manifests = [
-        moduleManifest([
-          headerless(".bun-version"),
-          managed(".github/workflows/managed.yml"),
-          starter(".github/workflows/starter.yml"),
-          headerless("LINK.md"),
-          split("SPLIT.md"),
-        ]),
-      ];
-      // The pin dotfile and the symlink have no comment channel, but they
-      // still enter the roster so the validator's manifest cross-check
-      // sees them - a hand-flipped class must not exempt them from parity.
-      expect(moduleOwnershipEntries(manifests, dir)).toEqual({
-        bun: [
-          { path: ".bun-version", kind: "class-only" },
-          { path: ".github/workflows/managed.yml", kind: "header" },
-          { path: "LINK.md", kind: "class-only" },
-          { path: "SPLIT.md", kind: "region", begin: B, end: E },
-        ],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const manifests = [
+      moduleManifest([
+        headerless(".bun-version"),
+        managed(".github/workflows/managed.yml"),
+        starter(".github/workflows/starter.yml"),
+        headerless("LINK.md"),
+        split("SPLIT.md"),
+      ]),
+    ];
+    // The pin dotfile and the symlink have no comment channel, but they
+    // still enter the roster so the validator's manifest cross-check
+    // sees them - a hand-flipped class must not exempt them from parity.
+    expect(moduleOwnershipEntries(manifests, dir)).toEqual({
+      bun: [
+        { path: ".bun-version", kind: "class-only" },
+        { path: ".github/workflows/managed.yml", kind: "header" },
+        { path: "LINK.md", kind: "class-only" },
+        { path: "SPLIT.md", kind: "region", begin: B, end: E },
+      ],
+    });
   });
 
   test("a landed file with no declaration throws", () => {
     const dir = writeTree({ "bun/silent.yml.jinja": "name: S\n" });
-    try {
-      expect(() => moduleOwnershipEntries([moduleManifest([])], dir)).toThrow(
-        "no ownership declaration",
-      );
-      expect(() => moduleOwnershipEntries([moduleManifest(undefined)], dir)).toThrow(
-        "no ownership declaration",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => moduleOwnershipEntries([moduleManifest([])], dir)).toThrow(
+      "no ownership declaration",
+    );
+    expect(() => moduleOwnershipEntries([moduleManifest(undefined)], dir)).toThrow(
+      "no ownership declaration",
+    );
   });
 
   test("a declaration whose path never lands throws", () => {
     const dir = writeTree({ "bun/real.yml.jinja": `${HEADER}name: R\n` });
-    try {
-      expect(() =>
-        moduleOwnershipEntries([moduleManifest([managed("real.yml"), managed("ghost.yml")])], dir),
-      ).toThrow("no templates/bun/ file lands there");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() =>
+      moduleOwnershipEntries([moduleManifest([managed("real.yml"), managed("ghost.yml")])], dir),
+    ).toThrow("no templates/bun/ file lands there");
   });
 
   // The header enforcement mode is declared, so both drift directions are
@@ -597,13 +587,9 @@ describe("moduleOwnershipEntries", () => {
   // the header guards against.
   test("a managed source without a header throws unless declared headerless", () => {
     const dir = writeTree({ "bun/bare.yml.jinja": "name: bare, no header\n" });
-    try {
-      expect(() => moduleOwnershipEntries([moduleManifest([managed("bare.yml")])], dir)).toThrow(
-        "does not open with the managed header",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => moduleOwnershipEntries([moduleManifest([managed("bare.yml")])], dir)).toThrow(
+      "does not open with the managed header",
+    );
   });
 
   test("a GATED managed source without a header throws too", () => {
@@ -613,27 +599,16 @@ describe("moduleOwnershipEntries", () => {
       "bun/managed.yml.jinja": `${HEADER}name: M\n`,
       "bun/{% if not private %}gated.yml{% endif %}.jinja": "name: bare\n",
     });
-    try {
-      expect(() =>
-        moduleOwnershipEntries(
-          [moduleManifest([managed("managed.yml"), managed("gated.yml")])],
-          dir,
-        ),
-      ).toThrow("does not open with the managed header");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() =>
+      moduleOwnershipEntries([moduleManifest([managed("managed.yml"), managed("gated.yml")])], dir),
+    ).toThrow("does not open with the managed header");
   });
 
   test("a headerless declaration whose source carries a header throws", () => {
     const dir = writeTree({ "bun/pinned.txt": `${HEADER}1.0.0\n` });
-    try {
-      expect(() =>
-        moduleOwnershipEntries([moduleManifest([headerless("pinned.txt")])], dir),
-      ).toThrow("declared headerless but its source opens with the managed header");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => moduleOwnershipEntries([moduleManifest([headerless("pinned.txt")])], dir)).toThrow(
+      "declared headerless but its source opens with the managed header",
+    );
   });
 
   test("a symlink declared managed without headerless throws", () => {
@@ -643,13 +618,9 @@ describe("moduleOwnershipEntries", () => {
       "bun/AGENTS.md.jinja": `${HEADER}body\n`,
       "bun/LINK.md": { symlink: "AGENTS.md.jinja" },
     });
-    try {
-      expect(() =>
-        moduleOwnershipEntries([moduleManifest([managed("AGENTS.md"), managed("LINK.md")])], dir),
-      ).toThrow("does not open with the managed header");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() =>
+      moduleOwnershipEntries([moduleManifest([managed("AGENTS.md"), managed("LINK.md")])], dir),
+    ).toThrow("does not open with the managed header");
   });
 
   test("an enforceable filename-gated module file throws instead of silently dropping out", () => {
@@ -661,41 +632,26 @@ describe("moduleOwnershipEntries", () => {
       "bun/managed.yml.jinja": `${HEADER}name: M\n`,
       "bun/{% if not private %}gated.yml{% endif %}.jinja": `${HEADER}name: G\n`,
     });
-    try {
-      expect(() =>
-        moduleOwnershipEntries(
-          [moduleManifest([managed("managed.yml"), managed("gated.yml")])],
-          dir,
-        ),
-      ).toThrow("enforceable but filename-gated");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() =>
+      moduleOwnershipEntries([moduleManifest([managed("managed.yml"), managed("gated.yml")])], dir),
+    ).toThrow("enforceable but filename-gated");
     const gatedStarter = writeTree({
       "bun/managed.yml.jinja": `${HEADER}name: M\n`,
       "bun/{% if not private %}gated.yml{% endif %}.jinja": "name: G\n",
     });
-    try {
-      expect(
-        moduleOwnershipEntries(
-          [moduleManifest([managed("managed.yml"), starter("gated.yml")])],
-          gatedStarter,
-        ),
-      ).toEqual({ bun: [{ path: "managed.yml", kind: "header" }] });
-    } finally {
-      rmSync(gatedStarter, { recursive: true, force: true });
-    }
+    expect(
+      moduleOwnershipEntries(
+        [moduleManifest([managed("managed.yml"), starter("gated.yml")])],
+        gatedStarter,
+      ),
+    ).toEqual({ bun: [{ path: "managed.yml", kind: "header" }] });
   });
 
   test("an empty table throws - the managed module workflows must enrol", () => {
     const dir = writeTree({ "bun/starter.yml.jinja": "name: S\n" });
-    try {
-      expect(() => moduleOwnershipEntries([moduleManifest([starter("starter.yml")])], dir)).toThrow(
-        "MODULE_OWNERSHIP record would be empty",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => moduleOwnershipEntries([moduleManifest([starter("starter.yml")])], dir)).toThrow(
+      "MODULE_OWNERSHIP record would be empty",
+    );
   });
 });
 
@@ -733,36 +689,28 @@ describe("baseOwnershipTables", () => {
 
   test("derives the enforced entries with translated gates, region splits included", () => {
     const dir = withBase(BASE_DECLS, BASE_FILES);
-    try {
-      const tables = baseOwnershipTables(dir);
-      expect(tables.enforced).toEqual([
-        { path: ".yamllint", kind: "header" },
-        { path: "SECURITY.md", kind: "region", begin: B, end: E },
-        { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
-        {
-          path: "LICENSE.md",
-          kind: "region",
-          begin: B,
-          end: E,
-          when: { withoutModule: "custom-license" },
-        },
-        { path: ".gitignore", kind: "region", begin: HB, end: HE },
-        // Headerless managed files enter as class-only so the manifest
-        // cross-check still covers them.
-        { path: ".pin", kind: "class-only" },
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const tables = baseOwnershipTables(dir);
+    expect(tables.enforced).toEqual([
+      { path: ".yamllint", kind: "header" },
+      { path: "SECURITY.md", kind: "region", begin: B, end: E },
+      { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
+      {
+        path: "LICENSE.md",
+        kind: "region",
+        begin: B,
+        end: E,
+        when: { withoutModule: "custom-license" },
+      },
+      { path: ".gitignore", kind: "region", begin: HB, end: HE },
+      // Headerless managed files enter as class-only so the manifest
+      // cross-check still covers them.
+      { path: ".pin", kind: "class-only" },
+    ]);
   });
 
   test("an undeclared base file throws", () => {
     const dir = withBase(BASE_DECLS, { ...BASE_FILES, "base/extra.md.jinja": "extra\n" });
-    try {
-      expect(() => baseOwnershipTables(dir)).toThrow("no ownership declaration");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(dir)).toThrow("no ownership declaration");
   });
 
   test("a declared path with no base file throws", () => {
@@ -772,11 +720,7 @@ describe("baseOwnershipTables", () => {
       "",
     ];
     const dir = withBase(decls, BASE_FILES);
-    try {
-      expect(() => baseOwnershipTables(dir)).toThrow("no templates/base/ file lands there");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(dir)).toThrow("no templates/base/ file lands there");
   });
 
   test("a comment-capable managed base file without a header throws", () => {
@@ -785,11 +729,7 @@ describe("baseOwnershipTables", () => {
     // of silently downgrading enforcement to class-only.
     const decls = [...BASE_DECLS.slice(0, -1), "  - { path: bare.yml, class: managed }", ""];
     const dir = withBase(decls, { ...BASE_FILES, "base/bare.yml.jinja": "name: bare\n" });
-    try {
-      expect(() => baseOwnershipTables(dir)).toThrow("does not open with the managed header");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(dir)).toThrow("does not open with the managed header");
   });
 
   test("an enforced file behind an untranslatable gate throws; a starter is fine", () => {
@@ -797,11 +737,7 @@ describe("baseOwnershipTables", () => {
       [...BASE_DECLS.slice(0, -1), "  - { path: auto.yml, class: starter }", ""],
       { ...BASE_FILES, "base/{% if has_toolchain %}auto.yml{% endif %}.jinja": "name: A\n" },
     );
-    try {
-      expect(() => baseOwnershipTables(gatedStarter)).not.toThrow();
-    } finally {
-      rmSync(gatedStarter, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(gatedStarter)).not.toThrow();
     const gatedManaged = withBase(
       [...BASE_DECLS.slice(0, -1), "  - { path: auto.yml, class: managed }", ""],
       {
@@ -809,11 +745,7 @@ describe("baseOwnershipTables", () => {
         "base/{% if has_toolchain %}auto.yml{% endif %}.jinja": `${HEADER}name: A\n`,
       },
     );
-    try {
-      expect(() => baseOwnershipTables(gatedManaged)).toThrow("no client-side translation");
-    } finally {
-      rmSync(gatedManaged, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(gatedManaged)).toThrow("no client-side translation");
   });
 
   test("a base tree with no region split throws (the derived tables must stay armed)", () => {
@@ -827,11 +759,7 @@ describe("baseOwnershipTables", () => {
       "base/.yamllint.jinja": `${HEADER}rules: {}\n`,
       "base/.gitleaks.toml.jinja": "[allowlist]\n",
     });
-    try {
-      expect(() => baseOwnershipTables(dir)).toThrow("miss a whole enforcement kind");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(() => baseOwnershipTables(dir)).toThrow("miss a whole enforcement kind");
   });
 });
 

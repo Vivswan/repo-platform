@@ -1,16 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tempDirs } from "../../tests/shared/temp_dir.ts";
 import { BASE_OWNERSHIP, type BaseOwnedFile, MODULE_OWNERSHIP } from "./ownership.ts";
+
+const temp = tempDirs();
 
 const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 
@@ -63,11 +57,6 @@ const BASELINE: Record<string, string> = {
     "",
   ].join("\n"),
 };
-
-const roots: string[] = [];
-afterAll(() => {
-  for (const root of roots) rmSync(root, { recursive: true, force: true });
-});
 
 const MANIFEST = ".github/repo-platform-manifest.json";
 
@@ -237,8 +226,7 @@ function runValidator(
   stdout: string;
   stderr: string;
 } {
-  const root = mkdtempSync(join(tmpdir(), "validate-template-"));
-  roots.push(root);
+  const root = temp.dir("validate-template-");
   const tree: Record<string, string> = { ...BASELINE, ...extra };
   for (const rel of opts.omit ?? []) delete tree[rel];
   // Client renders need a stamped manifest (absence is strict); self mode
@@ -1216,8 +1204,7 @@ describe("ownership self-declarations", () => {
   });
 
   test("an ungated base region file's ABSENCE is an error (the template always lands it)", () => {
-    const root = mkdtempSync(join(tmpdir(), "validate-template-"));
-    roots.push(root);
+    const root = temp.dir("validate-template-");
     // The manifest is the render's (it lists .editorconfig); the file was
     // deleted afterwards.
     const tree: Record<string, string> = { ...BASELINE, [MANIFEST]: manifestForTree(BASELINE) };
@@ -2126,8 +2113,7 @@ describe("ownership-manifest byte parity", () => {
   // with no comment channel. These fixtures select agents and land the
   // link so both the parity rule and the cross-check see a real symlink.
   const agentsLinkTree = (claudeEntry: string): string => {
-    const root = mkdtempSync(join(tmpdir(), "validate-template-link-"));
-    roots.push(root);
+    const root = temp.dir("validate-template-link-");
     const registration = BASELINE[".repo-platform.yml"].replace(
       "modules: [uv]",
       "modules: [uv, agents]",

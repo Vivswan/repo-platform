@@ -3,8 +3,7 @@
 // generated regions is proven by `bun run generate:check`, not here.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   actionSetsUpBun,
@@ -48,6 +47,9 @@ import {
 } from "../../scripts/generate";
 import { loadManifests, type ModuleManifest } from "../../scripts/module_manifests";
 import { skipIfExistsMatchers } from "../../scripts/ownership";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
   return { module, description: `${module} module`, ...extra };
@@ -552,24 +554,20 @@ describe("toolchain pins", () => {
   });
 
   test("strayPinFiles flags version-shaped dotfiles no manifest pin declares", () => {
-    const dir = mkdtempSync(join(tmpdir(), "strays-"));
-    try {
-      mkdirSync(join(dir, "bun"));
-      writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
-      // A leftover from a renamed pin: version-shaped, undeclared.
-      writeFileSync(join(dir, "bun", ".bunver"), "1.0.0\n");
-      // Not version-shaped: never flagged.
-      writeFileSync(join(dir, "bun", ".gitkeep"), "");
-      mkdirSync(join(dir, "uv"));
-      writeFileSync(join(dir, "uv", ".python-version"), "3.13.0\n");
-      expect(strayPinFiles([PINNED_BUN, UV], dir)).toEqual([
-        "templates/bun/.bunver",
-        "templates/uv/.python-version",
-      ]);
-      expect(strayPinFiles([PINNED_BUN], dir)).toEqual(["templates/bun/.bunver"]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const dir = temp.dir("strays-");
+    mkdirSync(join(dir, "bun"));
+    writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
+    // A leftover from a renamed pin: version-shaped, undeclared.
+    writeFileSync(join(dir, "bun", ".bunver"), "1.0.0\n");
+    // Not version-shaped: never flagged.
+    writeFileSync(join(dir, "bun", ".gitkeep"), "");
+    mkdirSync(join(dir, "uv"));
+    writeFileSync(join(dir, "uv", ".python-version"), "3.13.0\n");
+    expect(strayPinFiles([PINNED_BUN, UV], dir)).toEqual([
+      "templates/bun/.bunver",
+      "templates/uv/.python-version",
+    ]);
+    expect(strayPinFiles([PINNED_BUN], dir)).toEqual(["templates/bun/.bunver"]);
   });
 
   test("bunToolchainPin returns the bun module's pin and refuses a pinless manifest set", () => {
@@ -597,49 +595,41 @@ describe("toolchain pins", () => {
   });
 
   test("bunSetupActionDirs finds setup-bun actions, nested ones included, commented uses excused", () => {
-    const dir = mkdtempSync(join(tmpdir(), "action-pins-"));
-    try {
-      const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
-      mkdirSync(join(dir, "typo"));
-      writeFileSync(join(dir, "typo", "action.yml"), setup);
-      // A nested action (the pages-site/check-links shape).
-      mkdirSync(join(dir, "pages", "links"), { recursive: true });
-      writeFileSync(join(dir, "pages", "action.yml"), setup);
-      writeFileSync(join(dir, "pages", "links", "action.yml"), setup);
-      // No setup-bun: a commented example does not count.
-      mkdirSync(join(dir, "gate"));
-      writeFileSync(
-        join(dir, "gate", "action.yml"),
-        "runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - run: echo ok\n",
-      );
-      // Never scanned: installed dependencies.
-      mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
-      writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
-      expect(bunSetupActionDirs(dir)).toEqual([
-        "actions/pages",
-        "actions/pages/links",
-        "actions/typo",
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const dir = temp.dir("action-pins-");
+    const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
+    mkdirSync(join(dir, "typo"));
+    writeFileSync(join(dir, "typo", "action.yml"), setup);
+    // A nested action (the pages-site/check-links shape).
+    mkdirSync(join(dir, "pages", "links"), { recursive: true });
+    writeFileSync(join(dir, "pages", "action.yml"), setup);
+    writeFileSync(join(dir, "pages", "links", "action.yml"), setup);
+    // No setup-bun: a commented example does not count.
+    mkdirSync(join(dir, "gate"));
+    writeFileSync(
+      join(dir, "gate", "action.yml"),
+      "runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - run: echo ok\n",
+    );
+    // Never scanned: installed dependencies.
+    mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
+    expect(bunSetupActionDirs(dir)).toEqual([
+      "actions/pages",
+      "actions/pages/links",
+      "actions/typo",
+    ]);
   });
 
   test("strayActionPinFiles flags a .bun-version whose action.yml sets up no bun", () => {
-    const dir = mkdtempSync(join(tmpdir(), "action-strays-"));
-    try {
-      const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
-      mkdirSync(join(dir, "typo"));
-      writeFileSync(join(dir, "typo", "action.yml"), setup);
-      writeFileSync(join(dir, "typo", ".bun-version"), "1.4.0\n");
-      // The setup step retired but the dotfile left behind: stray.
-      mkdirSync(join(dir, "gate"));
-      writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
-      writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
-      expect(strayActionPinFiles(dir)).toEqual(["actions/gate/.bun-version"]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const dir = temp.dir("action-strays-");
+    const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
+    mkdirSync(join(dir, "typo"));
+    writeFileSync(join(dir, "typo", "action.yml"), setup);
+    writeFileSync(join(dir, "typo", ".bun-version"), "1.4.0\n");
+    // The setup step retired but the dotfile left behind: stray.
+    mkdirSync(join(dir, "gate"));
+    writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
+    writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
+    expect(strayActionPinFiles(dir)).toEqual(["actions/gate/.bun-version"]);
   });
 });
 

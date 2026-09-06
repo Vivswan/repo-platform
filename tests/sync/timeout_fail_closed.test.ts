@@ -17,12 +17,15 @@
 // no test needs to (or could) re-check that afterwards.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import "../../.github/scripts/sync/preserve_repo_owned.ts";
 import { licensePresentAtHead } from "../../.github/scripts/sync/retired_cleanup.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const preserveScript = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
 const cleanupScript = join(import.meta.dir, "../../.github/scripts/sync/retired_cleanup.ts");
@@ -70,7 +73,7 @@ function gitFreeOverlay(): Record<string, string | undefined> {
  * exec'd with detached fds so a survivor can never wedge the pipe past
  * the deadline (the stall-stub lore in tests/shared/proc.test.ts). */
 function hangingGitDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "hanging-git-"));
+  const dir = temp.dir("hanging-git-");
   writeFileSync(
     join(dir, "git"),
     "#!/usr/bin/env bash\nexec sleep 30 </dev/null >/dev/null 2>&1\n",
@@ -81,7 +84,7 @@ function hangingGitDir(): string {
 
 /** A committed scratch repository with the given flat files. */
 function initRepo(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "fail-closed-repo-"));
+  const dir = temp.dir("fail-closed-repo-");
   for (const [rel, content] of Object.entries(files)) {
     writeFileSync(join(dir, rel), content);
   }
@@ -107,7 +110,7 @@ function runDriver(
   source: string,
   env: Record<string, string>,
 ): { exitCode: number; stdout: string } {
-  const driver = join(mkdtempSync(join(tmpdir(), "fail-closed-driver-")), "driver.ts");
+  const driver = join(temp.dir("fail-closed-driver-"), "driver.ts");
   writeFileSync(driver, source);
   const proc = capture([process.execPath, driver], { env, timeoutMs: 10_000 });
   return { exitCode: proc.exitCode, stdout: proc.stdout };

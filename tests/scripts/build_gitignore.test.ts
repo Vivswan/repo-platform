@@ -10,9 +10,8 @@
 // and the retired pin flags are rejected before any network call - the one
 // part of main() that can run offline.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildFragment,
@@ -26,6 +25,9 @@ import {
   strayFragmentFiles,
 } from "../../scripts/build_gitignore";
 import type { ModuleManifest } from "../../scripts/module_manifests";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const SECTIONS: Record<string, string> = {
   "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
@@ -118,7 +120,7 @@ describe("selfSources", () => {
 });
 
 describe("strayFragmentFiles", () => {
-  const templates = mkdtempSync(join(tmpdir(), "gitignore-strays-"));
+  const templates = temp.dir("gitignore-strays-");
   beforeAll(() => {
     for (const module of ["bun", "uv"]) {
       mkdirSync(join(templates, module, "fragments"), { recursive: true });
@@ -126,7 +128,6 @@ describe("strayFragmentFiles", () => {
     }
     mkdirSync(join(templates, "agents"), { recursive: true });
   });
-  afterAll(() => rmSync(templates, { recursive: true, force: true }));
 
   const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
     module,
@@ -187,13 +188,12 @@ describe("missingFragmentFiles", () => {
   // composition would render nothing for it. Historically the refresh
   // workflow's `git diff --quiet` could not see this either, because the new
   // fragment was untracked; the topology check is what closed that.
-  const templates = mkdtempSync(join(tmpdir(), "gitignore-missing-"));
+  const templates = temp.dir("gitignore-missing-");
   beforeAll(() => {
     mkdirSync(join(templates, "bun", "fragments"), { recursive: true });
     writeFileSync(join(templates, "bun", "fragments", "gitignore.jinja"), "\n## bun\n");
     mkdirSync(join(templates, "deno"), { recursive: true });
   });
-  afterAll(() => rmSync(templates, { recursive: true, force: true }));
 
   const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
     module,

@@ -6,10 +6,12 @@
 // script-level plumbing - flags, file outputs, loud failures.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/render_data.ts");
 
@@ -19,7 +21,7 @@ function runScript(
   privateFlag: string,
   description: string,
 ): { exitCode: number; stdout: string; old: string; new: string } {
-  const dir = mkdtempSync(join(tmpdir(), "render-data-"));
+  const dir = temp.dir("render-data-");
   const answersPath = join(dir, "answers-old.yml");
   writeFileSync(answersPath, answersText);
   const outOld = join(dir, "data-old.yml");

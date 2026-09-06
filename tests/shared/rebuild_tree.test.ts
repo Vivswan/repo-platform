@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import { rebuildBranchTree } from "../../.github/scripts/shared/rebuild_tree.ts";
+import { tempDirs } from "./temp_dir";
+
+const temp = tempDirs();
 
 // The helper resolves git against the process cwd and the builder script
 // against the SOURCE worktree, so the fixture is a self-contained scratch
@@ -73,7 +75,7 @@ beforeAll(() => {
       delete process.env[key];
     }
   }
-  scratch = mkdtempSync(join(tmpdir(), "rebuild-tree-"));
+  scratch = temp.dir("rebuild-tree-");
   mkdirSync(join(scratch, ".github/scripts/build-branches"), { recursive: true });
   writeFileSync(join(scratch, ".github/scripts/build-branches/branch_tree.ts"), STUB_BUILDER);
   writeFileSync(join(scratch, "package.json"), '{ "name": "fixture", "private": true }\n');
@@ -95,7 +97,6 @@ beforeAll(() => {
 
 afterAll(() => {
   process.chdir(savedCwd);
-  rmSync(scratch, { recursive: true, force: true });
   for (const [key, value] of Object.entries(savedGitEnv)) {
     process.env[key] = value;
   }
@@ -219,7 +220,7 @@ describe("rebuildBranchTree", () => {
       // The message must NAME the expiring step: a bare "timed out" match
       // would pass via stepCapture's write-tree deadline. The stub is not real
       // git, since a SIGKILL mid-`worktree add` leaves a locked admin entry.
-      const bin = mkdtempSync(join(tmpdir(), "rebuild-slow-git-"));
+      const bin = temp.dir("rebuild-slow-git-");
       const invoked = join(bin, "invoked");
       writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\n: > "${invoked}"\nexec sleep 30\n`, {
         mode: 0o755,
@@ -248,7 +249,6 @@ describe("rebuildBranchTree", () => {
       }
       expect(existsSync(invoked)).toBe(true);
       expect(worktrees()).toEqual(mainOnly);
-      rmSync(bin, { recursive: true, force: true });
     },
     REBUILD_TEST_TIMEOUT_MS,
   );
@@ -319,7 +319,7 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
         srcDir: join(scratch, `work-${name}`, "src"),
         treeDir: join(scratch, `work-${name}`, "tree"),
       });
-      const cfg = mkdtempSync(join(tmpdir(), "hostile-git-"));
+      const cfg = temp.dir("hostile-git-");
       writeFileSync(join(cfg, "ignore"), "content.txt\n");
       writeFileSync(join(cfg, "attributes"), "* text\n");
       writeFileSync(
@@ -396,7 +396,6 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
       for (const name of ["clean", "hostile"]) {
         git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
       }
-      rmSync(cfg, { recursive: true, force: true });
     },
     REBUILD_TEST_TIMEOUT_MS,
   );

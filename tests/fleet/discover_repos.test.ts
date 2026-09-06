@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 // End-to-end harness for the sync plan's discovery step, stub-gh style
 // (see discovery.test.ts). This script replaced sync-repos.yml's inline
@@ -13,7 +15,7 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 // a count and the owner login.
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
-  const root = mkdtempSync(join(tmpdir(), "discover-repos-"));
+  const root = temp.dir("discover-repos-");
   const bin = join(root, "bin");
 
   beforeAll(() => {

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/normalize_src.ts");
 const CANONICAL = "gh:Vivswan/repo-platform";
@@ -29,7 +31,7 @@ function git(dir: string, ...args: string[]): string {
 /** A scratch root holding target/ as a one-commit git repo, the way the
  * sync workflow's checkout lays it out. */
 function makeRoot(answers: string): string {
-  const root = mkdtempSync(join(tmpdir(), "normalize-src-"));
+  const root = temp.dir("normalize-src-");
   const target = join(root, "target");
   mkdirSync(join(target, ".github"), { recursive: true });
   writeFileSync(join(target, ".github/.copier-answers.yml"), answers);

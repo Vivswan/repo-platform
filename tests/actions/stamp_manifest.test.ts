@@ -7,13 +7,11 @@ import { describe, expect, test } from "bun:test";
 import {
   chmodSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readlinkSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { isMarkerLine, type RegionSlice, splitManagedRegion } from "../../actions/shared/grammar";
 import {
@@ -33,13 +31,16 @@ import {
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 function sha256(data: string): string {
   return new Bun.CryptoHasher("sha256").update(Buffer.from(data, "latin1")).digest("hex");
 }
 
 function tree(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "stamp-manifest-"));
+  const root = temp.dir("stamp-manifest-");
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
@@ -1226,7 +1227,7 @@ describe("normalizeSymlinkTargets", () => {
     boundedSpawnSync(["readlink", join(root, path)]).stdout.trim();
 
   test("strips the template suffix from a manifest-listed link, idempotently", () => {
-    const root = mkdtempSync(join(tmpdir(), "normalize-"));
+    const root = temp.dir("normalize-");
     link(root, "CLAUDE.md", "AGENTS.md.jinja");
     const files = { "CLAUDE.md": { class: "managed" } };
     expect(normalizeSymlinkTargets(root, files)).toEqual(["CLAUDE.md"]);
@@ -1236,7 +1237,7 @@ describe("normalizeSymlinkTargets", () => {
   });
 
   test("never touches a link the manifest does not list, a non-managed class, or a plain target", () => {
-    const root = mkdtempSync(join(tmpdir(), "normalize-"));
+    const root = temp.dir("normalize-");
     link(root, "repo-own.md", "notes.md.jinja");
     link(root, "starter-link.md", "starter.md.jinja");
     link(root, "CLAUDE.md", "AGENTS.md");
@@ -1260,9 +1261,9 @@ describe("normalizeSymlinkTargets", () => {
     // Manifest text is target-repo content on updates: an absolute or
     // ..-carrying key, or one reaching out through a symlinked ancestor,
     // must not let the hook unlink anything outside the rendered root.
-    const outside = mkdtempSync(join(tmpdir(), "normalize-outside-"));
+    const outside = temp.dir("normalize-outside-");
     link(outside, "victim.md", "prey.md.jinja");
-    const root = mkdtempSync(join(tmpdir(), "normalize-root-"));
+    const root = temp.dir("normalize-root-");
     symlinkSync(outside, join(root, "escape"));
     const files = {
       [`../${basename(outside)}/victim.md`]: { class: "managed" },
@@ -1354,7 +1355,7 @@ describe("parseManifestFiles validation", () => {
     ],
   ];
   test.each(duplicated)("%s normalizes NOTHING (rejected before any mutation)", (_reason, text) => {
-    const root = mkdtempSync(join(tmpdir(), "normalize-dup-"));
+    const root = temp.dir("normalize-dup-");
     symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
     const { rewritten, problem } = normalizeFromText(text, root);
     expect(rewritten).toEqual([]);

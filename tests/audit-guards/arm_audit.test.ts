@@ -6,8 +6,8 @@
 // failed-to-look verdicts each fire on the fixture built to force them.
 // Every child pid the audit records must be dead when it returns.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,6 +23,9 @@ import {
 } from "../../.github/scripts/audit-guards/arm_audit.ts";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import type { GuardEntry } from "../../scripts/guard_registry.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 let fixtures: string;
 let junitDir: string;
@@ -43,7 +46,7 @@ function fixtureEntry(overrides: Partial<GuardEntry> = {}): GuardEntry {
 }
 
 beforeAll(() => {
-  fixtures = mkdtempSync(join(tmpdir(), "arm-audit-test-"));
+  fixtures = temp.dir("arm-audit-test-");
   junitDir = join(fixtures, "junit");
   mkdirSync(junitDir);
   // The armed/decorative tree: the forcing test pins FLAG, nothing pins
@@ -98,10 +101,6 @@ beforeAll(() => {
       '  throw new Error("never runs");\n' +
       "});\n",
   );
-});
-
-afterAll(() => {
-  rmSync(fixtures, { recursive: true, force: true });
 });
 
 describe("parseJunit and namedVerdict", () => {
@@ -290,26 +289,22 @@ describe("sweepSurvivors", () => {
     // the grandchild would sleep on - exactly the shape the sweep
     // exists to catch. The lurker self-exits after 30s, so a broken
     // sweep fails this test's assertions instead of wedging the run.
-    const markerDir = mkdtempSync(join(tmpdir(), "arm-audit-sweep-"));
-    try {
-      const lurker = join(markerDir, "lurker.sh");
-      writeFileSync(lurker, "sleep 30\n");
-      const launch = capture(["sh", "-c", `sh ${lurker} </dev/null >/dev/null 2>&1 & exit 0`], {
-        timeoutMs: 5_000,
-      });
-      expect(launch.exitCode).toBe(0);
-      const sweep = sweepSurvivors(markerDir);
-      expect(sweep.failed).toBe(false);
-      expect(sweep.survivors.length).toBeGreaterThan(0);
-      // The kill sticks: a follow-up sweep of the same marker is clean.
-      // (SIGKILL delivery is immediate; reaping by init may lag one tick.)
-      Bun.sleepSync(100);
-      const again = sweepSurvivors(markerDir);
-      expect(again.failed).toBe(false);
-      expect(again.survivors).toEqual([]);
-    } finally {
-      rmSync(markerDir, { recursive: true, force: true });
-    }
+    const markerDir = temp.dir("arm-audit-sweep-");
+    const lurker = join(markerDir, "lurker.sh");
+    writeFileSync(lurker, "sleep 30\n");
+    const launch = capture(["sh", "-c", `sh ${lurker} </dev/null >/dev/null 2>&1 & exit 0`], {
+      timeoutMs: 5_000,
+    });
+    expect(launch.exitCode).toBe(0);
+    const sweep = sweepSurvivors(markerDir);
+    expect(sweep.failed).toBe(false);
+    expect(sweep.survivors.length).toBeGreaterThan(0);
+    // The kill sticks: a follow-up sweep of the same marker is clean.
+    // (SIGKILL delivery is immediate; reaping by init may lag one tick.)
+    Bun.sleepSync(100);
+    const again = sweepSurvivors(markerDir);
+    expect(again.failed).toBe(false);
+    expect(again.survivors).toEqual([]);
   });
 
   test("a clean marker sweeps to nothing, distinctly from a failed look", () => {

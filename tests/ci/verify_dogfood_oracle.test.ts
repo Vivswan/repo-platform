@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = new URL("../../.github/scripts/ci/verify_dogfood_oracle.ts", import.meta.url)
   .pathname;
@@ -24,7 +26,7 @@ describe("verify_dogfood_oracle recorded answers boundary", () => {
     // non-mapping shape a typeof-object check alone would let through.
     { reason: "sequence", payload: "- a\n" },
   ])("a $reason payload fails with a shape error, not a crash", ({ payload }) => {
-    const root = mkdtempSync(join(tmpdir(), "dogfood-oracle-"));
+    const root = temp.dir("dogfood-oracle-");
     mkdirSync(join(root, ".github"));
     writeFileSync(join(root, ".github/.copier-answers.yml"), payload);
     const { exitCode, stderr } = run(root);

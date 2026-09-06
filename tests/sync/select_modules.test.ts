@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const fixtures = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/select_modules.ts");
 
@@ -11,7 +13,7 @@ const COPIER = ["modules:", "  choices:", "    uv: uv", "    bun: bun", ""].join
 /** A scratch root holding target/.repo-platform.yml and a RUNNER_TEMP with
  * the template's copier-new.yml, the way the sync workflow lays them out. */
 function makeRoot(repoFile: string, copier: string = COPIER): { root: string; temp: string } {
-  const root = mkdtempSync(join(tmpdir(), "select-modules-"));
+  const root = fixtures.dir("select-modules-");
   const temp = join(root, "temp");
   mkdirSync(join(root, "target"), { recursive: true });
   mkdirSync(temp);

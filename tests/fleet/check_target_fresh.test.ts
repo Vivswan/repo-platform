@@ -5,10 +5,12 @@
 // output file's contents, not just the exit code.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = resolve(import.meta.dir, "../../.github/scripts/fleet/check_target_fresh.ts");
 const HEAD = "a".repeat(40);
@@ -18,7 +20,7 @@ describe("check_target_fresh", () => {
   /** Runs the script with a stub `gh` that answers the two calls
    *  resolveTargetRef makes, or fails when `failGh` is set. */
   function run(env: Record<string, string>, failGh = false) {
-    const root = mkdtempSync(join(tmpdir(), "fresh-"));
+    const root = temp.dir("fresh-");
     const bin = join(root, "bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(

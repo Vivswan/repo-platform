@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/resolve_copier_conflicts.ts");
 
@@ -19,7 +21,7 @@ function conflict(local: string[], template: string[]): string {
 }
 
 function run(files: Record<string, string>, extraArgs: string[] = [], skipNames: string[] = []) {
-  const root = mkdtempSync(join(tmpdir(), "resolve-copier-"));
+  const root = temp.dir("resolve-copier-");
   mkdirSync(join(root, "work"));
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(root, "work", name), content);

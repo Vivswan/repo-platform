@@ -29,14 +29,12 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -62,6 +60,9 @@ import {
   writeVerdict,
 } from "../../actions/validate-template-report/verdict";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const ACTION = join(import.meta.dir, "../../actions/validate-template-report");
 const MARKER = "<!-- repo-platform:validate-template -->";
@@ -138,7 +139,7 @@ const verdictIn = (path: string): Integrity | null =>
   existsSync(path) ? (JSON.parse(read(path)) as Integrity) : null;
 
 function scratch(): { root: string; bin: string } {
-  const root = mkdtempSync(join(tmpdir(), "validate-template-report-"));
+  const root = temp.dir("validate-template-report-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
@@ -717,12 +718,12 @@ describe("the integrity verdict", () => {
     ],
   ];
   test.each(cases)("%s", (_name, exit, [findings, advisories], expected) => {
-    const root = mkdtempSync(join(tmpdir(), "verdict-"));
+    const root = temp.dir("verdict-");
     expect(classify(exit, 300_000, files(root, findings, advisories))).toEqual(expected);
   });
 
   test("readVerdict rejects anything that is not a whole verdict", () => {
-    const root = mkdtempSync(join(tmpdir(), "verdict-"));
+    const root = temp.dir("verdict-");
     const none = {
       kind: "not-judged",
       reason: "the aligned validator step wrote no verdict",
@@ -899,7 +900,7 @@ describe("the recorded build sha", () => {
     ["an empty _commit", "_commit:\n", { refusal: NO_COMMIT }],
   ];
   test.each(cases)("%s", (_name, answers, expected) => {
-    const root = mkdtempSync(join(tmpdir(), "build-sha-"));
+    const root = temp.dir("build-sha-");
     writeAnswers(root, answers);
     expect(recordedBuildSha(root)).toEqual(expected);
   });

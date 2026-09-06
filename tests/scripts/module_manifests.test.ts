@@ -4,9 +4,8 @@
 // templates/ integrity checks, and the MODULE_ORDER load against the live
 // repo's manifests.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODULE_ORDER } from "../../scripts/compose_template";
 import {
@@ -19,6 +18,9 @@ import {
   parseManifest,
   readManifest,
 } from "../../scripts/module_manifests";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const WHERE = "templates/demo/module.yml";
 
@@ -494,7 +496,7 @@ describe("settings_layers", () => {
   });
 
   describe("readManifest runs the cross-check on every load", () => {
-    const root = mkdtempSync(join(tmpdir(), "settings-layers-"));
+    const root = temp.dir("settings-layers-");
     const templates = join(root, "templates");
     beforeAll(() => {
       mkdirSync(join(templates, "declared"), { recursive: true });
@@ -512,7 +514,6 @@ describe("settings_layers", () => {
       writeFileSync(join(templates, "undeclared", "module.yml"), "description: x\n");
       writeFileSync(join(templates, "undeclared", "settings-private.yml"), "labels: []\n");
     });
-    afterAll(() => rmSync(root, { recursive: true, force: true }));
 
     test("declared and present loads", () => {
       expect(readManifest("declared", templates).settings_layers).toEqual(["settings.yml"]);
@@ -605,14 +606,13 @@ describe("assertTrackingLabelUniqueness", () => {
 });
 
 describe("readManifest", () => {
-  const root = mkdtempSync(join(tmpdir(), "module-manifests-"));
+  const root = temp.dir("module-manifests-");
   const templates = join(root, "templates");
   beforeAll(() => {
     mkdirSync(join(templates, "demo"), { recursive: true });
     writeFileSync(join(templates, "demo", "module.yml"), "description: a demo module\n");
     mkdirSync(join(templates, "bare"));
   });
-  afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   test("reads a manifest from its module folder", () => {
     expect(readManifest("demo", templates).description).toBe("a demo module");
@@ -634,7 +634,7 @@ describe("readManifest", () => {
 });
 
 describe("assertModuleOrderIntegrity", () => {
-  const root = mkdtempSync(join(tmpdir(), "module-order-"));
+  const root = temp.dir("module-order-");
   const templates = join(root, "templates");
   beforeAll(() => {
     for (const module of MODULE_ORDER) {
@@ -644,7 +644,6 @@ describe("assertModuleOrderIntegrity", () => {
     mkdirSync(join(templates, "base"));
     writeFileSync(join(templates, "README.md"), "not a module folder\n");
   });
-  afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   test("the live shape passes: every folder listed, base and files skipped", () => {
     expect(() => assertModuleOrderIntegrity(MODULE_ORDER, templates)).not.toThrow();

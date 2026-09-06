@@ -10,16 +10,17 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
 import { MANIFEST_NAME } from "../../actions/shared/manifest.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const fixtures = tempDirs();
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/sync/commit_push.ts");
@@ -95,7 +96,7 @@ let scratch: string;
 let stubBin: string;
 
 beforeAll(() => {
-  scratch = mkdtempSync(join(tmpdir(), "commit-push-"));
+  scratch = fixtures.dir("commit-push-");
   stubBin = join(scratch, "bin");
   mkdirSync(stubBin);
   mkdirSync(join(scratch, "work", "target"), { recursive: true });
@@ -109,7 +110,7 @@ function runCommitPush(
   temp: Record<string, string> = {},
   work: string = join(scratch, "work"),
 ) {
-  const runnerTemp = mkdtempSync(join(scratch, "rt-"));
+  const runnerTemp = fixtures.dir("rt-");
   writeFileSync(join(runnerTemp, "gh-output.txt"), "");
   for (const [name, content] of Object.entries(temp)) {
     writeFileSync(join(runnerTemp, name), content);
@@ -317,7 +318,7 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
     // on-disk hash, and the post-withhold re-validation of that tree
     // passes with the withheld advisory as its only finding. The validator
     // checkout the workflow places at validator/ is this repository.
-    const work = mkdtempSync(join(scratch, "work-"));
+    const work = fixtures.dir("work-");
     const targetDir = join(work, "target");
     for (const [rel, { content }] of Object.entries(RENDER)) {
       mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
