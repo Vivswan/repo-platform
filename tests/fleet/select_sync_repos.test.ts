@@ -17,8 +17,9 @@ const temp = tempDirs();
 //   hidden-locked - PRIVATE, push probe 403s (the token cannot push, so it
 //                   is not a fleet member): the notice must carry its hint
 //   locked        - public, push probe 403s: a public repo whose write
-//                   access was revoked stays discovered, so every plan
-//                   prints the notice by slug
+//                   access was revoked stays discovered, so every plan whose
+//                   scope includes public repos prints the notice by slug (the
+//                   private-scoped cases below print none)
 //   hidden-gone   - PRIVATE, NOT discovered: a private repo whose write
 //                   access was revoked vanishes from GET /user/repos; the
 //                   stubs would admit it (adopted, probe 200), so the

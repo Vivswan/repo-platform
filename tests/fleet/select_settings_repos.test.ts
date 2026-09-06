@@ -27,7 +27,8 @@ const temp = tempDirs();
 //                   skip, never a warning
 //   locked        - public, push probe 403s: a public repo whose write
 //                   access was revoked stays discovered - one notice by
-//                   slug every run, never a target
+//                   slug in every plan whose scope includes public repos
+//                   (a private-scoped plan never probes it), never a target
 //   hidden-locked - PRIVATE, push probe 403s: the same notice, by hint
 //   hidden-gone   - PRIVATE, NOT in the listing: a private repo whose write
 //                   access was revoked vanishes from GET /user/repos; the
