@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { selectsSettingsSync } from "../../.github/scripts/fleet/build_settings_matrix";
+import { declaredModules } from "../../.github/scripts/fleet/build_settings_matrix";
+import { notAdoptedNotice } from "../../.github/scripts/fleet/discovery.ts";
 import { undiscoveredWarning } from "../../.github/scripts/fleet/sync_scope.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -297,6 +298,7 @@ describe("select_settings_repos.ts", () => {
     expect(targetsOf(main).map((t) => t.repo)).toEqual([
       "Vivswan/flaky",
       "Vivswan/nomodule",
+      "Vivswan/open-lib",
       "Vivswan/repo-platform",
       "Vivswan/steady",
       "h**-s**r",
@@ -322,6 +324,13 @@ describe("select_settings_repos.ts", () => {
       {
         repo: "Vivswan/flaky",
         name: "flaky",
+        redact_name: false,
+        hide_details: true,
+        verify: "",
+      },
+      {
+        repo: "Vivswan/nomodule",
+        name: "nomodule",
         redact_name: false,
         hide_details: true,
         verify: "",
@@ -602,16 +611,23 @@ describe("select_settings_repos.ts", () => {
     hide_details: true,
     verify: "",
   };
+  const NOMODULE = {
+    repo: "Vivswan/nomodule",
+    name: "nomodule",
+    redact_name: false,
+    hide_details: true,
+    verify: "",
+  };
 
   // The called path (post-green's settings-fleet leg): the scope is public
   // text off the judged main commit, so a private repo rides only under the
-  // token; the five explicit personas are absent from discovery, so they
+  // token; the six explicit personas are absent from discovery, so they
   // count as private (fail-closed) and every run warns once, counting. The
   // operator repo joins when the scope selects it (it is public). Whole
   // outcome per row: every log line, the summary, the matrix, exit code.
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
-  const UNDISCOVERED = `::warning::${undiscoveredWarning(5)}`;
-  const UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(5)}\n`;
+  const UNDISCOVERED = `::warning::${undiscoveredWarning(6)}`;
+  const UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(6)}\n`;
   const ONE_UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(1)}\n`;
   const RETRY = (display: string, probe: string, detail: string) =>
     [1, 2].map(
@@ -624,26 +640,30 @@ describe("select_settings_repos.ts", () => {
   const HIDDEN_DEADAPI_DETAIL =
     "HTTP 502: https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable";
   const NOMODS_WARNING =
-    "h**-n**s: its .repo-platform.yml has no readable top-level modules list, so the settings opt-in cannot be determined - the repo is skipped and its settings stay unmanaged until the file is fixed.";
+    "h**-n**s: its .repo-platform.yml has no readable top-level modules list, so its settings baseline cannot be computed - the repo is skipped and its settings stay unmanaged until the file is fixed.";
+  const UNADOPTED_NOTICE = notAdoptedNotice(
+    "Vivswan/unadopted",
+    "The settings heal only manages adopted repos.",
+  );
   // Every private persona's probe output, in enriched-row order.
   const PRIVATE_PROBES = [
-    ...RETRY("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL),
-    `::warning::${GAVE_UP("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL)}`,
+    ...RETRY("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL)}`,
     ...RETRY("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
     `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
     "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
-    "Vivswan/flaky: settings opt-in check failed (attempt 1/3: HTTP 502 from stub); retrying...",
-    ...RETRY("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL),
-    `::warning::${GAVE_UP("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL)}`,
+    "Vivswan/flaky: settings adoption check failed (attempt 1/3: HTTP 502 from stub); retrying...",
+    ...RETRY("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL)}`,
     `::warning::${NOMODS_WARNING}`,
-    "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module, the opt-in to centrally managed settings (docs/settings.md). Nothing installs or heals its rulesets or labels.",
+    `::notice::${UNADOPTED_NOTICE}`,
   ];
   const PRIVATE_SUMMARY =
     UNDISCOVERED_SUMMARY +
     [
-      GAVE_UP("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL),
+      GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
       GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
-      GAVE_UP("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL),
+      GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
       NOMODS_WARNING,
     ]
       .map((line) => `- ${line}\n`)
@@ -666,22 +686,22 @@ describe("select_settings_repos.ts", () => {
     {
       reason: "private selects the rest, the discovered one by its hint",
       scope: "private",
-      targets: [FLAKY, STEADY, HIDDEN_SERVER],
+      targets: [FLAKY, NOMODULE, STEADY, HIDDEN_SERVER],
       stdout: lines(
         UNDISCOVERED,
         ...PRIVATE_PROBES,
-        "settings targets: Vivswan/flaky, Vivswan/steady, h**-s**r",
+        "settings targets: Vivswan/flaky, Vivswan/nomodule, Vivswan/steady, h**-s**r",
       ),
       summary: PRIVATE_SUMMARY,
     },
     {
       reason: "a token unions with a slug",
       scope: "private, Vivswan/open-lib",
-      targets: [FLAKY, OPEN_LIB, STEADY, HIDDEN_SERVER],
+      targets: [FLAKY, NOMODULE, OPEN_LIB, STEADY, HIDDEN_SERVER],
       stdout: lines(
         UNDISCOVERED,
         ...PRIVATE_PROBES,
-        "settings targets: Vivswan/flaky, Vivswan/open-lib, Vivswan/steady, h**-s**r",
+        "settings targets: Vivswan/flaky, Vivswan/nomodule, Vivswan/open-lib, Vivswan/steady, h**-s**r",
       ),
       summary: PRIVATE_SUMMARY,
     },
@@ -807,18 +827,18 @@ describe("select_settings_repos.ts", () => {
   test(
     "a scope of known repos that are not adopted selects nothing, green, with the notice",
     () => {
-      // A synced repo need not manage its settings here: the settings
-      // apply that follows a fleet sync must not go red for it. Dispatched:
-      // the persona is absent from discovery, so the called path would
-      // refuse it as private before the probes run.
+      // A scoped run may legitimately select nothing: the settings apply
+      // that follows a fleet sync must not go red for an unadopted repo.
+      // Dispatched: the persona is absent from discovery, so the called
+      // path would refuse it as private before the probes run.
       const eventFile = join(root, "dispatch-declined-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/nomodule" } }));
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/unadopted" } }));
       const r = run("list-declined", { env: { GITHUB_EVENT_PATH: eventFile } });
       expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
         exitCode: 0,
         stdout: lines(
           `::warning::${undiscoveredWarning(1)}`,
-          "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module, the opt-in to centrally managed settings (docs/settings.md). Nothing installs or heals its rulesets or labels.",
+          `::notice::${UNADOPTED_NOTICE}`,
           "settings targets: (none)",
         ),
         stderr: "",

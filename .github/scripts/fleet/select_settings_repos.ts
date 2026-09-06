@@ -209,7 +209,7 @@ const enriched = parseEnriched(
 // The scope's refusals (sync_scope.ts, counts only): every slug must name
 // a repo the fleet knows - a selected row or the operator repo itself -
 // and a called scope may not name a private one. A known repo the probes
-// then DROP (not enrolled, not adopted, module not selected) is a routine
+// then DROP (not enrolled, not adopted) is a routine
 // notice, so a called scope may legitimately select nothing. Visibility
 // is discovery's, fail-closed; the operator repo is this very repository,
 // disclosed by every log line, so it never counts as private here.
