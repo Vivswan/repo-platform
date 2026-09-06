@@ -610,10 +610,9 @@ export function actionSetsUpBun(text: string): boolean {
   return actionSteps(text).some(usesSetupBun);
 }
 
-/** Every directory under actions/ that carries a generated .bun-version,
- *  repo-relative and sorted: each whose action.yml sets up bun (nested
- *  actions included; EXCLUDED_DIRS bounds the walk as publication does) plus
- *  the declared script directories, which must exist and carry no manifest. */
+/** Every directory under actions/ carrying a generated .bun-version, sorted:
+ *  each whose action.yml sets up bun (EXCLUDED_DIRS bounds the walk as
+ *  publication does) plus the declared script directories (manifest-free). */
 export function bunPinnedActionDirs(
   actionsDir: string,
   scriptDirs: ReadonlySet<string> = PINNED_SCRIPT_DIRS,

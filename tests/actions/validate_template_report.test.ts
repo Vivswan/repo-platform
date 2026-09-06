@@ -59,8 +59,6 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../actions/validate-template-report/verdict";
-import { ACTIONS_BASH_SHELL } from "../../scripts/check_ssot";
-import { actionStepArgv } from "../shared/action_shell";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -153,6 +151,8 @@ function scratch(): { root: string; bin: string } {
   return { root, bin };
 }
 
+const RUNNER_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
+
 /** A step's run block from action.yml as the runner would execute it: the
  *  action-path expression resolved, the runner-temp expression resolved to
  *  `runnerTemp` when given, any other expression refused (env is the only
@@ -235,7 +235,7 @@ function runReport(opts: ReportOptions = {}) {
   writeFileSync(outputs, "");
   // The report step's own run block: the one place `integrity` is set, on
   // the bun path and on the no-bun fallback.
-  const proc = boundedSpawnSync(actionStepArgv(stepRun("report"), root), {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("report")], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -974,7 +974,7 @@ function runFetch(opts: FetchOptions = {}) {
   // same sha by default, so the floor holds without a second compare.
   const baseAnswers = join(root, "base-answers.yml");
   writeFileSync(baseAnswers, opts.base ?? `_commit: ${SHA}\n`);
-  const proc = boundedSpawnSync(actionStepArgv(stepRun("fetch"), root), {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("fetch")], {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
@@ -1241,7 +1241,7 @@ function runJudge(opts: JudgeOptions = {}) {
   const alignedDir = join(root, "aligned");
   layValidator(validatorOf(alignedDir), { lockfile: opts.lockfile });
   const verdict = join(root, "verdict.json");
-  const proc = boundedSpawnSync(actionStepArgv(stepRun("integrity"), root), {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("integrity")], {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
@@ -1377,7 +1377,7 @@ function runLatest(opts: LatestOptions = {}) {
   layValidator(validator, { lockfile: opts.lockfile });
   const findings = join(root, "latest-findings.md");
   const advisories = join(root, "latest-advisories.md");
-  const proc = boundedSpawnSync(actionStepArgv(stepRun("latest"), root), {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("latest")], {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
@@ -1483,7 +1483,7 @@ describe("the action's clear step", () => {
     let proc: ReturnType<typeof boundedSpawnSync>;
     if (lockVerdict) chmodSync(verdict, 0o555);
     try {
-      proc = boundedSpawnSync(actionStepArgv(stepRun("clear", runnerTemp), root), {
+      proc = boundedSpawnSync([...RUNNER_BASH, stepRun("clear", runnerTemp)], {
         env: {
           PATH: `${bin}:/usr/bin:/bin`,
           BASH_ENV: bashEnv,
@@ -1563,23 +1563,12 @@ describe("the action's wiring", () => {
     expect(byId("setup-bun-retry")?.if).toBe("steps.setup-bun.outcome == 'failure'");
     const actionBun = byId("action-bun");
     // Readiness has one truth, a bun on PATH at the pinned version, resolved
-    // by the one canonical block (the actions-bun-guard rule pins its text
-    // and tests its behaviour) for the probe and both post-setup resolvers.
-    // Every run step is privileged bash (the actions-bun-guard rule requires
-    // it): a caller's BASH_ENV, SHELLOPTS or exported functions cannot run
-    // before, rewrite, or redefine the lines the rule read.
-    for (const step of steps) {
-      if (typeof step.run === "string") expect(step.shell).toBe(ACTIONS_BASH_SHELL);
-    }
+    // by one block for both buns (executed below); `ready` derives from it.
     expect(envOf(actionBun)).toEqual({ PIN_FILE: "${{ github.action_path }}/.bun-version" });
-    expect(String(byId("bun")?.run)).toBe(String(actionBun?.run));
     const alignedBunPath = byId("aligned-bun-path");
     expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
     expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
-    // The resolver runs whatever happened before it, so the always() report
-    // step reads a recorded path, empty when no bun is pinned.
-    expect(actionBun?.if).toBe("always()");
-    const READY = "steps.action-bun.outputs.pinned == 'true'";
+    const READY = "steps.action-bun.outputs.ready == 'true'";
     expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
     expect(byId("latest")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
 
@@ -1589,17 +1578,18 @@ describe("the action's wiring", () => {
     const fetch = byId("fetch");
     expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
     // Every predictable scratch path is cleared by ONE fixed rm on the
-    // literal paths (no variable or PATH entry a caller could poison; one rm
-    // fails when any removal did): the aligned tree and verdict, which both
-    // aligned setups require (the actions-bun-guard rule reads it), and the
-    // latest leg's report pair, so an aborted latest validator leaves
-    // nothing stale.
+    // literal paths with BASH_ENV emptied (no variable or PATH entry a
+    // caller could poison; one rm fails when any removal did): the aligned
+    // tree and verdict, which both aligned setups require (the
+    // actions-bun-guard rule reads it), and the latest leg's report pair,
+    // so an aborted latest validator leaves nothing stale.
     const latest = byId("latest");
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
       id: "clear",
       "continue-on-error": true,
-      shell: ACTIONS_BASH_SHELL,
+      shell: "bash",
+      env: { BASH_ENV: "", SHELLOPTS: "" },
       run: `/bin/rm -rf ${[
         envOf(fetch).ALIGNED_DIR,
         envOf(fetch).VERDICT_FILE,
@@ -1664,7 +1654,7 @@ describe("the action's wiring", () => {
       id: "latest",
       if: `${READY} && steps.clear.outcome == 'success'`,
       "continue-on-error": true,
-      shell: ACTIONS_BASH_SHELL,
+      shell: "bash",
       env: {
         ACTION_BUN: BUN_PATH,
         VALIDATOR_DIR: sibling,
@@ -1721,15 +1711,9 @@ describe("the action's wiring", () => {
   });
 
   test("nothing resolves validate-template as an action any more: this action runs the script", () => {
-    // Templates, this repo's workflows, the golden renders, and the actions
-    // themselves: a `uses:` of the retired manifest would 404 at job start.
-    // One strict scan (a file that cannot be read throws, so a miss is never
-    // an unread file) serves the assertion and its control; action
-    // identifiers are case-insensitive, so the match is too; a `uses:` may
-    // fold its value onto the next line (a block scalar, with indicators and
-    // a trailing comment) or name the repo-local path (`./actions/...`, no
-    // `@`, an optional trailing slash), so the pattern spans every spelling
-    // actionlint accepts.
+    // A `uses:` of the retired manifest would 404 at job start. One strict
+    // scan (an unreadable file throws) serves the assertion and its control;
+    // the pattern spans every spelling actionlint accepts (the rows below).
     const REPO_ROOT = join(import.meta.dir, "../..");
     const usesOf = (action: string) =>
       new RegExp(
@@ -1773,5 +1757,69 @@ describe("the action's wiring", () => {
     expect(filesCarrying(usesOf("validate-template-report"))).toContain(
       ".github/workflows/fleet-ci.yml",
     );
+  });
+
+  // The one resolver block (both steps carry it), executed as the runner
+  // would: a path is recorded exactly when an absolute executable on PATH
+  // prints the pinned version AND exits 0, and `ready` derives from the
+  // path. A bun that lies about its version, one found through a relative
+  // PATH entry, another version, or no bun at all all read as no path.
+  const BUN_DIR = realpathSync(join(process.execPath, ".."));
+  const cases: [string, string, (dir: string) => { path: string; cwd?: string }, string][] = [
+    [
+      "the pinned version",
+      Bun.version,
+      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
+      `path=${process.execPath}\nready=true\n`,
+    ],
+    [
+      "another version",
+      "0.0.1",
+      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
+      "path=\nready=false\n",
+    ],
+    ["no bun at all", Bun.version, () => ({ path: "/usr/bin:/bin" }), "path=\nready=false\n"],
+    [
+      "a bun printing the pinned version but exiting nonzero",
+      Bun.version,
+      (dir) => {
+        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\nexit 97\n`, {
+          mode: 0o755,
+        });
+        return { path: `${dir}:/usr/bin:/bin` };
+      },
+      "path=\nready=false\n",
+    ],
+    [
+      "the pinned version reached through a relative PATH entry",
+      Bun.version,
+      (dir) => {
+        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\n`, {
+          mode: 0o755,
+        });
+        return { path: ".:/usr/bin:/bin", cwd: dir };
+      },
+      "path=\nready=false\n",
+    ],
+    ["an empty pin file", "", () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }), "path=\nready=false\n"],
+  ];
+  test.each(cases)("a resolver with %s records %j", (_name, pinned, arrange, expected) => {
+    const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
+    const step = (action.runs.steps as Record<string, unknown>[]).find(
+      (s) => s.id === "action-bun",
+    );
+    const { root } = scratch();
+    const stage = join(root, "stage");
+    mkdirSync(stage);
+    const { path, cwd } = arrange(stage);
+    const pinFile = join(root, ".bun-version");
+    writeFileSync(pinFile, pinned === "" ? "" : `${pinned}\n`);
+    const outputs = join(root, "outputs.txt");
+    writeFileSync(outputs, "");
+    const proc = boundedSpawnSync([...RUNNER_BASH, String(step?.run)], {
+      cwd,
+      env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs },
+    });
+    expect([proc.exitCode, read(outputs)]).toEqual([0, expected]);
   });
 });
