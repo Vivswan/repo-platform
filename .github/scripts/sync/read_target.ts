@@ -53,11 +53,8 @@ writeFileSync(join(runnerTemp, "description.txt"), `${description}\n`);
 writeFileSync(join(runnerTemp, "homepage.txt"), `${homepage}\n`);
 writeFileSync(join(runnerTemp, "topics.txt"), `${topics}\n`);
 if (hideDetails()) {
-  // addMask escapes %/CR/LF: workflow-command data must be single-line,
-  // or the runner misparses the command and the raw value hits the log.
-  // GitHub descriptions cannot hold real newlines, but this must not
-  // depend on that staying true. Short values stay unmasked: masking a
-  // three-letter topic would garble every log line containing it.
+  // addMask escapes %/CR/LF (workflow-command data is single-line). Short
+  // values stay unmasked: a three-letter topic would garble every log line.
   for (const value of [description, homepage, ...info.topics]) {
     if (value.length >= 4) addMask(value);
   }

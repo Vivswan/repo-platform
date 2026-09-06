@@ -1,29 +1,9 @@
-// agents, auto-assign, and settings-sync stopped being modules: every
-// managed repository renders their files unconditionally from the base
-// tree. A .repo-platform.yml still naming them fails module selection (a
-// name that is not a choice of the delivered template is refused, never
-// dropped), so the names leave the repository's declaration HERE, ahead of
-// selection and copier. The answers file is not touched: copier update
-// takes the filtered selection as data and records it itself.
-//
-// The folded files also ARRIVE in a repository that never selected the
-// three, and copier writes a managed path over whatever sits there. A
-// file at one of those paths that HEAD's ownership manifest does not list
-// is the repository's OWN (the template rendered everything the manifest
-// lists): at an agent-file alias path (CLAUDE.md, .github/agents.md,
-// .github/copilot-instructions.md) it is agent guidance, so it is folded
-// into AGENTS.md's repository-owned side ahead of copier (the split-file
-// carry then keeps it below the managed region and holds the PR for a
-// human to reconcile); at one of the other managed arrivals it is the
-// error arm - the sync never overwrites a file it did not render.
-//
-// The edit is a byte splice - each folded item leaves with its own
-// separator and every other byte stays, comments, spacing, line endings,
-// and the `mirrors` declaration included (Bun.YAML has no
-// comment-preserving emitter) - and the result is re-parsed and checked
-// against the declared list minus the folded names before anything is
-// written. Self-contained: node builtins and bun only
-// (docs/migrations.md).
+// Drops agents, auto-assign, and settings-sync (now base content) from
+// .repo-platform.yml ahead of module selection, which refuses a name the
+// template no longer offers; copier records the shorter list itself.
+// A repository's OWN file at an agent-file alias path (unlisted in HEAD's
+// ownership manifest) is folded into AGENTS.md first, or copier would
+// overwrite it with the managed symlink. Self-contained (docs/migrations.md).
 
 import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -95,10 +75,9 @@ function entryKind(path: string): "file" | "dir" | "absent" | "other" {
   return stat.isDirectory() && !stat.isSymbolicLink() ? "dir" : "other";
 }
 
-/** The declared module list of a registration text, or null when the sync's
- * selection would refuse the file (no mapping, no list, a non-string, empty,
- * or duplicate entry): that step owns the diagnosis, hide-details handling
- * included, and a rewrite must not launder a declaration it would refuse. */
+/** The declared module list, or null when the sync's selection would refuse
+ * the file (no mapping or list, a non-string, empty, or duplicate entry): that
+ * step owns the diagnosis, and a rewrite must not launder what it refuses. */
 function declaredModules(text: string): string[] | null {
   let data: unknown;
   try {
@@ -142,13 +121,9 @@ function splitComment(line: string): [body: string, comment: string] {
   return [line, ""];
 }
 
-/** A one-line flow list's inner text with the folded items spliced out:
- * each dropped item leaves with the separator that joined it to its
- * predecessor (the first item takes the separator after it), so the kept
- * items keep their own spacing and quoting byte for byte. A trailing comma
- * (YAML allows one) is not an item: it stays while any item is kept and
- * leaves with the last item otherwise. Null when an item is not a plain or
- * quoted scalar. */
+/** A one-line flow list's inner text with the folded items spliced out, each
+ * with the separator to its predecessor (the first takes the one after it); a
+ * trailing comma is no item. Null when an item is not a plain or quoted scalar. */
 function spliceFlowItems(inner: string): string | null {
   if (inner.trim() === "") return inner;
   const segments = inner.split(",");
@@ -180,10 +155,9 @@ function spliceFlowItems(inner: string): string | null {
   return out + (kept.length === 0 && trailingComma ? tail.replace(/^\s*,\s*/, "") : tail);
 }
 
-/** `text` with the folded names removed from its top-level `modules` list,
- * every other byte kept (the line's own ending included). Null when the
- * list's shape is not one the edit understands (a flow list spanning lines,
- * an item that is not a scalar). */
+/** `text` with the folded names spliced out of its top-level `modules` list,
+ * every other byte kept. Null for a shape the edit does not understand (a flow
+ * list spanning lines, a non-scalar item). */
 function dropFolded(text: string): string | null {
   const lines = text.split("\n");
   const keyAt = lines.findIndex((line) => /^modules\s*:/.test(line));
@@ -299,10 +273,8 @@ export default {
   id: "m0002_fold_base_modules",
 
   apply(target: Target): Outcome {
-    // Every arrival path but two sits under .github, and lstat follows a
-    // symlinked PARENT: a linked .github would have the fold read and
-    // remove files wherever the link points, so the parent is judged first
-    // (m0001 refuses the same shape).
+    // lstat follows a symlinked PARENT: a linked .github would have the fold
+    // read and remove files wherever it points, so it is judged first (as m0001).
     const parent = entryKind(join(target.dir, ".github"));
     if (parent === "file" || parent === "other") {
       return {
@@ -313,10 +285,9 @@ export default {
           "it: fix the default branch by hand, then re-run the sync.",
       };
     }
-    // The arrivals are judged before anything is staged, so an error arm
-    // leaves the checkout untouched. A regular file at an arrival path is
-    // the repository's own unless HEAD's manifest lists the path (the
-    // template rendered it, and copier updates it as always).
+    // Judged before anything is written, so an error arm leaves the tree
+    // untouched. A file HEAD's manifest lists was template-rendered (copier's
+    // to update); an unlisted one is the repository's own.
     const presentFiles = [...ALIASES, ...MANAGED_ARRIVALS].filter(
       (rel) => entryKind(join(target.dir, rel)) === "file",
     );
@@ -402,11 +373,9 @@ export default {
     return this.foldAliases(target, ownAliases, "dropped", [...NOTE, `> Dropped here: ${names}.`]);
   },
 
-  /** The alias fold, after the declaration edit: each of the repository's
-   * own alias files is appended to AGENTS.md (created when absent) and
-   * removed, both staged; the verdict's kind gains `+aliases` and its note
-   * the warning that holds the PR. Nothing to fold keeps `listKind` and its
-   * informational note as they were. */
+  /** Appends each own alias file to AGENTS.md (created when absent) and
+   * removes it, both staged; the kind gains `+aliases` and the note holds the
+   * PR. Nothing to fold returns `listKind` with its note unchanged. */
   foldAliases(
     target: Target,
     ownAliases: readonly string[],

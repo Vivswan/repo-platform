@@ -121,13 +121,10 @@ export interface LiveRenderData {
 
 const LIVE_KEYS = ["modules", "private", "description"] as const;
 
-/** The settings starter's identity answers copier asks of every repository.
- * A repository rendered before they were asked has none recorded, and a
- * starter rendered from the empty defaults would declare-and-clear what
- * the live repository shows, so the sync seeds each from the live
- * repository ONCE - into the answers copier records and the starter it
- * renders. A recorded answer wins, an empty one included: declare-and-clear
- * was the repository's own choice then. */
+/** The settings starter's identity answers. A repository rendered before they
+ * were asked has none recorded, and a starter from the empty defaults would
+ * clear the live values, so unrecorded ones seed from the live repository once;
+ * a recorded answer wins, an empty one included. */
 export const SEEDED_ANSWERS = ["homepage", "topics"] as const;
 export type SeededAnswer = (typeof SEEDED_ANSWERS)[number];
 

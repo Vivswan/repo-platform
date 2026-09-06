@@ -28,9 +28,10 @@
 // turns thrown RehearsalErrors into report rows instead of aborts.
 //
 // Known parity gaps vs the workflow (this is an operator convenience, not
-// a second pipeline): live visibility/description come from the recorded
-// copier answers instead of the GitHub API, so out-of-band settings drift
-// is not rehearsed; token-scope workflow withholding, hide-details
+// a second pipeline): live visibility/description and the homepage/topics
+// seeds come from the recorded copier answers instead of the GitHub API (an
+// unrecorded homepage or topics rehearses as "" where production seeds the
+// live value), so out-of-band settings drift is not rehearsed; token-scope workflow withholding, hide-details
 // redaction, and the PR/auto-merge machinery do not apply locally (the
 // tail tripwire CHECK runs and its report rides the outcome, but its
 // PR-body section and forced manual review are PR machinery); and
