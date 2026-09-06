@@ -62,11 +62,14 @@ case "$*" in
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
     exit 1 ;;
   *"--diff-filter=A"*)
-    # The added-files query: nothing was ADDED in these fixtures - the
-    # withheld file pre-exists, so reporting it here would have the
-    # restore path rmSync the very file the checkout case just restored.
+    # The added-files query: only withhold-added ADDS a workflow (the
+    # other withhold fixtures' file pre-exists, so reporting it here would
+    # have the restore path rmSync the very file the checkout case just
+    # restored).
+    if [ "$STUB_MODE" = "withhold-added" ]; then echo ".github/workflows/release.yml"; fi
     exit 0 ;;
   *"diff --name-only"*)
+    if [ "$STUB_MODE" = "withhold-added" ]; then echo ".github/workflows/release.yml"; fi
     if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
     if [ "$STUB_MODE" = "withhold-restore" ]; then echo ".github/workflows/ci.yml"; fi
     exit 0 ;;
@@ -225,6 +228,35 @@ describe("commit_push failure diagnostics", () => {
 });
 
 describe("commit_push Workflows-scope withhold reconciliation", () => {
+  test("a withheld ADDED workflow is removed and its manifest entry restamped hash-null with the withheld marker", () => {
+    // The manifest must describe the tree that is pushed: the added
+    // workflow the token could not create is gone, so its entry stamps
+    // hash-null and carries the marker validate-template reads as the one
+    // legitimate listed-but-missing state; every other entry restamps to
+    // its on-disk hash with no marker.
+    const targetDir = join(scratch, "work", "target");
+    mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules: []\n");
+    writeFileSync(join(targetDir, ".github/.copier-answers.yml"), "private: false\n");
+    writeFileSync(join(targetDir, ".github/workflows/release.yml"), "name: release\n");
+    writeFileSync(join(targetDir, ".github/workflows/ci.yml"), "name: ci\n");
+    const manifest = (release: string, ci: string) =>
+      `{\n  "files": {\n    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},\n    ".github/workflows/release.yml": {"class": "managed", "hash": ${release}},\n    ".github/workflows/ci.yml": {"class": "managed", "hash": ${ci}}\n  }\n}\n`;
+    writeFileSync(join(targetDir, ".github/repo-platform-manifest.json"), manifest("null", "null"));
+    const result = runCommitPush("withhold-added", "false");
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(targetDir, ".github/workflows/release.yml"))).toBe(false);
+    expect(readFileSync(join(targetDir, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+      manifest(
+        'null, "withheld": true',
+        `"${new Bun.CryptoHasher("sha256").update("name: ci\n").digest("hex")}"`,
+      ),
+    );
+    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toBe(
+      ".github/workflows/release.yml\n",
+    );
+  });
+
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
     // .github/workflows, so its report may claim label references the

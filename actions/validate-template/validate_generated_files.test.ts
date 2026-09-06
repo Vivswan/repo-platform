@@ -1410,46 +1410,42 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(".yamllint: .github/repo-platform-manifest.json records no hash");
   });
 
-  // One state the sync itself produces is not damage: a workflow file the
-  // push token could not deliver, whose entry the withhold restamps
-  // hash-null while the file stays absent. Every other listed-but-missing
-  // file is a managed file deleted outside a sync. The stamper nulls the
-  // hash of ANY absent file, so a hand-deleted workflow the template did
-  // not change between syncs reaches the same state once the sync
-  // restamps: an accepted residual, confined to .github/workflows/ by the
-  // path key. The workflow rows select release-please, whose managed
-  // release.yml the roster then expects (the tree the withhold pushes for a
-  // repo that just selected the module); the docs row is the plain
-  // baseline with one extra entry the roster does not cover.
+  // One listed-but-missing state is not damage: a workflow the sync's push
+  // token could not create, which the withhold removes from the pushed
+  // tree and restamps hash-null with the withheld marker. The advisory
+  // keys on the marker; the path only bounds where a marker is valid (the
+  // directory the Workflows scope gates), so a marker elsewhere cannot
+  // launder a deletion. The workflow rows select release-please, whose
+  // managed release.yml the roster then expects (the tree the withhold
+  // pushes for a repo that just selected the module); the docs rows are the
+  // plain baseline with one entry the roster does not cover.
   const RELEASE_PLEASE = BASELINE[".repo-platform.yml"].replace(
     "modules: [uv]",
     "modules: [uv, release-please]",
   );
+  const WITHHELD = "but withheld from the repo - the sync's push token lacked the Workflows scope";
+  const DELETED = "but missing from the repo - a managed file deleted outside a sync";
   test.each([
     {
-      reason: "a hash-null workflow entry with no file is the withheld-workflow advisory",
+      reason: "a withheld entry with no file is the advisory",
+      path: ".github/workflows/release.yml",
+      registration: RELEASE_PLEASE,
+      entry: '{"class": "managed", "hash": null, "withheld": true}',
+      verdict: { exitCode: 0, stream: "stdout", text: WITHHELD },
+    },
+    {
+      reason: "a hash-null workflow entry without the marker is a deleted managed file",
       path: ".github/workflows/release.yml",
       registration: RELEASE_PLEASE,
       entry: '{"class": "managed", "hash": null}',
-      verdict: {
-        exitCode: 0,
-        stream: "stdout",
-        text: "the state a withheld added workflow leaves",
-      },
+      verdict: { exitCode: 1, stream: "stderr", text: DELETED },
     },
     {
-      reason: "a hash-null entry outside .github/workflows is a deleted managed file",
+      reason: "a stamped entry with no file is a deleted managed file",
       path: "docs/handbook.md",
       registration: BASELINE[".repo-platform.yml"],
-      entry: '{"class": "managed", "hash": null}',
-      verdict: { exitCode: 1, stream: "stderr", text: "a managed file deleted outside a sync" },
-    },
-    {
-      reason: "a stamped workflow entry with no file is a deleted managed file",
-      path: ".github/workflows/release.yml",
-      registration: RELEASE_PLEASE,
       entry: `{"class": "managed", "hash": "${"a".repeat(64)}"}`,
-      verdict: { exitCode: 1, stream: "stderr", text: "a managed file deleted outside a sync" },
+      verdict: { exitCode: 1, stream: "stderr", text: DELETED },
     },
   ])("a listed file missing from the repo: $reason", ({ path, registration, entry, verdict }) => {
     const result = runValidator({
@@ -1459,7 +1455,7 @@ describe("ownership-manifest byte parity", () => {
     const other = verdict.stream === "stdout" ? result.stderr : result.stdout;
     expect(result.exitCode).toBe(verdict.exitCode);
     expect(result[verdict.stream]).toContain(
-      `${path}: listed as managed in ${MANIFEST} ${verdict.exitCode === 0 ? "with no hash and missing" : "but missing"} from the repo - ${verdict.text}`,
+      `${path}: listed as managed in ${MANIFEST} ${verdict.text}`,
     );
     expect(other).not.toContain(path);
     // One verdict per path: the BASELINE ci.yml's legacy-shape advisories
@@ -1467,6 +1463,69 @@ describe("ownership-manifest byte parity", () => {
     expect(result[verdict.stream].split("\n").filter((line) => line.includes(path))).toHaveLength(
       1,
     );
+  });
+
+  // The marker has one shape (true, on a hash-null managed or split entry
+  // other than the self entry): the stamper writes nothing else, so any
+  // other combination is a hand edit and draws exactly one diagnostic.
+  test.each([
+    {
+      reason: "a non-true value",
+      path: ".github/workflows/nightly.yml",
+      entry: '{"class": "managed", "hash": null, "withheld": "yes"}',
+    },
+    {
+      reason: "a marker next to a stamped hash",
+      path: ".github/workflows/nightly.yml",
+      entry: `{"class": "managed", "hash": "${"a".repeat(64)}", "withheld": true}`,
+    },
+    {
+      reason: "a marker on a starter",
+      path: ".github/workflows/nightly.yml",
+      entry: '{"class": "starter", "withheld": true}',
+    },
+    {
+      reason: "a marker outside .github/workflows/ (a deleted managed file cannot launder itself)",
+      path: "docs/handbook.md",
+      entry: '{"class": "managed", "hash": null, "withheld": true}',
+    },
+    {
+      reason: "a marker on a path that only lexically starts under .github/workflows/",
+      path: ".github/workflows/../../docs/handbook.md",
+      entry: '{"class": "managed", "hash": null, "withheld": true}',
+    },
+    {
+      reason: "a marker on the manifest's own entry",
+      path: MANIFEST,
+      entry: `{"class": "managed", "hash": null, "commit": "${COMMIT}", "withheld": true}`,
+    },
+  ])("a withheld marker outside its one shape is an error: $reason", ({ path, entry }) => {
+    const { exitCode, stdout, stderr } = runValidator({
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [path]: entry }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.includes(`'${path}'`))).toEqual([
+      `error: ${MANIFEST}: entry '${path}' carries a withheld marker outside its one shape (\`true\` on a hash-null managed or split entry under .github/workflows/) - the sync writes the marker only for a workflow it could not deliver; revert the entry (git history has the stamped original) or run a recovery sync (recover=recopy)`,
+    ]);
+    expect(stdout).not.toContain(path);
+  });
+
+  test("a withheld marker on a present hash-null file is the unstamped error, not the advisory", () => {
+    // The file arrived by hand after the withhold; the next stamp hashes it
+    // and strips the marker, and until then the entry reads as unstamped.
+    const path = ".github/workflows/nightly.yml";
+    const { exitCode, stdout, stderr } = runValidator({
+      [path]: "name: nightly\n",
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        [path]: '{"class": "managed", "hash": null, "withheld": true}',
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.includes(path))).toEqual([
+      `error: ${path}: ${MANIFEST} records no hash for it (unstamped) - the render's stamp hook did not run; run a template sync (or bun stamp_manifest.ts from the build branch) to stamp it`,
+    ]);
+    expect(stdout).not.toContain(path);
   });
 
   test("an unlisted roster path is an error even when its file is absent too", () => {
@@ -1857,42 +1916,32 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("a starter carrying a hash");
   });
 
-  test("a stale managed .repo-platform.yml entry is the known ownership flip: advisory, no parity", () => {
-    // The file was managed (hash-pinned) before it became a repo-owned
-    // starter; a not-yet-resynced repo's manifest still says managed while
-    // the repo edits the file - which is now the file's PURPOSE (module
-    // selection, the mirrors declaration), so the stale hash must not read
-    // as drift. The next sync restamps the entry.
-    const edited = `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: .github/SECURITY.md\n    targets: [copies/SECURITY.md]\n`;
-    const entries = {
-      ...stampedBaseline(),
-      // A hash stamped from a PREVIOUS state of the file, as a stale
-      // manifest carries: the edited file can no longer match it.
-      ".repo-platform.yml": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
-    };
+  // Every managed entry keeps full hash parity, whatever its path: the
+  // .repo-platform.yml ownership flip (managed -> starter) that once
+  // exempted a stale managed entry there is finished fleet-wide, so a
+  // manifest still classing it managed is a hand edit like any other.
+  test.each([
+    {
+      reason: ".repo-platform.yml classed managed with a stale hash",
+      path: ".repo-platform.yml",
+      content: `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: .github/SECURITY.md\n    targets: [copies/SECURITY.md]\n`,
+    },
+    { reason: "any other unlisted path", path: "docs/pinned.md", content: "drifted\n" },
+  ])("a drifted managed entry fails parity: $reason", ({ path, content }) => {
     const { exitCode, stdout, stderr } = runValidator({
-      ".repo-platform.yml": edited,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("predates its flip");
-  });
-
-  test("the flip exemption covers that one path only - other drifted managed entries still fail", () => {
-    // Negative control for the test above: the same drifted-hash shape on
-    // any OTHER unlisted path keeps full parity, so the exemption cannot
-    // quietly widen into a class-level bypass.
-    const entries = {
-      ...stampedBaseline(),
-      "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      "docs/pinned.md": "drifted\n",
-      [MANIFEST]: manifestOf(entries),
+      [path]: content,
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        [path]: `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
+      }),
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("docs/pinned.md: content does");
+    // Exactly one diagnostic names the path: no stale flip advisory and no
+    // second parity report ride along.
+    expect(stderr.split("\n").filter((line) => line.includes(path))).toEqual([
+      `error: ${path}: content does not match the sha256 recorded in ${MANIFEST} - the file drifted from the last stamped sync state; local edits to a managed file are replaced by the next template sync (move them to a repo-owned location), and intended template-side updates restamp on that sync`,
+    ]);
+    expect(stdout).not.toContain(path);
   });
 
   // The settings-sync module's one roster path, so a settings-sync fixture

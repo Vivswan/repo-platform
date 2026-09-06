@@ -53,9 +53,9 @@ import type { ModuleManifest } from "./module_manifests.ts";
  *  header sentence's canonical trailing period with no repo-name character
  *  (GitHub allows [A-Za-z0-9._-]) after it, so neither a negated
  *  look-alike ("is not managed by") nor a longer repo name
- *  ("/repo-platform_fork", "/repo-platform.fork") counts;
- *  validate_generated_files.ts applies the same anchoring to rendered
- *  files. */
+ *  ("/repo-platform_fork", "/repo-platform.fork") counts; the
+ *  validate-template action's checks/headers.ts applies the same anchoring
+ *  to rendered files. */
 export const MANAGED_HEADER_RE =
   /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
 
