@@ -59,7 +59,7 @@ const subject = `build tip ${tipSha.slice(0, 12)}`;
 // healthy stamp gives publish.ts nothing to stage and nothing its skip
 // guard objects to, so the dispatch is a no-op against it.
 const rebuildHint =
-  "If the build branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync. If the dispatch skips as no-change (the tip's tree already matches main's composition under a healthy stamp), have an admin reset refs/heads/build, or land any change that moves the composed tree.";
+  "If the build branch was pushed by something other than the post-green publisher, reset it: re-run that commit's CI, or dispatch post-green.yml with `sha=<green main commit>` to rebuild it from main, then re-run the sync. If the dispatch skips as no-change (the tip's tree already matches main's composition under a healthy stamp), have an admin reset refs/heads/build, or land any change that moves the composed tree.";
 
 // The battery's git questions answer with exit 0/1; anything else (or a
 // deadline expiry) is an errored look, not a verdict, and this gate
