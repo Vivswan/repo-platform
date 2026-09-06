@@ -1,8 +1,8 @@
 // Provenance stamp lines on build-branch commits. publish.ts writes both
 // lines into every build commit message; the source stamp is parsed back
 // by publish.ts (the newest-green stale check and the no-change skip
-// guard), sync/resolve_refs.ts, sync/wait_for_build.ts, and
-// shared/stamp_checks.ts, so the exact line shape lives here alone. The
+// guard), sync/resolve_refs.ts, and shared/stamp_checks.ts, so the exact
+// line shape lives here alone. The
 // run line is write-only: a human breadcrumb to the publishing run,
 // verified by nothing (the retired run-proof check was the last reader).
 

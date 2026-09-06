@@ -472,7 +472,10 @@ export const FLEET_WRITERS: Record<
         run: "bun .github/scripts/fleet/select_sync_repos.ts",
         value: "${{ inputs.repos }}",
       },
-      TARGET_SHA: { run: "bun .github/scripts/sync/wait_for_build.ts", value: "${{ inputs.sha }}" },
+      TARGET_SHA: {
+        run: "bun .github/scripts/fleet/select_sync_repos.ts",
+        value: "${{ inputs.sha }}",
+      },
     },
   },
   ".github/workflows/settings-repos.yml": {
@@ -730,7 +733,7 @@ export function fleetWriterMismatches(
   // The call inputs stay call-only: the concurrency ternary and the gate
   // read "is this a called run" off their presence, so a dispatch input
   // of the same name would silently take the called path - a per-run
-  // lane and no wait - on a hand-dispatched run.
+  // lane - on a hand-dispatched run.
   const dispatchInputs = Object.keys(mapping(mapping(on.workflow_dispatch).inputs));
   const shadowing = dispatchInputs.filter((name) => name === "repos" || name === "sha").sort();
   if (shadowing.length > 0) {

@@ -69,8 +69,8 @@ jobs:
   # residual is an OUT-OF-ORDER eviction - a re-run of an older commit's
   # CI replacing a pending newer publish - which leaves the branch stale
   # by one push, never rolled back; the next push heals it, or a dispatch
-  # with the newer commit's sha, and the sync's freshness check
-  # (sync/wait_for_build.ts) is what notices a stale build meanwhile.
+  # with the newer commit's sha; a sync meanwhile renders the previous
+  # build (a sync PR, when one opens, records the build commit it rendered).
   publish-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -152,9 +152,9 @@ jobs:
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
   # The opted-in sync: sync-repos.yml called in this run, needs-ordered
-  # behind the publish so wait_for_build's fast path finds the fresh tip
-  # (a red publish skips it - a sync then would wait out the freshness
-  # budget and ship the previous build). State-shaped: each target's
+  # behind the publish so the sync renders from the tip as the publish
+  # left it (a red publish skips it rather than sync the previous build).
+  # State-shaped: each target's
   # automation branch is regenerated under a lease, and the called sync
   # re-verifies the build's green source and provenance itself; a
   # swallowed run leaves a repo one sync behind, which the weekly cron

@@ -294,9 +294,8 @@ describe("rebuildBranchTree", () => {
   test(
     "hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash",
     () => {
-      // The scratch staging feeds both the provenance tree proof and
-      // wait_for_build's freshness compare, so a silent staging skew turns
-      // into a false tamper accusation or a burned 40-minute wait. Three
+      // The scratch staging feeds the provenance tree proof, so a silent
+      // staging skew turns into a false tamper accusation. Three
       // measured skew vectors, all planted at once: a .gitignore INSIDE
       // the composed tree hiding a sibling (only `add --force` covers it -
       // an excludesFile override does not), a machine-global
