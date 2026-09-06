@@ -122,7 +122,9 @@ const OUT = join(REPO_ROOT, "template");
 // here for the existing importers keyed on the composer.
 export { MODULE_ORDER };
 
-const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) (-?)#\}([^\r]*)$/;
+/** A compose anchor line: `{# compose:<name> #}` (or `-#}`), one per line;
+ *  the ssot sticky-pr-comments rule resolves fragment hosts with it. */
+export const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) (-?)#\}([^\r]*)$/;
 const JINJA_SUFFIX = ".jinja";
 const MANIFEST_NAME = "module.yml";
 const OWNERSHIP_NAME = "ownership.yml";

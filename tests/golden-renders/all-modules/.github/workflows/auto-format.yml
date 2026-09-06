@@ -72,10 +72,10 @@ jobs:
           uvx ruff format .
 
       - name: Commit and push changes
+        id: push
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if git diff --quiet; then
             echo "nothing to format"
@@ -86,16 +86,20 @@ jobs:
           git add -A
           git commit -m "style: apply automated formatting"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
-          # Checks will not re-run on the new head (github.token): say so,
-          # but stay green - the push itself succeeded.
-          marker="<!-- auto-format: no-retrigger-token -->"
-          comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate --jq '.[].body' || true)
-          case "$comments" in
-            *"$marker"*) ;;
-            *) gh pr comment "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --body "$marker
-          Pushed a formatting commit with the default workflow token, which starts no workflows, so checks will not re-run on the new head. Close and reopen this PR to re-run them." || true ;;
-          esac
+          # Checks will not re-run on the new head (github.token): flag it
+          # for the sticky PR comment below and as an annotation, but stay
+          # green - the push itself succeeded.
+          echo "no_retrigger=true" >> "$GITHUB_OUTPUT"
           echo "::warning::formatting commit pushed with github.token - checks will not re-run on the new head; close/reopen the PR to re-run them"
+      # One comment per PR, edited in place on later runs; a failed post
+      # fails the step.
+      - name: Comment that checks will not re-run
+        if: steps.push.outputs.no_retrigger == 'true'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: repo-platform/auto-format
+          message: |
+            Pushed a formatting commit with the default workflow token, which starts no workflows, so checks will not re-run on the new head. Close and reopen this PR to re-run them.
       # The label is a one-shot request: remove it even when a step failed,
       # so a broken run cannot loop.
       - name: Remove the fix-lint label

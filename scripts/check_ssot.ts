@@ -52,6 +52,11 @@ import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
 import {
+  ANCHOR_RE,
+  TOOLCHAIN_SETUP_FRAGMENT,
+  TOOLCHAIN_SETUP_TARGETS,
+} from "./compose_template.ts";
+import {
   actionSetsUpBun,
   actionSteps,
   MARKER_TOKENS,
@@ -60,6 +65,7 @@ import {
 } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
+import { landedPathAndGates } from "./ownership.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 import {
   argvFlagLeads,
@@ -2556,6 +2562,125 @@ export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
   }));
 }
 
+// --- sticky PR comments ------------------------------------------------------
+
+/** The one action fleet-rendered workflows post PR comments through: one
+ *  comment per header key per PR, upserted, a failed post failing the step.
+ *  Headers are `repo-platform/<host workflow stem>`, so two workflows can
+ *  never edit each other's comment. */
+export const STICKY_COMMENT_ACTION = "marocchino/sticky-pull-request-comment";
+
+/** The gh subcommand, or the REST route PR comments ride. */
+const HAND_ROLLED_PR_COMMENT_RE = /\bgh pr comment\b|\/issues\/.+?\/comments\b/;
+const STICKY_PIN_RE = new RegExp(
+  `${escapeRegExp(STICKY_COMMENT_ACTION)}@[0-9a-f]{40}["']? # v\\d+\\.\\d+\\.\\d+\\s*$`,
+);
+
+/** The rendered stem (`auto-format` for the gated
+ *  `{% if has_toolchain %}auto-format.yml{% endif %}.jinja`) of a template
+ *  workflow source; null for any other path. */
+export function templateWorkflowStem(rel: string): string | null {
+  const { path } = landedPathAndGates(rel.replace(/\.jinja$/, ""));
+  return /\/\.github\/workflows\/([^/]+)\.ya?ml$/.exec(path)?.[1] ?? null;
+}
+
+/** The workflow stems each fragment anchor splices into (the composer's
+ *  ANCHOR_RE, one anchor per line); the toolchain-setup fragment is
+ *  prepended into its targets' contributions and inherits their hosts. */
+export function fragmentHosts(workflows: [rel: string, text: string][]): Map<string, string[]> {
+  const hosts = new Map<string, string[]>();
+  for (const [rel, text] of workflows) {
+    const stem = templateWorkflowStem(rel);
+    if (stem === null) throw new Error(`fragmentHosts: ${rel} is not a template workflow source`);
+    for (const line of text.split("\n")) {
+      const anchor = ANCHOR_RE.exec(line)?.[1];
+      if (anchor !== undefined) hosts.set(anchor, [...(hosts.get(anchor) ?? []), stem]);
+    }
+  }
+  const setup = TOOLCHAIN_SETUP_TARGETS.flatMap((target) => hosts.get(target) ?? []);
+  return hosts.set(TOOLCHAIN_SETUP_FRAGMENT, setup);
+}
+
+/** One template source judged against the workflow stems it renders into
+ *  (its own for a workflow, its anchor's for a fragment), jinja comments
+ *  blanked and YAML comment lines skipped: no hand-rolled PR comment, and
+ *  every line naming the sticky action is pinned `@<40-hex sha> # vX.Y.Z`
+ *  and, down to the next `- ` step item, carries `header:
+ *  repo-platform/<host stem>` (so exactly one host) and no
+ *  continue-on-error. Plain line scanning: honest drift, not adversarial
+ *  YAML, is the target. */
+export function stickyCommentMismatches(
+  rel: string,
+  text: string,
+  hosts: readonly string[],
+): { mismatches: Mismatch[]; stickySteps: number } {
+  const lines = text
+    .replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""))
+    .split("\n");
+  const mismatches: Mismatch[] = [];
+  let stickySteps = 0;
+  for (const [index, line] of lines.entries()) {
+    if (/^\s*#/.test(line)) continue;
+    const flag = (expected: string, got: string) =>
+      mismatches.push({ file: `${rel}:${index + 1}`, expected, got });
+    if (HAND_ROLLED_PR_COMMENT_RE.test(line)) {
+      flag(`a ${STICKY_COMMENT_ACTION} step (upserted, a failed post fails the step)`, line.trim());
+      continue;
+    }
+    if (!line.includes(`${STICKY_COMMENT_ACTION}@`)) continue;
+    stickySteps += 1;
+    if (!STICKY_PIN_RE.test(line)) {
+      flag(
+        `${STICKY_COMMENT_ACTION}@<full 40-hex commit sha> # v<major>.<minor>.<patch>`,
+        line.trim(),
+      );
+    }
+    if (hosts.length !== 1) {
+      flag(
+        "a source rendering into exactly one workflow (the header names it)",
+        `${hosts.length} host workflows (${hosts.join(", ")})`,
+      );
+      continue;
+    }
+    const rest = lines.slice(index + 1);
+    const next = rest.findIndex((l) => /^\s*-\s/.test(l));
+    const step = rest.slice(0, next === -1 ? rest.length : next);
+    const header = step.map((l) => /^\s*header:\s*["']?([^\s"']+)/.exec(l)?.[1]).find(Boolean);
+    if (header !== `repo-platform/${hosts[0]}`) {
+      flag(
+        `with.header: repo-platform/${hosts[0]}`,
+        header ? `with.header: ${header}` : "no header: on the step",
+      );
+    }
+    if (step.some((l) => /^\s*continue-on-error:/.test(l))) {
+      flag(
+        "no continue-on-error on the step (a failed post fails the step)",
+        "continue-on-error set",
+      );
+    }
+  }
+  return { mismatches, stickySteps };
+}
+
+/** The rule over the template workflow and fragment sources. Throws when
+ *  no workflow source or no sticky step is present at all: a scan with
+ *  nothing to judge has lost its anchor. */
+export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mismatch[] {
+  const workflows = sources.filter(([rel]) => templateWorkflowStem(rel) !== null);
+  if (workflows.length === 0) throw new Error("no template workflow sources found - anchor lost");
+  const anchorHosts = fragmentHosts(workflows);
+  const judged = sources.map(([rel, text]) => {
+    const stem = templateWorkflowStem(rel);
+    const fragment = /^templates\/[^/]+\/fragments\/([a-z0-9-]+)\.jinja$/.exec(rel)?.[1];
+    const hosts = stem !== null ? [stem] : (anchorHosts.get(fragment ?? "") ?? []);
+    return stickyCommentMismatches(rel, text, hosts);
+  });
+  if (judged.every((j) => j.stickySteps === 0)) {
+    throw new Error(`no ${STICKY_COMMENT_ACTION} step in any template workflow - anchor lost`);
+  }
+  return judged.flatMap((j) => j.mismatches);
+}
+
 // --- scratch-scoped scripts ------------------------------------------------
 
 /** package.json scripts pinned to their EXACT command because the command
@@ -4177,6 +4302,23 @@ const rules: Rule[] = [
     },
   },
 
+  {
+    // Fleet-rendered workflows post PR comments through the sticky action
+    // only (stickyCommentMismatches states the shape); template workflow
+    // sources and the fragments that splice into them are the scan.
+    name: "sticky-pr-comments",
+    run: () =>
+      stickyTreeMismatches(
+        walkFiles("templates")
+          .filter(
+            (f) =>
+              !f.symlink &&
+              /\.(ya?ml|jinja)$/.test(f.path) &&
+              /\/(\.github\/workflows|fragments)\//.test(f.path),
+          )
+          .map((f) => [f.path, read(f.path)]),
+      ),
+  },
   {
     // The categorical delivery-channel law: EVERY self-reference in
     // fleet-rendered content - composite action or reusable workflow,
@@ -6664,6 +6806,7 @@ export const RULE_ROSTER = [
   "dogfood-oracle-row",
   "bun-dirs",
   "action-pins",
+  "sticky-pr-comments",
   "fleet-refs-ride-build",
   "bun-types-pin",
   "toolchain-version-files",

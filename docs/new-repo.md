@@ -98,7 +98,7 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 
 ### Fix commits and re-triggering CI
 
-Two of those workflows push fix commits to PR branches, and a push made with the default token (`github.token` / `GITHUB_TOKEN`) starts no workflows - the required `all-green` check would sit unreported on the new head. Both jobs post a PR comment and a run warning saying so; close/reopen the PR to re-run its checks. To make fix commits re-trigger CI automatically:
+Two of those workflows push fix commits to PR branches, and a push made with the default token (`github.token` / `GITHUB_TOKEN`) starts no workflows - the required `all-green` check would sit unreported on the new head. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning saying so; close/reopen the PR to re-run its checks. To make fix commits re-trigger CI automatically:
 
 - bun lockfile fixes: register `REPO_PLATFORM_TOKEN` as a *Dependabot* secret - a fine-grained token scoped to that one repo's Contents:RW is enough; do not put the fleet PAT in a downstream repo.
 - auto-format: a PAT with Contents:RW would work, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
