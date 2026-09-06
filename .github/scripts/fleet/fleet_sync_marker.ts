@@ -41,9 +41,17 @@ const POSITION =
 const FENCE_LINE = /^(?:`{3,}[^`]*|~{3,}.*)$/;
 
 /** The line behind its leading whitespace and blockquote markers, in any mix: what the mention
- *  scan reads (a quoted fence is a fence, a quoted span a span). The block grammar reads raw lines. */
+ *  scan reads (a quoted fence is a fence, a quoted span a span). The block grammar reads raw lines.
+ *  Generous on purpose: stripping more can only expose a mention, never hide one. */
 function containerBody(line: string): string {
   return line.replace(/^[ \t]*(?:>[ \t]*)*/, "");
+}
+
+/** The blockquote markers in the line's container prefix, counted as generously as containerBody
+ *  strips them: bareMentions() keeps the pairing-across reading, so a blockquote start the body did not
+ *  have never hides a mention that reading exposes. */
+function quoteDepth(line: string): number {
+  return (/^[ \t]*(?:>[ \t]*)*/.exec(line)?.[0].match(/>/g) ?? []).length;
 }
 
 /** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
@@ -85,26 +93,50 @@ function blankCodeSpans(lines: string[]): string[] {
   return (out + text.slice(cursor)).split("\n");
 }
 
-/** One paragraph's lines with their code spans blanked: each stretch between fence lines is one
- *  inline run scanned as a whole (GitHub wraps the squash body at 72 columns, so a one-line span
- *  in the PR body arrives as several lines here); a fence line passes through as written. */
-function withoutCodeSpans(lines: string[]): string[] {
+/** One paragraph's lines with their code spans blanked: each stretch between fence lines, and
+ *  before a line `opensBlock` says starts a new block, is one inline run scanned as a whole (GitHub
+ *  wraps the squash body at 72 columns, so a one-line span in the PR body arrives as several lines
+ *  here); a fence line passes through as written. */
+function withoutCodeSpans(
+  lines: string[],
+  opensBlock: (at: number, runStart: number) => boolean,
+): string[] {
   const bare: string[] = [];
   let inline: string[] = [];
+  let runStart = 0;
   const flush = () => {
     bare.push(...blankCodeSpans(inline));
     inline = [];
   };
-  for (const line of lines) {
+  lines.forEach((line, at) => {
     if (FENCE_LINE.test(line)) {
       if (inline.length > 0) flush();
       bare.push(line);
-    } else {
-      inline.push(line);
+      return;
     }
-  }
+    if (inline.length === 0) runStart = at;
+    else if (opensBlock(at, runStart)) {
+      flush();
+      runStart = at;
+    }
+    inline.push(line);
+  });
   if (inline.length > 0) flush();
   return bare;
+}
+
+/** Per line, whether a bare mention survives span blanking under EITHER reading of a blockquote
+ *  start: spans pairing across it (a lazy continuation) or ending there (a `>` interrupts a
+ *  paragraph). The union keeps every exposure of the pairing-across reading (main's), so a
+ *  boundary the body did not have hides nothing that reading shows. */
+function bareMentions(lines: string[]): boolean[] {
+  const body = lines.map(containerBody);
+  const depth = lines.map(quoteDepth);
+  const readings = [
+    withoutCodeSpans(body, () => false),
+    withoutCodeSpans(body, (at, runStart) => depth[at] > depth[runStart]),
+  ];
+  return lines.map((_, at) => readings.some((bare) => FLEET_SYNC_ANYWHERE.test(bare[at])));
 }
 
 // A line opening with a bare bracket group that ends or continues with text is directive-shaped
@@ -114,7 +146,7 @@ const DIRECTIVE_SHAPED = /^\[[^[\]]*\](?:\s|$)/;
 /** The lines as the PR body had them: GitHub re-wraps the squash body at 72 columns, so a line
  *  after a justified directive is its continuation. A line the block grammar or the mention scan
  *  would judge on its own never folds, so folding hides nothing. */
-function foldJustifications(lines: string[], bare: string[]): string[] {
+function foldJustifications(lines: string[], mentions: boolean[]): string[] {
   const folded: string[] = [];
   let justified: string[] | null = null;
   const flush = () => {
@@ -124,10 +156,7 @@ function foldJustifications(lines: string[], bare: string[]): string[] {
   lines.forEach((line, at) => {
     const body = containerBody(line);
     const ownLine =
-      DIRECTIVE_SHAPED.test(body) ||
-      BLOCK_LINE.test(body) ||
-      FENCE_LINE.test(body) ||
-      FLEET_SYNC_ANYWHERE.test(bare[at]);
+      DIRECTIVE_SHAPED.test(body) || BLOCK_LINE.test(body) || FENCE_LINE.test(body) || mentions[at];
     if (justified !== null && !ownLine) {
       justified.push(line);
       return;
@@ -140,10 +169,10 @@ function foldJustifications(lines: string[], bare: string[]): string[] {
   return folded;
 }
 
-/** One computation per paragraph of the three views: `lines` as written (what errors quote),
- *  `folded` (the block grammar's view), `bare` with container prefixes and code spans blanked
- *  (the mention scan's view). A line of only whitespace and blockquote markers is a break. */
-type Paragraph = { lines: string[]; folded: string[]; bare: string[] };
+/** One computation per paragraph: `lines` as written (what errors quote), `folded` (the block
+ *  grammar's view), `mentions` (which lines carry a bare mention once container prefixes and code
+ *  spans are blanked). A line of only whitespace and blockquote markers is a break. */
+type Paragraph = { lines: string[]; folded: string[]; mentions: boolean[] };
 
 function paragraphs(text: string): Paragraph[] {
   const lines = text
@@ -154,8 +183,8 @@ function paragraphs(text: string): Paragraph[] {
   let current: string[] = [];
   const flush = () => {
     if (current.length > 0) {
-      const bare = withoutCodeSpans(current.map(containerBody));
-      result.push({ lines: current, folded: foldJustifications(current, bare), bare });
+      const mentions = bareMentions(current);
+      result.push({ lines: current, folded: foldJustifications(current, mentions), mentions });
     }
     current = [];
   };
@@ -192,10 +221,10 @@ export function parseDirectives(body: string): Directives {
   paras.forEach((para, index) => {
     if (block !== null && index === BLOCK_INDEX) return;
     // Folding is for the block position only: elsewhere the raw shape and the
-    // bare view decide, so a wrapped code span holding brackets stays prose.
+    // mention scan decide, so a wrapped code span holding brackets stays prose.
     const shaped = isBlockShaped(para.lines);
     para.lines.forEach((line, at) => {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(para.bare[at])) {
+      if (shaped || para.mentions[at]) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
     });

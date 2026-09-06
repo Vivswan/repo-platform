@@ -617,6 +617,80 @@ describe("parseDirectives inside a container", () => {
     expect(parseDirectives(body(prefix))).toEqual(expected(prefix));
   });
 
+  test.each([
+    {
+      reason:
+        "entering a blockquote ends the inline run (the Copilot input): the quoted mention is bare",
+      body: message(PROSE, "Before `\n> [fleet-sync]\nAfter `"),
+      expected: misplaced("> [fleet-sync]"),
+    },
+    {
+      reason: "a deeper blockquote inside a quote ends the run the same way",
+      body: message(PROSE, "> a `\n> > [fleet-sync]\n> b `"),
+      expected: misplaced("> > [fleet-sync]"),
+    },
+    {
+      reason:
+        "leaving a blockquote is a lazy continuation (CommonMark): the span still pairs, the mention is code",
+      body: message(PROSE, "> Before `\n[fleet-sync]\n> After `"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a lazy continuation is never split, or its own backticks would re-pair and hide the bare mention",
+      body: message(PROSE, "> Before `\nend ` [fleet-sync] `"),
+      expected: misplaced("end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a `>` behind four spaces is text, not a marker: the paragraph continues and the span pairs as rendered",
+      body: message(PROSE, "Before `\n    > end ` [fleet-sync] `"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a `>` behind four spaces after a directive is prose in the same paragraph: misplaced, as before, never armed",
+      body: message("[fleet-sync: public]\n    > more", PROSE),
+      expected: misplaced("[fleet-sync: public]"),
+    },
+    {
+      reason:
+        "a deeper `>` inside a fenced block opens nothing: the fenced lines stay one run and the mention is bare",
+      body: message(PROSE, "```\na `\n> end ` [fleet-sync] `\n```"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason: "the same inside a tilde fence",
+      body: message(PROSE, "~~~\na `\n> end ` [fleet-sync] `\n~~~"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason: "a tilde line inside a backtick fence closes nothing: the fenced lines stay one run",
+      body: message(PROSE, "```\n~~~\na `\n> end ` [fleet-sync] `\n```"),
+      expected: misplaced("> end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a tab and spaces after the first marker leave the second `>` as text: one quoted paragraph, the span pairs as rendered",
+      body: message(PROSE, "> Before `\n>\t  > end ` [fleet-sync] `"),
+      expected: misplaced(">\t  > end ` [fleet-sync] `"),
+    },
+    {
+      reason:
+        "a constant quote depth with the markers written differently is one paragraph: the span pairs",
+      body: message(PROSE, "> Before `\n>[fleet-sync]\n > After `"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a quoted prose line after a justified line folds as its continuation (the block grammar never splits on quotes)",
+      body: message("[fleet-sync: all] why\n> more", PROSE),
+      expected: FLEET,
+    },
+  ])("$reason", ({ body, expected }) => {
+    expect(parseDirectives(body)).toEqual(expected);
+  });
+
   test("the quote-only-line input as reviewed, byte for byte", () => {
     expect(
       parseDirectives("feat: probe\n\nIntro.\n\n> Before `\n>\n> [fleet-sync]\n> After `"),
