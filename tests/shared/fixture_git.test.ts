@@ -43,15 +43,19 @@ function originAndWork(committed: boolean): string {
   return work;
 }
 
-const AMBIENT_TRIPLE = {
+// The triple plus GIT_CONFIG_PARAMETERS are scrubbed; GIT_CONFIG_SYSTEM is a
+// supported ambient variable the helper keeps (it cannot outrank the global).
+const AMBIENT = {
   GIT_CONFIG_COUNT: "1",
   GIT_CONFIG_KEY_0: "maintenance.auto",
   GIT_CONFIG_VALUE_0: "true",
+  GIT_CONFIG_PARAMETERS: "'maintenance.auto=true'",
+  GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
 describe("fixtureGit", () => {
   afterEach(() => {
-    for (const key of Object.keys(AMBIENT_TRIPLE)) delete process.env[key];
+    for (const key of Object.keys(AMBIENT)) delete process.env[key];
   });
 
   test.each([
@@ -76,7 +80,7 @@ describe("fixtureGit", () => {
   );
 
   test("an ambient GIT_CONFIG_COUNT triple re-enabling maintenance is scrubbed from the fixture env", () => {
-    Object.assign(process.env, AMBIENT_TRIPLE);
+    Object.assign(process.env, AMBIENT);
     // The control: the same triple left in place outranks the pinned file.
     const unscrubbed = { ...process.env, GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG };
     expect(traced(originAndWork(false), unscrubbed, ["commit", "-q", "-m", "a"])).toMatch(
@@ -85,9 +89,13 @@ describe("fixtureGit", () => {
     expect(traced(originAndWork(false), fixtureGitEnv(), ["commit", "-q", "-m", "a"])).not.toMatch(
       MAINTENANCE_SPAWN,
     );
-    expect(Object.keys(fixtureGitEnv()).filter((k) => k.startsWith("GIT_CONFIG_"))).toEqual([
-      "GIT_CONFIG_GLOBAL",
-    ]);
+    const env = fixtureGitEnv();
+    expect(
+      Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith("GIT_CONFIG_"))),
+    ).toEqual({
+      GIT_CONFIG_GLOBAL: FIXTURE_GITCONFIG,
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    });
   });
 
   test("a failing command throws with git's stderr; a passing one returns trimmed stdout", () => {
