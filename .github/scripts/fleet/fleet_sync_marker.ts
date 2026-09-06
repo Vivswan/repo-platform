@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
-// (sync_scope.ts's grammar; only `all` takes, and requires, a trailing justification), read over
+// (sync_scope.ts's grammar; only a bare `all` takes, and requires, a trailing justification), read over
 // judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
 // an older one already failed its own run and is a counts-only warning here.
 
@@ -13,7 +13,7 @@ import {
   rangeLabel,
   resolveBase,
 } from "./judged_range.ts";
-import { classifyEntry } from "./sync_scope.ts";
+import { parseScope } from "./sync_scope.ts";
 
 export type Directives =
   | { kind: "none" }
@@ -22,10 +22,11 @@ export type Directives =
 
 const KEYWORD = "fleet-sync";
 // A block line: brackets with any backticks around them (one balanced pair
-// is judged by unwrap()). Trailing text is part of the line only behind the
-// fleet-sync keyword, so `[Context] ordinary prose` stays prose.
+// is judged by unwrap()). Trailing text is part of the line only behind a
+// BARE fleet-sync bracket: `[Context] ordinary prose` stays prose, and so
+// does a code span followed by text, which is how a body mentions the grammar.
 const BLOCK_LINE = /^`*\[[^[\]]*\]`*$/;
-const JUSTIFIED_LINE = /^(`*\[\s*fleet-sync\b[^[\]]*\]`*)\s+(\S.*)$/i;
+const JUSTIFIED_LINE = /^(\[\s*fleet-sync\b[^[\]]*\])\s+(\S.*)$/i;
 const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
@@ -161,22 +162,15 @@ export function parseDirectives(body: string): Directives {
       );
       continue;
     }
-    const entries = value.split(",").map((entry) => entry.trim());
-    if (entries.includes("")) {
-      errors.push(`"${line}" has an empty entry in its list`);
+    // The one scope grammar: what the plans accept, the leg accepts.
+    const parsed = parseScope(value);
+    if (parsed.kind === "error") {
+      errors.push(`"${line}": ${parsed.message}`);
       continue;
     }
-    const folded = [...new Set(entries.map((entry) => entry.toLowerCase()))];
-    if (folded.includes("all")) {
-      if (folded.length > 1) {
-        errors.push(
-          `"${line}" mixes "all" with other entries: write [${keyword}: all] <justification> alone, or public, private, and slugs`,
-        );
-      } else if (reason === "") {
-        errors.push(`"${line}": ${NEEDS_REASON}`);
-      } else {
-        scope = "all";
-      }
+    if (parsed.kind === "all") {
+      if (reason === "") errors.push(`"${line}": ${NEEDS_REASON}`);
+      else scope = "all";
       continue;
     }
     if (reason !== "") {
@@ -185,14 +179,7 @@ export function parseDirectives(body: string): Directives {
       );
       continue;
     }
-    const bad = entries.filter((entry) => classifyEntry(entry) === "invalid");
-    if (bad.length > 0) {
-      errors.push(
-        `"${line}" lists entries that are not owner/name slugs, public, or private: ${bad.join(", ")}`,
-      );
-      continue;
-    }
-    scope = folded;
+    scope = [...parsed.visibility, ...parsed.slugs];
   }
   if (errors.length > 0) return { kind: "error", errors };
   return { kind: "fleet-sync", scope };

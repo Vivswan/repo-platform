@@ -61,9 +61,15 @@ describe("parseDirectives", () => {
       expected: FLEET,
     },
     {
-      reason: "a backticked all-scope renders as code and arms the same",
+      reason: "a code-span bracket followed by text is prose, never a justified directive",
       body: message("`[fleet-sync: all]` every repo's ci.yml changed", PROSE),
-      expected: FLEET,
+      expected: NONE,
+    },
+    {
+      reason:
+        "a first paragraph that mentions the default scope in a code span is prose (the control)",
+      body: message("`[fleet-sync: public]` is the default scope.", PROSE),
+      expected: NONE,
     },
     {
       reason: "public: the public repos, no reason needed",
@@ -107,7 +113,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "trailing whitespace, blank lines, and CRLF are tolerated",
-      body: `${message("`[fleet-sync: all]` every repo's ci.yml changed  ", PROSE)}\r\n\r\n   \r\n`.replace(
+      body: `${message("[fleet-sync: all] every repo's ci.yml changed  ", PROSE)}\r\n\r\n   \r\n`.replace(
         /\n/g,
         "\r\n",
       ),
@@ -240,7 +246,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: `o/r`, o/s]" lists entries that are not owner/name slugs, public, or private: `o/r`',
+          '"[fleet-sync: `o/r`, o/s]": 1 of 2 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)',
         ],
       },
     },
@@ -328,7 +334,9 @@ describe("parseDirectives", () => {
       body: message("[fleet-sync: o/r,]", PROSE),
       expected: {
         kind: "error",
-        errors: ['"[fleet-sync: o/r,]" has an empty entry in its list'],
+        errors: [
+          '"[fleet-sync: o/r,]": the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma',
+        ],
       },
     },
     {
@@ -337,17 +345,27 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: all, public] every repo changed" mixes "all" with other entries: write [fleet-sync: all] <justification> alone, or public, private, and slugs',
+          '"[fleet-sync: all, public] every repo changed": "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
         ],
       },
     },
     {
-      reason: "non-slug entries fail, all of them named",
+      reason: "a duplicated all is refused like the selectors refuse it (the control)",
+      body: message("[fleet-sync: all, all] every repo changed", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync: all, all] every repo changed": "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+        ],
+      },
+    },
+    {
+      reason: "non-slug entries fail, counted like the selectors count them",
       body: message("[fleet-sync: o/r, just-a-name, o/r/extra]", PROSE),
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: o/r, just-a-name, o/r/extra]" lists entries that are not owner/name slugs, public, or private: just-a-name, o/r/extra',
+          '"[fleet-sync: o/r, just-a-name, o/r/extra]": 2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)',
         ],
       },
     },
@@ -416,7 +434,7 @@ describe("main", () => {
   const prose1 = commit(message(PROSE));
   const prose2 = commit(message(PROSE));
   const listBA = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
-  const whole = commit(message("`[fleet-sync: all]` every repo's ci.yml changed", PROSE));
+  const whole = commit(message("[fleet-sync: all] every repo's ci.yml changed", PROSE));
   const bottom = commit(message(PROSE, "[fleet-sync]"));
   const prose3 = commit(message(PROSE));
   const pub = commit(message("[fleet-sync: public]", PROSE));
