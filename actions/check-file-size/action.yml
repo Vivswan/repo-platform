@@ -26,6 +26,7 @@ inputs:
 runs:
   using: composite
   steps:
+    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -34,9 +35,12 @@ runs:
         have="$(command -v bun >/dev/null && bun --version || true)"
         echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-    # The script runs on the action-local .bun-version pin, never on the
-    # caller's bun resolution (an older caller bun cannot parse this repo's
-    # lockfiles); reuse skips the fetch only on an exact pin match.
+    # Skipped only when the caller's bun already IS the pinned version
+    # (reuse then just skips a second network fetch): the action's scripts
+    # and lockfile run on the action-local .bun-version pin (generated
+    # from the manifests' bun pin), never on whatever the CALLER resolves
+    # - a caller pinning an older bun cannot parse the lockfiles
+    # repo-platform's bun writes.
     - name: Set up bun
       id: setup-bun
       if: steps.bun.outputs.pinned != 'true'
@@ -46,12 +50,21 @@ runs:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
-    # on nightly reporting paths a flake here turns a green night red.
+    # on nightly paths a flake here turns a green night red.
     - name: Set up bun (retry)
+      id: setup-bun-retry
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
+
+    # Recorded once after the setup: later steps run this path, never `bun`
+    # through PATH, where a later setup-bun can put another bun first.
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+    # END GENERATED: bun-setup
 
     # No install step (no runtime dependencies). continue-on-error so the
     # comment steps run first; the last step re-raises. The script records
@@ -61,12 +74,13 @@ runs:
       continue-on-error: true
       shell: bash
       env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         SCAN_PATH: ${{ inputs.path }}
         RENDERED_DIR: ${{ inputs.rendered-dir }}
         REPORT_PATH: ${{ runner.temp }}/check-file-size-report.md
       run: |
         status=0
-        bun "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" ${RENDERED_DIR:+--rendered "$RENDERED_DIR"} || status=$?
+        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" ${RENDERED_DIR:+--rendered "$RENDERED_DIR"} || status=$?
         grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
         exit "$status"
 
