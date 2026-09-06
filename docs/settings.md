@@ -145,7 +145,7 @@ The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts 
 
 Every render carries `.github/settings.yml` once (base content): the four identity keys seeded from the copier answers (`homepage` and `topics` are asked of every repository; a sync rendering the starter for answers that never recorded them seeds both from the live repository), plus commented examples for local labels and rulesets. It is repo-owned from then on (`_skip_if_exists`).
 
-Nothing in the repository applies it: settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) nightly, and after a green push to repo-platform's main that changes settings inputs or runs a fleet sync ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token.
+Nothing in the repository applies it: settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) after every green main merge there and nightly ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token.
 
 ## Opting out
 
