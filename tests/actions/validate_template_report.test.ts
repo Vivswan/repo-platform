@@ -1482,12 +1482,27 @@ describe("the action's wiring", () => {
     expect(byId("setup-bun-retry")?.if).toBe("steps.setup-bun.outcome == 'failure'");
     const actionBun = byId("action-bun");
     // Readiness has one truth, a bun on PATH at the pinned version, resolved
-    // by one block for both buns (executed below); `ready` derives from it.
-    expect(envOf(actionBun)).toEqual({ PIN_FILE: "${{ github.action_path }}/.bun-version" });
+    // by the one canonical block (the actions-bun-guard rule pins its text
+    // and tests its behaviour) for the probe and both post-setup resolvers.
+    // Every bash step empties BASH_ENV and SHELLOPTS (the actions-bun-guard
+    // rule requires it): a caller's job env cannot run a hook before, or
+    // rewrite, the lines the rule read.
+    const NEUTRAL = { BASH_ENV: "", SHELLOPTS: "" };
+    for (const step of steps) {
+      if (typeof step.run === "string") expect(envOf(step)).toMatchObject(NEUTRAL);
+    }
+    expect(envOf(actionBun)).toEqual({
+      ...NEUTRAL,
+      PIN_FILE: "${{ github.action_path }}/.bun-version",
+    });
+    expect(String(byId("bun")?.run)).toBe(String(actionBun?.run));
     const alignedBunPath = byId("aligned-bun-path");
     expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
     expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
-    const READY = "steps.action-bun.outputs.ready == 'true'";
+    // The resolver runs whatever happened before it, so the always() report
+    // step reads a recorded path, empty when no bun is pinned.
+    expect(actionBun?.if).toBe("always()");
+    const READY = "steps.action-bun.outputs.pinned == 'true'";
     expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
     expect(byId("latest")?.if).toBe(READY);
 
@@ -1554,6 +1569,7 @@ describe("the action's wiring", () => {
     // The judge runs on the bun the fetch step recorded, and hands the
     // tree's bun (the one setup-bun put on PATH) to the install and run.
     expect(envOf(judge)).toEqual({
+      ...NEUTRAL,
       ALIGNED_DIR: alignedDir,
       VERDICT_FILE: verdictFile,
       ORCHESTRATOR_BUN: BUN_PATH,
@@ -1596,69 +1612,5 @@ describe("the action's wiring", () => {
     for (const name of ["fetch_aligned.ts", "judge_aligned.ts", "report.ts"]) {
       expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
     }
-  });
-
-  // The one resolver block (both steps carry it), executed as the runner
-  // would: a path is recorded exactly when an absolute executable on PATH
-  // prints the pinned version AND exits 0, and `ready` derives from the
-  // path. A bun that lies about its version, one found through a relative
-  // PATH entry, another version, or no bun at all all read as no path.
-  const BUN_DIR = realpathSync(join(process.execPath, ".."));
-  const cases: [string, string, (dir: string) => { path: string; cwd?: string }, string][] = [
-    [
-      "the pinned version",
-      Bun.version,
-      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
-      `path=${process.execPath}\nready=true\n`,
-    ],
-    [
-      "another version",
-      "0.0.1",
-      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
-      "path=\nready=false\n",
-    ],
-    ["no bun at all", Bun.version, () => ({ path: "/usr/bin:/bin" }), "path=\nready=false\n"],
-    [
-      "a bun printing the pinned version but exiting nonzero",
-      Bun.version,
-      (dir) => {
-        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\nexit 97\n`, {
-          mode: 0o755,
-        });
-        return { path: `${dir}:/usr/bin:/bin` };
-      },
-      "path=\nready=false\n",
-    ],
-    [
-      "the pinned version reached through a relative PATH entry",
-      Bun.version,
-      (dir) => {
-        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\n`, {
-          mode: 0o755,
-        });
-        return { path: ".:/usr/bin:/bin", cwd: dir };
-      },
-      "path=\nready=false\n",
-    ],
-    ["an empty pin file", "", () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }), "path=\nready=false\n"],
-  ];
-  test.each(cases)("a resolver with %s records %j", (_name, pinned, arrange, expected) => {
-    const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
-    const step = (action.runs.steps as Record<string, unknown>[]).find(
-      (s) => s.id === "action-bun",
-    );
-    const { root } = scratch();
-    const stage = join(root, "stage");
-    mkdirSync(stage);
-    const { path, cwd } = arrange(stage);
-    const pinFile = join(root, ".bun-version");
-    writeFileSync(pinFile, pinned === "" ? "" : `${pinned}\n`);
-    const outputs = join(root, "outputs.txt");
-    writeFileSync(outputs, "");
-    const proc = boundedSpawnSync([...RUNNER_BASH, String(step?.run)], {
-      cwd,
-      env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs },
-    });
-    expect([proc.exitCode, read(outputs)]).toEqual([0, expected]);
   });
 });
