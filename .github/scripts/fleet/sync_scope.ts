@@ -74,11 +74,12 @@ export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): bo
 
 /** Why a list scope cannot run, counts only: a slug naming no known repo, or on the called path
  *  a slug naming a private one (private repos ride under the token). `known`: folded slug ->
- *  private. Null when it can run. */
+ *  private; `owner` names the discovery scope in the unknown-slug diagnosis. Null when it can run. */
 export function scopeRefusal(
   scope: Scope,
   known: ReadonlyMap<string, boolean>,
   source: ScopeSource,
+  owner: string,
 ): string | null {
   if (scope.kind === "all") return null;
   const slugs = [...scope.slugs];
@@ -86,8 +87,9 @@ export function scopeRefusal(
   if (missing > 0) {
     return (
       `${missing} of ${slugs.length} scoped repos matched no fleet repository (values withheld - ` +
-      "they may be private slugs): a repo you scoped to was not discovered this run - the fleet " +
-      "token cannot push to it, or it is archived - or the slug is misspelled (matching ignores case)"
+      `they may be private slugs): not among the fleet token's pushable repositories under ${owner} - ` +
+      "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
+      "misspelled (matching ignores case)"
     );
   }
   if (source.kind === "call") {

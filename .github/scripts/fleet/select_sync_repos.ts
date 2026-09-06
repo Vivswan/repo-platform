@@ -12,7 +12,8 @@
 // ::add-mask:: here: the runner silently drops a job output containing a
 // masked substring, which would kill the matrix.
 //
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
+// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, OWNER (the fleet owner, named in the
+// unknown-slug refusal), RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
 // GITHUB_EVENT_PATH supplies the repo dispatch input (a non-empty
 // ONLY_REPO env overrides it - the test harness and local runs use that).
 //
@@ -47,6 +48,7 @@ import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const runId = requireEnv("GITHUB_RUN_ID");
+const owner = requireEnv("OWNER");
 
 const scopeInput = readDispatchRepo();
 
@@ -83,7 +85,7 @@ if (discovered === null) {
 }
 const rows = enrich(discovered, (slug) => verifyTag(pat, runId, slug));
 const known = new Map(rows.map((row) => [row.repo.toLowerCase(), row.private]));
-const refusal = scopeRefusal(scope, known, scopeSource("TARGET_SHA"));
+const refusal = scopeRefusal(scope, known, scopeSource("TARGET_SHA"), owner);
 if (refusal !== null) {
   error(refusal);
   process.exit(1);

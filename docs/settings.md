@@ -149,7 +149,7 @@ Nothing in the repository applies it: settings are applied only centrally, by [s
 
 ## Opting out
 
-Leaving management is the only opt-out: revoke the fleet PAT's access to the repo (its nightly heal pauses; a still-discovered repo gets a notice line in the select job's log) or delete its `.repo-platform.yml`. The repo's `settings.yml` stays either way (sync never deletes it) as inert documentation or for hand use.
+Leaving management is the only opt-out: revoke the fleet PAT's access to the repo (it drops out of the nightly heal's discovery silently; a repo the token can still see but not push to gets a notice line in the select job's log) or delete its `.repo-platform.yml`. The repo's `settings.yml` stays either way (sync never deletes it) as inert documentation or for hand use.
 
 ## Token
 

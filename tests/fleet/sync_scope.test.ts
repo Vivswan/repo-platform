@@ -165,10 +165,10 @@ describe("scopeRefusal", () => {
       source: CALL,
       expected:
         "1 of 2 scoped repos matched no fleet repository (values withheld - they may be private slugs): " +
-        "a repo you scoped to was not discovered this run - the fleet token cannot push to it, or it is " +
-        "archived - or the slug is misspelled (matching ignores case)",
+        "not among the fleet token's pushable repositories under o - the grant was revoked, the " +
+        "repository is archived or owned by someone else, or the slug is misspelled (matching ignores case)",
     },
   ])("$reason", ({ scope, source, expected }) => {
-    expect(scopeRefusal(scope, known, source)).toBe(expected);
+    expect(scopeRefusal(scope, known, source, "o")).toBe(expected);
   });
 });

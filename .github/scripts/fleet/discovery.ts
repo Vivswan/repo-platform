@@ -175,11 +175,11 @@ export function scrubSlug(detail: string, slug: string, display: string): string
   return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
-/** Skip notice for a repo the fleet token cannot push to - by definition
- * not a fleet member, since the PAT's grant is the only membership fact;
- * `code` is the probe's definitive-negative HTTP status (401/403/404). */
+/** Notice for a repo discovery listed but the token cannot push to (a
+ * read-only grant). A REVOKED grant drops the repo from the listing itself,
+ * so leaving the fleet is silent; `code` is the probe's 401/403/404. */
 export function pushProbeSkipNotice(display: string, code: number): string {
-  return `${display}: not in the fleet - the fleet token cannot push to it (push probe HTTP ${code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it.`;
+  return `${display}: not in the fleet - the fleet token can see this repository but cannot push to it (push probe HTTP ${code}), so its grant is read-only. Give the REPO_PLATFORM_TOKEN write access to this repository to enroll it.`;
 }
 
 /** Skip notice for a repo without .repo-platform.yml on its default

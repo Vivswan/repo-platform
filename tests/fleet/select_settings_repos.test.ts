@@ -414,8 +414,9 @@ describe("select_settings_repos.ts", () => {
         exitCode: 1,
         stdout:
           "::error::1 of 1 scoped repos matched no fleet repository (values withheld - they may be " +
-          "private slugs): a repo you scoped to was not discovered this run - the fleet token cannot " +
-          "push to it, or it is archived - or the slug is misspelled (matching ignores case)\n",
+          "private slugs): not among the fleet token's pushable repositories under Vivswan - the grant " +
+          "was revoked, the repository is archived or owned by someone else, or the slug is misspelled " +
+          "(matching ignores case)\n",
         stderr: "",
         output: "",
         summary: "",

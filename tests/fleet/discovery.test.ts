@@ -162,9 +162,9 @@ describe("scrubSlug", () => {
 // The notice builders are the selectors' shared literals; these pin the
 // emitted text byte-for-byte.
 describe("notice builders", () => {
-  test("pushProbeSkipNotice names the repo a non-member, hint first", () => {
+  test("pushProbeSkipNotice names a listed-but-unpushable repo a non-member, hint first", () => {
     expect(pushProbeSkipNotice("h**-l**d", 403)).toBe(
-      "h**-l**d: not in the fleet - the fleet token cannot push to it (push probe HTTP 403). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it.",
+      "h**-l**d: not in the fleet - the fleet token can see this repository but cannot push to it (push probe HTTP 403), so its grant is read-only. Give the REPO_PLATFORM_TOKEN write access to this repository to enroll it.",
     );
   });
 

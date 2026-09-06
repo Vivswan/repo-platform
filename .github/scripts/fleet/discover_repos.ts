@@ -26,7 +26,9 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 
 // The owner scope is the PAT's own user: the fleet is the fleet owner's
 // repos the token can push to, so cross-owner repos the user can write to
-// must not ride into the sync plan.
+// must not ride into the sync plan. A revoked grant drops a repo from this
+// listing entirely: leaving the fleet is silent by construction, and the
+// selectors' notice covers only repos still listed but not pushable.
 const who = captureNetwork(["gh", "api", "user", "--jq", ".login"]);
 if (who.exitCode !== 0) {
   // writeSync: an async stream write racing the process.exit below

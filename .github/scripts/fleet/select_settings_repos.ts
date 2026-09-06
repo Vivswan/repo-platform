@@ -176,7 +176,7 @@ const rows = enrich(discovered, (slug) => verifyTag(pat, runId, slug));
 const known = new Map(rows.map((row) => [row.repo.toLowerCase(), row.private]));
 known.set(selfRepo.toLowerCase(), false);
 const isPrivate = (slug: string) => known.get(slug.toLowerCase()) ?? true;
-const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"));
+const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"), owner);
 if (refusal !== null) {
   console.log(`::error::${refusal}`);
   process.exit(1);

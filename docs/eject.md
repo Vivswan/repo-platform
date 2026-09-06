@@ -10,7 +10,7 @@ Management is push-based, so ejecting starts in repo-platform, not in the repo: 
 
 ## 1. Deregister in repo-platform
 
-Revoke the fleet PAT's access to the repo (its repository access list on the REPO_PLATFORM_TOKEN). The PAT's grant is the only membership fact: the next plan finds the repo unwritable and stops pushing sync PRs to it (a repo that discovery still lists gets one notice line saying the token cannot push); nothing in repo-platform lists the fleet, so there is nothing else to edit.
+Revoke the fleet PAT's access to the repo (its repository access list on the REPO_PLATFORM_TOKEN). The PAT's grant is the only membership fact: the repo disappears from the next plan's discovery and sync PRs stop, silently - nothing is deleted, and nothing in repo-platform lists the fleet, so there is nothing else to edit. (A repo the token can still see but not push to - a read-only grant - gets one notice line instead.)
 
 Settings stop being applied too: the nightly heal only manages enrolled repos with a `.repo-platform.yml` ([settings.md](settings.md)).
 
@@ -46,7 +46,7 @@ Every remaining file (settings.yml, AGENTS.md, editorconfig, gitignore content, 
 
 To stop receiving sync PRs without detaching, either:
 
-- revoke the fleet PAT's access to the repo (fleet side - the same step as deregistering; re-grant it to resume), or
+- revoke the fleet PAT's access to the repo (fleet side - the same step as deregistering; the repo vanishes from the next plan, and re-granting it resumes), or
 - delete `.repo-platform.yml` from the repo (the sync skips repos without it, with a notice).
 
-Undo either one to resume updates. Both pauses also stop the central nightly settings heal for a repo using the in-repo settings home, and neither is louder than a notice line in the plan job's log (a still-discovered revoked repo as "not in the fleet", the deleted-file one as "not adopted"), so check there if you forget which repos are paused.
+Undo either one to resume updates. Both pauses also stop the central nightly settings heal for a repo using the in-repo settings home. A revoked repo leaves no trace in the plan log (it is simply not discovered) and the deleted-file pause leaves only a "not adopted" notice line, so check the token's repository access list, not the log, to see which repos are paused.

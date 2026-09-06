@@ -112,6 +112,7 @@ describe("select_sync_repos.ts", () => {
         PAT: "stub-token",
         GH_TOKEN: "stub-token",
         GITHUB_RUN_ID: "8675309",
+        OWNER: "Vivswan",
         ONLY_REPO: "",
         RECOVER: "",
         // Neutralize the real event payload CI runs carry; the dispatch
@@ -177,7 +178,9 @@ describe("select_sync_repos.ts", () => {
   });
 
   test("skip notices print hints for private repos and slugs for public ones", () => {
-    expect(main.stdout).toContain("::notice::h**-l**d: not in the fleet - the fleet token cannot");
+    expect(main.stdout).toContain(
+      "::notice::h**-l**d: not in the fleet - the fleet token can see this repository but cannot push",
+    );
     expect(main.stdout).toContain("::notice::Vivswan/unadopted: skipped - no .repo-platform.yml");
   });
 
@@ -274,8 +277,9 @@ describe("select_sync_repos.ts", () => {
   const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d", 403)}`;
   const NO_FLEET_REPO = (missing: number, total: number) =>
     `::error::${missing} of ${total} scoped repos matched no fleet repository (values withheld - ` +
-    "they may be private slugs): a repo you scoped to was not discovered this run - the fleet " +
-    "token cannot push to it, or it is archived - or the slug is misspelled (matching ignores case)\n";
+    "they may be private slugs): not among the fleet token's pushable repositories under Vivswan - " +
+    "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
+    "misspelled (matching ignores case)\n";
   test.each([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
