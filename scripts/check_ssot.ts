@@ -555,11 +555,14 @@ function soleLocalCallerProblem(callers: WorkflowCaller[], expectedSite: string)
     .join(", ")}`;
 }
 
-/** post-green.yml is workflow_call-only, so its callers ARE its gate:
- *  exactly one job anywhere may call it, ci.yml's post-green job, itself
- *  needs-ordered behind the all-green job (allGreenGateMismatches judges
- *  that edge). A second caller would run every post-green leg - the
- *  fleet writers included - behind whatever that workflow's trigger is. */
+/** post-green.yml's call is the all-green gate's one exit, so its callers
+ *  ARE that gate: exactly one job anywhere may call it, ci.yml's
+ *  post-green job, itself needs-ordered behind the all-green job
+ *  (allGreenGateMismatches judges that edge). A second caller would run
+ *  every post-green leg - the fleet writers included - behind whatever
+ *  that workflow's trigger is. Its only other way in, a workflow_dispatch,
+ *  runs the publish leg alone (tests/build-branches/publish_wiring.test.ts
+ *  pins that) behind publish.ts's own in-script gate. */
 export function postGreenCallerMismatches(
   workflows: Record<string, string>,
   owner: string,
@@ -586,11 +589,9 @@ export function postGreenCallerMismatches(
  *  fleetTokenHolderMismatches, so an unregistered fleet-mutating workflow
  *  cannot land silently. */
 export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
-  ".github/workflows/build-branches.yml":
-    "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push)",
   ".github/workflows/ci.yml": "passes the secret through to post-green.yml",
   ".github/workflows/post-green.yml":
-    "passes the secret through to the publish and to the two writers it calls",
+    "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push) and passes the secret through to the two writers it calls",
   ".github/workflows/dependabot-bun-lockfile.yml": "pushes to THIS repository's dependabot PRs",
   ".github/workflows/refresh-gitignore.yml": "opens PRs in THIS repository",
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
@@ -1954,8 +1955,8 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
 // --- fleet delivery pins -----------------------------------------------------
 
 /** The green-gated branch every rendered self-pin executes from. A twin of
- *  publish.ts's BRANCH constant (build-branches.yml's one delivery
- *  channel), pinned against it by the fleet-refs-ride-build rule, so a
+ *  publish.ts's BRANCH constant (the one delivery channel post-green.yml
+ *  publishes), pinned against it by the fleet-refs-ride-build rule, so a
  *  delivery-branch rename updates both. Starters render once
  *  (_skip_if_exists): a rename reaches fresh renders only, never a pin an
  *  already-rendered starter carries. */

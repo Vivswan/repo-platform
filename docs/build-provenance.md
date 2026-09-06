@@ -8,17 +8,17 @@ How the `build` branch gets published, how a sync verifies the tip before consum
 | How does a sync know the tip is fresh? | [sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) |
 | How does a sync verify the tip's content before consuming it? | [sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) |
 | Why do producer and verifier hash the same tree? | [shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) and [shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts) |
-| Which workflows drive the flow? | [build-branches.yml](../.github/workflows/build-branches.yml), [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + post-green jobs), [post-green.yml](../.github/workflows/post-green.yml) |
+| Which workflows drive the flow? | [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + the post-green caller), [post-green.yml](../.github/workflows/post-green.yml) (the publish, on the call and on a dispatch) |
 
 ## Who can write `refs/heads/build`?
 
 | Writer | When | What gates the write |
 | --- | --- | --- |
-| post-green.yml's publish-build job | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and publish.ts re-verifies the check at the source before any mutation. |
-| Build Branches' schedule and dispatch legs | Weekly cron, or manual dispatch (the self-heal) | publish.ts's all-green verification at the source is the SOLE green gate there. |
+| post-green.yml's publish-build job, called | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and publish.ts re-verifies the check at the source before any mutation. |
+| post-green.yml's publish-build job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | publish.ts's verification at the source - main history, completed successful `all-green` - is the SOLE gate there. |
 | Anyone with push access, out of band | Any time | Nothing at write time: a user-repo ruleset blocks only force-pushes and deletion, so plain fast-forwards stay possible. Sync consumption is provenance-verified below; `uses:` execution trusts the ref (the residuals table). |
 
-Build Branches' push leg is deliberately NOT on this list: on every push to main it writes only the pending ref `build-pending/<sha>`, never the branch itself.
+Nothing writes the branch on a push before the gate: the compose happens inside the post-green run, after `all-green`.
 
 ## The delivery flow: push to publish
 
@@ -26,16 +26,15 @@ A template change merges to main as commit S. What happens, in order:
 
 | Step | Actor | What happens |
 | --- | --- | --- |
-| 1. Push to main | Build Branches' push leg ([build-branches.yml](../.github/workflows/build-branches.yml)) | Composes S's tree concurrently with CI and parks it, unpublished, at `refs/heads/build-pending/<S>` (`build_pending.ts`; `pending.ts` owns the ref grammar). |
-| 2. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
-| 3. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
-| 4. Publish | post-green.yml's publish-build job | [publish.ts](../.github/scripts/build-branches/publish.ts) promotes the parked tree (composing as the fallback when the pending ref is missing) and chains a stamped commit onto the branch tip. |
+| 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
+| 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
+| 3. Publish | post-green.yml's publish-build job | [publish.ts](../.github/scripts/build-branches/publish.ts) composes S's tree with S's own script (a worktree at S, its frozen dependencies, `branch_tree.ts`) and chains a stamped commit onto the branch tip. |
 
-The source composed and stamped is always SOURCE_SHA - the judged run's own commit on the green path, the trigger commit on schedule/dispatch - never a read of origin/main, which can already be a newer, even red, commit (publish.ts's header owns this discipline).
+The source composed and stamped is always SOURCE_SHA - the judged run's own commit on the call, the operator's sha input on a dispatch - never a read of origin/main, which can already be a newer, even red, commit (publish.ts's header owns this discipline).
 
-publish.ts hard-verifies the `all-green` check run at SOURCE_SHA before any mutation ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)): defense in depth on the green path above, where the needs edge already gated entry, and the sole green gate on the self-heal legs below.
+publish.ts hard-verifies SOURCE_SHA before any mutation: main history (the sync's stamp check 1 refuses anything else, so a dispatch naming a PR head would wedge every sync), then the `all-green` check run at that sha ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)) - defense in depth on the call, where the needs edge already gated entry, and the sole gate on a dispatch.
 
-Build Branches' schedule and dispatch legs are the self-heal publishers: they compose and publish in one run, covering a publish that went missing after a green gate (a failed or evicted post-green run) and a stamp that needs recovery. Anything without a green `all-green` check at the source is not theirs to heal alone - re-run that commit's CI first (the gate job posts the check), then Build Branches (build-branches.yml's header).
+A missing publish (a failed or evicted post-green run after a green gate) and a stamp that needs recovery heal two ways: the next push to main publishes the newer tree, or an operator dispatches post-green.yml with the green commit's sha. Meanwhile the sync's freshness check ([wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts), below) is what notices a stale build. Anything without a green `all-green` check at the source is not publishable - re-run that commit's CI first (the gate job posts the check), then dispatch.
 
 The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded `_commit`, needed by copier update's three-way merge - stay reachable forever.
 
@@ -52,9 +51,9 @@ The recorded `_commit` is the full 40-hex build commit sha, never git's 7-char a
 
 ## One publisher at a time
 
-Both workflow publishers of `refs/heads/build` serialize in one repo-scoped concurrency lane, `build-branches-publish`, shared as a literal string between post-green.yml's publish job and Build Branches' self-heal leg (a group derived from `github.workflow` would silently split the lane inside a `workflow_call`'d workflow - post-green.yml's header).
+Every workflow publisher of `refs/heads/build` serializes in one repo-scoped concurrency lane, `build-branches-publish`, held by post-green.yml's publish job as a literal string: a called run and a dispatched run are runs of DIFFERENT workflows (the caller's and post-green.yml's), and a group derived from `github.workflow` would silently split the lane between them (post-green.yml's header).
 
-The lane serializes only the workflows; out-of-band pushes are the residuals section's problem. Two mechanisms make the survivor rollback-proof anyway (publish.ts): a newest-green-wins staleness preflight against the tip's stamped source (`pending.ts` owns the rule), and the plain - never force - push, which doubles as the compare-and-swap on the exact tip the preflight read. The residuals are staleness-only, healed by the next push or the weekly cron (build-branches.yml's concurrency comment enumerates them).
+The lane serializes only the workflows; out-of-band pushes are the residuals section's problem. Two mechanisms make the survivor rollback-proof anyway (publish.ts): a newest-green-wins staleness preflight against the tip's stamped source, decided before anything is composed, and the plain - never force - push, which doubles as the compare-and-swap on the exact tip the preflight read. The residual is staleness-only (an out-of-order eviction leaves the branch one push behind, never rolled back), healed by the next push or a dispatch with the newer commit's sha.
 
 ## The no-empty-commit law
 
@@ -62,10 +61,10 @@ In normal operation a publish commits only on a content change (publish.ts owns 
 
 | Event | Composed tree vs tip | Tip stamp | Result |
 | --- | --- | --- | --- |
-| A quiet week's cron | identical | healthy | Nothing staged, nothing published. |
+| A docs-only landing | identical | healthy | Nothing staged, nothing published. |
 | Rerun of an already-published source | identical | healthy | Nothing published. |
 | A content change lands green | differs | any | A new stamped commit. |
-| A stale queued publisher runs after a newer main already published | any | any | Skip - newest-green wins (the staleness preflight, before any tree comparison). |
+| A stale queued publisher runs after a newer main already published | any | healthy | Skip - newest-green wins (the staleness preflight reads the tip's stamp, before any compose or tree comparison). |
 | Dispatch over a tampered or unparseable stamp | identical | broken | Stamp recovery: a freshly stamped, tree-identical commit. |
 
 No commit means no fleet `_commit` bump and no content-free sync PRs; freshness needs no commit either, because the sync computes it (next section) instead of trusting a marker ref or a filler commit.
@@ -81,7 +80,7 @@ Stamp recovery is the one exception that commits an identical tree, and the only
 | Fast | The tip's source stamp names main's HEAD - deliberately stamp-only, the tree unread (a tampered tree under a HEAD stamp goes red at the provenance verify instead). | After any publish stamped with HEAD: a content change, or a stamp recovery. |
 | Slow | Rebuild the composed tree at main's HEAD ([shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts)) and compare tree hashes with the tip, counted only under a healthy tip stamp. | The common path: after a docs-only or quiet landing the stamp never moves, so computed equality is the only freshness proof. |
 
-A green build-branches run at HEAD is deliberately not trusted as freshness: the push leg only parks a pending tree, so a green run there proves nothing about what the branch tip carries.
+A green post-green run at HEAD is deliberately not trusted as freshness: a run proves nothing about what the branch tip carries; the stamp and the tree do.
 
 The rebuild runs once, before the poll loop; any rebuild failure degrades to the stamp-only poll under the script's warn-and-continue contract. A timeout only warns, and the sync proceeds against the previous build tip - script/template skew, exactly the state a pre-gate sync always ran in - which every downstream gate still judges: `sync/resolve_refs.ts` re-runs the green gate on that tip's stamped source and the provenance checks below. The wait is a freshness aid; the gates live elsewhere.
 
@@ -97,13 +96,13 @@ The rebuild runs once, before the poll loop; any rebuild failure degrades to the
 
 Checks 1 and 2 are the same battery publish.ts's no-change skip guard runs, shared so the two can never drift.
 
-A fourth check - proving the stamped run a green build-branches run via the Actions API - existed and was retired: it anchored no content of its own while adding live-state trust (runs age out, workflows get renamed, so a valid tip could wedge every sync on a dead run id). The documented cost of its removal: actor provenance degraded from verified to advisory - the commit's `run:` line is a human breadcrumb, and a hand-pushed byte-identical tip is no longer distinguishable. A forensics loss, never a content-injection gain; the full argument is verify_build_provenance.ts's header.
+A fourth check - proving the stamped run a green publish run via the Actions API - existed and was retired: it anchored no content of its own while adding live-state trust (runs age out, workflows get renamed, so a valid tip could wedge every sync on a dead run id). The documented cost of its removal: actor provenance degraded from verified to advisory - the commit's `run:` line is a human breadcrumb, and a hand-pushed byte-identical tip is no longer distinguishable. A forensics loss, never a content-injection gain; the full argument is verify_build_provenance.ts's header.
 
 ## Hermetic staging: one function of the bytes
 
 The tree proof and the freshness slow path both compare a scratch rebuild's hash against the tip's, so producers and verifier must stage identically - or the skew reads as a false tamper accusation in the proof and a permanent "not fresh" in the slow path.
 
-[shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) owns the one staging argv all four sites run (`build_pending.ts`, `publish.ts`, and `rebuild_tree.ts` for both consumers). It neutralizes two config vectors:
+[shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) owns the one staging argv every site runs (`publish.ts`, and `rebuild_tree.ts` for both consumers). It neutralizes two config vectors:
 
 | Vector | Neutralizer |
 | --- | --- |
@@ -121,7 +120,7 @@ Guards of this class - defenses against environmental hazards a hermetic test ca
 The branch is both the copier source and the fleet's executable channel (`uses: ...@build`), which constrains every path on it:
 
 - Plain filenames only: a `uses:` ref downloads the whole branch tarball, and extraction dies on jinja-expression path segments, so conditional landing happens through copier.yml's generated `_exclude` region instead of filename gates.
-- Nothing the builder publishes can run on the branch: [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) hard-fails assembly if any shipped workflow carries a trigger other than `workflow_call` alone. PAT pushes can trigger workflows, so the safety is pinned by construction, not carried by omission (build-branches.yml's header); an out-of-band push bypasses the assembly guard entirely - the residuals section.
+- Nothing the builder publishes can run on the branch: [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) hard-fails assembly if any shipped workflow carries a trigger other than `workflow_call` alone. PAT pushes can trigger workflows, so the safety is pinned by construction, not carried by omission; an out-of-band push bypasses the assembly guard entirely - the residuals section.
 - The branch also carries `migrations/`, the [migration ladder](migrations.md)'s rung files verbatim: a sync walks the build commits between the target's recorded build and the delivered one and runs each rung that appeared, loading it from the newest build commit that carries it. Plain filenames outside `template/`, so copier never renders them.
 - Rungs are executable code the sync runs from the build branch, like the stamp hook copier runs from the delivered tree; a rung that is still on the tip loads from the tip, which the provenance proof covers. Any rung absent from the verified tip loads from an older commit, and that commit is trusted as history: the branch is append-only under a ruleset that blocks force-pushes and deletion, the same trust every `uses: ...@build` ref already places in the branch (the residuals table).
 
@@ -135,6 +134,5 @@ Every fleet-rendered reference to this repository rides `@build` (the `fleet-ref
 | --- | --- | --- |
 | `uses: ...@build` execution trusts the ref. | A user-repo ruleset cannot restrict other writers - plain fast-forwards stay possible; only force-pushes and deletion are blocked. | Sync consumption is provenance-verified; repo-platform's own CI gates every builder-published change to the executable channel (an out-of-band push bypasses both, the ref-trust residual in full). |
 | Actor provenance is advisory. | The run-proof check was retired as live-state trust (above). | Checks 1-3 anchor the content; the `run:` line stays a breadcrumb. |
-| Parking a poisoned pending tree is as powerful as fast-forwarding `refs/heads/build`. | Pending refs cannot be ruleset-scoped to the publisher on user repositories (`pending.ts`'s header). | The sync's provenance rebuild bounds template consumption; publish.ts's shape guard bounds what a malformed pending tree can publish. |
-| A freshness timeout lets the sync proceed on the previous build tip. | The bounded wait is an aid, not the gate. | resolve_refs.ts still runs the green gate and provenance checks on that tip; the weekly cron heals the miss (or a `[fleet-sync]` directive on the next merge runs the sync at once - [all-green.md](all-green.md#after-the-gate)). |
+| A freshness timeout lets the sync proceed on the previous build tip. | The bounded wait is an aid, not the gate. | resolve_refs.ts still runs the green gate and provenance checks on that tip; the next sync (the weekly cron, or a `[fleet-sync]` directive on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the publish once it lands, and a publish that never landed is healed by the next push or a dispatch with the green commit's sha. |
 | A migration rung absent from the tip loads from a build commit the tree proof did not cover. | Only the tip is rebuilt and compared; older commits are trusted as append-only history, and an out-of-band fast-forward could park a rung in a middle commit that a lagging repository runs later. | The same write-access trust as `uses:` execution; a rung still on the tip loads from the verified tip, so the residual is confined to rungs the verified tip lacks ([migrations.md](migrations.md)). |

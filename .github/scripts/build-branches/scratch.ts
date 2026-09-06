@@ -11,7 +11,7 @@ import { capture } from "../shared/proc.ts";
 export interface ScratchWorktrees {
   /** The source commit's own checkout: its script and lockfile compose the tree. */
   src: string;
-  /** The composed (or pre-built) tree. */
+  /** The composed tree. */
   tree: string;
   /** The worktree the commit is built in and pushed from. */
   out: string;

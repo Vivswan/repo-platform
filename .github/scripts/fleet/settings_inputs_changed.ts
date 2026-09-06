@@ -81,7 +81,7 @@ export function resolveBase(cwd: string, sha: string, before: string): DiffBase 
     );
     if (stamps.length === 0) {
       throw new Error(
-        "the build branch carries no stamped source in its whole history: publish.ts stamps every build commit, so this branch was not published by it - reset it (dispatch Build Branches) before the settings apply reads it",
+        "the build branch carries no stamped source in its whole history: publish.ts stamps every build commit, so this branch was not published by it - reset it (dispatch post-green.yml with sha=<green main commit>) before the settings apply reads it",
       );
     }
     const base = stamps.find((stamped) => stamped !== sha);

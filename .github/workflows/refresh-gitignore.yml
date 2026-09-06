@@ -3,7 +3,7 @@
 # and open a PR when upstream changed anything we consume. This workflow is
 # the only place that fetches upstream: nothing is pinned and no CI job
 # verifies the outputs, so the diff below IS the upstream change.
-# Merging the PR reaches the build branch automatically via build-branches.
+# Merging the PR reaches the build branch automatically via the post-green publish.
 
 name: Refresh gitignore
 

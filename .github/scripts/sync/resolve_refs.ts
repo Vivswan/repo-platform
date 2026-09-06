@@ -59,7 +59,7 @@ if (buildFetch.exitCode !== 0) {
     ? `timed out after ${DEFAULT_HANG_BOUND_MS}ms`
     : `failed (${lastLine(buildFetch.stderr) || "no output"})`;
   console.log(
-    `::error::fetching ${repository}'s build branch ${detail}; a stale local ref must not stand in for it. If the repository has no build branch yet, dispatch the Build Branches workflow, then re-run.`,
+    `::error::fetching ${repository}'s build branch ${detail}; a stale local ref must not stand in for it. If the repository has no build branch yet, dispatch post-green.yml with sha=<green main commit> to publish it, then re-run.`,
   );
   process.exit(1);
 }
@@ -96,7 +96,7 @@ function resolves(revspec: string): boolean {
 const tipProbe = capture(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/build"]);
 if (tipProbe.exitCode !== 0) {
   console.log(
-    `::error::cannot resolve the build target: ${repository} has no build branch, so there is nothing to sync from. Dispatch the Build Branches workflow, then re-run.`,
+    `::error::cannot resolve the build target: ${repository} has no build branch, so there is nothing to sync from. Dispatch post-green.yml with sha=<green main commit> to publish it, then re-run.`,
   );
   process.exit(1);
 }
@@ -110,13 +110,13 @@ const targetSha = tipProbe.stdout.trimEnd();
 const validateRef = stampOf(targetSha);
 if (validateRef === "") {
   console.log(
-    `::error::the build branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so the Build Branches workflow did not push it and the sync will not ship it. Dispatch Build Branches to rebuild the branch from main, then re-run.`,
+    `::error::the build branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so publish.ts did not push it and the sync will not ship it. Publish it from a green MAIN commit: dispatch post-green.yml with sha=<the newest green main commit> to rebuild the branch from main (re-run that main commit's CI first if its all-green check is missing), then re-run the sync.`,
   );
   process.exit(1);
 }
 if (!resolves(`${validateRef}^{commit}`)) {
   console.log(
-    `::error::the build branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it publishes a fresh stamp - then re-run.`,
+    `::error::the build branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch post-green.yml with sha=<green main commit> - it publishes a fresh stamp - then re-run.`,
   );
   process.exit(1);
 }
@@ -136,7 +136,7 @@ must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
 const notGreen = allGreenFailure(repository, validateRef);
 if (notGreen !== null) {
   console.log(
-    `::error::the build branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main, dispatch Build Branches, then re-run.`,
+    `::error::the build branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main (its post-green publish follows), or dispatch post-green.yml with sha=<green main commit>, then re-run.`,
   );
   process.exit(1);
 }

@@ -31,7 +31,7 @@
 //
 //   - build-branches/publish.ts refuses to advance the build branch from
 //     an ungreen source: every trigger path alike (the same-run
-//     post-green call, schedule, dispatch, API) flows through this
+//     post-green call, dispatch, API) flows through this
 //     in-code gate - trigger conditions only save runners, they are
 //     never the authority;
 //   - sync/resolve_refs.ts refuses to sync a build tip whose STAMPED
@@ -40,7 +40,7 @@
 //
 // The read can still race the gate: the green-path publisher is
 // needs-ordered behind the all-green job that released it, but the
-// schedule/dispatch self-heal and the sync's stamped-source gate wake on
+// dispatch self-heal and the sync's stamped-source gate wake on
 // their own, and a re-run's fresh check can trail a stale one. So the
 // read polls for a SUCCESS under a hard deadline (ALL_GREEN_WAIT_MS)
 // instead of failing the race; past the deadline it still fails CLOSED,
