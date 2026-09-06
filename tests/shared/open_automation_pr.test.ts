@@ -8,14 +8,9 @@ const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/shared/open_automation_pr.ts");
 
-// Records every git/gh invocation to CALLS_LOG with arguments separated by
-// \x1f and records by \x1e, so split arguments and multiline values stay
-// distinguishable. `gh api` answers the canned PR_LOOKUP JSON and `gh pr
-// create` prints CREATED_URL; GIT_FAIL/GH_FAIL pick a subcommand that
-// exits 1, and GH_HANG picks a gh subcommand that stalls: exec, so the
-// deadline's SIGKILL reaches the sleeper itself, and 10s (under the 15s
-// harness bound), so an unarmed deadline (the registry's mutation) comes
-// back to the exit-code assertion with no sleeper left behind.
+// Logs each git/gh argv to CALLS_LOG (\x1f between arguments, \x1e between
+// records). GH_HANG stalls one gh subcommand via exec (the SIGKILL hits the
+// sleeper itself) for 10s, under the 15s harness bound: no orphan if unarmed.
 const stub = (tool: string) => `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "${tool}"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
@@ -133,7 +128,8 @@ describe("open_automation_pr.ts", () => {
   // A missing env exits 2 (requireEnv); a present-but-invalid one exits 1.
   const slugError = (slug: string) =>
     `::error::GITHUB_REPOSITORY must be an owner/name slug, not "${slug}"`;
-  const deadlineError = "::error::GH_TIMEOUT_MS must be a positive integer of milliseconds";
+  const deadlineError =
+    "::error::GH_TIMEOUT_MS must be a decimal integer from 1 to 600000 milliseconds";
   test.each([
     ["a missing required env", {}, ["PR_BODY"], 2, "::error::PR_BODY must be set"],
     [
@@ -161,6 +157,17 @@ describe("open_automation_pr.ts", () => {
       1,
       deadlineError,
     ],
+    ["a negative deadline", { GH_TIMEOUT_MS: "-300" }, [], 1, deadlineError],
+    ["a fractional deadline", { GH_TIMEOUT_MS: "300.5" }, [], 1, deadlineError],
+    [
+      "an exponent deadline (1e100 is a finite Number)",
+      { GH_TIMEOUT_MS: "1e100" },
+      [],
+      1,
+      deadlineError,
+    ],
+    ["a hex deadline (Number would accept it)", { GH_TIMEOUT_MS: "0x1000" }, [], 1, deadlineError],
+    ["a deadline over the 10-minute cap", { GH_TIMEOUT_MS: "600001" }, [], 1, deadlineError],
   ])("%s fails before any command runs", (_reason, env, drop, exitCode, message) => {
     const r = run({ env, drop });
     expect(r.exitCode).toBe(exitCode);
@@ -242,11 +249,9 @@ describe("open_automation_pr.ts", () => {
     expect(r.calls).toEqual([...GIT_PREFIX, PR_LIST]);
   });
 
-  // Registered in scripts/guard_registry.ts: the deadline is the guard,
-  // this test the forcing case. Each hung gh call is SIGKILLed at the
-  // deadline (exit 128+9), the deadline is named, and nothing after the
-  // hung call runs. Without the deadline the run waits out the 10s
-  // sleeper, the stub returns empty, and the exit code is not 137.
+  // The forcing test of the guard registered in scripts/guard_registry.ts:
+  // each hung gh call is SIGKILLed at the deadline (exit 128+9) and named;
+  // unarmed, the run waits out the 10s sleeper and exits with another code.
   test("FORCED RED: a hung gh call hits the deadline and exits with the named refusal", () => {
     const hangs: [string, unknown[], string[][]][] = [
       ["api", [], [...GIT_PREFIX, PR_LIST]],

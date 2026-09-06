@@ -1,20 +1,14 @@
 #!/usr/bin/env bun
 // Commits the working tree onto a rolling automation branch, force-pushes
-// it, and creates or refreshes its PR - the "Commit, push, and open PR"
-// step of the rolling automation workflows. Each run regenerates the
-// branch, so the PR body (and, when REFRESH_TITLE is "true", the title)
-// is refreshed to describe what the branch now ships. git push
-// authenticates via the checkout step's persisted credentials; the gh
-// calls use GH_TOKEN and are pinned to GITHUB_REPOSITORY.
+// it, and creates or refreshes its PR (body always; title when
+// REFRESH_TITLE is "true"). git push uses the checkout's credentials.
 //
-// The PR this script edits always has its head in THIS repository: the
-// lookup is the REST pulls listing with `head=owner:branch`, because `gh
-// pr list --head` matches on branch name alone (cli/cli#10945) and would
+// The lookup is the REST pulls listing with `head=owner:branch`: `gh pr
+// list --head` matches on branch name alone (cli/cli#10945) and would
 // hand a fork's same-named PR to the edit below.
 //
 // Env: BRANCH, BASE_BRANCH, COMMIT_MESSAGE, PR_TITLE, PR_BODY,
-// GITHUB_REPOSITORY (the Actions-provided owner/name slug), GH_TOKEN,
-// REFRESH_TITLE (optional), GH_TIMEOUT_MS (optional, tests only).
+// GITHUB_REPOSITORY, GH_TOKEN, REFRESH_TITLE and GH_TIMEOUT_MS (optional).
 
 import { z } from "zod";
 import { env, fail, requireEnv } from "../shared/gha.ts";
@@ -32,13 +26,18 @@ const slug = requireEnv("GITHUB_REPOSITORY");
 const owner = /^([^/\s]+)\/[^/\s]+$/.exec(slug)?.[1];
 if (owner === undefined) fail(`GITHUB_REPOSITORY must be an owner/name slug, not "${slug}"`);
 
-/** Deadline for each gh call, tightening proc.ts's 300s hang bound to a
- * stalled-network backstop that leaves the 15-minute job room to report:
- * single calls answer in seconds. Overridable so tests can exercise the
- * expiry path without waiting out the production deadline. */
-const GH_TIMEOUT_MS = Number(env("GH_TIMEOUT_MS", "120000"));
-if (!Number.isInteger(GH_TIMEOUT_MS) || GH_TIMEOUT_MS <= 0) {
-  fail("GH_TIMEOUT_MS must be a positive integer of milliseconds");
+/** Per-call gh deadline: single calls answer in seconds, and the two per
+ * run at proc.ts's 300s bound would eat most of the callers' 15-minute
+ * job. Capped at 10 minutes so an expiry can still report inside it. */
+const MAX_GH_TIMEOUT_MS = 600_000;
+const rawTimeout = env("GH_TIMEOUT_MS", "120000");
+const GH_TIMEOUT_MS = /^\d+$/.test(rawTimeout) ? Number(rawTimeout) : Number.NaN;
+if (
+  !Number.isSafeInteger(GH_TIMEOUT_MS) ||
+  GH_TIMEOUT_MS <= 0 ||
+  GH_TIMEOUT_MS > MAX_GH_TIMEOUT_MS
+) {
+  fail(`GH_TIMEOUT_MS must be a decimal integer from 1 to ${MAX_GH_TIMEOUT_MS} milliseconds`);
 }
 
 /** gh with the deadline applied; an expiry exits after a line naming the
