@@ -285,8 +285,12 @@ describe("CLI", () => {
     await Bun.write(discovered, JSON.stringify(["Vivswan/dotfiles", { repo: 42 }]));
     const { exitCode, stdout } = run(["select", "--discovered", discovered]);
     expect(exitCode).toBe(1);
-    expect(stdout).toContain("entry at index 1");
-    expect(stdout).not.toContain("42");
+    // The whole line, not `not.toContain("42")`: the line carries the
+    // fixture path, and a mkdtemp suffix can spell any short alphanumeric
+    // sentinel (one run's TMPDIR was repo-platform-tests-zXT42w).
+    expect(stdout).toBe(
+      `::error::${discovered}: entry at index 1 is neither an "owner/name" string nor a {repo, ...} object\n`,
+    );
   });
 
   test("a malformed discovered file fails value-free (no SyntaxError echo)", async () => {
