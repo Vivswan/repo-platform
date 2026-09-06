@@ -38,12 +38,11 @@
 // Content is fully deterministic - no timestamps or source SHAs in-tree, so
 // the append-only build branch only gains a commit when something real
 // changed (provenance lives in the build commit message instead). That
-// determinism is load-bearing for TWO sync-side consumers (and measured:
-// independent warm- and cold-cache rebuilds hash identical trees, a
-// one-line template edit moves the hash): verify_build_provenance.ts's
-// tree proof, and sync/wait_for_build.ts's freshness slow path - two-path
-// freshness, the tip's stamp naming main's HEAD or this tree rebuilt at
-// HEAD matching the tip byte-for-byte (publish.ts's header has the
+// determinism is load-bearing for the sync's provenance tree proof
+// (verify_build_provenance.ts rebuilds this tree from the stamped source
+// and requires hash equality with the tip; measured: independent warm-
+// and cold-cache rebuilds hash identical trees, a one-line template edit
+// moves the hash) and for publish.ts's no-change skip (its header has the
 // publish model). Nothing
 // may RUN on the build branch even though it carries .github/workflows/:
 // copyFleetWorkflows refuses - by hard error, naming the file and trigger -

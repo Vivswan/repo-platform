@@ -5,7 +5,6 @@ How the `build` branch gets published, how a sync verifies the tip before consum
 | Question | Owner |
 | --- | --- |
 | When does a publish happen, and what gates it? | [build-branches/publish.ts](../.github/scripts/build-branches/publish.ts) |
-| How does a sync know the tip is fresh? | [sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) |
 | How does a sync verify the tip's content before consuming it? | [sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) |
 | Why do producer and verifier hash the same tree? | [shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) and [shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts) |
 | Which workflows drive the flow? | [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + the post-green caller), [post-green.yml](../.github/workflows/post-green.yml) (the publish, on the call and on a dispatch) |
@@ -34,7 +33,7 @@ The source composed and stamped is always SOURCE_SHA - the judged run's own comm
 
 publish.ts hard-verifies SOURCE_SHA before any mutation: main history (the sync's stamp check 1 refuses anything else, so a dispatch naming a PR head would wedge every sync), then the `all-green` check run at that sha ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)) - defense in depth on the call, where the needs edge already gated entry, and the sole gate on a dispatch.
 
-A missing publish (a failed or evicted post-green run after a green gate) and a stamp that needs recovery heal two ways: the next push to main publishes the newer tree, or an operator dispatches post-green.yml with the green commit's sha. Meanwhile the sync's freshness check ([wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts), below) is what notices a stale build. Anything without a green `all-green` check at the source is not publishable - re-run that commit's CI first (the gate job posts the check), then dispatch.
+A missing publish (a failed or evicted post-green run after a green gate) and a stamp that needs recovery heal two ways: the next push to main publishes the newer tree, or an operator dispatches post-green.yml with the green commit's sha. Until the heal, a sync renders from the tip as it stands - the previous tree after a missing publish (the residuals table; a sync PR, when one opens, records the build commit it rendered) - or fails resolve_refs.ts's stamp checks over a broken stamp. Anything without a green `all-green` check at the source is not publishable - re-run that commit's CI first (the gate job posts the check), then dispatch.
 
 The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded `_commit`, needed by copier update's three-way merge - stay reachable forever.
 
@@ -67,22 +66,9 @@ In normal operation a publish commits only on a content change (publish.ts owns 
 | A stale queued publisher runs after a newer main already published | any | healthy | Skip - newest-green wins (the staleness preflight reads the tip's stamp, before any compose or tree comparison). |
 | Dispatch over a tampered or unparseable stamp | identical | broken | Stamp recovery: a freshly stamped, tree-identical commit. |
 
-No commit means no fleet `_commit` bump and no content-free sync PRs; freshness needs no commit either, because the sync computes it (next section) instead of trusting a marker ref or a filler commit.
+No commit means no fleet `_commit` bump and no content-free sync PRs.
 
 Stamp recovery is the one exception that commits an identical tree, and the only reason `--allow-empty` appears in publish.ts: the no-change skip is guarded by the tip's stamp health ([shared/stamp_checks.ts](../.github/scripts/shared/stamp_checks.ts)), so a tree-identical tip with a broken stamp gets healed by dispatch instead of wedging every sync until the next content change.
-
-## Freshness: two paths, neither trusting live state
-
-[sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) bounds the wait between a merge and a consumable build tip. The target is main's live HEAD on cron and dispatch runs; a sync called from post-green ([all-green.md](all-green.md#after-the-gate)) passes the judged commit instead, since main may already hold a later merge whose own run is queued behind that one. "HEAD" below means whichever target applies:
-
-| Path | What ends the wait | When it decides |
-| --- | --- | --- |
-| Fast | The tip's source stamp names main's HEAD - deliberately stamp-only, the tree unread (a tampered tree under a HEAD stamp goes red at the provenance verify instead). | After any publish stamped with HEAD: a content change, or a stamp recovery. |
-| Slow | Rebuild the composed tree at main's HEAD ([shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts)) and compare tree hashes with the tip, counted only under a healthy tip stamp. | The common path: after a docs-only or quiet landing the stamp never moves, so computed equality is the only freshness proof. |
-
-A green post-green run at HEAD is deliberately not trusted as freshness: a run proves nothing about what the branch tip carries; the stamp and the tree do.
-
-The rebuild runs once, before the poll loop; any rebuild failure degrades to the stamp-only poll under the script's warn-and-continue contract. A timeout only warns, and the sync proceeds against the previous build tip - script/template skew, exactly the state a pre-gate sync always ran in - which every downstream gate still judges: `sync/resolve_refs.ts` re-runs the green gate on that tip's stamped source and the provenance checks below. The wait is a freshness aid; the gates live elsewhere.
 
 ## The provenance proof
 
@@ -100,9 +86,9 @@ A fourth check - proving the stamped run a green publish run via the Actions API
 
 ## Hermetic staging: one function of the bytes
 
-The tree proof and the freshness slow path both compare a scratch rebuild's hash against the tip's, so producers and verifier must stage identically - or the skew reads as a false tamper accusation in the proof and a permanent "not fresh" in the slow path.
+The tree proof compares a scratch rebuild's hash against the tip's, so producers and verifier must stage identically - or the skew reads as a false tamper accusation.
 
-[shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) owns the one staging argv every site runs (`publish.ts`, and `rebuild_tree.ts` for both consumers). It neutralizes two config vectors:
+[shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) owns the one staging argv every site runs (`publish.ts`, and `rebuild_tree.ts` for the verifier). It neutralizes two config vectors:
 
 | Vector | Neutralizer |
 | --- | --- |
@@ -134,5 +120,5 @@ Every fleet-rendered reference to this repository rides `@build` (the `fleet-ref
 | --- | --- | --- |
 | `uses: ...@build` execution trusts the ref. | A user-repo ruleset cannot restrict other writers - plain fast-forwards stay possible; only force-pushes and deletion are blocked. | Sync consumption is provenance-verified; repo-platform's own CI gates every builder-published change to the executable channel (an out-of-band push bypasses both, the ref-trust residual in full). |
 | Actor provenance is advisory. | The run-proof check was retired as live-state trust (above). | Checks 1-3 anchor the content; the `run:` line stays a breadcrumb. |
-| A freshness timeout lets the sync proceed on the previous build tip. | The bounded wait is an aid, not the gate. | resolve_refs.ts still runs the green gate and provenance checks on that tip; the next sync (the weekly cron, or a `[fleet-sync: public]` directive on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the publish once it lands, and a publish that never landed is healed by the next push or a dispatch with the green commit's sha. |
+| A sync renders from the build tip as it stands: a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, renders the previous build, as does any sync while a publish is missing. | No freshness wait exists. The post-green call is needs-ordered behind the publish in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag. | resolve_refs.ts runs the green gate and provenance checks on that tip, and a sync PR, when one opens, records the build commit it rendered; the next sync (the weekly cron, or a `[fleet-sync: public]` directive on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the publish once it lands, and a publish that never landed is healed by the next push or a dispatch with the green commit's sha. |
 | A migration rung absent from the tip loads from a build commit the tree proof did not cover. | Only the tip is rebuilt and compared; older commits are trusted as append-only history, and an out-of-band fast-forward could park a rung in a middle commit that a lagging repository runs later. | The same write-access trust as `uses:` execution; a rung still on the tip loads from the verified tip, so the residual is confined to rungs the verified tip lacks ([migrations.md](migrations.md)). |

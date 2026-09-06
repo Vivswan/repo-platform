@@ -247,9 +247,8 @@ describe("post-green publish wiring", () => {
     // below cannot tell which job holds it).
     expect(syncFleet.concurrency).toEqual({ group: "sync-repos", "cancel-in-progress": false });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
-    // The sync waits for THIS commit's build, never main's live HEAD: a
-    // later merge queued behind this run would otherwise stall the wait
-    // for its whole budget.
+    // The sync is handed THIS commit, never main's live HEAD: a refused
+    // called scope names the judged commit (select_sync_repos.ts).
     expect(syncFleet.with).toEqual({
       repos: "${{ needs.read-directives.outputs.repos }}",
       sha: "${{ inputs.sha }}",

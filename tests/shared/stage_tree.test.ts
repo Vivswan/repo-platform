@@ -1,8 +1,7 @@
 // The staging-agreement contract stage_tree.ts owns: the producers
 // (publish.ts and the other composed-tree sites below) and the verifier (rebuild_tree.ts) must
 // stage a composed tree to the SAME tree hash, or the sync's provenance
-// proof reads the skew as tampering and the freshness slow path reads
-// "not fresh" forever. Proven against real git with the two measured
+// proof reads the skew as tampering. Proven against real git with the two measured
 // divergence vectors planted at once:
 //   - an in-tree .gitignore hiding a sibling (the vector that diverged
 //     the old plain `add -A` producer form from the hermetic verifier);

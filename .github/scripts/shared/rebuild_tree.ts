@@ -1,9 +1,6 @@
 // Rebuild the build-branch tree from a source commit exactly as the builder
-// does: the SOURCE commit's own script and dependencies, so the rebuild
-// reproduces that commit's composition. Two consumers:
-// sync/verify_build_provenance.ts (the tree proof) and
-// sync/wait_for_build.ts (the freshness slow path); what each does with
-// the hash - and how it cleans up - stays its own policy.
+// does (the SOURCE commit's own script and dependencies); the consumer,
+// sync/verify_build_provenance.ts's tree proof, owns the hash and the cleanup.
 
 import { join } from "node:path";
 import { env } from "./gha.ts";
@@ -13,10 +10,9 @@ import { stageComposedTreeArgv } from "./stage_tree.ts";
 /** Per-step operational deadline, read at call time so tests can shrink
  * it: generous next to the measured normal (install + compose run
  * ~0.6-2 s warm, low minutes on a cold bun cache), small enough that a
- * wedged `bun install` throws here - into wait_for_build's
- * degrade-to-warn catch, or the provenance verifier's loud failure -
- * instead of eating the job's headroom toward an unnamed runner-level
- * kill. Local on purpose: proc.ts's passthrough is deadline-free by
+ * wedged `bun install` throws here - into the provenance verifier's
+ * loud failure - instead of eating the job's headroom toward an unnamed
+ * runner-level kill. Local on purpose: proc.ts's passthrough is deadline-free by
  * contract, and this is its only inherited-stdio caller with a real
  * deadline. */
 function stepTimeoutMs(): number {
@@ -86,9 +82,8 @@ export function rebuildBranchTree(options: {
   step(["git", "-C", treeDir, "init", "--quiet"]);
   // The staging must be the SAME function of the composed tree the
   // producers used (stage_tree.ts owns the shared argv and the hermetic
-  // rationale), or the hash skews - turning wait_for_build's slow path
-  // into a false "not fresh" and the provenance tree proof into a false
-  // tamper accusation. The SOURCE worktree checkout is left as-is on
+  // rationale), or the hash skews - turning the provenance tree proof
+  // into a false tamper accusation. The SOURCE worktree checkout is left as-is on
   // purpose: the repo's own .gitattributes governs it, and the scratch
   // repo is where the skew was measured.
   step(stageComposedTreeArgv(treeDir));

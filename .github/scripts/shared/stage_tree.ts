@@ -2,11 +2,10 @@
 // that turns the composed tree into git content: the PRODUCER
 // (build-branches/publish.ts commits the branch tip) and the VERIFIER
 // (shared/rebuild_tree.ts hashes a scratch rebuild for the sync's
-// provenance tree proof and its freshness slow path). Producer and
-// verifier must stage IDENTICALLY - the same function of the composed
-// tree's bytes - or their tree hashes skew, and a skew reads as a false
-// tamper accusation in the provenance proof and a permanent "not fresh"
-// in the freshness slow path.
+// provenance tree proof). Producer and verifier must stage IDENTICALLY -
+// the same function of the composed tree's bytes - or their tree hashes
+// skew, and a skew reads as a false tamper accusation in the provenance
+// proof.
 //
 // Why the hermetic form, at every site:
 //   - `--force` stages ignored files no matter where the ignore comes

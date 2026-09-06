@@ -108,8 +108,8 @@ function hasActionManifest(dir: string): boolean {
  * tip's stamp needs recovery), chains a stamped commit onto the tip. Two
  * early returns, both skips: stale (a newer publisher already delivered
  * - newest-green wins, decided BEFORE the compose so a stale run costs
- * nothing) and no-change-with-healthy-stamp (nothing to publish; the
- * sync computes freshness). The seed arm (a missing branch) never hits
+ * nothing) and no-change-with-healthy-stamp (nothing to publish: the
+ * tip already IS this source's tree). The seed arm (a missing branch) never hits
  * the no-change skip: it requires the branch to exist, and the seed
  * stages the whole tree anyway. */
 function publish(sourceSha: string): void {

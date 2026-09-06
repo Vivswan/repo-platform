@@ -18,9 +18,9 @@ import { classifyEntry, type ScopeSource } from "./sync_scope.ts";
  * serially at one page per 100 repos, so two minutes covers the fleet
  * growing to several hundred repos with a wide margin. This is a
  * stalled-network backstop, not a latency budget: without it a hung
- * connection blocks the plan job until the runner's own job timeout. Sits
- * between wait_for_build's 15s single-probe deadline and
- * rehearse's 300s whole-copier-run deadline. */
+ * connection blocks the plan job until the runner's own job timeout, and
+ * the plan job's timeout-minutes is sized from it. Well under rehearse's
+ * 300s whole-copier-run deadline. */
 export const NETWORK_TIMEOUT_MS = 120_000;
 
 /** capture() with the fleet network deadline applied; `timeoutMs` is
