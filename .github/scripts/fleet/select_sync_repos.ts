@@ -30,7 +30,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import {
   captureNetwork,
@@ -43,7 +43,7 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { parseDiscoveredList, parseEnriched } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
+import { parseScope, scopeRefusal, scopeSelects, undiscoveredWarning } from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -115,10 +115,12 @@ if (discovered === null) {
 }
 const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
 const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
+const undiscovered = enriched.rows.filter((row) => !visibility.has(row.repo.toLowerCase())).length;
+if (undiscovered > 0) warning(undiscoveredWarning(undiscovered));
 const refusal = scopeRefusal(
   scope,
   new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)])),
-  scopeSource(),
+  scopeSource("TARGET_SHA"),
 );
 if (refusal !== null) {
   error(refusal);

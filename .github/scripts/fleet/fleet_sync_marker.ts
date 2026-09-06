@@ -1,20 +1,7 @@
 #!/usr/bin/env bun
-// The merged commits' directives blocks: each PR body's FIRST paragraph
-// (a squash merge writes subject, blank line, PR body), one bracketed
-// directive per line, each optionally fenced in one pair of backticks -
-//
-//   `[fleet-sync: public]`                     the public repos now (the default choice)
-//   [fleet-sync: public, owner/a]              plus a public repo by slug
-//   [fleet-sync: private]                      the private repos (paid Actions minutes)
-//   [fleet-sync: all] every repo's ci.yml changed   everything; the justification is required
-//
-// Squash merges carry the body verbatim (settings-override.yml pins
-// PR_BODY), so the leg reads git alone: every commit in judged_range.ts's
-// range, scopes unioned (any `all` wins). The tokens pass through as
-// written (sync_scope.ts is the grammar; the plan expands them and refuses
-// a private repo's slug - the leg has no visibility source). A malformed or
-// misplaced block on any body fails the leg, naming the commit. Env:
-// judged_range.ts's, plus GITHUB_OUTPUT (armed, repos).
+// The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
+// (sync_scope.ts's grammar; only `all` takes, and requires, a trailing justification), read over
+// judged_range.ts's range and unioned. Any bad body fails the leg naming its commit.
 
 import { fail, notice, setOutput } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -33,10 +20,11 @@ export type Directives =
   | { kind: "error"; errors: string[] };
 
 const KEYWORD = "fleet-sync";
-// A block line as written: brackets, any backticks around them, then an
-// optional space-separated justification. Whether the backticks are one
-// balanced pair is judged per line by unwrap().
-const BLOCK_LINE = /^(`*\[[^[\]]*\]`*)(?:\s+(\S.*))?$/;
+// A block line: brackets with any backticks around them (one balanced pair
+// is judged by unwrap()). Trailing text is part of the line only behind the
+// fleet-sync keyword, so `[Context] ordinary prose` stays prose.
+const BLOCK_LINE = /^`*\[[^[\]]*\]`*$/;
+const JUSTIFIED_LINE = /^(`*\[\s*fleet-sync\b[^[\]]*\]`*)\s+(\S.*)$/i;
 const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
@@ -79,7 +67,8 @@ function unwrap(line: string): string | null {
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  const isBlockShaped = (para: string[]) => para.every((line) => BLOCK_LINE.test(line));
+  const isBlockShaped = (para: string[]) =>
+    para.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
     paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
 
@@ -98,7 +87,8 @@ export function parseDirectives(body: string): Directives {
   const seen = new Set<string>();
   let scope: "all" | string[] = [];
   for (const line of block) {
-    const [, bracketed, reason = ""] = BLOCK_LINE.exec(line) as RegExpExecArray;
+    const justified = JUSTIFIED_LINE.exec(line);
+    const [bracketed, reason] = justified === null ? [line, ""] : [justified[1], justified[2]];
     const directive = unwrap(bracketed);
     if (directive === null) {
       errors.push(

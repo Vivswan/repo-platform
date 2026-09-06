@@ -47,7 +47,7 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { type EnrichedRow, parseEnriched } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
+import { parseScope, scopeRefusal, scopeSelects, undiscoveredWarning } from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -210,9 +210,11 @@ const enriched = parseEnriched(
 const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
 visibility.set(selfRepo.toLowerCase(), false);
 const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
+const undiscovered = enriched.rows.filter((row) => !visibility.has(row.repo.toLowerCase())).length;
+if (undiscovered > 0) warn(undiscoveredWarning(undiscovered));
 const known = new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)]));
 known.set(selfRepo.toLowerCase(), false);
-const refusal = scopeRefusal(scope, known, scopeSource());
+const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"));
 if (refusal !== null) {
   console.log(`::error::${refusal}`);
   process.exit(1);
@@ -248,7 +250,7 @@ const excluded = parseJson(
 ) as string[];
 // A scoped run is a scoped heal; the fleet-wide exclusion reminders
 // belong to the full runs.
-const sweepable = scope === null ? excluded : [];
+const sweepable = scope.kind === "all" ? excluded : [];
 for (const repo of sweepable) {
   const probeResult = captureNetwork([
     "gh",

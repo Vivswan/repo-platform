@@ -1,7 +1,6 @@
 // The fleet scope grammar, one owner for the directive parser and both selectors: `all`, the
-// visibility tokens `public` and `private`, or owner/name slugs, comma-separated. Visibility is
-// known only where discovery ran (fail-closed: not discovered as public counts as private), so
-// the plan expands the tokens; the read-directives leg passes them through as written.
+// tokens `public` and `private`, or owner/name slugs. Only the plans know visibility (fail-closed:
+// not discovered as public counts as private), so they expand the tokens the leg passes through.
 
 import { isSlug } from "./repos_registry.ts";
 
@@ -57,9 +56,15 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
   return { kind: "list", visibility, slugs };
 }
 
-/** Where the scope came from: the workflow_call input (public text off a main commit, ridden
- *  in as ONLY_REPO) or the typed dispatch input (may be a private slug). */
-export type ScopeSource = "call" | "dispatch";
+/** Where the scope came from: the workflow_call input (ONLY_REPO, public text off the judged
+ *  main commit) or the typed dispatch input (may be a private slug). */
+export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
+
+/** The counts-only warning when the fail-closed default hid targeted repos from a `public`
+ *  scope: discovery did not list them this run. */
+export function undiscoveredWarning(count: number): string {
+  return `${count} targeted ${count === 1 ? "repository was" : "repositories were"} not discovered this run and count as private; a \`public\` scope skips them until the next run`;
+}
 
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
   if (scope.kind === "all") return true;
@@ -68,10 +73,9 @@ export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): bo
   );
 }
 
-/** Why a list scope cannot run, counts only: a slug naming no known repo (a partial match
- *  would silently narrow the scope), or on the called path a slug naming a private repo (a
- *  directive is public text, so private repos ride only under the `private` token). Null
- *  when it can. `known` maps folded slugs to their visibility. */
+/** Why a list scope cannot run, counts only: a slug naming no known repo, or on the called path
+ *  a slug naming a private one (private repos ride under the token). `known`: folded slug ->
+ *  private. Null when it can run. */
 export function scopeRefusal(
   scope: Scope,
   known: ReadonlyMap<string, boolean>,
@@ -87,10 +91,10 @@ export function scopeRefusal(
       "or it is listed in exclude; check the spelling (matching ignores case)"
     );
   }
-  if (source === "call") {
+  if (source.kind === "call") {
     const hidden = slugs.filter((slug) => known.get(slug) === true).length;
     if (hidden > 0) {
-      return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main`;
+      return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${source.sha.slice(0, 12)})`;
     }
   }
   return null;

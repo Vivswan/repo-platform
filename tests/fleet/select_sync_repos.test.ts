@@ -1,7 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
+import { undiscoveredWarning } from "../../.github/scripts/fleet/sync_scope.ts";
 import { tempDirs } from "../shared/temp_dir";
+
+const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
@@ -270,30 +274,80 @@ describe("select_sync_repos.ts", () => {
   );
 
   // The called path (post-green's sync-fleet leg): the scope is public text
-  // off a main commit, so a private repo rides only under the token.
+  // off the judged main commit, so a private repo rides only under the
+  // token. Whole outcome per row: every log line, the matrix, exit code.
+  const HIDDEN_SERVER_ROW = {
+    repo: "h**-s**r",
+    redact_name: true,
+    hide_details: true,
+    verify: expect.stringMatching(/^[0-9a-f]{32}$/),
+  };
+  const STEADY_ROW = {
+    repo: "Vivswan/steady",
+    redact_name: false,
+    hide_details: false,
+    verify: "",
+  };
+  const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
+  const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
+  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d", 403)}`;
   test.each([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
       scope: "Vivswan/steady,Vivswan/unadopted",
-      repos: ["Vivswan/steady"],
+      discoveredList: discovered,
+      repos: [STEADY_ROW],
+      stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
     },
-    { reason: "public selects the public repos", scope: "public", repos: ["Vivswan/steady"] },
+    {
+      reason: "public selects the public repos",
+      scope: "public",
+      discoveredList: discovered,
+      repos: [STEADY_ROW],
+      stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
+    },
     {
       reason: "private selects the private repos, by hint (the locked one drops on its probe)",
       scope: "private",
-      repos: ["h**-s**r"],
+      discoveredList: discovered,
+      repos: [HIDDEN_SERVER_ROW],
+      stdout: lines(LOCKED, "syncing: h**-s**r"),
     },
     {
       reason: "a token unions with a slug",
       scope: "private, Vivswan/steady",
-      repos: ["h**-s**r", "Vivswan/steady"],
+      discoveredList: discovered,
+      repos: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      stdout: lines(LOCKED, "syncing: h**-s**r, Vivswan/steady"),
+    },
+    {
+      reason:
+        "a targeted repo discovery missed counts as private: public skips it, and the plan says so, counting only",
+      scope: "public",
+      discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
+      repos: [],
+      stdout: lines(
+        `::warning::${undiscoveredWarning(1)}`,
+        UNADOPTED,
+        "::notice::no adopted repos selected; nothing to sync.",
+      ),
     },
   ])(
     "called with $scope: $reason",
-    ({ scope, repos }) => {
-      const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
-      expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(repos);
+    ({ scope, discoveredList, repos, stdout }) => {
+      const r = run(
+        `called-${Bun.hash(scope + discoveredList.length).toString(16)}`,
+        { ONLY_REPO: scope, TARGET_SHA: SHA },
+        discoveredList,
+      );
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "repos=".length) }).toEqual({
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        output: "repos=",
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
+      expect(reposOf(r)).toEqual(repos);
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-server");
       }
@@ -303,36 +357,39 @@ describe("select_sync_repos.ts", () => {
 
   test.each([
     {
-      reason: "a private slug on the called path is refused: private repos ride under the token",
+      reason:
+        "a private slug on the called path is refused, naming the judged commit: private repos ride under the token",
       scope: "Vivswan/steady,Vivswan/hidden-server",
-      error:
-        "::error::1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main",
+      stdout: `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})\n`,
       withheld: "hidden-server",
     },
     {
       reason: "a list with one miss fails the whole plan",
       scope: "Vivswan/steady,Vivswan/hidden-servr",
-      error: "::error::1 of 2 scoped repos matched no managed repository (values withheld",
+      stdout:
+        "::error::1 of 2 scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)\n",
       withheld: "hidden-servr",
     },
     {
       reason: "a lone comma fails the plan instead of fanning out",
       scope: ",",
-      error: "::error::the scope has an empty entry",
+      stdout:
+        "::error::the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma\n",
       withheld: null,
     },
   ])(
     "$reason, counting only",
-    ({ scope, error, withheld }) => {
-      const r = run(`refused-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain(error);
+    ({ scope, stdout, withheld }) => {
+      const r = run(`refused-${Bun.hash(scope).toString(16)}`, {
+        ONLY_REPO: scope,
+        TARGET_SHA: SHA,
+      });
+      expect(r).toEqual({ exitCode: 1, stdout, stderr: "", output: "" });
       if (withheld !== null) {
         for (const channel of [r.stdout, r.stderr, r.output]) {
           expect(channel).not.toContain(withheld);
         }
       }
-      expect(r.output).not.toContain("repos=");
     },
     TEST_TIMEOUT_MS,
   );

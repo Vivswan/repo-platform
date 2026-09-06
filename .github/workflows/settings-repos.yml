@@ -198,6 +198,9 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           ONLY_REPO: ${{ inputs.repos }}
+          # The judged commit a refused called scope names; empty
+          # on cron and dispatch runs like ONLY_REPO.
+          SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
   apply:

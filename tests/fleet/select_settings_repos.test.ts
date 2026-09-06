@@ -1,8 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { declaredModules } from "../../.github/scripts/fleet/build_settings_matrix";
+import { selectsSettingsSync } from "../../.github/scripts/fleet/build_settings_matrix";
+import { undiscoveredWarning } from "../../.github/scripts/fleet/sync_scope.ts";
 import { tempDirs } from "../shared/temp_dir";
+
+const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
@@ -601,31 +604,100 @@ describe("select_settings_repos.ts", () => {
   };
 
   // The called path (post-green's settings-fleet leg): the scope is public
-  // text off a main commit, so a private repo rides only under the token;
-  // the fail-closed personas count as private. The operator repo joins
-  // when the scope selects it (it is public).
+  // text off the judged main commit, so a private repo rides only under the
+  // token; the five explicit personas are absent from discovery, so they
+  // count as private (fail-closed) and every run warns once, counting. The
+  // operator repo joins when the scope selects it (it is public). Whole
+  // outcome per row: every log line, the summary, the matrix, exit code.
+  const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
+  const UNDISCOVERED = `::warning::${undiscoveredWarning(5)}`;
+  const UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(5)}\n`;
+  const RETRY = (display: string, probe: string, detail: string) =>
+    [1, 2].map(
+      (attempt) => `${display}: ${probe} failed (attempt ${attempt}/3: ${detail}); retrying...`,
+    );
+  const GAVE_UP = (display: string, probe: string, detail: string) =>
+    `${display}: the ${probe} failed 3 times (last error: ${detail}) - not a permission or adoption answer, so the repo is skipped this run; the nightly heal retries it. If this persists, check the repo's availability and the fleet token.`;
+  const DEADAPI_DETAIL = "HTTP 502 from stub";
+  const DEADPROBE_DETAIL = "HTTP 500";
+  const HIDDEN_DEADAPI_DETAIL =
+    "HTTP 502: https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable";
+  const NOMODS_WARNING =
+    "h**-n**s: its .repo-platform.yml has no readable top-level modules list, so the settings opt-in cannot be determined - the repo is skipped and its settings stay unmanaged until the file is fixed.";
+  // Every private persona's probe output, in enriched-row order.
+  const PRIVATE_PROBES = [
+    ...RETRY("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL)}`,
+    ...RETRY("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
+    "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
+    "Vivswan/flaky: settings opt-in check failed (attempt 1/3: HTTP 502 from stub); retrying...",
+    ...RETRY("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL)}`,
+    `::warning::${NOMODS_WARNING}`,
+    "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module, the opt-in to centrally managed settings (docs/settings.md). Nothing installs or heals its rulesets or labels.",
+  ];
+  const PRIVATE_SUMMARY =
+    UNDISCOVERED_SUMMARY +
+    [
+      GAVE_UP("Vivswan/deadapi", "settings opt-in check", DEADAPI_DETAIL),
+      GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+      GAVE_UP("h**-d**i", "settings opt-in check", HIDDEN_DEADAPI_DETAIL),
+      NOMODS_WARNING,
+    ]
+      .map((line) => `- ${line}\n`)
+      .join("");
   test.each([
-    { reason: "a public slug selects it alone", scope: "Vivswan/open-lib", targets: [OPEN_LIB] },
+    {
+      reason: "a public slug selects it alone",
+      scope: "Vivswan/open-lib",
+      targets: [OPEN_LIB],
+      stdout: lines(UNDISCOVERED, "settings targets: Vivswan/open-lib"),
+      summary: UNDISCOVERED_SUMMARY,
+    },
     {
       reason: "public selects the public repos, self included",
       scope: "public",
       targets: [OPEN_LIB, SELF],
+      stdout: lines(UNDISCOVERED, "settings targets: Vivswan/open-lib, Vivswan/repo-platform"),
+      summary: UNDISCOVERED_SUMMARY,
     },
     {
       reason: "private selects the rest, the discovered one by its hint",
       scope: "private",
       targets: [FLAKY, STEADY, HIDDEN_SERVER],
+      stdout: lines(
+        UNDISCOVERED,
+        ...PRIVATE_PROBES,
+        "settings targets: Vivswan/flaky, Vivswan/steady, h**-s**r",
+      ),
+      summary: PRIVATE_SUMMARY,
     },
     {
       reason: "a token unions with a slug",
       scope: "private, Vivswan/open-lib",
       targets: [FLAKY, OPEN_LIB, STEADY, HIDDEN_SERVER],
+      stdout: lines(
+        UNDISCOVERED,
+        ...PRIVATE_PROBES,
+        "settings targets: Vivswan/flaky, Vivswan/open-lib, Vivswan/steady, h**-s**r",
+      ),
+      summary: PRIVATE_SUMMARY,
     },
   ])(
     "called with $scope: $reason",
-    ({ scope, targets }) => {
-      const r = run(`called-${Bun.hash(scope).toString(16)}`, { env: { ONLY_REPO: scope } });
-      expect(r.exitCode).toBe(0);
+    ({ scope, targets, stdout, summary }) => {
+      const r = run(`called-${Bun.hash(scope).toString(16)}`, {
+        env: { ONLY_REPO: scope, SOURCE_SHA: SHA },
+      });
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        output: "targets=",
+        summary,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
       expect(targetsOf(r)).toEqual(targets);
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
@@ -635,16 +707,21 @@ describe("select_settings_repos.ts", () => {
   );
 
   test(
-    "a private slug on the called path is refused, counting only, never printing it",
+    "a private slug on the called path is refused, counting only, naming the judged commit",
     () => {
       const r = run("called-private", {
-        env: { ONLY_REPO: "Vivswan/open-lib, vivswan/hidden-server" },
+        env: { ONLY_REPO: "Vivswan/open-lib, vivswan/hidden-server", SOURCE_SHA: SHA },
       });
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain(
-        "::error::1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main",
-      );
-      expect(r.output).not.toContain("targets=");
+      expect(r).toEqual({
+        exitCode: 1,
+        stdout: lines(
+          UNDISCOVERED,
+          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
+        ),
+        stderr: "",
+        output: "",
+        summary: UNDISCOVERED_SUMMARY,
+      });
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
       }
@@ -743,6 +820,7 @@ describe("select_settings_repos.ts", () => {
       const r = run("list-empty", { env: { ONLY_REPO: "Vivswan/steady,,Vivswan/flaky" } });
       expect(r.exitCode).toBe(1);
       expect(r.stdout).toContain("::error::the scope has an empty entry");
+      expect(r.summary).toBe("");
       expect(r.output).not.toContain("targets=");
     },
     TEST_TIMEOUT_MS,

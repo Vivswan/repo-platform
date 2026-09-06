@@ -152,6 +152,19 @@ describe("parseDirectives", () => {
       expected: misplaced("[fleet-sync]"),
     },
     {
+      reason: "a bracketed lead-in followed by ordinary prose is prose, not a block (the control)",
+      body: message("[Context] This is ordinary PR prose.", PROSE),
+      expected: NONE,
+    },
+    {
+      reason: "a bracket-only near-miss keyword is still caught",
+      body: message("[fleet-synk]", "[Context] This is ordinary PR prose."),
+      expected: {
+        kind: "error",
+        errors: ['unknown directive keyword in "[fleet-synk]"; known: fleet-sync'],
+      },
+    },
+    {
       reason: "a first paragraph that is a markdown link is not a block: misplaced",
       body: message("[fleet-sync](https://x.test)", PROSE),
       expected: misplaced("[fleet-sync](https://x.test)"),
@@ -368,6 +381,9 @@ describe("main", () => {
   const pub = commit(message("[fleet-sync: public]", PROSE));
   const mixed = commit(message("`[fleet-sync: private, Vivswan/b]`", PROSE));
   const bare = commit(message("[fleet-sync]", PROSE));
+  const unjustified = commit(message("`[fleet-sync: all]`", PROSE));
+  const reasoned = commit(message("[fleet-sync: public] the ci changed", PROSE));
+  const context = commit(message("[Context] This is ordinary PR prose.", PROSE));
 
   /** A clone whose origin carries main plus, when `stamp` is given, a
    *  build branch of one orphan commit stamped like publish.ts stamps. */
@@ -546,6 +562,35 @@ describe("main", () => {
           directive(sha, "vivswan/b,vivswan/a"),
           syncing(base, sha, "vivswan/b,vivswan/a"),
         ),
+    },
+    {
+      reason: "[fleet-sync: all] without a reason: red leg, nothing armed",
+      sha: unjustified,
+      exitCode: 1,
+      output: "",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          `::error::${short(sha)}: "\`[fleet-sync: all]\`": ${NEEDS_REASON}`,
+        ),
+    },
+    {
+      reason: "a reason on public: red leg, nothing armed",
+      sha: reasoned,
+      exitCode: 1,
+      output: "",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          `::error::${short(sha)}: "[fleet-sync: public] the ci changed" carries text after the directive: only [fleet-sync: all] takes a justification`,
+        ),
+    },
+    {
+      reason: "a bracketed lead-in with prose is a normal body: armed=false",
+      sha: context,
+      exitCode: 0,
+      output: "armed=false\n",
+      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
     },
     {
       reason: "a block at the bottom of the body: red leg, nothing armed",

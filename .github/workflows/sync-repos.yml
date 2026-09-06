@@ -179,6 +179,9 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           ONLY_REPO: ${{ inputs.repos }}
+          # The judged commit a refused called scope names; empty
+          # on cron and dispatch runs like ONLY_REPO.
+          TARGET_SHA: ${{ inputs.sha }}
           # Scheduled runs have no inputs context: empty is
           # fine, only the literal "recopy" means recovery.
           RECOVER: ${{ inputs.recover }}

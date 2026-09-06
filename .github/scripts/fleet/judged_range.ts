@@ -32,12 +32,9 @@ export type DiffBase =
   | { kind: "push-before"; base: string }
   | { kind: "empty-tree"; base: string };
 
-/** The base the judged commit is read from, verified present in the checkout at `cwd` and a
- *  strict ancestor of `sha` (anything else would make the range mean something else): the newest
- *  build stamp that is not `sha` itself (the tip may already be THIS run's publish), walking the
- *  whole build history so no bound can hide an older stamp. The push's `before` (the empty tree
- *  when all zeros - a branch-creating push) only when no build branch exists or its only stamp is
- *  `sha`, the first publish ever; a build branch with no stamp at all is refused. */
+/** The newest build stamp that is not `sha` itself (the tip may be THIS run's publish), verified
+ *  a strict ancestor of `sha` in the checkout at `cwd`; the push's `before` (the empty tree when
+ *  all zeros) only when no older stamp exists. An unstamped build branch is refused. */
 export function resolveBase(cwd: string, sha: string, before: string): DiffBase {
   const base = findBase(cwd, sha, before);
   if (base.kind !== "empty-tree") {

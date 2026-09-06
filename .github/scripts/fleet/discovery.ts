@@ -147,9 +147,10 @@ export function readDispatchRepo(owner?: string): string {
     .toLowerCase();
 }
 
-/** Which input readDispatchRepo read: the workflow_call scope rides in as ONLY_REPO. */
-export function scopeSource(): ScopeSource {
-  return env("ONLY_REPO") === "" ? "dispatch" : "call";
+/** Which input readDispatchRepo read: the workflow_call scope rides in as ONLY_REPO, with the
+ *  judged commit in `shaEnv` (the writer's own name for the call's sha input). */
+export function scopeSource(shaEnv: string): ScopeSource {
+  return env("ONLY_REPO") === "" ? { kind: "dispatch" } : { kind: "call", sha: env(shaEnv) };
 }
 
 /** Run one selection-pipeline stage, teeing its stdout to `outFile`. A

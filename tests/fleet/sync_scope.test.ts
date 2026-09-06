@@ -6,9 +6,14 @@ import {
   classifyEntry,
   parseScope,
   type Scope,
+  type ScopeSource,
   scopeRefusal,
   scopeSelects,
+  undiscoveredWarning,
 } from "../../.github/scripts/fleet/sync_scope.ts";
+
+const CALL: ScopeSource = { kind: "call", sha: "8096c4920f84ec4122d14c5bd884703dd0d382ba" };
+const DISPATCH: ScopeSource = { kind: "dispatch" };
 
 const ALL: Scope = { kind: "all" };
 const list = (visibility: ("public" | "private")[], slugs: string[]): Scope => ({
@@ -119,43 +124,57 @@ describe("scopeRefusal", () => {
     ["o/priv", true],
   ]);
   const PRIVATE_BY_SLUG =
-    "1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main";
-  test.each<{ reason: string; scope: Scope; source: "call" | "dispatch"; expected: string | null }>(
-    [
-      { reason: "all is never refused", scope: ALL, source: "call", expected: null },
-      {
-        reason: "tokens alone are never refused",
-        scope: list(["private"], []),
-        source: "call",
-        expected: null,
-      },
-      {
-        reason: "a public slug on the called path runs",
-        scope: list([], ["o/pub"]),
-        source: "call",
-        expected: null,
-      },
-      {
-        reason: "a private slug on the called path is refused, counting only",
-        scope: list(["public"], ["o/pub", "o/priv"]),
-        source: "call",
-        expected: PRIVATE_BY_SLUG,
-      },
-      {
-        reason: "the same private slug from a dispatch runs (the typed input never prints)",
-        scope: list(["public"], ["o/pub", "o/priv"]),
-        source: "dispatch",
-        expected: null,
-      },
-      {
-        reason: "an unknown slug is refused before visibility is judged",
-        scope: list([], ["o/priv", "o/nope"]),
-        source: "call",
-        expected:
-          "1 of 2 scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)",
-      },
-    ],
-  )("$reason", ({ scope, source, expected }) => {
+    "1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main (the range judged at 8096c4920f84)";
+  test.each<{ reason: string; scope: Scope; source: ScopeSource; expected: string | null }>([
+    { reason: "all is never refused", scope: ALL, source: CALL, expected: null },
+    {
+      reason: "tokens alone are never refused",
+      scope: list(["private"], []),
+      source: CALL,
+      expected: null,
+    },
+    {
+      reason: "a public slug on the called path runs",
+      scope: list([], ["o/pub"]),
+      source: CALL,
+      expected: null,
+    },
+    {
+      reason:
+        "a private slug on the called path is refused, counting only, naming the judged commit",
+      scope: list(["public"], ["o/pub", "o/priv"]),
+      source: CALL,
+      expected: PRIVATE_BY_SLUG,
+    },
+    {
+      reason: "the same private slug from a dispatch runs (the typed input never prints)",
+      scope: list(["public"], ["o/pub", "o/priv"]),
+      source: DISPATCH,
+      expected: null,
+    },
+    {
+      reason: "an unknown slug is refused before visibility is judged",
+      scope: list([], ["o/priv", "o/nope"]),
+      source: CALL,
+      expected:
+        "1 of 2 scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)",
+    },
+  ])("$reason", ({ scope, source, expected }) => {
     expect(scopeRefusal(scope, known, source)).toBe(expected);
+  });
+});
+
+describe("undiscoveredWarning", () => {
+  test.each([
+    [
+      1,
+      "1 targeted repository was not discovered this run and count as private; a `public` scope skips them until the next run",
+    ],
+    [
+      3,
+      "3 targeted repositories were not discovered this run and count as private; a `public` scope skips them until the next run",
+    ],
+  ])("%d", (count, expected) => {
+    expect(undiscoveredWarning(count)).toBe(expected);
   });
 });
