@@ -612,6 +612,7 @@ describe("select_settings_repos.ts", () => {
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNDISCOVERED = `::warning::${undiscoveredWarning(5)}`;
   const UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(5)}\n`;
+  const ONE_UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(1)}\n`;
   const RETRY = (display: string, probe: string, detail: string) =>
     [1, 2].map(
       (attempt) => `${display}: ${probe} failed (attempt ${attempt}/3: ${detail}); retrying...`,
@@ -649,11 +650,11 @@ describe("select_settings_repos.ts", () => {
       .join("");
   test.each([
     {
-      reason: "a public slug selects it alone",
+      reason: "a public slug selects it alone, and slugs alone never warn about other repos",
       scope: "Vivswan/open-lib",
       targets: [OPEN_LIB],
-      stdout: lines(UNDISCOVERED, "settings targets: Vivswan/open-lib"),
-      summary: UNDISCOVERED_SUMMARY,
+      stdout: lines("settings targets: Vivswan/open-lib"),
+      summary: "",
     },
     {
       reason: "public selects the public repos, self included",
@@ -715,12 +716,11 @@ describe("select_settings_repos.ts", () => {
       expect(r).toEqual({
         exitCode: 1,
         stdout: lines(
-          UNDISCOVERED,
           `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
         ),
         stderr: "",
         output: "",
-        summary: UNDISCOVERED_SUMMARY,
+        summary: "",
       });
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
@@ -742,7 +742,10 @@ describe("select_settings_repos.ts", () => {
       const r = run("list", { env: { GITHUB_EVENT_PATH: eventFile } });
       expect(r.exitCode).toBe(0);
       // steady is an explicit managed persona absent from discovery:
-      // fail-closed private, self-disclosed by its repos.yml entry.
+      // fail-closed private, self-disclosed by its repos.yml entry - the
+      // one undiscovered repo THIS scope names, so the warning counts one.
+      expect(r.stdout).toContain(`::warning::${undiscoveredWarning(1)}`);
+      expect(r.summary).toBe(ONE_UNDISCOVERED_SUMMARY);
       expect(targetsOf(r)).toEqual([
         {
           repo: "Vivswan/steady",
@@ -805,6 +808,7 @@ describe("select_settings_repos.ts", () => {
       const r = run("list-declined", { env: { GITHUB_EVENT_PATH: eventFile } });
       expect(r.exitCode).toBe(0);
       expect(targetsOf(r)).toEqual([]);
+      expect(r.summary).toBe(ONE_UNDISCOVERED_SUMMARY);
       expect(r.stdout).toContain(
         "::notice::Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch",
       );

@@ -377,13 +377,25 @@ describe("select_sync_repos.ts", () => {
         "::error::the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma\n",
       withheld: null,
     },
+    {
+      reason:
+        "a slug-only scope whose own slug discovery missed warns about that one repo, then is refused as private",
+      scope: "Vivswan/steady",
+      discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
+      stdout: lines(
+        `::warning::${undiscoveredWarning(1)}`,
+        `::error::1 of 1 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
+      ),
+      withheld: null,
+    },
   ])(
     "$reason, counting only",
-    ({ scope, stdout, withheld }) => {
-      const r = run(`refused-${Bun.hash(scope).toString(16)}`, {
-        ONLY_REPO: scope,
-        TARGET_SHA: SHA,
-      });
+    ({ scope, stdout, withheld, discoveredList = discovered }) => {
+      const r = run(
+        `refused-${Bun.hash(scope + discoveredList.length).toString(16)}`,
+        { ONLY_REPO: scope, TARGET_SHA: SHA },
+        discoveredList,
+      );
       expect(r).toEqual({ exitCode: 1, stdout, stderr: "", output: "" });
       if (withheld !== null) {
         for (const channel of [r.stdout, r.stderr, r.output]) {

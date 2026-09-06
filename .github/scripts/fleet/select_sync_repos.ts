@@ -43,7 +43,13 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { parseDiscoveredList, parseEnriched } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects, undiscoveredWarning } from "./sync_scope.ts";
+import {
+  parseScope,
+  scopeRefusal,
+  scopeSelects,
+  undiscoveredCount,
+  undiscoveredWarning,
+} from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -115,7 +121,11 @@ if (discovered === null) {
 }
 const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
 const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
-const undiscovered = enriched.rows.filter((row) => !visibility.has(row.repo.toLowerCase())).length;
+const undiscovered = undiscoveredCount(
+  scope,
+  enriched.rows.map((row) => row.repo),
+  new Set(visibility.keys()),
+);
 if (undiscovered > 0) warning(undiscoveredWarning(undiscovered));
 const refusal = scopeRefusal(
   scope,

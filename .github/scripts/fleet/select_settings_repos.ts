@@ -47,7 +47,13 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { type EnrichedRow, parseEnriched } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects, undiscoveredWarning } from "./sync_scope.ts";
+import {
+  parseScope,
+  scopeRefusal,
+  scopeSelects,
+  undiscoveredCount,
+  undiscoveredWarning,
+} from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -210,7 +216,11 @@ const enriched = parseEnriched(
 const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
 visibility.set(selfRepo.toLowerCase(), false);
 const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
-const undiscovered = enriched.rows.filter((row) => !visibility.has(row.repo.toLowerCase())).length;
+const undiscovered = undiscoveredCount(
+  scope,
+  enriched.rows.map((row) => row.repo),
+  new Set(visibility.keys()),
+);
 if (undiscovered > 0) warn(undiscoveredWarning(undiscovered));
 const known = new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)]));
 known.set(selfRepo.toLowerCase(), false);

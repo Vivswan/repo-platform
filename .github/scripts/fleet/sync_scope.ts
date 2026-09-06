@@ -60,6 +60,22 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
  *  main commit) or the typed dispatch input (may be a private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 
+/** The targeted repos discovery missed, as the scope sees them: every target when the scope
+ *  reads visibility (`all` or a token), only the scope's own slugs otherwise. `discovered` holds
+ *  folded slugs. */
+export function undiscoveredCount(
+  scope: Scope,
+  targets: Iterable<string>,
+  discovered: ReadonlySet<string>,
+): number {
+  const folded = [...targets].map((target) => target.toLowerCase());
+  const seen =
+    scope.kind === "list" && scope.visibility.size === 0
+      ? folded.filter((target) => scope.slugs.has(target))
+      : folded;
+  return seen.filter((target) => !discovered.has(target)).length;
+}
+
 /** The counts-only warning when the fail-closed default hid targeted repos from a `public`
  *  scope: discovery did not list them this run. */
 export function undiscoveredWarning(count: number): string {

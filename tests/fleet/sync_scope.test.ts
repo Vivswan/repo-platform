@@ -9,6 +9,7 @@ import {
   type ScopeSource,
   scopeRefusal,
   scopeSelects,
+  undiscoveredCount,
   undiscoveredWarning,
 } from "../../.github/scripts/fleet/sync_scope.ts";
 
@@ -176,5 +177,29 @@ describe("undiscoveredWarning", () => {
     ],
   ])("%d", (count, expected) => {
     expect(undiscoveredWarning(count)).toBe(expected);
+  });
+});
+
+describe("undiscoveredCount", () => {
+  // Targets o/a, o/b, o/c; discovery listed only o/a.
+  const targets = ["o/a", "o/B", "o/c"];
+  const discovered = new Set(["o/a"]);
+  test.each<{ reason: string; scope: Scope; expected: number }>([
+    { reason: "all sees every target", scope: ALL, expected: 2 },
+    { reason: "a token sees every target", scope: list(["public"], []), expected: 2 },
+    {
+      reason: "a token beside a slug still sees every target",
+      scope: list(["private"], ["o/a"]),
+      expected: 2,
+    },
+    { reason: "slugs alone see only themselves, folded", scope: list([], ["o/b"]), expected: 1 },
+    { reason: "a discovered slug alone sees nothing", scope: list([], ["o/a"]), expected: 0 },
+    {
+      reason: "an unknown slug is not a target and is not counted",
+      scope: list([], ["o/nope"]),
+      expected: 0,
+    },
+  ])("$reason", ({ scope, expected }) => {
+    expect(undiscoveredCount(scope, targets, discovered)).toBe(expected);
   });
 });
