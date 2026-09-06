@@ -164,11 +164,9 @@ function generatedRegionMask(lines: string[]): boolean[] {
   return mask;
 }
 
-/** A line that is one string or regex literal, optionally assigned,
- *  returned, keyed, or continued with `+`: wrapping it means splitting the
- *  literal, which the fleet leaves alone. Exempt from the WARN width tier
- *  only; the hard tier still catches it. A hand scanner, linear in the
- *  line, where a regex over the same grammar backtracks quadratically. */
+/** One string or regex literal, optionally assigned, returned, keyed, or
+ *  `+`-continued: exempt from the WARN width tier only (wrapping it means
+ *  splitting the literal). A linear scanner; the regex form backtracked. */
 export function isLiteralLine(line: string): boolean {
   const start = skipWhile(line, 0, isSpace);
   for (const prefix of [declarationPrefix, returnPrefix, keyPrefix, (_: string, i: number) => i]) {

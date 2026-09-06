@@ -331,23 +331,38 @@ describe("isLiteralLine", () => {
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
-  test.each<[string, boolean]>([
-    ['export const x: Readonly<T[]> = "v";', true],
-    ["let x = `v`,", true],
-    ["  return /re/gi", true],
-    ["key: 'v')]", true],
-    ['obj.key += "v"', true],
-    ["'a' + 'b'", false],
-    ['const x = "unclosed', false],
-    ['rb"v"', true],
-    ['rbx"v"', false],
-    ["r`v`", false],
-    ["//", false],
-    ["/a\\/b/", true],
-    ['"esc\\"aped"', true],
-    ['const x = "v" x', false],
-  ])("%s -> %s", (line, ok) => {
-    expect(isLiteralLine(line)).toBe(ok);
+  // Each line is warn-wide (150 < width < 256) and breakable; a literal
+  // line yields no finding, anything else the whole warn width finding.
+  const F = "a ".repeat(90).trim();
+  test.each<[string, string, boolean]>([
+    ["a typed exported declaration", `export const x: Readonly<T[]> = "${F}";`, true],
+    ["a template with a trailing comma", `let x = \`${F}\`,`, true],
+    ["a returned regex with flags", `  return /${F}/gi`, true],
+    ["a keyed literal with trailers", `key: '${F}')]`, true],
+    ["a += assignment", `obj.key += "${F}"`, true],
+    ["a python raw bytes prefix", `rb"${F}"`, true],
+    ["an escaped quote inside", `"esc\\"aped ${F}"`, true],
+    ["an escaped slash inside a regex", `/a\\/b ${F}/`, true],
+    ["two literals joined on one line", `'${F}' + 'b'`, false],
+    ["an unclosed literal", `const x = "unclosed ${F}`, false],
+    ["a three-letter prefix", `rbx"${F}"`, false],
+    ["a prefixed template", `r\`${F}\``, false],
+    ["a comment (an empty regex body is no literal)", `// ${F}`, false],
+    ["a literal followed by code", `const x = "${F}" x`, false],
+  ])("%s", (_name, line, literal) => {
+    const width = [...line].length;
+    expect(width).toBeGreaterThan(WARN.width);
+    expect(width).toBeLessThanOrEqual(HARD.width);
+    const finding: Finding = {
+      path: "f",
+      kind: "source",
+      tier: "warn",
+      measure: "width",
+      line: 1,
+      value: width,
+      cap: WARN.width,
+    };
+    expect(judgeFile("f", "source", `${line}\n`)).toEqual(literal ? [] : [finding]);
   });
 });
 
