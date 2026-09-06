@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { boundedSpawnSync } from "../../tests/shared/bounded_spawn.ts";
-import { tempDirs } from "../../tests/shared/temp_dir.ts";
+import { join, resolve } from "node:path";
 import {
   deriveRewrites,
   deriveSidebar,
@@ -11,9 +9,13 @@ import {
   pageTitle,
   routeOf,
   walkMarkdown,
-} from "./.vitepress/derive.ts";
-import { assertCentralTheme, copyInto, tierStrictLinks } from "./build.ts";
-import { collectBroken, reportBody, walkHtml } from "./check_links.ts";
+} from "../../../actions/pages-site/.vitepress/derive.ts";
+import {
+  assertCentralTheme,
+  copyInto,
+  tierStrictLinks,
+} from "../../../actions/pages-site/build.ts";
+import { collectBroken, reportBody, walkHtml } from "../../../actions/pages-site/check_links.ts";
 import {
   assemblyOrder,
   judgeCommandTag,
@@ -28,9 +30,12 @@ import {
   versionLinks,
   versionsIndex,
   versionTags,
-} from "./lib.ts";
+} from "../../../actions/pages-site/lib.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
 describe("parseMounts", () => {
   test("accepts the single docs mount and the composed pair", () => {
@@ -515,7 +520,7 @@ describe("strict check build", () => {
       mkdirSync(join(root, "runner-temp"));
       writeFileSync(join(docs, "README.md"), "# Home\n\nSee [page](page.md).\n");
       writeFileSync(join(docs, "page.md"), `# Page\n\n${body}\n`);
-      const result = boundedSpawnSync([process.execPath, join(import.meta.dir, "build.ts")], {
+      const result = boundedSpawnSync([process.execPath, join(ACTION_DIR, "build.ts")], {
         env: {
           ...process.env,
           GITHUB_WORKSPACE: join(root, "ws"),
@@ -536,7 +541,7 @@ describe("strict check build", () => {
         const stderr = Bun.stripANSI(result.stderr);
         const fatal = stderr.indexOf("build error:\n");
         const annotation = stderr.indexOf(
-          `::error::command failed (exit 1): bun ${join(import.meta.dir, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
+          `::error::command failed (exit 1): bun ${join(ACTION_DIR, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
         );
         expect(result.exitCode).toBe(1);
         expect(fatal).toBeGreaterThanOrEqual(0);
@@ -612,7 +617,9 @@ describe("link-rot reporting", () => {
     const dir = temp.dir("crawl-");
     writeFileSync(join(dir, "index.html"), '<a href="/other.html">o</a>');
     writeFileSync(join(dir, "other.html"), '<a href="/missing.html">m</a>');
-    const { LinkChecker } = await import("linkinator");
+    // Resolved from the action's own dependency tree, so the version under
+    // test is the one check_links.ts loads, not a root install.
+    const { LinkChecker } = await import(Bun.resolveSync("linkinator", ACTION_DIR));
     const result = await new LinkChecker().check({
       path: ["index.html", "other.html"],
       serverRoot: dir,
@@ -621,9 +628,11 @@ describe("link-rot reporting", () => {
       retry: true,
       linksToSkip: async () => false,
     });
-    const judged = result.links.filter((link) => link.state !== "SKIPPED");
+    // Typed as what check_links reads: the shape this test exists to pin.
+    const links: Parameters<typeof collectBroken>[0] = result.links;
+    const judged = links.filter((link) => link.state !== "SKIPPED");
     expect(judged.length).toBeGreaterThan(0);
-    const broken = result.links.filter((link) => link.state === "BROKEN");
+    const broken = links.filter((link) => link.state === "BROKEN");
     expect(broken).toHaveLength(1);
     // Suffix matches: check_links.ts never depends on linkinator's URL
     // normalization (relative vs loopback-absolute), so this test must not

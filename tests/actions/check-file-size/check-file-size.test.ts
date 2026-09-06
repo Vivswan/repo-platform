@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { tempDirs } from "../../tests/shared/temp_dir.ts";
+import { dirname, join, resolve } from "node:path";
 import {
   ALLOWLIST_FILE,
   check,
@@ -23,15 +22,18 @@ import {
   type Tier,
   type Verdict,
   WARN,
-} from "./check-file-size.ts";
+} from "../../../actions/check-file-size/check-file-size.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
-const SCRIPT = join(import.meta.dir, "check-file-size.ts");
-const REPO_ROOT = join(import.meta.dir, "..", "..");
+const ACTION_DIR = resolve(import.meta.dir, "../../../actions/check-file-size");
+const SCRIPT = join(ACTION_DIR, "check-file-size.ts");
+const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
 function git(root: string, ...args: string[]): void {
-  const proc = Bun.spawnSync(["git", "-C", root, ...args], { stdout: "pipe", stderr: "pipe" });
-  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
+  const proc = boundedSpawnSync(["git", "-C", root, ...args]);
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr}`);
 }
 
 /** A git checkout holding `tracked` (added to the index) and `untracked`
@@ -587,9 +589,7 @@ describe("the CLI", () => {
     writeFileSync(reportPath, "stale\n");
     writeFileSync(summaryPath, "");
     writeFileSync(outputPath, "");
-    const proc = Bun.spawnSync(["bun", SCRIPT, root], {
-      stdout: "pipe",
-      stderr: "pipe",
+    const proc = boundedSpawnSync(["bun", SCRIPT, root], {
       env: {
         ...process.env,
         REPORT_PATH: reportPath,
@@ -599,8 +599,8 @@ describe("the CLI", () => {
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString().trimEnd().split("\n"),
-      stderr: proc.stderr.toString().trimEnd().split("\n"),
+      stdout: proc.stdout.trimEnd().split("\n"),
+      stderr: proc.stderr.trimEnd().split("\n"),
       comment: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : null,
       summary: readFileSync(summaryPath, "utf-8"),
       output: readFileSync(outputPath, "utf-8"),

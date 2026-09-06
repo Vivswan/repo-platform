@@ -8,7 +8,6 @@
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tempDirs } from "../../tests/shared/temp_dir";
 import {
   type Config,
   findReleasePr,
@@ -22,7 +21,8 @@ import {
   runHealthCheck,
   securityGate,
   severitiesAtOrAbove,
-} from "./release-health";
+} from "../../../actions/release-health/release-health.ts";
+import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 

@@ -6,7 +6,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tempDirs } from "../../tests/shared/temp_dir";
 import {
   CheckFailure,
   kebabToTitle,
@@ -19,7 +18,8 @@ import {
   validateMarketplace,
   validateSkillDir,
   validateStructure,
-} from "./validate_skills";
+} from "../../../actions/validate-skills/validate_skills.ts";
+import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 

@@ -2549,23 +2549,32 @@ export function tempDirFileMismatches(
   return tempDirSiteMismatches(file.path, source());
 }
 
-/** Selection and judgment for the walked tests/ and actions/ trees: every
- *  script under tests/, every file bun test discovers under actions/,
- *  each judged by tempDirFileMismatches; the helper must be among them
+/** Selection and judgment for the walked tests/ tree: every script under
+ *  it, each judged by tempDirFileMismatches; the helper must be among them
  *  as a regular file, or the anchor is lost. */
 export function tempDirTreeMismatches(
   files: { path: string; symlink: boolean }[],
   read: (rel: string) => string,
 ): Mismatch[] {
-  const selected = files.filter(
-    (f) =>
-      (f.path.startsWith("tests/") && SCRIPT_FILE.test(f.path)) ||
-      (f.path.startsWith("actions/") && BUN_TEST_FILE.test(f.path)),
-  );
+  const selected = files.filter((f) => f.path.startsWith("tests/") && SCRIPT_FILE.test(f.path));
   if (!selected.some((f) => f.path === TEMP_DIR_HELPER && !f.symlink)) {
     throw new Error(`${TEMP_DIR_HELPER}: the temp-dir helper is missing - anchor lost`);
   }
   return selected.flatMap((f) => tempDirFileMismatches(f, () => read(f.path)));
+}
+
+/** Every file bun test would discover under actions/ is a mismatch: tests
+ *  live under tests/actions/<action>/, the launcher's one root is tests/,
+ *  and the build tree ships actions without tests (branch_tree.ts). */
+export function actionTestFileMismatches(files: { path: string }[]): Mismatch[] {
+  return files
+    .filter((f) => BUN_TEST_FILE.test(f.path))
+    .map((f) => ({
+      file: f.path,
+      expected:
+        "no test file under actions/ (tests live under tests/actions/<action>/, mirroring the action's tree)",
+      got: "a bun-discoverable test file beside an action's sources",
+    }));
 }
 
 export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
@@ -7319,11 +7328,18 @@ const rules: Rule[] = [
   },
 
   {
-    // No bare mkdtemp in the test trees: TEMP_DIR_HELPER owns fixtures
+    // No bare mkdtemp in the test tree: TEMP_DIR_HELPER owns fixtures
     // and is the one file that may call it. Fixed-name writes under
     // os.tmpdir() are the launcher's leftover check's to catch.
     name: "temp-dirs-through-helper",
-    run: () => tempDirTreeMismatches([...walkFiles("tests"), ...walkFiles("actions")], read),
+    run: () => tempDirTreeMismatches(walkFiles("tests"), read),
+  },
+
+  {
+    // Tests never sit beside an action's sources: the launcher runs
+    // tests/ alone, and the build tree ships actions without tests.
+    name: "no-tests-under-actions",
+    run: () => actionTestFileMismatches(walkFiles("actions")),
   },
 
   {
@@ -7456,6 +7472,7 @@ export const RULE_ROSTER = [
   "settings-label-preflight",
   "spawn-sync-hang-bound",
   "temp-dirs-through-helper",
+  "no-tests-under-actions",
   "stream-write-sync",
   "local-bun-runtime",
   "skill-ownership-tables",

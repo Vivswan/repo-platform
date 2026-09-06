@@ -385,7 +385,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     guardFile: "actions/pages-site/build.ts",
     snippet: 'if (existsSync(join(docsTree, ".vitepress"))) {',
     mutated: "if (false) {",
-    testFile: "actions/pages-site/pages-site.test.ts",
+    testFile: "tests/actions/pages-site/pages-site.test.ts",
     testName: "a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform",
   },
   {
@@ -397,7 +397,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     guardFile: "actions/pages-site/build.ts",
     snippet: 'return tier.ref === "HEAD";',
     mutated: "return false;",
-    testFile: "actions/pages-site/pages-site.test.ts",
+    testFile: "tests/actions/pages-site/pages-site.test.ts",
     testName: "the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient",
   },
   {
@@ -409,7 +409,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     guardFile: "actions/pages-site/lib.ts",
     snippet: 'return typeof pkg.scripts[script] === "string";',
     mutated: "return false;",
-    testFile: "actions/pages-site/pages-site.test.ts",
+    testFile: "tests/actions/pages-site/pages-site.test.ts",
     testName: "the legacy-tag skip is NARROW: a tag declaring the build script is never skipped",
   },
   // The composite actions' pinned bun: staged live when the 1.4.0 bump's

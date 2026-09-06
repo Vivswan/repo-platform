@@ -723,7 +723,7 @@ describe("the integrity verdict", () => {
 
   test("readVerdict rejects anything that is not a whole verdict", () => {
     const root = temp.dir("verdict-");
-    const none = {
+    const none: Integrity = {
       kind: "not-judged",
       reason: "the aligned validator step wrote no verdict",
     };
@@ -768,7 +768,7 @@ describe("the integrity verdict", () => {
   // run() must keep the three ways a child ends apart: the classifier
   // above reads them, and a timeout folded into "exit 1" would render as
   // an exit the validator never made.
-  test.each([
+  test.each<[string, string[], number, ChildExit]>([
     ["a normal exit", ["sh", "-c", "exit 3"], 5_000, { kind: "exited", code: 3 }],
     ["a deadline", ["sleep", "5"], 200, { kind: "timed-out" }],
     [
@@ -817,7 +817,7 @@ describe("a failed child's one-line detail", () => {
 // How a child ended is classified once for capture(), download(), and
 // run(): the deadline wins over everything else the runtime reports.
 describe("how a child ended", () => {
-  test.each([
+  test.each<[string, Parameters<typeof childExit>[0], ChildExit]>([
     [
       "the deadline, even beside exit 0 (an orphan held the pipe open)",
       { exitedDueToTimeout: true, exitCode: 0, signalCode: null },
@@ -1011,7 +1011,7 @@ function runFetch(opts: FetchOptions = {}) {
      *  and a planted link's target was left alone. */
     ownDir: !existsSync(alignedDir) || !lstatSync(alignedDir).isSymbolicLink(),
     elsewhereIntact: !opts.symlinked || snapshot(elsewhere) === planted,
-    errors: (proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [],
+    errors: [...((proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [])],
   };
 }
 
@@ -1026,7 +1026,7 @@ describe("the action's fetch script", () => {
   // A refusal publishes no compare, whatever the build-branch compare
   // said: freshness is the admission's outcome, not one leg of it. Only a
   // refusal PAST the admission (fetch, unpack, layout) leaves it published.
-  const refused = (reason: string, calls = "", outputs = "") => ({
+  const refused = (reason: string, calls = "", outputs = ""): ReturnType<typeof runFetch> => ({
     exitCode: 1,
     outputs,
     calls,
@@ -1036,7 +1036,7 @@ describe("the action's fetch script", () => {
     elsewhereIntact: true,
     errors: [`::error::${reason}`],
   });
-  const laidOut = (outputs: string, calls = fetched) => ({
+  const laidOut = (outputs: string, calls = fetched): ReturnType<typeof runFetch> => ({
     exitCode: 0,
     outputs,
     calls,
@@ -1248,14 +1248,14 @@ function runJudge(opts: JudgeOptions = {}) {
     verdict: verdictIn(verdict),
     // realpath: the script resolves its cwd, and tmpdir may be a symlink.
     judged: (proc.stdout + proc.stderr).includes(`validated ${realpathSync(repo)}`),
-    errors: (proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [],
+    errors: [...((proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [])],
   };
 }
 
 describe("the action's judge script", () => {
   // Judged whole: exit code (0 only for clean), the verdict written,
   // whether the validator judged the repository, and the error lines.
-  const notJudged = (reason: string, judged = true) => ({
+  const notJudged = (reason: string, judged = true): ReturnType<typeof runJudge> => ({
     exitCode: 1,
     verdict: { kind: "not-judged", reason },
     judged,
