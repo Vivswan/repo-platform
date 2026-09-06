@@ -11,7 +11,15 @@ import { resolve } from "node:path";
 import { capture } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
-const NAMESPACE_REF = /^refs\/(?:tags|heads)\/(ci-build-[^/]+)(?:\/|$)/;
+/** The tag names upgrade_path_test.sh creates under its namespace (its
+ * `*_TAG="$REF_NS/<name>"` lines; the test pins the two lists together). */
+export const HARNESS_TAG_NAMES = ["run", "old", "new", "split", "probe1", "probe2"] as const;
+/** Exactly the harness's shape: `ci-build-` plus mktemp's six-character
+ * token, as the branch itself or one of the tags above. A lookalike such as
+ * refs/heads/ci-build-release is not a namespace and is never touched. */
+const NAMESPACE_REF = new RegExp(
+  `^refs/(?:heads/(ci-build-[A-Za-z0-9]{6})|tags/(ci-build-[A-Za-z0-9]{6})/(?:${HARNESS_TAG_NAMES.join("|")}))$`,
+);
 const USAGE =
   "usage: sweep_harness_namespaces.ts [--dry-run | --execute] [--force-unowned] [--repo <path>]";
 
@@ -71,7 +79,7 @@ export function groupNamespaces(listing: string): Namespace[] {
     const [refname, objecttype, subject] = line.split("\t");
     const match = NAMESPACE_REF.exec(refname);
     if (match === null) continue;
-    const name = match[1];
+    const name = match[1] ?? match[2];
     const group = byName.get(name) ?? { others: [], owner: null };
     byName.set(name, group);
     if (refname === `refs/tags/${name}/run`) {
@@ -126,7 +134,7 @@ export function judge(namespace: Namespace, by: Judge): Verdict {
   if (owner === null) {
     return unowned(
       "no owner record",
-      "killed before writing its /run tag, or a pre-owner leftover",
+      "a pre-owner leftover, or a /run tag that is not an annotated record",
     );
   }
   const who = `pid ${owner.pid}, started ${owner.started}`;
@@ -134,13 +142,23 @@ export function judge(namespace: Namespace, by: Judge): Verdict {
     return { kind: "keep", reason: `owned on host ${owner.host} (${who}); sweep it from there` };
   }
   const liveness = by.liveness(owner.pid);
-  if (liveness === "alive")
-    return { kind: "refuse", reason: `owner alive (${who}, dir ${owner.dir})` };
-  if (liveness === "unknown") return unowned("owner liveness unknown", `${who}, dir ${owner.dir}`);
-  const dir = by.dirPresent(owner.dir)
-    ? `dir ${owner.dir} still present: rm -rf it, then git worktree prune`
-    : `dir ${owner.dir} gone`;
-  return { kind: "delete", reason: `owner dead (${who}); ${count}; ${dir}` };
+  switch (liveness) {
+    case "alive":
+      return { kind: "refuse", reason: `owner alive (${who}, dir ${owner.dir})` };
+    case "unknown":
+      return unowned("owner liveness unknown", `${who}, dir ${owner.dir}`);
+    case "dead": {
+      const dir = by.dirPresent(owner.dir)
+        ? `dir ${owner.dir} still present: rm -rf it, then git worktree prune`
+        : `dir ${owner.dir} gone`;
+      return { kind: "delete", reason: `owner dead (${who}); ${count}; ${dir}` };
+    }
+    default: {
+      // A new Liveness member must be judged here, never fall through to delete.
+      const unhandled: never = liveness;
+      throw new Error(`unhandled liveness ${String(unhandled)}`);
+    }
+  }
 }
 
 function git(repo: string, args: string[]): string {

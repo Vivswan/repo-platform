@@ -91,7 +91,7 @@ trap cleanup EXIT
 
 # The owner record, the namespace's FIRST ref: sweep_harness_namespaces.ts
 # deletes a namespace only when this pid is dead on this host, and a run
-# killed before writing it shows up there as unowned.
+# killed before writing it has left no namespace at all.
 git -C "$REPO_ROOT" -c user.name=ci -c user.email=ci@localhost tag -a "$RUN_TAG" HEAD \
   -m "pid=$$ host=$(hostname) started=$(date -u +%Y-%m-%dT%H:%M:%SZ) dir=$RUN_DIR"
 
