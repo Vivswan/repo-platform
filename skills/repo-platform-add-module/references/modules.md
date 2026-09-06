@@ -6,28 +6,24 @@ The authoritative roster is the `modules` question in repo-platform's `copier.ym
 
 ## Base (every managed repo, no module needed)
 
-Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `.github/SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work, called after the gate on a push to main, before the release), `.gitleaks.toml`, `.github/actionlint.yaml`.
+Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `.github/SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape), the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker) with the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`, all pointing at AGENTS.md), `.github/instructions/review.instructions.md` (how Copilot code review words its comments: problem first, then an example, then the fix), the `auto-assign.yml` caller, and the `settings-sync.yml` caller (push-time self-apply of the repository's settings). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work, called after the gate on a push to main, before the release), `copilot-setup-steps.yml` (Copilot coding agent environment setup, prefilled with installs for the toolchains selected at generation time; adding a toolchain later does not update an existing copy), `.github/settings.yml` (the settings identity starter, below), `.gitleaks.toml`, `.github/actionlint.yaml`.
+
+Repository settings are managed for every repo with a `.repo-platform.yml`: the nightly heal assembles the repo's baseline (policy block, module labels, fleet rulesets) and merges the repo's own `.github/settings.yml` over it. That starter is rendered once and repo-owned, never deleted: the identity keys (`description`, `homepage`, `topics`, `private`, seeded from the copier answers - declared-empty clears the live value, so copy UI-set values into the file before they get healed away) plus local overrides (a same-name label replaces the fleet one wholesale, a same-name ruleset merges into it; a key set to `null` opts out of that part of the fleet defaults, except where the override layer declares it). Optional: a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret buys apply-on-push immediacy; without it the self-apply skips with a warning and the central nightly run still applies the repo. Leaving management (excluding the repo in `repos.yml`, or deleting its `.repo-platform.yml`) stops the heal; `settings.yml` stays as inert documentation.
 
 ## Toolchains: bun / node / deno / uv / rust
 
 - Managed: dependabot ecosystem entry, gitignore section, CodeQL job in ci.yml (public repos; not rust), and for bun/node/deno the toolchain version dotfile (`.bun-version` / `.node-version` / `.dvmrc`, fleet-pinned; uv and rust carry none) plus, bun only, the `dependabot-bun-lockfile.yml` lockfile fixer.
-- Starter: `auto-format.yml` prefilled per selected formatter toolchain (all but rust) - only when the file does not exist yet. The same applies to every composite starter a toolchain contributes fragments to: an existing `auto-format.yml`, `checks.yml` (example jobs), `.gitleaks.toml` (lockfile allowlists), or `copilot-setup-steps.yml` (agents module) does NOT gain a newly added toolchain's fragment - add the toolchain's piece to the existing file by hand.
+- Starter: `auto-format.yml` prefilled per selected formatter toolchain (all but rust) - only when the file does not exist yet. The same applies to every composite starter a toolchain contributes fragments to: an existing `auto-format.yml`, `checks.yml` (example jobs), `.gitleaks.toml` (lockfile allowlists), or `copilot-setup-steps.yml` (a base starter) does NOT gain a newly added toolchain's fragment - add the toolchain's piece to the existing file by hand.
 - Companion steps:
   - Settings labels are automatic: the fleet baseline declares `dependencies` (`0366d6`) and `github_actions` (`000000`) always, and each toolchain module's own `templates/<module>/settings.yml` layer declares its label - `javascript` (`168700`) for bun/node, `deno` (`70ffaf`), `python:uv` (`2b67c6`), `rust` (`000000`). An SSOT rule pins each of those against the manifest's `dependabot` tuple, so the two cannot drift. A NEW toolchain's layer files must also be declared in its `module.yml` under `settings_layers` - the render selects layers from that declaration, and the manifest loader refuses an undeclared or missing file.
   - bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT (human-only). Without it the lockfile fix lands but cannot re-trigger checks; each fixed Dependabot PR then needs a close/reopen.
 - Removal: the dependabot entry, gitignore section, and CodeQL job leave - except outputs another selected toolchain still contributes: bun/node/deno share the `codeql-javascript` job, and bun and node share the Node gitignore section, so those stay while any contributor remains selected. The auto-format starter stays (edit it yourself). The toolchain label leaves the managed baseline once nothing carries it, and the next apply deletes it from the repo.
 
-## agents
-
-- Managed: the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker), the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`), all pointing at AGENTS.md, and `.github/instructions/review.instructions.md` (how Copilot code review words its comments: problem first, then an example, then the fix).
-- Starter: `copilot-setup-steps.yml` (Copilot coding agent environment setup), prefilled with installs for the toolchains selected at generation time; adding a toolchain later does not update an existing copy.
-- Removal: AGENTS.md is deleted whole (its repo-owned section included - move that content out first), and the symlinks and the review instructions go with it; the sync PR lists every removal for review. The starter stays.
-
 ## pages
 
 - Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest served `vX.Y.Z` tag (redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (`PAGES_MAX_VERSIONS` repo variable, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's `docs/pages.md`).
 - Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`): repo-platform's `docs/pages.md`.
-- Companion step (one-time, needs repo settings access; automatic with `settings-sync` - the module's settings layer enables Pages): Settings -> Pages -> Source: GitHub Actions.
+- Companion step: the module's settings layer enables Pages on the next fleet settings apply; only a deploy before that apply needs the manual toggle (Settings -> Pages -> Source: GitHub Actions).
 - With `docs-site` also selected, the website turns unversioned at `/` and the docs mount versioned at `/<docs_site_path>/`, all in this one workflow.
 - Removal: the caller leaves the render and is deleted; the live Pages site and settings stay until you turn Pages off in the repo.
 
@@ -36,7 +32,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 - Managed: `docs-site.yml` - the repo's `docs/` markdown deployed as a versioned VitePress site under the CENTRAL fleet theme (the repo carries only markdown; theme and config live in repo-platform's `actions/pages-site`), plus a strict docs build check on every PR touching `docs/` (dead internal links fail there; never a required check).
 - Parameters: `docs_site_path` (URL mount when `pages` is also selected; default `docs`), `docs_site_label` (the nightly link-rot tracking stream's label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page; sidebar and nav derive from the file tree; translations in `docs/<lang>/` (e.g. `zh-cn/`) become locales automatically; links must resolve inside `docs/` or be absolute URLs. Details: repo-platform's `docs/docs-site.md`.
-- Companion step: same one-time Pages toggle as the pages module (automatic with `settings-sync`), and make sure `docs/` exists with a `README.md` index - the deploy refuses an absent docs tree.
+- Companion step: same Pages enablement as the pages module, and make sure `docs/` exists with a `README.md` index - the deploy refuses an absent docs tree.
 - Removal: the managed workflow leaves the render and is deleted; the live Pages site stays until you turn Pages off.
 
 ## release-please
@@ -72,19 +68,9 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 - Removal: the label leaves the managed baseline and the next apply deletes it. The starter workflow keeps running - delete it yourself, or declare its label in the repo's own `.github/settings.yml` first.
 - Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md` (failure-report contract, sharding, issue lifecycle, release gating).
 
-## pr-title / auto-assign
+## pr-title
 
-- pr-title: a managed `pr-title.yml` workflow whose `pr-title` check the module's settings layer requires by ruleset (the baseline carries the ruleset disabled; the module flips it active). Removal deletes the workflow and the next settings apply disables the requirement.
-- auto-assign: a managed `auto-assign.yml` caller. Removal deletes it.
-
-## settings-sync
-
-- Selecting the module IS the opt-in to centrally managed settings: the nightly heal assembles the repo's baseline (policy block, module labels, fleet rulesets) and merges the repo's own `.github/settings.yml` over it.
-- Managed: `settings-sync.yml` caller (push-time self-apply of the same merge).
-- Starter, never deleted: `.github/settings.yml` - the identity keys plus local overrides, rendered once and repo-owned (a same-name label there replaces the fleet one wholesale, a same-name ruleset merges into it; a key set to `null` opts out of that part of the fleet defaults, except where the override layer declares it).
-- Parameters: `homepage`, `topics` (seeded into the starter; declared-empty clears the live value, so copy UI-set values into the file before they get healed away).
-- Companion step (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret buys apply-on-push immediacy; without it self-apply skips with a warning and the central nightly run still applies the repo.
-- Removal: the caller is deleted; `settings.yml` stays as inert documentation - nothing enforces the repo's settings afterwards.
+- A managed `pr-title.yml` workflow whose `pr-title` check the module's settings layer requires by ruleset (the baseline carries the ruleset disabled; the module flips it active). Removal deletes the workflow and the next settings apply disables the requirement.
 
 ## custom-license
 

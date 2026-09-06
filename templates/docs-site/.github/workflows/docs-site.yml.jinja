@@ -7,9 +7,9 @@
 # The check job builds docs/ strictly on every PR touching it (dead
 # internal links fail there instead of at deploy time); paths-filtered by
 # design, so it is never in the all-green roster and never a required
-# check.{% if 'pages' not in modules %} One-time setup without the settings-sync module: repo
-# Settings -> Pages -> Source: GitHub Actions (with it, the module's
-# settings layer enables Pages automatically).{% endif %}{% if 'pages' in modules %} The deploy itself lives in
+# check.{% if 'pages' not in modules %} Pages is enabled by this module's settings layer on
+# the next fleet settings apply; a deploy before that needs repo
+# Settings -> Pages -> Source: GitHub Actions.{% endif %}{% if 'pages' in modules %} The deploy itself lives in
 # pages.yml: with the pages module selected, the website rides at / and
 # the docs mount at /{{ docs_site_path }}/ in ONE Pages deployment.{% endif %}
 name: Docs Site

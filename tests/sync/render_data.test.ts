@@ -20,6 +20,7 @@ function runScript(
   modules: string,
   privateFlag: string,
   description: string,
+  extra: string[] = [],
 ): { exitCode: number; stdout: string; old: string; new: string } {
   const dir = temp.dir("render-data-");
   const answersPath = join(dir, "answers-old.yml");
@@ -41,6 +42,7 @@ function runScript(
     privateFlag,
     "--description",
     description,
+    ...extra,
   ]);
   const slurp = (path: string) => {
     try {
@@ -115,6 +117,10 @@ describe("render_data script", () => {
         '  - "agents"',
         "private: true",
         'description: "live description"',
+        // Unrecorded seeded answers take the (empty) live values, so the
+        // data file agrees with what `copier update` seeds.
+        'homepage: ""',
+        'topics: ""',
       ],
     },
     {
@@ -122,13 +128,58 @@ describe("render_data script", () => {
       modules: "[]",
       privateFlag: "false",
       description: "",
-      expectedNew: [...VERBATIM_HEAD, "modules: []", "private: false", 'description: ""'],
+      expectedNew: [
+        ...VERBATIM_HEAD,
+        "modules: []",
+        "private: false",
+        'description: ""',
+        'homepage: ""',
+        'topics: ""',
+      ],
     },
   ])("$reason", ({ modules, privateFlag, description, expectedNew }) => {
     const result = runScript(ANSWERS, modules, privateFlag, description);
     expect(result.exitCode).toBe(0);
     expect(result.old).toBe(DATA_OLD);
     expect(result.new).toBe(expectedNew.map((line) => `${line}\n`).join(""));
+  });
+
+  // A recorded homepage/topics rides verbatim (live ignored); an unrecorded
+  // one is seeded from the live value, quoted. Whole data-new pinned either way.
+  test.each([
+    {
+      reason: "neither recorded: both seeded from the live values, after the live keys",
+      answers: ANSWERS,
+      expectedTail: ['homepage: "https://live.example"', 'topics: "live,topics"'],
+    },
+    {
+      reason:
+        "topics recorded (empty): only homepage is seeded; the recorded empty topics ride verbatim",
+      answers: `${ANSWERS}topics: ''\n`,
+      expectedTail: ["topics: ''", 'homepage: "https://live.example"'],
+    },
+  ])("$reason", ({ answers, expectedTail }) => {
+    const result = runScript(answers, '["uv"]', "false", "d", [
+      "--homepage",
+      "https://live.example",
+      "--topics",
+      "live,topics",
+    ]);
+    expect(result.exitCode).toBe(0);
+    const recordedTopics = expectedTail[0] === "topics: ''" ? ["topics: ''"] : [];
+    expect(result.new).toBe(
+      [
+        ...VERBATIM_HEAD,
+        ...recordedTopics,
+        "modules:",
+        '  - "uv"',
+        "private: false",
+        'description: "d"',
+        ...expectedTail.filter((line) => line !== "topics: ''"),
+      ]
+        .map((line) => `${line}\n`)
+        .join(""),
+    );
   });
 
   test("a malformed answers file fails loudly", () => {

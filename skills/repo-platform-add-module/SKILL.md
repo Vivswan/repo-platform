@@ -1,6 +1,6 @@
 ---
 name: repo-platform-add-module
-description: 'Add or remove a Vivswan/repo-platform module in a managed repository - edit the modules list, set module parameters, get the sync PR, and finish the companion steps. Use when someone says "add a module", "enable the fuzzer", "add nightly CI to this repo", "turn on pages", "host skills in this repo", "enable settings-sync", "add the bun toolchain", "add Python support to this repo", "add Rust support", "start cutting releases here", "publish the docs site", "check PR titles on this repo", "remove a module", "drop the fuzzer", "disable nightly", asks "what modules does this repo have", or asks how to change a module parameter like nightly_label, fuzzer_label, skills_dir, or the pages build command.'
+description: 'Add or remove a Vivswan/repo-platform module in a managed repository - edit the modules list, set module parameters, get the sync PR, and finish the companion steps. Use when someone says "add a module", "enable the fuzzer", "add nightly CI to this repo", "turn on pages", "host skills in this repo", "add the bun toolchain", "add Python support to this repo", "add Rust support", "start cutting releases here", "publish the docs site", "check PR titles on this repo", "remove a module", "drop the fuzzer", "disable nightly", asks "what modules does this repo have", or asks how to change a module parameter like nightly_label, fuzzer_label, skills_dir, or the pages build command.'
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -31,7 +31,6 @@ One line each, generated from the module manifests (`templates/<module>/module.y
 
 | Module | What it gives the repo |
 |---|---|<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
-| `agents` | AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style |
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
 | `node` | JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS) |
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
@@ -43,10 +42,8 @@ One line each, generated from the module manifests (`templates/<module>/module.y
 | `issue-templates` | bug/feature issue forms |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
-| `auto-assign` | auto-assign issues/PRs/alerts to owner |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
-| `settings-sync` | centrally managed repo settings + repo-owned settings.yml starter |
 | `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not rendered |<!-- END GENERATED: module-roster -->
 
 Per-module details - what is managed vs starter, parameters, companion steps, removal notes - are in [references/modules.md](references/modules.md).
@@ -57,7 +54,7 @@ Per-module details - what is managed vs starter, parameters, companion steps, re
 
 ```bash
 # .repo-platform.yml - add the module name to the top-level list:
-modules: ["agents", "release-please", "issue-templates", "pr-title", "auto-assign", "nightly"]
+modules: ["release-please", "issue-templates", "pr-title", "nightly"]
 ```
 
 A typo is safe: a name the template does not know fails the sync run loudly instead of being dropped - and the safety net fires earlier than that: the `validate-template` job on the step-1 PR itself flags an unknown module name before merge. One more caveat:
@@ -94,7 +91,7 @@ The sync PR is an ordinary template sync PR: before anything merges, classify an
 What the PR delivers, in two classes:
 
 - Managed files: arrive now and keep updating on every future sync (workflow callers, ci.yml jobs, dependabot entries, gitignore sections). Do not edit them.
-- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`update-release.yml`, `update-release-pr.yml`, `release-please-config.json`, `.release-please-manifest.json`), `issue-templates` (issue forms + chooser), `agents` (`copilot-setup-steps.yml`), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
+- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`update-release.yml`, `update-release-pr.yml`, `release-please-config.json`, `.release-please-manifest.json`), `issue-templates` (issue forms + chooser), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
 
 ### 4. Finish the companion steps
 
@@ -102,7 +99,7 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 - Settings labels need no hand work, but they do need a home: put the new module's labels in its own `templates/<module>/settings.yml` layer (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`), declare that layer file in the module's own `module.yml` under `settings_layers` (the render selects layer files from that declaration, not from the tree, and the manifest loader refuses an undeclared or missing one), and the merge picks the labels up at apply time. Only the tracking labels for `fuzzer`/`nightly`/`docs-site` still come from the manifest, because their NAMES are per-repo answers. The one thing to record: a tracking-stream repo's label answer (`fuzzer_label`/`nightly_label`/`docs_site_label`) must be readable from its `.github/.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
 - `bun`: register a repo-scoped Contents:RW PAT as a DEPENDABOT secret so the lockfile fixer's push re-runs CI (human-only - needs the token value): `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
-- `pages` / `docs-site`: one-time repo setup - Settings -> Pages -> Source: GitHub Actions; automatic with `settings-sync` (the modules' settings layers enable Pages on the next apply).
+- `pages` / `docs-site`: the modules' settings layers enable Pages on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
 - `skills`: the starter manifests are repo-owned - a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; until then it is a green no-op that never files issues.
 
@@ -139,11 +136,11 @@ Deselecting works the same way: remove the name from `modules:` in `.repo-platfo
 
 - Managed files the module owned leave the render and are deleted - including locally modified ones (the retired-file cleanup diffs two clean renders; every removal is listed in the PR body for review). Check none were repurposed locally before merging.
 - Starters and repo-owned files stay: `_skip_if_exists` files are never deleted by sync. Dropping `fuzzer`/`nightly` leaves `nightly-fuzz.yml`/`nightly.yml` running - delete the workflow yourself, or keep its tracking label declared in your settings.
-- `.github/settings.yml` is never deleted by sync, even when dropping `settings-sync` de-renders it. Dropping the module also stops the nightly heal for the repo: nothing enforces its settings afterwards (docs/settings.md).
+- `.github/settings.yml` is never deleted by sync; repository settings stay managed for every repo with a `.repo-platform.yml` (docs/settings.md).
 - Dropping `custom-license` is guarded: the sync FAILS with instructions while the repo's own license file still exists, because the incoming fleet LICENSE.md cannot be reconciled with it. Delete the old license in the same commit that removes the module (git history records prior licensing; third-party notices go below the fleet LICENSE.md's END marker), then re-run the sync.
 - Label cleanup is automatic: the baseline stops declaring the dropped module's labels and the next apply deletes them from the repo. If you kept the module's starter workflow running, declare its tracking label in the repo's own `.github/settings.yml` first, or the apply strips the label off the open tracking issue.
 
-A module the TEMPLATE retired (rather than you deselecting it) is handled automatically: the sync drops it from the selection with a notice and the same cleanup rules apply.
+A module the TEMPLATE retired or folded into its base (`agents`, `auto-assign`, and `settings-sync` became base content every render carries) is handled by a migration rung: the sync rewrites `.repo-platform.yml` to drop the name before selecting modules and says so in the PR body (repo-platform's docs/migrations.md); a hand edit is only needed when the rung's note asks for one.
 
 ## Verify
 

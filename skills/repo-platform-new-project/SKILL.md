@@ -74,7 +74,7 @@ The template's `.gitignore` is generated and managed: after the copy, move any s
 
 Full walkthrough in [references/questions.md](references/questions.md). The load-bearing answers:
 
-- `modules`: a multiselect (space toggles, enter confirms), any combination. Modules with parameters ask follow-up questions only when selected (pages, docs-site, fuzzer, nightly, skills, settings-sync). The authoritative roster is the interactive prompt itself (repo-platform's `copier.yml`).
+- `modules`: a multiselect (space toggles, enter confirms), any combination. Modules with parameters ask follow-up questions only when selected (pages, docs-site, fuzzer, nightly, skills); `homepage` and `topics` (the settings starter's identity keys) are asked of every repository. The authoritative roster is the interactive prompt itself (repo-platform's `copier.yml`).
 - `private`: gates the render - public repos get CodeQL and dependency-review jobs plus CONTRIBUTING.md; private ones do not. It must match the visibility you create the repo with in step 6.
 
 Two files record the outcome:
@@ -104,7 +104,7 @@ The module deploys `docs/` markdown as a versioned VitePress site; the repo carr
 - Create `docs/README.md` (the site's landing page) before the first deploy - the deploy refuses an absent docs tree. Each directory's `README.md` is its index; the sidebar mirrors the file tree.
 - Keep links inside `docs/` or absolute: a `../README.md`-style link works on GitHub but is dead on the site, and dead links fail the build (the module's PR check names the broken link before merge).
 - Translations, when wanted, go in `docs/<lang>/` (e.g. `zh-cn/`) mirroring the root structure - detected automatically, no config.
-- The first deploy needs Pages enabled: automatic with settings-sync (the module's settings layer enables it); otherwise Settings -> Pages -> Source: GitHub Actions (in Owner actions below).
+- The first deploy needs Pages enabled: the module's settings layer enables it on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions (in Owner actions below).
 
 Onboarding an EXISTING repository that already has a `docs/` tree differs in two ways: enable the module through the `repo-platform-add-module` skill when the repo is already managed (edit `.repo-platform.yml`; an unmanaged repo selects `docs-site` during this skill's copier adoption instead), and expect a link-fixing pass - existing docs usually carry out-of-tree relative links, and the first PR touching `docs/` will name every one. A repo that self-managed VitePress before must also delete its `docs/.vitepress/` - the build refuses it, because a repo-local theme could never apply (the theme is central by design).
 
@@ -127,11 +127,11 @@ Then one grant: give the fleet `REPO_PLATFORM_TOKEN` PAT access to the new repos
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-### 7. Settings management (the settings-sync module)
+### 7. Settings management
 
-Repository settings (fields, topics, labels, rulesets) are applied FROM repo-platform, and selecting the `settings-sync` module in `.repo-platform.yml` is the whole opt-in. Do this before relying on CI gating: the branch protection that makes `all-green` a REQUIRED check is the managed baseline's `main` ruleset, applied by the nightly heal (or immediately via `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project`).
+Repository settings (fields, topics, labels, rulesets) are applied FROM repo-platform for every managed repository - a `.repo-platform.yml` on the default branch is the opt-in; there is nothing to select. Apply them before relying on CI gating: the branch protection that makes `all-green` a REQUIRED check is the managed baseline's `main` ruleset, applied by the nightly heal (or immediately via `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project`).
 
-The fleet and module settings layers (shared defaults, every label the module selection requires, the fleet rulesets) are merged per repository at apply time; the repo's own `.github/settings.yml` - a generated-once identity starter carrying description, homepage, topics, private, plus local overrides - merges over them, and the fleet override layer merges over that. Nothing to hand-maintain: the labels each module needs come from that module's own `templates/<module>/settings.yml` layer automatically. For a dry run: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`. The module also renders a push-time self-apply workflow (needs a repo-scoped PAT and skips with a warning without one).
+The fleet and module settings layers (shared defaults, every label the module selection requires, the fleet rulesets) are merged per repository at apply time; the repo's own `.github/settings.yml` - a generated-once identity starter carrying description, homepage, topics, private, plus local overrides - merges over them, and the fleet override layer merges over that. Nothing to hand-maintain: the labels each module needs come from that module's own `templates/<module>/settings.yml` layer automatically. For a dry run: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`. Every render also carries `settings-sync.yml`, a push-time self-apply workflow (needs a repo-scoped PAT and skips with a warning without one).
 
 ### 8. What runs on PRs
 
@@ -144,9 +144,9 @@ On private repositories the five base checks run as one combined `base-checks` j
 Collect these for the human with admin rights:
 
 - Grant the fleet PAT access to the new repo: the `REPO_PLATFORM_TOKEN` fine-grained PAT's repository access list at https://github.com/settings/personal-access-tokens - this is the enrollment step; nothing syncs without it.
-- pages or docs-site module (skip with settings-sync selected - the modules' settings layers enable Pages automatically): Settings -> Pages -> Source: GitHub Actions.
+- pages or docs-site module: the modules' settings layers enable Pages on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
 - bun module: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` (prompts for the token value on stdin - the human runs it, or pass `--body "$TOKEN"` non-interactively). Without it the fix lands but each fixed PR needs a close/reopen for checks to appear.
-- settings-sync module self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it self-apply skips and the central heal still covers the repo.
+- settings self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it the rendered `settings-sync.yml` skips and the central heal still covers the repo.
 
 ## Private repositories
 

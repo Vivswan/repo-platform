@@ -344,14 +344,14 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
+            modules: "[bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, fuzzer, nightly, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,node,deno,uv
               bun install --frozen-lockfile
               bun run build
           - name: bun-typical
-            modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
+            modules: "[bun, release-please, issue-templates, pr-title]"
             private: "false"
           # node and deno each as the sole toolchain: codeql-javascript and
           # the javascript/deno labels must render from the module alone,
@@ -359,13 +359,13 @@ jobs:
           # with a non-default skills_dir, so the module's dir answer is
           # exercised end-to-end (the everything row covers the default).
           - name: node-typical
-            modules: "[agents, node, skills, settings-sync]"
+            modules: "[node, skills]"
             private: "false"
             extra_data: "-d skills_dir=lib/skills"
           # pages rides along as the only real render of a non-bun pages
           # chain end-to-end (the everything row's chain heads with bun).
           - name: deno-typical
-            modules: "[agents, deno, pages, settings-sync]"
+            modules: "[deno, pages]"
             private: "false"
             expect_in_pages: |
               setup: deno
@@ -377,7 +377,7 @@ jobs:
           # Node.gitignore guard's bun+node leg (one section, the node copy
           # suppressed).
           - name: bun-node
-            modules: "[agents, bun, node, settings-sync]"
+            modules: "[bun, node]"
             private: "false"
           # deno co-selected with each earlier Node.gitignore declarer:
           # deno's two-operand suppression guard must render the shared
@@ -393,34 +393,32 @@ jobs:
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,
           # and AGENTS.md's Toolchain section must render the uv bullet
-          # alone (every other agents+uv row pairs uv with bun). nightly
+          # alone (every other uv row pairs uv with bun). nightly
           # rides along as the only fuzzer-free nightly render: stream
           # independence means the fuzz starter must not render here, and
           # with release-please the release-health call sites must pass
           # exactly the nightly label (the single-stream nightly-only leg;
           # rust-fuzzer covers the fuzzer-only mirror).
           - name: uv-typical
-            modules: "[agents, uv, nightly, release-please]"
+            modules: "[uv, nightly, release-please]"
             private: "false"
           # rust + fuzzer must render cargo dependabot + the Rust gitignore and
           # nothing toolchain-gated (no CodeQL block, no auto-format starter):
           # rust is deliberately outside has_toolchain, and the fuzzer module
-          # adds nothing toolchain-gated. agents rides along so the AGENTS.md
-          # Toolchain section is exercised with rust as the only toolchain
-          # module; without auto-assign, the fuzzer starter must render no
-          # auto-assign dispatch (the everything row covers the with branch).
+          # adds nothing toolchain-gated, so the AGENTS.md Toolchain section
+          # is exercised with rust as the only toolchain module.
           # Deliberately nightly-free: the fuzzer-present/nightly-absent leg
           # (no nightly.yml renders) - uv-typical covers the mirror leg and
           # the everything row the co-selection. release-please rides along
           # so the release-health call sites pass exactly the fuzz label
           # (the single-stream fuzzer-only leg).
           - name: rust-fuzzer
-            modules: "[agents, rust, fuzzer, release-please]"
+            modules: "[rust, fuzzer, release-please]"
             private: "false"
           - name: uv-pages-private
-            # settings-sync rides along so the private: true render of
-            # settings.yml is exercised for uv (bun-private covers bun).
-            modules: "[uv, pages, auto-assign, settings-sync]"
+            # The private: true render of the settings.yml starter is
+            # exercised for uv (bun-private covers bun).
+            modules: "[uv, pages]"
             private: "true"
             expect_in_pages: |
               uv sync
@@ -431,10 +429,10 @@ jobs:
           # (uv-pages-private covers the uv side), and pr-title proves the
           # module's own required workflow renders on a private row too.
           - name: bun-private
-            modules: "[bun, settings-sync, pr-title]"
+            modules: "[bun, pr-title]"
             private: "true"
           - name: pages-bare
-            modules: "[pages, auto-assign]"
+            modules: "[pages]"
             private: "false"
             extra_data: "-d pages_setup=none -d pages_build_command=./build.sh"
             expect_in_pages: |
@@ -443,11 +441,11 @@ jobs:
           # docs-site alone: docs-site.yml carries the PR check job AND the
           # deploy (no pages module to ride); the composed shape - pages.yml
           # carrying the docs mount while docs-site.yml renders down to the
-          # check job - is the everything row's leg. settings-sync rides
-          # along so the module's OWN Pages-enablement layer is asserted
-          # without the pages module's identical layer masking it.
+          # check job - is the everything row's leg; the module's OWN
+          # Pages-enablement layer is asserted without the pages module's
+          # identical layer masking it.
           - name: docs-only
-            modules: "[docs-site, settings-sync]"
+            modules: "[docs-site]"
             private: "false"
           # Proves the declared _min_copier_version still supports the
           # multiselect + when features the template uses (serialized
@@ -465,7 +463,7 @@ jobs:
           # description stays the harness default - EXTRA_DATA cannot carry
           # whitespace and no generated pair renders it.
           - name: dogfood-oracle
-            modules: "[agents, bun, skills, pr-title, auto-assign, docs-site]"
+            modules: "[bun, skills, pr-title, docs-site]"
             private: "false"
             extra_data: "-d project_name=repo-platform"
     steps:

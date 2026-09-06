@@ -2,9 +2,8 @@
 // Discovers the settings targets and builds the per-repo apply matrix
 // for settings-repos.yml. A target is an enrolled repo (the fleet token
 // can push - probed, since user/repos' permissions field reflects the
-// USER, not the token) that is adopted AND selects the settings-sync
-// module in its .repo-platform.yml - the module selection is the opt-in
-// to centrally managed settings. The operator repository itself is always
+// USER, not the token) that is adopted - a readable .repo-platform.yml is
+// the opt-in to centrally managed settings. The operator repository itself is always
 // a target (build_settings_matrix.ts's --self row; its baseline facts
 // come from .repo-platform-answers.yml).
 //
@@ -35,7 +34,7 @@ import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
-import { selectsSettingsSync } from "./build_settings_matrix.ts";
+import { declaredModules } from "./build_settings_matrix.ts";
 import {
   captureNetwork,
   discoverOwnerRepos,
@@ -102,12 +101,11 @@ function probePush(slug: string, display: string): ProbeResult {
   return { detail: `HTTP ${String(code).padStart(3, "0")}` };
 }
 
-// The opt-in probe: the repo's .repo-platform.yml must exist (adopted) and
-// select the settings-sync module. Only a 404 means "not adopted"; any
-// other API failure is a non-answer. A repo without the module is a
-// routine, deliberate skip (notice level); an unreadable modules list is a
-// repo defect worth a warning - its settings stay unmanaged until fixed.
-function probeOptIn(slug: string, display: string): ProbeResult {
+// The adoption probe: the repo's .repo-platform.yml must exist and carry a
+// readable modules list. Only a 404 means "not adopted"; any other API
+// failure is a non-answer. An unreadable modules list is a repo defect
+// worth a warning - its settings stay unmanaged until fixed.
+function probeAdoption(slug: string, display: string): ProbeResult {
   const probe = captureNetwork([
     "gh",
     "api",
@@ -116,19 +114,10 @@ function probeOptIn(slug: string, display: string): ProbeResult {
     "Accept: application/vnd.github.raw",
   ]);
   if (probe.exitCode === 0) {
-    const optedIn = selectsSettingsSync(probe.stdout);
-    if (optedIn === true) return "pass";
-    if (optedIn === false) {
-      notice(
-        `${display}: skipped - its .repo-platform.yml does not select the settings-sync ` +
-          "module, the opt-in to centrally managed settings (docs/settings.md). Nothing " +
-          "installs or heals its rulesets or labels.",
-      );
-      return "drop";
-    }
+    if (declaredModules(probe.stdout) !== null) return "pass";
     warn(
-      `${display}: its .repo-platform.yml has no readable top-level modules list, so the ` +
-        "settings opt-in cannot be determined - the repo is skipped and its settings stay " +
+      `${display}: its .repo-platform.yml has no readable top-level modules list, so its ` +
+        "settings baseline cannot be computed - the repo is skipped and its settings stay " +
         "unmanaged until the file is fixed.",
     );
     return "drop";
@@ -218,8 +207,8 @@ const enriched = parseEnriched(
 // would silently narrow the scope, and a typo would heal nothing while
 // looking green. Counts only: an operator-typed entry may be a private
 // slug and this print is publicly readable. A known repo the probes
-// then DROP (not enrolled, not adopted, module not selected) is a
-// routine notice, so a called scope may legitimately select nothing.
+// then DROP (not enrolled, not adopted) is a routine notice, so a called
+// scope may legitimately select nothing.
 if (scope !== null) {
   const known = new Set([
     ...enriched.rows.map((row) => row.repo.toLowerCase()),
@@ -242,10 +231,10 @@ for (const row of enriched.rows) {
   if (scope !== null && !scope.includes(row.repo.toLowerCase())) continue;
   const { repo, display } = row;
   // The operator repo rides in as the matrix builder's --self row (it is
-  // not adopted, so the opt-in probe would drop it here).
+  // not adopted, so the adoption probe would drop it here).
   if (repo.toLowerCase() === selfRepo.toLowerCase()) continue;
   if (!(await probe("push-permission probe", probePush, repo, display))) continue;
-  if (!(await probe("settings opt-in check", probeOptIn, repo, display))) continue;
+  if (!(await probe("settings adoption check", probeAdoption, repo, display))) continue;
   targets.push(row);
 }
 writeFileSync(join(runnerTemp, "settings_targets.json"), JSON.stringify(targets));
@@ -277,14 +266,12 @@ for (const repo of sweepable) {
     "Accept: application/vnd.github.raw",
   ]);
   if (probeResult.exitCode === 0) {
-    if (selectsSettingsSync(probeResult.stdout) === true) {
-      warn(
-        `${repo} is excluded in repos.yml but its .repo-platform.yml still selects the ` +
-          "settings-sync module - the exclusion also pauses the central nightly settings " +
-          "heal, so its settings can drift. If the pause is deliberate, this is the " +
-          "reminder that healing is off; otherwise remove the exclusion.",
-      );
-    }
+    warn(
+      `${repo} is excluded in repos.yml but still carries a .repo-platform.yml - the ` +
+        "exclusion also pauses the central nightly settings heal, so its settings can " +
+        "drift. If the pause is deliberate, this is the reminder that healing is off; " +
+        "otherwise remove the exclusion.",
+    );
   } else if (!/HTTP 404/.test(probeResult.stderr)) {
     // A 404 also covers repos the token cannot read; those skip
     // silently. Anything else: this check is purely informational, so
@@ -301,7 +288,7 @@ for (const repo of sweepable) {
       detail = `${code ?? "no status"} (detail hidden: private repository)`;
     }
     console.log(
-      `::warning::settings opt-in check for excluded repo ${repo} failed: ${detail} - cannot tell whether its pause left managed settings behind; continuing.`,
+      `::warning::settings adoption check for excluded repo ${repo} failed: ${detail} - cannot tell whether its pause left managed settings behind; continuing.`,
     );
   }
 }

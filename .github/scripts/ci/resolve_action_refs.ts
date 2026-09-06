@@ -67,7 +67,7 @@ function* walk(dir: string): Generator<string> {
     if (name === "node_modules") continue;
     const path = join(dir, name);
     // lstat: a dangling symlink (bun leaves them in node_modules/.bin,
-    // and templates/agents/ ships symlinks on purpose) must not throw.
+    // and templates/base/ ships the agent-file symlinks on purpose) must not throw.
     const entry = lstatSync(path);
     if (entry.isDirectory()) yield* walk(path);
     else if (entry.isFile() && /\.(ya?ml|jinja)$/.test(name)) yield path;

@@ -34,27 +34,17 @@ const answers: Answers = {
   github_username: "Vivswan",
   copyright_holder: "Vivswan Shah",
   private: false,
-  modules: new Set([
-    "agents",
-    "bun",
-    "release-please",
-    "skills",
-    "pr-title",
-    "auto-assign",
-    "docs-site",
-  ]),
+  modules: new Set(["bun", "release-please", "skills", "pr-title", "docs-site"]),
   skills_dir: "skills",
   docs_site_label: "docs-link-rot",
 };
 
 const manifests: ModuleManifest[] = [
-  { module: "agents", description: "a" },
   { module: "bun", description: "b", toolchain: { codeql_language: "javascript-typescript" } },
   { module: "uv", description: "u", toolchain: { codeql_language: "python" } },
   { module: "release-please", description: "r" },
   { module: "skills", description: "s" },
   { module: "pr-title", description: "p" },
-  { module: "auto-assign", description: "aa" },
   { module: "docs-site", description: "ds" },
 ];
 
@@ -112,7 +102,7 @@ describe("copier-computed context", () => {
     expect(hasToolchain(answers, manifests)).toBe(true);
     expect(enableCodeql(answers, manifests)).toBe(true);
     expect(enableCodeql({ ...answers, private: true }, manifests)).toBe(false);
-    const noToolchain = { ...answers, modules: new Set(["agents", "release-please"]) };
+    const noToolchain = { ...answers, modules: new Set(["release-please"]) };
     expect(hasToolchain(noToolchain, manifests)).toBe(false);
     expect(enableCodeql(noToolchain, manifests)).toBe(false);
   });
@@ -122,8 +112,6 @@ describe("copier-computed context", () => {
       private: false,
       has_toolchain: true,
       enable_codeql: true,
-      "'agents' in modules": true,
-      "'agents' not in modules": false,
       "'bun' in modules": true,
       "'bun' not in modules": false,
       "'uv' in modules": false,
@@ -134,8 +122,6 @@ describe("copier-computed context", () => {
       "'skills' not in modules": false,
       "'pr-title' in modules": true,
       "'pr-title' not in modules": false,
-      "'auto-assign' in modules": true,
-      "'auto-assign' not in modules": false,
       "'docs-site' in modules": true,
       "'docs-site' not in modules": false,
     });

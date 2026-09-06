@@ -9,7 +9,9 @@ The authoritative source is repo-platform's `copier.yml` (the interactive prompt
 | `project_name` | Human-readable project name | - |
 | `project_slug` | Repository / package identifier (kebab-case) | derived from the name |
 | `description` | One-line repository description (used in settings.yml) | - |
-| `modules` | Multiselect, any combination (space toggles, enter confirms) | `agents, release-please, issue-templates, pr-title, auto-assign` |
+| `modules` | Multiselect, any combination (space toggles, enter confirms) | `release-please, issue-templates, pr-title` |
+| `homepage` | Homepage URL, seeded into the `.github/settings.yml` identity starter | empty |
+| `topics` | Comma-separated GitHub topics, seeded into the same starter | empty |
 | `private` | Repository visibility; gates CodeQL, dependency-review, CONTRIBUTING.md | `false` |
 | `github_username` | Owner of the repository | `Vivswan` |
 | `copyright_holder` | Licensor named in the fleet license's Required Notice (skipped with the custom-license module) | `Vivswan Shah (https://github.com/Vivswan)` |
@@ -18,7 +20,6 @@ The authoritative source is repo-platform's `copier.yml` (the interactive prompt
 
 One line each, generated from the module manifests:<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- `agents`: AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
 - `node`: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
 - `deno`: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
@@ -30,24 +31,15 @@ One line each, generated from the module manifests:<!-- BEGIN GENERATED: module-
 - `issue-templates`: bug/feature issue forms
 - `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check, its own required workflow
-- `auto-assign`: auto-assign issues/PRs/alerts to owner
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
 - `nightly`: nightly CI starter with failure issue filing and auto-close
-- `settings-sync`: centrally managed repo settings + repo-owned settings.yml starter
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered<!-- END GENERATED: module-roster -->
 
-`settings-sync` is deliberately not a default: selecting it is the opt-in to centrally managed settings (the assembled baseline plus the repo's own settings.yml - docs/settings.md).
+Every render also carries the base content no module gates: `AGENTS.md` with its agent-file symlinks, the Copilot review instructions and `copilot-setup-steps.yml` starter, `auto-assign.yml`, and the settings pair (`.github/settings.yml` starter plus `settings-sync.yml`). Repository settings are managed for every managed repository (docs/settings.md).
 
 ## Per-module follow-up questions
 
 Asked only when the module is selected.
-
-### settings-sync
-
-| Question | Meaning | Default |
-|---|---|---|
-| `homepage` | Homepage URL for settings.yml | empty |
-| `topics` | Comma-separated GitHub topics for settings.yml | empty |
 
 ### pages
 
@@ -58,7 +50,7 @@ Asked only when the module is selected.
 | `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION` are exported | per toolchain, e.g. `bun run build` |
 | `pages_dist_dir` | Build output directory (plain relative path) | `dist` |
 
-The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (a redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions - automatic when settings-sync is selected (the module's settings layer enables Pages).
+The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (a redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). Pages is enabled by the module's settings layer on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
 
 ### docs-site
 
@@ -106,4 +98,4 @@ Settings applies delete undeclared labels, but the merged settings layers declar
 | docs-site | the `docs_site_label` answer (default `docs-link-rot`, `D4A72C`) |
 | private repos declaring labels | `settings-as-code-report` (`0e2a47`) |
 
-Exact descriptions live in repo-platform's `templates/settings-sync/.github/settings.yml.jinja`.
+Exact descriptions live in repo-platform's `templates/base/.github/settings.yml.jinja`.

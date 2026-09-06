@@ -68,7 +68,6 @@ if (
 // dependabot ecosystem order). A templates/ folder not listed here is an
 // error, and so is an entry here without a templates/ folder.
 export const MODULE_ORDER = [
-  "agents",
   "bun",
   "node",
   "deno",
@@ -80,10 +79,8 @@ export const MODULE_ORDER = [
   "issue-templates",
   "skills",
   "pr-title",
-  "auto-assign",
   "fuzzer",
   "nightly",
-  "settings-sync",
   "custom-license",
 ];
 

@@ -1,4 +1,4 @@
-# Reusable settings apply for settings-sync module repos: a thin caller
+# Reusable settings apply for managed repos: the rendered settings-sync.yml
 # runs this on pushes touching its .github/settings.yml. The apply is the
 # SAME two-layer merge the central settings-repos run computes - a partial
 # repo document alone would delete every baseline label (the action's
@@ -169,10 +169,10 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --target-dir . \
             --out "$RUNNER_TEMP/managed-settings.yml"
 
-      # Its own step so a repository that has DROPPED settings-sync ends
-      # in a clean warned skip: the render writes no baseline and reports
-      # skipped, and merging a file that was never written would turn a
-      # deliberate opt-out into a red workflow. The token gate is not
+      # Its own step so a repository whose render skipped ends in a clean
+      # warned skip rather than a red workflow: the render writes no
+      # baseline and reports skipped, and merging a file that was never
+      # written would fail here. The token gate is not
       # repeated here - without it the render never ran, so its output is
       # empty and this condition is already false.
       - name: Merge this repository's settings.yml over them
@@ -187,8 +187,8 @@ jobs:
             --out "$RUNNER_TEMP/merged-settings.yml"
 
       # This checkout is a snapshot of the default branch, and the branch
-      # keeps moving while the merge runs: a push that drops settings-sync
-      # or rewrites settings.yml lands after the facts were read, and the
+      # keeps moving while the merge runs: a push that rewrites
+      # settings.yml lands after the facts were read, and the
       # apply would reconcile - and delete - labels from the stale
       # document. GITHUB_TOKEN's contents: read is enough to re-resolve
       # the head. Same narrowing as the central run, same gate.

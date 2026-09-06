@@ -11,8 +11,8 @@ Everything between the BEGIN and END markers is managed by {{ github_username }}
 {# compose:agents-toolchain #}
 ## Conventions
 
-- PR titles and commit subjects are Conventional Commits{% if 'release-please' in modules %}; they drive release-please versioning{% endif %}.{% if 'settings-sync' in modules %} PRs are squash-merged, so the PR title becomes the commit subject.{% endif %}{% if 'pr-title' in modules %} The `pr-title` check validates the title.{% endif %}
-- CI gates on the `all-green` check{% if 'settings-sync' in modules %}, required by the managed ruleset{% endif %}. Under `.github/workflows/`, this repository's test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.
+- PR titles and commit subjects are Conventional Commits{% if 'release-please' in modules %}; they drive release-please versioning{% endif %}. PRs are squash-merged, so the PR title becomes the commit subject.{% if 'pr-title' in modules %} The `pr-title` check validates the title.{% endif %}
+- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository's test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.
 {%- if 'release-please' in modules %}
 - A green push to main releases through the managed `release.yml`; this repository's release steps go in the repo-owned `update-release.yml` and `update-release-pr.yml` hooks.
 {%- endif %}
@@ -21,9 +21,7 @@ Everything between the BEGIN and END markers is managed by {{ github_username }}
 ## Managed by repo-platform
 
 - Files whose header says "managed by {{ github_username }}/repo-platform" arrive via sync PRs from that repository. Do not edit them here; change them there.
-{%- if 'settings-sync' in modules %}
 - Repository settings are applied from {{ github_username }}/repo-platform's layers plus this repository's own `.github/settings.yml`. Edit that file, never the GitHub UI; the merge rules are in repo-platform's docs/settings.md.
-{%- endif %}
 - Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region, `.typography-allow.local`{% if 'release-please' in modules %}, the release hooks and the release-please JSON files{% endif %}{% if 'skills' in modules %}, the `.claude-plugin/` manifests{% endif %}.
 - Module selection is the `modules` list in `.repo-platform.yml`; the next sync PR applies a change. The per-module contracts are in repo-platform's docs/new-repo.md.
 - Fleet-wide conventions: repo-platform's docs/fleet-guidelines.md.

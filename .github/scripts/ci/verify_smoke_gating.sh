@@ -65,7 +65,7 @@ present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
 # JSON is rebuilt in MODULE_ORDER (a new module must join this list or the
 # everything row's exact-line assert fails loudly).
 ordered=""
-for m in agents bun node deno uv rust pages docs-site release-please issue-templates skills pr-title auto-assign fuzzer nightly settings-sync custom-license; do
+for m in bun node deno uv rust pages docs-site release-please issue-templates skills pr-title fuzzer nightly custom-license; do
   if has "$m"; then ordered="${ordered:+$ordered, }\"$m\""; fi
 done
 present_line "      modules: '[$ordered]'" "$wf/ci.yml"
@@ -125,7 +125,8 @@ else
   test ! -e "$wf/pr-title.yml"
   absent '"pr-title"' "$wf/ci.yml"
 fi
-if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
+# auto-assign.yml is base content: every render carries it.
+test -f "$wf/auto-assign.yml"
 
 # Single-call CI re-homed the gate jobs into the operator's fleet-ci.yml,
 # so the render no longer shows their bodies; the thin-caller shapes are
@@ -209,22 +210,17 @@ fi
 
 
 # fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
-# both modes and the dispatch replay inputs; the auto-assign dispatch step
-# follows that module (rendered workflows pin composite actions @build,
-# like check-typography below - that ref is the green-gated build branch).
+# both modes and the dispatch replay inputs, plus the auto-assign dispatch
+# step (auto-assign.yml is base content; rendered workflows pin composite
+# actions @build - that ref is the green-gated build branch).
 if has fuzzer; then
   test -f "$wf/nightly-fuzz.yml"
   present "actions/fuzz-issue@build" "$wf/nightly-fuzz.yml"
   present "mode: report" "$wf/nightly-fuzz.yml"
   present "mode: resolve" "$wf/nightly-fuzz.yml"
   present "workflow_dispatch:" "$wf/nightly-fuzz.yml"
-  if has auto-assign; then
-    present "auto-assign.yml" "$wf/nightly-fuzz.yml"
-    present "actions: write" "$wf/nightly-fuzz.yml"
-  else
-    absent "auto-assign.yml" "$wf/nightly-fuzz.yml"
-    absent "actions: write" "$wf/nightly-fuzz.yml"
-  fi
+  present "auto-assign.yml" "$wf/nightly-fuzz.yml"
+  present "actions: write" "$wf/nightly-fuzz.yml"
 else
   test ! -e "$wf/nightly-fuzz.yml"
 fi
@@ -232,8 +228,8 @@ fi
 # nightly: the repo-owned plain-CI starter with the fuzz-issue action in
 # both modes but NO artifacts contract (the action files the generic
 # nightly-failure report). The report job must treat a cancelled checks
-# job (a timeout) as red, and the auto-assign dispatch step follows that
-# module, like the fuzzer starter's. Exact-line matches so the header
+# job (a timeout) as red and carry the auto-assign dispatch step, like
+# the fuzzer starter's. Exact-line matches so the header
 # comments (or a commented-out step) cannot satisfy them. The fuzzer
 # else-leg above already proves stream independence the other way: a
 # fuzzer-free nightly row must render no nightly-fuzz.yml.
@@ -246,13 +242,8 @@ if has nightly; then
   present_line "  workflow_dispatch:" "$wf/nightly.yml"
   present "needs.checks.result == 'cancelled'" "$wf/nightly.yml"
   absent "artifacts-dir" "$wf/nightly.yml"
-  if has auto-assign; then
-    present "auto-assign.yml" "$wf/nightly.yml"
-    present_line "      actions: write" "$wf/nightly.yml"
-  else
-    absent "auto-assign.yml" "$wf/nightly.yml"
-    absent "actions: write" "$wf/nightly.yml"
-  fi
+  present "auto-assign.yml" "$wf/nightly.yml"
+  present_line "      actions: write" "$wf/nightly.yml"
 else
   test ! -e "$wf/nightly.yml"
 fi
@@ -293,64 +284,59 @@ else
   absent '"skills"' "$wf/ci.yml"
 fi
 
-if has settings-sync; then
-  test -f "$SMOKE/.github/settings.yml"
-  test -f "$wf/settings-sync.yml"
-  present "reusable-apply-settings.yml@build" "$wf/settings-sync.yml"
-  # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
-  # identity keys and nothing else. description is the constant
-  # smoke_generate.ts passes; visibility is declared even when public. The
-  # whole-line matches keep the explanatory comments above the keys from
-  # satisfying the checks.
-  present_line '  description: "Smoke-test project"' "$SMOKE/.github/settings.yml"
-  present_line "  private: $PRIVATE" "$SMOKE/.github/settings.yml"
-  # homepage and topics are declared even when empty (declare-and-clear);
-  # no row passes either answer, so every row must render the empty form.
-  # A re-gated key would vanish and its drift would go unmanaged again.
-  present_line '  homepage: ""' "$SMOKE/.github/settings.yml"
-  present_line '  topics: ""' "$SMOKE/.github/settings.yml"
-  # The managed baseline (labels, rulesets, security_and_analysis) is
-  # assembled centrally at apply time and merged UNDER this file - none of
-  # it may render into the starter again (a rendered copy would shadow
-  # baseline evolution forever), and the retired mergeable marker must
-  # never come back: the starter is repo-owned and the baseline is merged
-  # under it, so nothing may class the file as a merge target again.
-  absent "type: code_scanning" "$SMOKE/.github/settings.yml"
-  absent "security_and_analysis:" "$SMOKE/.github/settings.yml"
-  absent_line "labels:" "$SMOKE/.github/settings.yml"
-  absent_line "rulesets:" "$SMOKE/.github/settings.yml"
-  absent "repo-platform:mergeable" "$SMOKE/.github/settings.yml"
-else
-  test ! -e "$SMOKE/.github/settings.yml"
-  test ! -e "$wf/settings-sync.yml"
-fi
+# The settings pair is base content: every render carries the identity
+# starter and the self-apply caller.
+test -f "$SMOKE/.github/settings.yml"
+test -f "$wf/settings-sync.yml"
+present "reusable-apply-settings.yml@build" "$wf/settings-sync.yml"
+# The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
+# identity keys and nothing else. description is the constant
+# smoke_generate.ts passes; visibility is declared even when public. The
+# whole-line matches keep the explanatory comments above the keys from
+# satisfying the checks.
+present_line '  description: "Smoke-test project"' "$SMOKE/.github/settings.yml"
+present_line "  private: $PRIVATE" "$SMOKE/.github/settings.yml"
+# homepage and topics are declared even when empty (declare-and-clear);
+# no row passes either answer, so every row must render the empty form.
+# A re-gated key would vanish and its drift would go unmanaged again.
+present_line '  homepage: ""' "$SMOKE/.github/settings.yml"
+present_line '  topics: ""' "$SMOKE/.github/settings.yml"
+# The managed baseline (labels, rulesets, security_and_analysis) is
+# assembled centrally at apply time and merged UNDER this file - none of
+# it may render into the starter again (a rendered copy would shadow
+# baseline evolution forever), and the retired mergeable marker must
+# never come back: the starter is repo-owned and the baseline is merged
+# under it, so nothing may class the file as a merge target again.
+absent "type: code_scanning" "$SMOKE/.github/settings.yml"
+absent "security_and_analysis:" "$SMOKE/.github/settings.yml"
+absent_line "labels:" "$SMOKE/.github/settings.yml"
+absent_line "rulesets:" "$SMOKE/.github/settings.yml"
+absent "repo-platform:mergeable" "$SMOKE/.github/settings.yml"
 
 # auto-assign: the issues/PR call grants only issues/PR scopes;
 # security-events rides the separate alerts call, which - with its
 # CodeQL-driven triggers - follows enable_codeql (= public AND a toolchain
 # module) and is absent otherwise. The workflow level grants nothing, so a
 # scope moving back up there fails here.
-if has auto-assign; then
-  absent "code_scanning:" "$wf/auto-assign.yml"
-  present "reusable-auto-assign.yml" "$wf/auto-assign.yml"
-  present_line "permissions: {}" "$wf/auto-assign.yml"
-  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
-    present "workflow_run:" "$wf/auto-assign.yml"
-    # Alert assignment watches CI completions (the CodeQL jobs run inside
-    # CI's gate; a reusable-workflow call creates no separate run to watch).
-    present 'workflows: ["CI"]' "$wf/auto-assign.yml"
-    present "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
-    # Exactly once: only the alerts caller job may carry the scope.
-    if [ "$(grep -cF -- "security-events: write" "$wf/auto-assign.yml")" != "1" ]; then
-      echo "::error::gating check failed: 'security-events: write' must appear exactly once (on the alerts caller job) in $wf/auto-assign.yml for"\
-        "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
-      exit 1
-    fi
-  else
-    absent "workflow_run:" "$wf/auto-assign.yml"
-    absent "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
-    absent "security-events: write" "$wf/auto-assign.yml"
+absent "code_scanning:" "$wf/auto-assign.yml"
+present "reusable-auto-assign.yml" "$wf/auto-assign.yml"
+present_line "permissions: {}" "$wf/auto-assign.yml"
+if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
+  present "workflow_run:" "$wf/auto-assign.yml"
+  # Alert assignment watches CI completions (the CodeQL jobs run inside
+  # CI's gate; a reusable-workflow call creates no separate run to watch).
+  present 'workflows: ["CI"]' "$wf/auto-assign.yml"
+  present "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
+  # Exactly once: only the alerts caller job may carry the scope.
+  if [ "$(grep -cF -- "security-events: write" "$wf/auto-assign.yml")" != "1" ]; then
+    echo "::error::gating check failed: 'security-events: write' must appear exactly once (on the alerts caller job) in $wf/auto-assign.yml for"\
+      "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
+    exit 1
   fi
+else
+  absent "workflow_run:" "$wf/auto-assign.yml"
+  absent "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
+  absent "security-events: write" "$wf/auto-assign.yml"
 fi
 
 # CodeQL: public AND at least one analyzable toolchain. The analysis jobs
@@ -421,61 +407,43 @@ if has uv; then present 'package-ecosystem: "uv"' "$SMOKE/.github/dependabot.yml
 if has rust; then present 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; fi
 if has_any_toolchain; then present 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; else absent 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; fi
 
-# agents module: AGENTS.md plus the three agent-file symlinks. The
-# rows without it also prove conditional filenames work on symlinks.
-if has agents; then
-  test -f "$SMOKE/AGENTS.md"
-  test -L "$SMOKE/CLAUDE.md"
-  test "$(readlink "$SMOKE/CLAUDE.md")" = "AGENTS.md"
-  test -L "$SMOKE/.github/copilot-instructions.md"
-  test -L "$SMOKE/.github/agents.md"
-  # AGENTS.md toolchain section only when a toolchain module is selected,
-  # with exactly the selected toolchains' bullets inside it.
-  if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absent "## Toolchain" "$SMOKE/AGENTS.md"; fi
-  # The pinned-toolchain modules also emit their dotfile line (the dotfile
-  # itself carries no header, so this is the only place an agent learns
-  # it is managed); asserted exactly, like the command bullet.
-  pinned_by_sync() { printf -- '- `%s` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$1"; }
-  if has bun; then
-    present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
-    present_line "$(pinned_by_sync .bun-version)" "$SMOKE/AGENTS.md"
-  else absent '`bun install`' "$SMOKE/AGENTS.md"; absent '.bun-version' "$SMOKE/AGENTS.md"; fi
-  if has node; then
-    present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
-    present_line "$(pinned_by_sync .node-version)" "$SMOKE/AGENTS.md"
-  else absent '`npm install`' "$SMOKE/AGENTS.md"; absent '.node-version' "$SMOKE/AGENTS.md"; fi
-  if has deno; then
-    present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"
-    present_line "$(pinned_by_sync .dvmrc)" "$SMOKE/AGENTS.md"
-  else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
-  if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
-  if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
-  # Merge policy and the ruleset requiring all-green are managed only with
-  # settings-sync; without it the file must not claim them, and the
-  # settings bullet (edit .github/settings.yml, never the UI) is absent.
-  if has settings-sync; then
-    present "PRs are squash-merged, so the PR title becomes the commit subject." "$SMOKE/AGENTS.md"
-    gate_line='- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository'"'"'s test and '
-    gate_line+='lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.'
-    present_line "$gate_line" "$SMOKE/AGENTS.md"
-    settings_line='- Repository settings are applied from Vivswan/repo-platform'"'"'s layers plus this repository'"'"'s own `.github/settings.yml`. '
-    settings_line+='Edit that file, never the GitHub UI; the merge rules are in repo-platform'"'"'s docs/settings.md.'
-    present_line "$settings_line" "$SMOKE/AGENTS.md"
-  else
-    absent "squash-merged" "$SMOKE/AGENTS.md"
-    present_line '- CI gates on the `all-green` check. Under `.github/workflows/`, this repository'"'"'s test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.' "$SMOKE/AGENTS.md"
-    absent "required by the managed ruleset" "$SMOKE/AGENTS.md"
-    absent "Repository settings are applied" "$SMOKE/AGENTS.md"
-    absent ".github/settings.yml" "$SMOKE/AGENTS.md"
-  fi
-else
-  # `test ! -e` follows symlinks (a dangling one passes), so also
-  # assert not-a-symlink for the three link paths.
-  test ! -e "$SMOKE/AGENTS.md"
-  test ! -e "$SMOKE/CLAUDE.md" && test ! -L "$SMOKE/CLAUDE.md"
-  test ! -e "$SMOKE/.github/agents.md" && test ! -L "$SMOKE/.github/agents.md"
-  test ! -e "$SMOKE/.github/copilot-instructions.md" && test ! -L "$SMOKE/.github/copilot-instructions.md"
-fi
+# AGENTS.md plus the three agent-file symlinks are base content: every
+# render carries them (the symlinks prove copier preserves links).
+test -f "$SMOKE/AGENTS.md"
+test -L "$SMOKE/CLAUDE.md"
+test "$(readlink "$SMOKE/CLAUDE.md")" = "AGENTS.md"
+test -L "$SMOKE/.github/copilot-instructions.md"
+test -L "$SMOKE/.github/agents.md"
+# AGENTS.md toolchain section only when a toolchain module is selected,
+# with exactly the selected toolchains' bullets inside it.
+if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absent "## Toolchain" "$SMOKE/AGENTS.md"; fi
+# The pinned-toolchain modules also emit their dotfile line (the dotfile
+# itself carries no header, so this is the only place an agent learns
+# it is managed); asserted exactly, like the command bullet.
+pinned_by_sync() { printf -- '- `%s` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$1"; }
+if has bun; then
+  present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
+  present_line "$(pinned_by_sync .bun-version)" "$SMOKE/AGENTS.md"
+else absent '`bun install`' "$SMOKE/AGENTS.md"; absent '.bun-version' "$SMOKE/AGENTS.md"; fi
+if has node; then
+  present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
+  present_line "$(pinned_by_sync .node-version)" "$SMOKE/AGENTS.md"
+else absent '`npm install`' "$SMOKE/AGENTS.md"; absent '.node-version' "$SMOKE/AGENTS.md"; fi
+if has deno; then
+  present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"
+  present_line "$(pinned_by_sync .dvmrc)" "$SMOKE/AGENTS.md"
+else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
+if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
+if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
+# Merge policy, the ruleset requiring all-green, and the settings bullet
+# (edit .github/settings.yml, never the UI) are managed for every render.
+present "PRs are squash-merged, so the PR title becomes the commit subject." "$SMOKE/AGENTS.md"
+gate_line='- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository'"'"'s test and '
+gate_line+='lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.'
+present_line "$gate_line" "$SMOKE/AGENTS.md"
+settings_line='- Repository settings are applied from Vivswan/repo-platform'"'"'s layers plus this repository'"'"'s own `.github/settings.yml`. '
+settings_line+='Edit that file, never the GitHub UI; the merge rules are in repo-platform'"'"'s docs/settings.md.'
+present_line "$settings_line" "$SMOKE/AGENTS.md"
 
 # The module/visibility gating that used to render into settings.yml now
 # lives in the centrally ASSEMBLED baseline: invoke the assembly CLI as a
@@ -486,101 +454,99 @@ fi
 # .github/settings-baseline.yml / the module manifests /
 # render_managed_settings.ts (or this expectation). The assembly needs the
 # repo root's dependencies, which the smoke job does not install.
-if has settings-sync; then
-  managed_out="$SMOKE_WORK/managed-settings.yml"
-  merged_out="$SMOKE_WORK/merged-settings.yml"
-  [ -d "$REPO_ROOT/node_modules" ] || bun install --frozen-lockfile --silent --cwd "$REPO_ROOT"
-  # Both scripts publish step outputs now, so both need somewhere to
-  # write them; Actions sets this, a hand run does not.
-  export GITHUB_OUTPUT="${GITHUB_OUTPUT:-$SMOKE_WORK/step-output.txt}"
-  bun "$REPO_ROOT/.github/scripts/fleet/render_managed_settings.ts" \
-    --repo smoke/test --target-dir "$SMOKE" --out "$managed_out"
-  # The document the apply actually receives: the rendered layers plus the
-  # smoke repo's own settings.yml plus the fleet override on top. The
-  # protection rulesets live in the override, so only the merged document
-  # shows the whole contract. GITHUB_OUTPUT is set by Actions; give the
-  # script a scratch file when running this harness by hand.
-  bun "$REPO_ROOT/.github/scripts/fleet/merge_settings_layers.ts" \
-    --managed "$managed_out" --repo-file "$SMOKE/.github/settings.yml" \
-    --out "$merged_out"
-  # The unconditional labels: dependabot's base pair (the base
-  # dependabot.yml always carries the github-actions ecosystem, and
-  # dependabot recreates its labels when missing, so an undeclared one
-  # would loop delete/recreate nightly) plus the triage trio.
-  present_line "  - name: dependencies" "$merged_out"
-  present_line "  - name: github_actions" "$merged_out"
-  present_line "  - name: bug" "$merged_out"
-  present_line "  - name: enhancement" "$merged_out"
-  present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with main's ONE required check -
-  # all-green, pinned to the GitHub Actions app (the gate job's check run
-  # is Actions-created; the pin stops any other app or a plain commit
-  # status from satisfying the context) - plus the review-thread gate.
-  # The retired copilot-pull-request-reviewer context must NOT render:
-  # Copilot reviews are advisory now (the copilot_code_review rule below
-  # requests them; nothing blocks on them), and a reappearing context
-  # here is the retired belt sneaking back.
-  present_line "  - name: main" "$merged_out"
-  present_line "  - name: non-bypassable" "$merged_out"
-  present "context: all-green" "$merged_out"
-  absent "copilot-pull-request-reviewer" "$merged_out"
-  present "integration_id: 15368" "$merged_out"
-  present "required_review_thread_resolution: true" "$merged_out"
-  # The copilot_code_review auto-request rule is PUBLIC-only (the fleet
-  # public overlay carries it): Copilot reviews are disabled on private
-  # repos, so requesting one there is a request nothing can answer. The
-  # reviews are advisory - nothing gates on them.
-  if [ "$PRIVATE" != "true" ]; then
-    present "type: copilot_code_review" "$merged_out"
-  else
-    absent "copilot_code_review" "$merged_out"
-  fi
-  # The main ruleset's code_scanning rule follows enable_codeql (public
-  # AND an analyzable toolchain): GitHub 422s that rule on a private
-  # personal repo, so a private assembly must never emit it.
-  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
-    present "type: code_scanning" "$merged_out"
-  else
-    absent "type: code_scanning" "$merged_out"
-  fi
-  # security_and_analysis follows visibility alone (private repos without
-  # Advanced Security reject the block); the settings-as-code-report
-  # marker label is the private-only counterpart.
-  if [ "$PRIVATE" != "true" ]; then
-    present "security_and_analysis:" "$merged_out"
-    present "secret_scanning_push_protection:" "$merged_out"
-    absent "settings-as-code-report" "$merged_out"
-  else
-    absent "security_and_analysis:" "$merged_out"
-    present_line "  - name: settings-as-code-report" "$merged_out"
-  fi
-  # Dependabot's per-ecosystem labels follow the toolchain modules.
-  if has bun || has node; then present_line "  - name: javascript" "$merged_out"; else absent "name: javascript" "$merged_out"; fi
-  if has deno; then present_line "  - name: deno" "$merged_out"; else absent "name: deno" "$merged_out"; fi
-  if has uv; then present_line "  - name: python:uv" "$merged_out"; else absent "python:uv" "$merged_out"; fi
-  if has rust; then present_line "  - name: rust" "$merged_out"; else absent "name: rust" "$merged_out"; fi
-  # release-please brings its labels and the release-tags ruleset from its
-  # own templates/release-please/settings.yml layer.
-  if has release-please; then
-    present "autorelease: pending" "$merged_out"
-    present "autorelease: tagged" "$merged_out"
-    present "release-blocker" "$merged_out"
-    present "release-override" "$merged_out"
-    present_line "  - name: release-tags" "$merged_out"
-  else
-    absent "autorelease:" "$merged_out"
-    absent "release-blocker" "$merged_out"
-    absent "release-override" "$merged_out"
-    absent "name: release-tags" "$merged_out"
-  fi
-  # The tracking streams render the recorded answers (the rows take the
-  # copier defaults).
-  if has docs-site; then present_line "  - name: docs-link-rot" "$merged_out"; else absent "docs-link-rot" "$merged_out"; fi
-  if has fuzzer; then present_line "  - name: fuzz-nightly" "$merged_out"; else absent "fuzz-nightly" "$merged_out"; fi
-  if has nightly; then present_line "  - name: nightly-failure" "$merged_out"; else absent "nightly-failure" "$merged_out"; fi
-  # Pages enablement rides the pages/docs-site settings layers.
-  if has pages || has docs-site; then present_line "  build_type: workflow" "$merged_out"; else absent "build_type:" "$merged_out"; fi
+managed_out="$SMOKE_WORK/managed-settings.yml"
+merged_out="$SMOKE_WORK/merged-settings.yml"
+[ -d "$REPO_ROOT/node_modules" ] || bun install --frozen-lockfile --silent --cwd "$REPO_ROOT"
+# Both scripts publish step outputs now, so both need somewhere to
+# write them; Actions sets this, a hand run does not.
+export GITHUB_OUTPUT="${GITHUB_OUTPUT:-$SMOKE_WORK/step-output.txt}"
+bun "$REPO_ROOT/.github/scripts/fleet/render_managed_settings.ts" \
+  --repo smoke/test --target-dir "$SMOKE" --out "$managed_out"
+# The document the apply actually receives: the rendered layers plus the
+# smoke repo's own settings.yml plus the fleet override on top. The
+# protection rulesets live in the override, so only the merged document
+# shows the whole contract. GITHUB_OUTPUT is set by Actions; give the
+# script a scratch file when running this harness by hand.
+bun "$REPO_ROOT/.github/scripts/fleet/merge_settings_layers.ts" \
+  --managed "$managed_out" --repo-file "$SMOKE/.github/settings.yml" \
+  --out "$merged_out"
+# The unconditional labels: dependabot's base pair (the base
+# dependabot.yml always carries the github-actions ecosystem, and
+# dependabot recreates its labels when missing, so an undeclared one
+# would loop delete/recreate nightly) plus the triage trio.
+present_line "  - name: dependencies" "$merged_out"
+present_line "  - name: github_actions" "$merged_out"
+present_line "  - name: bug" "$merged_out"
+present_line "  - name: enhancement" "$merged_out"
+present_line "  - name: fix-lint" "$merged_out"
+# The fleet rulesets, always, with main's ONE required check -
+# all-green, pinned to the GitHub Actions app (the gate job's check run
+# is Actions-created; the pin stops any other app or a plain commit
+# status from satisfying the context) - plus the review-thread gate.
+# The retired copilot-pull-request-reviewer context must NOT render:
+# Copilot reviews are advisory now (the copilot_code_review rule below
+# requests them; nothing blocks on them), and a reappearing context
+# here is the retired belt sneaking back.
+present_line "  - name: main" "$merged_out"
+present_line "  - name: non-bypassable" "$merged_out"
+present "context: all-green" "$merged_out"
+absent "copilot-pull-request-reviewer" "$merged_out"
+present "integration_id: 15368" "$merged_out"
+present "required_review_thread_resolution: true" "$merged_out"
+# The copilot_code_review auto-request rule is PUBLIC-only (the fleet
+# public overlay carries it): Copilot reviews are disabled on private
+# repos, so requesting one there is a request nothing can answer. The
+# reviews are advisory - nothing gates on them.
+if [ "$PRIVATE" != "true" ]; then
+  present "type: copilot_code_review" "$merged_out"
+else
+  absent "copilot_code_review" "$merged_out"
 fi
+# The main ruleset's code_scanning rule follows enable_codeql (public
+# AND an analyzable toolchain): GitHub 422s that rule on a private
+# personal repo, so a private assembly must never emit it.
+if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
+  present "type: code_scanning" "$merged_out"
+else
+  absent "type: code_scanning" "$merged_out"
+fi
+# security_and_analysis follows visibility alone (private repos without
+# Advanced Security reject the block); the settings-as-code-report
+# marker label is the private-only counterpart.
+if [ "$PRIVATE" != "true" ]; then
+  present "security_and_analysis:" "$merged_out"
+  present "secret_scanning_push_protection:" "$merged_out"
+  absent "settings-as-code-report" "$merged_out"
+else
+  absent "security_and_analysis:" "$merged_out"
+  present_line "  - name: settings-as-code-report" "$merged_out"
+fi
+# Dependabot's per-ecosystem labels follow the toolchain modules.
+if has bun || has node; then present_line "  - name: javascript" "$merged_out"; else absent "name: javascript" "$merged_out"; fi
+if has deno; then present_line "  - name: deno" "$merged_out"; else absent "name: deno" "$merged_out"; fi
+if has uv; then present_line "  - name: python:uv" "$merged_out"; else absent "python:uv" "$merged_out"; fi
+if has rust; then present_line "  - name: rust" "$merged_out"; else absent "name: rust" "$merged_out"; fi
+# release-please brings its labels and the release-tags ruleset from its
+# own templates/release-please/settings.yml layer.
+if has release-please; then
+  present "autorelease: pending" "$merged_out"
+  present "autorelease: tagged" "$merged_out"
+  present "release-blocker" "$merged_out"
+  present "release-override" "$merged_out"
+  present_line "  - name: release-tags" "$merged_out"
+else
+  absent "autorelease:" "$merged_out"
+  absent "release-blocker" "$merged_out"
+  absent "release-override" "$merged_out"
+  absent "name: release-tags" "$merged_out"
+fi
+# The tracking streams render the recorded answers (the rows take the
+# copier defaults).
+if has docs-site; then present_line "  - name: docs-link-rot" "$merged_out"; else absent "docs-link-rot" "$merged_out"; fi
+if has fuzzer; then present_line "  - name: fuzz-nightly" "$merged_out"; else absent "fuzz-nightly" "$merged_out"; fi
+if has nightly; then present_line "  - name: nightly-failure" "$merged_out"; else absent "nightly-failure" "$merged_out"; fi
+# Pages enablement rides the pages/docs-site settings layers.
+if has pages || has docs-site; then present_line "  build_type: workflow" "$merged_out"; else absent "build_type:" "$merged_out"; fi
 # The tracking-labels input follows the selected stream modules: it feeds
 # fleet-ci's release-health job (which only runs with release-please), and
 # the exact quoted default list (selected streams in module order) is
@@ -714,17 +680,13 @@ if has bun; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.bun-version"; else 
 if has node; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.node-version"; else test ! -e "$SMOKE/.node-version"; fi
 if has deno; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.dvmrc"; else test ! -e "$SMOKE/.dvmrc"; fi
 
-# copilot-setup-steps belongs to the agents module; the toolchain installs
-# inside it splice from the toolchain module fragments.
-if has agents; then
-  test -f "$wf/copilot-setup-steps.yml"
-  if has bun; then present "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; else absent "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; fi
-  if has node; then present "actions/setup-node" "$wf/copilot-setup-steps.yml"; else absent "actions/setup-node" "$wf/copilot-setup-steps.yml"; fi
-  if has deno; then present "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; else absent "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; fi
-  if has uv; then present "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; else absent "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; fi
-else
-  test ! -e "$wf/copilot-setup-steps.yml"
-fi
+# copilot-setup-steps is a base starter; the toolchain installs inside it
+# splice from the toolchain module fragments.
+test -f "$wf/copilot-setup-steps.yml"
+if has bun; then present "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; else absent "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; fi
+if has node; then present "actions/setup-node" "$wf/copilot-setup-steps.yml"; else absent "actions/setup-node" "$wf/copilot-setup-steps.yml"; fi
+if has deno; then present "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; else absent "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; fi
+if has uv; then present "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; else absent "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; fi
 
 # Row-specific expectations for the rendered pages caller.
 if [ -n "$EXPECT_IN_PAGES" ]; then
@@ -775,7 +737,11 @@ fi
 expect_class ".github/SECURITY.md" split
 expect_class ".gitignore" split
 expect_class ".github/repo-platform-manifest.json" managed
-if has agents; then expect_class "AGENTS.md" split; else expect_class "AGENTS.md" absent; fi
+expect_class "AGENTS.md" split
+expect_class "CLAUDE.md" managed
+expect_class ".github/workflows/auto-assign.yml" managed
+expect_class ".github/workflows/settings-sync.yml" managed
+expect_class ".github/workflows/copilot-setup-steps.yml" starter
 if has release-please; then
   expect_class ".github/workflows/release.yml" managed
   expect_class "release-please-config.json" starter
@@ -783,7 +749,7 @@ else
   expect_class ".github/workflows/release.yml" absent
   expect_class "release-please-config.json" absent
 fi
-if has settings-sync; then expect_class ".github/settings.yml" starter; else expect_class ".github/settings.yml" absent; fi
+expect_class ".github/settings.yml" starter
 if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
 # Stamping: the managed ci.yml hash must equal the file's sha256 (computed
 # here with hashlib, not the code under test), the split .github/SECURITY.md hash

@@ -28,9 +28,9 @@
 // turns thrown RehearsalErrors into report rows instead of aborts.
 //
 // Known parity gaps vs the workflow (this is an operator convenience, not
-// a second pipeline): live visibility/description come from the recorded
-// copier answers instead of the GitHub API, so out-of-band settings drift
-// is not rehearsed; token-scope workflow withholding, hide-details
+// a second pipeline): visibility, description, and the homepage/topics seeds
+// come from the recorded answers, not the GitHub API (an unrecorded seed
+// rehearses as "" where production seeds the live value), so drift is not rehearsed; token-scope workflow withholding, hide-details
 // redaction, and the PR/auto-merge machinery do not apply locally (the
 // tail tripwire CHECK runs and its report rides the outcome, but its
 // PR-body section and forced manual review are PR machinery); and
@@ -397,6 +397,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     const privateAnswer = answers.fields.private === true ? "true" : "false";
     const description =
       typeof answers.fields.description === "string" ? answers.fields.description : "";
+    // The seeded answers' "live" values: the recorded ones, like description
+    // (a rehearsal has no GitHub to read), so an unrecorded key seeds "".
+    const recordedString = (key: string) =>
+      typeof answers.fields[key] === "string" ? (answers.fields[key] as string) : "";
 
     section("fetching build refs and assembling the rehearsal release");
     run(["git", "init", "--quiet", platformDir]);
@@ -544,8 +548,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         join(targetDir, ".repo-platform.yml"),
         "--template-copier",
         join(buildDir, "copier.yml"),
-        "--retired-summary",
-        join(temp, "retired-modules.txt"),
       ],
       { cwd: REPO_ROOT },
     );
@@ -558,6 +560,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       MODULES: modules,
       PRIVATE: privateAnswer,
       DESCRIPTION: description,
+      HOMEPAGE: recordedString("homepage"),
+      TOPICS: recordedString("topics"),
       RUNNER_TEMP: temp,
       SRC_PATH: platformDir,
       OLD_SHA: oldSha,

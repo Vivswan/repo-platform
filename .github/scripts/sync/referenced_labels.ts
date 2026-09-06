@@ -19,11 +19,9 @@
 // and re-invoked by commit_push.ts's Workflows-scope withhold path, whose
 // restore rewrites .github/workflows after this check first ran.
 //
-// Not applicable (empty report) when no apply would reconcile labels:
-// the target does not select settings-sync, has no settings.yml to merge
-// (mergeOutcome skips the apply), or the merged document declares no
-// labels key. A repo in those states keeps its live labels, so nothing
-// removes what the files reference.
+// Not applicable (empty report) when no apply would reconcile labels: no
+// .repo-platform.yml, no settings.yml to merge, or no labels key in the merged
+// document - the repo keeps its live labels, so nothing removes a reference.
 //
 // A computation failure (unreadable facts, a malformed layer) writes a
 // COULD-NOT-VERIFY section instead - still forcing review, still exit 0:
@@ -51,11 +49,7 @@ import {
   referenceFilesFromDir,
 } from "../fleet/label_references.ts";
 import { mergeOutcome } from "../fleet/merge_settings_layers.ts";
-import {
-  factsFromTargetDir,
-  managedSettings,
-  renderDecision,
-} from "../fleet/render_managed_settings.ts";
+import { factsFromTargetDir, managedSettings } from "../fleet/render_managed_settings.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv, warning } from "../shared/gha.ts";
 import { REFERENCED_LABELS_NAME } from "./section_files.ts";
@@ -133,8 +127,8 @@ export function writeReferencedLabelsReport(
     const manifests = loadManifests();
     const facts = factsFromTargetDir(root, manifests);
     const settingsPath = join(root, ".github/settings.yml");
-    if (renderDecision(facts, "target-dir", root).kind === "skip") {
-      log = "not applicable (the target does not select the settings-sync module)";
+    if (facts === null) {
+      log = "not applicable (no .repo-platform.yml, so no apply reconciles labels)";
     } else if (!existsSync(settingsPath)) {
       log = "not applicable (no settings.yml to merge, so no apply reconciles labels)";
     } else {

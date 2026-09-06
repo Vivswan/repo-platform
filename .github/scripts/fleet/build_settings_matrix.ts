@@ -10,8 +10,8 @@
 //
 // Targets come from --targets, a JSON array of the selector's enriched
 // rows ({repo, redact_name, hide_details, display, verify, ...}) - the
-// enrolled, adopted repos whose .repo-platform.yml selects the
-// settings-sync module. --self appends the operator repository itself: it
+// enrolled, adopted repos (a readable .repo-platform.yml). --self appends
+// the operator repository itself: it
 // is not adopted (no .repo-platform.yml), but its settings are managed by
 // the same run (its baseline facts come from .repo-platform-answers.yml -
 // see render_managed_settings.ts). Prints a JSON array of
@@ -24,26 +24,24 @@ import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
+import { readModules } from "../sync/modules.ts";
 import { type EnrichedRow, parseEnrichedRows, type RedactionState } from "./redact.ts";
 
-/** Whether a .repo-platform.yml text selects the settings-sync module -
- *  the opt-in to centrally managed settings; null when the top-level
- *  modules list is unreadable. Lives here (not in the selector script,
- *  which runs at import time) so the parse stays unit-testable, and so
- *  the parse detail (target-repo content) never reaches a public log. */
-export function selectsSettingsSync(registrationText: string): boolean | null {
+/** The module names a .repo-platform.yml text declares - the readable
+ *  registration that makes a repository a settings target; null when the
+ *  file or its top-level modules list is unreadable. One grammar with the
+ *  sync's module selection (readModules), and logLevel error so a warned-on
+ *  source line (target content) never reaches a public log. Lives here (not
+ *  in the selector script, which runs at import time) so the parse stays
+ *  unit-testable. */
+export function declaredModules(registrationText: string): string[] | null {
   let data: unknown;
   try {
-    data = parseYaml(registrationText);
+    data = parseYaml(registrationText, { logLevel: "error" });
   } catch {
     return null;
   }
-  const modules =
-    typeof data === "object" && data !== null && !Array.isArray(data)
-      ? (data as Record<string, unknown>).modules
-      : null;
-  if (!Array.isArray(modules) || !modules.every((m) => typeof m === "string")) return null;
-  return modules.includes("settings-sync");
+  return readModules(data).modules;
 }
 
 // hide_details rides the matrix because the apply leg DOES have

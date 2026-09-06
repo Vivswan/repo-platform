@@ -7,15 +7,19 @@
 // manual-review path). Invoked by reusable-template-sync.yml's "Apply
 // copier update" step.
 //
-// Env: TARGET_DIR (default target), TARGET_REF, MODULES, PRIVATE,
-// DESCRIPTION, RECOVER; SRC_PATH optional (where TARGET_REF resolves when
-// the template source is a local clone other than the cwd - the
-// rehearsal's).
+// Env: TARGET_DIR (default target), TARGET_REF, MODULES, PRIVATE, DESCRIPTION,
+// RECOVER, HOMEPAGE and TOPICS (live seeds for unrecorded answers); SRC_PATH
+// optional (where TARGET_REF resolves for a local template clone, the rehearsal's).
 
 import { statSync } from "node:fs";
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { capture, passthrough } from "../shared/proc.ts";
-import { AnswersFileError, readAnswersFile, recordedCommitMismatch } from "./answers_file.ts";
+import {
+  AnswersFileError,
+  readAnswersFile,
+  recordedCommitMismatch,
+  unrecordedSeeds,
+} from "./answers_file.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const targetRef = requireEnv("TARGET_REF");
@@ -77,7 +81,27 @@ function recordedSrcPath(): string {
   }
 }
 
+/** The keys the recorded answers carry, or null when the file cannot be
+ * read: an unreadable file records nothing KNOWN, which is not "nothing
+ * recorded", so nothing is seeded and copier fails on its own terms. */
+function recordedKeys(): string[] | null {
+  try {
+    return Object.keys(readAnswersFile(targetDir).fields);
+  } catch (err) {
+    if (err instanceof AnswersFileError) return null;
+    throw err;
+  }
+}
+
 const sha = targetSha();
+const recordedAnswerKeys = recordedKeys();
+const seeds =
+  recordedAnswerKeys === null
+    ? []
+    : unrecordedSeeds(recordedAnswerKeys, {
+        homepage: env("HOMEPAGE"),
+        topics: env("TOPICS"),
+      }).flatMap(([key, value]) => ["-d", `${key}=${value}`]);
 const subcommand = env("RECOVER") === "recopy" ? ["recopy", "--overwrite"] : ["update"];
 const exitCode = passthrough(
   [
@@ -100,6 +124,7 @@ const exitCode = passthrough(
     `private=${requireEnv("PRIVATE")}`,
     "-d",
     `description=${env("DESCRIPTION")}`,
+    ...seeds,
   ],
   { cwd: targetDir },
 );

@@ -114,9 +114,28 @@ export interface LiveRenderData {
   modules: readonly string[];
   private: boolean;
   description: string;
+  /** Live values for the SEEDED_ANSWERS, applied only where the recorded
+   * answers lack the key (unrecordedSeeds). */
+  seeds?: Readonly<Record<SeededAnswer, string>>;
 }
 
 const LIVE_KEYS = ["modules", "private", "description"] as const;
+
+/** The settings starter's identity answers: unrecorded ones (a render from before
+ * they were asked) seed from the live repository once, or the starter's empty
+ * defaults would clear the live values; a recorded answer wins, empty included. */
+export const SEEDED_ANSWERS = ["homepage", "topics"] as const;
+export type SeededAnswer = (typeof SEEDED_ANSWERS)[number];
+
+/** The seeds to apply: the live value of each SEEDED_ANSWERS key the
+ * recorded answers do not carry, in roster order. */
+export function unrecordedSeeds(
+  recordedKeys: Iterable<string>,
+  live: Readonly<Record<SeededAnswer, string>>,
+): [SeededAnswer, string][] {
+  const recorded = new Set(recordedKeys);
+  return SEEDED_ANSWERS.filter((key) => !recorded.has(key)).map((key) => [key, live[key]]);
+}
 
 /** A string as a PyYAML-safe YAML double-quoted scalar. JSON string
  * literals are a valid YAML double-quote subset (JSON.stringify emits only
@@ -192,6 +211,7 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
     throw new AnswersFileError("top level must be a mapping");
   }
   const dropped = live === null ? [] : LIVE_KEYS;
+  const recordedKeys: string[] = [];
   contents.items = contents.items.filter((item) => {
     // Under failsafe every scalar is a string; a non-scalar key is a
     // collection key copier never writes - refuse rather than guess
@@ -200,8 +220,15 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
       throw new AnswersFileError("top-level keys must be plain scalars");
     }
     const key = item.key.value;
+    recordedKeys.push(key);
     return !key.startsWith("_") && !(dropped as readonly string[]).includes(key);
   });
+  const seeded =
+    live?.seeds === undefined
+      ? []
+      : unrecordedSeeds(recordedKeys, live.seeds).map(
+          ([key, value]) => `${key}: ${yamlDoubleQuoted(value)}\n`,
+        );
   let carried: string;
   if (contents.items.length === 0) {
     // "{}\n" would strand appended keys after a flow mapping, and "" would
@@ -222,7 +249,12 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
       );
     }
   }
-  const out = live === null ? (carried === "" ? "{}\n" : carried) : carried + liveDataYaml(live);
+  const out =
+    live === null
+      ? carried === ""
+        ? "{}\n"
+        : carried
+      : carried + liveDataYaml(live) + seeded.join("");
   // Postcondition on the assembled text, not the inputs: the failure mode
   // is silent divergence, so anything short of one clean mapping document
   // with the live keys exactly once is refused.
@@ -262,7 +294,9 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
     );
   }
   if (live !== null) {
-    for (const key of LIVE_KEYS) {
+    // The live keys once each, and every seeded answer once: recorded or
+    // seeded, never both and never neither.
+    for (const key of [...LIVE_KEYS, ...(live.seeds === undefined ? [] : SEEDED_ANSWERS)]) {
       const count = outMap.items.filter(
         (item) => isScalar(item.key) && item.key.value === key,
       ).length;

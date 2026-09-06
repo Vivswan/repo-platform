@@ -43,12 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
-    # issues: write lets the fuzz-issue action file/close the tracking issue{% if 'auto-assign' in modules %};
-    # actions: write lets the red path dispatch auto-assign at it{% endif %}.
+    # issues: write lets the fuzz-issue action file/close the tracking issue;
+    # actions: write lets the red path dispatch auto-assign at it.
     permissions:
       issues: write
-{% if 'auto-assign' in modules %}      actions: write
-{% endif %}    steps:
+      actions: write
+    steps:
       - name: File or update the nightly issue
         id: file-issue
         if: {% raw %}needs.checks.result == 'failure' || needs.checks.result == 'cancelled'{% endraw %}
@@ -59,11 +59,11 @@ jobs:
           title: Nightly CI failures
           # No artifacts directory: this stream files the generic report,
           # not the fuzzer's failure-report contract. The label tuple is
-          # used only at creation and matches the settings-sync one.
+          # used only at creation and matches the settings layer's.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
 
-{% if 'auto-assign' in modules %}      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
+      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
       - name: Trigger auto-assign for the filed issue
         if: {% raw %}steps.file-issue.outputs.issue-number != ''{% endraw %}
         env:
@@ -74,7 +74,7 @@ jobs:
           ISSUE_NUMBER: {% raw %}${{ steps.file-issue.outputs.issue-number }}{% endraw %}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
-{% endif %}      - name: Close the nightly issue on a green night
+      - name: Close the nightly issue on a green night
         if: {% raw %}needs.checks.result == 'success'{% endraw %}
         uses: {{ github_username }}/repo-platform/actions/fuzz-issue@build
         with:

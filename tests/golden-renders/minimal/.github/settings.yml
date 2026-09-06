@@ -1,7 +1,7 @@
 ---
-# This repository's OWN settings, applied by {{ github_username }}/repo-platform
-# (and by settings-sync on pushes to this file when the repo carries its
-# own REPO_PLATFORM_TOKEN). Rendered once, repo-owned: template sync never
+# This repository's OWN settings, applied by Vivswan/repo-platform
+# (and by the settings-sync workflow on pushes to this file when the repo
+# carries its own REPO_PLATFORM_TOKEN). Rendered once, repo-owned: template sync never
 # rewrites it. Fleet defaults merge UNDER this file - keys here win, null
 # opts out, labels replace by name, rulesets MERGE by name; both must stay
 # lists. The fleet invariants (squash-only merging, the protection
@@ -9,12 +9,12 @@
 # deleted by the apply; undeclared rulesets are left alone.
 
 repository:
-  description: {{ description | tojson }}
+  description: "Golden render fixture"
   # Declared even when empty: the apply manages only declared keys, so
   # this keeps it healing out-of-band edits.
-  homepage: {{ homepage | tojson }}
-  topics: {{ topics | tojson }}
-  private: {{ private | tojson }}
+  homepage: ""
+  topics: ""
+  private: false
 
 # This repository's own labels (the fleet layers already carry the
 # dependabot, release, and tracking labels its modules need):

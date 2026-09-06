@@ -7,16 +7,16 @@
 // script only picks the ones a repo's facts select and merges them.
 // merge_settings_layers.ts owns the dialect and adds the repo's own
 // .github/settings.yml and the fleet override on top. No layer file is
-// ever synced into a client repo; the settings-sync template renders the
-// repo's own settings.yml ONCE as a repo-owned identity starter.
+// ever synced into a client repo; the template renders the repo's own
+// settings.yml ONCE as a repo-owned identity starter.
 //
 // Consumers beyond the apply paths: scripts/generate.ts derives the
 // tracking-label validators' reserved-label roster from managedLabelNames,
 // and scripts/check_ssot.ts anchors its label/ruleset rules here.
 //
 // Inputs are repo facts: the module selection (the target repo's
-// .repo-platform.yml - selecting the settings-sync module there is the
-// opt-in), effective visibility (private repositories reject the
+// .repo-platform.yml - every repository carrying one is a settings
+// target), effective visibility (private repositories reject the
 // public-only layers with a 422), and the
 // tracking-label answers recorded in .github/.copier-answers.yml (each stream
 // repo picks its own label name; the color/description tuples live in
@@ -49,7 +49,7 @@ import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
-import { RETIRED_MODULES } from "../sync/modules.ts";
+import { readModules } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 import {
@@ -303,29 +303,22 @@ export function managedRulesets(
 
 // --- fact resolution --------------------------------------------------------
 
-/** Modules from a .repo-platform.yml text; throws on a missing or
- *  malformed top-level list (the baseline cannot be computed from a
- *  guess). */
-/** The module selection, VALIDATED against the manifest roster. An
- *  unknown name cannot be tolerated here the way an unknown key can:
- *  layerPaths simply finds no layer files for it, so a typo yields a
- *  perfectly valid-looking document that is missing that module's labels,
- *  and the apply's delete-undeclared pass then removes them from the live
- *  repository. A retired module is different - the template dropped it on
- *  purpose and repos may still list it - so it is dropped with a warning,
- *  the same tolerance sync/modules.ts applies (and the same single list,
- *  imported rather than mirrored). */
+/** The module selection of a .repo-platform.yml text, read with the
+ *  sync's own registration grammar (readModules: one list, string entries,
+ *  no duplicates) and VALIDATED against the manifest roster. A malformed
+ *  list throws - the baseline cannot be computed from a guess - and so does
+ *  an unknown name: layerPaths simply finds no layer files for it, so a
+ *  typo would yield a perfectly valid-looking document missing that
+ *  module's labels, and the apply's delete-undeclared pass would then
+ *  remove them from the live repository. */
 export function modulesFrom(
   registrationText: string,
   where: string,
   manifests: ModuleManifest[] = loadManifests(),
-  retired: ReadonlySet<string> = RETIRED_MODULES,
 ): string[] {
-  const modules = parseYamlMapping(registrationText, where).modules;
-  if (!Array.isArray(modules) || !modules.every((m) => typeof m === "string")) {
-    throw new Error(`${where}: no readable top-level modules list`);
-  }
-  return assertKnownModules(modules, where, manifests, retired);
+  const { modules } = readModules(parseYamlMapping(registrationText, where), where);
+  if (modules === null) throw new Error(`${where}: no readable top-level modules list`);
+  return assertKnownModules(modules, where, manifests);
 }
 
 /** Every selection reaching the render goes through here, against the SAME
@@ -335,24 +328,19 @@ export function assertKnownModules(
   modules: string[],
   where: string,
   manifests: ModuleManifest[],
-  retired: ReadonlySet<string> = RETIRED_MODULES,
 ): string[] {
   const known = new Set(manifests.map((m) => m.module));
-  const kept: string[] = [];
-  const unknown: string[] = [];
-  for (const name of modules) {
-    if (known.has(name)) kept.push(name);
-    else if (retired.has(name)) warning(`${where}: module "${name}" is retired; ignoring it`);
-    else unknown.push(name);
-  }
+  const unknown = modules.filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new Error(
       `${where}: unknown module(s) ${unknown.map((n) => JSON.stringify(n)).join(", ")} - not a ` +
-        "template module and not retired. Applying the settings without them would compute a " +
-        "roster missing their labels, and the apply deletes undeclared labels.",
+        "template module. Applying the settings without them would compute a roster missing " +
+        "their labels, and the apply deletes undeclared labels. A name the template retired " +
+        "leaves the file with the repository's pending sync PR (its migration rung rewrites " +
+        "the list); merge that PR first.",
     );
   }
-  return kept;
+  return modules;
 }
 
 /** The selected stream modules' tracking-label answers from a
@@ -505,8 +493,10 @@ export function factsFromOperatorAnswers(
   };
 }
 
-/** Facts fetched from the target repository's default branch (gh api).
- *  Visibility is the DECLARED repository.private in the repo's
+/** Facts fetched from the target repository's default branch (gh api), or
+ *  null when it carries no .repo-platform.yml at `ref`: the repository left
+ *  management between the plan job's selection and this read, and the
+ *  caller skips it. Visibility is the DECLARED repository.private in the repo's
  *  settings.yml when it is a boolean, the live probe otherwise: the apply
  *  flips visibility to the declared value (repository section first), so
  *  the baseline's visibility-gated blocks must match the POST-apply state
@@ -517,14 +507,9 @@ export function factsFromFetch(
   manifests: ModuleManifest[],
   ref: string,
   fetch: RepoFileFetcher = fetchRepoFile,
-): RepoFacts {
+): RepoFacts | null {
   const registration = fetch(repo, ".repo-platform.yml", ref);
-  if (registration === null) {
-    throw new Error(
-      `${repo}: no .repo-platform.yml on the default branch - the repo is not adopted, ` +
-        "so there is no module selection to compute a settings baseline from",
-    );
-  }
+  if (registration === null) return null;
   const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`, manifests);
   const isPrivate =
     declaredPrivate(fetch(repo, ".github/settings.yml", ref)) ?? fetchRepoIsPrivate(repo);
@@ -555,14 +540,17 @@ export function factsFromFetch(
   return { modules, private: isPrivate, trackingLabels, prTitleWorkflowPresent };
 }
 
-/** Facts read from a local checkout: the sync's referenced-label check
- *  (referenced_labels.ts) reads the target's post-update tree this way. The
- *  private fact prefers the checkout's DECLARED repository.private (the
- *  same precedence as the fetch path), falling back to the recorded
- *  answer - post-update the sync has already re-recorded the live value
- *  there. */
-export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): RepoFacts {
+/** Facts read from a local checkout: the self-apply
+ *  (reusable-apply-settings.yml) and the sync's referenced-label check
+ *  (referenced_labels.ts) read the target's tree this way. Null when the
+ *  checkout carries no .repo-platform.yml (it is not a settings target),
+ *  like the fetched source. The private fact prefers the checkout's
+ *  DECLARED repository.private (the same precedence as the fetch path),
+ *  falling back to the recorded answer - post-update the sync has already
+ *  re-recorded the live value there. */
+export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): RepoFacts | null {
   const where = (name: string) => `${join(dir, name)}`;
+  if (!existsSync(join(dir, ".repo-platform.yml"))) return null;
   const modules = modulesFrom(
     readFileSync(join(dir, ".repo-platform.yml"), "utf-8"),
     where(".repo-platform.yml"),
@@ -596,36 +584,19 @@ export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]
   )}`;
 }
 
-/** The opt-in, rechecked at the PINNED commit. Selection happened in the
- *  plan job against whatever the default branch held then; a repo that
- *  dropped settings-sync in between would otherwise still get a baseline
- *  built from the opted-out revision and applied - deleting labels after
- *  the repo turned management off. The operator repository is exempt: it
- *  has no .repo-platform.yml and opts in by being the operator. */
-const SETTINGS_MODULE = "settings-sync";
-
-/** Whether this run may write a baseline at all. A pure decision so the
- *  refusal is testable on its own: asserting that facts round-trip a
- *  module list proves nothing about whether the render acts on them. */
-export type RenderDecision = { kind: "render" } | { kind: "skip"; reason: string };
-
-export function renderDecision(
-  facts: RepoFacts,
-  source: "fetch" | "target-dir" | "operator",
-  repo: string,
-): RenderDecision {
-  // The operator repository has no .repo-platform.yml; it opts in by
-  // being the operator, so there is no selection to recheck.
-  if (source === "operator") return { kind: "render" };
-  if (facts.modules.includes(SETTINGS_MODULE)) return { kind: "render" };
-  return {
-    kind: "skip",
-    reason:
-      `${repo}: the ${SETTINGS_MODULE} module is not selected at the revision these facts were ` +
-      "read from, so settings are no longer managed here and this apply is SKIPPED. Applying " +
-      "anyway would reconcile - and delete - labels on a repository that has turned central " +
-      "settings off.",
-  };
+/** The skip a target earns by leaving management between the plan job's
+ *  selection and this read: no .repo-platform.yml at the pinned commit
+ *  means no selection to compute a baseline from, and applying one built
+ *  from an older revision would reconcile - and delete - labels on a
+ *  repository that is no longer managed. Adoption IS the opt-in: every
+ *  repository with a registration file is a settings target, and the
+ *  operator repository stands in its own answers file for one. */
+export function leftManagementReason(repo: string): string {
+  return (
+    `${repo}: no .repo-platform.yml at the revision these facts were read from - the ` +
+    "repository left management, so this apply is SKIPPED. Applying anyway would reconcile " +
+    "- and delete - labels on a repository that is no longer managed."
+  );
 }
 
 function main(args: string[]): void {
@@ -638,14 +609,13 @@ function main(args: string[]): void {
     fail("--target-dir and --operator-answers are mutually exclusive - pass one fact source");
   }
   const repo = flags["--repo"];
-  let facts: RepoFacts;
+  // Null after the reads when the target left management (no registration
+  // at the pinned revision): nothing is written and the apply is gated off.
+  let facts: RepoFacts | null = null;
   // Published so the merge step reads the repo layer at the SAME commit
   // these facts came from, and so the freshness step can tell whether the
   // target moved since. Every fact source pins, local ones included.
   let pinnedRef = "";
-  // The opt-in can be dropped between the plan job's selection and this
-  // read; when it has been, nothing is written and the apply is gated off.
-  let optedOut = false;
   try {
     const manifests = loadManifests();
     if (flags["--target-dir"] !== undefined) {
@@ -660,16 +630,8 @@ function main(args: string[]): void {
       pinnedRef = resolveTargetRef(repo);
       facts = factsFromFetch(repo, manifests, pinnedRef);
     }
-    const source =
-      flags["--target-dir"] !== undefined
-        ? "target-dir"
-        : flags["--operator-answers"] !== undefined
-          ? "operator"
-          : "fetch";
-    const decision = renderDecision(facts, source, repo);
-    if (decision.kind === "skip") {
-      warning(decision.reason);
-      optedOut = true;
+    if (facts === null) {
+      warning(leftManagementReason(repo));
     } else {
       writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
     }
@@ -677,9 +639,11 @@ function main(args: string[]): void {
     fail(error instanceof Error ? error.message : String(error));
   }
   setOutput("ref", pinnedRef);
-  setOutput("skipped", String(optedOut));
-  if (optedOut) {
-    console.log("skipped: the target no longer selects the settings module");
+  setOutput("skipped", String(facts === null));
+  if (facts === null) {
+    console.log(
+      "skipped: the target left management (no .repo-platform.yml at the pinned revision)",
+    );
     return;
   }
   console.log(
