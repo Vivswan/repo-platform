@@ -245,6 +245,13 @@ describe("readDispatchRepo", () => {
       expected: "all",
     },
     {
+      reason: "the visibility tokens are scope tokens, never bare repo names to prefix",
+      onlyRepo: " Public,private ",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "public,private",
+    },
+    {
       reason:
         "a comma list is trimmed and owner-prefixed per entry; empties survive for the registry to reject",
       onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",

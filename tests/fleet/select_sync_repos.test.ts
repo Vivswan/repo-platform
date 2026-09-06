@@ -218,7 +218,7 @@ describe("select_sync_repos.ts", () => {
       expect(r.exitCode).not.toBe(0);
       // The registry stage's ::error:: rides its captured stdout, which
       // runStage forwards on failure.
-      expect(r.stdout).toContain("matched no selected repository");
+      expect(r.stdout).toContain("matched no managed repository (values withheld");
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-servr");
       }
@@ -269,12 +269,31 @@ describe("select_sync_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "a comma list via ONLY_REPO (the called post-green path) selects exactly those repos",
-    () => {
-      const r = run("list", { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-server" });
+  // The called path (post-green's sync-fleet leg): the scope is public text
+  // off a main commit, so a private repo rides only under the token.
+  test.each([
+    {
+      reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
+      scope: "Vivswan/steady,Vivswan/unadopted",
+      repos: ["Vivswan/steady"],
+    },
+    { reason: "public selects the public repos", scope: "public", repos: ["Vivswan/steady"] },
+    {
+      reason: "private selects the private repos, by hint (the locked one drops on its probe)",
+      scope: "private",
+      repos: ["h**-s**r"],
+    },
+    {
+      reason: "a token unions with a slug",
+      scope: "private, Vivswan/steady",
+      repos: ["h**-s**r", "Vivswan/steady"],
+    },
+  ])(
+    "called with $scope: $reason",
+    ({ scope, repos }) => {
+      const r = run(`called-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
       expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r", "Vivswan/steady"]);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(repos);
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-server");
       }
@@ -282,26 +301,37 @@ describe("select_sync_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  test(
-    "a list with one miss fails the whole plan, counting only",
-    () => {
-      const r = run("list-miss", { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-servr" });
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain("1 of 2 requested repos matched no selected repository");
-      for (const channel of [r.stdout, r.stderr, r.output]) {
-        expect(channel).not.toContain("hidden-servr");
-      }
-      expect(r.output).not.toContain("repos=");
+  test.each([
+    {
+      reason: "a private slug on the called path is refused: private repos ride under the token",
+      scope: "Vivswan/steady,Vivswan/hidden-server",
+      error:
+        "::error::1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main",
+      withheld: "hidden-server",
     },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a lone comma in the scope fails the plan instead of fanning out",
-    () => {
-      const r = run("comma", { ONLY_REPO: "," });
+    {
+      reason: "a list with one miss fails the whole plan",
+      scope: "Vivswan/steady,Vivswan/hidden-servr",
+      error: "::error::1 of 2 scoped repos matched no managed repository (values withheld",
+      withheld: "hidden-servr",
+    },
+    {
+      reason: "a lone comma fails the plan instead of fanning out",
+      scope: ",",
+      error: "::error::the scope has an empty entry",
+      withheld: null,
+    },
+  ])(
+    "$reason, counting only",
+    ({ scope, error, withheld }) => {
+      const r = run(`refused-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope });
       expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain("--repo has an empty entry");
+      expect(r.stdout).toContain(error);
+      if (withheld !== null) {
+        for (const channel of [r.stdout, r.stderr, r.output]) {
+          expect(channel).not.toContain(withheld);
+        }
+      }
       expect(r.output).not.toContain("repos=");
     },
     TEST_TIMEOUT_MS,

@@ -22,7 +22,9 @@ function message(...paras: string[]): string {
 }
 
 const NONE: Directives = { kind: "none" };
-const FLEET: Directives = { kind: "fleet-sync", repos: [] };
+const FLEET: Directives = { kind: "fleet-sync", scope: "all" };
+const NEEDS_REASON =
+  "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 function misplaced(...lines: string[]): Directives {
@@ -39,54 +41,87 @@ describe("parseDirectives", () => {
     { reason: "an empty message", body: "", expected: NONE },
     { reason: "a footer-only body is not a block", body: message(TRAILERS), expected: NONE },
     {
-      reason: "a bare [fleet-sync] opening the body arms the whole fleet",
-      body: message("[fleet-sync]", PROSE),
+      reason: "the all-scope with its justification arms the whole fleet",
+      body: message("[fleet-sync: all] every repo's ci.yml changed", PROSE),
       expected: FLEET,
+    },
+    {
+      reason: "a bare [fleet-sync] is the unjustified all-scope: red",
+      body: message("[fleet-sync]", PROSE),
+      expected: { kind: "error", errors: [`"[fleet-sync]": ${NEEDS_REASON}`] },
+    },
+    {
+      reason: "[fleet-sync: all] without a reason is red the same way",
+      body: message("`[fleet-sync: all]`", PROSE),
+      expected: { kind: "error", errors: [`"\`[fleet-sync: all]\`": ${NEEDS_REASON}`] },
     },
     {
       reason: "a block with nothing after it",
-      body: message("[fleet-sync]"),
+      body: message("[fleet-sync: all] the gate action changed"),
       expected: FLEET,
     },
     {
-      reason: "a backticked block renders as code and arms the same",
-      body: message("`[fleet-sync]`", PROSE),
+      reason: "a backticked all-scope renders as code and arms the same",
+      body: message("`[fleet-sync: all]` every repo's ci.yml changed", PROSE),
       expected: FLEET,
+    },
+    {
+      reason: "public: the public repos, no reason needed",
+      body: message("`[fleet-sync: public]`", PROSE),
+      expected: { kind: "fleet-sync", scope: ["public"] },
+    },
+    {
+      reason: "private: the private repos",
+      body: message("[fleet-sync: Private]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["private"] },
+    },
+    {
+      reason: "a token mixes with slugs, folded",
+      body: message("[fleet-sync: public, Vivswan/Dotfiles]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["public", "vivswan/dotfiles"] },
+    },
+    {
+      reason: "a justification on a scope other than all is red",
+      body: message("[fleet-sync: public] because the ci changed", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync: public] because the ci changed" carries text after the directive: only [fleet-sync: all] takes a justification',
+        ],
+      },
     },
     {
       reason: "a backticked scoped block",
       body: message("`[fleet-sync: Vivswan/a, Vivswan/b]`", PROSE),
-      expected: { kind: "fleet-sync", repos: ["vivswan/a", "vivswan/b"] },
-    },
-    {
-      reason: "[fleet-sync: all] is the same as bare",
-      body: message("[fleet-sync: all]", PROSE),
-      expected: FLEET,
+      expected: { kind: "fleet-sync", scope: ["vivswan/a", "vivswan/b"] },
     },
     {
       reason: "a list is trimmed, folded, and deduped",
       body: message("[Fleet-Sync: Vivswan/A , vivswan/b,Vivswan/a]", PROSE),
-      expected: { kind: "fleet-sync", repos: ["vivswan/a", "vivswan/b"] },
+      expected: { kind: "fleet-sync", scope: ["vivswan/a", "vivswan/b"] },
     },
     {
       reason: "no space after the colon",
       body: message("[fleet-sync:o/r]", PROSE),
-      expected: { kind: "fleet-sync", repos: ["o/r"] },
+      expected: { kind: "fleet-sync", scope: ["o/r"] },
     },
     {
       reason: "trailing whitespace, blank lines, and CRLF are tolerated",
-      body: `${message("`[fleet-sync]`  ", PROSE)}\r\n\r\n   \r\n`.replace(/\n/g, "\r\n"),
+      body: `${message("`[fleet-sync: all]` every repo's ci.yml changed  ", PROSE)}\r\n\r\n   \r\n`.replace(
+        /\n/g,
+        "\r\n",
+      ),
       expected: FLEET,
     },
     {
       reason: "git trailers GitHub appends on squash follow the body as before",
-      body: message("[fleet-sync]", PROSE, TRAILERS),
+      body: message("[fleet-sync: all] every repo's ci.yml changed", PROSE, TRAILERS),
       expected: FLEET,
     },
     {
       reason: "a Conventional Commits footer in the body is prose",
       body: message("[fleet-sync: o/r]", PROSE, "BREAKING CHANGE: the asset is renamed"),
-      expected: { kind: "fleet-sync", repos: ["o/r"] },
+      expected: { kind: "fleet-sync", scope: ["o/r"] },
     },
     {
       reason: "a block at the bottom of the body (the retired position) fails, naming the position",
@@ -138,7 +173,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a valid block AND a marker in prose: the misplaced one still fails",
-      body: message("[fleet-sync]", "See [fleet-sync] above."),
+      body: message("[fleet-sync: public]", "See [fleet-sync] above."),
       expected: misplaced("See [fleet-sync] above."),
     },
     {
@@ -191,7 +226,9 @@ describe("parseDirectives", () => {
       body: message("[fleet-sync: `o/r`, o/s]", PROSE),
       expected: {
         kind: "error",
-        errors: ['"[fleet-sync: `o/r`, o/s]" lists entries that are not owner/name slugs: `o/r`'],
+        errors: [
+          '"[fleet-sync: `o/r`, o/s]" lists entries that are not owner/name slugs, public, or private: `o/r`',
+        ],
       },
     },
     {
@@ -201,7 +238,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a valid block AND a backticked marker in a fenced example: the fenced one fails",
-      body: message("[fleet-sync]", PROSE, "```text\n`[fleet-sync: o/r]`\n```"),
+      body: message("[fleet-sync: public]", PROSE, "```text\n`[fleet-sync: o/r]`\n```"),
       expected: misplaced("`[fleet-sync: o/r]`"),
     },
     {
@@ -227,7 +264,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a multi-line block repeating the keyword fails",
-      body: message("[fleet-sync]\n`[fleet-sync: o/r]`", PROSE),
+      body: message("[fleet-sync: public]\n`[fleet-sync: o/r]`", PROSE),
       expected: {
         kind: "error",
         errors: ["duplicate directive [fleet-sync]: one line per keyword"],
@@ -239,7 +276,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync:]" has an empty scope: write [fleet-sync] for the whole fleet, or list owner/name slugs',
+          '"[fleet-sync:]" has an empty scope: write [fleet-sync: public], [fleet-sync: private], owner/name slugs, or [fleet-sync: all] <justification>',
         ],
       },
     },
@@ -252,12 +289,12 @@ describe("parseDirectives", () => {
       },
     },
     {
-      reason: "all mixed with slugs fails",
-      body: message("[fleet-sync: all, o/r]", PROSE),
+      reason: "all mixed with anything fails, justification or not",
+      body: message("[fleet-sync: all, public] every repo changed", PROSE),
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: all, o/r]" mixes "all" with slugs: write [fleet-sync] or the slugs alone',
+          '"[fleet-sync: all, public] every repo changed" mixes "all" with other entries: write [fleet-sync: all] <justification> alone, or public, private, and slugs',
         ],
       },
     },
@@ -267,7 +304,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: o/r, just-a-name, o/r/extra]" lists entries that are not owner/name slugs: just-a-name, o/r/extra',
+          '"[fleet-sync: o/r, just-a-name, o/r/extra]" lists entries that are not owner/name slugs, public, or private: just-a-name, o/r/extra',
         ],
       },
     },
@@ -279,7 +316,7 @@ describe("parseDirectives", () => {
         errors: [
           'unknown directive keyword in "[fleet-synk]"; known: fleet-sync',
           '"`[fleet-sync:]" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
-          '"`[fleet-sync:]`" has an empty scope: write [fleet-sync] for the whole fleet, or list owner/name slugs',
+          '"`[fleet-sync:]`" has an empty scope: write [fleet-sync: public], [fleet-sync: private], owner/name slugs, or [fleet-sync: all] <justification>',
         ],
       },
     },
@@ -325,9 +362,12 @@ describe("main", () => {
   const prose1 = commit(message(PROSE));
   const prose2 = commit(message(PROSE));
   const listBA = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
-  const whole = commit(message("`[fleet-sync]`", PROSE));
+  const whole = commit(message("`[fleet-sync: all]` every repo's ci.yml changed", PROSE));
   const bottom = commit(message(PROSE, "[fleet-sync]"));
   const prose3 = commit(message(PROSE));
+  const pub = commit(message("[fleet-sync: public]", PROSE));
+  const mixed = commit(message("`[fleet-sync: private, Vivswan/b]`", PROSE));
+  const bare = commit(message("[fleet-sync]", PROSE));
 
   /** A clone whose origin carries main plus, when `stamp` is given, a
    *  build branch of one orphan commit stamped like publish.ts stamps. */
@@ -357,6 +397,8 @@ describe("main", () => {
   const publishedSeed = cloneWithBuild("published-seed", seed);
   const publishedProse2 = cloneWithBuild("published-prose2", prose2);
   const publishedListBA = cloneWithBuild("published-list-ba", listBA);
+  const publishedProse3 = cloneWithBuild("published-prose3", prose3);
+  const publishedMixed = cloneWithBuild("published-mixed", mixed);
 
   function run(
     cwd: string,
@@ -419,7 +461,7 @@ describe("main", () => {
       ),
     },
     {
-      reason: "a whole-fleet directive beside a list: all wins",
+      reason: "a justified all-scope beside a list: all wins",
       cwd: publishedProse2,
       sha: whole,
       output: "armed=true\nrepos=all\n",
@@ -429,23 +471,45 @@ describe("main", () => {
         syncing(prose2, whole, "all"),
       ),
     },
+    {
+      reason: "visibility tokens union with a slug list and pass through as written",
+      cwd: publishedProse3,
+      sha: mixed,
+      output: "armed=true\nrepos=public,private,vivswan/b\n",
+      stdout: lines(
+        directive(pub, "public"),
+        directive(mixed, "private,vivswan/b"),
+        syncing(prose3, mixed, "public,private,vivswan/b"),
+      ),
+    },
   ])("$reason", ({ cwd, sha, output, stdout }) => {
     const result = run(cwd, sha, git(cwd, ["rev-parse", `${sha}~1`]));
     expect(result).toEqual({ exitCode: 0, output, stdout, stderr: "" });
   });
 
-  test("a misplaced block on any commit in the range turns the leg red, naming that commit; nothing is armed", () => {
-    const result = run(publishedListBA, prose3, bottom);
-    expect(result).toEqual({
-      exitCode: 1,
-      output: "",
+  test.each([
+    {
+      reason: "a misplaced block",
+      cwd: publishedListBA,
+      sha: prose3,
       stdout: lines(
         directive(whole, "all"),
         `::error::${short(bottom)}: misplaced directive "[fleet-sync]": ${POSITION}`,
       ),
-      stderr: "",
-    });
-  });
+    },
+    {
+      reason: "an unjustified all-scope (the retired bare form)",
+      cwd: publishedMixed,
+      sha: bare,
+      stdout: lines(`::error::${short(bare)}: "[fleet-sync]": ${NEEDS_REASON}`),
+    },
+  ])(
+    "$reason on any commit in the range turns the leg red, naming that commit; nothing is armed",
+    ({ cwd, sha, stdout }) => {
+      const result = run(cwd, sha, git(cwd, ["rev-parse", `${sha}~1`]));
+      expect(result).toEqual({ exitCode: 1, output: "", stdout, stderr: "" });
+    },
+  );
 
   test.each([
     {
@@ -456,7 +520,15 @@ describe("main", () => {
       stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
     },
     {
-      reason: "whole fleet: armed=true, repos=all",
+      reason: "public: armed=true, repos=public",
+      sha: pub,
+      exitCode: 0,
+      output: "armed=true\nrepos=public\n",
+      stdout: (base: string, sha: string) =>
+        lines(pushAlone(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
+    },
+    {
+      reason: "the justified all-scope: armed=true, repos=all",
       sha: whole,
       exitCode: 0,
       output: "armed=true\nrepos=all\n",

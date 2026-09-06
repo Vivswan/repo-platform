@@ -10,6 +10,7 @@ import { z } from "zod";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
+import { classifyEntry, type ScopeSource } from "./sync_scope.ts";
 
 /** Hard deadline for every fleet network subprocess (the gh api calls and
  * the curl push probe). Single calls answer in seconds; the slowest is
@@ -113,11 +114,11 @@ const dispatchEvent = z.object({
  * event payload's dispatch input - post-green's called sync passes its
  * scope that way (public text off a main commit), and so do the test
  * harnesses and local runs. When `owner` is given, a bare name gets it
- * prefixed - except the literal "all", the explicit whole-fleet scope,
- * which is never a repo name. The typed dispatch input may be a private
- * slug, so IT must never ride in as step env: the runner prints step env
- * values into the public log group; the event payload on the runner's
- * disk is not logged. */
+ * prefixed - except the scope tokens (all, public, private), which are
+ * never repo names. The typed dispatch input may be a private slug, so IT
+ * must never ride in as step env: the runner prints step env values into
+ * the public log group; the event payload on the runner's disk is not
+ * logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
   if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {
@@ -135,12 +136,20 @@ export function readDispatchRepo(owner?: string): string {
     .split(",")
     .map((entry) => entry.trim())
     .map((entry) =>
-      owner !== undefined && entry !== "" && entry.toLowerCase() !== "all" && !entry.includes("/")
+      owner !== undefined &&
+      entry !== "" &&
+      classifyEntry(entry) === "invalid" &&
+      !entry.includes("/")
         ? `${owner}/${entry}`
         : entry,
     )
     .join(",")
     .toLowerCase();
+}
+
+/** Which input readDispatchRepo read: the workflow_call scope rides in as ONLY_REPO. */
+export function scopeSource(): ScopeSource {
+  return env("ONLY_REPO") === "" ? "dispatch" : "call";
 }
 
 /** Run one selection-pipeline stage, teeing its stdout to `outFile`. A

@@ -3,14 +3,18 @@
 // (a squash merge writes subject, blank line, PR body), one bracketed
 // directive per line, each optionally fenced in one pair of backticks -
 //
-//   [fleet-sync]                      sync the whole fleet now
-//   `[fleet-sync: owner/a, owner/b]`  sync those repos now
+//   `[fleet-sync: public]`                     the public repos now (the default choice)
+//   [fleet-sync: public, owner/a]              plus a public repo by slug
+//   [fleet-sync: private]                      the private repos (paid Actions minutes)
+//   [fleet-sync: all] every repo's ci.yml changed   everything; the justification is required
 //
 // Squash merges carry the body verbatim (settings-override.yml pins
 // PR_BODY), so the leg reads git alone: every commit in judged_range.ts's
-// range, scopes unioned (any `all` wins). A malformed or misplaced block on
-// any body fails the leg, naming the commit. Env: judged_range.ts's, plus
-// GITHUB_OUTPUT (armed, repos).
+// range, scopes unioned (any `all` wins). The tokens pass through as
+// written (sync_scope.ts is the grammar; the plan expands them and refuses
+// a private repo's slug - the leg has no visibility source). A malformed or
+// misplaced block on any body fails the leg, naming the commit. Env:
+// judged_range.ts's, plus GITHUB_OUTPUT (armed, repos).
 
 import { fail, notice, setOutput } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -21,18 +25,21 @@ import {
   rangeLabel,
   resolveBase,
 } from "./judged_range.ts";
-import { isSlug } from "./repos_registry.ts";
+import { classifyEntry } from "./sync_scope.ts";
 
 export type Directives =
   | { kind: "none" }
-  | { kind: "fleet-sync"; repos: string[] }
+  | { kind: "fleet-sync"; scope: "all" | string[] }
   | { kind: "error"; errors: string[] };
 
 const KEYWORD = "fleet-sync";
-// A block line as written: brackets, any backticks around them. Whether
-// the backticks are one balanced pair is judged per line by unwrap().
-const BLOCK_LINE = /^`*\[[^[\]]*\]`*$/;
+// A block line as written: brackets, any backticks around them, then an
+// optional space-separated justification. Whether the backticks are one
+// balanced pair is judged per line by unwrap().
+const BLOCK_LINE = /^(`*\[[^[\]]*\]`*)(?:\s+(\S.*))?$/;
 const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
+const NEEDS_REASON =
+  "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
@@ -89,9 +96,10 @@ export function parseDirectives(body: string): Directives {
   if (block === null) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
 
   const seen = new Set<string>();
-  let repos: string[] = [];
+  let scope: "all" | string[] = [];
   for (const line of block) {
-    const directive = unwrap(line);
+    const [, bracketed, reason = ""] = BLOCK_LINE.exec(line) as RegExpExecArray;
+    const directive = unwrap(bracketed);
     if (directive === null) {
       errors.push(
         `"${line}" has bad backtick fencing: wrap the whole directive in one pair, \`[keyword]\`, or none`,
@@ -113,15 +121,18 @@ export function parseDirectives(body: string): Directives {
       continue;
     }
     seen.add(keyword);
-    const scope = (match[2] ?? "").trim();
-    if (match[2] !== undefined && scope === "") {
+    const value = (match[2] ?? "").trim();
+    if (match[2] === undefined) {
+      errors.push(`"${line}": ${NEEDS_REASON}`);
+      continue;
+    }
+    if (value === "") {
       errors.push(
-        `"${line}" has an empty scope: write [${keyword}] for the whole fleet, or list owner/name slugs`,
+        `"${line}" has an empty scope: write [${keyword}: public], [${keyword}: private], owner/name slugs, or [${keyword}: all] <justification>`,
       );
       continue;
     }
-    if (scope === "") continue;
-    const entries = scope.split(",").map((entry) => entry.trim());
+    const entries = value.split(",").map((entry) => entry.trim());
     if (entries.includes("")) {
       errors.push(`"${line}" has an empty entry in its list`);
       continue;
@@ -129,19 +140,33 @@ export function parseDirectives(body: string): Directives {
     const folded = [...new Set(entries.map((entry) => entry.toLowerCase()))];
     if (folded.includes("all")) {
       if (folded.length > 1) {
-        errors.push(`"${line}" mixes "all" with slugs: write [${keyword}] or the slugs alone`);
+        errors.push(
+          `"${line}" mixes "all" with other entries: write [${keyword}: all] <justification> alone, or public, private, and slugs`,
+        );
+      } else if (reason === "") {
+        errors.push(`"${line}": ${NEEDS_REASON}`);
+      } else {
+        scope = "all";
       }
       continue;
     }
-    const bad = entries.filter((entry) => !isSlug(entry));
-    if (bad.length > 0) {
-      errors.push(`"${line}" lists entries that are not owner/name slugs: ${bad.join(", ")}`);
+    if (reason !== "") {
+      errors.push(
+        `"${line}" carries text after the directive: only [${keyword}: all] takes a justification`,
+      );
       continue;
     }
-    repos = folded;
+    const bad = entries.filter((entry) => classifyEntry(entry) === "invalid");
+    if (bad.length > 0) {
+      errors.push(
+        `"${line}" lists entries that are not owner/name slugs, public, or private: ${bad.join(", ")}`,
+      );
+      continue;
+    }
+    scope = folded;
   }
   if (errors.length > 0) return { kind: "error", errors };
-  return { kind: "fleet-sync", repos };
+  return { kind: "fleet-sync", scope };
 }
 
 function main(): number {
@@ -172,9 +197,9 @@ function main(): number {
       continue;
     }
     armed = true;
-    if (parsed.repos.length === 0) all = true;
-    for (const repo of parsed.repos) repos.add(repo);
-    const scope = parsed.repos.length === 0 ? "all" : parsed.repos.join(",");
+    if (parsed.scope === "all") all = true;
+    else for (const entry of parsed.scope) repos.add(entry);
+    const scope = parsed.scope === "all" ? "all" : parsed.scope.join(",");
     notice(`fleet-sync directive on ${commit.slice(0, 12)}: ${scope}`);
   }
   if (errors.length > 0) return fail(errors);

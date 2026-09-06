@@ -72,26 +72,35 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release (release-ple
 The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else, each line optionally fenced in one pair of backticks so it renders as code. Squash merges put the body right under the subject verbatim, so the merged commit carries the block and post-green reads it from git alone.
 
 ```text
-`[fleet-sync: Vivswan/copilot-env, Vivswan/litellm-vscode-chat]`
+`[fleet-sync: public]`
 
 ## How
 
 ...
 ```
 
-- `[fleet-sync]` or `[fleet-sync: all]`: the whole fleet, the same run the weekly cron performs. `[fleet-sync: owner/a, owner/b]`: those repos only. Case does not matter, and `` `[fleet-sync]` `` reads the same as `[fleet-sync]`.
+| Scope line | Syncs now | Notes |
+| --- | --- | --- |
+| `[fleet-sync: public]` | every public managed repo | the default choice |
+| `[fleet-sync: private]` | the private ones | private repos burn paid Actions minutes, so the weekly sync normally carries them |
+| `[fleet-sync: public, owner/a, owner/b]` | the union of tokens and public repo slugs | slugs name PUBLIC repos only |
+| `[fleet-sync: all] <justification>` | the whole fleet, the same run the weekly cron performs | the reason is required, on the same line, and generic |
+
+- Case does not matter, and `` `[fleet-sync: public]` `` reads the same as `[fleet-sync: public]`. The bare `[fleet-sync]` form is retired with no compatibility: it is the all-scope without its justification and turns the leg red.
+- The justification says what changed and why every repo needs it now, naming no private repository: `[fleet-sync: all] the all-green gate action changed for every ci.yml`.
+- The leg passes the tokens through as written; sync-repos.yml's plan, the one place that knows each repo's visibility, expands `public` and `private` against discovery and refuses a scope that names a private repo by slug (counts only, never the slug): `sync-fleet` goes red and nothing syncs. [fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts) owns the grammar for the leg and both writers' plans.
 - A body whose first paragraph is not a block carries no directives; git trailers GitHub appends on squash (`Co-authored-by:`) change nothing.
 - The parser scans the WHOLE merged message, so a PR body must not quote a block anywhere else, not even inside a fenced code example: write examples with a placeholder such as `[keyword]`.
-- A `[fleet-sync` or a bracket-only paragraph anywhere else in the body or in the PR title (the squash subject is the title), backtick fencing that is not one pair, an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. A block at the BOTTOM of the body, where the retired grammar put it, is the misplaced case and goes red the same way. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
-- The block is public text on `main`. Naming an undisclosed private repository there discloses it; sync those by dispatch.
-- The leg reads every commit since the last published build, so an opt-in survives its own CI run's eviction. Three PRs merged within one minute, `[fleet-sync]` on the first only, and only the third's run reaches post-green:
+- A `[fleet-sync` or a bracket-only paragraph anywhere else in the body or in the PR title (the squash subject is the title), backtick fencing that is not one pair, an unknown or repeated keyword, an empty scope, an entry that is neither a slug nor a token, an all-scope without its justification, or a justification on any other scope turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. A block at the BOTTOM of the body, where the retired grammar put it, is the misplaced case and goes red the same way. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
+- The block is public text on `main`, and so is every log line that echoes it: private repositories appear there only as the word `private`; the plans print them by their masked hint.
+- The leg reads every commit since the last published build, so an opt-in survives its own CI run's eviction. Three PRs merged within one minute, `[fleet-sync: public]` on the first only, and only the third's run reaches post-green:
 
 ```text
-::notice::fleet-sync directive on <first merge>: all
-::notice::<last published build>..<third merge> opted in: syncing all now
+::notice::fleet-sync directive on <first merge>: public
+::notice::<last published build>..<third merge> opted in: syncing public now
 ```
 
-- Several opt-ins in the range union: any `all` wins, otherwise the repo lists combine in commit order. A red body anywhere in the range turns the leg red, naming its commit, and nothing syncs.
+- Several opt-ins in the range union: any `all` wins, otherwise the tokens and repo lists combine in commit order. A red body anywhere in the range turns the leg red, naming its commit, and nothing syncs.
 - Lost only when no later green run reaches post-green before the crons, or when the first-publish fallback reads the push alone: the weekly sync cron heals the sync leg and the nightly settings cron heals the settings leg.
 
 ## Residuals, stated

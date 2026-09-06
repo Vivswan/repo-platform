@@ -16,10 +16,10 @@
 // GITHUB_EVENT_PATH supplies the repo dispatch input (a non-empty
 // ONLY_REPO env overrides it - the test harness and local runs use that).
 //
-// Recovery scope contract: the repo input scopes the run - an owner/name
-// slug selects one repo, the literal "all" is an explicit whole-fleet
-// scope (same selection as an empty repo, and never ambiguous: real slugs
-// are always owner/name). RECOVER=recopy requires one of the two, because
+// Scope contract (sync_scope.ts owns the grammar): owner/name slugs, the
+// visibility tokens public/private, or the literal "all" - an explicit
+// whole-fleet scope (same selection as an empty repo, and never ambiguous:
+// real slugs are always owner/name). RECOVER=recopy requires a scope, because
 // a recovery re-render clobbers local edits in template-managed files and
 // must never fan out across the fleet by accident: an empty repo is
 // rejected, so a fat-fingered recover input on a plain dispatch cannot
@@ -38,33 +38,41 @@ import {
   pushProbeSkipNotice,
   readDispatchRepo,
   runStage,
+  scopeSource,
   scrubSlug,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
-import { parseEnriched } from "./redact.ts";
+import { parseDiscoveredList, parseEnriched } from "./redact.ts";
+import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 
-let onlyRepo = readDispatchRepo();
+const scopeInput = readDispatchRepo();
 
 // Recovery scope guard (full contract in the header above): recopy needs
 // an explicit repo scope, and "all" is the deliberate whole-fleet form.
-if (env("RECOVER") === "recopy" && onlyRepo === "") {
+if (env("RECOVER") === "recopy" && scopeInput === "") {
   error(
     "recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository, or repo=all to fan the recovery out across every managed repo.",
   );
   process.exit(1);
 }
 
-if (onlyRepo === "all") onlyRepo = "";
+const scope = parseScope(scopeInput);
+if (scope.kind === "error") {
+  error(scope.message);
+  process.exit(1);
+}
 
+// The whole selected fleet, then the scope applied to the enriched rows:
+// the visibility tokens need every row, and a slug must name a selected
+// repo or the run fails (below).
 runStage(
   [
     "bun",
     ".github/scripts/fleet/repos_registry.ts",
     "select",
-    ...(onlyRepo === "" ? [] : ["--repo", onlyRepo]),
     "--discovered",
     join(runnerTemp, "discovered.json"),
   ],
@@ -93,9 +101,34 @@ const enriched = parseEnriched(
   "select_sync_repos: enriched rows",
 );
 
+// Visibility as discovery reported it, fail-closed like the enricher: a
+// selected repo discovery did not list counts as private.
+const discovered = parseDiscoveredList(
+  parseJson(
+    readFileSync(join(runnerTemp, "discovered.json"), "utf-8"),
+    "select_sync_repos: discovered list",
+  ),
+);
+if (discovered === null) {
+  error("select_sync_repos: the discovered list must be a JSON array of {repo, private} objects");
+  process.exit(1);
+}
+const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
+const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
+const refusal = scopeRefusal(
+  scope,
+  new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)])),
+  scopeSource(),
+);
+if (refusal !== null) {
+  error(refusal);
+  process.exit(1);
+}
+
 const repos: Record<string, unknown>[] = [];
 for (const row of enriched.rows) {
   const { repo: slug, display } = row;
+  if (!scopeSelects(scope, slug, isPrivate(slug))) continue;
   const probeCode = pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
     notice(pushProbeSkipNotice(display, probeCode));

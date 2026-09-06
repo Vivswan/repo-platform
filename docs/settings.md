@@ -39,7 +39,7 @@ One implementation ([merge_settings_layers.ts](../.github/scripts/fleet/merge_se
 
 | Entry | Effect |
 |---|---|
-| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | when a settings input changed since the last published green main, every target is applied - [fleet/settings_inputs_changed.ts](../.github/scripts/fleet/settings_inputs_changed.ts) owns the path list; after a `[fleet-sync]` opt-in synced repos, those repos are applied in the same run |
+| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | when a settings input changed since the last published green main, every target is applied - [fleet/settings_inputs_changed.ts](../.github/scripts/fleet/settings_inputs_changed.ts) owns the path list; after a fleet-sync directive synced repos, those repos are applied in the same run |
 | Nightly cron | heals out-of-band drift |
 | Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), a comma list of them, or `all` - an entry naming no managed repo fails the run, a repo without a `.repo-platform.yml` is skipped with a notice |
 

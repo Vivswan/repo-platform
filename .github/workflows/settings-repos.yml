@@ -33,7 +33,7 @@ on:
       repo:
         description: >-
           owner/name to heal (or a bare name, same owner), a
-          comma-separated list of them, or the literal "all" - same as
+          comma-separated list of them, public, private, or the literal "all" - same as
           leaving it empty, every settings target
         required: false
         type: string
@@ -54,7 +54,9 @@ on:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs
+          "all", or a comma-separated list of owner/name slugs and the
+          visibility tokens public and private (fleet/sync_scope.ts); a
+          private repo may appear only under its token here
         required: true
         type: string
       sha:
