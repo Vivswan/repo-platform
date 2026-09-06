@@ -10,6 +10,7 @@ import {
   type Finding,
   HARD,
   isGenerated,
+  isLiteralLine,
   isManaged,
   isUnbreakable,
   judgeFile,
@@ -314,6 +315,39 @@ describe("judgeFile line width", () => {
     ],
   ])("%s", (_name, kind, text, expected) => {
     expect(judgeFile("f", kind, text)).toEqual(expected.map((row) => widthFinding(kind, row)));
+  });
+});
+
+describe("isLiteralLine", () => {
+  test("pathological inputs finish in linear time (the regex form took seconds at 100k)", () => {
+    const cases: [string, boolean][] = [
+      [`\`\`${" ".repeat(100_000)}x`, false],
+      [`\`\`${" ".repeat(100_000)}`, true],
+      ["`".repeat(100_000), false],
+      [`const x = "${"a ".repeat(50_000)}";${" ".repeat(50_000)}`, true],
+    ];
+    const started = performance.now();
+    expect(cases.map(([line]) => isLiteralLine(line))).toEqual(cases.map(([, ok]) => ok));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  test.each<[string, boolean]>([
+    ['export const x: Readonly<T[]> = "v";', true],
+    ["let x = `v`,", true],
+    ["  return /re/gi", true],
+    ["key: 'v')]", true],
+    ['obj.key += "v"', true],
+    ["'a' + 'b'", false],
+    ['const x = "unclosed', false],
+    ['rb"v"', true],
+    ['rbx"v"', false],
+    ["r`v`", false],
+    ["//", false],
+    ["/a\\/b/", true],
+    ['"esc\\"aped"', true],
+    ['const x = "v" x', false],
+  ])("%s -> %s", (line, ok) => {
+    expect(isLiteralLine(line)).toBe(ok);
   });
 });
 

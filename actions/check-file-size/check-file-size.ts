@@ -167,11 +167,100 @@ function generatedRegionMask(lines: string[]): boolean[] {
 /** A line that is one string or regex literal, optionally assigned,
  *  returned, keyed, or continued with `+`: wrapping it means splitting the
  *  literal, which the fleet leaves alone. Exempt from the WARN width tier
- *  only; the hard tier still catches it. */
-const LITERAL_LINE =
-  /^\s*(?:(?:export\s+)?(?:const|let|var)\s+\w+(?:\s*:\s*[\w<>[\]|]+)?\s*=\s*|return\s+|[\w$.'"-]+\s*\+?[:=]\s*)?(?:[rbufRBUF]{0,2}"(?:[^"\\]|\\.)*"|[rbufRBUF]{0,2}'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\]|\\.)+\/[dgimsuvy]*)\s*[,;)\]+]*\s*$/;
+ *  only; the hard tier still catches it. A hand scanner, linear in the
+ *  line, where a regex over the same grammar backtracks quadratically. */
 export function isLiteralLine(line: string): boolean {
-  return LITERAL_LINE.test(line);
+  const start = skipWhile(line, 0, isSpace);
+  for (const prefix of [declarationPrefix, returnPrefix, keyPrefix, (_: string, i: number) => i]) {
+    const at = prefix(line, start);
+    if (at === -1) continue;
+    const end = scanLiteral(line, at);
+    if (end === -1) continue;
+    const rest = skipWhile(
+      line,
+      skipWhile(line, skipWhile(line, end, isSpace), isTrailer),
+      isSpace,
+    );
+    if (rest === line.length) return true;
+  }
+  return false;
+}
+
+const isSpace = (c: string): boolean => /\s/.test(c);
+const isWord = (c: string): boolean => /\w/.test(c);
+const isKeyChar = (c: string): boolean => /[\w$.'"-]/.test(c);
+const isTypeChar = (c: string): boolean => /[\w<>[\]|]/.test(c);
+const isTrailer = (c: string): boolean => ",;)]+".includes(c);
+const isStringPrefix = (c: string): boolean => "rbufRBUF".includes(c);
+const isRegexFlag = (c: string): boolean => "dgimsuvy".includes(c);
+
+function skipWhile(line: string, i: number, pred: (c: string) => boolean): number {
+  let j = i;
+  while (j < line.length && pred(line[j])) j++;
+  return j;
+}
+
+/** `[export] const|let|var name [: Type] = `; -1 when absent. */
+function declarationPrefix(line: string, i: number): number {
+  let j = i;
+  if (line.startsWith("export", j) && isSpace(line[j + 6] ?? ""))
+    j = skipWhile(line, j + 6, isSpace);
+  const keyword = ["const", "let", "var"].find((k) => line.startsWith(k, j));
+  if (keyword === undefined || !isSpace(line[j + keyword.length] ?? "")) return -1;
+  j = skipWhile(line, j + keyword.length, isSpace);
+  const name = skipWhile(line, j, isWord);
+  if (name === j) return -1;
+  j = name;
+  const colon = skipWhile(line, j, isSpace);
+  if (line[colon] === ":") {
+    const type = skipWhile(line, skipWhile(line, colon + 1, isSpace), isTypeChar);
+    if (isTypeChar(line[type - 1] ?? "")) j = type;
+  }
+  j = skipWhile(line, j, isSpace);
+  if (line[j] !== "=") return -1;
+  return skipWhile(line, j + 1, isSpace);
+}
+
+/** `return `; -1 when absent. */
+function returnPrefix(line: string, i: number): number {
+  if (!line.startsWith("return", i) || !isSpace(line[i + 6] ?? "")) return -1;
+  return skipWhile(line, i + 6, isSpace);
+}
+
+/** `key: ` / `key = ` / `key += `; -1 when absent. */
+function keyPrefix(line: string, i: number): number {
+  let j = skipWhile(line, i, isKeyChar);
+  if (j === i) return -1;
+  j = skipWhile(line, j, isSpace);
+  if (line[j] === "+") j++;
+  if (line[j] !== ":" && line[j] !== "=") return -1;
+  return skipWhile(line, j + 1, isSpace);
+}
+
+/** The end of a string (with an optional r/b/u/f prefix), template, or
+ *  regex literal starting at `i`; -1 when none starts there. */
+function scanLiteral(line: string, i: number): number {
+  let j = i;
+  while (j < i + 2 && isStringPrefix(line[j] ?? "")) j++;
+  const quote = line[j];
+  if (quote === '"' || quote === "'" || (quote === "`" && j === i)) {
+    return scanDelimited(line, j + 1, quote, 0);
+  }
+  if (line[i] !== "/") return -1;
+  const close = scanDelimited(line, i + 1, "/", 1);
+  return close === -1 ? -1 : skipWhile(line, close, isRegexFlag);
+}
+
+/** The index after the closing delimiter, honouring backslash escapes and
+ *  requiring at least `minBody` body characters; -1 when unclosed. */
+function scanDelimited(line: string, from: number, close: string, minBody: number): number {
+  let j = from;
+  while (j < line.length) {
+    if (line[j] === "\\") j += 2;
+    else if (line[j] === close) return j - from >= minBody ? j + 1 : -1;
+    else j++;
+  }
+  return -1;
 }
 
 interface FindingBase {
