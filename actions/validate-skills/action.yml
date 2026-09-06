@@ -28,19 +28,11 @@ runs:
   steps:
     - name: Check for a bun matching the action's pin
       id: bun
-      shell: bash --noprofile --norc -p -eo pipefail {0}
-      env:
-        PIN_FILE: ${{ github.action_path }}/.bun-version
+      shell: bash
       run: |
-        pin="$(<"$PIN_FILE")"
-        path="$(command -v bun || true)"
-        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
-        have=""
-        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
-        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
+        pin="$(cat "${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Skipped only when the caller's bun already IS the pinned version
     # (reuse then just skips a second network fetch): the action's scripts
@@ -64,27 +56,15 @@ runs:
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
-    # Re-resolved after the setup so the recorded path is the bun it
-    # installed; every later step runs that path, never bun through PATH.
+    # Recorded once after the setup: later steps run this path, never `bun`
+    # through PATH, where a later setup-bun can put another bun first.
     - name: Resolve the action's bun
       id: action-bun
-      if: always()
-      shell: bash --noprofile --norc -p -eo pipefail {0}
-      env:
-        PIN_FILE: ${{ github.action_path }}/.bun-version
-      run: |
-        pin="$(<"$PIN_FILE")"
-        path="$(command -v bun || true)"
-        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
-        have=""
-        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
-        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
 
     - name: Validate skills
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         SKILLS_DIR: ${{ inputs.skills-dir }}
         PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}

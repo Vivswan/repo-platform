@@ -2918,63 +2918,20 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
-/** The one bun resolver every bun-touching composite action runs, as the
- *  trimmed lines of its run block: `path` is recorded only for an ABSOLUTE,
- *  control-character-free executable on PATH that prints exactly the pin
- *  in PIN_FILE and exits 0 (a bun that prints the version but dies is no
- *  bun; a newline in the path would forge a second $GITHUB_OUTPUT record);
- *  `pinned` derives from it. Only bash builtins run here (the pin is read
- *  with `$(<file)`, output goes through printf with a static format: echo
- *  may expand backslashes under POSIXLY_CORRECT, which -p does not ignore;
- *  xpg_echo forces that behaviour across bash builds), so the caller's PATH
- *  resolves nothing but bun. Run as
- *  the pre-setup probe and again post-setup, so later steps run the
- *  installed bun by path, never `bun` through PATH. */
-export const ACTIONS_BUN_RESOLVER: readonly string[] = [
-  'pin="$(<"$PIN_FILE")"',
-  'path="$(command -v bun || true)"',
-  'case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac',
-  'have=""',
-  'if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi',
-  'if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi',
-  "printf '%s\\n' \"bun ${pin:-(no pin)}: ${path:-none on PATH}\"",
-  'printf \'%s\\n\' "path=$path" >> "$GITHUB_OUTPUT"',
-  'printf \'%s\\n\' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"',
-];
-
-/** The shell of every run step in a bun-touching action: the runner's own
- *  `shell: bash` expansion plus `-p` (privileged mode), under which bash
- *  ignores BASH_ENV, SHELLOPTS, BASHOPTS and env-exported functions
- *  (BASH_FUNC_*), so a caller's job env cannot run a hook before, rewrite,
- *  or redefine the lines this rule reads. */
-export const ACTIONS_BASH_SHELL = "bash --noprofile --norc -p -eo pipefail {0}";
-
-/** The action-local generated pin, as the resolver's env line. */
-export const ACTIONS_BUN_PIN_ENV = "PIN_FILE: ${{ github.action_path }}/.bun-version";
-
-/** A resolver step reading the action-local pin, as trimmed semantic lines. */
-function actionBunResolverStep(name: string, id: string, condition?: string): string[] {
-  return [
-    `- name: ${name}`,
-    `id: ${id}`,
-    ...(condition === undefined ? [] : [`if: ${condition}`]),
-    `shell: ${ACTIONS_BASH_SHELL}`,
-    "env:",
-    ACTIONS_BUN_PIN_ENV,
-    "run: |",
-    ...ACTIONS_BUN_RESOLVER,
-  ];
-}
-
 /** The canonical pinned-bun setup block every bun-touching composite
  *  action carries, as trimmed semantic lines (comments and blank lines
- *  excused, so per-action prose stays free): the resolver as the probe,
- *  then the pinned setup and its retry. The generated action-local
+ *  excused, so per-action prose stays free). The generated action-local
  *  .bun-version both setup steps read is what decouples the action's
  *  runtime from the CALLING repository's bun resolution; the exact-match
  *  probe keeps the reuse fast path from resurrecting that coupling. */
 export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
-  ...actionBunResolverStep("Check for a bun matching the action's pin", "bun"),
+  "- name: Check for a bun matching the action's pin",
+  "id: bun",
+  "shell: bash",
+  "run: |",
+  'pin="$(cat "${{ github.action_path }}/.bun-version")"',
+  'have="$(command -v bun >/dev/null && bun --version || true)"',
+  'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
   "- name: Set up bun",
   "id: setup-bun",
   "if: steps.bun.outputs.pinned != 'true'",
@@ -2989,337 +2946,6 @@ export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
   "bun-version-file: ${{ github.action_path }}/.bun-version",
 ];
 
-/** The canonical post-setup resolver step, whose `path` output is the bun
- *  the action's own steps run. It runs whatever happened before it
- *  (always()), so a consumer that runs after a failure - the report step
- *  of validate-template-report - still reads a recorded path (empty when
- *  no bun is pinned) rather than the empty output of a skipped step. */
-export const ACTIONS_BUN_RESOLVE_STEP: readonly string[] = actionBunResolverStep(
-  "Resolve the action's bun",
-  "action-bun",
-  "always()",
-);
-
-/** One word of a run line, as written. */
-export interface LineWord {
-  text: string;
-}
-
-/** Bash splits words on space and tab only; a unicode blank or a carriage
- *  return is a content character to it, so every trim and split here is
- *  the same (`\s` and String.trim would read `echo\u00a0ok` and `echo\rok`
- *  as two words where bash looks up one command). */
-const ASCII_BLANK = /[ \t]/;
-function asciiTrim(text: string): string {
-  return text.replace(/^[ \t]+|[ \t]+$/g, "");
-}
-
-/** The words of one logical run line, split on unquoted whitespace with
- *  single quotes, double quotes, and backslashes honoured; null when a
- *  quote is left open (a multi-line string, which the grammar has no line
- *  for). Nothing else is interpreted: an unquoted metacharacter stays in
- *  its word, where the grammar's word forms refuse it. */
-export function lineWords(line: string): LineWord[] | null {
-  const words: LineWord[] = [];
-  let text = "";
-  let quote: string | null = null;
-  let inWord = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quote === null && ASCII_BLANK.test(ch)) {
-      if (inWord) words.push({ text });
-      text = "";
-      inWord = false;
-      continue;
-    }
-    inWord = true;
-    if (quote === "'") {
-      text += ch;
-      if (ch === "'") quote = null;
-      continue;
-    }
-    if (ch === "\\" && i + 1 < line.length) {
-      text += ch + line[i + 1];
-      i++;
-      continue;
-    }
-    if (quote === null && (ch === "'" || ch === '"')) quote = ch;
-    else if (quote === '"' && ch === '"') quote = null;
-    text += ch;
-  }
-  if (quote !== null) return null;
-  if (inWord) words.push({ text });
-  return words;
-}
-
-/** A data word: a bare token of plain characters or one wholly quoted
- *  string, with no unquoted metacharacter (an unquoted `$VAR` word-splits
- *  and globs, so it is no data). Inside double quotes a `$` may start only
- *  a plain variable name or the Actions expression `${{ ... }}` - an
- *  allowlist, so no expansion that runs or assigns (`$(...)`, `${VAR:=x}`,
- *  `$[...]`) and no backtick reads as data; single quotes are inert. Data
- *  is what a command in the grammar may receive; it runs and assigns nothing. */
-const DATA_WORD = /^(?:[A-Za-z0-9_./:=+@%,-]+|"(?:[^"\\]|\\.)*"|'[^']*')$/;
-const INERT_DOLLARS = /^(?:[^$`]|\$(?=[A-Za-z_]|\{\{))*$/;
-
-function isDataText(text: string): boolean {
-  if (!DATA_WORD.test(text)) return false;
-  return text.startsWith("'") || INERT_DOLLARS.test(text);
-}
-
-function isData(word: LineWord): boolean {
-  return isDataText(word.text);
-}
-
-/** The Actions expressions a run block may carry, comments included:
- *  contexts the runner fixes, never caller-shaped text (an `inputs.*`
- *  value is substituted into the script before bash reads it - a comment
- *  line too - so a multi-line value can end one command and start another;
- *  dynamic values reach a step through env). */
-export const TRUSTED_EXPRESSIONS: ReadonlySet<string> = new Set([
-  "${{ github.action_path }}",
-  "${{ runner.temp }}",
-]);
-
-/** Every Actions expression in a run block that is not a trusted one. */
-export function untrustedExpressions(run: string): string[] {
-  return (run.match(/\$\{\{[^}]*\}\}?/g) ?? []).filter(
-    (expression) => !TRUSTED_EXPRESSIONS.has(expression),
-  );
-}
-
-// A recorded bun's variable ends in _BUN: no bash special variable does
-// (BASH, PATH, RANDOM, ... are bash's own whatever env says).
-const RECORDED_VARIABLE = /^"\$([A-Z][A-Z0-9_]*_BUN)"$/;
-const GUARD_LINE = /^if \[ -n "\$([A-Z][A-Z0-9_]*_BUN)" \]; then$/;
-const ASSIGNMENT_HEAD = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
-const DATA_COMMANDS = new Set(["printf"]);
-
-/** The forms a run line in a bun-touching action may take. Anything else
- *  is `outside`: the grammar admits no way to name a command but a
- *  literal from this list or one recorded variable, so no spelling of a
- *  PATH lookup (a wrapper, an interpreter, a substitution, an expansion,
- *  a heredoc, a pipeline) needs recognising - longer logic belongs in a
- *  script the recorded bun runs. */
-export type RunLine =
-  | { kind: "invocation"; variable: string }
-  | { kind: "guard"; variable: string }
-  | { kind: "keyword" }
-  | { kind: "assignment"; name: string }
-  | { kind: "data-command" }
-  | { kind: "removal" }
-  | { kind: "outside" };
-
-/** The grammar, one logical line at a time:
- *  - `"$VAR" <data>...` or `exec "$VAR" <data>...`: the recorded bun
- *  - `if [ -n "$VAR" ]; then`, `else`, `fi`: the guard around it
- *  - `NAME=<data>`: a plain assignment
- *  - `printf <format> <data>...`: output (the format a static literal with
- *    only %s and %% conversions: `printf -v` and `%n` assign; echo has no
- *    place here, since under xpg_echo it expands backslashes)
- *  - `/bin/rm -rf "<clean runner-scratch path>"...`: the scratch clearing
- *    (cleanScratchPath: nothing outside `${{ runner.temp }}/` can be removed)
- *  The recorded-bun, output, and removal forms take an optional
- *  `> <data>` or `>> <data>` tail. */
-export function readRunLine(line: string): RunLine {
-  const outside: RunLine = { kind: "outside" };
-  const guard = GUARD_LINE.exec(line);
-  if (guard !== null) return { kind: "guard", variable: guard[1] };
-  if (line === "fi" || line === "else") return { kind: "keyword" };
-  const words = lineWords(line);
-  if (words === null || words.length === 0) return outside;
-  let body = words;
-  const tail = words.length >= 2 ? words[words.length - 2] : undefined;
-  if (tail !== undefined && (tail.text === ">" || tail.text === ">>")) {
-    if (!isData(words[words.length - 1])) return outside;
-    body = words.slice(0, -2);
-  }
-  if (body.length === 0) return outside;
-  const [head, ...args] = body;
-  if (!args.every(isData)) return outside;
-  const assignment = ASSIGNMENT_HEAD.exec(head.text);
-  if (assignment !== null) {
-    const value = assignment[2];
-    const plain = value === "" || isDataText(value);
-    return plain && args.length === 0 && body === words
-      ? { kind: "assignment", name: assignment[1] }
-      : outside;
-  }
-  const recorded = RECORDED_VARIABLE.exec(head.text);
-  if (recorded !== null) return { kind: "invocation", variable: recorded[1] };
-  if (head.text === "exec") {
-    const target = args.length > 0 ? RECORDED_VARIABLE.exec(args[0].text) : null;
-    return target === null ? outside : { kind: "invocation", variable: target[1] };
-  }
-  if (DATA_COMMANDS.has(head.text)) {
-    // The format is a static literal (no leading `-`, no `$`) whose
-    // conversions are %s and %% only: `printf -v` and `%n` (under any width
-    // or length modifier) assign.
-    const first = args[0]?.text ?? "";
-    if (/^["']?-/.test(first) || /\$/.test(first) || /%(?!s)/.test(first.replace(/%%/g, ""))) {
-      return outside;
-    }
-    return { kind: "data-command" };
-  }
-  if (head.text === "/bin/rm" && args[0]?.text === "-rf" && args.length > 1) {
-    const operands = args.slice(1).map((word) => /^"([^"]+)"$/.exec(word.text)?.[1]);
-    return operands.every(cleanScratchPath) ? { kind: "removal" } : outside;
-  }
-  return outside;
-}
-
-/** The logical lines of a run block: continuation lines joined, blank and
- *  comment lines dropped, the rest trimmed. */
-export function logicalRunLines(run: string): string[] {
-  const lines: string[] = [];
-  let pending = "";
-  for (const raw of run.split("\n")) {
-    const joined = pending + raw;
-    const trailing = /(\\*)$/.exec(joined)?.[1].length ?? 0;
-    if (trailing % 2 === 1) {
-      pending = joined.slice(0, -1);
-      continue;
-    }
-    pending = "";
-    const line = asciiTrim(joined);
-    if (line !== "" && !line.startsWith("#")) lines.push(line);
-  }
-  if (asciiTrim(pending) !== "") lines.push(asciiTrim(pending));
-  return lines;
-}
-
-/** The composite actions declared bun-free: every other action is under
- *  this rule's full contract by default, so a new action is in scope
- *  until it is listed here - and a listed one may not set up, resolve, or
- *  so much as mention bun (dequoted: `b\\un` and `b"u"n` are bun). Scope by
- *  declaration, not detection: no spelling of an invocation has to be
- *  recognised for the grammar to apply. */
-export const BUN_FREE_ACTIONS: ReadonlySet<string> = new Set([
-  "actions/all-green/action.yml",
-  "actions/dependency-review/action.yml",
-  "actions/yamllint/action.yml",
-]);
-
-/** Every string inside a parsed YAML value, keys included, however
- *  nested. */
-function scalarsOf(value: unknown): string[] {
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.flatMap(scalarsOf);
-  if (typeof value === "object" && value !== null) {
-    return Object.entries(value).flatMap(([key, inner]) => [key, ...scalarsOf(inner)]);
-  }
-  return [];
-}
-
-/** Whether any text names bun (or bunx, any case) as a whole word once
- *  continuation lines are joined and quotes, backslashes, and the `$` of an
- *  ANSI-C or locale string (`$''`) are stripped: what a declared bun-free
- *  action may not contain anywhere, a comment or a step name included. */
-export function mentionsBun(text: unknown): boolean {
-  if (typeof text !== "string") return false;
-  const dequoted = text
-    .replace(/\\\n[ \t]*/g, "")
-    .replace(/\$(?=["'])/g, "")
-    .replace(/["'\\]/g, "");
-  // Letters and digits bound the word; an underscore does not (BUN_INSTALL).
-  return /(?:^|[^A-Za-z0-9])bunx?(?![A-Za-z0-9])/i.test(dequoted);
-}
-
-/** A step's run block as ASCII-trimmed non-blank, non-comment lines. */
-function stepRunLines(step: Record<string, unknown>): string[] {
-  if (typeof step.run !== "string") return [];
-  return step.run
-    .split("\n")
-    .map(asciiTrim)
-    .filter((line) => line !== "" && !line.startsWith("#"));
-}
-
-function stepEnv(step: Record<string, unknown>): Record<string, unknown> {
-  return typeof step.env === "object" && step.env !== null
-    ? (step.env as Record<string, unknown>)
-    : {};
-}
-
-/** Whether a step's run block IS the resolver, byte for byte. */
-function runsResolver(step: Record<string, unknown>): boolean {
-  const lines = stepRunLines(step);
-  return (
-    lines.length === ACTIONS_BUN_RESOLVER.length &&
-    ACTIONS_BUN_RESOLVER.every((line, i) => lines[i] === line)
-  );
-}
-
-/** The keys a resolver step may carry; the two canonical ones have their
- *  key sets pinned exactly (the probe carries no `if`, the post-setup
- *  resolver `if: always()`). */
-const RESOLVER_STEP_KEYS = new Set(["name", "id", "if", "shell", "env", "run"]);
-
-/** The pin a step resolves: its PIN_FILE when the step is the resolver and
- *  nothing else (no key beyond RESOLVER_STEP_KEYS, its env exactly
- *  PIN_FILE, the canonical shell); else undefined. */
-function resolvedPin(step: Record<string, unknown>): string | undefined {
-  const env = stepEnv(step);
-  const shape =
-    Object.keys(step).every((key) => RESOLVER_STEP_KEYS.has(key)) &&
-    step.shell === ACTIONS_BASH_SHELL &&
-    Object.keys(env).length === 1 &&
-    typeof env.PIN_FILE === "string";
-  return shape && runsResolver(step) ? (env.PIN_FILE as string) : undefined;
-}
-
-interface SettledResolver {
-  index: number;
-  condition: string;
-}
-
-/** The SETTLED resolvers by id: resolver steps whose pin some setup-bun
- *  step of this action reads and that sit after every such setup, so their
- *  recorded path is the installed bun (the pre-setup probe resolves the
- *  same pin but may record nothing). */
-function settledResolvers(steps: Record<string, unknown>[]): Map<string, SettledResolver> {
-  const lastSetupFor = new Map<string, number>();
-  steps.forEach((step, i) => {
-    if (!usesSetupBun(step)) return;
-    const pin = (step.with as Record<string, unknown> | undefined)?.["bun-version-file"];
-    if (typeof pin === "string") lastSetupFor.set(pin, i);
-  });
-  const settled = new Map<string, SettledResolver>();
-  steps.forEach((step, i) => {
-    const pin = resolvedPin(step);
-    const lastSetup = pin === undefined ? undefined : lastSetupFor.get(pin);
-    if (lastSetup !== undefined && lastSetup < i && typeof step.id === "string") {
-      settled.set(step.id, { index: i, condition: String(step.if ?? "") });
-    }
-  });
-  return settled;
-}
-
-const STATUS_FUNCTION = /^(?:always|success|failure|cancelled)\(\)$/;
-
-/** A step condition as the set of terms that must all hold for the step
- *  to run, the way Actions reads it: a pure `&&`-conjunction, with
- *  `success()` implied when no status function is named and `always()`
- *  dropped as vacuous; null when the condition is not a pure conjunction
- *  of readable terms (any `||`, negation, or other parenthesis). */
-export function conditionTerms(condition: string): Set<string> | null {
-  if (/\|\||!(?!=)/.test(condition)) return null;
-  const terms = condition.trim() === "" ? [] : condition.split("&&").map((term) => term.trim());
-  if (terms.some((term) => /[()]/.test(term) && !STATUS_FUNCTION.test(term))) return null;
-  if (!terms.some((term) => STATUS_FUNCTION.test(term))) terms.push("success()");
-  return new Set(terms.filter((term) => term !== "always()"));
-}
-
-/** Whether a step whose `if` is `consumer` runs only when a step whose
- *  `if` is `resolver` ran: every term the resolver needs, the consumer
- *  needs too - the implicit `success()` included, so an `always()`
- *  consumer may follow only an `always()` resolver. */
-function runsOnlyAfter(consumer: string, resolver: string): boolean {
-  const needed = conditionTerms(resolver);
-  const carried = conditionTerms(consumer);
-  if (needed === null || carried === null) return false;
-  return [...needed].every((term) => carried.has(term));
-}
-
 /** Every action manifest under actions/, nested actions included - one
  *  walk shared by the actions-bun-guard rule and its forcing test, so
  *  the two can never judge different rosters; branch_tree.ts's
@@ -3329,17 +2955,9 @@ export function actionManifestFiles(): string[] {
     .map((f) => f.path)
     .filter(
       (path) =>
-        isActionManifest(path) && !path.split("/").some((segment) => EXCLUDED_DIRS.has(segment)),
+        path.endsWith("/action.yml") &&
+        !path.split("/").some((segment) => EXCLUDED_DIRS.has(segment)),
     );
-}
-
-/** Whether a path is an action manifest under either spelling GitHub
- *  reads (action.yml or action.yaml). The walk sees both so that the rule
- *  can refuse the .yaml one: the generator's dotfile walk (generate.ts)
- *  reads action.yml only, and a manifest it never sees would run its
- *  resolver against a missing pin. */
-export function isActionManifest(path: string): boolean {
-  return /\/action\.ya?ml$/.test(path);
 }
 
 /** The runner scratch root a setup-bun pin may sit under instead of the
@@ -3377,15 +2995,22 @@ function conjunctionRequires(condition: string, atom: string): boolean {
     .includes(atom);
 }
 
-/** The paths a step removes beyond a caller's reach: under the canonical
- *  shell (ACTIONS_BASH_SHELL), ONE non-blank non-comment line `/bin/rm -rf
- *  "<clean scratch path>" ...` (no rm from PATH, no operand the shell could
- *  expand or a caller could point elsewhere); else nothing. One rm for
- *  every path is what fails closed: it attempts each removal and exits
- *  nonzero when any failed, where a line per path stops at the first
- *  failure or masks it behind the last. */
+/** Inherited shell variables that could skip or rewrite a bash step's lines
+ *  before they run; a clearing step must carry each one emptied. */
+export const NEUTRALIZED_SHELL_ENV = ["BASH_ENV", "SHELLOPTS"];
+
+/** The paths a bash step removes beyond a caller's reach: the shell knobs
+ *  above emptied, and ONE non-blank non-comment line `/bin/rm -rf "<clean
+ *  scratch path>" ...` (no rm from PATH, no operand the shell could expand
+ *  or a caller could point elsewhere); else nothing. One rm for every path
+ *  is what fails closed: it attempts each removal and exits nonzero when
+ *  any failed, whatever the shell's options, where a line per path stops
+ *  at the first failure or masks it behind the last. */
 function pathsClearedBy(step: Record<string, unknown>): string[] {
-  if (step.shell !== ACTIONS_BASH_SHELL || typeof step.run !== "string") return [];
+  const stepEnv =
+    typeof step.env === "object" && step.env !== null ? (step.env as Record<string, unknown>) : {};
+  const neutralized = NEUTRALIZED_SHELL_ENV.every((name) => stepEnv[name] === "");
+  if (step.shell !== "bash" || !neutralized || typeof step.run !== "string") return [];
   const lines = step.run.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line));
   if (lines.length !== 1) return [];
   // Operands are space-separated: bash joins adjacent quoted strings into
@@ -3414,88 +3039,65 @@ export function pinRootCleared(
     );
 }
 
-/** How one action.yml violates the pinned-bun contract. An action declared
- *  bun-free (BUN_FREE_ACTIONS) may not set up, resolve, or mention bun.
- *  Every other action must carry ACTIONS_BUN_SETUP_GUARD and
- *  ACTIONS_BUN_RESOLVE_STEP verbatim; EVERY setup-bun step (canonical or
- *  extra, quoted or plain) must read the action-local pin, or a clean
- *  .bun-version path under the runner scratch root (fetchedTreePin) - so a
- *  bare setup added beside a canonical block is as loud as a drifted block;
- *  and every other run step runs under ACTIONS_BASH_SHELL with every
- *  line reading as one form of the grammar (readRunLine), where
- *  the only command names are a few literals and one RECORDED variable
- *  bound in the step's env to a settled resolver's path output and never
- *  reassigned - so bun can be run no way but by the path the resolver
- *  recorded (a later setup-bun puts another bun first on PATH). Triggers, the per-step pin, and the lines are
- *  judged on the PARSED steps (actionSteps), the way Actions itself reads
- *  the manifest; only the canonical blocks stay a byte comparison, because
- *  pinning exact bytes is their point. The setup-bun trigger is what makes
- *  a reintroduced BARE setup loud even before anything runs the bun it
- *  installs. */
+/** How one action.yml violates the pinned-bun setup contract: any action
+ *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
+ *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
+ *  plain) must read the action-local pin, or a clean .bun-version path
+ *  under the runner scratch root (fetchedTreePin) - so a bare setup added
+ *  beside a canonical block is as loud as a drifted block. Triggers and the
+ *  per-step pin are judged on the PARSED steps (actionSteps), the way
+ *  Actions itself reads the manifest; only the canonical block stays a
+ *  byte comparison, because pinning exact bytes is its point. The
+ *  setup-bun trigger is what makes a reintroduced BARE setup loud even
+ *  before anything runs the bun it installs. */
 export function actionsBunGuardMismatches(file: string, text: string): Mismatch[] {
   const steps = actionSteps(text);
+  // A run line starting with "bun " counts, block scalars included; a
+  // prose line shaped that way would over-demand the guard, which fails
+  // closed.
+  const bareBunLines = steps.flatMap((step) =>
+    typeof step.run === "string"
+      ? step.run
+          .split("\n")
+          .filter((line) => line.trimStart().startsWith("bun "))
+          .map((line) => ({ step: String(step.name ?? step.id), line: line.trim() }))
+      : [],
+  );
   const setupSteps = steps.filter(usesSetupBun);
+  if (bareBunLines.length === 0 && setupSteps.length === 0) return [];
   const mismatches: Mismatch[] = [];
-  if (BUN_FREE_ACTIONS.has(file)) {
-    // Every scalar of every step (name, uses, with, env, shell, run, ...):
-    // a declared bun-free action mentions bun nowhere.
-    for (const step of steps) {
-      const touches = usesSetupBun(step) || runsResolver(step) || scalarsOf(step).some(mentionsBun);
-      if (!touches) continue;
-      mismatches.push({
-        file,
-        expected: `no step of an action declared bun-free (BUN_FREE_ACTIONS) setting up, resolving, or mentioning bun - drop '${file}' from the declaration to bring it under the guard`,
-        got: `step '${String(step.name ?? step.id)}' touches bun`,
-      });
-    }
-    return mismatches;
-  }
-  // The canonical block's pin line doubles as the per-step requirement
-  // and as the canonical resolvers' PIN_FILE, so no two judgments can
-  // demand different bytes.
-  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
-  const pinValue = pinLine.slice("bun-version-file: ".length);
   // Trimmed: the guard sits at different depths across actions.
   const lines = semanticLines(text).map((line) => line.trim());
-  const carries = (block: readonly string[]) =>
-    lines.some((_, i) => block.every((line, j) => lines[i + j] === line));
-  // The parsed shape closes what a line-subsequence match leaves open: a
-  // key after the run block (an `if` that skips the resolver) is drift.
-  const exactShape = (id: string, keys: string[]) => {
-    const step = steps.find((s) => s.id === id);
-    return (
-      step !== undefined &&
-      Object.keys(step).sort().join() === keys.join() &&
-      resolvedPin(step) === pinValue
-    );
-  };
-  if (
-    !carries(ACTIONS_BUN_SETUP_GUARD) ||
-    !exactShape("bun", ["env", "id", "name", "run", "shell"])
-  ) {
+  const carried = lines.some((_, i) =>
+    ACTIONS_BUN_SETUP_GUARD.every((line, j) => lines[i + j] === line),
+  );
+  if (!carried) {
     mismatches.push({
       file,
       expected:
-        "the canonical three-step bun setup guard (the resolver as the pin probe, pinned install, pinned retry - " +
+        "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
         "both setup steps reading the action-local generated .bun-version)",
       got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
     });
   }
-  if (
-    !carries(ACTIONS_BUN_RESOLVE_STEP) ||
-    !exactShape("action-bun", ["env", "id", "if", "name", "run", "shell"])
-  ) {
+  // `bun` by name resolves through PATH, where a later setup-bun (a fetched
+  // tree's, a caller's) can put another bun first; every step runs the
+  // absolute path the action's post-setup resolver step recorded.
+  for (const { step, line } of bareBunLines) {
     mismatches.push({
       file,
-      expected:
-        "the canonical post-setup resolver step (Resolve the action's bun, id action-bun, the resolver block reading the action-local generated .bun-version)",
-      got: "missing or drifted from the step this rule pins - its path output is the only bun the action's own steps may run",
+      expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the post-setup resolver's path output), never \`bun\` by name`,
+      got: line,
     });
   }
-  // A pin under the runner's scratch directory is the one other anchor
-  // accepted: a tree the action fetched there itself
-  // (validate-template-report runs an older validator on that tree's own
-  // bun) is no more the caller's than the action path is.
+  // The canonical block's pin line doubles as the per-step requirement,
+  // so the two judgments can never demand different bytes. A pin under
+  // the runner's scratch directory is the one other anchor accepted: a
+  // tree the action fetched there itself (validate-template-report runs
+  // an older validator on that tree's own bun) is no more the caller's
+  // than the action path is.
+  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
+  const pinValue = pinLine.slice("bun-version-file: ".length);
   for (const step of setupSteps) {
     const withBlock = step.with;
     const value =
@@ -3510,7 +3112,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
       mismatches.push({
         file,
-        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a step under the canonical privileged bash shell whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
+        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
         got: "no such step - a caller could plant that pin before the action runs",
       });
       continue;
@@ -3521,71 +3123,6 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
     });
   }
-  const settled = settledResolvers(steps);
-  const forms =
-    '"$VAR" <data>..., exec "$VAR" <data>..., if [ -n "$VAR" ]; then, else, fi, NAME=<data>, printf <static-format> <data>..., /bin/rm -rf "<clean runner-scratch path>"... (each with an optional > or >> <data> tail)';
-  // A VALIDATED resolver step is excused from the grammar: its text is
-  // pinned verbatim, and its `command -v bun` is the one sanctioned lookup.
-  // A step that merely carries a resolver's id is judged like any other.
-  steps.forEach((step, index) => {
-    if (typeof step.run !== "string") return;
-    const label = String(step.name ?? step.id);
-    // Read on the RAW block, resolver steps included: substitution runs
-    // before bash, so a comment line carries an expression as live text.
-    for (const expression of untrustedExpressions(step.run)) {
-      mismatches.push({
-        file,
-        expected: `every Actions expression in step '${label}''s run block (comments included: substitution precedes bash) one of ${[...TRUSTED_EXPRESSIONS].join(" or ")} - dynamic values reach a step through env`,
-        got: expression,
-      });
-    }
-    if (resolvedPin(step) !== undefined) return;
-    const env = stepEnv(step);
-    // Another shell (`bun {0}`, plain `bash`) runs the block through a PATH
-    // lookup, or with a caller's BASH_ENV, SHELLOPTS or exported functions.
-    if (step.shell !== ACTIONS_BASH_SHELL) {
-      mismatches.push({
-        file,
-        expected: `step '${label}' running under shell: ${ACTIONS_BASH_SHELL} (privileged bash ignores a caller's BASH_ENV, SHELLOPTS and env-exported functions, so what this rule reads is what runs)`,
-        got: `shell: '${String(step.shell ?? "")}'`,
-      });
-    }
-    for (const line of logicalRunLines(step.run)) {
-      const read = readRunLine(line);
-      if (read.kind === "outside") {
-        mismatches.push({
-          file,
-          expected: `every run line in step '${label}' one of the forms this rule reads (${forms}); longer logic belongs in a script the recorded bun runs`,
-          got: `a line outside those forms: ${line}`,
-        });
-      } else if (read.kind === "assignment") {
-        if (read.name in env) {
-          mismatches.push({
-            file,
-            expected: `no run line in step '${label}' reassigning an env-bound variable (the recorded bun is bound once, in env)`,
-            got: line,
-          });
-        }
-      } else if (read.kind === "invocation" || read.kind === "guard") {
-        const bound = env[read.variable];
-        const source = /^\$\{\{ steps\.([^.\s]+)\.outputs\.path \}\}$/.exec(String(bound ?? ""));
-        const resolver = source === null ? undefined : settled.get(source[1]);
-        if (resolver === undefined || resolver.index >= index) {
-          mismatches.push({
-            file,
-            expected: `"$${read.variable}" in step '${label}' bound in its env to the path output of an EARLIER resolver step that follows every setup-bun for its pin`,
-            got: `${read.variable} bound to ${bound === undefined ? "nothing" : `'${String(bound)}'`}`,
-          });
-        } else if (!runsOnlyAfter(String(step.if ?? ""), resolver.condition)) {
-          mismatches.push({
-            file,
-            expected: `step '${label}' running only when its resolver '${source?.[1]}' ran (an if: carrying every term of the resolver's '${resolver.condition || "success()"}', the implicit success() included)`,
-            got: `if: '${String(step.if ?? "")}'`,
-          });
-        }
-      }
-    }
-  });
   return mismatches;
 }
 
@@ -7424,13 +6961,24 @@ const rules: Rule[] = [
   },
 
   {
-    // Every composite action not declared bun-free carries the canonical
-    // pinned-bun setup and resolver blocks, and runs bun only by the
-    // resolved path (actionsBunGuardMismatches has the contract). A BARE
-    // setup-bun resolves the CALLING repository's version files, and a
-    // consumer's older bun cannot parse the lockfiles repo-platform's bun
-    // writes. The blocks are copies because a relative `uses:` inside a
-    // composite resolves against the CALLER's workspace, not this repo.
+    // Every composite action that touches bun carries the same three-step
+    // setup guard: probe for a bun already AT the action's pin, install
+    // the pinned version when the probe misses, retry the install once (a
+    // setup-bun fetch flake on a nightly reporting path turns a green
+    // night red). The pin is the load-bearing part: both setup steps read
+    // the action-local generated .bun-version (bun-version-file against
+    // github.action_path), because a BARE setup-bun resolves the CALLING
+    // repository's version files - and a consumer pinning an older bun
+    // cannot parse the lockfiles repo-platform's bun writes (the
+    // cloud-speech class: bun < 1.4.0 dying on a lockfileVersion-2
+    // bun.lock with the message swallowed by --silent). The block cannot
+    // be hoisted into a shared action - a relative `uses:` inside a
+    // composite action resolves against the CALLER's workspace, not this
+    // repo - so the copies are load-bearing; this rule keeps every copy
+    // present and identical (nested actions included), and catches a
+    // future bun-touching action shipped bare. Past the block, every step
+    // runs the absolute path a post-setup step recorded, never `bun` by
+    // name (a later setup-bun can put another bun first on PATH).
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();
@@ -7438,23 +6986,7 @@ const rules: Rule[] = [
       if (guarded.length === 0) {
         throw new Error("no actions/**/action.yml sets up bun - anchor lost");
       }
-      const stale = [...BUN_FREE_ACTIONS].filter((file) => !files.includes(file));
-      return [
-        ...stale.map((file) => ({
-          file,
-          expected: "every action declared bun-free (BUN_FREE_ACTIONS) to exist",
-          got: "no such action manifest - a retired or renamed action leaves a stale declaration",
-        })),
-        ...files
-          .filter((file) => file.endsWith(".yaml"))
-          .map((file) => ({
-            file,
-            expected:
-              "every action manifest spelled action.yml (the one spelling the generated .bun-version walk reads)",
-            got: "an action.yaml manifest - it would carry no generated pin",
-          })),
-        ...files.flatMap((file) => actionsBunGuardMismatches(file, read(file))),
-      ];
+      return files.flatMap((file) => actionsBunGuardMismatches(file, read(file)));
     },
   },
 

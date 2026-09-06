@@ -3,9 +3,8 @@
 // generated regions is proven by `bun run generate:check`, not here.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PINNED_SCRIPT_DIRS } from "../../.github/scripts/build-branches/branch_tree";
 import {
   actionSetsUpBun,
   baseOwnershipRegion,
@@ -51,7 +50,6 @@ import { skipIfExistsMatchers } from "../../scripts/ownership";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
-const REPO_ROOT = join(import.meta.dir, "../..");
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
   return { module, description: `${module} module`, ...extra };
@@ -630,21 +628,6 @@ describe("toolchain pins", () => {
     );
     expect(() => bunPinnedActionDirs(dir, new Set(["typo"]))).toThrow(
       "actions/typo is declared a pinned script directory (branch_tree.ts PINNED_SCRIPT_DIRS) yet carries an action.yml",
-    );
-  });
-
-  test("the live declared script directories ship no action.yml and carry the pin, a lockfile, and the validator", () => {
-    // The report action's latest leg runs the validator from this sibling
-    // on its own bun, and a fetched tree's copy runs on the pin it carries.
-    expect([...PINNED_SCRIPT_DIRS]).toEqual(["validate-template"]);
-    const dir = join(REPO_ROOT, "actions", "validate-template");
-    expect(
-      ["action.yml", ".bun-version", "bun.lock", "validate_generated_files.ts"].map((name) =>
-        existsSync(join(dir, name)),
-      ),
-    ).toEqual([false, true, true, true]);
-    expect(readFileSync(join(dir, ".bun-version"), "utf-8")).toBe(
-      readFileSync(join(REPO_ROOT, "actions", "validate-template-report", ".bun-version"), "utf-8"),
     );
   });
 

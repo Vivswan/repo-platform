@@ -33,23 +33,14 @@ runs:
   using: composite
   steps:
     # Installed once up front: every leg's script runs on it, the sibling
-    # validator included. The probe is the resolver the actions-bun-guard
-    # rule pins, run before the setup.
+    # validator included.
     - name: Check for a bun matching the action's pin
       id: bun
-      shell: bash --noprofile --norc -p -eo pipefail {0}
-      env:
-        PIN_FILE: ${{ github.action_path }}/.bun-version
+      shell: bash
       run: |
-        pin="$(<"$PIN_FILE")"
-        path="$(command -v bun || true)"
-        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
-        have=""
-        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
-        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
+        pin="$(cat "${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Skipped only when the caller's bun already IS the pinned version
     # (reuse then just skips a second network fetch): the action's scripts
@@ -76,25 +67,23 @@ runs:
       id: setup-bun-retry
       continue-on-error: true
 
-    # A bun is pinned only as an absolute path that prints the pinned version
+    # A bun is ready only as an absolute path that prints the pinned version
     # and exits 0; scripts run by that path, never by name, since later
     # setups put other buns on PATH. The tree's resolver is this same block.
     - name: Resolve the action's bun
       id: action-bun
-      if: always()
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
-        pin="$(<"$PIN_FILE")"
+        pin="$(cat "$PIN_FILE")"
         path="$(command -v bun || true)"
-        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
+        case "$path" in /*) ;; *) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Every predictable scratch path, cleared by ONE fixed /bin/rm before
     # anything reads it: every path is attempted and any failed removal fails
@@ -102,7 +91,10 @@ runs:
     - name: Clear the scratch root
       id: clear
       continue-on-error: true
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
       run: >-
         /bin/rm -rf
         "${{ runner.temp }}/aligned-validator"
@@ -115,9 +107,9 @@ runs:
     # the vintage floor: `_commit` may not move behind the base ref's.
     - name: Fetch the validator at the recorded _commit
       id: fetch
-      if: steps.action-bun.outputs.pinned == 'true' && steps.clear.outcome == 'success'
+      if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
       continue-on-error: true
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         GH_TOKEN: ${{ inputs.github-token }}
@@ -149,19 +141,18 @@ runs:
     - name: Resolve the fetched tree's bun
       id: aligned-bun-path
       if: steps.fetch.outcome == 'success'
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         PIN_FILE: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
       run: |
-        pin="$(<"$PIN_FILE")"
+        pin="$(cat "$PIN_FILE")"
         path="$(command -v bun || true)"
-        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
+        case "$path" in /*) ;; *) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # The judge script runs on the action's bun; only the fetched tree's
     # install and validator run on the tree's (an empty path is a
@@ -171,7 +162,7 @@ runs:
       id: integrity
       if: steps.fetch.outcome == 'success'
       continue-on-error: true
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
@@ -180,14 +171,13 @@ runs:
       run: '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"'
 
     # Advisory only (report.ts renders it as warnings; its outcome is read by
-    # nothing). The build tip's validator is this action's sibling on the
-    # build branch, run on this action's bun: the two pins are one generated
-    # value, so the bun reading the sibling's lockfile is the one that wrote it.
+    # nothing). The build tip's validator is this action's sibling on the build
+    # branch, run on this action's bun: both pins are one generated value.
     - name: Run the build tip's validator
       id: latest
-      if: steps.action-bun.outputs.pinned == 'true' && steps.clear.outcome == 'success'
+      if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
       continue-on-error: true
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         VALIDATOR_DIR: ${{ github.action_path }}/../validate-template
@@ -203,7 +193,7 @@ runs:
     - name: Report the findings
       id: report
       if: always()
-      shell: bash --noprofile --norc -p -eo pipefail {0}
+      shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
@@ -222,6 +212,6 @@ runs:
           exec "$ACTION_BUN" "$ACTION_PATH/report.ts"
         fi
         reason="the action's pinned bun is unavailable"
-        printf '%s\n' "integrity=failure" >> "$GITHUB_OUTPUT"
-        printf '%s\n' "::error::$reason"
+        echo "integrity=failure" >> "$GITHUB_OUTPUT"
+        echo "::error::$reason"
         printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' "$reason" "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"
