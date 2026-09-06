@@ -1,20 +1,10 @@
 // The slice of the repository's shared helpers this composite action needs,
-// kept LOCAL on purpose. A composite action is published on a build output
-// branch of this repository and runs from its own directory, so it cannot
-// import out of the repository tree - not from .github/scripts/shared/,
-// and not from a sibling action either. That is a property of how actions
-// are published, not drift: the predicates themselves (freshness.ts,
-// report.ts) exist exactly once, and callers use the action rather than
-// keeping a second copy of them.
-//
-// This is currently the only action carrying this file (the Copilot
-// actions that shared it byte-identically were retired with the
-// ruleset-owned review gate). If another composite action ever copies it,
-// bring back the byte-equality test that policed the copies: edit one,
-// copy it to the others, never re-type.
-//
-// Keep these behaviour-compatible with .github/scripts/shared/ - they are
-// the same functions, narrowed to what the action uses.
+// kept LOCAL on purpose: a composite action is published on the build
+// branch and runs from its own directory, so it can import from
+// actions/shared/ (the dependency-free zone shipped beside it) and from
+// nothing else in the repository tree.
+
+import { closeSync, openSync } from "node:fs";
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
@@ -35,10 +25,6 @@ function escapeData(message: string): string {
   return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
-export function notice(message: string): void {
-  console.log(`::notice::${escapeData(message)}`);
-}
-
 export function warning(message: string): void {
   console.log(`::warning::${escapeData(message)}`);
 }
@@ -47,23 +33,39 @@ export function error(message: string): void {
   console.log(`::error::${escapeData(message)}`);
 }
 
+/** How a child ended. The deadline wins over the exit code: a child that
+ *  exited 0 while an orphan held its pipe open still hit the deadline. */
+export type ChildExit =
+  | { kind: "exited"; code: number }
+  | { kind: "signaled"; signal: string }
+  | { kind: "timed-out" };
+
+export function childExit(proc: {
+  exitedDueToTimeout?: boolean;
+  exitCode: number | null;
+  signalCode?: string | null;
+}): ChildExit {
+  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
+  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
+  return { kind: "signaled", signal: proc.signalCode ?? "an unknown signal" };
+}
+
+export function succeeded(exit: ChildExit): boolean {
+  return exit.kind === "exited" && exit.code === 0;
+}
+
 export interface RunResult {
-  exitCode: number;
+  exit: ChildExit;
   stdout: string;
   stderr: string;
-  timedOut: boolean;
 }
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
-  /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
-   *  the result reports `timedOut`. REQUIRED, unlike the repository's
-   *  shared proc.ts where it is optional. This action runs on a billed
-   *  runner with a job timeout, and a `gh` call that hangs there burns
-   *  the budget and then fails the job on the clock instead of on its
-   *  own verdict. Making the deadline unskippable is what retires the
-   *  grep that used to scan the rendered bash for a bare `gh api`. */
+  /** Hard deadline in milliseconds, REQUIRED: on expiry the child is
+   *  SIGKILLed and the result reports `timed-out`. A `gh` call that hangs on
+   *  a billed runner would otherwise fail the job on the clock, not on a verdict. */
   timeoutMs: number;
 }
 
@@ -76,10 +78,50 @@ export function capture(command: string[], options: RunOptions): RunResult {
     timeout: options.timeoutMs,
     killSignal: "SIGKILL",
   });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    timedOut: proc.exitedDueToTimeout === true,
-  };
+  return { exit: childExit(proc), stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+}
+
+/** One line saying why a captured child failed: the deadline, the signal,
+ *  its first stderr line, or its exit code. */
+export function failureDetail(result: RunResult): string {
+  if (result.exit.kind === "timed-out") return "timed out";
+  if (result.exit.kind === "signaled") return `died on ${result.exit.signal}`;
+  const line = result.stderr
+    .split("\n")
+    .find((l) => l.trim() !== "")
+    ?.trim();
+  return line || `exit ${result.exit.code}`;
+}
+
+/** capture() with stdout streamed to a file instead of a string: for
+ *  binary payloads (a tarball) that a string round trip would corrupt. */
+export function download(command: string[], toFile: string, options: RunOptions): RunResult {
+  const fd = openSync(toFile, "w");
+  try {
+    const proc = Bun.spawnSync(command, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
+      stdout: fd,
+      stderr: "pipe",
+      timeout: options.timeoutMs,
+      killSignal: "SIGKILL",
+    });
+    return { exit: childExit(proc), stdout: "", stderr: proc.stderr.toString() };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** A child whose output belongs in the job log as it happens (stdio
+ *  inherited); only how it ended comes back. */
+export function run(command: string[], options: RunOptions): ChildExit {
+  const proc = Bun.spawnSync(command, {
+    cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : undefined,
+    stdout: "inherit",
+    stderr: "inherit",
+    timeout: options.timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  return childExit(proc);
 }

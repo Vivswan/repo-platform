@@ -62,7 +62,7 @@ jobs:
       - name: Fail on an integrity finding
         if: steps.template.outputs.integrity != 'success'
         run: |
-          echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
+          echo "::error::validate-template's integrity check failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
   # The five base checks, merged into one job on private repositories (a

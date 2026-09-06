@@ -28,6 +28,7 @@ import {
   deliveryRefTwinMismatches,
   expandCheckChain,
   extractUsesPins,
+  FETCHED_TREE_PIN_ANCHOR,
   firstDiff,
   fleetCiRenderMismatches,
   fleetWorkflowPinMismatches,
@@ -850,8 +851,8 @@ describe("actionsBunGuardMismatches", () => {
   };
   const perStepMismatch = {
     file: "actions/x/action.yml",
-    expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
-    got: "a setup-bun step without the action-local pin - it resolves the CALLER repository's bun version files",
+    expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
+    got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
   };
 
   test.each([
@@ -899,6 +900,179 @@ describe("actionsBunGuardMismatches", () => {
       expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
     },
   );
+
+  // A runner-scratch pin needs an earlier bash step that removes the pin's
+  // root by a fixed rm on the literal path, shell knobs emptied, and that the
+  // setup's condition requires; anything less lets a caller plant the pin.
+  const PIN = "${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version";
+  const REQUIRED = "      if: steps.clear.outcome == 'success'\n";
+  const fetchedSetup = (condition = REQUIRED) => `    - name: Set up the fetched tree's bun
+${condition}      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${PIN}
+`;
+  const NEUTRAL = 'BASH_ENV: ""\n        SHELLOPTS: ""';
+  const clearingStep = (
+    run: string,
+    extra = "",
+    shell = "bash",
+    env = NEUTRAL,
+  ) => `    - name: Clear
+      id: clear
+${extra}      shell: ${shell}
+      env:
+        ${env}
+      run: ${run}
+`;
+  const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
+  const noClearing = {
+    file: "actions/x/action.yml",
+    expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is /bin/rm -rf of literal paths, and whose success this setup's condition requires)`,
+    got: "no such step - a caller could plant that pin before the action runs",
+  };
+  const cases: [string, string, ReturnType<typeof actionsBunGuardMismatches>, string?, string?][] =
+    [
+      ["a required clearing step removing the root", clearingStep(REMOVAL), []],
+      [
+        "a required clearing step removing the root and another scratch path",
+        clearingStep(`|\n        /bin/rm -rf "\${{ runner.temp }}/other"\n        ${REMOVAL}`),
+        [],
+      ],
+      [
+        "a required clearing step allowed to fail (its success is still required)",
+        clearingStep(REMOVAL, "      continue-on-error: true\n"),
+        [],
+      ],
+      [
+        "a required clearing step carrying a condition of its own",
+        clearingStep(REMOVAL, "      if: steps.bun.outputs.pinned == 'true'\n"),
+        [],
+      ],
+      [
+        "the setup requiring it among other terms",
+        clearingStep(REMOVAL),
+        [],
+        "      if: steps.fetch.outcome == 'success' && steps.clear.outcome == 'success'\n",
+      ],
+      ["no earlier step at all", "", [noClearing]],
+      ["a clearing step the setup does not require", clearingStep(REMOVAL), [noClearing], ""],
+      [
+        "a clearing step the setup names only inside a disjunction",
+        clearingStep(REMOVAL),
+        [noClearing],
+        "      if: always() || steps.clear.outcome == 'success'\n",
+      ],
+      [
+        "a clearing step required only in one branch of a mixed condition",
+        clearingStep(REMOVAL),
+        [noClearing],
+        "      if: steps.clear.outcome == 'success' && false || always()\n",
+      ],
+      [
+        "a clearing step named only inside a parenthesised sub-expression",
+        clearingStep(REMOVAL),
+        [noClearing],
+        "      if: false == (false && steps.clear.outcome == 'success') && steps.fetch.outcome == 'success'\n",
+      ],
+      [
+        "a clearing of a scratch path that does not cover the pin",
+        clearingStep('/bin/rm -rf "${{ runner.temp }}/other"'),
+        [noClearing],
+      ],
+      [
+        "a clearing under a shell that is not bash",
+        clearingStep(REMOVAL, "", "true {0}"),
+        [noClearing],
+      ],
+      [
+        "a clearing step that leaves BASH_ENV inherited",
+        clearingStep(REMOVAL, "", "bash", 'SHELLOPTS: ""'),
+        [noClearing],
+      ],
+      [
+        "a clearing step that leaves SHELLOPTS inherited",
+        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""'),
+        [noClearing],
+      ],
+      [
+        "a clearing step that sets BASH_ENV to a file",
+        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: /tmp/x\n        SHELLOPTS: ""'),
+        [noClearing],
+      ],
+      [
+        "a clearing step that sets SHELLOPTS to noexec",
+        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""\n        SHELLOPTS: noexec'),
+        [noClearing],
+      ],
+      [
+        "a clearing by rm from PATH rather than /bin/rm",
+        clearingStep('rm -rf "${{ runner.temp }}/aligned-validator"'),
+        [noClearing],
+      ],
+      [
+        "a clearing through a variable",
+        clearingStep(
+          '/bin/rm -rf "$ALIGNED_DIR"',
+          "",
+          "bash",
+          `${NEUTRAL}\n        ALIGNED_DIR: \${{ runner.temp }}/aligned-validator`,
+        ),
+        [noClearing],
+      ],
+      [
+        "a clearing commented out",
+        clearingStep(`|\n        # ${REMOVAL}\n        echo skipped`),
+        [noClearing],
+      ],
+      [
+        "a clearing wrapped in shell control flow",
+        clearingStep(`|\n        if false; then\n          ${REMOVAL}\n        fi`),
+        [noClearing],
+      ],
+      [
+        "a clearing followed by another command",
+        clearingStep(`|\n        ${REMOVAL}\n        echo done`),
+        [noClearing],
+      ],
+      ["a clearing with trailing shell syntax", clearingStep(`${REMOVAL} || true`), [noClearing]],
+      [
+        "the clearing step AFTER the setup, not before",
+        "",
+        [noClearing],
+        REQUIRED,
+        clearingStep(REMOVAL),
+      ],
+    ];
+  test.each(cases)(
+    "a runner-scratch pin with %s",
+    (_name, before, expected, condition = REQUIRED, after = "") => {
+      const text = `${canonical}${before}${fetchedSetup(condition)}${after}`;
+      expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual(expected);
+    },
+  );
+
+  // The scratch-root anchor admits only a clean dotfile path: a traversal
+  // or a nested expression could reach the caller's checkout again.
+  test.each([
+    "${{ runner.temp }}/../work/repo/.bun-version",
+    "${{ runner.temp }}/safe\\..\\..\\work\\repo/.bun-version",
+    "${{ runner.temp }}/.. /work/repo/.bun-version",
+    "${{ runner.temp }}/..../.bun-version",
+    "${{ runner.temp }}/aligned validator/.bun-version",
+    "${{ runner.temp }}/aligned/./.bun-version",
+    "${{ runner.temp }}/${{ github.workspace }}/.bun-version",
+    "${{ runner.temp }}//.bun-version",
+    "${{ runner.temp }}/aligned/package.json",
+    "${{ runner.temp }}/.bun-version-extra",
+  ])("an EXTRA setup-bun pinned at %s is refused per step", (pin) => {
+    const extra = `${canonical}
+    - name: Set up the fetched tree's bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${pin}
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
+  });
 
   test("an action that runs bun with no setup block at all is refused for the missing block alone", () => {
     const text =
