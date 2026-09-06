@@ -415,7 +415,6 @@ jobs:
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
           VALIDATION: ${{ steps.verdict.outputs.verdict }}
-          RESOLVED: ${{ steps.conflicts.outputs.resolved }}
           DRIFT_FILE: ${{ runner.temp }}/settings-drift.md
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           CARRIED_FILE: ${{ runner.temp }}/local-carryover.md

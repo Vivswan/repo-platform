@@ -1,7 +1,6 @@
 # File classes and the decision rule per class
 
-<!-- Keep in sync with the twin copy in skills/repo-platform-new-project/
-     references/file-ownership.md - skills install standalone, so the table is duplicated. -->
+<!-- The Class and Files columns are one roster with skills/repo-platform-new-project/references/file-ownership.md (skills install standalone, so each ships its own table); repo-platform's check_ssot skill-ownership-tables rule fails on any difference between the two. The third column is this skill's own. -->
 
 Classify every file a sync PR touches before deciding what to do with a conflict or a surprising diff.
 

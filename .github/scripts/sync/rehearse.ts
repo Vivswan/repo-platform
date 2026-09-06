@@ -76,15 +76,7 @@ import {
 } from "./answers_file.ts";
 import { resolveRecordedCommit, unusableReason } from "./recorded_commit.ts";
 import { applyPending } from "./run_migrations.ts";
-import {
-  MIGRATIONS_NAME,
-  MIGRATIONS_REVIEW_NAME,
-  MIRRORS_NOTE_NAME,
-  MIRRORS_REVIEW_NAME,
-  REFERENCED_LABELS_NAME,
-  REMOVED_SPLITS_NAME,
-  TAIL_SHRANK_NAME,
-} from "./section_files.ts";
+import { PR_BODY_SECTIONS, TAIL_SHRANK_NAME } from "./section_files.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -255,47 +247,6 @@ export function parseConflictReport(stdout: string): {
   }
   return { conflicts, malformed };
 }
-
-/** The would-be PR-body sections in open_pr.ts's body order: its flag
- * sections, then the conflict summary. Each row is a RUNNER_TEMP-twin
- * report file a replayed step writes, with the title printed above its
- * content; the fixed-name reports ride the section_files.ts constants
- * open_pr.ts reads them by, the rest are the workflow-provided env paths
- * under the workflow's own names. Review-only flags with no body section
- * (CARRY_REVIEW_FILE) are not rows, as in the PR. tests/sync/rehearse.test.ts
- * pins the fixed-name rows' presence and order against open_pr.ts. */
-export const PR_BODY_SECTIONS: readonly (readonly [string, string])[] = [
-  ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
-  [
-    TAIL_SHRANK_NAME,
-    "TAIL TRIPWIRE report (the PR would stay manual-review; a trip is a sync bug)",
-  ],
-  ["retired-modules.txt", "Retired modules dropped from the selection"],
-  ["removed-paths.txt", "The template retired these files; this update deletes them"],
-  [MIGRATIONS_NAME, "Migration rungs that acted ahead of copier (informational)"],
-  [
-    MIGRATIONS_REVIEW_NAME,
-    "Migration rungs whose verdict needs a human (the PR would stay manual-review)",
-  ],
-  ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
-  [MIRRORS_NOTE_NAME, "Mirror copies materialized from the repo's own `mirrors` declaration"],
-  [
-    MIRRORS_REVIEW_NAME,
-    "Refused mirror declarations - nothing written for them (the PR would stay manual-review)",
-  ],
-  [
-    REFERENCED_LABELS_NAME,
-    "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
-  ],
-  [
-    REMOVED_SPLITS_NAME,
-    "Files this update deletes with a repository-owned half (split-classed at HEAD, or a license file the manifest cannot class); the PR would stay manual-review",
-  ],
-  [
-    "dropped-local-hunks.md",
-    "Merge conflicts resolved toward the template (review the dropped local lines)",
-  ],
-];
 
 /** The per-file diagnostics of a failed validate_generated_files.ts run,
  * for a quiet-mode fleet report: its "error: <file>: ..." lines (prefix
@@ -786,15 +737,17 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         passthrough(["git", "-C", targetDir, "diff", "--cached", origHead]);
       }
 
+      // open_pr.ts's roster rendered as the PR would: each replayed step
+      // wrote its report under the RUNNER_TEMP twin of the roster's file.
       section("would-be PR-body sections");
       let anySection = false;
-      for (const [file, title] of PR_BODY_SECTIONS) {
+      for (const { file, title, render, forcesReview } of PR_BODY_SECTIONS) {
         const path = join(temp, file);
-        if (existsSync(path) && statSync(path).size > 0) {
-          anySection = true;
-          console.log(`\n--- ${title} ---`);
-          console.log(readFileSync(path, "utf-8").replace(/\n$/, ""));
-        }
+        if (render === null || !existsSync(path) || statSync(path).size === 0) continue;
+        anySection = true;
+        const holds = forcesReview ? " (the PR would stay manual-review)" : "";
+        console.log(`\n--- ${title}${holds} ---`);
+        console.log(render(readFileSync(path, "utf-8").replace(/\n$/, "")));
       }
       if (!anySection) console.log("(none - nothing here would hold the PR for review)");
 
