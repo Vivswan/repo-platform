@@ -8,8 +8,8 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
-import { ACTION_BUN_PIN, bunSetupRegionName, bunSetupSteps } from "../../scripts/action_bun_setup";
 import {
+  ACTION_BUN_PIN,
   ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
   actionManifestFiles,
@@ -19,6 +19,7 @@ import {
   applyDivergences,
   asyncSpawnMismatches,
   asyncStreamWriteMismatches,
+  BUN_SETUP_USES,
   BUN_TEST_FILE,
   type BunDirsInputs,
   bunDirsMismatches,
@@ -100,13 +101,7 @@ import {
   unsafeStepCondition,
   zToDollar,
 } from "../../scripts/check_ssot";
-import {
-  actionSetsUpBun,
-  actionSteps,
-  MARKER_TOKENS,
-  markerLines,
-  mdMarkers,
-} from "../../scripts/generate";
+import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
 
 describe("ownershipTableMismatches", () => {
@@ -1297,40 +1292,65 @@ describe("stepCarriesWithKey", () => {
 
 describe("actionsBunGuardMismatches", () => {
   const FILE = "actions/x/action.yml";
-  const REGION = bunSetupRegionName(FILE);
-  const markers = markerLines(REGION, "#", "", "scripts/action_bun_setup.ts");
   const RUN_STEP = `    - name: Run
       shell: bash
       env:
         ACTION_BUN: \${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
 `;
-  // A minimal composite carrying the generated region exactly as the
-  // generator fills it, then one step running the recorded bun.
+  // A minimal composite: pinned probe, setup, retry, the recorded path,
+  // then one step running the recorded bun.
   const canonical = `runs:
   using: composite
   steps:
-    ${markers.begin}
-${bunSetupSteps(REGION, 4).join("\n")}
-    ${markers.end}
+    - name: Check for a bun matching the action's pin
+      id: bun
+      shell: bash
+      run: |
+        pin="$(cat "\${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.pinned != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
 
 ${RUN_STEP}`;
 
-  test("the generated region plus a step running the recorded bun passes", () => {
+  test("pinned setup steps plus a step running the recorded bun pass", () => {
     expect(actionsBunGuardMismatches(FILE, canonical)).toEqual([]);
   });
 
-  // The rule's fixed-message mismatches, built from the same pin the
-  // generator writes, so the expectations below can never demand
-  // different bytes from the judgment.
-  const regionMismatchFor = (file: string, region: string, problem: string) => ({
-    file,
+  // The rule's fixed-message mismatches, built from the same constants the
+  // rule reads, so the expectations below can never demand different bytes
+  // from the judgment.
+  const shapeMismatch = (got: string) => ({
+    file: FILE,
     expected:
-      `the generated bun setup region '${region}' (exactly one BEGIN/END GENERATED marker pair at step depth, ` +
-      "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
-    got: `${problem} - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer`,
+      `exactly one bun setup step with id 'action-bun' ('uses: ${BUN_SETUP_USES}' with ` +
+      `'pin: ${ACTION_BUN_PIN}', or a run step recording the path behind this action's own setup-bun steps), ahead of any other step that uses an action or touches bun`,
+    got: `${got} - the setup is what pins the bun to this action's own .bun-version, never the CALLER repository's`,
   });
-  const regionMismatch = regionMismatchFor(FILE, REGION, `no '${REGION}' marker pair`);
+  const danglingMismatch = (id: string, got = `no step with id '${id}'`) => ({
+    file: FILE,
+    expected: `steps.${id}.outputs.path naming a step of this action that sets a path output (the bun setup, or a run step writing path= to GITHUB_OUTPUT)`,
+    got: `${got} - the reference is empty at run time and the step it binds runs nothing`,
+  });
   const perStepMismatch = {
     file: FILE,
     expected: `every setup-bun step carrying 'bun-version-file: ${ACTION_BUN_PIN}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
@@ -1338,95 +1358,232 @@ ${RUN_STEP}`;
   };
   const bareBunMismatch = (line: string, step = "Run") => ({
     file: FILE,
-    expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the resolver step's path output), never \`bun\` by name`,
+    expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to steps.action-bun.outputs.path), never \`bun\` by name`,
     got: line,
   });
-
-  // The same steps shipped by hand, markers gone: the content is right
-  // today and unheld tomorrow - only the region keeps generate:check on it.
-  test("the setup steps without their marker pair are refused for the missing region", () => {
-    const unfenced = canonical
-      .replace(`    ${markers.begin}\n`, "")
-      .replace(`    ${markers.end}\n`, "");
-    expect(unfenced).not.toBe(canonical);
-    expect(actionsBunGuardMismatches(FILE, unfenced)).toEqual([regionMismatch]);
-  });
-
-  // The ready-output action derives the other region name: fenced as the
-  // plain variant, its region is not the one the generator fills.
-  test("a ready-output action fenced as the plain variant lacks ITS region", () => {
-    const report = "actions/validate-template-report/action.yml";
-    expect(bunSetupRegionName(report)).toBe("bun-setup-ready");
-    expect(actionsBunGuardMismatches(report, canonical)).toEqual([
-      regionMismatchFor(report, "bun-setup-ready", "no 'bun-setup-ready' marker pair"),
-    ]);
-    const ready = markerLines("bun-setup-ready", "#", "", "scripts/action_bun_setup.ts");
-    const fenced = `runs:\n  using: composite\n  steps:\n    ${ready.begin}\n${bunSetupSteps("bun-setup-ready", 4).join("\n")}\n    ${ready.end}\n\n${RUN_STEP}`;
-    expect(actionsBunGuardMismatches(report, fenced)).toEqual([]);
-  });
-
-  // One pair, at the step list's depth, in order: a column-1 pair would
-  // still splice (markers match trimmed); a doubled or lone marker breaks
-  // the next regeneration.
-  test.each([
-    {
-      reason: "both markers at column 1",
-      text: canonical
-        .replace(`    ${markers.begin}\n`, `${markers.begin}\n`)
-        .replace(`    ${markers.end}\n`, `${markers.end}\n`),
-      problem: `a '${REGION}' marker at column 0 where the step list sits at column 4`,
-    },
-    {
-      reason: "the END marker one column deeper than the steps",
-      text: canonical.replace(`    ${markers.end}\n`, `     ${markers.end}\n`),
-      problem: `a '${REGION}' marker at column 5 where the step list sits at column 4`,
-    },
-    {
-      reason: "a duplicate region",
-      text: `${canonical}    ${markers.begin}\n${bunSetupSteps(REGION, 4).join("\n")}\n    ${markers.end}\n`,
-      problem: `2 BEGIN and 2 END markers for '${REGION}' - exactly one of each`,
-    },
-    {
-      reason: "a lone BEGIN",
-      text: canonical.replace(`    ${markers.end}\n`, ""),
-      problem: `1 BEGIN and 0 END markers for '${REGION}' - exactly one of each`,
-    },
-    {
-      reason: "a lone END",
-      text: canonical.replace(`    ${markers.begin}\n`, ""),
-      problem: `0 BEGIN and 1 END markers for '${REGION}' - exactly one of each`,
-    },
-    {
-      reason: "the END marker before the BEGIN",
-      text: canonical
-        .replace(`    ${markers.begin}\n`, `    ${markers.end}\n`)
-        .replace(`    ${markers.end}\n\n`, `    ${markers.begin}\n\n`),
-      problem: `the '${REGION}' END marker sits before its BEGIN`,
-    },
-  ])("$reason is refused for the malformed region", ({ text, problem }) => {
-    expect(text).not.toBe(canonical);
-    expect(actionsBunGuardMismatches(FILE, text)).toEqual([
-      regionMismatchFor(FILE, REGION, problem),
-    ]);
-  });
-
-  // The region renders at whatever column the step list sits at; the rule
-  // accepts the pair there.
-  test("a six-space step list with its region rendered at six spaces passes", () => {
-    const six = `runs:
-  using: composite
-  steps:
-      ${markers.begin}
-${bunSetupSteps(REGION, 6).join("\n")}
-      ${markers.end}
-      - name: Run
-        shell: bash
-        env:
-          ACTION_BUN: \${{ steps.action-bun.outputs.path }}
-        run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
+  const SHARED_STEP = `    - name: Set up the action's bun
+      id: action-bun
+      uses: ${BUN_SETUP_USES}
+      with:
+        pin: \${{ github.action_path }}/.bun-version
 `;
-    expect(actionSteps(six)).toEqual(actionSteps(canonical));
-    expect(actionsBunGuardMismatches(FILE, six)).toEqual([]);
+  const RESOLVER = `    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
+`;
+  const withShared = `runs:\n  using: composite\n  steps:\n${SHARED_STEP}\n${RUN_STEP}`;
+
+  test("the shared bun-setup step plus a step running the recorded bun passes", () => {
+    expect(canonical).toContain(RESOLVER);
+    expect(actionsBunGuardMismatches(FILE, withShared)).toEqual([]);
+  });
+
+  // Exactly one setup, either form, ahead of everything else: each row is
+  // one deviation and the whole mismatch list it earns.
+  test.each<{ reason: string; text: string; expected: ReturnType<typeof shapeMismatch>[] }>([
+    {
+      reason: "no setup at all while a step binds the recorded path",
+      text: `runs:\n  using: composite\n  steps:\n${RUN_STEP}`,
+      expected: [shapeMismatch("0 steps with id 'action-bun'"), danglingMismatch("action-bun")],
+    },
+    {
+      reason: "two resolvers",
+      text: canonical.replace(RUN_STEP, `${RESOLVER}\n${RUN_STEP}`),
+      expected: [shapeMismatch("2 steps with id 'action-bun'")],
+    },
+    {
+      reason: "a resolver with no setup-bun ahead of it",
+      text: `runs:\n  using: composite\n  steps:\n${RESOLVER}\n${RUN_STEP}`,
+      expected: [shapeMismatch("no setup-bun step ahead of the 'action-bun' step")],
+    },
+    {
+      reason: "another action used between the setup and the resolver",
+      text: canonical.replace(RESOLVER, `    - uses: actions/checkout@v7\n${RESOLVER}`),
+      expected: [
+        shapeMismatch(
+          "step 'actions/checkout@v7' sits among the bun setup steps ahead of the 'action-bun' step",
+        ),
+      ],
+    },
+    {
+      reason: "a resolver that is neither a run step nor the shared action",
+      text: canonical.replace(RESOLVER, "    - id: action-bun\n      uses: actions/checkout@v7\n"),
+      expected: [
+        shapeMismatch(
+          "the 'action-bun' step is neither the shared bun-setup action nor a run step",
+        ),
+        danglingMismatch("action-bun", "step 'action-bun' sets no path output"),
+      ],
+    },
+    {
+      reason: "a second shared step under another id, the recorded path bound to it",
+      text: withShared
+        .replace(SHARED_STEP, `${SHARED_STEP}${SHARED_STEP.replace("id: action-bun", "id: other")}`)
+        .replace("steps.action-bun.outputs.path", "steps.other.outputs.path"),
+      expected: [shapeMismatch("2 shared bun-setup steps")],
+    },
+    {
+      reason: "the shared step at @main under another id, the recorded path bound to it",
+      text: withShared
+        .replace("id: action-bun", "id: other")
+        .replace("@build", "@main")
+        .replace("steps.action-bun.outputs.path", "steps.other.outputs.path"),
+      expected: [shapeMismatch(`0 steps with id 'action-bun'`)],
+    },
+    {
+      reason:
+        "the recorded path bound to a run step that assigns path locally but never writes it to GITHUB_OUTPUT",
+      text: canonical.replace(
+        RUN_STEP,
+        `    - id: local\n      shell: bash\n      run: |\n        path="$(command -v bun)"\n        echo "ready=true" >> "$GITHUB_OUTPUT"\n${RUN_STEP.replace("steps.action-bun.outputs.path", "steps.local.outputs.path")}`,
+      ),
+      expected: [danglingMismatch("local", "step 'local' sets no path output")],
+    },
+    {
+      reason: "the recorded path bound to the probe, which sets no path output",
+      text: canonical.replace("steps.action-bun.outputs.path", "steps.bun.outputs.path"),
+      expected: [danglingMismatch("bun", "step 'bun' sets no path output")],
+    },
+    {
+      reason: "the shared step at another ref",
+      text: withShared.replace("@build", "@main"),
+      expected: [shapeMismatch(`uses '${BUN_SETUP_USES.replace("@build", "@main")}'`)],
+    },
+    {
+      reason: "the shared step handed the CALLER's pin",
+      text: withShared.replace("pin: ${{ github.action_path }}/.bun-version", "pin: .bun-version"),
+      expected: [shapeMismatch("pin '.bun-version'")],
+    },
+    {
+      reason: "a step using an action ahead of the shared step",
+      text: withShared.replace(SHARED_STEP, `    - uses: actions/checkout@v7\n${SHARED_STEP}`),
+      expected: [
+        shapeMismatch("step 'actions/checkout@v7' uses an action or touches bun before it"),
+      ],
+    },
+    {
+      reason: "a step touching bun ahead of the shared step",
+      text: withShared.replace(
+        SHARED_STEP,
+        `    - name: Warm\n      shell: bash\n      run: echo "$ACTION_BUN"\n${SHARED_STEP}`,
+      ),
+      expected: [shapeMismatch("step 'Warm' uses an action or touches bun before it")],
+    },
+    {
+      reason: "a run step touching bun ahead of the inline setup-bun steps",
+      text: canonical.replace(
+        "  steps:\n",
+        `  steps:\n    - name: Warm\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n`,
+      ),
+      expected: [
+        shapeMismatch("step 'Warm' sits among the bun setup steps ahead of the 'action-bun' step"),
+      ],
+    },
+    {
+      reason: "a bun-running step between the setup-bun step and its retry",
+      text: canonical.replace(
+        "    - name: Set up bun (retry)\n",
+        `    - name: Eager\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n\n    - name: Set up bun (retry)\n`,
+      ),
+      expected: [
+        shapeMismatch("step 'Eager' sits among the bun setup steps ahead of the 'action-bun' step"),
+      ],
+    },
+    {
+      reason: "a harmless run step between the probe and the setup-bun step",
+      text: canonical.replace(
+        "    - name: Set up bun\n",
+        `    - name: Note\n      shell: bash\n      run: echo ok\n\n    - name: Set up bun\n`,
+      ),
+      expected: [
+        shapeMismatch("step 'Note' sits among the bun setup steps ahead of the 'action-bun' step"),
+      ],
+    },
+    {
+      reason: "an action carrying the probe's id (the setup-bun if: reads it) in the probe's place",
+      text: canonical.replace(
+        `    - name: Check for a bun matching the action's pin
+      id: bun
+      shell: bash
+      run: |
+        pin="$(cat "\${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+`,
+        "    - id: bun\n      uses: actions/checkout@v7\n",
+      ),
+      expected: [
+        shapeMismatch("step 'bun' sits among the bun setup steps ahead of the 'action-bun' step"),
+      ],
+    },
+    {
+      reason:
+        "a lone action-bun step using the shared action by a relative path (nothing else names bun)",
+      text: "runs:\n  using: composite\n  steps:\n    - id: action-bun\n      uses: ./actions/bun-setup\n",
+      expected: [shapeMismatch("uses './actions/bun-setup', pin 'undefined'")],
+    },
+    {
+      reason: "the shared action by a relative path under another id (nothing else names bun)",
+      text: "runs:\n  using: composite\n  steps:\n    - id: runtime\n      uses: ./actions/bun-setup\n",
+      expected: [shapeMismatch("0 steps with id 'action-bun'")],
+    },
+    {
+      reason: "a steps.undefined.outputs.path reference beside id-less steps",
+      text: canonical.replace("steps.action-bun.outputs.path", "steps.undefined.outputs.path"),
+      expected: [danglingMismatch("undefined")],
+    },
+    {
+      reason: "a dangling steps.<id>.outputs.path reference",
+      text: canonical.replace("steps.action-bun.outputs.path", "steps.gone.outputs.path"),
+      expected: [danglingMismatch("gone")],
+    },
+  ])("$reason is refused", ({ text, expected }) => {
+    expect(text).not.toBe(canonical);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual(expected);
+  });
+
+  // pages-site records the caller's PATH ahead of its setup, by design.
+  test.each([
+    ["inline", canonical],
+    ["shared", withShared],
+  ])(
+    "a run step neither using an action nor touching bun may precede the %s setup",
+    (_form, text) => {
+      const record = `    - name: Record the caller's toolchain PATH\n      id: caller\n      shell: bash\n      run: echo "path=$PATH" >> "$GITHUB_OUTPUT"\n`;
+      const preceded = text.replace("  steps:\n", `  steps:\n${record}`);
+      expect(preceded).not.toBe(text);
+      expect(actionsBunGuardMismatches(FILE, preceded)).toEqual([]);
+    },
+  );
+
+  // An action whose only bun is an env binding of its own is still a bun
+  // runner: with no setup, the rule names the missing step.
+  test("an action running a bun it names only in env, with no setup, is refused", () => {
+    const text = `runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n`;
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([
+      shapeMismatch("0 steps with id 'action-bun'"),
+    ]);
+  });
+
+  // The shared setup action reads the caller's pin through its input and
+  // carries no resolver of its own; any other action shaped like it is
+  // unpinned on both counts.
+  test("actions/bun-setup's setup steps read the pin input; another action shaped like it is refused", () => {
+    const shared = canonical
+      .replaceAll(
+        "bun-version-file: ${{ github.action_path }}/.bun-version",
+        "bun-version-file: ${{ inputs.pin }}",
+      )
+      .replace(RESOLVER, "")
+      .replace(RUN_STEP, "");
+    expect(shared).not.toBe(canonical);
+    expect(actionsBunGuardMismatches("actions/bun-setup/action.yml", shared)).toEqual([]);
+    expect(actionsBunGuardMismatches(FILE, shared)).toEqual([
+      shapeMismatch("0 steps with id 'action-bun'"),
+      perStepMismatch,
+      perStepMismatch,
+    ]);
   });
 
   // A later setup-bun (the fetched tree's, a caller's) can put another bun
@@ -1702,21 +1859,19 @@ ${extra}      shell: ${shell}
     expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
   });
 
-  test("an action that runs bun by name with no setup at all is refused for the missing region and the name", () => {
+  test("an action that runs bun by name with no setup at all is refused for the missing setup and the name", () => {
     const text =
       'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
     expect(actionsBunGuardMismatches(FILE, text)).toEqual([
-      regionMismatch,
+      shapeMismatch("0 steps with id 'action-bun'"),
       bareBunMismatch('bun "x.ts"'),
     ]);
   });
 
-  // Binding a step to the resolver's outputs IS running bun: with no
-  // region there is no resolver, and the env would be empty at run time.
-  test("an action running the recorded bun with no region is refused for the missing region", () => {
-    const text = `runs:\n  using: composite\n  steps:\n${RUN_STEP}`;
-    expect(actionSetsUpBun(text)).toBe(false);
-    expect(actionsBunGuardMismatches(FILE, text)).toEqual([regionMismatch]);
+  test("a non-bun action consuming another action's path output needs no guard", () => {
+    const text =
+      "runs:\n  using: composite\n  steps:\n    - id: tool\n      uses: x/setup-tool@v1\n    - name: Run\n      shell: bash\n      env:\n        TOOL: ${{ steps.tool.outputs.path }}\n      run: '\"$TOOL\" --check'\n";
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([]);
   });
 
   test("an action touching no bun needs no guard", () => {
@@ -1736,7 +1891,7 @@ ${extra}      shell: ${shell}
     expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");
   });
 
-  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries the generated region with pinned setup steps", () => {
+  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup", () => {
     // The live-file forcing test the guard registry names: unpinning any
     // real action's setup-bun (the staged mutation strips the primary
     // setup step's with: block in check-typography) goes red here.

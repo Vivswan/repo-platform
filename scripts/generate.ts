@@ -28,10 +28,6 @@
 // - actions/<dir>/.bun-version for every action that sets up bun: WHOLE
 //   dotfiles carrying the manifests' bun pin, so the actions never ride the
 //   CALLER's bun resolution.
-// - actions/**/action.yml carrying a bun-setup region: the setup steps
-//   that read those dotfiles (scripts/action_bun_setup.ts is the source;
-//   the actions-bun-guard ssot rule demands the region of every action
-//   that runs bun).
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
@@ -74,7 +70,6 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
-import { BUN_SETUP_SOURCES, bunSetupRegionName, bunSetupSteps } from "./action_bun_setup.ts";
 import { compose } from "./compose/compose.ts";
 import { dependabotLabels } from "./compose/data_anchors.ts";
 import { excludePatterns } from "./compose/exclude.ts";
@@ -627,62 +622,32 @@ function actionManifests(actionsDir: string): { dir: string; file: string; text:
   return found;
 }
 
-/** The indentation of a composite manifest's step list: the shallowest
- *  `- key:` line after `steps:` (block-scalar bodies sit deeper). */
-export function stepListIndent(lines: string[]): number | null {
-  const stepsAt = lines.findIndex((line) => /^ *steps:\s*$/.test(line));
-  if (stepsAt === -1) return null;
-  const indents = lines
-    .slice(stepsAt + 1)
-    .flatMap((line) => (/^ *- [A-Za-z_-]+:/.test(line) ? [line.search(/\S/)] : []));
-  return indents.length === 0 ? null : Math.min(...indents);
-}
+/** The shared setup action every other composite action calls for its bun;
+ *  its setup-bun reads the caller's pin through the `pin` input, so it
+ *  carries no .bun-version of its own. */
+export const BUN_SETUP_ACTION = "actions/bun-setup";
 
-/** Why an action manifest's bun-setup region (the one its variant derives)
- *  is not a well-formed target: null when exactly one BEGIN and one END
- *  marker sit at the step list's depth, END after BEGIN. */
-export function bunSetupRegionProblem(file: string, text: string): string | null {
-  const name = bunSetupRegionName(file);
-  const { begin, end } = markerLines(name, "#", "", BUN_SETUP_SOURCES);
-  const lines = text.split("\n");
-  const at = (marker: string) =>
-    lines.flatMap((line, index) => (line.trim() === marker ? [index] : []));
-  const begins = at(begin);
-  const ends = at(end);
-  if (begins.length === 0 && ends.length === 0) return `no '${name}' marker pair`;
-  if (begins.length !== 1 || ends.length !== 1) {
-    return `${begins.length} BEGIN and ${ends.length} END markers for '${name}' - exactly one of each`;
-  }
-  if (ends[0] < begins[0]) return `the '${name}' END marker sits before its BEGIN`;
-  const depth = stepListIndent(lines);
-  if (depth === null) return "no step list to sit in";
-  for (const index of [begins[0], ends[0]]) {
-    const indent = lines[index].search(/\S/);
-    if (indent !== depth) {
-      return `a '${name}' marker at column ${indent} where the step list sits at column ${depth}`;
-    }
-  }
-  return null;
-}
-
-/** The action manifests carrying a well-formed bun-setup region, sorted, each
- *  with the step-list indent its region is rendered at: the generator's
- *  roster. */
-export function bunSetupActionFiles(actionsDir: string): { file: string; indent: number }[] {
-  return actionManifests(actionsDir)
-    .filter(({ file, text }) => bunSetupRegionProblem(file, text) === null)
-    .map(({ file, text }) => ({ file, indent: stepListIndent(text.split("\n")) as number }))
-    .sort((a, b) => a.file.localeCompare(b.file));
+/** Whether one parsed step's `uses:` names the shared bun-setup action in
+ *  any spelling: published at any ref, or the relative path (identifiers
+ *  are case-insensitive). */
+export function usesBunSetup(step: Record<string, unknown>): boolean {
+  return (
+    typeof step.uses === "string" &&
+    new RegExp(`(^|/)${BUN_SETUP_ACTION}(@|$)`, "i").test(step.uses.trim())
+  );
 }
 
 /** Every directory under actions/ carrying a generated .bun-version, sorted:
- *  each action that sets up bun or is fenced for the generated setup (a fresh
- *  fence is filled and pinned in one run; EXCLUDED_DIRS bounds the walk). */
+ *  each whose action.yml sets up bun itself or through the shared bun-setup
+ *  action (EXCLUDED_DIRS bounds the walk), the shared action excepted. */
 export function bunPinnedActionDirs(actionsDir: string): string[] {
-  const dirs = actionManifests(actionsDir)
-    .filter(({ file, text }) => actionSetsUpBun(text) || bunSetupRegionProblem(file, text) === null)
-    .map(({ dir }) => dir);
-  return dirs.sort();
+  return actionManifests(actionsDir)
+    .filter(
+      ({ dir, text }) =>
+        dir !== BUN_SETUP_ACTION && (actionSetsUpBun(text) || actionSteps(text).some(usesBunSetup)),
+    )
+    .map(({ dir }) => dir)
+    .sort();
 }
 
 /** .bun-version files under actions/ that bunPinnedActionDirs no longer
@@ -999,15 +964,6 @@ export function targets(manifests: ModuleManifest[]): Target[] {
         ],
       ],
     },
-    ...bunSetupActionFiles(join(REPO_ROOT, "actions")).map(({ file, indent }): Target => {
-      const name = bunSetupRegionName(file);
-      return {
-        file,
-        syntax: "line",
-        prefix: "#",
-        regions: [[name, () => bunSetupSteps(name, indent), BUN_SETUP_SOURCES]],
-      };
-    }),
     {
       file: "templates/base/.github/workflows/ci.yml.jinja",
       syntax: "jinja",
@@ -1136,8 +1092,7 @@ function main(): number {
       "its generated region(s) do not match their sources (the module " +
       "manifests; the ownership declarations and template decoration for " +
       "the ownership regions; the settings baseline generator's label " +
-      "roster for copier.yml's tracking-label validators; " +
-      `${BUN_SETUP_SOURCES} for the actions' bun-setup regions)`;
+      "roster for copier.yml's tracking-label validators)";
     changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");

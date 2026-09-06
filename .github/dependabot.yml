@@ -13,6 +13,7 @@ updates:
     directories:
       - "/"
       - "/actions/all-green"
+      - "/actions/bun-setup"
       - "/actions/check-file-size"
       - "/actions/check-typography"
       - "/actions/dependency-review"

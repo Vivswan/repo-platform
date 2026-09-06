@@ -32,7 +32,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # BEGIN GENERATED: bun-setup-ready (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -85,7 +84,6 @@ runs:
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
         echo "path=$path" >> "$GITHUB_OUTPUT"
         echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-    # END GENERATED: bun-setup-ready
 
     # Every predictable scratch path, cleared by ONE fixed /bin/rm before
     # anything reads it; any failed removal fails the step.

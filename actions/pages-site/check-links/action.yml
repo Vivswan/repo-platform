@@ -24,7 +24,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # BEGIN GENERATED: bun-setup (scripts/generate.ts - edit scripts/action_bun_setup.ts, not this block)
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -62,7 +61,6 @@ runs:
       id: action-bun
       shell: bash
       run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
-    # END GENERATED: bun-setup
 
     - name: Install the pinned link checker
       shell: bash
