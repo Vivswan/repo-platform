@@ -527,18 +527,22 @@ describe("strict check build", () => {
         },
         timeoutMs: 180_000,
       });
-      const page = join(
-        realpathSync(join(root, "runner-temp")),
-        "pages-site",
-        "build-0",
-        ".vitepress",
-        "dist",
-        "page.html",
-      );
+      const buildDir = join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0");
+      const page = join(buildDir, ".vitepress", "dist", "page.html");
       if (fails) {
-        expect(result.exitCode).not.toBe(0);
-        expect(result.stderr).toContain(
-          "TypeError: undefined is not an object (evaluating '_ctx.x.y')",
+        // The SSR frame must sit inside vitepress's fatal block (`build error:`,
+        // ANSI-colored under CI, up to the action's annotation) and is never matched
+        // by wording: bun 1.4.0 prints a bare `Error` stack header in ~1.5% of throws.
+        const stderr = Bun.stripANSI(result.stderr);
+        const fatal = stderr.indexOf("build error:\n");
+        const annotation = stderr.indexOf(
+          `::error::command failed (exit 1): bun ${join(import.meta.dir, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
+        );
+        expect(result.exitCode).toBe(1);
+        expect(fatal).toBeGreaterThanOrEqual(0);
+        expect(annotation).toBeGreaterThan(fatal);
+        expect(stderr.slice(fatal, annotation)).toContain(
+          `at _sfc_ssrRender (${join(buildDir, ".vitepress", ".temp", "page.md.js")}:`,
         );
         expect(existsSync(page)).toBe(false);
       } else {
