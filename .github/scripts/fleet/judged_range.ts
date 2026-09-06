@@ -52,7 +52,9 @@ export function resolveBase(cwd: string, sha: string, before: string): DiffBase 
     }
     if (!gitAnswersYes(cwd, ["merge-base", "--is-ancestor", base.base, sha])) {
       throw new Error(
-        `${what} ${base.base.slice(0, 12)} is not an ancestor of ${sha.slice(0, 12)}: the range means nothing (a force-push, a foreign payload, or a tampered build stamp) - the nightly heal covers the commit`,
+        `${what} ${base.base.slice(0, 12)} is not an ancestor of ${sha.slice(0, 12)}: the range means ` +
+          "nothing (a force-push, a foreign payload, or a tampered build stamp) - publish a green main " +
+          "commit by hand (dispatch post-green.yml with sha=<green main commit>) to reset the base",
       );
     }
   }
