@@ -8,8 +8,8 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
+import { ACTION_BUN_PIN, bunSetupRegionName, bunSetupSteps } from "../../scripts/action_bun_setup";
 import {
-  ACTIONS_BUN_SETUP_GUARD,
   ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
   actionManifestFiles,
@@ -99,7 +99,7 @@ import {
   unsafeStepCondition,
   zToDollar,
 } from "../../scripts/check_ssot";
-import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
+import { actionSetsUpBun, MARKER_TOKENS, markerLines, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
 
 describe("applyDivergences", () => {
@@ -1207,70 +1207,76 @@ describe("stepCarriesWithKey", () => {
 });
 
 describe("actionsBunGuardMismatches", () => {
-  // A minimal composite carrying the canonical pinned-bun setup block.
-  const canonical = `runs:
-  using: composite
-  steps:
-    - name: Check for a bun matching the action's pin
-      id: bun
-      shell: bash
-      run: |
-        pin="$(cat "\${{ github.action_path }}/.bun-version")"
-        have="$(command -v bun >/dev/null && bun --version || true)"
-        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
-    # Free-form prose between the steps is excused by the semantic-line
-    # comparison; only the steps themselves are pinned.
-    - name: Set up bun
-      id: setup-bun
-      if: steps.bun.outputs.pinned != 'true'
-      continue-on-error: true
-      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: \${{ github.action_path }}/.bun-version
-
-    - name: Set up bun (retry)
-      if: steps.setup-bun.outcome == 'failure'
-      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: \${{ github.action_path }}/.bun-version
-
-    - name: Resolve the action's bun
-      id: action-bun
-      shell: bash
-      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
-
-    - name: Run
+  const FILE = "actions/x/action.yml";
+  const REGION = bunSetupRegionName(FILE);
+  const markers = markerLines(REGION, "#", "", "scripts/action_bun_setup.ts");
+  const RUN_STEP = `    - name: Run
       shell: bash
       env:
         ACTION_BUN: \${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
 `;
+  // A minimal composite carrying the generated region exactly as the
+  // generator fills it, then one step running the recorded bun.
+  const canonical = `runs:
+  using: composite
+  steps:
+    ${markers.begin}
+${bunSetupSteps(REGION).join("\n")}
+    ${markers.end}
 
-  test("the canonical pinned block passes", () => {
-    expect(actionsBunGuardMismatches("actions/x/action.yml", canonical)).toEqual([]);
+${RUN_STEP}`;
+
+  test("the generated region plus a step running the recorded bun passes", () => {
+    expect(actionsBunGuardMismatches(FILE, canonical)).toEqual([]);
   });
 
-  // The rule's two fixed-message mismatches, built from the same pin line
-  // the rule reads, so the expectations below can never demand different
-  // bytes from the judgment.
-  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
-  const canonicalBlockMismatch = {
-    file: "actions/x/action.yml",
+  // The rule's fixed-message mismatches, built from the same pin the
+  // generator writes, so the expectations below can never demand
+  // different bytes from the judgment.
+  const regionMismatch = {
+    file: FILE,
     expected:
-      "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
-      "both setup steps reading the action-local generated .bun-version)",
-    got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
+      `the generated bun setup region '${REGION}' (a BEGIN/END GENERATED marker pair at step depth, ` +
+      "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
+    got: "no such region - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer",
   };
   const perStepMismatch = {
-    file: "actions/x/action.yml",
-    expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
+    file: FILE,
+    expected: `every setup-bun step carrying 'bun-version-file: ${ACTION_BUN_PIN}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
     got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
   };
   const bareBunMismatch = (line: string, step = "Run") => ({
-    file: "actions/x/action.yml",
-    expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the post-setup resolver's path output), never \`bun\` by name`,
+    file: FILE,
+    expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the resolver step's path output), never \`bun\` by name`,
     got: line,
+  });
+
+  // The same steps shipped by hand, markers gone: the content is right
+  // today and unheld tomorrow - only the region keeps generate:check on it.
+  test("the setup steps without their marker pair are refused for the missing region", () => {
+    const unfenced = canonical
+      .replace(`    ${markers.begin}\n`, "")
+      .replace(`    ${markers.end}\n`, "");
+    expect(unfenced).not.toBe(canonical);
+    expect(actionsBunGuardMismatches(FILE, unfenced)).toEqual([regionMismatch]);
+  });
+
+  // The ready-output action derives the other region name: fenced as the
+  // plain variant, its region is not the one the generator fills.
+  test("a ready-output action fenced as the plain variant lacks ITS region", () => {
+    const report = "actions/validate-template-report/action.yml";
+    expect(bunSetupRegionName(report)).toBe("bun-setup-ready");
+    expect(actionsBunGuardMismatches(report, canonical)).toEqual([
+      {
+        ...regionMismatch,
+        file: report,
+        expected: regionMismatch.expected.replace(`'${REGION}'`, "'bun-setup-ready'"),
+      },
+    ]);
+    const ready = markerLines("bun-setup-ready", "#", "", "scripts/action_bun_setup.ts");
+    const fenced = `runs:\n  using: composite\n  steps:\n    ${ready.begin}\n${bunSetupSteps("bun-setup-ready").join("\n")}\n    ${ready.end}\n\n${RUN_STEP}`;
+    expect(actionsBunGuardMismatches(report, fenced)).toEqual([]);
   });
 
   // A later setup-bun (the fetched tree's, a caller's) can put another bun
@@ -1280,17 +1286,20 @@ describe("actionsBunGuardMismatches", () => {
     ['bun "${{ github.action_path }}/x.ts"', ['bun "${{ github.action_path }}/x.ts"']],
     ["bun install --frozen-lockfile --production", ["bun install --frozen-lockfile --production"]],
     ['|\n        "$ACTION_BUN" install\n        bun "x.ts"', ['bun "x.ts"']],
-  ])("a step running %s beside an intact block is refused for bun by name", (run, lines) => {
+  ])("a step running %s beside an intact region is refused for bun by name", (run, lines) => {
     const text = canonical.replace(
       `      run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'\n`,
       () => `      run: ${run}\n`,
     );
     expect(text).not.toBe(canonical);
-    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual(
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual(
       lines.map((line) => bareBunMismatch(line)),
     );
   });
 
+  // Inside the region generate:check owns the bytes; the per-step pin
+  // judgment still names each unpinned setup, so the guard registry's
+  // staged mutation (the with: block stripped) is loud in both gates.
   test.each([
     {
       reason: "both with: blocks deleted (the pre-fix bare shape)",
@@ -1308,16 +1317,10 @@ describe("actionsBunGuardMismatches", () => {
         "bun-version-file: .bun-version",
       ),
     },
-  ])(
-    "$reason is refused: the canonical-block mismatch plus one per unpinned setup step",
-    ({ text }) => {
-      expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
-        canonicalBlockMismatch,
-        perStepMismatch,
-        perStepMismatch,
-      ]);
-    },
-  );
+  ])("$reason inside the region is refused once per unpinned setup step", ({ text }) => {
+    expect(text).not.toBe(canonical);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([perStepMismatch, perStepMismatch]);
+  });
 
   test.each([
     { uses: "oven-sh/setup-bun@v2", reason: "a plain spelling" },
@@ -1327,13 +1330,13 @@ describe("actionsBunGuardMismatches", () => {
       reason: "a mixed-case id (GitHub action ids are case-insensitive)",
     },
   ])(
-    "an EXTRA bare setup-bun beside an intact canonical block is refused per step - $reason",
+    "an EXTRA bare setup-bun beside an intact region is refused per step - $reason",
     ({ uses }) => {
       const extra = `${canonical}
     - name: Set up bun again
       uses: ${uses}
 `;
-      expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
+      expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
     },
   );
 
@@ -1363,7 +1366,7 @@ ${extra}      shell: ${shell}
 `;
   const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
   const noClearing = {
-    file: "actions/x/action.yml",
+    file: FILE,
     expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
     got: "no such step - a caller could plant that pin before the action runs",
   };
@@ -1522,7 +1525,7 @@ ${extra}      shell: ${shell}
     "a runner-scratch pin with %s",
     (_name, before, expected, condition = REQUIRED, after = "") => {
       const text = `${canonical}${before}${fetchedSetup(condition)}${after}`;
-      expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual(expected);
+      expect(actionsBunGuardMismatches(FILE, text)).toEqual(expected);
     },
   );
 
@@ -1546,36 +1549,44 @@ ${extra}      shell: ${shell}
       with:
         bun-version-file: ${pin}
 `;
-    expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
+    expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
   });
 
-  test("an action that runs bun by name with no setup block at all is refused for the missing block and the name", () => {
+  test("an action that runs bun by name with no setup at all is refused for the missing region and the name", () => {
     const text =
       'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
-    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
-      canonicalBlockMismatch,
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([
+      regionMismatch,
       bareBunMismatch('bun "x.ts"'),
     ]);
+  });
+
+  // Binding a step to the resolver's outputs IS running bun: with no
+  // region there is no resolver, and the env would be empty at run time.
+  test("an action running the recorded bun with no region is refused for the missing region", () => {
+    const text = `runs:\n  using: composite\n  steps:\n${RUN_STEP}`;
+    expect(actionSetsUpBun(text)).toBe(false);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([regionMismatch]);
   });
 
   test("an action touching no bun needs no guard", () => {
     const text =
       "runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: echo ok\n";
-    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([]);
   });
 
   test("a commented setup-bun example alone demands nothing", () => {
     const text =
       "runs:\n  using: composite\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - name: Run\n      shell: bash\n      run: echo ok\n";
     expect(actionSetsUpBun(text)).toBe(false);
-    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([]);
   });
 
   test("the manifest walk sees nested actions", () => {
     expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");
   });
 
-  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block", () => {
+  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries the generated region with pinned setup steps", () => {
     // The live-file forcing test the guard registry names: unpinning any
     // real action's setup-bun (the staged mutation strips the primary
     // setup step's with: block in check-typography) goes red here.

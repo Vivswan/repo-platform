@@ -28,6 +28,10 @@
 // - actions/<dir>/.bun-version for every action that sets up bun: WHOLE
 //   dotfiles carrying the manifests' bun pin, so the actions never ride the
 //   CALLER's bun resolution.
+// - actions/**/action.yml carrying a bun-setup region: the setup steps
+//   that read those dotfiles (scripts/action_bun_setup.ts is the source;
+//   the actions-bun-guard ssot rule demands the region of every action
+//   that runs bun).
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
@@ -70,6 +74,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
+import { BUN_SETUP_SOURCES, bunSetupRegionName, bunSetupSteps } from "./action_bun_setup.ts";
 import { compose } from "./compose/compose.ts";
 import { dependabotLabels } from "./compose/data_anchors.ts";
 import { excludePatterns } from "./compose/exclude.ts";
@@ -599,20 +604,52 @@ export function actionSetsUpBun(text: string): boolean {
   return actionSteps(text).some(usesSetupBun);
 }
 
-/** Every directory under actions/ carrying a generated .bun-version, sorted:
- *  each whose action.yml sets up bun (EXCLUDED_DIRS bounds the walk as
- *  publication does). */
-export function bunPinnedActionDirs(actionsDir: string): string[] {
-  const dirs: string[] = [];
+/** Every action.yml under `actionsDir`, nested actions included and
+ *  EXCLUDED_DIRS pruned as publication prunes them: the manifest's
+ *  repo-relative path, its directory's, and its text. */
+function actionManifests(actionsDir: string): { dir: string; file: string; text: string }[] {
+  const found: { dir: string; file: string; text: string }[] = [];
   const walk = (dir: string, rel: string) => {
     const manifest = join(dir, "action.yml");
-    if (existsSync(manifest) && actionSetsUpBun(readFileSync(manifest, "utf-8"))) dirs.push(rel);
+    if (existsSync(manifest)) {
+      found.push({ dir: rel, file: `${rel}/action.yml`, text: readFileSync(manifest, "utf-8") });
+    }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory() || EXCLUDED_DIRS.has(entry.name)) continue;
       walk(join(dir, entry.name), `${rel}/${entry.name}`);
     }
   };
   walk(actionsDir, "actions");
+  return found;
+}
+
+/** Whether an action manifest carries its bun-setup region's BEGIN marker
+ *  (the name its variant derives, so a ready-output action fenced as the
+ *  plain variant does not count and the actions-bun-guard rule names the
+ *  region it lacks). */
+export function carriesBunSetupRegion(file: string, text: string): boolean {
+  const { begin } = markerLines(bunSetupRegionName(file), "#", "", BUN_SETUP_SOURCES);
+  return text.split("\n").some((line) => line.trim() === begin);
+}
+
+/** The action manifests carrying their bun-setup region, sorted - the
+ *  generator's roster (the markers are hand-placed once, like every
+ *  region's; the actions-bun-guard rule makes a bun-running action without
+ *  them loud). */
+export function bunSetupActionFiles(actionsDir: string): string[] {
+  return actionManifests(actionsDir)
+    .filter(({ file, text }) => carriesBunSetupRegion(file, text))
+    .map(({ file }) => file)
+    .sort();
+}
+
+/** Every directory under actions/ carrying a generated .bun-version, sorted:
+ *  each action that sets up bun or is fenced for the generated setup (a fresh
+ *  fence is filled and pinned in one run; EXCLUDED_DIRS bounds the walk). */
+export function bunPinnedActionDirs(actionsDir: string): string[] {
+  const dirs = actionManifests(actionsDir)
+    .filter(({ file, text }) => actionSetsUpBun(text) || carriesBunSetupRegion(file, text))
+    .map(({ dir }) => dir);
   return dirs.sort();
 }
 
@@ -876,15 +913,16 @@ type MarkdownRegions =
   | { regions: SpanRegion[]; inlineRegions?: InlineRegion[] }
   | { regions?: SpanRegion[]; inlineRegions: InlineRegion[] };
 
-type Target =
+export type Target =
   | { file: string; syntax: "line"; prefix: string; regions: SpanRegion[] }
   | { file: string; syntax: "jinja"; regions: SpanRegion[] }
   | ({ file: string; syntax: "markdown" } & MarkdownRegions);
 
-// The region roster is a function of the manifests: each tracking stream
-// contributes its question's validator region (the markers are still
-// hand-placed once, next to the hand-written question).
-function targets(manifests: ModuleManifest[]): Target[] {
+// The region roster is a function of the manifests and the tree: each
+// tracking stream contributes its question's validator region (the markers
+// are still hand-placed once, next to the hand-written question), and each
+// action manifest fenced for the bun setup contributes its region.
+export function targets(manifests: ModuleManifest[]): Target[] {
   const streams = trackingStreams(manifests);
   return [
     {
@@ -929,6 +967,15 @@ function targets(manifests: ModuleManifest[]): Target[] {
         ],
       ],
     },
+    ...bunSetupActionFiles(join(REPO_ROOT, "actions")).map((file): Target => {
+      const name = bunSetupRegionName(file);
+      return {
+        file,
+        syntax: "line",
+        prefix: "#",
+        regions: [[name, () => bunSetupSteps(name), BUN_SETUP_SOURCES]],
+      };
+    }),
     {
       file: "templates/base/.github/workflows/ci.yml.jinja",
       syntax: "jinja",
@@ -1057,7 +1104,8 @@ function main(): number {
       "its generated region(s) do not match their sources (the module " +
       "manifests; the ownership declarations and template decoration for " +
       "the ownership regions; the settings baseline generator's label " +
-      "roster for copier.yml's tracking-label validators)";
+      "roster for copier.yml's tracking-label validators; " +
+      `${BUN_SETUP_SOURCES} for the actions' bun-setup regions)`;
     changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");

@@ -52,6 +52,7 @@ import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { RUNG_FILE_RE, RUNG_ID_BODY } from "../.github/scripts/sync/run_migrations.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
+import { ACTION_BUN_PIN, bunSetupRegionName, RESOLVER_STEP_ID } from "./action_bun_setup.ts";
 import { bunLockDirs } from "./bootstrap.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
 import { ANCHOR_RE } from "./compose/splice.ts";
@@ -59,6 +60,7 @@ import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
 import {
   actionSetsUpBun,
   actionSteps,
+  carriesBunSetupRegion,
   MARKER_TOKENS,
   trackingStreams,
   usesSetupBun,
@@ -2988,34 +2990,6 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
-/** The canonical pinned-bun setup block every bun-touching composite
- *  action carries, as trimmed semantic lines (comments and blank lines
- *  excused, so per-action prose stays free). The generated action-local
- *  .bun-version both setup steps read is what decouples the action's
- *  runtime from the CALLING repository's bun resolution; the exact-match
- *  probe keeps the reuse fast path from resurrecting that coupling. */
-export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
-  "- name: Check for a bun matching the action's pin",
-  "id: bun",
-  "shell: bash",
-  "run: |",
-  'pin="$(cat "${{ github.action_path }}/.bun-version")"',
-  'have="$(command -v bun >/dev/null && bun --version || true)"',
-  'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
-  "- name: Set up bun",
-  "id: setup-bun",
-  "if: steps.bun.outputs.pinned != 'true'",
-  "continue-on-error: true",
-  "uses: oven-sh/setup-bun@v2",
-  "with:",
-  "bun-version-file: ${{ github.action_path }}/.bun-version",
-  "- name: Set up bun (retry)",
-  "if: steps.setup-bun.outcome == 'failure'",
-  "uses: oven-sh/setup-bun@v2",
-  "with:",
-  "bun-version-file: ${{ github.action_path }}/.bun-version",
-];
-
 /** Every action manifest under actions/, nested actions included - one
  *  walk shared by the actions-bun-guard rule and its forcing test, so
  *  the two can never judge different rosters; branch_tree.ts's
@@ -3110,16 +3084,18 @@ export function pinRootCleared(
 }
 
 /** How one action.yml violates the pinned-bun setup contract: any action
- *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
- *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
+ *  that runs bun (a `bun ` line, a step bound to the resolver's outputs)
+ *  OR sets it up must carry its generated bun-setup region (the marker
+ *  pair scripts/generate.ts fills from scripts/action_bun_setup.ts;
+ *  generate:check holds the content, so only the region's PRESENCE is
+ *  judged here), and EVERY setup-bun step (generated or extra, quoted or
  *  plain) must read the action-local pin, or a clean .bun-version path
  *  under the runner scratch root (fetchedTreePin) - so a bare setup added
- *  beside a canonical block is as loud as a drifted block. Triggers and the
+ *  beside the region is as loud as a missing region. Triggers and the
  *  per-step pin are judged on the PARSED steps (actionSteps), the way
- *  Actions itself reads the manifest; only the canonical block stays a
- *  byte comparison, because pinning exact bytes is its point. The
- *  setup-bun trigger is what makes a reintroduced BARE setup loud even
- *  before anything runs the bun it installs. */
+ *  Actions itself reads the manifest. Past the region, every step runs
+ *  the absolute path the resolver recorded, never `bun` by name (a later
+ *  setup-bun can put another bun first on PATH). */
 export function actionsBunGuardMismatches(file: string, text: string): Mismatch[] {
   const steps = actionSteps(text);
   // A run line starting with "bun " counts, block scalars included; a
@@ -3134,47 +3110,43 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       : [],
   );
   const setupSteps = steps.filter(usesSetupBun);
-  if (bareBunLines.length === 0 && setupSteps.length === 0) return [];
+  const runsRecordedBun = text.includes(`steps.${RESOLVER_STEP_ID}.outputs.`);
+  if (bareBunLines.length === 0 && setupSteps.length === 0 && !runsRecordedBun) return [];
   const mismatches: Mismatch[] = [];
-  // Trimmed: the guard sits at different depths across actions.
-  const lines = semanticLines(text).map((line) => line.trim());
-  const carried = lines.some((_, i) =>
-    ACTIONS_BUN_SETUP_GUARD.every((line, j) => lines[i + j] === line),
-  );
-  if (!carried) {
+  const region = bunSetupRegionName(file);
+  if (!carriesBunSetupRegion(file, text)) {
     mismatches.push({
       file,
       expected:
-        "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
-        "both setup steps reading the action-local generated .bun-version)",
-      got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
+        `the generated bun setup region '${region}' (a BEGIN/END GENERATED marker pair at step depth, ` +
+        "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
+      got: "no such region - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer",
     });
   }
   // `bun` by name resolves through PATH, where a later setup-bun (a fetched
   // tree's, a caller's) can put another bun first; every step runs the
-  // absolute path the action's post-setup resolver step recorded.
+  // absolute path the action's resolver step recorded.
   for (const { step, line } of bareBunLines) {
     mismatches.push({
       file,
-      expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the post-setup resolver's path output), never \`bun\` by name`,
+      expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to the resolver step's path output), never \`bun\` by name`,
       got: line,
     });
   }
-  // The canonical block's pin line doubles as the per-step requirement,
-  // so the two judgments can never demand different bytes. A pin under
-  // the runner's scratch directory is the one other anchor accepted: a
-  // tree the action fetched there itself (validate-template-report runs
-  // an older validator on that tree's own bun) is no more the caller's
-  // than the action path is.
-  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
-  const pinValue = pinLine.slice("bun-version-file: ".length);
+  // The generated steps' pin doubles as the per-step requirement, so the
+  // two judgments can never demand different bytes. A pin under the
+  // runner's scratch directory is the one other anchor accepted: a tree
+  // the action fetched there itself (validate-template-report runs an
+  // older validator on that tree's own bun) is no more the caller's than
+  // the action path is.
+  const pinLine = `bun-version-file: ${ACTION_BUN_PIN}`;
   for (const step of setupSteps) {
     const withBlock = step.with;
     const value =
       typeof withBlock === "object" && withBlock !== null
         ? (withBlock as Record<string, unknown>)["bun-version-file"]
         : undefined;
-    if (value === pinValue) continue;
+    if (value === ACTION_BUN_PIN) continue;
     if (fetchedTreePin(value)) {
       // The scratch path is predictable, so a caller could plant the pin
       // before the action runs; only an earlier step of THIS action
@@ -6987,24 +6959,23 @@ const rules: Rule[] = [
   },
 
   {
-    // Every composite action that touches bun carries the same three-step
-    // setup guard: probe for a bun already AT the action's pin, install
-    // the pinned version when the probe misses, retry the install once (a
-    // setup-bun fetch flake on a nightly reporting path turns a green
-    // night red). The pin is the load-bearing part: both setup steps read
-    // the action-local generated .bun-version (bun-version-file against
-    // github.action_path), because a BARE setup-bun resolves the CALLING
-    // repository's version files - and a consumer pinning an older bun
-    // cannot parse the lockfiles repo-platform's bun writes (the
+    // Every bun-touching composite action opens with the generated
+    // bun-setup region (scripts/action_bun_setup.ts is the source): a pin
+    // probe, a pinned install, one retry, and the resolver recording the
+    // bun's absolute path. The pin is the load-bearing part: both setup
+    // steps read the action-local generated .bun-version (bun-version-file
+    // against github.action_path), because a BARE setup-bun resolves the
+    // CALLING repository's version files - and a consumer pinning an older
+    // bun cannot parse the lockfiles repo-platform's bun writes (the
     // cloud-speech class: bun < 1.4.0 dying on a lockfileVersion-2
-    // bun.lock with the message swallowed by --silent). The block cannot
+    // bun.lock with the message swallowed by --silent). The steps cannot
     // be hoisted into a shared action - a relative `uses:` inside a
     // composite action resolves against the CALLER's workspace, not this
-    // repo - so the copies are load-bearing; this rule keeps every copy
-    // present and identical (nested actions included), and catches a
-    // future bun-touching action shipped bare. Past the block, every step
-    // runs the absolute path a post-setup step recorded, never `bun` by
-    // name (a later setup-bun can put another bun first on PATH).
+    // repo - so every action carries a copy, generated: generate:check
+    // holds each region's content, and this rule catches a bun-touching
+    // action shipped without the region (nested actions included), an
+    // extra setup-bun outside it reading anything but the pin, and any
+    // step running `bun` by name instead of the recorded path.
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();

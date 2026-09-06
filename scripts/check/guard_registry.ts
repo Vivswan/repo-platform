@@ -480,8 +480,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "actions/pages-site/pages-site.test.ts",
     testName: "the legacy-tag skip is NARROW: a tag declaring the build script is never skipped",
   },
-  // The composite actions' pinned-bun setup (the actions-bun-guard rule's
-  // canonical block). The attack was staged live, not hypothetically: the
+  // The composite actions' pinned-bun setup (the generated bun-setup
+  // region scripts/action_bun_setup.ts is the source of; the
+  // actions-bun-guard rule judges every setup step's pin). The attack was
+  // staged live, not hypothetically: the
   // 1.4.0 bump rewrote the action lockfiles to lockfileVersion 2, and
   // every consumer whose own pin resolved an older bun (cloud-speech at
   // 1.3.9 first) died at the actions' install step - with the parse error
@@ -498,7 +500,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
-      "the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block",
+      "the composite actions' bun pin is ARMED: every bun-touching action.yml carries the generated region with pinned setup steps",
   },
   // The test trees' fixture discipline: each fails OPEN if unarmed -
   // fixtures pile up under the real temp directory with every gate green.
