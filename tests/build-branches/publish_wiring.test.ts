@@ -356,6 +356,20 @@ describe("post-green publish wiring", () => {
     expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
   });
 
+  test("ci.yml's main lane serializes without cancelling; only pull-request lanes cancel", () => {
+    // The directive-loss fix reads a RANGE because GitHub keeps one pending
+    // run per group and replaces it (a burst of three loses the middle
+    // run); cancel-in-progress must never add a second loss by killing the
+    // running main run, while PR pushes keep cancelling their stale runs.
+    const doc = parseYaml(ciYml) as {
+      concurrency: { group: string; "cancel-in-progress": string | boolean };
+    };
+    expect(doc.concurrency).toEqual({
+      group: "${{ github.workflow }}-${{ github.ref }}",
+      "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+    });
+  });
+
   test("ONE publisher lane: a literal group on the publish job, and no lane on the caller", () => {
     // The group must be a literal - NEVER derived from github.workflow,
     // which inside a workflow_call'd workflow resolves to the CALLER's
