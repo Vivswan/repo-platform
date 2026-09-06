@@ -17,8 +17,8 @@ const temp = tempDirs();
 // live defect), then assert the carry restores every side. Requires
 // copier on PATH, so it runs where copier exists (locally and on the sync
 // runner); CI's script-tests job skips it, and the always-on CI coverage
-// is upgrade_path_test.sh's recovery leg, which drives the same carry
-// against a real recopy in the upgrade-path job.
+// is the upgrade-path harness's recovery leg (ci/upgrade_path/02_recovery_recopy.sh),
+// which drives the same carry against a real recopy in the upgrade-path job.
 const hasCopier = Bun.which("copier") !== null;
 
 describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)", () => {
