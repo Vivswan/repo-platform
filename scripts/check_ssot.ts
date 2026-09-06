@@ -953,6 +953,47 @@ function lineDiffMismatch(
   ];
 }
 
+/** The two skills' file-ownership references. Skills install standalone
+ *  (no cross-skill link resolves after `npx skills add`), so each ships
+ *  its own table; the Class and Files columns are one roster, the third
+ *  column is each skill's own reading of it. */
+export const SKILL_OWNERSHIP_TABLES = [
+  "skills/repo-platform-new-project/references/file-ownership.md",
+  "skills/repo-platform-sync-pr/references/file-ownership.md",
+] as const;
+
+/** Every table row's first two cells (`| Class | Files |`), header and
+ *  separator included, trimmed - the roster the twin tables share. A file
+ *  with no table rows is a lost anchor, not an empty roster. */
+export function ownershipTableRoster(file: string, markdown: string): string[] {
+  const rows = markdown.split("\n").filter((line) => line.startsWith("|"));
+  if (rows.length === 0) throw new Error(`${file}: no markdown table rows - anchor lost`);
+  return rows.map((line) =>
+    line
+      .split("|")
+      .slice(1, 3)
+      .map((cell) => cell.trim())
+      .join(" | "),
+  );
+}
+
+/** The first roster row where the second table's Class and Files cells
+ *  differ from the first's (a row present in one only included). */
+export function ownershipTableMismatches(
+  tables: readonly { file: string; markdown: string }[],
+): Mismatch[] {
+  const [reference, ...others] = tables;
+  const expected = ownershipTableRoster(reference.file, reference.markdown);
+  return others.flatMap((other) =>
+    lineDiffMismatch(
+      other.file,
+      reference.file,
+      expected,
+      ownershipTableRoster(other.file, other.markdown),
+    ),
+  );
+}
+
 // --- shared parsed inputs -------------------------------------------------
 
 /** Rules re-derive these shared inputs dozens of times per run and the
@@ -7455,6 +7496,18 @@ const rules: Rule[] = [
     name: "local-bun-runtime",
     run: () => bunRuntimeMismatches(Bun.version, read(".bun-version").trim()),
   },
+
+  {
+    // The skills' twin file-ownership tables share their Class and Files
+    // columns row for row; a path added or reclassified in one table
+    // without the other is the drift the old "keep in sync" comment
+    // could only ask for.
+    name: "skill-ownership-tables",
+    run: () =>
+      ownershipTableMismatches(
+        SKILL_OWNERSHIP_TABLES.map((file) => ({ file, markdown: read(file) })),
+      ),
+  },
 ];
 
 // --- the checker's own rule roster ------------------------------------------
@@ -7523,6 +7576,7 @@ export const RULE_ROSTER = [
   "temp-dirs-through-helper",
   "stream-write-sync",
   "local-bun-runtime",
+  "skill-ownership-tables",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the

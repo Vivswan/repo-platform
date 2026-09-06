@@ -1328,7 +1328,7 @@ GH_CALLS="$TRIP_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   DRIFT_FILE="$TRIP_WORK/empty.txt" CARRIED_FILE="$TRIP_WORK/empty.txt" \
   CARRY_REVIEW_FILE="$TRIP_WORK/empty.txt" RETIRED_MODULES_FILE="$TRIP_WORK/empty.txt" \
   REMOVED_PATHS_FILE="$TRIP_WORK/empty.txt" WITHHELD_FILE="$TRIP_WORK/empty.txt" \
-  MANIFEST_LICENSE_FILE="$TRIP_WORK/empty.txt" \
+  MANIFEST_LICENSE_FILE="$TRIP_WORK/empty.txt" SUMMARY_FILE="$TRIP_WORK/empty.txt" \
   bun .github/scripts/sync/open_pr.ts > "$TRIP_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$TRIP_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a tripped tail tripwire"
@@ -1425,7 +1425,7 @@ GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   DRIFT_FILE="$DESEL_WORK/empty.txt" CARRIED_FILE="$DESEL_WORK/local-carryover.md" \
   CARRY_REVIEW_FILE="$DESEL_WORK/carry-review.txt" RETIRED_MODULES_FILE="$DESEL_WORK/empty.txt" \
   REMOVED_PATHS_FILE="$DESEL_WORK/removed-paths.txt" WITHHELD_FILE="$DESEL_WORK/empty.txt" \
-  MANIFEST_LICENSE_FILE="$DESEL_WORK/empty.txt" \
+  MANIFEST_LICENSE_FILE="$DESEL_WORK/empty.txt" SUMMARY_FILE="$DESEL_WORK/empty.txt" \
   bun .github/scripts/sync/open_pr.ts > "$DESEL_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$DESEL_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a deleted split-classed file"

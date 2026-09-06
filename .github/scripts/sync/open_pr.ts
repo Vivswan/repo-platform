@@ -6,11 +6,11 @@
 //
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
 // HIDE_DETAILS, DISPLAY, BRANCH, BASE_BRANCH,
-// VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
+// VALIDATION, RECOVER, FORCE_MANUAL, DRIFT_FILE, the env-named section
+// files of section_files.ts's PR_BODY_SECTIONS (SUMMARY_FILE,
 // CARRIED_FILE, CARRY_REVIEW_FILE, RETIRED_MODULES_FILE,
-// REMOVED_PATHS_FILE, WITHHELD_FILE, MANIFEST_LICENSE_FILE,
-// GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
-// RUNNER_TEMP.
+// REMOVED_PATHS_FILE, WITHHELD_FILE, MANIFEST_LICENSE_FILE),
+// GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
 import {
   closeSync,
@@ -25,15 +25,7 @@ import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
-import {
-  MIGRATIONS_NAME,
-  MIGRATIONS_REVIEW_NAME,
-  MIRRORS_NOTE_NAME,
-  MIRRORS_REVIEW_NAME,
-  REFERENCED_LABELS_NAME,
-  REMOVED_SPLITS_NAME,
-  TAIL_SHRANK_NAME,
-} from "./section_files.ts";
+import { PR_BODY_SECTIONS } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const runnerTemp = requireEnv("RUNNER_TEMP");
@@ -41,7 +33,6 @@ const repository = requireEnv("GITHUB_REPOSITORY");
 const branch = requireEnv("BRANCH");
 const display = requireEnv("DISPLAY");
 const recover = env("RECOVER");
-const resolved = env("RESOLVED");
 const validation = env("VALIDATION");
 
 /** bash's `[ -s file ]`: the file exists and is non-empty. */
@@ -52,12 +43,6 @@ function nonEmpty(path: string): boolean {
 /** File content with the trailing newline stripped, like `$(cat file)`. */
 function slurp(path: string): string {
   return readFileSync(path, "utf-8").replace(/\n$/, "");
-}
-
-function lines(path: string): string[] {
-  return slurp(path)
-    .split("\n")
-    .filter((line) => line !== "");
 }
 
 // From resolve_refs.ts via file (not a step output: the value is
@@ -180,104 +165,14 @@ if (recover === "recopy") {
 > Review the whole diff before merging.`);
 }
 
-// PR-body sections fed by flag files, collected from ONE declarative list:
-// each entry names its file (a workflow-provided env path, or a fixed
-// RUNNER_TEMP name shared with its writer via section_files.ts), how it
-// renders (null = review-only flag, no body section), and whether its
-// presence forces the manual-review path. An absent or empty file is no
-// section. Order is the body order.
-//
-// - CARRIED_FILE: preserve_local_content.ts rebuilds every split-class
-//   file structurally on every run; its summary names each carried file.
-// - tail-shrank: tail_tripwire.ts's post-stamp check - the structural
-//   rebuild should make a trip impossible, so a non-empty report is a
-//   sync bug and the PR waits for a human.
-// - CARRY_REVIEW_FILE: carries that need a human (an appendix, reset
-//   managed-half edits, duplicate markers) - review-only, the carried
-//   summary already names the files.
-interface FlagSection {
-  path: string;
-  /** Renders the section body (called only on a non-empty file); null
-   * marks a review-only flag with no body section of its own. */
-  render: ((path: string) => string) | null;
-  /** A present section forces the manual-review path. */
-  forcesReview: boolean;
-}
-
-const sections: FlagSection[] = [
-  { path: requireEnv("CARRIED_FILE"), render: slurp, forcesReview: false },
-  { path: join(runnerTemp, TAIL_SHRANK_NAME), render: slurp, forcesReview: true },
-  {
-    path: requireEnv("RETIRED_MODULES_FILE"),
-    render: (path) => `Retired modules dropped from the selection: ${lines(path).join(", ")}`,
-    forcesReview: false,
-  },
-  {
-    path: requireEnv("REMOVED_PATHS_FILE"),
-    render: (path) =>
-      `The template retired these files; this update deletes them:\n\n${lines(path)
-        .map((rel) => `- ${rel}`)
-        .join("\n")}`,
-    forcesReview: false,
-  },
-  // run_migrations.ts's notes, one report per severity: the rungs that
-  // acted ahead of copier and say nothing leaves the repository
-  // (informational), and the rungs whose verdict needs a human (holds).
-  { path: join(runnerTemp, MIGRATIONS_NAME), render: slurp, forcesReview: false },
-  { path: join(runnerTemp, MIGRATIONS_REVIEW_NAME), render: slurp, forcesReview: true },
-  {
-    path: requireEnv("WITHHELD_FILE"),
-    render: (path) => `> [!WARNING]
-> Workflow-file changes were WITHHELD from this update: the sync
-> token lacks the Workflows scope. Grant Workflows read/write to
-> the REPO_PLATFORM_TOKEN and re-run the sync to include them.
-
-${lines(path)
-  .map((rel) => `- ${rel}`)
-  .join("\n")}`,
-    forcesReview: true,
-  },
-  { path: requireEnv("MANIFEST_LICENSE_FILE"), render: slurp, forcesReview: false },
-  // materialize_mirrors.ts's listing: every mirror copy materialized from
-  // the repo's own .repo-platform.yml `mirrors` declaration. Informational
-  // (the declaration is repo-owned consent; the listing explains the diff)
-  // - forcing review here would defeat the auto-heal the step exists for.
-  { path: join(runnerTemp, MIRRORS_NOTE_NAME), render: slurp, forcesReview: false },
-  // materialize_mirrors.ts's refusals: declared mirrors the sync would not
-  // write, so their copies are stale in this update - a human fixes the
-  // declaration (or the files) before merging.
-  { path: join(runnerTemp, MIRRORS_REVIEW_NAME), render: slurp, forcesReview: true },
-  // referenced_labels.ts's report: label(s) the target's issue forms or
-  // workflows reference that the merged settings label roster does not
-  // declare - the apply deletes undeclared labels, so each reference is
-  // broken or about to be; a human declares the label or drops the
-  // reference.
-  { path: join(runnerTemp, REFERENCED_LABELS_NAME), render: slurp, forcesReview: true },
-  // preserve_repo_owned.ts's removed-split-files report: the update
-  // deletes a path whose previous copy carried a repository-owned half
-  // (class `split` at HEAD, or LICENSE.md, which no manifest classes
-  // under custom-license); the section names the content that leaves and the PR waits
-  // for a human to restore what must stay.
-  { path: join(runnerTemp, REMOVED_SPLITS_NAME), render: slurp, forcesReview: true },
-  { path: requireEnv("CARRY_REVIEW_FILE"), render: null, forcesReview: true },
-];
+// The report-file sections, from section_files.ts's one roster (body
+// order, render, and whether presence forces the manual-review path).
 let sectionsForceReview = false;
-for (const section of sections) {
-  if (!nonEmpty(section.path)) continue;
-  if (section.render !== null) appendSection(`\n\n${section.render(section.path)}`);
+for (const section of PR_BODY_SECTIONS) {
+  const path = section.env === null ? join(runnerTemp, section.file) : requireEnv(section.env);
+  if (!nonEmpty(path)) continue;
+  if (section.render !== null) appendSection(`\n\n${section.render(slurp(path))}`);
   sectionsForceReview ||= section.forcesReview;
-}
-
-if (resolved === "true") {
-  appendSection(`
-
-> [!WARNING]
-> copier hit merge conflicts, resolved below in favor of the
-> template where possible. Restore any dropped local lines that
-> should stay, and hand-edit anything marked unresolved, before
-> merging.
-
-${slurp(requireEnv("SUMMARY_FILE"))}`);
 }
 
 if (validation === "failed") {
@@ -399,11 +294,9 @@ body = capBody(body);
 // stale in this update), a migration rung whose verdict needs a human -
 // stays
 // manual; a clean update (clean side-restore carries included) arms
-// squash auto-merge below. The flag-file
-// reasons ride the section list above (forcesReview), so a new section
-// cannot forget the review question.
+// squash auto-merge below. The report-file reasons ride the roster
+// (forcesReview), so a new section cannot forget the review question.
 const needsReview =
-  resolved === "true" ||
   validation === "failed" ||
   recover === "recopy" ||
   env("FORCE_MANUAL") === "true" ||

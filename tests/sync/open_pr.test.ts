@@ -13,6 +13,7 @@ import {
   MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
+  PR_BODY_SECTIONS,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
   TAIL_SHRANK_NAME,
@@ -70,6 +71,7 @@ function run(opts: Options = {}) {
     "REMOVED_PATHS_FILE",
     "WITHHELD_FILE",
     "MANIFEST_LICENSE_FILE",
+    "SUMMARY_FILE",
   ];
   for (const name of fileVars) {
     const path = join(root, `${name.toLowerCase()}.txt`);
@@ -137,8 +139,9 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.output).not.toContain("auto-merge enabled via");
   });
 
-  // open_pr.ts collects its flag-file sections from ONE declarative roster
-  // (FlagSection[]: file, render, forcesReview). This table is that roster
+  // open_pr.ts collects its report-file sections from ONE declarative roster
+  // (section_files.ts's PR_BODY_SECTIONS: env or fixed file, render,
+  // forcesReview). This table is that roster
   // row for row, in body order, so every section constant has a row and
   // the review / informational split is asserted the same way on each: a
   // roster entry whose forcesReview flips, or a renamed report file, fails
@@ -264,7 +267,22 @@ describe("open_pr sections and auto-merge", () => {
       section: null,
       forcesReview: true,
     },
+    {
+      reason: "conflict summary: dropped local hunks need a human",
+      where: "files",
+      name: "SUMMARY_FILE",
+      content: "## docs/x.md\n\n```\nlocal line\n```\n",
+      section:
+        "> [!WARNING]\n> copier hit merge conflicts, resolved below in favor of the\n> template where possible. Restore any dropped local lines that\n> should stay, and hand-edit anything marked unresolved, before\n> merging.\n\n## docs/x.md\n\n```\nlocal line\n```",
+      forcesReview: true,
+    },
   ];
+
+  test("the fixture table covers the roster row for row", () => {
+    expect(sectionRows.map((row) => row.name).sort()).toEqual(
+      PR_BODY_SECTIONS.map((row) => row.env ?? row.file).sort(),
+    );
+  });
 
   test.each(sectionRows)("flag-file section: $reason", (row) => {
     const { where, name, content, forcesReview } = row;
