@@ -35,7 +35,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   BUN_VERSION_FILE,
@@ -59,6 +59,8 @@ import {
   readVerdict,
   writeVerdict,
 } from "../../actions/validate-template-report/verdict";
+import { ACTIONS_BASH_SHELL } from "../../scripts/check_ssot";
+import { actionStepArgv } from "../shared/action_shell";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -122,7 +124,7 @@ if (!process.env.FAKE_SKIP_REPORT) {
   writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
   writeFileSync(process.env.ADVISORIES_FILE, process.env.FAKE_ADVISORIES ?? "");
 }
-console.log("validated " + process.argv[2]);
+console.log("validated " + process.argv[2] + " from " + process.cwd());
 if (process.env.FAKE_SIGNAL) process.kill(process.pid, process.env.FAKE_SIGNAL);
 process.exit(Number(process.env.FAKE_EXIT ?? "0"));
 `;
@@ -150,8 +152,6 @@ function scratch(): { root: string; bin: string } {
   });
   return { root, bin };
 }
-
-const RUNNER_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
 
 /** A step's run block from action.yml as the runner would execute it: the
  *  action-path expression resolved, the runner-temp expression resolved to
@@ -188,7 +188,7 @@ function writeAnswers(root: string, answers: string | undefined): void {
   writeFileSync(join(root, ".github/.copier-answers.yml"), answers);
 }
 
-/** A fake validate-template action directory at `dir`. */
+/** A fake validator script directory (actions/validate-template) at `dir`. */
 function layValidator(dir: string, opts: { lockfile?: string; bunVersion?: boolean }): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, VALIDATOR_SCRIPT), fakeValidator);
@@ -235,7 +235,7 @@ function runReport(opts: ReportOptions = {}) {
   writeFileSync(outputs, "");
   // The report step's own run block: the one place `integrity` is set, on
   // the bun path and on the no-bun fallback.
-  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("report")], {
+  const proc = boundedSpawnSync(actionStepArgv(stepRun("report"), root), {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -594,11 +594,9 @@ describe("the action's reporting script", () => {
     });
   });
 
-  // The two steps wired as action.yml wires them: the report reads the
-  // verdict the fetch wrote and the outputs it published (an unpublished
-  // output reads as empty). A vintage-floor refusal comes AFTER the
-  // build-branch compare said `ahead 3`; the report must still tell one
-  // story, not a blocking refusal beside "behind by 3, nothing to do here".
+  // The fetch and report steps wired as action.yml wires them (an
+  // unpublished step output reaches the report as empty). A floor refusal
+  // after `ahead 3` must render one story: not judged, freshness not checked.
   test("a vintage-floor refusal renders one story: not judged, freshness not checked", () => {
     const BASE = "1111111111111111111111111111111111111111";
     const reason = `_commit moves backwards from main's ${BASE} to ${SHA} (compare: behind)`;
@@ -911,7 +909,7 @@ describe("the recorded build sha", () => {
 interface FetchOptions {
   /** undefined = no .github/.copier-answers.yml at all. */
   answers?: string;
-  /** false = the served build tree ships no validate-template action. */
+  /** false = the served build tree ships no validator script directory. */
   validator?: boolean;
   /** false = the served validator ships no .bun-version. */
   bunVersion?: boolean;
@@ -976,7 +974,7 @@ function runFetch(opts: FetchOptions = {}) {
   // same sha by default, so the floor holds without a second compare.
   const baseAnswers = join(root, "base-answers.yml");
   writeFileSync(baseAnswers, opts.base ?? `_commit: ${SHA}\n`);
-  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("fetch")], {
+  const proc = boundedSpawnSync(actionStepArgv(stepRun("fetch"), root), {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
@@ -1243,7 +1241,7 @@ function runJudge(opts: JudgeOptions = {}) {
   const alignedDir = join(root, "aligned");
   layValidator(validatorOf(alignedDir), { lockfile: opts.lockfile });
   const verdict = join(root, "verdict.json");
-  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("integrity")], {
+  const proc = boundedSpawnSync(actionStepArgv(stepRun("integrity"), root), {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
@@ -1361,6 +1359,89 @@ describe("the action's judge script", () => {
   });
 });
 
+// --- the latest leg ------------------------------------------------------------
+
+interface LatestOptions {
+  /** A bun.lock to ship beside the fake validator (none by default). */
+  lockfile?: string;
+  env?: Record<string, string>;
+}
+
+/** The latest step's run block as the runner would execute it, against a
+ *  fake sibling validator: the poisoned `bun` on PATH would exit 97. */
+function runLatest(opts: LatestOptions = {}) {
+  const { root, bin } = scratch();
+  const repo = join(root, "repo");
+  mkdirSync(repo);
+  const validator = join(root, "validate-template");
+  layValidator(validator, { lockfile: opts.lockfile });
+  const findings = join(root, "latest-findings.md");
+  const advisories = join(root, "latest-advisories.md");
+  const proc = boundedSpawnSync(actionStepArgv(stepRun("latest"), root), {
+    cwd: repo,
+    timeoutMs: 60_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      ACTION_BUN: process.execPath,
+      VALIDATOR_DIR: validator,
+      FINDINGS_FILE: findings,
+      ADVISORIES_FILE: advisories,
+      ...opts.env,
+    },
+  });
+  return {
+    exitCode: proc.exitCode,
+    // realpath: the fake prints its cwd, and tmpdir may be a symlink.
+    judged: (proc.stdout + proc.stderr).includes(`validated . from ${realpathSync(repo)}`),
+    findings: existsSync(findings) ? read(findings) : null,
+    advisories: existsSync(advisories) ? read(advisories) : null,
+  };
+}
+
+describe("the action's latest leg", () => {
+  // Judged whole: the exit code (the step's colour only; continue-on-error
+  // keeps the action going), whether the validator judged the caller's
+  // checkout, and the report pair as report.ts will find it (null = never
+  // written, which report.ts tells apart from empty).
+  const runs: [string, LatestOptions, ReturnType<typeof runLatest>][] = [
+    [
+      "a clean run writes an empty pair",
+      {},
+      { exitCode: 0, judged: true, findings: "", advisories: "" },
+    ],
+    [
+      "findings ride the validator's exit 1 into the pair",
+      {
+        env: {
+          FAKE_FINDINGS: "#### Errors (1)\n\n- ci.yml drifted\n",
+          FAKE_ADVISORIES: "#### Advisories (1)\n\n- consider a codeql job\n",
+          FAKE_EXIT: "1",
+        },
+      },
+      {
+        exitCode: 1,
+        judged: true,
+        findings: "#### Errors (1)\n\n- ci.yml drifted\n",
+        advisories: "#### Advisories (1)\n\n- consider a codeql job\n",
+      },
+    ],
+    [
+      "a lockfile the frozen install rejects stops the step before the validator runs",
+      { lockfile: "not a lockfile {\n" },
+      { exitCode: 1, judged: false, findings: null, advisories: null },
+    ],
+    [
+      "a validator that exits before reporting leaves no pair",
+      { env: { FAKE_SKIP_REPORT: "1" } },
+      { exitCode: 0, judged: true, findings: null, advisories: null },
+    ],
+  ];
+  test.each(runs)("%s", (_name, opts, expected) => {
+    expect(runLatest(opts)).toEqual(expected);
+  });
+});
+
 // --- action.yml --------------------------------------------------------------
 
 // --- the clear step ------------------------------------------------------------
@@ -1402,7 +1483,7 @@ describe("the action's clear step", () => {
     let proc: ReturnType<typeof boundedSpawnSync>;
     if (lockVerdict) chmodSync(verdict, 0o555);
     try {
-      proc = boundedSpawnSync([...RUNNER_BASH, stepRun("clear", runnerTemp)], {
+      proc = boundedSpawnSync(actionStepArgv(stepRun("clear", runnerTemp), root), {
         env: {
           PATH: `${bin}:/usr/bin:/bin`,
           BASH_ENV: bashEnv,
@@ -1458,8 +1539,8 @@ describe("the action's wiring", () => {
       "latest",
       "report",
     ]);
-    // The operator repository is a constant, not an input: the latest
-    // leg's `uses:` could never follow one.
+    // One input, the token: the build tip's validator is this action's
+    // sibling on the same branch, not a ref an input could move.
     expect(Object.keys(action.inputs)).toEqual(["github-token"]);
     // ONE writer of integrity: the report step's output, never a step outcome.
     expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
@@ -1484,17 +1565,13 @@ describe("the action's wiring", () => {
     // Readiness has one truth, a bun on PATH at the pinned version, resolved
     // by the one canonical block (the actions-bun-guard rule pins its text
     // and tests its behaviour) for the probe and both post-setup resolvers.
-    // Every bash step empties BASH_ENV and SHELLOPTS (the actions-bun-guard
-    // rule requires it): a caller's job env cannot run a hook before, or
-    // rewrite, the lines the rule read.
-    const NEUTRAL = { BASH_ENV: "", SHELLOPTS: "" };
+    // Every run step is privileged bash (the actions-bun-guard rule requires
+    // it): a caller's BASH_ENV, SHELLOPTS or exported functions cannot run
+    // before, rewrite, or redefine the lines the rule read.
     for (const step of steps) {
-      if (typeof step.run === "string") expect(envOf(step)).toMatchObject(NEUTRAL);
+      if (typeof step.run === "string") expect(step.shell).toBe(ACTIONS_BASH_SHELL);
     }
-    expect(envOf(actionBun)).toEqual({
-      ...NEUTRAL,
-      PIN_FILE: "${{ github.action_path }}/.bun-version",
-    });
+    expect(envOf(actionBun)).toEqual({ PIN_FILE: "${{ github.action_path }}/.bun-version" });
     expect(String(byId("bun")?.run)).toBe(String(actionBun?.run));
     const alignedBunPath = byId("aligned-bun-path");
     expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
@@ -1504,7 +1581,7 @@ describe("the action's wiring", () => {
     expect(actionBun?.if).toBe("always()");
     const READY = "steps.action-bun.outputs.pinned == 'true'";
     expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
-    expect(byId("latest")?.if).toBe(READY);
+    expect(byId("latest")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
 
     // Every action script runs by the recorded absolute path, never `bun`
     // by name: later setups put other buns on PATH.
@@ -1512,23 +1589,22 @@ describe("the action's wiring", () => {
     const fetch = byId("fetch");
     expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
     // Every predictable scratch path is cleared by ONE fixed rm on the
-    // literal paths with BASH_ENV emptied (no variable or PATH entry a
-    // caller could poison; one rm fails when any removal did): the aligned
-    // tree and verdict, which both aligned setups require (the
-    // actions-bun-guard rule reads it), and the latest leg's report pair,
-    // so an aborted latest validator leaves nothing stale.
-    const latestWith = byId("latest")?.with as Record<string, string>;
+    // literal paths (no variable or PATH entry a caller could poison; one rm
+    // fails when any removal did): the aligned tree and verdict, which both
+    // aligned setups require (the actions-bun-guard rule reads it), and the
+    // latest leg's report pair, so an aborted latest validator leaves
+    // nothing stale.
+    const latest = byId("latest");
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
       id: "clear",
       "continue-on-error": true,
-      shell: "bash",
-      env: { BASH_ENV: "", SHELLOPTS: "" },
+      shell: ACTIONS_BASH_SHELL,
       run: `/bin/rm -rf ${[
         envOf(fetch).ALIGNED_DIR,
         envOf(fetch).VERDICT_FILE,
-        latestWith["findings-file"],
-        latestWith["advisories-file"],
+        envOf(latest).FINDINGS_FILE,
+        envOf(latest).ADVISORIES_FILE,
       ]
         .map((path) => `"${path}"`)
         .join(" ")}`,
@@ -1569,7 +1645,6 @@ describe("the action's wiring", () => {
     // The judge runs on the bun the fetch step recorded, and hands the
     // tree's bun (the one setup-bun put on PATH) to the install and run.
     expect(envOf(judge)).toEqual({
-      ...NEUTRAL,
       ALIGNED_DIR: alignedDir,
       VERDICT_FILE: verdictFile,
       ORCHESTRATOR_BUN: BUN_PATH,
@@ -1579,9 +1654,40 @@ describe("the action's wiring", () => {
       '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"',
     );
 
-    const latest = byId("latest");
-    expect(String(latest?.uses)).toBe("Vivswan/repo-platform/actions/validate-template@build");
-    expect(latest?.["continue-on-error"]).toBe(true);
+    // The latest leg runs the sibling validator (the build branch ships the
+    // whole actions/ tree beside this action) on the recorded bun, with a
+    // frozen install of the sibling's lockfile first; only behind a cleared
+    // scratch root, since report.ts reads its pair on that condition.
+    const sibling = `\${{ github.action_path }}/../${basename(VALIDATOR_DIR)}`;
+    expect(latest).toEqual({
+      name: "Run the build tip's validator",
+      id: "latest",
+      if: `${READY} && steps.clear.outcome == 'success'`,
+      "continue-on-error": true,
+      shell: ACTIONS_BASH_SHELL,
+      env: {
+        ACTION_BUN: BUN_PATH,
+        VALIDATOR_DIR: sibling,
+        FINDINGS_FILE: "${{ runner.temp }}/latest-findings.md",
+        ADVISORIES_FILE: "${{ runner.temp }}/latest-advisories.md",
+      },
+      run: [
+        '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$VALIDATOR_DIR"',
+        `"$ACTION_BUN" "$VALIDATOR_DIR/${VALIDATOR_SCRIPT}" .`,
+        "",
+      ].join("\n"),
+    });
+    // The sibling is a script directory, not an action: no manifest, and the
+    // same generated pin as this action, so ACTION_BUN can read its lockfile.
+    const siblingDir = join(ACTION, "..", basename(VALIDATOR_DIR));
+    expect(
+      ["action.yml", BUN_VERSION_FILE, "bun.lock", VALIDATOR_SCRIPT].map((name) =>
+        existsSync(join(siblingDir, name)),
+      ),
+    ).toEqual([false, true, true, true]);
+    expect(readFileSync(join(siblingDir, BUN_VERSION_FILE), "utf8")).toBe(
+      readFileSync(join(ACTION, BUN_VERSION_FILE), "utf8"),
+    );
 
     // The report runs whatever happened above, reads the verdict the
     // integrity leg wrote, the latest pair where that leg wrote it, and
@@ -1595,8 +1701,8 @@ describe("the action's wiring", () => {
       ACTION_PATH: "${{ github.action_path }}",
       VERDICT: verdictFile,
       CLEAR_OUTCOME: "${{ steps.clear.outcome }}",
-      LATEST_FINDINGS: latestWith["findings-file"],
-      LATEST_ADVISORIES: latestWith["advisories-file"],
+      LATEST_FINDINGS: envOf(latest).FINDINGS_FILE,
+      LATEST_ADVISORIES: envOf(latest).ADVISORIES_FILE,
       COMPARE_STATUS: "${{ steps.fetch.outputs.compare }}",
       AHEAD_BY: "${{ steps.fetch.outputs.ahead-by }}",
     });
@@ -1612,5 +1718,42 @@ describe("the action's wiring", () => {
     for (const name of ["fetch_aligned.ts", "judge_aligned.ts", "report.ts"]) {
       expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
     }
+  });
+
+  test("nothing resolves validate-template as an action any more: this action runs the script", () => {
+    // Templates, this repo's workflows, the golden renders, and the actions
+    // themselves: a `uses:` of the retired manifest would 404 at job start.
+    // One strict scan (a file that cannot be read throws, so a miss is never
+    // an unread file) serves the assertion and its control; action
+    // identifiers are case-insensitive, so the match is too, and a `uses:`
+    // may fold its value onto the next line (`>-`), so the pattern spans it.
+    const REPO_ROOT = join(import.meta.dir, "../..");
+    const usesOf = (action: string) =>
+      new RegExp(`uses:\\s*(?:[>|][-+]?\\s*)?["']?[\\w./-]*actions/${action}@`, "i");
+    for (const spelling of [
+      "uses: Vivswan/repo-platform/actions/validate-template@build",
+      'uses: "Vivswan/repo-platform/actions/validate-template@build"',
+      "uses: >-\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses: |\n        VIVSWAN/Repo-Platform/actions/validate-template@build",
+    ]) {
+      expect(usesOf("validate-template").test(spelling)).toBe(true);
+    }
+    expect(usesOf("validate-template").test("uses: x/actions/validate-template-report@build")).toBe(
+      false,
+    );
+    const filesCarrying = (pattern: RegExp): string[] =>
+      ["templates", ".github/workflows", "tests/golden-renders", "actions"].flatMap((root) =>
+        readdirSync(join(REPO_ROOT, root), { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile() && !entry.parentPath.includes("/node_modules"))
+          .map((entry) => join(entry.parentPath, entry.name))
+          .filter((path) => pattern.test(readFileSync(path, "utf8")))
+          .map((path) => path.slice(REPO_ROOT.length + 1)),
+      );
+    expect(filesCarrying(usesOf("validate-template"))).toEqual([]);
+    // The control: the same scan sees the report action's own ref in the
+    // fleet-ci workflow, so an empty list is a scan that looked.
+    expect(filesCarrying(usesOf("validate-template-report"))).toContain(
+      ".github/workflows/fleet-ci.yml",
+    );
   });
 });

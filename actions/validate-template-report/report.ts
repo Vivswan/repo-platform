@@ -20,10 +20,9 @@ const PAGINATED_TIMEOUT_MS = NETWORK_TIMEOUT_MS * 4;
 // strands every comment already posted under the old one.
 const MARKER = "<!-- repo-platform:validate-template -->";
 
-// A verdict is read only from a run whose scratch root was cleared: with the
-// clear step failed, fetch never ran and any verdict file on disk is stale.
-// The latest leg's report pair sits under the same root and is read on the
-// same condition.
+// Unless the clear step succeeded, neither fetch nor the latest leg ran:
+// any verdict or latest report on disk is stale or planted, so neither is
+// read without a successful clear.
 const clearOutcome = env("CLEAR_OUTCOME");
 const cleared = clearOutcome === "success";
 const verdict: Integrity = cleared

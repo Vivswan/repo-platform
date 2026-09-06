@@ -26,21 +26,19 @@ runs:
   steps:
     - name: Check for a bun matching the action's pin
       id: bun
-      shell: bash
+      shell: bash --noprofile --norc -p -eo pipefail {0}
       env:
-        BASH_ENV: ""
-        SHELLOPTS: ""
         PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
         pin="$(<"$PIN_FILE")"
         path="$(command -v bun || true)"
-        case "$path" in /*) ;; *) path="" ;; esac
+        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        echo "path=$path" >> "$GITHUB_OUTPUT"
-        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
+        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
 
     # Skipped only when the caller's bun already IS the pinned version
     # (reuse then just skips a second network fetch): the action's scripts
@@ -69,36 +67,30 @@ runs:
     - name: Resolve the action's bun
       id: action-bun
       if: always()
-      shell: bash
+      shell: bash --noprofile --norc -p -eo pipefail {0}
       env:
-        BASH_ENV: ""
-        SHELLOPTS: ""
         PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
         pin="$(<"$PIN_FILE")"
         path="$(command -v bun || true)"
-        case "$path" in /*) ;; *) path="" ;; esac
+        case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
-        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
-        echo "path=$path" >> "$GITHUB_OUTPUT"
-        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "bun ${pin:-(no pin)}: ${path:-none on PATH}"
+        printf '%s\n' "path=$path" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"
 
     - name: Install the pinned link checker
-      shell: bash
+      shell: bash --noprofile --norc -p -eo pipefail {0}
       env:
-        BASH_ENV: ""
-        SHELLOPTS: ""
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --cwd "${{ github.action_path }}/.."'
 
     - name: Check external links
       id: check
-      shell: bash
+      shell: bash --noprofile --norc -p -eo pipefail {0}
       env:
-        BASH_ENV: ""
-        SHELLOPTS: ""
         SITE_DIR: ${{ inputs.site-dir }}
         REPORT_DIR: ${{ runner.temp }}/pages-site-link-rot
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}

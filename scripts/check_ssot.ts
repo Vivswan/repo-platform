@@ -2919,36 +2919,34 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
 }
 
 /** The one bun resolver every bun-touching composite action runs, as the
- *  trimmed lines of its run block. `path` is recorded only for an ABSOLUTE
- *  executable on PATH that prints exactly the pin in PIN_FILE and exits 0
- *  (a bun that prints the version but dies is no bun); `pinned` derives
- *  from it. Every command in it is a bash builtin (the pin is read with
- *  `$(<file)`): the caller's PATH resolves nothing but bun itself. Run before the setup as the probe that decides whether setup
- *  runs, and again after it so the recorded path is the bun setup
- *  installed: later steps run that path, never `bun` through PATH, where
- *  a later setup-bun can put another bun first. */
+ *  trimmed lines of its run block: `path` is recorded only for an ABSOLUTE,
+ *  control-character-free executable on PATH that prints exactly the pin
+ *  in PIN_FILE and exits 0 (a bun that prints the version but dies is no
+ *  bun; a newline in the path would forge a second $GITHUB_OUTPUT record);
+ *  `pinned` derives from it. Only bash builtins run here (the pin is read
+ *  with `$(<file)`, output goes through printf with a static format: under
+ *  POSIXLY_CORRECT, which -p does not ignore, echo expands backslashes), so
+ *  the caller's PATH resolves nothing but bun. Run as
+ *  the pre-setup probe and again post-setup, so later steps run the
+ *  installed bun by path, never `bun` through PATH. */
 export const ACTIONS_BUN_RESOLVER: readonly string[] = [
   'pin="$(<"$PIN_FILE")"',
   'path="$(command -v bun || true)"',
-  'case "$path" in /*) ;; *) path="" ;; esac',
+  'case "$path" in *[[:cntrl:]]*|[!/]*) path="" ;; esac',
   'have=""',
   'if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi',
   'if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi',
-  'echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"',
-  'echo "path=$path" >> "$GITHUB_OUTPUT"',
-  'echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+  "printf '%s\\n' \"bun ${pin:-(no pin)}: ${path:-none on PATH}\"",
+  'printf \'%s\\n\' "path=$path" >> "$GITHUB_OUTPUT"',
+  'printf \'%s\\n\' "pinned=$([ -n "$path" ] && printf true || printf false)" >> "$GITHUB_OUTPUT"',
 ];
 
-/** Inherited shell variables that could run a caller's hook before a bash
- *  step's lines, or skip or rewrite them (bash sources BASH_ENV and adopts
- *  SHELLOPTS at startup); every bash step of a bun-touching action carries
- *  each one emptied, so what the rule reads is what runs. */
-export const NEUTRALIZED_SHELL_ENV = ["BASH_ENV", "SHELLOPTS"];
-
-/** The neutralizers as env lines. */
-export const NEUTRALIZED_ENV_LINES: readonly string[] = NEUTRALIZED_SHELL_ENV.map(
-  (name) => `${name}: ""`,
-);
+/** The shell of every run step in a bun-touching action: the runner's own
+ *  `shell: bash` expansion plus `-p` (privileged mode), under which bash
+ *  ignores BASH_ENV, SHELLOPTS, BASHOPTS and env-exported functions
+ *  (BASH_FUNC_*), so a caller's job env cannot run a hook before, rewrite,
+ *  or redefine the lines this rule reads. */
+export const ACTIONS_BASH_SHELL = "bash --noprofile --norc -p -eo pipefail {0}";
 
 /** The action-local generated pin, as the resolver's env line. */
 export const ACTIONS_BUN_PIN_ENV = "PIN_FILE: ${{ github.action_path }}/.bun-version";
@@ -2959,9 +2957,8 @@ function actionBunResolverStep(name: string, id: string, condition?: string): st
     `- name: ${name}`,
     `id: ${id}`,
     ...(condition === undefined ? [] : [`if: ${condition}`]),
-    "shell: bash",
+    `shell: ${ACTIONS_BASH_SHELL}`,
     "env:",
-    ...NEUTRALIZED_ENV_LINES,
     ACTIONS_BUN_PIN_ENV,
     "run: |",
     ...ACTIONS_BUN_RESOLVER,
@@ -3007,12 +3004,13 @@ export interface LineWord {
   text: string;
 }
 
-/** Bash splits words on ASCII blanks only; a unicode blank is a content
- *  character to it, so every trim and split here is ASCII too (`\s` and
- *  String.trim would read `echo\u00a0ok` as two words). */
-const ASCII_BLANK = /[ \t\r]/;
+/** Bash splits words on space and tab only; a unicode blank or a carriage
+ *  return is a content character to it, so every trim and split here is
+ *  the same (`\s` and String.trim would read `echo\u00a0ok` and `echo\rok`
+ *  as two words where bash looks up one command). */
+const ASCII_BLANK = /[ \t]/;
 function asciiTrim(text: string): string {
-  return text.replace(/^[ \t\r]+|[ \t\r]+$/g, "");
+  return text.replace(/^[ \t]+|[ \t]+$/g, "");
 }
 
 /** The words of one logical run line, split on unquoted whitespace with
@@ -3053,14 +3051,14 @@ export function lineWords(line: string): LineWord[] | null {
   return words;
 }
 
-/** A data word: a bare token of plain characters, one unquoted variable,
- *  or one wholly quoted string, with no unquoted metacharacter. Outside
- *  single quotes (inert), a `$` may start only a plain variable name or
- *  the Actions expression `${{ ... }}` - an allowlist, so no expansion
- *  that runs or assigns (`$(...)`, `${VAR:=x}`, `$[...]`, `$'...'`) and no
- *  backtick reads as data. Data is what a command in the grammar may
- *  receive; it runs and assigns nothing. */
-const DATA_WORD = /^(?:[A-Za-z0-9_./:=+@%,-]+|\$[A-Za-z_][A-Za-z0-9_]*|"(?:[^"\\]|\\.)*"|'[^']*')$/;
+/** A data word: a bare token of plain characters or one wholly quoted
+ *  string, with no unquoted metacharacter (an unquoted `$VAR` word-splits
+ *  and globs, so it is no data). Inside double quotes a `$` may start only
+ *  a plain variable name or the Actions expression `${{ ... }}` - an
+ *  allowlist, so no expansion that runs or assigns (`$(...)`, `${VAR:=x}`,
+ *  `$[...]`) and no backtick reads as data; single quotes are inert. Data
+ *  is what a command in the grammar may receive; it runs and assigns nothing. */
+const DATA_WORD = /^(?:[A-Za-z0-9_./:=+@%,-]+|"(?:[^"\\]|\\.)*"|'[^']*')$/;
 const INERT_DOLLARS = /^(?:[^$`]|\$(?=[A-Za-z_]|\{\{))*$/;
 
 function isDataText(text: string): boolean {
@@ -3094,7 +3092,7 @@ export function untrustedExpressions(run: string): string[] {
 const RECORDED_VARIABLE = /^"\$([A-Z][A-Z0-9_]*_BUN)"$/;
 const GUARD_LINE = /^if \[ -n "\$([A-Z][A-Z0-9_]*_BUN)" \]; then$/;
 const ASSIGNMENT_HEAD = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
-const DATA_COMMANDS = new Set(["echo", "printf"]);
+const DATA_COMMANDS = new Set(["printf"]);
 
 /** The forms a run line in a bun-touching action may take. Anything else
  *  is `outside`: the grammar admits no way to name a command but a
@@ -3115,9 +3113,11 @@ export type RunLine =
  *  - `"$VAR" <data>...` or `exec "$VAR" <data>...`: the recorded bun
  *  - `if [ -n "$VAR" ]; then`, `else`, `fi`: the guard around it
  *  - `NAME=<data>`: a plain assignment
- *  - `echo|printf <data>...`: output (no options; printf's format static
- *    with only %s and %% conversions: `printf -v` and `%n` assign)
- *  - `/bin/rm -rf <data>...`: the scratch clearing
+ *  - `printf <format> <data>...`: output (the format a static literal with
+ *    only %s and %% conversions: `printf -v` and `%n` assign; echo has no
+ *    place here, since POSIXLY_CORRECT makes it expand backslashes)
+ *  - `/bin/rm -rf "<clean runner-scratch path>"...`: the scratch clearing
+ *    (cleanScratchPath: nothing outside `${{ runner.temp }}/` can be removed)
  *  The recorded-bun, output, and removal forms take an optional
  *  `> <data>` or `>> <data>` tail. */
 export function readRunLine(line: string): RunLine {
@@ -3151,21 +3151,19 @@ export function readRunLine(line: string): RunLine {
     return target === null ? outside : { kind: "invocation", variable: target[1] };
   }
   if (DATA_COMMANDS.has(head.text)) {
-    // The first argument is what echo and printf read as an option or a
-    // format: a literal that starts with no `-` however quoted, and no
-    // variable unless single-quoted (inert), so no value can turn into
-    // `-v NAME` (printf -v assigns) or `-e`. printf's format is static
-    // (no variable at all) and its conversions an allowlist - %s and the
-    // %% escape - so no %n (which assigns the byte count, under any width
-    // or length modifier) can reach a variable.
+    // The format is a static literal (no leading `-`, no `$`) whose
+    // conversions are %s and %% only: `printf -v` and `%n` (under any width
+    // or length modifier) assign.
     const first = args[0]?.text ?? "";
-    if (/^["']?-/.test(first) || /^"?\$/.test(first)) return outside;
-    if (head.text === "printf" && (/\$/.test(first) || /%(?!s)/.test(first.replace(/%%/g, "")))) {
+    if (/^["']?-/.test(first) || /\$/.test(first) || /%(?!s)/.test(first.replace(/%%/g, ""))) {
       return outside;
     }
     return { kind: "data-command" };
   }
-  if (head.text === "/bin/rm" && args[0]?.text === "-rf") return { kind: "removal" };
+  if (head.text === "/bin/rm" && args[0]?.text === "-rf" && args.length > 1) {
+    const operands = args.slice(1).map((word) => /^"([^"]+)"$/.exec(word.text)?.[1]);
+    return operands.every(cleanScratchPath) ? { kind: "removal" } : outside;
+  }
   return outside;
 }
 
@@ -3255,22 +3253,15 @@ function runsResolver(step: Record<string, unknown>): boolean {
  *  resolver `if: always()`). */
 const RESOLVER_STEP_KEYS = new Set(["name", "id", "if", "shell", "env", "run"]);
 
-/** Whether a step's env carries every neutralizer emptied. */
-function shellNeutralized(step: Record<string, unknown>): boolean {
-  const env = stepEnv(step);
-  return NEUTRALIZED_SHELL_ENV.every((name) => env[name] === "");
-}
-
 /** The pin a step resolves: its PIN_FILE when the step is the resolver and
- *  nothing else (no key beyond RESOLVER_STEP_KEYS, its env exactly the
- *  neutralizers plus PIN_FILE, bash its shell); else undefined. */
+ *  nothing else (no key beyond RESOLVER_STEP_KEYS, its env exactly
+ *  PIN_FILE, the canonical shell); else undefined. */
 function resolvedPin(step: Record<string, unknown>): string | undefined {
   const env = stepEnv(step);
   const shape =
     Object.keys(step).every((key) => RESOLVER_STEP_KEYS.has(key)) &&
-    step.shell === "bash" &&
-    shellNeutralized(step) &&
-    Object.keys(env).length === NEUTRALIZED_SHELL_ENV.length + 1 &&
+    step.shell === ACTIONS_BASH_SHELL &&
+    Object.keys(env).length === 1 &&
     typeof env.PIN_FILE === "string";
   return shape && runsResolver(step) ? (env.PIN_FILE as string) : undefined;
 }
@@ -3385,18 +3376,15 @@ function conjunctionRequires(condition: string, atom: string): boolean {
     .includes(atom);
 }
 
-/** The paths a bash step removes beyond a caller's reach: the shell knobs
- *  above emptied, and ONE non-blank non-comment line `/bin/rm -rf "<clean
- *  scratch path>" ...` (no rm from PATH, no operand the shell could expand
- *  or a caller could point elsewhere); else nothing. One rm for every path
- *  is what fails closed: it attempts each removal and exits nonzero when
- *  any failed, whatever the shell's options, where a line per path stops
- *  at the first failure or masks it behind the last. */
+/** The paths a step removes beyond a caller's reach: under the canonical
+ *  shell (ACTIONS_BASH_SHELL), ONE non-blank non-comment line `/bin/rm -rf
+ *  "<clean scratch path>" ...` (no rm from PATH, no operand the shell could
+ *  expand or a caller could point elsewhere); else nothing. One rm for
+ *  every path is what fails closed: it attempts each removal and exits
+ *  nonzero when any failed, where a line per path stops at the first
+ *  failure or masks it behind the last. */
 function pathsClearedBy(step: Record<string, unknown>): string[] {
-  const stepEnv =
-    typeof step.env === "object" && step.env !== null ? (step.env as Record<string, unknown>) : {};
-  const neutralized = NEUTRALIZED_SHELL_ENV.every((name) => stepEnv[name] === "");
-  if (step.shell !== "bash" || !neutralized || typeof step.run !== "string") return [];
+  if (step.shell !== ACTIONS_BASH_SHELL || typeof step.run !== "string") return [];
   const lines = step.run.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line));
   if (lines.length !== 1) return [];
   // Operands are space-separated: bash joins adjacent quoted strings into
@@ -3432,8 +3420,8 @@ export function pinRootCleared(
  *  extra, quoted or plain) must read the action-local pin, or a clean
  *  .bun-version path under the runner scratch root (fetchedTreePin) - so a
  *  bare setup added beside a canonical block is as loud as a drifted block;
- *  and every other run step is bash with the shell neutralizers emptied
- *  whose every line reads as one form of the grammar (readRunLine), where
+ *  and every other run step runs under ACTIONS_BASH_SHELL with every
+ *  line reading as one form of the grammar (readRunLine), where
  *  the only command names are a few literals and one RECORDED variable
  *  bound in the step's env to a settled resolver's path output and never
  *  reassigned - so bun can be run no way but by the path the resolver
@@ -3521,7 +3509,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
       mismatches.push({
         file,
-        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
+        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a step under the canonical privileged bash shell whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
         got: "no such step - a caller could plant that pin before the action runs",
       });
       continue;
@@ -3534,7 +3522,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   }
   const settled = settledResolvers(steps);
   const forms =
-    '"$VAR" <data>..., exec "$VAR" <data>..., if [ -n "$VAR" ]; then, else, fi, NAME=<data>, echo|printf <data>..., /bin/rm -rf <data>... (each with an optional > or >> <data> tail)';
+    '"$VAR" <data>..., exec "$VAR" <data>..., if [ -n "$VAR" ]; then, else, fi, NAME=<data>, printf <static-format> <data>..., /bin/rm -rf "<clean runner-scratch path>"... (each with an optional > or >> <data> tail)';
   // A VALIDATED resolver step is excused from the grammar: its text is
   // pinned verbatim, and its `command -v bun` is the one sanctioned lookup.
   // A step that merely carries a resolver's id is judged like any other.
@@ -3552,20 +3540,13 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
     }
     if (resolvedPin(step) !== undefined) return;
     const env = stepEnv(step);
-    // The shell this rule reads is bash; a custom shell (`bun {0}`) runs the
-    // block through a PATH lookup this rule never sees.
-    if (step.shell !== "bash") {
+    // Another shell (`bun {0}`, plain `bash`) runs the block through a PATH
+    // lookup, or with a caller's BASH_ENV, SHELLOPTS or exported functions.
+    if (step.shell !== ACTIONS_BASH_SHELL) {
       mismatches.push({
         file,
-        expected: `step '${label}' running under shell: bash, the shell this rule reads`,
+        expected: `step '${label}' running under shell: ${ACTIONS_BASH_SHELL} (privileged bash ignores a caller's BASH_ENV, SHELLOPTS and env-exported functions, so what this rule reads is what runs)`,
         got: `shell: '${String(step.shell ?? "")}'`,
-      });
-    }
-    if (!shellNeutralized(step)) {
-      mismatches.push({
-        file,
-        expected: `step '${label}' carrying ${NEUTRALIZED_SHELL_ENV.join(" and ")} emptied in its env (a caller's job env would otherwise run a hook before, or rewrite, the lines this rule reads)`,
-        got: `env: ${JSON.stringify(Object.fromEntries(NEUTRALIZED_SHELL_ENV.map((name) => [name, env[name] ?? null])))}`,
       });
     }
     for (const line of logicalRunLines(step.run)) {
@@ -7442,25 +7423,13 @@ const rules: Rule[] = [
   },
 
   {
-    // Every composite action not declared bun-free (BUN_FREE_ACTIONS; a
-    // declared one may not mention bun at all) carries the same setup
-    // guard: probe for a bun already AT the action's pin, install the
-    // pinned version when the probe misses, retry the install once (a
-    // setup-bun fetch flake on a nightly reporting path turns a green
-    // night red), then resolve the installed bun's absolute path, which
-    // every later step runs under a small grammar (actionsBunGuardMismatches
-    // has the contract). The pin is the load-bearing part: both setup steps read
-    // the action-local generated .bun-version (bun-version-file against
-    // github.action_path), because a BARE setup-bun resolves the CALLING
-    // repository's version files - and a consumer pinning an older bun
-    // cannot parse the lockfiles repo-platform's bun writes (the
-    // cloud-speech class: bun < 1.4.0 dying on a lockfileVersion-2
-    // bun.lock with the message swallowed by --silent). The block cannot
-    // be hoisted into a shared action - a relative `uses:` inside a
-    // composite action resolves against the CALLER's workspace, not this
-    // repo - so the copies are load-bearing; this rule keeps every copy
-    // present and identical (nested actions included), and catches a
-    // future action shipped bare: new actions are in scope until declared.
+    // Every composite action not declared bun-free carries the canonical
+    // pinned-bun setup and resolver blocks, and runs bun only by the
+    // resolved path (actionsBunGuardMismatches has the contract). A BARE
+    // setup-bun resolves the CALLING repository's version files, and a
+    // consumer's older bun cannot parse the lockfiles repo-platform's bun
+    // writes. The blocks are copies because a relative `uses:` inside a
+    // composite resolves against the CALLER's workspace, not this repo.
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();

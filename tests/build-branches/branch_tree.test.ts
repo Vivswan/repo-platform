@@ -18,6 +18,7 @@ import {
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
   MIGRATIONS_SRC_REL,
+  PINNED_SCRIPT_DIRS,
   parseArgs,
   SHARED_DIR,
   UsageError,
@@ -189,6 +190,25 @@ describe("copyActions", () => {
     mkdirSync(join(sharedOnly, "actions", SHARED_DIR), { recursive: true });
     writeFileSync(join(sharedOnly, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
+  });
+
+  test("a declared pinned script directory ships without an action.yml, and satisfies no roster", () => {
+    // Run by path (the report action's sibling validator, a fetched tree's
+    // copy), never resolved as an action: exempt from the manifest guard
+    // like the shared zone, and no more an action than it for the roster.
+    const [script] = [...PINNED_SCRIPT_DIRS];
+    const root = actionsFixture();
+    mkdirSync(join(root, "actions", script), { recursive: true });
+    writeFileSync(join(root, "actions", script, "run.ts"), "export {};\n");
+    writeFileSync(join(root, "actions", script, ".bun-version"), "1.4.0\n");
+    const dest = temp.dir("branch-actions-dest-");
+    expect(copyActions(root, dest)).toBe(6);
+    expect(existsSync(join(dest, "actions", script, ".bun-version"))).toBe(true);
+
+    const scriptOnly = temp.dir("branch-actions-script-only-");
+    mkdirSync(join(scriptOnly, "actions", script), { recursive: true });
+    writeFileSync(join(scriptOnly, "actions", script, "run.ts"), "export {};\n");
+    expect(() => copyActions(scriptOnly, dest)).toThrow("holds no action directories");
   });
 
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {

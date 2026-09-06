@@ -1,7 +1,7 @@
 {
   "name": "validate-template",
   "private": true,
-  "description": "Dependency manifest for the validate-template action (yaml parses the workflow and registration files).",
+  "description": "Dependency manifest for the validate-template validator script directory (yaml parses the workflow and registration files).",
   "dependencies": {
     "yaml": "^2.9.0"
   },

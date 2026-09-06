@@ -117,9 +117,9 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # yaml runtime dependency of the validate-template action. The action dir
-  # commits bun.lock, so the bun ecosystem keeps both manifest and lockfile
-  # current.
+  # yaml runtime dependency of the validate-template validator script
+  # directory. It commits bun.lock, so the bun ecosystem keeps both manifest
+  # and lockfile current.
   - package-ecosystem: "bun"
     directory: "/actions/validate-template"
     schedule:
