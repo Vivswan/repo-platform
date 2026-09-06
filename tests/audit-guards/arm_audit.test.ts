@@ -9,12 +9,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   auditEntry,
   type ForcingRun,
   judgeControl,
   judgeRed,
+  loadCloneRegistry,
   namedVerdict,
   parseJunit,
   pidAlive,
@@ -22,6 +23,7 @@ import {
   sweepSurvivors,
 } from "../../.github/scripts/audit-guards/arm_audit.ts";
 import { capture } from "../../.github/scripts/shared/proc.ts";
+import { REGISTRY_PATH } from "../../scripts/check/check_guard_binding.ts";
 import type { GuardEntry } from "../../scripts/check/guard_registry.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -262,6 +264,45 @@ describe("auditEntry", () => {
     expect(result.problems[0]).toContain("failed to look");
     expect(result.pids).toHaveLength(1);
     expect(pidAlive(result.pids[0])).toBe(false);
+  });
+});
+
+// The audit imports the registry FROM THE SCRATCH CLONE, a path no other
+// gate exercises: a registry move that misses this import stays green
+// locally and fails only in the weekly run. Building the scratch tree
+// from the same REGISTRY_PATH the binding check owns pins the two to one
+// spelling; the stale-spelling control shows the pin can fail.
+describe("loadCloneRegistry", () => {
+  const registrySource = (ids: string[]) =>
+    `export const GUARD_REGISTRY = [\n${ids.map((id) => `  { id: "${id}" },\n`).join("")}];\n`;
+
+  function cloneWithRegistryAt(rel: string, source: string): string {
+    const clone = temp.dir("arm-audit-clone-");
+    mkdirSync(dirname(join(clone, rel)), { recursive: true });
+    writeFileSync(join(clone, rel), source);
+    return clone;
+  }
+
+  test("reads the entries from the clone's registry at REGISTRY_PATH", async () => {
+    const clone = cloneWithRegistryAt(REGISTRY_PATH, registrySource(["alpha", "beta"]));
+    expect(await loadCloneRegistry(clone)).toEqual([{ id: "alpha" }, { id: "beta" }]);
+  });
+
+  test("CONTROL: a registry at the pre-move spelling (one segment short) is not found", async () => {
+    const stale = REGISTRY_PATH.replace("scripts/check/", "scripts/");
+    expect(stale).not.toBe(REGISTRY_PATH);
+    const clone = cloneWithRegistryAt(stale, registrySource(["alpha"]));
+    await expect(loadCloneRegistry(clone)).rejects.toThrow(/Cannot find module|resolve/i);
+  });
+
+  test("a registry file exporting no GUARD_REGISTRY array is a loud floor, not an empty audit", async () => {
+    const clone = cloneWithRegistryAt(
+      REGISTRY_PATH,
+      'export const GUARD_REGISTRY = "not a list";\n',
+    );
+    await expect(loadCloneRegistry(clone)).rejects.toThrow(
+      `the scratch clone's ${REGISTRY_PATH} exports no GUARD_REGISTRY array`,
+    );
   });
 });
 

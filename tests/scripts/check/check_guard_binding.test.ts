@@ -6,12 +6,13 @@
 // neuters the branch in a scratch clone and requires that test red.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   deletionTripwire,
   entryBindingMismatches,
   extractRegistryIds,
+  REGISTRY_PATH,
   registryBindingMismatches,
   registryDeletionMismatches,
   retiredGuardMismatches,
@@ -221,7 +222,7 @@ describe("extractRegistryIds", () => {
   });
 
   test("tracks the landed registry file's format: extraction matches the imported ids", () => {
-    const source = readOrNull("scripts/check/guard_registry.ts");
+    const source = readOrNull(REGISTRY_PATH);
     expect(source).not.toBeNull();
     const expected = [
       ...GUARD_REGISTRY.map((guard) => guard.id),
@@ -273,11 +274,8 @@ describe("deletionTripwire (real git plumbing)", () => {
   function baseRepo(): string {
     const dir = temp.dir("guard-tripwire-");
     git(dir, ["init", "--quiet", "-b", "main"]);
-    mkdirSync(join(dir, "scripts/check"), { recursive: true });
-    writeFileSync(
-      join(dir, "scripts/check/guard_registry.ts"),
-      registrySource(["kept", "dropped"]),
-    );
+    mkdirSync(dirname(join(dir, REGISTRY_PATH)), { recursive: true });
+    writeFileSync(join(dir, REGISTRY_PATH), registrySource(["kept", "dropped"]));
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "--quiet", "-m", "base"]);
     git(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
@@ -287,7 +285,7 @@ describe("deletionTripwire (real git plumbing)", () => {
   /** baseRepo advanced one commit: HEAD's registry drops "dropped". */
   function scratchRepo(): string {
     const dir = baseRepo();
-    writeFileSync(join(dir, "scripts/check/guard_registry.ts"), registrySource(["kept"]));
+    writeFileSync(join(dir, REGISTRY_PATH), registrySource(["kept"]));
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "--quiet", "-m", "drops one"]);
     return dir;
@@ -332,6 +330,27 @@ describe("deletionTripwire (real git plumbing)", () => {
       "depth-1 checkout would make it stand down (fail open) on every PR.\n" +
         "      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0",
     );
+  });
+});
+
+// The registry's spelled location must be the registry's real location:
+// the tripwire's `git show` and the arming audit's scratch-clone import
+// both build their path from REGISTRY_PATH, and neither runs against
+// this checkout's files, so a move that updates the import lines but not
+// the constant would leave both consumers pointing at the old home.
+describe("REGISTRY_PATH", () => {
+  test("resolves against the real checkout to the very module the static import bound", async () => {
+    const resolved = join(root, REGISTRY_PATH);
+    expect(existsSync(resolved)).toBe(true);
+    const loaded = (await import(resolved)) as { GUARD_REGISTRY?: unknown };
+    expect(loaded.GUARD_REGISTRY).toBe(GUARD_REGISTRY);
+  });
+
+  test("CONTROL: the pre-move spelling (one segment short) resolves to nothing", async () => {
+    const stale = join(root, REGISTRY_PATH.replace("scripts/check/", "scripts/"));
+    expect(stale).not.toBe(join(root, REGISTRY_PATH));
+    expect(existsSync(stale)).toBe(false);
+    await expect(import(stale)).rejects.toThrow();
   });
 });
 

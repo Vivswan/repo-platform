@@ -43,6 +43,13 @@ import {
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
+/** The registry's repo-relative home, spelled ONCE: the tripwire reads
+ *  it at the merge-base via git show, and the arming audit
+ *  (.github/scripts/audit-guards/arm_audit.ts) imports it from its
+ *  scratch clone. Both suites resolve it against a real tree, so a move
+ *  that forgets a consumer is red before the weekly audit runs. */
+export const REGISTRY_PATH = "scripts/check/guard_registry.ts";
+
 export interface BindingProblem {
   id: string;
   problem: string;
@@ -183,8 +190,6 @@ export function retiredGuardMismatches(
   }
   return problems;
 }
-
-const REGISTRY_PATH = "scripts/check/guard_registry.ts";
 
 export interface TripwireVerdict {
   problems: BindingProblem[];
