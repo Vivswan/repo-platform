@@ -1,24 +1,16 @@
 #!/usr/bin/env bun
 // The validate-template job's reporting and the ONE reader of the verdict:
-// the `integrity` output and the rendered body come from the same parsed
-// value. Never fails the job; the caller re-raises `integrity` last.
+// the `integrity` output, the step summary, and the comment body that the
+// sticky steps in action.yml post come from the same parsed value. Never
+// fails the job; the caller re-raises `integrity` last.
 //
-// Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, GITHUB_OUTPUT,
-// VERDICT, CLEAR_OUTCOME, LATEST_FINDINGS, LATEST_ADVISORIES, COMPARE_STATUS,
-// AHEAD_BY, EVENT_NAME, PR_NUMBER, RUN_URL.
+// Env: GITHUB_STEP_SUMMARY, GITHUB_OUTPUT, COMMENT_FILE, VERDICT,
+// CLEAR_OUTCOME, LATEST_FINDINGS, LATEST_ADVISORIES, COMPARE_STATUS,
+// AHEAD_BY, RUN_URL.
 
-import { appendFileSync, readFileSync, statSync } from "node:fs";
-import { capture, env, requireEnv, succeeded, warning } from "./runtime.ts";
+import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { env, requireEnv } from "./runtime.ts";
 import { type Integrity, readVerdict } from "./verdict.ts";
-
-const NETWORK_TIMEOUT_MS = 20_000;
-/** The paginated comment listing fetches N sequential pages under ONE
- * deadline, so its budget is several single-call writes' worth. */
-const PAGINATED_TIMEOUT_MS = NETWORK_TIMEOUT_MS * 4;
-
-// Identifies our own comment across runs. Keep it stable: changing it
-// strands every comment already posted under the old one.
-const MARKER = "<!-- repo-platform:validate-template -->";
 
 // Unless the clear step succeeded, neither fetch nor the latest leg ran:
 // any verdict or latest report on disk is stale or planted, so neither is
@@ -32,19 +24,15 @@ const verdict: Integrity = cleared
       reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
     };
 // Exported before anything else can go wrong: this line IS the gate.
-appendFileSync(
-  requireEnv("GITHUB_OUTPUT"),
-  `integrity=${verdict.kind === "clean" ? "success" : "failure"}\n`,
-);
+const outputFile = requireEnv("GITHUB_OUTPUT");
+appendFileSync(outputFile, `integrity=${verdict.kind === "clean" ? "success" : "failure"}\n`);
 const latestFindingsFile = requireEnv("LATEST_FINDINGS");
 const latestAdvisoriesFile = requireEnv("LATEST_ADVISORIES");
 const compareStatus = env("COMPARE_STATUS");
 const aheadBy = env("AHEAD_BY");
-const eventName = requireEnv("EVENT_NAME");
-const prNumber = env("PR_NUMBER");
 const runUrl = requireEnv("RUN_URL");
-const repository = requireEnv("GITHUB_REPOSITORY");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
+const commentFile = requireEnv("COMMENT_FILE");
 
 /** A file's text with trailing newlines stripped, or null when there is
  *  no regular file at the path. */
@@ -125,71 +113,12 @@ if (compareStatus === "identical") {
   freshness = `#### Freshness\n\nNot checked this run: ${reason}.`;
 }
 
-const body = `${MARKER}\n### Template check\n\n${integrity}${advice}${latest}\n\n${freshness}`;
+const body = `### Template check\n\n${integrity}${advice}${latest}\n\n${freshness}`;
 appendFileSync(summaryFile, `${body}\n`);
 
-// A comment is worth making only when something needs saying. A clean,
-// fresh repository leaves no new comment - but it does clear one a
-// previous run left behind.
+// The sticky steps in action.yml read both: the body from the file, and
+// `report` to post it (findings) or to delete the comment an earlier run
+// left (clean) - a clean, fresh repository has nothing worth a comment.
+writeFileSync(commentFile, `${body}\n`);
 const worthSaying = blocking || behind || advice !== "" || latest !== "";
-
-if (eventName !== "pull_request") process.exit(0);
-
-// --paginate: on a long PR our marker comment sits past the first page,
-// and a lookup that misses it POSTS A NEW ONE on every push. --slurp
-// yields one array per page, so flatten before searching.
-const listing = capture(
-  [
-    "gh",
-    "api",
-    "--paginate",
-    "--slurp",
-    `repos/${repository}/issues/${prNumber}/comments?per_page=100`,
-    "--jq",
-    "add // [] | map(select(.body | contains(env.MARKER))) | last | .id // empty",
-  ],
-  { timeoutMs: PAGINATED_TIMEOUT_MS, env: { MARKER } },
-);
-if (!succeeded(listing.exit)) {
-  warning("could not list PR comments; the findings are in the job summary instead.");
-  process.exit(0);
-}
-const existing = listing.stdout.trim();
-
-if (!worthSaying && existing === "") process.exit(0);
-
-if (existing !== "") {
-  const patch = capture(
-    [
-      "gh",
-      "api",
-      "--method",
-      "PATCH",
-      `repos/${repository}/issues/comments/${existing}`,
-      "-f",
-      `body=${body}`,
-      "--silent",
-    ],
-    { timeoutMs: NETWORK_TIMEOUT_MS },
-  );
-  if (!succeeded(patch.exit)) {
-    warning("could not update the findings comment; the findings are in the job summary instead.");
-  }
-} else {
-  const post = capture(
-    [
-      "gh",
-      "api",
-      "--method",
-      "POST",
-      `repos/${repository}/issues/${prNumber}/comments`,
-      "-f",
-      `body=${body}`,
-      "--silent",
-    ],
-    { timeoutMs: NETWORK_TIMEOUT_MS },
-  );
-  if (!succeeded(post.exit)) {
-    warning("could not post the findings comment; the findings are in the job summary instead.");
-  }
-}
+appendFileSync(outputFile, `report=${worthSaying ? "findings" : "clean"}\n`);

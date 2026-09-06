@@ -25,7 +25,7 @@ Conventions every managed repository follows, whether the file is managed by syn
       message: ...
   ```
 
-- Enforced by: the `sticky-pr-comments` ssot rule in repo-platform's [scripts/check_ssot.ts](../scripts/check_ssot.ts) (landing) for its templates; review only in repo-owned workflows.
+- Enforced by: the `sticky-pr-comments` ssot rule in repo-platform's [scripts/check_ssot.ts](../scripts/check_ssot.ts) (landing) over every file under its `templates/`, `.github/workflows/`, and `actions/`: no hand-rolled `gh pr comment`, `gh pr close --comment`, or comments REST call anywhere in them, and every sticky step pinned with `header: repo-platform/<workflow stem or action name>`. The rule reads YAML step lists (workflows, composite actions, step fragments; jinja sources as the YAML they render) as the runner does: a step is a mapping whatever its key order, its `run` is one shell line per folded `>-` block and one per literal `|` line, and each command line is split into words, so `gh pr close` is caught by its comment option in any spelling (`--comment`, `--comment=`, `-c`, `-dc`) and `gh pr comment` or a comments REST route in a shell line, a github-script body, or an argv array alike. `gh issue comment` is not judged (the issue-tracking actions comment on issues by design). Composite actions alone may set `continue-on-error` on the step: they post under the calling job's token, which a fork PR grants no write, so their comment is a convenience sink beside the step summary. Review only in repo-owned workflows.
 
 ## Conventional Commits, squash-merged
 

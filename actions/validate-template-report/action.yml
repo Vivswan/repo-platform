@@ -9,8 +9,9 @@ description: >-
   only warns about the rules the next sync brings; FRESHNESS
   reads the integrity leg's build-branch compare and only informs. The
   action never fails on its own - the report step ALWAYS runs, exports the
-  verdict as `integrity`, and the caller fails LAST, so the comment is
-  already posted when the gate goes red. The calling job needs
+  verdict as `integrity`, and writes the comment body the sticky steps post
+  (deleted when there is nothing to say); the caller fails LAST, so the
+  comment is already posted when the gate goes red. The calling job needs
   pull-requests: write for the comment (and nothing else beyond contents:
   read).
 
@@ -57,6 +58,7 @@ runs:
         "${{ runner.temp }}/aligned-verdict.json"
         "${{ runner.temp }}/latest-findings.md"
         "${{ runner.temp }}/latest-advisories.md"
+        "${{ runner.temp }}/validate-template-report.md"
 
     # The integrity leg: fetch, the tree's bun, judge. A failed fetch writes
     # its own not-judged verdict and skips the steps behind it. BASE_REF is
@@ -153,15 +155,13 @@ runs:
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
-        GH_TOKEN: ${{ inputs.github-token }}
         VERDICT: ${{ runner.temp }}/aligned-verdict.json
         CLEAR_OUTCOME: ${{ steps.clear.outcome }}
         LATEST_FINDINGS: ${{ runner.temp }}/latest-findings.md
         LATEST_ADVISORIES: ${{ runner.temp }}/latest-advisories.md
         COMPARE_STATUS: ${{ steps.fetch.outputs.compare }}
         AHEAD_BY: ${{ steps.fetch.outputs.ahead-by }}
-        EVENT_NAME: ${{ github.event_name }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_FILE: ${{ runner.temp }}/validate-template-report.md
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         if [ -n "$ACTION_BUN" ]; then
@@ -169,5 +169,29 @@ runs:
         fi
         reason="the action's pinned bun is unavailable"
         echo "integrity=failure" >> "$GITHUB_OUTPUT"
+        echo "report=findings" >> "$GITHUB_OUTPUT"
         echo "::error::$reason"
-        printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' "$reason" "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+        printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' "$reason" "$RUN_URL" | tee "$COMMENT_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+    # The comment is a convenience sink: the summary carries the same body,
+    # so a token without pull-requests write (a fork or Dependabot PR) must
+    # not turn the verdict red. The caller fails on `integrity`, never here.
+    - name: Post the findings as a sticky PR comment
+      id: post-comment
+      if: github.event_name == 'pull_request' && steps.report.outputs.report == 'findings'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        header: repo-platform/validate-template-report
+        path: ${{ runner.temp }}/validate-template-report.md
+
+    - name: Remove a stale sticky comment
+      id: delete-comment
+      if: github.event_name == 'pull_request' && steps.report.outputs.report == 'clean'
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+      with:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        header: repo-platform/validate-template-report
+        delete: true
