@@ -927,17 +927,55 @@ ${extra}      shell: ${shell}
   const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
   const noClearing = {
     file: "actions/x/action.yml",
-    expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is /bin/rm -rf of literal paths, and whose success this setup's condition requires)`,
+    expected: `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
     got: "no such step - a caller could plant that pin before the action runs",
   };
   const cases: [string, string, ReturnType<typeof actionsBunGuardMismatches>, string?, string?][] =
     [
       ["a required clearing step removing the root", clearingStep(REMOVAL), []],
       [
-        "a required clearing step removing the root and another scratch path",
-        clearingStep(`|\n        /bin/rm -rf "\${{ runner.temp }}/other"\n        ${REMOVAL}`),
+        "a required clearing step removing the root and other scratch paths in one rm",
+        clearingStep(
+          `/bin/rm -rf "\${{ runner.temp }}/other" "\${{ runner.temp }}/aligned-validator" "\${{ runner.temp }}/x.md"`,
+        ),
         [],
       ],
+      // One rm attempts every path and fails when any did; a line per path
+      // stops at the first failure under -e or masks it behind the last.
+      [
+        "a clearing split over one rm line per path",
+        clearingStep(`|\n        /bin/rm -rf "\${{ runner.temp }}/other"\n        ${REMOVAL}`),
+        [noClearing],
+      ],
+      [
+        "a clearing preceded by a set -e line",
+        clearingStep(`|\n        set -euo pipefail\n        ${REMOVAL}`),
+        [noClearing],
+      ],
+      [
+        "a clearing whose operands touch (bash joins them into one word)",
+        clearingStep(`${REMOVAL}"\${{ runner.temp }}/other"`),
+        [noClearing],
+      ],
+      [
+        "a clearing whose paths are not each quoted",
+        clearingStep('/bin/rm -rf "${{ runner.temp }}/aligned-validator" ${{ runner.temp }}/other'),
+        [noClearing],
+      ],
+      // Every operand is judged, not only the one covering the pin: a
+      // second operand the shell expands or a caller supplies is refused.
+      ...[
+        '"$HOME/x"',
+        '"$(echo /)"',
+        '"`echo /`"',
+        '"${{ inputs.cleanup-path }}"',
+        '"${{ runner.temp }}/../work"',
+        '"/tmp/other"',
+      ].map((operand): (typeof cases)[number] => [
+        `a clearing of the root beside the operand ${operand}`,
+        clearingStep(`${REMOVAL} ${operand}`),
+        [noClearing],
+      ]),
       [
         "a required clearing step allowed to fail (its success is still required)",
         clearingStep(REMOVAL, "      continue-on-error: true\n"),

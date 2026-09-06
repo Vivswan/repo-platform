@@ -2368,21 +2368,24 @@ export function actionManifestFiles(): string[] {
  *  action path. */
 export const FETCHED_TREE_PIN_ANCHOR = "${{ runner.temp }}/";
 
-/** A setup-bun pin under the runner scratch root, accepted only as a clean
- *  path to a .bun-version dotfile there: every segment drawn from
+/** A clean path under the runner scratch root: every segment drawn from
  *  [A-Za-z0-9._-], not a dot or dot-dot, and not ending in a period (a
- *  traversal would reach the caller's checkout; Windows strips trailing
- *  periods and spaces and reads a backslash as a separator, so the
- *  whitelist is what closes the class, not a list of spellings). */
-export function fetchedTreePin(value: unknown): boolean {
+ *  traversal would reach the caller's checkout, a `$` would expand in the
+ *  shell; Windows strips trailing periods and spaces and reads a backslash
+ *  as a separator, so the whitelist is what closes the class, not a list
+ *  of spellings). */
+function cleanScratchPath(value: unknown): value is string {
   if (typeof value !== "string" || !value.startsWith(FETCHED_TREE_PIN_ANCHOR)) return false;
-  const segments = value.slice(FETCHED_TREE_PIN_ANCHOR.length).split("/");
-  return (
-    segments[segments.length - 1] === ".bun-version" &&
-    segments.every(
-      (s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== "." && s !== ".." && !s.endsWith("."),
-    )
-  );
+  return value
+    .slice(FETCHED_TREE_PIN_ANCHOR.length)
+    .split("/")
+    .every((s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== "." && s !== ".." && !s.endsWith("."));
+}
+
+/** A setup-bun pin under the runner scratch root, accepted only as a clean
+ *  path to a .bun-version dotfile there. */
+export function fetchedTreePin(value: unknown): boolean {
+  return cleanScratchPath(value) && value.endsWith("/.bun-version");
 }
 
 /** Whether `condition` is a pure `&&`-conjunction carrying `atom` as one of
@@ -2401,21 +2404,25 @@ function conjunctionRequires(condition: string, atom: string): boolean {
 export const NEUTRALIZED_SHELL_ENV = ["BASH_ENV", "SHELLOPTS"];
 
 /** The paths a bash step removes beyond a caller's reach: the shell knobs
- *  above emptied, and every non-blank non-comment line `/bin/rm -rf
- *  "<literal path>"` (no variable to rebind, no rm from PATH); else nothing. */
+ *  above emptied, and ONE non-blank non-comment line `/bin/rm -rf "<clean
+ *  scratch path>" ...` (no rm from PATH, no operand the shell could expand
+ *  or a caller could point elsewhere); else nothing. One rm for every path
+ *  is what fails closed: it attempts each removal and exits nonzero when
+ *  any failed, whatever the shell's options, where a line per path stops
+ *  at the first failure or masks it behind the last. */
 function pathsClearedBy(step: Record<string, unknown>): string[] {
   const stepEnv =
     typeof step.env === "object" && step.env !== null ? (step.env as Record<string, unknown>) : {};
   const neutralized = NEUTRALIZED_SHELL_ENV.every((name) => stepEnv[name] === "");
   if (step.shell !== "bash" || !neutralized || typeof step.run !== "string") return [];
-  const cleared: string[] = [];
   const lines = step.run.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line));
-  for (const line of lines) {
-    const removed = /^\s*\/bin\/rm -rf (?:-- )?"([^"]+)"\s*$/.exec(line);
-    if (removed === null) return [];
-    cleared.push(removed[1]);
-  }
-  return cleared;
+  if (lines.length !== 1) return [];
+  // Operands are space-separated: bash joins adjacent quoted strings into
+  // one word.
+  const removed = /^\s*\/bin\/rm -rf (?:-- )?("[^"]+"(?: "[^"]+")*)\s*$/.exec(lines[0]);
+  if (removed === null) return [];
+  const operands = removed[1].match(/"([^"]+)"/g)?.map((quoted) => quoted.slice(1, -1)) ?? [];
+  return operands.every(cleanScratchPath) ? operands : [];
 }
 
 /** Clearing evidence for a runner-scratch pin: a step before `index` that
@@ -2496,7 +2503,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
       mismatches.push({
         file,
-        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is /bin/rm -rf of literal paths, and whose success this setup's condition requires)`,
+        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf of clean paths under that root, and whose success this setup's condition requires)`,
         got: "no such step - a caller could plant that pin before the action runs",
       });
       continue;

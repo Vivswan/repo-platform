@@ -25,6 +25,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -1366,10 +1367,10 @@ describe("the action's judge script", () => {
 describe("the action's clear step", () => {
   // Executed as the runner would, with a planted scratch tree, a planted
   // clean verdict, and a planted latest-leg report pair where the action
-  // expects them: all must be gone after, whatever the inherited PATH,
-  // BASH_ENV, or SHELLOPTS say. (A latest validator that aborts before
-  // writing would otherwise leave an earlier run's pair for the report.)
-  test("removes a planted scratch tree, verdict, and latest reports under a hostile environment", () => {
+  // expects them, under a poisoned rm first on PATH, a BASH_ENV that
+  // redefines rm, and SHELLOPTS=noexec: the step's own env must defeat all
+  // three. Judged whole: the exit code and which of the four paths remain.
+  const runClear = (lockVerdict: boolean) => {
     const { root, bin } = scratch();
     const runnerTemp = join(root, "runner-temp");
     const alignedDir = join(runnerTemp, "aligned-validator");
@@ -1377,11 +1378,18 @@ describe("the action's clear step", () => {
     const latestFindings = join(runnerTemp, "latest-findings.md");
     const latestAdvisories = join(runnerTemp, "latest-advisories.md");
     layValidator(validatorOf(alignedDir), {});
-    writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
     writeFileSync(latestFindings, "#### Errors (1)\n\n- stale finding\n");
     writeFileSync(latestAdvisories, "#### Advisories (1)\n\n- stale advisory\n");
-    // A poisoned rm first on PATH, a BASH_ENV that redefines rm, and
-    // SHELLOPTS=noexec: the step's own env must defeat all three.
+    if (lockVerdict) {
+      // A directory rm cannot empty: its entry cannot be unlinked. Mode
+      // bits bind no root, so the case cannot even be staged there.
+      if (process.getuid?.() === 0)
+        throw new Error("the locked-path case needs an unprivileged user");
+      mkdirSync(verdict);
+      writeFileSync(join(verdict, "planted"), "");
+    } else {
+      writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
+    }
     writeFileSync(join(bin, "rm"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
     const bashEnv = join(root, "bash_env.sh");
     writeFileSync(bashEnv, "rm() { :; }\n/bin/rm() { :; }\n");
@@ -1390,21 +1398,37 @@ describe("the action's clear step", () => {
       unknown
     >[];
     const clear = steps.find((s) => s.id === "clear") as { env: Record<string, string> };
-    const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("clear", runnerTemp)], {
-      env: {
-        PATH: `${bin}:/usr/bin:/bin`,
-        BASH_ENV: bashEnv,
-        SHELLOPTS: "noexec",
-        ...clear.env,
-      },
-    });
-    expect([
-      proc.exitCode,
-      existsSync(alignedDir),
-      existsSync(verdict),
-      existsSync(latestFindings),
-      existsSync(latestAdvisories),
-    ]).toEqual([0, false, false, false, false]);
+    let proc: ReturnType<typeof boundedSpawnSync>;
+    if (lockVerdict) chmodSync(verdict, 0o555);
+    try {
+      proc = boundedSpawnSync([...RUNNER_BASH, stepRun("clear", runnerTemp)], {
+        env: {
+          PATH: `${bin}:/usr/bin:/bin`,
+          BASH_ENV: bashEnv,
+          SHELLOPTS: "noexec",
+          ...clear.env,
+        },
+      });
+    } finally {
+      if (lockVerdict) chmodSync(verdict, 0o755);
+    }
+    return {
+      failed: proc.exitCode !== 0,
+      remaining: [alignedDir, verdict, latestFindings, latestAdvisories]
+        .filter((path) => existsSync(path))
+        .map((path) => path.slice(runnerTemp.length + 1)),
+    };
+  };
+
+  test("removes the planted scratch tree, verdict, and latest reports under a hostile environment", () => {
+    expect(runClear(false)).toEqual({ failed: false, remaining: [] });
+  });
+
+  // One removal that cannot complete fails the whole step (so the report
+  // trusts nothing on disk) while every other path is still cleared: a
+  // fetch step gated on this outcome never runs beside a stale verdict.
+  test("fails when one path cannot be removed, having still cleared the others", () => {
+    expect(runClear(true)).toEqual({ failed: true, remaining: ["aligned-verdict.json"] });
   });
 });
 
@@ -1471,11 +1495,12 @@ describe("the action's wiring", () => {
     const BUN_PATH = "${{ steps.action-bun.outputs.path }}";
     const fetch = byId("fetch");
     expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
-    // Every predictable scratch path is cleared by a fixed rm on the literal
-    // path with BASH_ENV emptied (no variable or PATH entry a caller could
-    // poison): the aligned tree and verdict, which both aligned setups
-    // require (the actions-bun-guard rule reads it), and the latest leg's
-    // report pair, so an aborted latest validator leaves nothing stale.
+    // Every predictable scratch path is cleared by ONE fixed rm on the
+    // literal paths with BASH_ENV emptied (no variable or PATH entry a
+    // caller could poison; one rm fails when any removal did): the aligned
+    // tree and verdict, which both aligned setups require (the
+    // actions-bun-guard rule reads it), and the latest leg's report pair,
+    // so an aborted latest validator leaves nothing stale.
     const latestWith = byId("latest")?.with as Record<string, string>;
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
@@ -1483,14 +1508,14 @@ describe("the action's wiring", () => {
       "continue-on-error": true,
       shell: "bash",
       env: { BASH_ENV: "", SHELLOPTS: "" },
-      run: [
+      run: `/bin/rm -rf ${[
         envOf(fetch).ALIGNED_DIR,
         envOf(fetch).VERDICT_FILE,
         latestWith["findings-file"],
         latestWith["advisories-file"],
       ]
-        .map((path) => `/bin/rm -rf "${path}"\n`)
-        .join(""),
+        .map((path) => `"${path}"`)
+        .join(" ")}`,
     });
     expect(envOf(fetch).ACTION_BUN).toBe(BUN_PATH);
     // The vintage floor reads the PR's base ref, or the default branch off a PR.
