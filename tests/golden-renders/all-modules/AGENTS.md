@@ -1,9 +1,9 @@
 <!-- BEGIN REPO-PLATFORM MANAGED -->
 # AGENTS.md
 
-This file provides guidance to AI coding agents working in this repository. `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to this file, so edit only here.
+Guidance for AI coding agents working in this repository. `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to this file, so edit only here.
 
-Everything between the BEGIN and END markers is managed by Vivswan/repo-platform and overwritten by template sync; this repository's own guidance belongs outside the markers (below the END marker at the bottom).
+Everything between the BEGIN and END markers is managed by Vivswan/repo-platform and overwritten by template sync. This repository's own guidance goes below the END marker.
 
 ## Project
 
@@ -11,35 +11,30 @@ Golden Render: Golden render fixture
 
 ## Toolchain
 
-- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)
-- See `package.json` scripts for the available commands.
-- `.bun-version` pins the toolchain and is managed by the template: sync overwrites it, so version overrides belong in the repo-owned workflows' explicit version inputs.
-- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)
-- npm scripts in `package.json` are the command entry points.
-- `.node-version` pins the toolchain and is managed by the template: sync overwrites it, so version overrides belong in the repo-owned workflows' explicit version inputs.
-- Deno runtime (`deno install`, `deno test`, `deno task <task>`)
-- See `deno.json` for tasks, imports (`npm:`/`jsr:` dependency specifiers), and lint/format settings.
-- `.dvmrc` pins the toolchain and is managed by the template: sync overwrites it, so version overrides belong in the repo-owned workflows' explicit version inputs.
-- Python managed with uv (`uv sync`, `uv run <command>`)
-- See `pyproject.toml` for project metadata and dependencies.
-- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)
-- See `Cargo.toml` for the workspace/crate layout and dependencies.
+- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)
+- `.bun-version` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.
+- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)
+- `.node-version` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.
+- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)
+- `.dvmrc` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.
+- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)
+- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)
 
 ## Conventions
 
-- PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`, `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the commit subject and drives release-please versioning. CI validates both (the required pr-title check + validate-commit-names).
-- CI gates on the required check `all-green`: ci.yml's own `all-green` job needs the `checks` and `ci` caller jobs and fails unless each result is success or skipped, with at least one success (the gate jobs themselves run centrally through repo-platform's fleet-ci.yml; the `pr-title` check is required separately by its own ruleset). This repository's own test/lint jobs belong in `.github/workflows/checks.yml` (repo-owned, called inside the gate), and its own green-gated work in `.github/workflows/post-green.yml` (repo-owned; ci.yml's `post-green` job calls it after the gate on a push to main, with the judged sha); do not edit ci.yml, template sync overwrites it. A green gate on a push to main releases: ci.yml's `release` job (`needs: [all-green, post-green]`, gated on both results, so post-green work lands before the tag) calls the managed release pipeline in `.github/workflows/release.yml` with the judged commit; this repository's release preparation (packaging, asset uploads, note edits) goes in the repo-owned `.github/workflows/update-release.yml` hook it calls.
-- No typographic look-alike characters (curly quotes, em-dashes, invisible unicode). CI enforces this with the check-typography action; use plain ASCII punctuation.
+- PR titles and commit subjects are Conventional Commits. PRs are squash-merged, so the PR title becomes the commit subject and drives release-please versioning. The `pr-title` check validates the title.
+- CI gates on the `all-green` check, required by the managed ruleset. This repository's own test and lint jobs go in the repo-owned `.github/workflows/checks.yml`, its green-gated work on main in the repo-owned `post-green.yml`; `ci.yml` is managed.
+- A green push to main releases through the managed `release.yml`; this repository's release steps go in the repo-owned `update-release.yml` and `update-release-pr.yml` hooks.
+- Plain ASCII punctuation only: no curly quotes, em-dashes, or invisible unicode. The check-typography gate enforces it.
 
 ## Managed by repo-platform
 
-- Files whose header says "managed by Vivswan/repo-platform" arrive via sync PRs pushed by that repository. Do not edit them here; change them in Vivswan/repo-platform and let the next sync PR deliver the update.
-- Repository settings (description, topics, labels, rulesets, merge policy) are applied from Vivswan/repo-platform: it merges the fleet defaults and this repository's selected-module layers at apply time, then this repository's own `.github/settings.yml` (identity keys and local overrides) over them, and finally a fleet override layer carrying the invariants no repository may weaken (squash-only merging, the branch protection rulesets). A same-name label here replaces the fleet one; a same-name ruleset merges, so you can tighten a fleet ruleset but not strip a rule from it. Do not change settings by hand in the GitHub UI; edit `.github/settings.yml`.
-- Repo-owned escape hatches stay local: `.github/workflows/checks.yml`, `.github/workflows/post-green.yml`, `.github/workflows/update-release.yml`, `.github/workflows/update-release-pr.yml`, `release-please-config.json` and `.release-please-manifest.json` (release state, seeded once; force a version with a `Release-As: x.y.z` commit footer, never a `release-as` key - CI rejects the key because it outlives its release), `.gitleaks.toml`, `.gitignore` outside its BEGIN/END managed region, `.typography-allow.local` (typography exemptions; the managed `.typography-allow` is overwritten by sync), the `.claude-plugin/` manifests (plugin identity and the skill catalog, seeded once), and the repository-specific section below.
-- Module selection is this repository's own: edit the `modules` list in `.repo-platform.yml` and the next sync PR applies the change.
+- Files whose header says "managed by Vivswan/repo-platform" arrive via sync PRs from that repository. Do not edit them here; change them there.
+- Repository settings are applied from Vivswan/repo-platform's layers plus this repository's own `.github/settings.yml`. Edit that file, never the GitHub UI; the merge rules are in repo-platform's docs/settings.md.
+- Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region, `.typography-allow.local`, the release hooks and the release-please JSON files, the `.claude-plugin/` manifests.
+- Module selection is the `modules` list in `.repo-platform.yml`; the next sync PR applies a change. The per-module contracts are in repo-platform's docs/new-repo.md.
 
 ## Repository-specific guidance
 
-<!-- Add project-specific instructions below the END marker. They are this
-     repository's own and survive template updates. -->
+<!-- Add project-specific instructions below the END marker; they are this repository's own and survive template updates. -->
 <!-- END REPO-PLATFORM MANAGED -->

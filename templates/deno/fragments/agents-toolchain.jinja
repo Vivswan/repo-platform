@@ -1,3 +1,2 @@
-- Deno runtime (`deno install`, `deno test`, `deno task <task>`)
-- See `deno.json` for tasks, imports (`npm:`/`jsr:` dependency specifiers), and lint/format settings.
-- `.dvmrc` pins the toolchain and is managed by the template: sync overwrites it, so version overrides belong in the repo-owned workflows' explicit version inputs.
+- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)
+- `.dvmrc` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.

@@ -423,11 +423,11 @@ if has agents; then
   # AGENTS.md toolchain section only when a toolchain module is selected,
   # with exactly the selected toolchains' bullets inside it.
   if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absent "## Toolchain" "$SMOKE/AGENTS.md"; fi
-  if has bun; then present_line '- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)' "$SMOKE/AGENTS.md"; else absent "Runtime and package manager: bun" "$SMOKE/AGENTS.md"; fi
-  if has node; then present_line '- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)' "$SMOKE/AGENTS.md"; else absent "Node.js with npm" "$SMOKE/AGENTS.md"; fi
-  if has deno; then present_line '- Deno runtime (`deno install`, `deno test`, `deno task <task>`)' "$SMOKE/AGENTS.md"; else absent "Deno runtime" "$SMOKE/AGENTS.md"; fi
-  if has uv; then present_line '- Python managed with uv (`uv sync`, `uv run <command>`)' "$SMOKE/AGENTS.md"; else absent "Python managed with uv" "$SMOKE/AGENTS.md"; fi
-  if has rust; then present_line '- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)' "$SMOKE/AGENTS.md"; else absent "Rust managed with cargo" "$SMOKE/AGENTS.md"; fi
+  if has bun; then present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; else absent '`bun install`' "$SMOKE/AGENTS.md"; fi
+  if has node; then present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; else absent '`npm install`' "$SMOKE/AGENTS.md"; fi
+  if has deno; then present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"; else absent '`deno install`' "$SMOKE/AGENTS.md"; fi
+  if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
+  if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
 else
   # `test ! -e` follows symlinks (a dangling one passes), so also
   # assert not-a-symlink for the three link paths.
