@@ -2773,10 +2773,8 @@ export const FLEET_CI_ROSTER = [
   "release-health",
 ];
 
-/** The folded job-level condition every gate-downstream caller in the
- *  rendered ci.yml carries: released only by green results (spelled out,
- *  never GitHub's implied-success rule alone) on a push to main.
- *  `upstream` names the jobs whose results the caller reads. */
+/** The folded job-level condition of a gate-downstream caller: green
+ *  results of `upstream`, spelled out, on a push to main. */
 export function downstreamGateBlock(upstream: string[]): string {
   return [
     "    if: >-",
@@ -2786,10 +2784,9 @@ export function downstreamGateBlock(upstream: string[]): string {
   ].join("\n");
 }
 
-/** Pins a downstream caller's condition as one ADJACENT block that also
- *  ENDS the folded scalar: a continuation line appended after it (an ||
- *  arm, even past blank lines - a folded scalar keeps them as content)
- *  would weaken the gate while the block pin stayed satisfied. */
+/** Pins the condition as one adjacent block that also ENDS the folded
+ *  scalar: a continuation (an || arm, even past blank lines) would weaken
+ *  the gate while the block pin stayed satisfied. */
 function pinDownstreamGate(
   text: string,
   block: string,
@@ -2827,11 +2824,9 @@ function pinDownstreamGate(
   }
 }
 
-/** The grants under a job-level `    permissions:` at `start`: every line
- *  of the block (blanks and comments skipped) until the first dedent. A
- *  line that is not a bare `      scope: read|write` grant is returned
- *  verbatim so the ceiling census fails CLOSED on it - a quoted value
- *  (`pull-requests: "write"`) is a grant to GitHub all the same. */
+/** The grants under `    permissions:` at `start`, to the first dedent.
+ *  A non-canonical line (a quoted `"write"`) is returned verbatim so the
+ *  ceiling census fails closed on it. */
 function permissionGrants(lines: string[], start: number): string[] {
   const grants: string[] = [];
   for (const line of lines.slice(start + 1)) {
@@ -2854,19 +2849,12 @@ function jobBlock(lines: string[], id: string): string[] {
   return lines.slice(at + 1, end === -1 ? undefined : end);
 }
 
-/** A mapping key with whitespace before its colon (`key :`), at any depth
- *  and in a sequence item alike: YAML reads it as `key:`, while every
- *  key census here reads the key form `key:` only. */
+/** `key :` at any depth: YAML reads it as `key:`, the censuses do not. */
 const SPACED_KEY = /^\s*(?:-\s+)?[A-Za-z0-9_-]+\s+:(?:\s|$)/;
 
-/** The mapping keys appearing more than once under the same parent in one
- *  job's block, at any depth (`uses`, `with.sha`, `steps[0].with.needs`):
- *  YAML's last duplicate wins silently, so a second key after the pinned
- *  one would ship while every exact-line pin stayed satisfied. Each `- `
- *  sequence item opens its own mapping, so two steps both carrying `uses:`
- *  are not duplicates of each other. Indent-driven over the source lines
- *  (the file is jinja, so no YAML parse); jinja and comment lines never
- *  match the key form. */
+/** Keys repeated under one parent in a job block, at any depth (YAML's
+ *  last duplicate wins silently). Indent-driven over jinja source; each
+ *  `- ` item is its own mapping. */
 export function duplicateJobKeys(block: string[]): string[] {
   const seen = new Map<string, number>();
   const stack: { indent: number; path: string }[] = [];
@@ -2890,27 +2878,9 @@ export function duplicateJobKeys(block: string[]): string[] {
   return [...seen.entries()].filter(([, count]) => count > 1).map(([path]) => path);
 }
 
-/** The fleet gate's render shape at the SOURCE. The template ci.yml.jinja
- *  carries exactly the `checks` and `ci` caller jobs, the `all-green`
- *  gate job (its check run is the ruleset's required context), whose
- *  needs edge, always() condition, and shared-action judgment are pinned
- *  as exact lines - each fails OPEN at run time if lost - and the
- *  `post-green` caller of the repo-owned post-green.yml hook: gate-
- *  downstream with the spelled-out condition, the judged sha passed
- *  explicitly, a contents: read ceiling, and NO lane (the called jobs
- *  are the repo's own; a caller holding a lane a called job takes
- *  deadlocks the call against itself). The release-please leg
- *  (fragments/all-green-release.jinja, spliced after the hook) must need
- *  BOTH the gate and the hook with both results spelled out (dropping
- *  any clause releases off unjudged, red, or PR-shaped runs, or before
- *  the repo's post-green work landed), must pass the judged sha
- *  explicitly (github.sha - the leg runs in the judged commit's own run;
- *  the explicit input is what keeps a future caller honest), and must
- *  hold a concurrency group no job inside the called release.yml takes
- *  (a shared name self-deadlocks). release.yml must declare the sha
- *  input and read it in the head gate, or the pass rots into a silent
- *  release-from-tip. Pure over the three texts for the suite's forcing
- *  cases. */
+/** The fleet gate's render shape at the jinja SOURCE, pinned as exact
+ *  lines against a maintainer's accidental omission (the rendered shape is
+ *  asserted by verify_smoke_gating.sh); docs/all-green.md has the model. */
 export function fleetCiRenderMismatches(
   ciTemplateText: string,
   releaseLegText: string,
@@ -2933,20 +2903,9 @@ export function fleetCiRenderMismatches(
       got: jobIds.join(", ") || "no job ids",
     });
   }
-  // No job-level name: anywhere (the all-green job's id is the required
-  // check-run name; a caller rename would silently reshape the gate),
-  // and the ONLY job-level if: lines are the gate's own always() and the
-  // post-green hook's folded gate condition (pinned inside its block
-  // below) - a condition on a caller job skips it, and skipped stands
-  // down. Line censuses over the whole jobs region: every needs: line
-  // must be a pinned one (a second needs key on a job silently wins in
-  // YAML), no step-level if: (a conditioned judgment step is a green
-  // no-op gate), and strategy/continue-on-error/concurrency are banned
-  // outright (a matrix suffixes the check name away from the required
-  // context; softening waves a failure through; a caller lane deadlocks
-  // against any repo-owned post-green job taking the same name).
-  // 4-space only: the gate's with-block passes a `needs:` INPUT at step
-  // depth, which is data, not a YAML job key.
+  // Line censuses over the jobs region; each mismatch message states
+  // its why. 4-space only: the gate's with-block passes a `needs:` INPUT
+  // at step depth, which is data, not a YAML job key.
   const needsLines = ciTemplateText
     .slice(jobsAt)
     .split("\n")
@@ -3043,12 +3002,9 @@ export function fleetCiRenderMismatches(
       });
     }
   }
-  // The gate's and the hook caller's shapes, pinned as exact lines - each
-  // exactly once in the whole file (YAML's last duplicate wins silently,
-  // so a compliant copy next to a gutted one must be loud) AND, for the
-  // job-body pins, INSIDE the named job's own block: a pin satisfied from
-  // another job's body (if: always() moved onto a caller) is the same
-  // disarm.
+  // Exact-line pins, each once in the file (a compliant copy next to a
+  // gutted one must be loud) and, for job-body pins, inside the named
+  // job's block (a pin moved onto another job is the same disarm).
   const ciLines = ciTemplateText.split("\n");
   const blocks = {
     "all-green": jobBlock(ciLines, "all-green"),
@@ -3136,21 +3092,19 @@ export function fleetCiRenderMismatches(
     "the post-green hook caller",
     mismatches,
   );
-  // The hook caller's ceiling: contents: read and nothing else. A called
-  // job cannot raise above its caller, so this line is what keeps
-  // repo-owned post-green work on the default token at read scope;
-  // privileged work rides a repository secret instead.
+  // The hook caller's ceiling: a called job cannot raise above it.
   const hookPermissionsAt = blocks["post-green"].indexOf("    permissions:");
   if (hookPermissionsAt === -1) {
     mismatches.push({
       file: `${ciRel} job 'post-green'`,
-      expected: "a job-level permissions: ceiling for the called repo-owned hook",
+      expected:
+        "a job-level permissions: ceiling of contents: read for the called repo-owned hook (a called job cannot raise GITHUB_TOKEN above its caller, so this line keeps repo-owned post-green work at read scope; privileged work rides inherited secrets)",
       got: "missing",
     });
   } else {
     mismatches.push(
       ...setMismatch(
-        `${ciRel} post-green permissions ceiling`,
+        `${ciRel} post-green permissions ceiling (contents: read only - a called job cannot raise GITHUB_TOKEN above its caller; privileged work rides inherited secrets)`,
         ["contents: read"],
         permissionGrants(blocks["post-green"], hookPermissionsAt),
       ),

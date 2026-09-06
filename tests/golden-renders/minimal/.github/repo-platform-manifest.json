@@ -11,7 +11,7 @@
     ".github/dependabot.yml": {"class": "managed", "hash": "477a76f5cd1e3adc00e8b8596e91b74e124c1502b9a40ccf097dfdeb634d85bc"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
     ".github/workflows/checks.yml": {"class": "starter"},
-    ".github/workflows/ci.yml": {"class": "managed", "hash": "e32de76d04cbe89026462fc22240c0d97322428c27e4bdbc7f8b4bf464857a2a"},
+    ".github/workflows/ci.yml": {"class": "managed", "hash": "0a81eafe1058417250ca955723b2d6277da01e103772c0519cffe96ff600e292"},
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "2922c29883f7aab7be850981eeba3c9698d865dc2b7004cf5fe9465d2e6c7474"},
     ".gitleaks.toml": {"class": "starter"},
