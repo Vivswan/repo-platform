@@ -2565,41 +2565,28 @@ export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
 // --- sticky PR comments ------------------------------------------------------
 
 /** The one action fleet-rendered workflows post PR comments through: one
- *  comment per header key per PR, edited in place on later runs, a failed
- *  post failing the step. */
+ *  comment per header key per PR, upserted, a failed post failing the step.
+ *  Headers are `repo-platform/<host workflow stem>`, so two workflows can
+ *  never edit each other's comment. */
 export const STICKY_COMMENT_ACTION = "marocchino/sticky-pull-request-comment";
 
-/** Header keys are `repo-platform/<host workflow stem>`, so two fleet
- *  workflows can never edit each other's comment. */
-export const STICKY_HEADER_PREFIX = "repo-platform/";
-
-/** A PR comment posted by hand: the gh subcommand (any shell spacing), or
- *  the REST route (PR comments ride the issues comments route, whatever
- *  expression fills the number segment). */
-const HAND_ROLLED_PR_COMMENT_RE = /\bgh\s+pr\s+comment\b|\/issues\/.+\/comments\b/;
-/** The one accepted spelling of the pin: `uses:` on the same line, the
- *  canonical-case slug, a full commit sha, the release tag beside it. Any
- *  other non-comment line naming the slug in any case (a folded scalar, a
- *  moving tag, a bare sha) is a candidate that fails this shape, so a
- *  misspelled pin can never hide from the count. */
-const STICKY_USES_RE = new RegExp(
-  `^\\s*-?\\s*uses:\\s*["']?${escapeRegExp(STICKY_COMMENT_ACTION)}@[0-9a-f]{40}["']?\\s+# v\\d+\\.\\d+\\.\\d+\\s*$`,
+/** The gh subcommand, or the REST route PR comments ride. */
+const HAND_ROLLED_PR_COMMENT_RE = /\bgh pr comment\b|\/issues\/.+?\/comments\b/;
+const STICKY_PIN_RE = new RegExp(
+  `${escapeRegExp(STICKY_COMMENT_ACTION)}@[0-9a-f]{40}["']? # v\\d+\\.\\d+\\.\\d+\\s*$`,
 );
-const YAML_COMMENT_RE = /^\s*#/;
 
-/** The rendered workflow stem (`auto-format` for the gated
- *  `{% if has_toolchain %}auto-format.yml{% endif %}.jinja`) when `rel` is
- *  a template workflow source; null otherwise. */
+/** The rendered stem (`auto-format` for the gated
+ *  `{% if has_toolchain %}auto-format.yml{% endif %}.jinja`) of a template
+ *  workflow source; null for any other path. */
 export function templateWorkflowStem(rel: string): string | null {
   const { path } = landedPathAndGates(rel.replace(/\.jinja$/, ""));
-  const match = /\/\.github\/workflows\/([^/]+)\.ya?ml$/.exec(path);
-  return match ? match[1] : null;
+  return /\/\.github\/workflows\/([^/]+)\.ya?ml$/.exec(path)?.[1] ?? null;
 }
 
-/** Which workflow stems each fragment anchor splices into: every anchor
- *  line (the composer's ANCHOR_RE grammar) in a template workflow source,
- *  plus the toolchain-setup fragment, which is prepended into its target
- *  anchors' contributions and so inherits their hosts. */
+/** The workflow stems each fragment anchor splices into (the composer's
+ *  ANCHOR_RE, one anchor per line); the toolchain-setup fragment is
+ *  prepended into its targets' contributions and inherits their hosts. */
 export function fragmentHosts(workflows: [rel: string, text: string][]): Map<string, string[]> {
   const hosts = new Map<string, string[]>();
   for (const [rel, text] of workflows) {
@@ -2610,136 +2597,88 @@ export function fragmentHosts(workflows: [rel: string, text: string][]): Map<str
       if (anchor !== undefined) hosts.set(anchor, [...(hosts.get(anchor) ?? []), stem]);
     }
   }
-  hosts.set(
-    TOOLCHAIN_SETUP_FRAGMENT,
-    TOOLCHAIN_SETUP_TARGETS.flatMap((target) => hosts.get(target) ?? []),
-  );
-  return hosts;
+  const setup = TOOLCHAIN_SETUP_TARGETS.flatMap((target) => hosts.get(target) ?? []);
+  return hosts.set(TOOLCHAIN_SETUP_FRAGMENT, setup);
 }
 
-/** The workflow stems a template source renders into: its own for a
- *  workflow file, its anchor's hosts for a fragment, none otherwise. */
-export function stickyHosts(rel: string, anchorHosts: Map<string, string[]>): string[] {
-  const stem = templateWorkflowStem(rel);
-  if (stem !== null) return [stem];
-  const fragment = /^templates\/[^/]+\/fragments\/([a-z0-9][a-z0-9-]*)\.jinja$/.exec(rel);
-  return fragment ? (anchorHosts.get(fragment[1]) ?? []) : [];
-}
-
-/** The text with every `{# ... #}` jinja comment (multi-line included)
- *  emptied in place, line count preserved: a commented-out step renders
- *  nothing, so it is neither a candidate nor a post. */
-function blankJinjaComments(text: string): string {
-  return text.replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""));
-}
-
-/** The rule over the selected template workflow and fragment sources:
- *  fragment hosts resolved from the workflow anchors, every source judged
- *  against its hosts. Throws when no workflow source or no sticky
- *  candidate is present at all: a scan that finds nothing to judge has
- *  lost its anchor and must not pass green. */
-export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mismatch[] {
-  const workflows = sources.filter(([rel]) => templateWorkflowStem(rel) !== null);
-  if (workflows.length === 0) throw new Error("no template workflow sources found - anchor lost");
-  const anchorHosts = fragmentHosts(workflows);
-  const judged = sources.map(([rel, text]) =>
-    stickyCommentMismatches(rel, text, stickyHosts(rel, anchorHosts)),
-  );
-  if (judged.every((j) => j.stickyCandidates === 0)) {
-    throw new Error(`no ${STICKY_COMMENT_ACTION} step in any template workflow - anchor lost`);
-  }
-  return judged.flatMap((j) => j.mismatches);
-}
-
-/** Shell lines with their backslash continuations joined, by starting
- *  line, so a command split across lines is judged as one. */
-function logicalLines(lines: string[]): string[] {
-  return lines.map((_, index) => {
-    let joined = lines[index];
-    for (let next = index; lines[next].endsWith("\\") && next + 1 < lines.length; next++) {
-      joined = `${joined.slice(0, -1).trimEnd()} ${lines[next + 1].trim()}`;
-    }
-    return joined;
-  });
-}
-
-/** The judgment for one template workflow or fragment source, given the
- *  workflow stems it renders into: no hand-rolled PR comment (the sticky
- *  action is the one poster), and every sticky candidate is a step pinned
- *  to a full commit sha with its `# vX.Y.Z` tag beside it, whose own with:
- *  block carries `header: repo-platform/<host stem>` - which needs exactly
- *  one host, so a fragment spliced into two workflows (or none) cannot
- *  carry one, and no `continue-on-error` (a failed post must fail the
- *  step). A candidate outside any step item (the slug quoted inside a
- *  run: block scalar) is a mismatch of its own, and jinja comments are
- *  blanked first, so the count can never be satisfied by text. Returns the
- *  mismatches and the candidate count, so the caller can prove the scan
- *  still finds the real steps. */
+/** One template source judged against the workflow stems it renders into
+ *  (its own for a workflow, its anchor's for a fragment), jinja comments
+ *  blanked and YAML comment lines skipped: no hand-rolled PR comment, and
+ *  every line naming the sticky action is pinned `@<40-hex sha> # vX.Y.Z`
+ *  and, down to the next `- ` step item, carries `header:
+ *  repo-platform/<host stem>` (so exactly one host) and no
+ *  continue-on-error. Plain line scanning: honest drift, not adversarial
+ *  YAML, is the target. */
 export function stickyCommentMismatches(
   rel: string,
   text: string,
   hosts: readonly string[],
-): { mismatches: Mismatch[]; stickyCandidates: number } {
+): { mismatches: Mismatch[]; stickySteps: number } {
+  const lines = text
+    .replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""))
+    .split("\n");
   const mismatches: Mismatch[] = [];
-  const lines = blankJinjaComments(text).split("\n");
-  const logical = logicalLines(lines);
-  let stickyCandidates = 0;
+  let stickySteps = 0;
   for (const [index, line] of lines.entries()) {
-    if (YAML_COMMENT_RE.test(line)) continue;
-    const at = `${rel}:${index + 1}`;
-    if (HAND_ROLLED_PR_COMMENT_RE.test(logical[index])) {
-      mismatches.push({
-        file: at,
-        expected: `a ${STICKY_COMMENT_ACTION} step (one upserted comment per PR, a failed post failing the step)`,
-        got: `a hand-rolled PR comment: ${logical[index].trim()}`,
-      });
+    if (/^\s*#/.test(line)) continue;
+    const flag = (expected: string, got: string) =>
+      mismatches.push({ file: `${rel}:${index + 1}`, expected, got });
+    if (HAND_ROLLED_PR_COMMENT_RE.test(line)) {
+      flag(`a ${STICKY_COMMENT_ACTION} step (upserted, a failed post fails the step)`, line.trim());
       continue;
     }
-    if (!line.toLowerCase().includes(STICKY_COMMENT_ACTION)) continue;
-    stickyCandidates += 1;
-    if (!STICKY_USES_RE.test(line)) {
-      mismatches.push({
-        file: at,
-        expected: `uses: ${STICKY_COMMENT_ACTION}@<full 40-hex commit sha> # v<major>.<minor>.<patch> on one line (the release tag's commit, dereferenced if annotated)`,
-        got: line.trim(),
-      });
+    if (!line.includes(`${STICKY_COMMENT_ACTION}@`)) continue;
+    stickySteps += 1;
+    if (!STICKY_PIN_RE.test(line)) {
+      flag(
+        `${STICKY_COMMENT_ACTION}@<full 40-hex commit sha> # v<major>.<minor>.<patch>`,
+        line.trim(),
+      );
     }
     if (hosts.length !== 1) {
-      mismatches.push({
-        file: at,
-        expected:
-          "a source rendering into exactly one workflow (a workflow file, or a fragment one workflow anchor splices) - the header names that workflow",
-        got: `${hosts.length} host workflows${hosts.length ? ` (${hosts.join(", ")})` : ""}`,
-      });
+      flag(
+        "a source rendering into exactly one workflow (the header names it)",
+        `${hosts.length} host workflows (${hosts.join(", ")})`,
+      );
       continue;
     }
-    const expected = `${STICKY_HEADER_PREFIX}${hosts[0]}`;
-    if (stepItemStart(lines, index) === null) {
-      mismatches.push({
-        file: at,
-        expected: "a uses: line inside a `- ` step item",
-        got: "a uses:-shaped line outside any step (a block scalar body, or a stray key)",
-      });
-      continue;
+    const rest = lines.slice(index + 1);
+    const next = rest.findIndex((l) => /^\s*-\s/.test(l));
+    const step = rest.slice(0, next === -1 ? rest.length : next);
+    const header = step.map((l) => /^\s*header:\s*["']?([^\s"']+)/.exec(l)?.[1]).find(Boolean);
+    if (header !== `repo-platform/${hosts[0]}`) {
+      flag(
+        `with.header: repo-platform/${hosts[0]}`,
+        header ? `with.header: ${header}` : "no header: on the step",
+      );
     }
-    if (stepKeyValue(lines, index, "continue-on-error") !== null) {
-      mismatches.push({
-        file: at,
-        expected: "no continue-on-error on the step (a failed post fails the step)",
-        got: "continue-on-error set on the sticky step",
-      });
-    }
-    const header = stepWithInput(lines, index, "header");
-    if (header !== expected) {
-      mismatches.push({
-        file: at,
-        expected: `with.header: ${expected}`,
-        got:
-          header === null ? "no header: in the step's own with: block" : `with.header: ${header}`,
-      });
+    if (step.some((l) => /^\s*continue-on-error:/.test(l))) {
+      flag(
+        "no continue-on-error on the step (a failed post fails the step)",
+        "continue-on-error set",
+      );
     }
   }
-  return { mismatches, stickyCandidates };
+  return { mismatches, stickySteps };
+}
+
+/** The rule over the template workflow and fragment sources. Throws when
+ *  no workflow source or no sticky step is present at all: a scan with
+ *  nothing to judge has lost its anchor. */
+export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mismatch[] {
+  const workflows = sources.filter(([rel]) => templateWorkflowStem(rel) !== null);
+  if (workflows.length === 0) throw new Error("no template workflow sources found - anchor lost");
+  const anchorHosts = fragmentHosts(workflows);
+  const judged = sources.map(([rel, text]) => {
+    const stem = templateWorkflowStem(rel);
+    const fragment = /^templates\/[^/]+\/fragments\/([a-z0-9-]+)\.jinja$/.exec(rel)?.[1];
+    const hosts = stem !== null ? [stem] : (anchorHosts.get(fragment ?? "") ?? []);
+    return stickyCommentMismatches(rel, text, hosts);
+  });
+  if (judged.every((j) => j.stickySteps === 0)) {
+    throw new Error(`no ${STICKY_COMMENT_ACTION} step in any template workflow - anchor lost`);
+  }
+  return judged.flatMap((j) => j.mismatches);
 }
 
 // --- scratch-scoped scripts ------------------------------------------------
@@ -2911,140 +2850,36 @@ export function asyncStreamWriteMismatches(
 /** The pinned-toolchain setup actions and the version-file input each must
  *  carry (matched against a trimmed `uses:` line, commented or not). */
 export const SETUP_VERSION_FILES: [action: RegExp, input: string][] = [
-  [/^-? ?uses: oven-sh\/setup-bun@/, "bun-version-file"],
-  [/^-? ?uses: actions\/setup-node@/, "node-version-file"],
-  [/^-? ?uses: denoland\/setup-deno@/, "deno-version-file"],
+  [/^-? ?uses: oven-sh\/setup-bun@/, "bun-version-file:"],
+  [/^-? ?uses: actions\/setup-node@/, "node-version-file:"],
+  [/^-? ?uses: denoland\/setup-deno@/, "deno-version-file:"],
 ];
 
-/** The column of the first key on a `- key:` sequence-item line (any
- *  spacing after the dash), or null for a line that starts no item. */
-function itemKeyColumn(line: string): number | null {
-  const match = /^(\s*)-(\s+)\S/.exec(line);
-  return match ? match[1].length + 1 + match[2].length : null;
-}
-
-/** A line's YAML text: leading whitespace, an inline comment, and
- *  surrounding whitespace removed (`- with: # inputs` -> `with:`). A
- *  comment starts at a `#` preceded by whitespace OUTSIDE quotes, so
- *  `name: "Issue #123"` keeps its value. */
-function keyText(line: string): string {
-  let quote: string | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (quote === null) {
-      if (char === '"' || char === "'") quote = char;
-      else if (char === "#" && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i).trim();
-    } else if (char === quote) {
-      quote = null;
-    } else if (quote === '"' && char === "\\") {
-      i += 1;
-    }
-  }
-  return line.trim();
-}
-
-/** The `key: value` mapping entry on a comment-stripped line (a leading
- *  `- ` already removed), or null for a line that is no entry: the key
- *  plain (trimmed) or quoted (quotes removed, inner whitespace kept as
- *  YAML keeps it, whitespace before the `:` allowed), the value trimmed
- *  but otherwise raw, so a caller can see an open quote or a node
- *  property. */
-function mappingEntry(text: string): { key: string; value: string } | null {
-  const match = /^(?:"([^"]*)"|'([^']*)'|([^\s"'#][^:]*?))\s*:(?:\s+(.*)|$)/.exec(keyText(text));
-  if (!match) return null;
-  return { key: match[1] ?? match[2] ?? match[3].trim(), value: (match[4] ?? "").trim() };
-}
-
-/** A value with its surrounding quotes removed. */
-function unquote(value: string): string {
-  return value.replace(/^(["'])(.*)\1$/, "$2");
-}
-
-/** The value part of a `- key: value` / `key: value` / `- value` line,
- *  node properties (`&anchor`, `!!tag`) dropped. */
-function yamlValue(line: string): string {
-  const rest = keyText(line).replace(/^-\s+/, "");
-  const value = mappingEntry(rest)?.value ?? rest;
-  return value.replace(/^(?:[&!]\S*\s+)+/, "");
-}
-
-/** Whether a line's value begins a scalar body that continues on the
- *  deeper lines below it (which are then text, whatever they look like):
- *  a block scalar indicator (`run: |`, `message: >-`, `- |`), or a quoted
- *  scalar the line leaves open. Judged on the comment-stripped value, so
- *  a `|` inside an inline comment is not an indicator. */
-function opensScalarBody(line: string): boolean {
-  const value = yamlValue(line);
-  return (
-    /^[|>][-+0-9]*$/.test(value) ||
-    /^"(?:[^"\\]|\\.)*$/.test(value) ||
-    /^'(?:[^']|'')*$/.test(value)
-  );
-}
-
-/** Whether line `at` sits inside a scalar body: walking the chain of
- *  enclosing lines (each the nearest non-blank line left of the previous
- *  one - comments included, since a `#` line inside a body is text), any
- *  line on the chain opening a scalar body owns it as text. */
-function insideScalarBody(lines: string[], at: number): boolean {
-  const indentOf = (text: string) => text.length - text.trimStart().length;
-  let indent = indentOf(lines[at]);
-  for (let i = at - 1; i >= 0 && indent > 0; i--) {
-    const line = lines[i];
-    if (line.trim() === "" || indentOf(line) >= indent) continue;
-    if (opensScalarBody(line)) return true;
-    indent = indentOf(line);
-  }
-  return false;
-}
-
-/** The `- ` item line of the workflow step that owns line `at`, or null
- *  when `at` sits in no step item: `- uses:` is its own item start; a bare
- *  `uses:` walks back over the step's deeper lines to a `- ` line whose
- *  first key sits in the same column; and either shape inside a scalar
- *  body (a workflow quoted in a run: heredoc) is text, not a step. */
-export function stepItemStart(lines: string[], at: number): number | null {
-  const line = lines[at];
-  if (insideScalarBody(lines, at)) return null;
-  if (itemKeyColumn(line) !== null) return at;
-  const indentOf = (text: string) => text.length - text.trimStart().length;
-  const skip = (text: string) => text.trim() === "" || text.trim().startsWith("#");
-  const keyIndent = indentOf(line);
-  let start = at;
-  while (start > 0 && (skip(lines[start - 1]) || indentOf(lines[start - 1]) >= keyIndent)) {
-    start -= 1;
-  }
-  return start > 0 && itemKeyColumn(lines[start - 1]) === keyIndent ? start - 1 : null;
-}
-
-/** The value of input `key` in the with: block of the workflow step whose
- *  `uses:` line sits at `usesAt`, or null. Structural, indentation-scoped:
- *  the step spans its `- ` item line (stepItemStart, so with: may precede
- *  uses:) to the first non-blank line left of its key column, and the key
- *  only counts at the with: block's direct-child level - the first child
- *  fixes that level, and anything deeper (a nested mapping, a block scalar
- *  body that merely LOOKS like the key) is a value, not an input. A
- *  comment, a neighbouring step's input, a job-level look-alike, the same
- *  key under env:, or a uses: line owned by no step never matches. The
- *  value comes back trimmed, with an inline comment and surrounding
- *  quotes removed. */
-export function stepWithInput(lines: string[], usesAt: number, key: string): string | null {
-  const start = stepItemStart(lines, usesAt);
-  if (start === null) return null;
-  const item = lines[start];
-  const keyIndent = itemKeyColumn(item) as number;
-  const indentOf = (line: string) => line.length - line.trimStart().length;
-  const skip = (line: string) => line.trim() === "" || line.trim().startsWith("#");
-  let inWith = mappingEntry(item.slice(keyIndent))?.key === "with";
+/** Whether the workflow step whose `uses:` line sits at `usesAt` carries
+ *  `key` as a DIRECT child of its OWN with: block. Structural,
+ *  indentation-scoped: the step's keys live two columns inside the `- `
+ *  item start, the scan stops where the step ends (a non-blank line left
+ *  of the key column), and the key only counts at the with: block's
+ *  direct-child level - the first child fixes that level, and anything
+ *  deeper (a nested mapping, a block scalar body that merely LOOKS like
+ *  the key) is a value, not an input. A comment, a neighbouring step's
+ *  input, or a look-alike elsewhere never matches. */
+export function stepCarriesWithKey(lines: string[], usesAt: number, key: string): boolean {
+  const usesLine = lines[usesAt];
+  const usesIndent = usesLine.length - usesLine.trimStart().length;
+  // `- uses:` starts the item; a bare `uses:` sits under `- name:` two
+  // columns in. Either way the step's sibling keys share one column.
+  const keyIndent = usesLine.trimStart().startsWith("- ") ? usesIndent + 2 : usesIndent;
+  let inWith = false;
   let withChildIndent: number | null = null;
-  for (let i = start + 1; i < lines.length; i++) {
+  for (let i = usesAt + 1; i < lines.length; i++) {
     const line = lines[i];
-    if (skip(line)) continue;
-    const indent = indentOf(line);
-    if (indent < keyIndent) break;
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent < keyIndent) return false;
     if (indent === keyIndent) {
-      if (itemKeyColumn(line) !== null) break;
-      inWith = mappingEntry(line)?.key === "with";
+      if (line.trimStart().startsWith("- ")) return false;
+      inWith = line.trim() === "with:";
       withChildIndent = null;
       continue;
     }
@@ -3053,39 +2888,9 @@ export function stepWithInput(lines: string[], usesAt: number, key: string): str
     // scalar bodies and nested values always sit deeper than their key).
     if (withChildIndent === null) withChildIndent = indent;
     if (indent !== withChildIndent) continue;
-    const entry = mappingEntry(line);
-    if (entry?.key === key) return unquote(entry.value);
+    if (line.trim().startsWith(key)) return true;
   }
-  return null;
-}
-
-/** The value of the step-level key `key` (`if`, `continue-on-error`, ...)
- *  of the workflow step whose `uses:` line sits at `usesAt`, or null:
- *  the step's own key column only, so the same key under with: or env:,
- *  or on a neighbouring step, never matches. The value comes back like
- *  stepWithInput's. */
-export function stepKeyValue(lines: string[], usesAt: number, key: string): string | null {
-  const start = stepItemStart(lines, usesAt);
-  if (start === null) return null;
-  const keyIndent = itemKeyColumn(lines[start]) as number;
-  const indentOf = (line: string) => line.length - line.trimStart().length;
-  const skip = (line: string) => line.trim() === "" || line.trim().startsWith("#");
-  const keyValue = (text: string) => {
-    const entry = mappingEntry(text);
-    return entry?.key === key ? unquote(entry.value) : null;
-  };
-  const onItem = keyValue(lines[start].slice(keyIndent));
-  if (onItem !== null) return onItem;
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (skip(line)) continue;
-    const indent = indentOf(line);
-    if (indent < keyIndent || (indent === keyIndent && itemKeyColumn(line) !== null)) break;
-    if (indent !== keyIndent) continue;
-    const value = keyValue(line);
-    if (value !== null) return value;
-  }
-  return null;
+  return false;
 }
 
 /** The canonical pinned-bun setup block every bun-touching composite
@@ -4629,11 +4434,11 @@ const rules: Rule[] = [
                 action.test(trimmed.replace(/^#\s*/, "")) &&
                 !lines
                   .slice(index + 1, index + 6)
-                  .some((next) => next.trim().startsWith("#") && next.includes(`${input}:`))
+                  .some((next) => next.trim().startsWith("#") && next.includes(input))
               ) {
                 mismatches.push({
                   file: `${rel}:${index + 1}`,
-                  expected: `a commented '${input}: ...' input beside the commented example step`,
+                  expected: `a commented '${input} ...' input beside the commented example step`,
                   got: "an example step floating on the action's default version",
                 });
               }
@@ -4641,10 +4446,10 @@ const rules: Rule[] = [
             }
             if (!action.test(trimmed)) continue;
             seen.add(input);
-            if (stepWithInput(lines, index, input) === null) {
+            if (!stepCarriesWithKey(lines, index, input)) {
               mismatches.push({
                 file: `${rel}:${index + 1}`,
-                expected: `a '${input}: ...' input in the setup step's own with: block`,
+                expected: `a '${input} ...' input in the setup step's own with: block`,
                 got: "a setup step floating on the action's default version",
               });
             }
