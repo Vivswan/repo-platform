@@ -1,11 +1,8 @@
-// The fixture owner's contract, proven through a child `bun test`: a probe
-// file takes a directory from tempDirs() at collection time, reports the
-// path, and then exercises one bun shape; the directory must exist while
-// the file runs and be gone once the child exits. The one measured
-// exception (a name filter that skips every test in the file, so bun runs
-// no hook there; bun's CI=1 refusal of `.only` likewise) is pinned as
-// such: the fixture SURVIVES, which is the fact the launcher's filter
-// carve-out rests on.
+// The fixture owner's contract through a child `bun test`: a probe file
+// mints a directory at collection time, exercises one bun shape, and the
+// directory must be gone once the child exits. The rows where bun runs no
+// hook at all pin the fixture SURVIVING, the fact the launcher's carve-out
+// rests on.
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";

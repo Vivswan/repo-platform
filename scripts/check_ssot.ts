@@ -6594,9 +6594,8 @@ const rules: Rule[] = [
 
   {
     // No bare mkdtemp in the test trees: TEMP_DIR_HELPER owns fixtures
-    // and is the one file that may call it; the launcher's leftover check
-    // is the runtime net for shapes no textual scan sees (fixed-name
-    // writes under os.tmpdir()).
+    // and is the one file that may call it. Fixed-name writes under
+    // os.tmpdir() are the launcher's leftover check's to catch.
     name: "temp-dirs-through-helper",
     run: () => tempDirTreeMismatches([...walkFiles("tests"), ...walkFiles("actions")], read),
   },

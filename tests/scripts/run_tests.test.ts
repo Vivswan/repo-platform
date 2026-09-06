@@ -1,13 +1,7 @@
-// The test launcher's TMPDIR scoping and leftover verdict, proven end to
-// end: a probe test file reports where os.tmpdir() pointed and where its
-// fixture landed, and the assertions pin that the run had its own temp
-// directory, that the fixture lived inside it, that nothing of it survives
-// the launcher, and that a fixture still there when the child exits fails
-// a green run by name. Not judged, by design: a run cut short by a signal
-// (no afterAll ran) and a name-filtered run (bun skips every hook in a
-// file the filter empties). Negative control: dropping the launcher's
-// TMPDIR entry makes the nested run report the outer temp directory, and
-// the not-equal assertion reds.
+// The launcher's TMPDIR scoping and leftover verdict, end to end: a probe
+// reports where os.tmpdir() pointed and where its fixture landed. Negative
+// control: dropping the launcher's TMPDIR entry makes the nested run report
+// the outer temp directory, and the not-equal assertion reds.
 
 import { describe, expect, test } from "bun:test";
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";

@@ -20,16 +20,12 @@ const DEFAULT_TARGETS = ["./tests", "./actions"];
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const LISTED_LEFTOVERS = 20;
 
-/** Whether the run's afterAll hooks all had their chance, so leftovers are
- * evidence: false after a signal death (the child never reached its
- * hooks) and under a name filter, because bun runs no hook in a file
- * whose tests the filter all skipped (tests/shared/temp_dir.test.ts pins
- * it; `--only` still runs them, measured). Filter spellings bun accepts:
- * `--test-name-pattern[=x]`, and `-t` anywhere in a short-option cluster
- * with the pattern attached or next (`-t x`, `-tx`, `-ut x`, `-utx`);
- * nothing after `--` is an option. Over-detecting a filter costs a
- * verdict; under-detecting one costs a false red, so a cluster is judged
- * by its letters alone. */
+/** Whether leftovers are evidence, i.e. every afterAll had its chance: not
+ * after a signal death (the child died before its hooks), and not under a
+ * name filter, since bun runs no hook in a file the filter empties
+ * (tests/shared/temp_dir.test.ts pins it). A short-option cluster holding
+ * `t` counts as a filter: over-detecting costs a verdict, under-detecting
+ * a false red. */
 export function leftoversJudgeable(args: string[], signalCode: string | null): boolean {
   if (signalCode !== null) return false;
   for (const arg of args) {

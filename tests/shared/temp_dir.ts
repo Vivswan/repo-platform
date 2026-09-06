@@ -1,14 +1,7 @@
-// The one owner of temp fixtures in test files: `const temp = tempDirs()`
-// at a file's top level, `temp.dir(prefix)` anywhere in it, and one
-// afterAll removes everything the file made, whatever its tests did.
-//
-// One lifetime, the file's, because bun:test binds hooks to the file
-// whose collection registers them (a hook registered by a module
-// evaluated once serves only its first importer). Fresh directories keep
-// tests isolated without a per-test flavour. Known gap, pinned by
-// tests/shared/temp_dir.test.ts: bun runs no hook in a file whose tests a
-// name filter (-t) all skipped, so such fixtures outlive the process; the
-// launcher's per-run TMPDIR is what removes them.
+// The one owner of temp fixtures in test files: one afterAll per file
+// removes everything the file made. Call tempDirs() at the file's top
+// level: bun:test binds hooks to the registering file, so a module-level
+// hook would serve only its first importer.
 
 import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
