@@ -13,7 +13,7 @@ import {
   HASH_REGION_MARKERS,
   splitManagedRegion,
 } from "../../actions/shared/grammar";
-import { existingLocalSides } from "../../scripts/build_gitignore";
+import { existingLocalSides } from "../../scripts/generate/build_gitignore";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

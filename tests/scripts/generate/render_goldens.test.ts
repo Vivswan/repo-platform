@@ -13,13 +13,13 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { stampManifestText } from "../../actions/shared/stamp_manifest";
+import { stampManifestText } from "../../../actions/shared/stamp_manifest";
 import {
   normalizeAnswers,
   normalizeRenderedTree,
   SHA_SENTINEL,
-} from "../../scripts/render_goldens";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../scripts/generate/render_goldens";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 

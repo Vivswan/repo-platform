@@ -1,7 +1,7 @@
 // Manifest fixtures shared by the compose suites: a parsed module manifest
 // from a few YAML lines, plus the module shapes the data-anchor tests group.
 
-import { type ModuleManifest, parseManifest } from "../../../scripts/module_manifests";
+import { type ModuleManifest, parseManifest } from "../../../scripts/lib/module_manifests";
 
 export function manifest(module: string, body: string[]): ModuleManifest {
   return parseManifest(

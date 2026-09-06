@@ -22,7 +22,7 @@ import {
   sweepSurvivors,
 } from "../../.github/scripts/audit-guards/arm_audit.ts";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import type { GuardEntry } from "../../scripts/guard_registry.ts";
+import type { GuardEntry } from "../../scripts/check/guard_registry.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

@@ -6,8 +6,8 @@ import { describe, expect, test } from "bun:test";
 import type { Contribution } from "../../../scripts/compose/data_anchors";
 import type { SourcedEntry } from "../../../scripts/compose/entries";
 import { fragmentMarkerErrors, spliceContributions } from "../../../scripts/compose/splice";
-import { renderJinjaFile } from "../../../scripts/jinja_subset";
-import type { ModuleManifest } from "../../../scripts/module_manifests";
+import { renderJinjaFile } from "../../../scripts/lib/jinja_subset";
+import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
 import { manifest } from "./fixtures";
 
 describe("fragmentMarkerErrors", () => {

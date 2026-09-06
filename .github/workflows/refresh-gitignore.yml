@@ -42,7 +42,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Regenerate from upstream HEAD
-        run: bun scripts/build_gitignore.ts
+        run: bun scripts/generate/build_gitignore.ts
 
       - name: Detect changes
         id: changes

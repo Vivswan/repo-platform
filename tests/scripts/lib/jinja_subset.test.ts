@@ -1,4 +1,4 @@
-// Unit tests for the shared jinja subset (scripts/jinja_subset.ts): the
+// Unit tests for the shared jinja subset (scripts/lib/jinja_subset.ts): the
 // normalizer check_ssot.ts compares with and the renderer
 // render_dogfood.ts writes with. The normalizeJinja cases moved here from
 // tests/scripts/check_ssot.test.ts with the helpers themselves.
@@ -9,7 +9,7 @@ import {
   placeholderJinja,
   renderJinjaFile,
   resolveCondition,
-} from "../../scripts/jinja_subset";
+} from "../../../scripts/lib/jinja_subset";
 
 const vars = {
   username: "Vivswan",

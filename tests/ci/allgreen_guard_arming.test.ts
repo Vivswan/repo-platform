@@ -1,5 +1,5 @@
 // Arming wrappers for the all-green action's guard-registry entries
-// (scripts/guard_registry.ts, the allgreen-* ids). The guards live in
+// (scripts/check/guard_registry.ts, the allgreen-* ids). The guards live in
 // actions/all-green/action.yml's judge block and their forcing cases are
 // verify_allgreen_judgment.sh scenarios - a bash harness the weekly
 // arming audit cannot run directly (it runs bun test files with junit

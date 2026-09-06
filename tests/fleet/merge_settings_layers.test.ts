@@ -23,7 +23,7 @@ import {
 } from "../../.github/scripts/fleet/merge_settings_layers";
 import { managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
 import { parseSettingsDoc } from "../../.github/scripts/fleet/settings_document";
-import { loadManifests } from "../../scripts/module_manifests";
+import { loadManifests } from "../../scripts/lib/module_manifests";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

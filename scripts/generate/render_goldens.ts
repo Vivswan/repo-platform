@@ -56,8 +56,8 @@
 // bun), like ci.yml's smoke legs.
 //
 // Usage:
-//   bun scripts/render_goldens.ts           # rewrite tests/golden-renders/
-//   bun scripts/render_goldens.ts --check   # render to temp, exit 1 on drift
+//   bun scripts/generate/render_goldens.ts           # rewrite tests/golden-renders/
+//   bun scripts/generate/render_goldens.ts --check   # render to temp, exit 1 on drift
 
 import {
   lstatSync,
@@ -77,13 +77,13 @@ import {
   must,
   mustCapture,
   timeoutExitCode,
-} from "../.github/scripts/shared/proc.ts";
-import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
-import { MANIFEST_NAME } from "../actions/shared/manifest.ts";
-import { FULL_SHA_HEX, stampManifestText } from "../actions/shared/stamp_manifest.ts";
-import { loadManifests } from "./module_manifests.ts";
+} from "../../.github/scripts/shared/proc.ts";
+import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
+import { MANIFEST_NAME } from "../../actions/shared/manifest.ts";
+import { FULL_SHA_HEX, stampManifestText } from "../../actions/shared/stamp_manifest.ts";
+import { loadManifests } from "../lib/module_manifests.ts";
 
-const REPO_ROOT = resolve(import.meta.dir, "..");
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const GOLDEN_ROOT = "tests/golden-renders";
 
 // The fixed answers every golden renders with (project_slug derives to
@@ -445,7 +445,9 @@ function main(): void {
   const args = process.argv.slice(2);
   const checkMode = args[0] === "--check";
   if (args.length > 1 || (args.length === 1 && !checkMode)) {
-    console.error(`usage: bun scripts/render_goldens.ts [--check] (got: ${args.join(" ")})`);
+    console.error(
+      `usage: bun scripts/generate/render_goldens.ts [--check] (got: ${args.join(" ")})`,
+    );
     process.exit(2);
   }
   if (!Bun.which("copier")) {

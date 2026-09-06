@@ -3,7 +3,7 @@
 // line with its ordered contributions.
 
 import { joinLines, splitLines } from "../../.github/scripts/shared/lines.ts";
-import type { ModuleManifest } from "../module_manifests.ts";
+import type { ModuleManifest } from "../lib/module_manifests.ts";
 import { type Contribution, DATA_ANCHORS, renderedSeparationErrors } from "./data_anchors.ts";
 import { FRAGMENTS_DIR, JINJA_SUFFIX, type SourcedEntry } from "./entries.ts";
 

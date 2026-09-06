@@ -3,7 +3,7 @@
 // block), the toolchain-setup prepend, and the rendered-separation
 // invariant every anchor's contributions must satisfy.
 
-import type { ModuleManifest } from "../module_manifests.ts";
+import type { ModuleManifest } from "../lib/module_manifests.ts";
 import { FRAGMENTS_DIR, JINJA_SUFFIX, MANIFEST_NAME } from "./entries.ts";
 
 // A total module -> gate lookup: build() populates the gate map for every

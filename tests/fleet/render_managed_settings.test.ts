@@ -28,7 +28,7 @@ import {
   trackingLabelsFrom,
 } from "../../.github/scripts/fleet/render_managed_settings";
 import { capture } from "../../.github/scripts/shared/proc";
-import { loadManifests } from "../../scripts/module_manifests";
+import { loadManifests } from "../../scripts/lib/module_manifests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -282,7 +282,7 @@ describe("the layer topology fails CLOSED", () => {
   // delete-undeclared pass removed the module's labels from live repos.
   // The module declaration now lives in each module.yml (settings_layers)
   // and the manifest LOADER holds it against the tree in both directions
-  // (assertSettingsLayerFiles, tests/scripts/module_manifests.test.ts),
+  // (assertSettingsLayerFiles, tests/scripts/lib/module_manifests.test.ts),
   // so a genuine drift fails at loadManifests - never as a shorter render;
   // what the render still owns is the fleet layer files and the
   // declaration-driven selection proven here.

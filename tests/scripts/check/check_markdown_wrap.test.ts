@@ -10,7 +10,7 @@ import {
   quoteDepth,
   rendersToMarkdown,
   scanMarkdown,
-} from "../../scripts/check_markdown_wrap";
+} from "../../../scripts/check/check_markdown_wrap";
 
 describe("classify", () => {
   test("prose, blank, and structural lines", () => {

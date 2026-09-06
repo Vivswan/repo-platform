@@ -14,7 +14,7 @@ import {
   settingsInputsTouched,
 } from "../../.github/scripts/fleet/settings_inputs_changed.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
-import { SETTINGS_LAYER_ORDER } from "../../scripts/module_manifests.ts";
+import { SETTINGS_LAYER_ORDER } from "../../scripts/lib/module_manifests.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -39,8 +39,8 @@ describe("settingsInputsTouched", () => {
         "templates/rust/settings-private.yml",
         "templates/uv/nested/settings.yml",
         "templates/uv/module.yml",
-        "scripts/module_manifests.ts",
-        "scripts/module_manifests.test.ts",
+        "scripts/lib/module_manifests.ts",
+        "scripts/lib/module_manifests.test.ts",
         ".repo-platform-answers.yml",
         "repos.yml",
         "docs/settings.md",
@@ -54,7 +54,7 @@ describe("settingsInputsTouched", () => {
       "templates/uv/settings-public.yml",
       "templates/rust/settings-private.yml",
       "templates/uv/module.yml",
-      "scripts/module_manifests.ts",
+      "scripts/lib/module_manifests.ts",
       ".repo-platform-answers.yml",
       "repos.yml",
     ]);

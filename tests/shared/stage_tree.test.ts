@@ -284,7 +284,7 @@ describe("stageComposedTreeArgv", () => {
       { rel: ".github/scripts/build-branches/publish.ts", composed: true },
       { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
       { rel: ".github/scripts/ci/smoke_generate.ts", composed: true },
-      { rel: "scripts/render_goldens.ts", composed: true },
+      { rel: "scripts/generate/render_goldens.ts", composed: true },
       {
         rel: ".github/scripts/sync/rehearse.ts",
         composed: true,

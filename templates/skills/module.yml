@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/module_manifests.ts).
+# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
 description: agent skills hosting (plugin manifests, skill validation)
 ownership:
   - { path: .claude-plugin/marketplace.json, class: starter }

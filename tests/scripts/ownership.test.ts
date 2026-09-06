@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ModuleManifest } from "../../scripts/module_manifests";
+import type { ModuleManifest } from "../../scripts/lib/module_manifests";
 import {
   baseOwnershipTables,
   declarationTextErrors,

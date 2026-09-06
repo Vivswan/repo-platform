@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Guard-binding check: proves every scripts/guard_registry.ts entry
+// Guard-binding check: proves every scripts/check/guard_registry.ts entry
 // resolves BOTH ways on this commit - the guard snippet appears exactly
 // once in its guard file, and the forcing test name appears verbatim in
 // its test file. Deleting a guard, renaming its forcing test, or deleting
@@ -27,12 +27,12 @@
 // WITH its registry entry and forcing test in the same commit.
 //
 // Usage:
-//   bun scripts/check_guard_binding.ts   # prints "guard-binding: <id>: <problem>"
+//   bun scripts/check/check_guard_binding.ts   # prints "guard-binding: <id>: <problem>"
 //                                        # lines and exits 1 on any problem
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { capture } from "../.github/scripts/shared/proc.ts";
+import { capture } from "../../.github/scripts/shared/proc.ts";
 import {
   countOccurrences,
   GUARD_REGISTRY,
@@ -41,7 +41,7 @@ import {
   type RetiredGuard,
 } from "./guard_registry.ts";
 
-const REPO_ROOT = resolve(import.meta.dir, "..");
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
 export interface BindingProblem {
   id: string;
@@ -144,7 +144,7 @@ export function registryDeletionMismatches(
       problems.push({
         id: baseId,
         problem:
-          "present in scripts/guard_registry.ts at the merge-base with origin/main but GONE at HEAD - " +
+          "present in scripts/check/guard_registry.ts at the merge-base with origin/main but GONE at HEAD - " +
           "restore the entry (a merge-conflict resolution likely dropped it), or retire it deliberately " +
           "by moving the id into RETIRED_GUARDS with a one-line reason",
       });
@@ -184,7 +184,7 @@ export function retiredGuardMismatches(
   return problems;
 }
 
-const REGISTRY_PATH = "scripts/guard_registry.ts";
+const REGISTRY_PATH = "scripts/check/guard_registry.ts";
 
 export interface TripwireVerdict {
   problems: BindingProblem[];

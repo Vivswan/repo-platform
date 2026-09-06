@@ -23,9 +23,9 @@ import {
   missingFragmentFiles,
   selfSources,
   strayFragmentFiles,
-} from "../../scripts/build_gitignore";
-import type { ModuleManifest } from "../../scripts/module_manifests";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../scripts/generate/build_gitignore";
+import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 

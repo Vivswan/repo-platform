@@ -1,12 +1,6 @@
 #!/bin/sh
 set -e
 
-# Refuse to mutate the repo during commits. Dependencies should already exist.
-if [ ! -d node_modules ]; then
-	echo "Dependencies are missing. Run 'bun install' before committing."
-	exit 1
-fi
-
 # git exports GIT_DIR/GIT_INDEX_FILE into hooks, which redirects any git
 # subprocess the gates spawn (tests init scratch repos) at the real
 # repository; a leaked GIT_DIR once rewrote this repo's config to bare.
