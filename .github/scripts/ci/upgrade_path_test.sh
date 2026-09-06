@@ -630,10 +630,10 @@ for f in .github/workflows/auto-assign.yml .github/workflows/settings-sync.yml \
   .github/workflows/copilot-setup-steps.yml .github/instructions/review.instructions.md .github/settings.yml; do
   cmp -s "$WORK/folded-before/$f" "$f" || fail "the folded file $f did not land unchanged"
 done
-[ "$(readlink CLAUDE.md)" = "AGENTS.md" ] \
-  && [ "$(readlink .github/agents.md)" = "../AGENTS.md" ] \
-  && [ "$(readlink .github/copilot-instructions.md)" = "../AGENTS.md" ] \
-  || fail "an agent-file symlink did not survive the fold with its target"
+for link in CLAUDE.md:AGENTS.md .github/agents.md:../AGENTS.md .github/copilot-instructions.md:../AGENTS.md; do
+  [ "$(readlink "${link%%:*}")" = "${link#*:}" ] \
+    || fail "the agent-file symlink ${link%%:*} did not survive the fold with its target (points at '$(readlink "${link%%:*}")')"
+done
 for m in agents auto-assign settings-sync; do
   if grep -qF "\"$m\"" .repo-platform.yml; then
     fail ".repo-platform.yml still lists $m after the update"
@@ -1760,10 +1760,10 @@ for f in .github/instructions/review.instructions.md .github/workflows/auto-assi
   test -f "$f" || fail "the folded file $f did not arrive with the update"
   cmp -s "$ARR_WORK/render-new/$f" "$f" || fail "the arriving $f is not byte-identical to the clean render at the new ref"
 done
-[ "$(readlink CLAUDE.md)" = "AGENTS.md" ] \
-  && [ "$(readlink .github/agents.md)" = "../AGENTS.md" ] \
-  && [ "$(readlink .github/copilot-instructions.md)" = "../AGENTS.md" ] \
-  || fail "an agent-file symlink did not arrive with the update pointing at AGENTS.md"
+for link in CLAUDE.md:AGENTS.md .github/agents.md:../AGENTS.md .github/copilot-instructions.md:../AGENTS.md; do
+  [ "$(readlink "${link%%:*}")" = "${link#*:}" ] \
+    || fail "the agent-file symlink ${link%%:*} did not arrive with the update pointing at AGENTS.md (points at '$(readlink "${link%%:*}")')"
+done
 # The repository's own AGENTS.md: preserved in full BELOW the fresh managed
 # region's END marker under the recovery appendix (one marker pair in the
 # file), and the carry flagged for manual review.
