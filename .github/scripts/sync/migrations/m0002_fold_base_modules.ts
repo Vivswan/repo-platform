@@ -259,13 +259,15 @@ const ALIAS_NOTE = [
   "> AGENT FILES FOLDED: this repository carried its own regular file at an",
   "> agent-file alias path that the template now renders as a symlink to",
   "> `AGENTS.md`. Its content was moved verbatim into `AGENTS.md` below the",
-  "> managed region, under a heading naming the source path, and the alias",
-  "> became the managed symlink. Reconcile the moved content into your",
-  "> repository-specific section before merging; nothing was deleted.",
+  "> managed region, under a heading naming the source path (a final newline",
+  "> is added when the file had none), and the alias became the managed",
+  "> symlink. Reconcile the moved content into your repository-specific",
+  "> section before merging; nothing was deleted.",
 ];
 
 /** The block appended to AGENTS.md for one folded alias. Repository bytes
- * ride as Buffers (a utf-8 decode would fold a non-UTF-8 byte onto U+FFFD). */
+ * ride as Buffers (a utf-8 decode would fold a non-UTF-8 byte onto U+FFFD); a
+ * final newline is added when the file had none, so the next block starts a line. */
 function foldedBlock(alias: string, content: Buffer): Buffer {
   const heading =
     `\n## Folded from ${alias}\n\n` +
@@ -319,6 +321,17 @@ export default {
           "re-run the sync.",
       };
     }
+    // AGENTS.md is classified with the arrivals, before the manifest is read.
+    const agentsKind = entryKind(join(target.dir, AGENTS));
+    if (agentsKind !== "file" && agentsKind !== "absent") {
+      return {
+        kind: "error",
+        message:
+          `carries something other than a regular file at ${AGENTS} (a symlink or a directory), ` +
+          "a path this template renders for every repository. Fix the default branch by hand, " +
+          "then re-run the sync.",
+      };
+    }
     const presentFiles = arrivals.filter(([, kind]) => kind === "file").map(([rel]) => rel);
     const listed = presentFiles.length === 0 ? new Set<string>() : manifestPaths(target.dir);
     if (listed === null) {
@@ -344,16 +357,6 @@ export default {
       };
     }
     const ownAliases = own.filter((rel) => ALIASES.includes(rel));
-    const agentsKind = entryKind(join(target.dir, AGENTS));
-    if (agentsKind !== "file" && agentsKind !== "absent") {
-      return {
-        kind: "error",
-        message:
-          `carries something other than a regular file at ${AGENTS} (a symlink or a directory), ` +
-          "a path this template renders for every repository. Fix the default branch by hand, " +
-          "then re-run the sync.",
-      };
-    }
     const path = join(target.dir, REGISTRATION);
     const kind = entryKind(path);
     if (kind === "absent") return this.foldAliases(target, ownAliases, "missing", []);

@@ -63,9 +63,10 @@ const ALIAS_NOTE = [
   "> AGENT FILES FOLDED: this repository carried its own regular file at an",
   "> agent-file alias path that the template now renders as a symlink to",
   "> `AGENTS.md`. Its content was moved verbatim into `AGENTS.md` below the",
-  "> managed region, under a heading naming the source path, and the alias",
-  "> became the managed symlink. Reconcile the moved content into your",
-  "> repository-specific section before merging; nothing was deleted.",
+  "> managed region, under a heading naming the source path (a final newline",
+  "> is added when the file had none), and the alias became the managed",
+  "> symlink. Reconcile the moved content into your repository-specific",
+  "> section before merging; nothing was deleted.",
 ].join("\n");
 
 // The ownership manifest every render stamps; a fixture whose files the
@@ -368,12 +369,17 @@ describe("m0002_fold_base_modules", () => {
     git(dir, "add", "-A");
     git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "latin1 alias");
     expect(apply(dir)).toMatchObject({ kind: "verdict", verdict: { kind: "in-place+aliases" } });
-    const expected = Buffer.concat([
-      Buffer.from(folded("CLAUDE.md", ""), "utf-8"),
-      ours,
-      Buffer.from("\n"),
-    ]);
-    expect(Buffer.compare(readFileSync(join(dir, "AGENTS.md")), expected)).toBe(0);
+    const agents = readFileSync(join(dir, "AGENTS.md"));
+    const heading = Buffer.from(folded("CLAUDE.md", ""), "utf-8");
+    // The body rides verbatim: the repository's bytes follow the heading exactly.
+    expect(
+      Buffer.compare(agents.subarray(heading.length, heading.length + ours.length), ours),
+    ).toBe(0);
+    // The one addition: a final newline, because the file had none.
+    expect(Buffer.compare(agents.subarray(heading.length + ours.length), Buffer.from("\n"))).toBe(
+      0,
+    );
+    expect(Buffer.compare(agents.subarray(0, heading.length), heading)).toBe(0);
   });
 
   test("the template's own alias symlinks (a repo that selected agents, or a Windows-free render) are left to copier", () => {
@@ -460,6 +466,18 @@ describe("m0002_fold_base_modules", () => {
       // write the managed file over a directory.
       label: "a directory at AGENTS.md with nothing to fold",
       files: { [REGISTRATION]: RENDERED, [MANIFEST]: manifestOf(), "AGENTS.md/nested": "x\n" },
+      message: "something other than a regular file at AGENTS.md",
+    },
+    {
+      // Kinds are classified before the manifest is read: with both broken,
+      // the AGENTS.md shape is named, not the unreadable manifest.
+      label: "a directory AGENTS.md and an unreadable manifest: the shape is named",
+      files: {
+        [REGISTRATION]: RENDERED,
+        [MANIFEST]: "{not json",
+        "CLAUDE.md": "ours\n",
+        "AGENTS.md/nested": "x\n",
+      },
       message: "something other than a regular file at AGENTS.md",
     },
     {
