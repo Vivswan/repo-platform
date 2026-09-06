@@ -40,6 +40,7 @@ import {
   fleetTokenHolderMismatches,
   fleetWorkflowPinMismatches,
   fleetWriterMismatches,
+  fragmentHosts,
   gatesOnModule,
   hookCommandParts,
   inlineFunctionCopies,
@@ -70,6 +71,8 @@ import {
   SETUP_VERSION_FILES,
   STAMP_HOOK_ARGV,
   STAMP_HOOK_WHEN,
+  STICKY_COMMENT_ACTION,
+  STICKY_HEADER_PREFIX,
   scratchScopedScriptMismatches,
   semanticLines,
   setMismatch,
@@ -79,12 +82,18 @@ import {
   spawnSyncHazard,
   spawnSyncSites,
   stampHookSiteMismatches,
-  stepCarriesWithKey,
+  stepItemStart,
+  stepKeyValue,
+  stepWithInput,
+  stickyCommentMismatches,
+  stickyHosts,
+  stickyTreeMismatches,
   stripGeneratedRegions,
   TEMP_DIR_HELPER,
   tempDirSiteMismatches,
   tempDirTreeMismatches,
   templateSelfPins,
+  templateWorkflowStem,
   topLevelProperties,
   unsafeStepCondition,
   zToDollar,
@@ -1084,107 +1093,465 @@ describe("inlineFunctionCopies", () => {
   });
 });
 
-describe("stepCarriesWithKey", () => {
-  const key = "bun-version-file:";
+describe("stepWithInput", () => {
+  const key = "bun-version-file";
   const lines = (text: string) => text.split("\n");
 
-  test("finds the key inside the step's own with: block (item and named shapes)", () => {
-    const item = lines(
-      [
+  test.each([
+    {
+      shape: "item shape",
+      at: 0,
+      text: [
         "      - uses: oven-sh/setup-bun@v2",
         "        with:",
         "          bun-version-file: .bun-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(item, 0, key)).toBe(true);
-    const named = lines(
-      [
+      ],
+    },
+    {
+      shape: "named shape",
+      at: 1,
+      text: [
         "      - name: Set up bun",
         "        uses: oven-sh/setup-bun@v2",
         "        with:",
         "          bun-version-file: .bun-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(named, 1, key)).toBe(true);
-  });
-
-  test("the NEXT step's input never satisfies the check", () => {
-    const twoSteps = lines(
-      [
-        "      - uses: oven-sh/setup-bun@v2",
-        "      - uses: actions/cache@v6",
-        "        with:",
+      ],
+    },
+    {
+      shape: "with: before uses:",
+      at: 3,
+      text: [
+        "      - with:",
         "          bun-version-file: .bun-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(twoSteps, 0, key)).toBe(false);
-  });
-
-  test("a comment mentioning the key never satisfies the check", () => {
-    const commented = lines(
-      [
-        "      - uses: oven-sh/setup-bun@v2",
-        "        # bun-version-file: .bun-version",
-        "      - run: bun install",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(commented, 0, key)).toBe(false);
-  });
-
-  test("the key must sit under with:, not as a stray step key", () => {
-    const noWith = lines(
-      ["      - uses: oven-sh/setup-bun@v2", "        bun-version-file: .bun-version"].join("\n"),
-    );
-    expect(stepCarriesWithKey(noWith, 0, key)).toBe(false);
-  });
-
-  test("a direct child at the with: block's exact level matches", () => {
-    const direct = lines(
-      [
+        "        name: Set up bun",
+        "        uses: oven-sh/setup-bun@v2",
+      ],
+    },
+    {
+      shape: "a direct child after another",
+      at: 0,
+      text: [
         "      - uses: oven-sh/setup-bun@v2",
         "        with:",
         "          no-cache: true",
         "          bun-version-file: .bun-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(direct, 0, key)).toBe(true);
+      ],
+    },
+    {
+      shape: "a quoted input key",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        '          "bun-version-file": .bun-version',
+      ],
+    },
+    {
+      shape: "whitespace before the input's colon",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          bun-version-file : .bun-version",
+      ],
+    },
+    {
+      shape: "quoted, with an inline comment",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        '          bun-version-file: ".bun-version" # the pin',
+      ],
+    },
+    {
+      shape: "a `- ` line inside a block scalar of the same step does not end it",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          message: |",
+        "            - detail one",
+        "          bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "two spaces after the dash",
+      at: 0,
+      text: [
+        "      -  uses: oven-sh/setup-bun@v2",
+        "         with:",
+        "           bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "with: first, with an inline comment",
+      at: 2,
+      text: [
+        "      - with: # inputs",
+        "          bun-version-file: .bun-version",
+        "        uses: oven-sh/setup-bun@v2",
+      ],
+    },
+  ])("$shape -> the input's value", ({ at, text }) => {
+    expect(stepWithInput(lines(text.join("\n")), at, key)).toBe(".bun-version");
   });
 
-  test("a key-shaped line inside a block scalar body never matches", () => {
-    const scalar = lines(
-      [
-        "      - uses: actions/setup-node@v6",
+  test.each([
+    {
+      shape: "the NEXT step's input",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "      - uses: actions/cache@v6",
+        "        with:",
+        "          bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "the PREVIOUS step's input",
+      at: 3,
+      text: [
+        "      - uses: actions/cache@v6",
+        "        with:",
+        "          bun-version-file: .bun-version",
+        "      - uses: oven-sh/setup-bun@v2",
+      ],
+    },
+    {
+      shape: "the PREVIOUS step's input before a named step",
+      at: 4,
+      text: [
+        "      - uses: actions/cache@v6",
+        "        with:",
+        "          bun-version-file: .bun-version",
+        "      - name: Set up bun",
+        "        uses: oven-sh/setup-bun@v2",
+      ],
+    },
+    {
+      shape: "a comment mentioning the key",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        # bun-version-file: .bun-version",
+        "      - run: bun install",
+      ],
+    },
+    {
+      shape: "a stray step key outside with:",
+      at: 0,
+      text: ["      - uses: oven-sh/setup-bun@v2", "        bun-version-file: .bun-version"],
+    },
+    {
+      shape: "the key under env:",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        env:",
+        "          bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "a key-shaped line inside a block scalar body",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
         "        with:",
         "          cache-dependency-path: |",
-        "            node-version-file: .node-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(scalar, 0, "node-version-file:")).toBe(false);
-  });
-
-  test("a key nested deeper than the direct-child level never matches", () => {
-    const nested = lines(
-      [
-        "      - uses: actions/setup-node@v6",
+        "            bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "a key nested deeper than the direct-child level",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
         "        with:",
         "          something:",
-        "            node-version-file: .node-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(nested, 0, "node-version-file:")).toBe(false);
-  });
-
-  test("a with: block ended by a later step key stops matching", () => {
-    const after = lines(
-      [
+        "            bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "a with: block ended by a later step key",
+      at: 0,
+      text: [
         "      - uses: oven-sh/setup-bun@v2",
         "        with:",
         "          no-cache: true",
         "        env:",
         "          bun-version-file: .bun-version",
-      ].join("\n"),
-    );
-    expect(stepCarriesWithKey(after, 0, key)).toBe(false);
+      ],
+    },
+    {
+      shape: "a job-level look-alike after the last step",
+      at: 1,
+      text: [
+        "    steps:",
+        "      - uses: oven-sh/setup-bun@v2",
+        "    env:",
+        "      with:",
+        "        bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "a quoted input key padded with spaces (YAML keeps them, so it is another key)",
+      at: 0,
+      text: [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        '          " bun-version-file ": .bun-version',
+      ],
+    },
+    {
+      shape: "a uses:-shaped line inside a run: block scalar (no step owns it)",
+      at: 1,
+      text: [
+        "      - run: |",
+        "          uses: oven-sh/setup-bun@v2",
+        "          with:",
+        "            bun-version-file: .bun-version",
+      ],
+    },
+    {
+      shape: "a `- uses:` item quoted inside a run: heredoc (text, not a step)",
+      at: 2,
+      text: [
+        "      - run: |",
+        "          cat > fake.yml <<YAML",
+        "            - uses: oven-sh/setup-bun@v2",
+        "              with:",
+        "                bun-version-file: .bun-version",
+        "          YAML",
+      ],
+    },
+  ])("$shape -> null", ({ at, text }) => {
+    expect(stepWithInput(lines(text.join("\n")), at, key)).toBeNull();
+  });
+
+  test.each([
+    {
+      shape: "`- uses:` is its own item",
+      at: 0,
+      text: ["      - uses: x@v1", "        with:"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under `- name:`",
+      at: 2,
+      text: ["      - name: n", "        # a comment", "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: after the item's with: block",
+      at: 2,
+      text: ["      - with:", "          k: v", "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a uses:-shaped line inside a run: block scalar",
+      at: 1,
+      text: ["      - run: |", "          uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item directly inside a run: block scalar",
+      at: 1,
+      text: ["      - run: |", "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item nested deeper inside a folded message: scalar",
+      at: 3,
+      text: [
+        "      - with:",
+        "          message: >-",
+        "            text",
+        "              - uses: x@v1",
+      ],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside an anchored block scalar",
+      at: 1,
+      text: ["      - run: &script |", "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside a tagged, chomped block scalar",
+      at: 1,
+      text: ["      - run: !!str |-", "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside an open double-quoted scalar",
+      at: 1,
+      text: ['      - run: "echo', '          - uses: x@v1"'],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside an open single-quoted scalar",
+      at: 1,
+      text: ["      - run: 'echo", "          - uses: x@v1'"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item after a block scalar has ended",
+      at: 2,
+      text: ["      - run: |", "          echo hi", "      - uses: x@v1"],
+      start: 2,
+    },
+    {
+      shape: "a bare uses: under a `- name:` whose inline comment mentions `run: |`",
+      at: 1,
+      text: ["      - name: Sticky # example run: |", "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under a `- name:` whose value is a closed quoted scalar with a pipe",
+      at: 1,
+      text: ['      - name: "a | b"', "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under a `- if:` piping in a plain scalar",
+      at: 1,
+      text: ["      - if: github.event_name == 'push' || failure()", "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under a `- name:` whose quoted value contains a `#`",
+      at: 1,
+      text: ['      - name: "Issue #123"', "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under a `- name:` whose single-quoted value contains a `#`",
+      at: 1,
+      text: ["      - name: 'Issue #123'", "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a bare uses: under a `- name:` with an escaped quote before the `#`",
+      at: 1,
+      text: ['      - name: "Issue \\"#123\\""', "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a `- uses:` item inside a block scalar whose quoted key carries a colon",
+      at: 1,
+      text: ['      - "message:body": |', "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a bare uses: under a `- run:` plain scalar with an unmatched quote",
+      at: 1,
+      text: ['      - run: echo "unterminated', "        uses: x@v1"],
+      start: 0,
+    },
+    {
+      shape: "a `- uses:` item inside a quoted-key block scalar",
+      at: 1,
+      text: ['      - "run": |', "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside a slash-keyed block scalar",
+      at: 1,
+      text: ["      - message/body: |", "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a `- uses:` item inside an anchored open quoted scalar",
+      at: 1,
+      text: ['      - run: &a "echo', "          - uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a bare uses: after a block scalar has ended, under `- name:`",
+      at: 3,
+      text: ["      - run: |", "          echo hi", "      - name: n", "        uses: x@v1"],
+      start: 2,
+    },
+    {
+      shape: "a bare uses: with no item above it",
+      at: 0,
+      text: ["        uses: x@v1"],
+      start: null,
+    },
+    {
+      shape: "a bare uses: under a mapping key, not an item",
+      at: 1,
+      text: ["      steps:", "        uses: x@v1"],
+      start: null,
+    },
+  ])("stepItemStart: $shape", ({ at, text, start }) => {
+    expect(stepItemStart(text, at)).toBe(start);
+  });
+
+  test.each([
+    {
+      shape: "a double-quoted step-level key",
+      at: 0,
+      text: ["      - uses: x@v1", '        "if": always()'],
+      value: "always()",
+    },
+    {
+      shape: "a single-quoted step-level key",
+      at: 0,
+      text: ["      - uses: x@v1", "        'if': always()"],
+      value: "always()",
+    },
+    {
+      shape: "whitespace before the step-level key's colon",
+      at: 0,
+      text: ["      - uses: x@v1", "        if : always()"],
+      value: "always()",
+    },
+    {
+      shape: "a step-level key after uses:",
+      at: 0,
+      text: ["      - uses: x@v1", "        if: always()"],
+      value: "always()",
+    },
+    {
+      shape: "the key on the item line",
+      at: 1,
+      text: ["      - if: 'a == b' # why", "        uses: x@v1"],
+      value: "a == b",
+    },
+    {
+      shape: "the key under with: is an input, not a step key",
+      at: 0,
+      text: ["      - uses: x@v1", "        with:", "          if: no"],
+      value: null,
+    },
+    {
+      shape: "the key under env:",
+      at: 0,
+      text: ["      - uses: x@v1", "        env:", "          if: no"],
+      value: null,
+    },
+    {
+      shape: "the NEXT step's key",
+      at: 0,
+      text: ["      - uses: x@v1", "      - run: y", "        if: always()"],
+      value: null,
+    },
+    {
+      shape: "a job-level key after the last step",
+      at: 1,
+      text: ["    steps:", "      - uses: x@v1", "    if: always()"],
+      value: null,
+    },
+    {
+      shape: "no step owns the line",
+      at: 1,
+      text: ["      - run: |", "          uses: x@v1", "          if: always()"],
+      value: null,
+    },
+  ])("stepKeyValue: $shape", ({ at, text, value }) => {
+    expect(stepKeyValue(text, at, "if")).toBe(value);
   });
 
   test("SETUP_VERSION_FILES matches uses lines commented or not, item or named", () => {
@@ -4467,5 +4834,503 @@ describe("stampHookSiteMismatches", () => {
     const hook = { command: good.command, when: STAMP_HOOK_WHEN._migrations };
     expect(stampHookSiteMismatches("_migrations", [hook], STAMP)).toEqual([]);
     expect(stampHookSiteMismatches("_migrations", [good], STAMP)).toHaveLength(1);
+  });
+});
+
+describe("sticky-pr-comments: templateWorkflowStem, fragmentHosts, stickyHosts, stickyCommentMismatches", () => {
+  const SHA = "5770ad5eb8f42dd2c4f34da00c94c5381e49af88";
+  const PIN = `${STICKY_COMMENT_ACTION}@${SHA} # v3.0.5`;
+  const WORKFLOW = "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja";
+  const GATED =
+    "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja";
+  const FRAGMENT = "templates/bun/fragments/auto-format.jinja";
+  const HOST = "dependabot-bun-lockfile";
+  const HEADER = `${STICKY_HEADER_PREFIX}${HOST}`;
+  const step = (header: string | null, uses = PIN) =>
+    [
+      "      - name: Comment that checks will not re-run",
+      "        if: steps.push.outputs.no_retrigger == 'true'",
+      `        uses: ${uses}`,
+      "        with:",
+      ...(header === null ? [] : [`          header: ${header}`]),
+      "          message: |",
+      "            Pushed a commit with the default workflow token.",
+    ].join("\n");
+  const usesExpected = `uses: ${STICKY_COMMENT_ACTION}@<full 40-hex commit sha> # v<major>.<minor>.<patch> on one line (the release tag's commit, dereferenced if annotated)`;
+  const handRolledExpected = `a ${STICKY_COMMENT_ACTION} step (one upserted comment per PR, a failed post failing the step)`;
+  const notAStepExpected = "a uses: line inside a `- ` step item";
+  const notAStepGot = "a uses:-shaped line outside any step (a block scalar body, or a stray key)";
+  const hostsExpected =
+    "a source rendering into exactly one workflow (a workflow file, or a fragment one workflow anchor splices) - the header names that workflow";
+
+  test.each([
+    { rel: WORKFLOW, stem: HOST },
+    { rel: GATED, stem: "auto-format" },
+    { rel: "templates/x/.github/workflows/nightly.yaml", stem: "nightly" },
+    { rel: FRAGMENT, stem: null },
+    { rel: "templates/bun/.github/dependabot.yml.jinja", stem: null },
+  ])("$rel renders the stem $stem", ({ rel, stem }) => {
+    expect(templateWorkflowStem(rel)).toBe(stem);
+  });
+
+  test("fragmentHosts maps every anchor line (the composer's grammar) to its hosting workflows; toolchain-setup inherits its targets' hosts", () => {
+    const hosts = fragmentHosts([
+      [GATED, "steps:\n{# compose:auto-format #}\n{# compose:shared -#}\n"],
+      [
+        "templates/base/.github/workflows/checks.yml.jinja",
+        "{# compose:checks-examples #}\n{# compose:shared #}\n",
+      ],
+      // Not anchors to the composer: an opening trim, an indented line, an inline mention.
+      [
+        "templates/x/.github/workflows/other.yml.jinja",
+        "{#- compose:trimmed #}\n  {# compose:indented #}\nrun: echo '{# compose:inline #}'\n",
+      ],
+    ]);
+    expect([...hosts.entries()].sort()).toEqual([
+      ["auto-format", ["auto-format"]],
+      ["checks-examples", ["checks"]],
+      ["shared", ["auto-format", "checks"]],
+      ["toolchain-setup", ["auto-format"]],
+    ]);
+    const both = fragmentHosts([
+      [GATED, "{# compose:auto-format #}\n"],
+      [
+        "templates/agents/.github/workflows/copilot-setup-steps.yml.jinja",
+        "{# compose:copilot-setup-steps #}\n",
+      ],
+    ]);
+    expect(both.get("toolchain-setup")).toEqual(["auto-format", "copilot-setup-steps"]);
+    expect(() => fragmentHosts([[FRAGMENT, ""]])).toThrow(/not a template workflow source/);
+  });
+
+  test.each([
+    { rel: WORKFLOW, hosts: [HOST] },
+    { rel: GATED, hosts: ["auto-format"] },
+    { rel: FRAGMENT, hosts: ["auto-format"] },
+    {
+      rel: "templates/bun/fragments/toolchain-setup.jinja",
+      hosts: ["auto-format", "copilot-setup-steps"],
+    },
+    { rel: "templates/bun/fragments/gitignore.jinja", hosts: [] },
+    { rel: "templates/bun/.github/dependabot.yml.jinja", hosts: [] },
+  ])("stickyHosts($rel) -> $hosts", ({ rel, hosts }) => {
+    const anchorHosts = new Map([
+      ["auto-format", ["auto-format"]],
+      ["toolchain-setup", ["auto-format", "copilot-setup-steps"]],
+    ]);
+    expect(stickyHosts(rel, anchorHosts)).toEqual(hosts);
+  });
+
+  test("stickyTreeMismatches: hosts resolved from the workflow anchors, every source judged, anchors enforced", () => {
+    const hostWorkflow = `steps:\n{# compose:auto-format #}\n`;
+    expect(
+      stickyTreeMismatches([
+        [WORKFLOW, step(HEADER)],
+        [GATED, hostWorkflow],
+        [FRAGMENT, step(`${STICKY_HEADER_PREFIX}auto-format`)],
+      ]),
+    ).toEqual([]);
+    expect(
+      stickyTreeMismatches([
+        [GATED, hostWorkflow],
+        [FRAGMENT, step(`${STICKY_HEADER_PREFIX}dependabot-bun-lockfile`)],
+      ]),
+    ).toEqual([
+      {
+        file: `${FRAGMENT}:3`,
+        expected: `with.header: ${STICKY_HEADER_PREFIX}auto-format`,
+        got: `with.header: ${STICKY_HEADER_PREFIX}dependabot-bun-lockfile`,
+      },
+    ]);
+    // Every sticky step commented out (jinja), or no workflow source at all: the anchor is lost.
+    expect(() => stickyTreeMismatches([[WORKFLOW, `{#\n${step(HEADER)}\n#}\n`]])).toThrow(
+      /no marocchino\/sticky-pull-request-comment step .* anchor lost/,
+    );
+    expect(() => stickyTreeMismatches([[FRAGMENT, step(HEADER)]])).toThrow(
+      /no template workflow sources found - anchor lost/,
+    );
+  });
+
+  test.each([
+    {
+      shape: "the canonical step, followed by another step",
+      text: `${step(HEADER)}\n      - run: echo done\n`,
+    },
+    { shape: "a quoted uses", text: step(HEADER, `"${STICKY_COMMENT_ACTION}@${SHA}" # v3.0.5`) },
+    { shape: "an inline comment on the header", text: step(`${HEADER} # stable key`) },
+    {
+      shape: "with: before uses:",
+      text: `      - with:\n          header: ${HEADER}\n          message: hi\n        uses: ${PIN}\n`,
+    },
+    {
+      shape: "the action named in a YAML comment (not a candidate)",
+      text: `      # ${STICKY_COMMENT_ACTION} posts the notice\n${step(HEADER)}`,
+    },
+    {
+      shape: "a hand-rolled post inside a YAML comment (not a post)",
+      text: `      # gh pr comment 1 --body hi\n${step(HEADER)}`,
+    },
+    {
+      shape:
+        "a hand-rolled post inside a jinja comment block (not a post), the step after it counted",
+      text: `{#\n      gh pr comment 1 --body hi\n#}\n${step(HEADER)}`,
+    },
+    {
+      shape: "a `- ` line inside the message body does not end the step",
+      text: `      - uses: ${PIN}\n        with:\n          message: |\n            - detail\n          header: ${HEADER}\n`,
+    },
+    {
+      shape: "two spaces after the dash",
+      text: `      -  uses: ${PIN}\n         with:\n           header: ${HEADER}\n`,
+    },
+    {
+      shape: "with: first, with an inline comment",
+      text: `      - with: # inputs\n          header: ${HEADER}\n        uses: ${PIN}\n`,
+    },
+    {
+      shape: "a step name with a `#` inside quotes",
+      text: `      - name: "Issue #123"\n        uses: ${PIN}\n        with:\n          header: ${HEADER}\n`,
+    },
+  ])("$shape passes with one counted candidate", ({ text }) => {
+    expect(stickyCommentMismatches(WORKFLOW, text, [HOST])).toEqual({
+      mismatches: [],
+      stickyCandidates: 1,
+    });
+  });
+
+  test("the hand-rolled post-once snippet is a mismatch per posting command: any spacing, number expression, or line continuation", () => {
+    const snippet = [
+      "        run: |",
+      '          marker="<!-- x: no-retrigger-token -->"',
+      "          comments=$(gh api \"repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments\" --paginate --jq '.[].body' || true)",
+      '          case "$comments" in',
+      '            *"$marker"*) ;;',
+      '            *) gh  pr  comment "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --body "$marker" || true ;;',
+      "          esac",
+      "          gh api repos/x/y/issues/${{ github.event.pull_request.number }}/comments -f body=hi",
+      "          gh pr \\",
+      '            comment "$PR_NUMBER" --body notice',
+    ].join("\n");
+    expect(stickyCommentMismatches(WORKFLOW, snippet, [HOST])).toEqual({
+      stickyCandidates: 0,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: handRolledExpected,
+          got: "a hand-rolled PR comment: comments=$(gh api \"repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments\" --paginate --jq '.[].body' || true)",
+        },
+        {
+          file: `${WORKFLOW}:6`,
+          expected: handRolledExpected,
+          got: 'a hand-rolled PR comment: *) gh  pr  comment "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --body "$marker" || true ;;',
+        },
+        {
+          file: `${WORKFLOW}:8`,
+          expected: handRolledExpected,
+          got: "a hand-rolled PR comment: gh api repos/x/y/issues/${{ github.event.pull_request.number }}/comments -f body=hi",
+        },
+        {
+          file: `${WORKFLOW}:9`,
+          expected: handRolledExpected,
+          got: 'a hand-rolled PR comment: gh pr comment "$PR_NUMBER" --body notice',
+        },
+      ],
+    });
+  });
+
+  test.each([
+    {
+      reason: "a moving major tag",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: step(HEADER, `${STICKY_COMMENT_ACTION}@v3`),
+      mismatches: [
+        { file: `${WORKFLOW}:3`, expected: usesExpected, got: `uses: ${STICKY_COMMENT_ACTION}@v3` },
+      ],
+    },
+    {
+      reason: "a case-variant slug (GitHub resolves it, the pin rule does not)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: step(HEADER, `Marocchino/sticky-pull-request-comment@${SHA} # v3.0.5`),
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: usesExpected,
+          got: `uses: Marocchino/sticky-pull-request-comment@${SHA} # v3.0.5`,
+        },
+      ],
+    },
+    {
+      reason: "a full sha without its version comment",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: step(HEADER, `${STICKY_COMMENT_ACTION}@${SHA}`),
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: usesExpected,
+          got: `uses: ${STICKY_COMMENT_ACTION}@${SHA}`,
+        },
+      ],
+    },
+    {
+      reason: "a folded-scalar uses (the action on its own line, so no step to read a header from)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: >-\n          ${PIN}\n        with:\n          header: ${HEADER}\n`,
+      mismatches: [
+        { file: `${WORKFLOW}:2`, expected: usesExpected, got: PIN },
+        { file: `${WORKFLOW}:2`, expected: notAStepExpected, got: notAStepGot },
+      ],
+    },
+    {
+      reason: "a header naming another workflow",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: step(`${STICKY_HEADER_PREFIX}auto-format`),
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: `with.header: ${HEADER}`,
+          got: `with.header: ${STICKY_HEADER_PREFIX}auto-format`,
+        },
+      ],
+    },
+    {
+      reason: "a header off the prefix in a gated workflow",
+      rel: GATED,
+      hosts: ["auto-format"],
+      text: step("auto-format"),
+      mismatches: [
+        {
+          file: `${GATED}:3`,
+          expected: `with.header: ${STICKY_HEADER_PREFIX}auto-format`,
+          got: "with.header: auto-format",
+        },
+      ],
+    },
+    {
+      reason: "no header at all",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: step(null),
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "continue-on-error on the step (a failed post would stay green)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: ${PIN}\n        continue-on-error: true\n        with:\n          header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:1`,
+          expected: "no continue-on-error on the step (a failed post fails the step)",
+          got: "continue-on-error set on the sticky step",
+        },
+      ],
+    },
+    {
+      reason: "continue-on-error spelled as a quoted key",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: ${PIN}\n        "continue-on-error": true\n        with:\n          header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:1`,
+          expected: "no continue-on-error on the step (a failed post fails the step)",
+          got: "continue-on-error set on the sticky step",
+        },
+      ],
+    },
+    {
+      reason: "continue-on-error on the item line itself",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - continue-on-error: \${{ true }}\n        uses: ${PIN}\n        with:\n          header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:2`,
+          expected: "no continue-on-error on the step (a failed post fails the step)",
+          got: "continue-on-error set on the sticky step",
+        },
+      ],
+    },
+    {
+      reason: "the header under env: instead of with:",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: ${PIN}\n        env:\n          header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:1`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "a header-shaped line inside the message body",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: ${PIN}\n        with:\n          message: |\n            header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:1`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "a job-level look-alike after the last step",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `    steps:\n      - uses: ${PIN}\n    env:\n      with:\n        header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:2`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "a header that belongs to the NEXT step",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `${step(null)}\n      - uses: other/action@v1\n        with:\n          header: ${HEADER}\n`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:3`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "a header that belongs to the PREVIOUS step",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - uses: other/action@v1\n        with:\n          header: ${HEADER}\n${step(null)}`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:6`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "the canonical pin quoted inside a run: block scalar (text, not a step)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - run: |\n          uses: ${PIN}\n          with:\n            header: ${HEADER}\n`,
+      mismatches: [{ file: `${WORKFLOW}:2`, expected: notAStepExpected, got: notAStepGot }],
+    },
+    {
+      reason: "the canonical step inside a quoted-key block scalar (text, not a step)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - "run": |\n          - uses: ${PIN}\n            with:\n              header: ${HEADER}\n`,
+      mismatches: [{ file: `${WORKFLOW}:2`, expected: notAStepExpected, got: notAStepGot }],
+    },
+    {
+      reason: "the canonical step inside an anchored block scalar (text, not a step)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - run: &script |\n          - uses: ${PIN}\n            with:\n              header: ${HEADER}\n`,
+      mismatches: [{ file: `${WORKFLOW}:2`, expected: notAStepExpected, got: notAStepGot }],
+    },
+    {
+      reason: "a header-less step after a jinja comment block (line numbers survive the blanking)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `{#\n  a note\n#}\n${step(null)}`,
+      mismatches: [
+        {
+          file: `${WORKFLOW}:6`,
+          expected: `with.header: ${HEADER}`,
+          got: "no header: in the step's own with: block",
+        },
+      ],
+    },
+    {
+      reason: "the canonical `- uses:` item quoted inside a run: heredoc (text, not a step)",
+      rel: WORKFLOW,
+      hosts: [HOST],
+      text: `      - run: |\n          cat > fake.yml <<YAML\n          - uses: ${PIN}\n            with:\n              header: ${HEADER}\n          YAML\n`,
+      mismatches: [{ file: `${WORKFLOW}:3`, expected: notAStepExpected, got: notAStepGot }],
+    },
+    {
+      reason: "a fragment spliced into two workflows",
+      rel: "templates/bun/fragments/toolchain-setup.jinja",
+      hosts: ["auto-format", "copilot-setup-steps"],
+      text: step(`${STICKY_HEADER_PREFIX}auto-format`),
+      mismatches: [
+        {
+          file: "templates/bun/fragments/toolchain-setup.jinja:3",
+          expected: hostsExpected,
+          got: "2 host workflows (auto-format, copilot-setup-steps)",
+        },
+      ],
+    },
+    {
+      reason: "a fragment no workflow anchor splices",
+      rel: "templates/bun/fragments/gitignore.jinja",
+      hosts: [],
+      text: step(`${STICKY_HEADER_PREFIX}auto-format`),
+      mismatches: [
+        {
+          file: "templates/bun/fragments/gitignore.jinja:3",
+          expected: hostsExpected,
+          got: "0 host workflows",
+        },
+      ],
+    },
+  ])(
+    "$reason -> the whole mismatch list, one counted candidate",
+    ({ rel, hosts, text, mismatches }) => {
+      expect(stickyCommentMismatches(rel, text, hosts)).toEqual({
+        mismatches,
+        stickyCandidates: 1,
+      });
+    },
+  );
+
+  test("a step inside a jinja comment block renders nothing: no candidate, no mismatch", () => {
+    expect(stickyCommentMismatches(WORKFLOW, `{#\n${step(HEADER)}\n#}\n`, [HOST])).toEqual({
+      mismatches: [],
+      stickyCandidates: 0,
+    });
+  });
+
+  test("a single-host fragment is held to that host's header", () => {
+    expect(
+      stickyCommentMismatches(FRAGMENT, step(`${STICKY_HEADER_PREFIX}auto-format`), [
+        "auto-format",
+      ]),
+    ).toEqual({
+      mismatches: [],
+      stickyCandidates: 1,
+    });
+    expect(
+      stickyCommentMismatches(FRAGMENT, step(`${STICKY_HEADER_PREFIX}anything`), ["auto-format"]),
+    ).toEqual({
+      mismatches: [
+        {
+          file: `${FRAGMENT}:3`,
+          expected: `with.header: ${STICKY_HEADER_PREFIX}auto-format`,
+          got: `with.header: ${STICKY_HEADER_PREFIX}anything`,
+        },
+      ],
+      stickyCandidates: 1,
+    });
   });
 });
