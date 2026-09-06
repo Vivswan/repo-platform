@@ -856,6 +856,56 @@ function lineDiffMismatch(
   ];
 }
 
+/** The fleet license template every LICENSE.md copy in this repository
+ *  renders from; the dogfood-parity rule compares each copy against it. */
+export const LICENSE_TEMPLATE =
+  "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
+
+/** Every tracked LICENSE.md that copies this repository's license (the root
+ *  file, each skill folder's copy, any copy added later); the template source
+ *  and the golden renders (owned by renders:check) are not copies. */
+export function licenseCopies(tracked: string[]): string[] {
+  const copies = tracked
+    .filter(
+      (rel) =>
+        (rel === "LICENSE.md" || rel.endsWith("/LICENSE.md")) &&
+        !rel.startsWith("templates/") &&
+        !rel.startsWith("tests/golden-renders/"),
+    )
+    .sort();
+  if (!copies.includes("LICENSE.md")) {
+    throw new Error("git ls-files: no tracked root LICENSE.md - anchor lost");
+  }
+  return copies;
+}
+
+export interface DogfoodPair {
+  repo: string;
+  tpl: string;
+  /** prefix: the copy must START with the rendered template (the managed
+   *  region; a repo-owned tail may follow). semantic: comment- and
+   *  blank-stripped lines must match, modulo RECORDED_DIVERGENCES. */
+  mode: "prefix" | "semantic";
+  context?: Record<string, boolean>;
+}
+
+/** One dogfood pair's judgment, given the rendered template and the copy. */
+export function dogfoodPairMismatches(
+  pair: DogfoodPair,
+  expected: string,
+  got: string,
+): Mismatch[] {
+  if (pair.mode === "prefix") {
+    if (got.startsWith(expected)) return [];
+    return lineDiffMismatch(pair.repo, pair.tpl, expected.split("\n"), got.split("\n"));
+  }
+  const excused = applyDivergences(pair.repo, semanticLines(expected), semanticLines(got));
+  return [
+    ...excused.mismatches,
+    ...lineDiffMismatch(pair.repo, pair.tpl, excused.expected, excused.actual),
+  ];
+}
+
 /** The skills' twin ownership tables: skills install standalone, so each
  *  ships its own; Class and Files are one roster, the third column is each
  *  skill's own. */
@@ -5288,13 +5338,15 @@ const rules: Rule[] = [
     name: "dogfood-parity",
     run: () => {
       const vars = jinjaVars();
-      const mismatches: Mismatch[] = [];
-      const pairs: {
-        repo: string;
-        tpl: string;
-        mode: "prefix" | "semantic";
-        context?: Record<string, boolean>;
-      }[] = [
+      // capture() carries the hang bound a bare piped spawn lacks (the
+      // spawn-sync-hang-bound rule's semantics).
+      const proc = capture(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
+      if (proc.exitCode !== 0) {
+        throw new Error(
+          `git ls-files failed${proc.timedOut ? " (timed out)" : ""}: ${proc.stderr.trim()}`,
+        );
+      }
+      const pairs: DogfoodPair[] = [
         {
           // The template's render is the managed region (BEGIN through END
           // markers); everything a repo appends after the END marker is its
@@ -5304,37 +5356,24 @@ const rules: Rule[] = [
           mode: "prefix",
         },
         {
-          // Same region semantics: repo-specific license notices
-          // (third-party components, differently licensed paths) live
-          // below the END marker, hence prefix semantics.
-          repo: "LICENSE.md",
-          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
-          mode: "prefix",
-        },
-        {
           // Same region semantics as SECURITY.md: repo-specific contributing
           // docs live below the END marker.
           repo: "CONTRIBUTING.md",
           tpl: "templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
           mode: "prefix",
         },
+        // Same region semantics for every tracked copy of the license.
+        ...licenseCopies(proc.stdout.split("\0").filter(Boolean)).map(
+          (repo): DogfoodPair => ({ repo, tpl: LICENSE_TEMPLATE, mode: "prefix" }),
+        ),
       ];
-      for (const pair of pairs) {
-        const expected = normalizeJinja(read(pair.tpl), vars, pair.context);
-        const got = read(pair.repo);
-        if (pair.mode === "prefix" && !got.startsWith(expected)) {
-          mismatches.push(
-            ...lineDiffMismatch(pair.repo, pair.tpl, expected.split("\n"), got.split("\n")),
-          );
-        } else if (pair.mode === "semantic") {
-          const excused = applyDivergences(pair.repo, semanticLines(expected), semanticLines(got));
-          mismatches.push(...excused.mismatches);
-          mismatches.push(
-            ...lineDiffMismatch(pair.repo, pair.tpl, excused.expected, excused.actual),
-          );
-        }
-      }
-      return mismatches;
+      return pairs.flatMap((pair) =>
+        dogfoodPairMismatches(
+          pair,
+          normalizeJinja(read(pair.tpl), vars, pair.context),
+          read(pair.repo),
+        ),
+      );
     },
   },
 
