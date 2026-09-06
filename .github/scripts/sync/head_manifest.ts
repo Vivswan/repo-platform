@@ -2,20 +2,12 @@
 // HEAD-manifest split declarations: how the PREVIOUS commit of a target
 // repository declared its split files. ONE grammar exists (managed-region:
 // repo-owned content above a BEGIN marker line and below an END marker
-// line, sync owning the bounded region between them), and the fleet is
-// censused fully post-conversion (2026-09: every managed repo's manifest
-// stamps managed-region on every split entry), so HEAD manifests ride the
-// same strict grammar vocabulary as post-sync ones.
-//
-// The one-time conversion shim that used to live here - reading the
-// RETIRED tail-marker and bounded-region vintages out of HEAD and
-// stripping their platform-authored relic lines (CONVERSION_RELIC_LINES)
-// during the carry - is DELETED, the lifecycle its header documented (the
-// same one the pre-grammar fallback followed: carried for one transition,
-// then retired with a loud refusal). A straggler manifest still declaring
-// a retired grammar, or predating the grammar field entirely, is refused
-// with actionable recovery advice (recover=recopy) - never read, never
-// split by a guessed boundary.
+// line, sync owning the bounded region between them), and HEAD manifests
+// ride the same strict vocabulary as post-sync ones: a manifest declaring
+// any other grammar, or no grammar, is refused with recovery advice
+// (recover=recopy) - never read, never split by a guessed boundary. The
+// sync carries no tolerance for shapes it no longer stamps; a transition
+// that needs one is a migration ladder rung (docs/migrations.md).
 //
 // Everything here fails CLOSED: a manifest this module cannot read in
 // full throws with an actionable message, and the callers route the throw
@@ -59,24 +51,20 @@ export function isCleanRelativePath(path: string): boolean {
 }
 
 /** One HEAD split declaration: the entry's path and its managed-region
- * marker pair (the one grammar; retired vintages refuse at the parse). */
+ * marker pair. */
 export type HeadSplit = { path: string; begin: string; end: string };
 
-/** Every class any manifest vintage has stamped: the current three plus
- * the retired mergeable era. An entry spelling anything else ("spllt") is
- * damage that could be hiding a split declaration, so the whole manifest
- * is rejected to the callers' fail-closed path. */
-const KNOWN_HEAD_CLASSES = new Set(["managed", "split", "starter", "mergeable"]);
+/** The ownership classes the stamp writes. An entry spelling anything else
+ * ("spllt") is damage that could be hiding a split declaration, so the
+ * whole manifest is rejected to the callers' fail-closed path. */
+const KNOWN_HEAD_CLASSES = new Set(["managed", "split", "starter"]);
 
 /** How HEAD's manifest declares its splits, strictly parsed. Every entry's
  * ownership class must be on the known roster - reading a damaged class
  * ("spllt") as merely non-split would drop that file from the candidates
  * and let a retirement delete its repo-owned half. Every split entry must
- * carry the managed-region grammar: the fleet is fully post-conversion
- * (censused 2026-09), so a pre-grammar entry or one declaring a retired
- * grammar (tail-marker, the old bounded-region shape - once converted by
- * the deleted transition shim) gets this loud, actionable refusal instead
- * - never split by a guessed grammar. */
+ * carry the managed-region grammar; anything else gets this loud,
+ * actionable refusal - never a split by a guessed grammar. */
 export function headSplitEntries(text: string, where: string): Map<string, HeadSplit> {
   let parsed: unknown;
   try {
@@ -110,7 +98,8 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
     if (typeof shaped.class !== "string" || !KNOWN_HEAD_CLASSES.has(shaped.class)) {
       throw new Error(
         `${where}: entry for ${path} declares no ownership class this sync knows - the ` +
-          "damage could be hiding a split declaration",
+          "damage could be hiding a split declaration; run a recovery sync (recover=recopy) " +
+          "against this repository to restamp its manifest",
       );
     }
     if (shaped.class !== "split") continue;
@@ -126,9 +115,9 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
       // excerpts, and a long target-controlled path must truncate itself,
       // never the diagnosis or the recovery advice.
       throw new Error(
-        `${where}: a split entry declares no grammar - this manifest predates the ` +
-          "stamped split grammar, which this sync no longer reads; run a recovery " +
-          `sync (recover=recopy) against this repository to restamp its manifest. The entry is ${path}`,
+        `${where}: a split entry declares no grammar, so this sync cannot read it; run a ` +
+          "recovery sync (recover=recopy) against this repository to restamp its manifest. " +
+          `The entry is ${path}`,
       );
     }
     if (knownGrammar(shaped.grammar) === "managed-region") {
@@ -139,14 +128,12 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
       });
       continue;
     }
-    // Retired vintages (tail-marker, bounded-region) land here too: the
-    // conversion that once read them is deleted. Kept SHORT on purpose -
-    // callers clip this message into PR-body excerpts (300 chars), and the
-    // recovery advice must survive the clip, with the target-controlled
-    // values (the entry path, then the declared grammar) riding last so
-    // they truncate themselves, never the diagnosis or the advice. The
-    // prose stays tight enough that a normal-length path and grammar both
-    // fit inside the clip.
+    // Kept SHORT on purpose - callers clip this message into PR-body
+    // excerpts (300 chars), and the recovery advice must survive the clip,
+    // with the target-controlled values (the entry path, then the declared
+    // grammar) riding last so they truncate themselves, never the diagnosis
+    // or the advice. The prose stays tight enough that a normal-length path
+    // and grammar both fit inside the clip.
     throw new Error(
       `${where}: a split entry declares a grammar this sync does not read ` +
         "(only managed-region) - refusing to guess; run a recovery sync " +

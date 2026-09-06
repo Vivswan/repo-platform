@@ -357,12 +357,16 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("repository-owned section is empty");
   });
 
-  test("a deleted license without a manifest answer is held pointwise", () => {
-    // No manifest at HEAD at all: the class rule cannot answer, but a
-    // license deletion must still hold the PR.
-    const result = runHold({ LICENSE: "old license\nlocal notice\n" }, ["LICENSE"]);
+  test("a deleted license the manifest does not class is held pointwise", () => {
+    // A usable HEAD manifest that classes only AGENTS.md: the class rule
+    // cannot answer for LICENSE.md (repo-owned under custom-license, no
+    // entry), yet its deletion must still hold the PR.
+    const result = runHold(
+      { [MANIFEST_REL]: manifest, "LICENSE.md": "old license\nlocal notice\n" },
+      ["LICENSE.md"],
+    );
     expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`LICENSE`");
+    expect(result.report).toContain("`LICENSE.md`");
     expect(result.report).toContain("does not class this file");
   });
 
@@ -420,7 +424,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
   );
 
   // HEAD's manifest is damaged past reading, so the split map cannot be
-  // enumerated. Checking only the two license names would auto-merge a
+  // enumerated. Checking only LICENSE.md would auto-merge a
   // retired split file's repository-owned content away, and the tail
   // tripwire cannot cover it (it skips post-sync split paths absent at
   // HEAD before it consults HEAD's manifest). Fail closed: every deleted
@@ -434,22 +438,22 @@ describe("preserve_repo_owned removed-splits hold", () => {
       fragments: ["does not class this file"],
     },
     {
-      // The one-time conversion machinery is deleted: a straggler manifest
-      // still declaring a retired vintage is refused, never converted, and
-      // the refusal's recovery advice rides into the body.
-      reason: "a retired tail-marker grammar",
+      // A manifest declaring a grammar the sync does not read is refused,
+      // never converted, and the refusal's recovery advice rides into the
+      // body.
+      reason: "an unknown one-marker grammar",
       damaged: JSON.stringify({
         files: {
           "AGENTS.md": {
             class: "split",
-            grammar: "tail-marker",
-            marker: "<!-- repo-platform:local-section -->",
+            grammar: "one-marker",
+            marker: "<!-- other-tool:section -->",
             managed: "above",
             hash: null,
           },
         },
       }),
-      fragments: ['split grammar "tail-marker"', "recover=recopy"],
+      fragments: ['split grammar "one-marker"', "recover=recopy"],
     },
     {
       // JSON.parse keeps the LAST duplicate: split-then-managed for the

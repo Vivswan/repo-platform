@@ -8,8 +8,8 @@
 // baseline and applies the result. A recovery re-render can de-render the
 // file too, so it is restored outright there.
 //
-// The license (LICENSE.md, or a custom repo's own spelling) leaves the
-// render when a repo selects the custom-license module;
+// LICENSE.md leaves the render when a repo selects the custom-license
+// module;
 // copier deletes the de-rendered file when it was unmodified, which would
 // leave the repo with no license at all, so it is restored from the base
 // commit. Unlike settings.yml it is NOT restored on recovery: without the
@@ -27,8 +27,8 @@
 // the cwd's git repository).
 //
 // Last, the removed-split-files hold: every path this update deletes whose
-// previous copy HEAD's manifest classes `split` (plus the two license
-// spellings pointwise) is reported to open_pr.ts, which keeps the PR on
+// previous copy HEAD's manifest classes `split` (plus LICENSE.md
+// pointwise) is reported to open_pr.ts, which keeps the PR on
 // the manual-review path with the leaving repository-owned content named
 // in the body - see the block at the end of this file.
 //
@@ -144,19 +144,15 @@ function restoreRepoOwned(): void {
     }
   }
 
-  // Only on the custom-license module: there the repo's own license is
-  // repo-owned - LICENSE.md by convention, with the extensionless spelling
-  // tolerated until every repo's rename lands. Without the module the
-  // license is template-managed, and a de-rendered old spelling (the
-  // extensionless LICENSE before the LICENSE.md rename) must stay deleted.
+  // Only on the custom-license module: there the repo's own LICENSE.md is
+  // repo-owned. Without the module the license is template-managed and
+  // any de-rendered spelling must stay deleted.
   if (!recover && modules.includes("custom-license")) {
-    for (const name of ["LICENSE", "LICENSE.md"]) {
-      if (inHead(name) && !existsSync(join(targetDir, name))) {
-        restoreFromHead(name);
-        notice(
-          `${label}: ${name} left the template render (custom-license module) but is repo-owned; kept as-is.`,
-        );
-      }
+    if (inHead("LICENSE.md") && !existsSync(join(targetDir, "LICENSE.md"))) {
+      restoreFromHead("LICENSE.md");
+      notice(
+        `${label}: LICENSE.md left the template render (custom-license module) but is repo-owned; kept as-is.`,
+      );
     }
   }
 
@@ -233,9 +229,9 @@ function restoreRepoOwned(): void {
 // `split` holds the PR (open_pr.ts's section list) with the leaving content
 // named. HEAD's manifest, not the post-sync one: a path split at HEAD but
 // absent from the new render is in neither the rebuild's walk nor the tail
-// tripwire's. The two license spellings are pointwise candidates on top - a
-// pre-rename extensionless LICENSE has no manifest entry, yet its deletion
-// must still hold the PR.
+// tripwire's. LICENSE.md is a pointwise candidate on top - under the
+// custom-license module it is repo-owned with no manifest entry, yet its
+// deletion must still hold the PR.
 //
 // FAIL CLOSED when HEAD's manifest cannot be classified (missing or damaged
 // past parsing): the split map is unknown, so every deleted tracked path
@@ -507,10 +503,10 @@ export function deletedTrackedPaths(
 /** The removed-splits hold: HEAD's split declarations, split with HEAD's
  * OWN manifest (a marker rename in the update cannot mis-split the
  * previous copy - head_manifest.ts). headSplits is null when the manifest
- * is missing, damaged past parsing, or of a vintage headSplitEntries
- * refuses loudly (pre-grammar, a retired grammar, anything unknown) - all
- * target-state anomalies the fully-converted fleet manifest should never
- * present, all handled fail closed below with the refusal's message (its
+ * is missing, damaged past parsing, or of a shape headSplitEntries
+ * refuses loudly (an unknown or missing grammar) - all target-state
+ * anomalies a stamped manifest should never present, all handled fail
+ * closed below with the refusal's message (its
  * recover=recopy advice included) in the PR body. */
 function holdRemovedSplits(): void {
   let headSplits: Map<string, HeadSplit> | null = null;
@@ -557,9 +553,7 @@ function holdRemovedSplits(): void {
       }
     }
   }
-  for (const name of ["LICENSE", "LICENSE.md"]) {
-    if (!candidates.has(name)) candidates.set(name, undefined);
-  }
+  if (!candidates.has("LICENSE.md")) candidates.set("LICENSE.md", undefined);
 
   for (const [path, split] of candidates) {
     if (existsSync(join(targetDir, path))) continue; // still present: not a deletion

@@ -14,7 +14,7 @@ const START = `${"<".repeat(7)} before updating`;
 const SEP = "=".repeat(7);
 const END = `${">".repeat(7)} after updating`;
 
-const SENTINEL = "<!-- repo-platform:local-section -->";
+const SENTINEL = "<!-- other-tool:section -->";
 
 function conflict(local: string[], template: string[]): string {
   return [START, ...local, SEP, ...template, END].join("\n");

@@ -8,13 +8,11 @@
 // HEAD:.github/repo-platform-manifest.json), so a marker rename in the
 // update cannot mis-split the previous copy.
 // The manifest exists fleet-wide and stamps the one grammar
-// (managed-region; the fleet is censused post-conversion), so there is no
-// pre-manifest splitting fallback and no retired-vintage conversion: a
-// HEAD manifest declaring a grammar this sync does not read (a retired
-// vintage, a pre-grammar entry, anything unknown) is REFUSED loudly by
-// headSplitEntries - every split file goes unverifiable (manual review)
-// with the refusal's actionable recover=recopy message, never split by a
-// guessed grammar.
+// (managed-region), so there is no pre-manifest splitting fallback: a HEAD
+// manifest declaring a grammar this sync does not read (or none) is
+// REFUSED loudly by headSplitEntries - every split file goes unverifiable
+// (manual review) with the refusal's actionable recover=recopy message,
+// never split by a guessed grammar.
 //
 // After preserve_local_content.ts's structural rebuild this should never
 // fire - that is the point: a trip means the rebuild (or a step after it)
@@ -187,8 +185,8 @@ function main(argv: string[]): number {
   const entries = splitEntries(readFileSync(manifestPath, "utf-8"), manifestPath);
 
   // HEAD's manifest, for splitting HEAD's copies with HEAD's own
-  // declarations. A missing or unusable one - a pre-grammar or
-  // unknown-grammar manifest's loud refusal included - is a target-state
+  // declarations. A missing or unusable one - an unknown-grammar
+  // manifest's loud refusal included - is a target-state
   // anomaly, not this run's: every previously-present split file becomes
   // unverifiable (manual review) instead of failing the job - going red
   // here would block the very sync that could deliver the fix. The

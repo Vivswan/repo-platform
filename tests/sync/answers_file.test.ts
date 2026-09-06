@@ -27,6 +27,16 @@ function read(content: string) {
 }
 
 describe("readAnswersFile", () => {
+  test.each([
+    ["a set", "!!set\n? a\n"],
+    ["an ordered map", "!!omap\n- a: 1\n"],
+    ["a timestamp", "!!timestamp 2001-12-14\n"],
+    ["a list", "- a\n"],
+    ["a scalar", "just text\n"],
+  ])("a tagged or non-mapping top level (%s) is refused, not read as fields", (_reason, text) => {
+    expect(() => read(text)).toThrow("top level must be a mapping");
+  });
+
   test("parses commit and keeps every field for other consumers", () => {
     expect(read("_commit: abc1234\nprivate: true\n")).toEqual({
       commit: "abc1234",
