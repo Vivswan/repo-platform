@@ -423,9 +423,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
       "rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in " +
       "repo-platform's own",
     guardFile: "actions/check-typography/action.yml",
-    snippet:
-      "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ github.action_path }}/.bun-version",
-    mutated: "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2",
+    snippet: "        pin: ${{ github.action_path }}/.bun-version",
+    mutated: "        pin: .bun-version",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
       "the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup",
