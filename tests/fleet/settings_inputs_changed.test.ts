@@ -380,7 +380,10 @@ describe("main", () => {
       cwd: unpublished,
       sha: moduleCommit,
       before: sideCommit,
-      error: `the push base ${short(sideCommit)} is not an ancestor of ${short(moduleCommit)}: the range means nothing (a force-push, a foreign payload, or a tampered build stamp) - the nightly heal covers the commit`,
+      error:
+        `the push base ${short(sideCommit)} is not an ancestor of ${short(moduleCommit)}: the range means ` +
+        "nothing (a force-push, a foreign payload, or a tampered build stamp) - publish a green main " +
+        "commit by hand (dispatch post-green.yml with sha=<green main commit>) to reset the base",
     },
     {
       reason: "a build stamp naming a commit off main (tampered), even with a sound before",

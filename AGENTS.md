@@ -12,7 +12,7 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 - This repo is the push-only operator: `sync-repos.yml` pushes sync PRs into managed repos and `settings-repos.yml` applies settings. Managed repos carry no sync workflow and no sync secret; the REPO_PLATFORM_TOKEN PAT lives only here.
 - `templates/` is the source of truth: `base/` plus one folder per module, each with a `module.yml` manifest (loader: scripts/lib/module_manifests.ts). The composed `template/` tree is NOT committed on main; `bun run compose` writes a gitignored local copy.
 - The orphan `build` branch is the generated delivery channel the fleet consumes (branch_tree.ts): copier.yml, the composed `template/`, `actions/`, and the fleet-facing reusable workflows. Fleet refs pin `@build`, never `@main`.
-- Publishing the build branch is green-gated and provenance-verified: the post-green legs, including the `[fleet-sync]` PR-body directive, are in docs/all-green.md; the trust model is in docs/build-provenance.md.
+- Publishing the build branch is green-gated and provenance-verified: the post-green legs, including the `[fleet-sync: <scope>]` PR-body directive, are in docs/all-green.md; the trust model is in docs/build-provenance.md.
 - Composition rules (gates, `{# compose:<name> #}` anchors, fragments, collisions): the header of scripts/compose/compose.ts. Fleet membership: `repos.yml`. Module selection: each repo's `.repo-platform.yml`. Settings: the six-layer merge in docs/settings.md.
 
 ## Editing rules

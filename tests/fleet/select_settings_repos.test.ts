@@ -2,7 +2,11 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { declaredModules } from "../../.github/scripts/fleet/build_settings_matrix";
+import { notAdoptedNotice } from "../../.github/scripts/fleet/discovery.ts";
+import { undiscoveredWarning } from "../../.github/scripts/fleet/sync_scope.ts";
 import { tempDirs } from "../shared/temp_dir";
+
+const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
@@ -74,10 +78,12 @@ describe("select_settings_repos.ts", () => {
         '    echo "HTTP 500 from stub" >&2',
         "    exit 1",
         "  fi",
-        // Three wildcard-discovered private repos; every explicit managed
-        // persona is deliberately absent (fail-closed => private, but
-        // self-disclosed by their repos.yml entries).
-        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
+        // Three wildcard-discovered private repos and one public (open-lib:
+        // every probe answers, opts in); every explicit managed persona is
+        // deliberately absent (fail-closed => private, but self-disclosed
+        // by their repos.yml entries).
+        `  echo '[[{"full_name":"Vivswan/open-lib","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
+          `{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/hidden-nomods","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
         "  exit 0",
@@ -292,6 +298,7 @@ describe("select_settings_repos.ts", () => {
     expect(targetsOf(main).map((t) => t.repo)).toEqual([
       "Vivswan/flaky",
       "Vivswan/nomodule",
+      "Vivswan/open-lib",
       "Vivswan/repo-platform",
       "Vivswan/steady",
       "h**-s**r",
@@ -326,6 +333,13 @@ describe("select_settings_repos.ts", () => {
         name: "nomodule",
         redact_name: false,
         hide_details: true,
+        verify: "",
+      },
+      {
+        repo: "Vivswan/open-lib",
+        name: "open-lib",
+        redact_name: false,
+        hide_details: false,
         verify: "",
       },
       {
@@ -562,16 +576,204 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
+  const OPEN_LIB = {
+    repo: "Vivswan/open-lib",
+    name: "open-lib",
+    redact_name: false,
+    hide_details: false,
+    verify: "",
+  };
+  const SELF = {
+    repo: "Vivswan/repo-platform",
+    name: "repo-platform",
+    redact_name: false,
+    hide_details: false,
+    verify: "",
+  };
+  const HIDDEN_SERVER = {
+    repo: "h**-s**r",
+    name: "h**-s**r",
+    redact_name: true,
+    hide_details: true,
+    verify: expect.stringMatching(/^[0-9a-f]{32}$/),
+  };
+  const FLAKY = {
+    repo: "Vivswan/flaky",
+    name: "flaky",
+    redact_name: false,
+    hide_details: true,
+    verify: "",
+  };
+  const STEADY = {
+    repo: "Vivswan/steady",
+    name: "steady",
+    redact_name: false,
+    hide_details: true,
+    verify: "",
+  };
+  const NOMODULE = {
+    repo: "Vivswan/nomodule",
+    name: "nomodule",
+    redact_name: false,
+    hide_details: true,
+    verify: "",
+  };
+
+  // The called path (post-green's settings-fleet leg): the scope is public
+  // text off the judged main commit, so a private repo rides only under the
+  // token; the six explicit personas are absent from discovery, so they
+  // count as private (fail-closed) and every run warns once, counting. The
+  // operator repo joins when the scope selects it (it is public). Whole
+  // outcome per row: every log line, the summary, the matrix, exit code.
+  const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
+  const UNDISCOVERED = `::warning::${undiscoveredWarning(6)}`;
+  const UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(6)}\n`;
+  const ONE_UNDISCOVERED_SUMMARY = `### Settings heal warnings\n- ${undiscoveredWarning(1)}\n`;
+  const RETRY = (display: string, probe: string, detail: string) =>
+    [1, 2].map(
+      (attempt) => `${display}: ${probe} failed (attempt ${attempt}/3: ${detail}); retrying...`,
+    );
+  const GAVE_UP = (display: string, probe: string, detail: string) =>
+    `${display}: the ${probe} failed 3 times (last error: ${detail}) - not a permission or adoption answer, so the repo is skipped this run; the nightly heal retries it. If this persists, check the repo's availability and the fleet token.`;
+  const DEADAPI_DETAIL = "HTTP 502 from stub";
+  const DEADPROBE_DETAIL = "HTTP 500";
+  const HIDDEN_DEADAPI_DETAIL =
+    "HTTP 502: https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable";
+  const NOMODS_WARNING =
+    "h**-n**s: its .repo-platform.yml has no readable top-level modules list, so its settings baseline cannot be computed - the repo is skipped and its settings stay unmanaged until the file is fixed.";
+  const UNADOPTED_NOTICE = notAdoptedNotice(
+    "Vivswan/unadopted",
+    "The settings heal only manages adopted repos.",
+  );
+  // Every private persona's probe output, in enriched-row order.
+  const PRIVATE_PROBES = [
+    ...RETRY("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL)}`,
+    ...RETRY("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
+    "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
+    "Vivswan/flaky: settings adoption check failed (attempt 1/3: HTTP 502 from stub); retrying...",
+    ...RETRY("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL)}`,
+    `::warning::${NOMODS_WARNING}`,
+    `::notice::${UNADOPTED_NOTICE}`,
+  ];
+  const PRIVATE_SUMMARY =
+    UNDISCOVERED_SUMMARY +
+    [
+      GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
+      GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+      GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
+      NOMODS_WARNING,
+    ]
+      .map((line) => `- ${line}\n`)
+      .join("");
+  test.each([
+    {
+      reason: "a public slug selects it alone, and slugs alone never warn about other repos",
+      scope: "Vivswan/open-lib",
+      targets: [OPEN_LIB],
+      stdout: lines("settings targets: Vivswan/open-lib"),
+      summary: "",
+    },
+    {
+      reason: "public selects the public repos, self included",
+      scope: "public",
+      targets: [OPEN_LIB, SELF],
+      stdout: lines(UNDISCOVERED, "settings targets: Vivswan/open-lib, Vivswan/repo-platform"),
+      summary: UNDISCOVERED_SUMMARY,
+    },
+    {
+      reason: "private selects the rest, the discovered one by its hint",
+      scope: "private",
+      targets: [FLAKY, NOMODULE, STEADY, HIDDEN_SERVER],
+      stdout: lines(
+        UNDISCOVERED,
+        ...PRIVATE_PROBES,
+        "settings targets: Vivswan/flaky, Vivswan/nomodule, Vivswan/steady, h**-s**r",
+      ),
+      summary: PRIVATE_SUMMARY,
+    },
+    {
+      reason: "a token unions with a slug",
+      scope: "private, Vivswan/open-lib",
+      targets: [FLAKY, NOMODULE, OPEN_LIB, STEADY, HIDDEN_SERVER],
+      stdout: lines(
+        UNDISCOVERED,
+        ...PRIVATE_PROBES,
+        "settings targets: Vivswan/flaky, Vivswan/nomodule, Vivswan/open-lib, Vivswan/steady, h**-s**r",
+      ),
+      summary: PRIVATE_SUMMARY,
+    },
+  ])(
+    "called with $scope: $reason",
+    ({ scope, targets, stdout, summary }) => {
+      const r = run(`called-${Bun.hash(scope).toString(16)}`, {
+        env: { ONLY_REPO: scope, SOURCE_SHA: SHA },
+      });
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        output: "targets=",
+        summary,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
+      expect(targetsOf(r)).toEqual(targets);
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   test(
-    "a comma list scopes the heal to every listed target, the redacted one by its hint",
+    "a private slug on the called path is refused, counting only, naming the judged commit",
     () => {
-      // The called path's scope (post-green's settings-fleet leg after a
-      // [fleet-sync: a, b] sync) arrives as ONLY_REPO - public text off a
-      // main commit - and selects exactly those targets.
-      const r = run("list", { env: { ONLY_REPO: "Vivswan/steady, vivswan/hidden-server" } });
-      expect(r.exitCode).toBe(0);
+      const r = run("called-private", {
+        env: { ONLY_REPO: "Vivswan/open-lib, vivswan/hidden-server", SOURCE_SHA: SHA },
+      });
+      expect(r).toEqual({
+        exitCode: 1,
+        stdout: lines(
+          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
+        ),
+        stderr: "",
+        output: "",
+        summary: "",
+      });
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a dispatched comma list scopes the heal to every listed target, the redacted one by its hint",
+    () => {
+      // The typed dispatch input may name private repos; it arrives via
+      // the event payload, never as step env.
+      const eventFile = join(root, "dispatch-list-event.json");
+      writeFileSync(
+        eventFile,
+        JSON.stringify({ inputs: { repo: "Vivswan/steady, vivswan/hidden-server" } }),
+      );
+      const r = run("list", { env: { GITHUB_EVENT_PATH: eventFile } });
       // steady is an explicit managed persona absent from discovery:
-      // fail-closed private, self-disclosed by its repos.yml entry.
+      // fail-closed private, self-disclosed by its repos.yml entry - the
+      // one undiscovered repo THIS scope names, so the warning counts one.
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout: lines(
+          `::warning::${undiscoveredWarning(1)}`,
+          "settings targets: Vivswan/steady, h**-s**r",
+        ),
+        stderr: "",
+        output: "targets=",
+        summary: ONE_UNDISCOVERED_SUMMARY,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
       expect(targetsOf(r)).toEqual([
         {
           repo: "Vivswan/steady",
@@ -627,14 +829,24 @@ describe("select_settings_repos.ts", () => {
     () => {
       // A scoped run may legitimately select nothing: the settings apply
       // that follows a fleet sync must not go red for an unadopted repo.
-      const r = run("list-declined", { env: { ONLY_REPO: "Vivswan/unadopted" } });
-      expect(r.exitCode).toBe(0);
+      // Dispatched: the persona is absent from discovery, so the called
+      // path would refuse it as private before the probes run.
+      const eventFile = join(root, "dispatch-declined-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/unadopted" } }));
+      const r = run("list-declined", { env: { GITHUB_EVENT_PATH: eventFile } });
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout: lines(
+          `::warning::${undiscoveredWarning(1)}`,
+          `::notice::${UNADOPTED_NOTICE}`,
+          "settings targets: (none)",
+        ),
+        stderr: "",
+        output: "targets=",
+        summary: ONE_UNDISCOVERED_SUMMARY,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
       expect(targetsOf(r)).toEqual([]);
-      expect(r.stdout).toContain(
-        "::notice::Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch",
-      );
-      expect(r.stdout).toContain("settings targets: (none)");
-      expect(r.stdout).not.toContain("::error::");
     },
     TEST_TIMEOUT_MS,
   );
@@ -644,7 +856,8 @@ describe("select_settings_repos.ts", () => {
     () => {
       const r = run("list-empty", { env: { ONLY_REPO: "Vivswan/steady,,Vivswan/flaky" } });
       expect(r.exitCode).toBe(1);
-      expect(r.stdout).toContain("::error::the settings scope has an empty entry");
+      expect(r.stdout).toContain("::error::the scope has an empty entry");
+      expect(r.summary).toBe("");
       expect(r.output).not.toContain("targets=");
     },
     TEST_TIMEOUT_MS,

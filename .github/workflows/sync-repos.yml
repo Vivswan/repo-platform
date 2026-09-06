@@ -14,7 +14,7 @@
 # fleet-wide recover=recopy, and repo takes a comma list. The weekly cron
 # is the catch-all: repos pick up main merges through it, and it heals
 # any sync run that was missed. A merged PR opts into an immediate sync
-# with a [fleet-sync] directive (fleet_sync_marker.ts): post-green.yml's
+# with a [fleet-sync: <scope>] directive (fleet_sync_marker.ts): post-green.yml's
 # sync-fleet leg then CALLS this workflow in the merge's own CI run.
 
 name: Sync Repos
@@ -26,7 +26,7 @@ on:
     inputs:
       repo:
         description: >-
-          owner/name to sync, a comma-separated list of them, or the
+          owner/name to sync, a comma-separated list of them, the visibility tokens public and private, or the
           literal "all" - same as leaving it empty, every managed repo
           (recovery requires an explicit value)
         required: false
@@ -58,7 +58,9 @@ on:
     inputs:
       repos:
         description: >-
-          "all", or a comma-separated list of owner/name slugs
+          "all", or a comma-separated list of owner/name slugs and the
+          visibility tokens public and private (fleet/sync_scope.ts); a
+          private repo may appear only under its token here
         required: true
         type: string
       sha:
@@ -177,6 +179,9 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           ONLY_REPO: ${{ inputs.repos }}
+          # The judged commit a refused called scope names; empty
+          # on cron and dispatch runs like ONLY_REPO.
+          TARGET_SHA: ${{ inputs.sha }}
           # Scheduled runs have no inputs context: empty is
           # fine, only the literal "recopy" means recovery.
           RECOVER: ${{ inputs.recover }}

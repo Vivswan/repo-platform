@@ -211,17 +211,30 @@ describe("post-green publish wiring", () => {
       "settings-inputs",
       "settings-fleet",
     ]);
-    // read-directives mutates nothing; it reads the judged commit's
-    // directives block (never a re-derived ref) into the two outputs
-    // sync-fleet consumes.
-    const readStep = (jobs["read-directives"].steps ?? []).find((step) =>
+    // read-directives mutates nothing; it reads every commit since the last
+    // published build (never a re-derived ref) into the two outputs
+    // sync-fleet consumes. The whole wiring of that range read is pinned as
+    // one shape: the judged sha and the push's `before` (judged_range.ts's
+    // fallback base) as the step's env, and a full-history checkout, since
+    // the stamped base can sit many commits below the judged one.
+    const readSteps = jobs["read-directives"].steps ?? [];
+    const readStep = readSteps.find((step) =>
       (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
     );
     if (readStep === undefined) throw new Error("read-directives has no fleet_sync_marker.ts step");
-    expect((readStep.env as Record<string, string>).SOURCE_SHA).toBe("${{ inputs.sha }}");
-    expect(jobs["read-directives"].outputs).toEqual({
-      armed: "${{ steps.directives.outputs.armed }}",
-      repos: "${{ steps.directives.outputs.repos }}",
+    const checkout = readSteps.find((step) => (step.uses ?? "").startsWith("actions/checkout@"));
+    if (checkout === undefined) throw new Error("read-directives has no checkout step");
+    expect({
+      env: readStep.env,
+      checkout: checkout.with,
+      outputs: jobs["read-directives"].outputs,
+    }).toEqual({
+      env: { SOURCE_SHA: "${{ inputs.sha }}", BEFORE_SHA: "${{ inputs.before }}" },
+      checkout: { ref: "${{ inputs.sha }}", "fetch-depth": 0 },
+      outputs: {
+        armed: "${{ steps.directives.outputs.armed }}",
+        repos: "${{ steps.directives.outputs.repos }}",
+      },
     });
     // sync-fleet's own verification is the called sync's (green source +
     // provenance gates in resolve_refs.ts); its wiring is pinned: gated
@@ -341,6 +354,20 @@ describe("post-green publish wiring", () => {
     expect(syncRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
     expect(syncRepos).not.toContain("ONLY_REPO: ${{ inputs.repo }}");
     expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
+  });
+
+  test("ci.yml's main lane serializes without cancelling; only pull-request lanes cancel", () => {
+    // The directive-loss fix reads a RANGE because GitHub keeps one pending
+    // run per group and replaces it (a burst of three loses the middle
+    // run); cancel-in-progress must never add a second loss by killing the
+    // running main run, while PR pushes keep cancelling their stale runs.
+    const doc = parseYaml(ciYml) as {
+      concurrency: { group: string; "cancel-in-progress": string | boolean };
+    };
+    expect(doc.concurrency).toEqual({
+      group: "${{ github.workflow }}-${{ github.ref }}",
+      "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+    });
   });
 
   test("ONE publisher lane: a literal group on the publish job, and no lane on the caller", () => {

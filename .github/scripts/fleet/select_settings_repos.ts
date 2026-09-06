@@ -26,8 +26,8 @@
 // copy of every warning; GITHUB_EVENT_PATH supplies the dispatch scope
 // input (a non-empty ONLY_REPO env overrides it - post-green.yml's called
 // run passes its scope that way, and so do the test harness and local
-// runs). The scope grammar is the sync's: owner/name slugs (a bare name
-// takes the fleet owner), a comma-separated list of them, or "all".
+// runs). The scope grammar is the sync's (sync_scope.ts): owner/name slugs
+// (a bare name takes the fleet owner), public, private, or "all".
 
 import { appendFileSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
@@ -42,10 +42,18 @@ import {
   pushProbeSkipNotice,
   readDispatchRepo,
   runStage,
+  scopeSource,
   scrubSlug,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { type EnrichedRow, parseEnriched } from "./redact.ts";
+import {
+  parseScope,
+  scopeRefusal,
+  scopeSelects,
+  undiscoveredCount,
+  undiscoveredWarning,
+} from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -53,15 +61,11 @@ const owner = requireEnv("OWNER");
 const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
-// lives with readDispatchRepo. "all" is the explicit whole-fleet scope,
-// the same selection as no scope; a list is validated against the
-// discovered fleet once the rows are known (below).
-const scopeInput = readDispatchRepo(owner);
-const scope = scopeInput === "" || scopeInput === "all" ? null : scopeInput.split(",");
-if (scope?.includes("")) {
-  console.log(
-    "::error::the settings scope has an empty entry: pass owner/name slugs separated by commas, with no stray or trailing comma",
-  );
+// lives with readDispatchRepo. A list is validated against the discovered
+// fleet once the rows are known (below).
+const scope = parseScope(readDispatchRepo(owner));
+if (scope.kind === "error") {
+  console.log(`::error::${scope.message}`);
   process.exit(1);
 }
 
@@ -202,33 +206,33 @@ const enriched = parseEnriched(
   "select_settings_repos: enriched rows",
 );
 
-// Every scope entry must name a repo the fleet knows - a selected row or
-// the operator repo itself - or the whole run fails: a partial match
-// would silently narrow the scope, and a typo would heal nothing while
-// looking green. Counts only: an operator-typed entry may be a private
-// slug and this print is publicly readable. A known repo the probes
-// then DROP (not enrolled, not adopted) is a routine notice, so a called
-// scope may legitimately select nothing.
-if (scope !== null) {
-  const known = new Set([
-    ...enriched.rows.map((row) => row.repo.toLowerCase()),
-    selfRepo.toLowerCase(),
-  ]);
-  const missing = scope.filter((entry) => !known.has(entry)).length;
-  if (missing > 0) {
-    console.log(
-      `::error::${missing} of ${scope.length} scoped repos matched no managed repository ` +
-        `(values withheld - they may be private slugs): a repo you scoped to is not in managed ` +
-        `(or the discovered list), or it is listed in exclude; check the spelling (matching ` +
-        `ignores case)`,
-    );
-    process.exit(1);
-  }
+// The scope's refusals (sync_scope.ts, counts only): every slug must name
+// a repo the fleet knows - a selected row or the operator repo itself -
+// and a called scope may not name a private one. A known repo the probes
+// then DROP (not enrolled, not adopted) is a routine
+// notice, so a called scope may legitimately select nothing. Visibility
+// is discovery's, fail-closed; the operator repo is this very repository,
+// disclosed by every log line, so it never counts as private here.
+const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
+visibility.set(selfRepo.toLowerCase(), false);
+const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
+const undiscovered = undiscoveredCount(
+  scope,
+  enriched.rows.map((row) => row.repo),
+  new Set(visibility.keys()),
+);
+if (undiscovered > 0) warn(undiscoveredWarning(undiscovered));
+const known = new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)]));
+known.set(selfRepo.toLowerCase(), false);
+const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"));
+if (refusal !== null) {
+  console.log(`::error::${refusal}`);
+  process.exit(1);
 }
 
 const targets: EnrichedRow[] = [];
 for (const row of enriched.rows) {
-  if (scope !== null && !scope.includes(row.repo.toLowerCase())) continue;
+  if (!scopeSelects(scope, row.repo, isPrivate(row.repo))) continue;
   const { repo, display } = row;
   // The operator repo rides in as the matrix builder's --self row (it is
   // not adopted, so the adoption probe would drop it here).
@@ -256,7 +260,7 @@ const excluded = parseJson(
 ) as string[];
 // A scoped run is a scoped heal; the fleet-wide exclusion reminders
 // belong to the full runs.
-const sweepable = scope === null ? excluded : [];
+const sweepable = scope.kind === "all" ? excluded : [];
 for (const repo of sweepable) {
   const probeResult = captureNetwork([
     "gh",
@@ -293,19 +297,18 @@ for (const repo of sweepable) {
   }
 }
 
-// The matrix joins the probed opt-in list with the operator repo's own
-// row; a builder failure invalidates the whole selection and exits 1.
-// capture() pipes stderr (the hang bound needs the pipe); re-emit it whole
-// with writeSync - an async stream write racing the process.exit below
-// truncates at the pipe buffer (~64 KiB).
+// The matrix joins the probed opt-in list (already scoped above) with the
+// operator repo's own row when the scope selects it; a builder failure
+// invalidates the whole selection and exits 1. capture() pipes stderr (the
+// hang bound needs the pipe); re-emit it whole with writeSync - an async
+// stream write racing the process.exit below truncates at the pipe buffer
+// (~64 KiB).
 const matrix = capture([
   "bun",
   ".github/scripts/fleet/build_settings_matrix.ts",
   "--targets",
   join(runnerTemp, "settings_targets.json"),
-  "--self",
-  selfRepo,
-  ...(scope === null ? [] : ["--only", scope.join(",")]),
+  ...(scopeSelects(scope, selfRepo, false) ? ["--self", selfRepo] : []),
 ]);
 writeSync(2, matrix.stderr);
 if (matrix.exitCode !== 0) {

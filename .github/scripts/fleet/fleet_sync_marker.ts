@@ -1,40 +1,78 @@
 #!/usr/bin/env bun
-// The merged commit's directives block: the PR body's FIRST paragraph
-// (a squash merge writes subject, blank line, PR body), one bracketed
-// directive per line, each optionally fenced in one pair of backticks -
-//
-//   [fleet-sync]                      sync the whole fleet now
-//   `[fleet-sync: owner/a, owner/b]`  sync those repos now
-//
-// Squash merges carry the PR body verbatim (.github/settings-override.yml
-// pins PR_BODY), so post-green.yml's read-directives leg reads the opt-in
-// from the commit alone and hands the scope to its sync-fleet leg.
-//
-// A block-shaped paragraph or a [fleet-sync anywhere else, bad backtick
-// fencing, an unknown or duplicated keyword, an empty scope, or a bad slug
-// FAILS the leg: a misread opt-in is loud, never a silent weekly-cron wait.
-//
-// Env: SOURCE_SHA (the judged commit), GITHUB_OUTPUT (armed, repos).
+// The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
+// (sync_scope.ts's grammar; only a bare `all` takes, and requires, a trailing justification), read over
+// judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
+// an older one already failed its own run and is a counts-only warning here.
 
-import { fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
-import { isSlug } from "./repos_registry.ts";
+import {
+  type DiffBase,
+  judgedRangeEnv,
+  rangeCommits,
+  rangeLabel,
+  resolveBase,
+} from "./judged_range.ts";
+import { parseScope } from "./sync_scope.ts";
 
 export type Directives =
   | { kind: "none" }
-  | { kind: "fleet-sync"; repos: string[] }
+  | { kind: "fleet-sync"; scope: "all" | string[] }
   | { kind: "error"; errors: string[] };
 
 const KEYWORD = "fleet-sync";
-// A block line as written: brackets, any backticks around them. Whether
-// the backticks are one balanced pair is judged per line by unwrap().
+// A block line: brackets with any backticks around them (one balanced pair
+// is judged by unwrap()). Trailing text is part of the line only behind a
+// BARE fleet-sync bracket: `[Context] ordinary prose` stays prose, and so
+// does a code span followed by text, which is how a body mentions the grammar.
 const BLOCK_LINE = /^`*\[[^[\]]*\]`*$/;
+const JUSTIFIED_LINE = /^(\[\s*fleet-sync\b[^[\]]*\])\s+(\S.*)$/i;
 const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
+const NEEDS_REASON =
+  "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
+
+/** `line` without its code spans (CommonMark: a run of N backticks closes at the next run of
+ *  exactly N; an unclosed run is literal text). A body may describe the grammar in code spans; a
+ *  bare [fleet-sync outside the block may not. Linear: the runs are tokenized once and each one's
+ *  next equal-length run is found in one right-to-left pass. */
+function withoutCodeSpans(line: string): string {
+  const runs: { start: number; end: number }[] = [];
+  for (let i = 0; i < line.length; ) {
+    if (line[i] !== "`") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < line.length && line[j] === "`") j++;
+    runs.push({ start: i, end: j });
+    i = j;
+  }
+  const nextSame = new Array<number>(runs.length).fill(-1);
+  const nearest = new Map<number, number>();
+  for (let r = runs.length - 1; r >= 0; r--) {
+    const length = runs[r].end - runs[r].start;
+    nextSame[r] = nearest.get(length) ?? -1;
+    nearest.set(length, r);
+  }
+  let out = "";
+  let cursor = 0;
+  for (let r = 0; r < runs.length; ) {
+    const close = nextSame[r];
+    if (close === -1) {
+      r++;
+      continue;
+    }
+    out += line.slice(cursor, runs[r].start);
+    cursor = runs[close].end;
+    r = close + 1;
+  }
+  return out + line.slice(cursor);
+}
 
 function paragraphs(body: string): string[][] {
   const lines = body
@@ -69,7 +107,8 @@ function unwrap(line: string): string | null {
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  const isBlockShaped = (para: string[]) => para.every((line) => BLOCK_LINE.test(line));
+  const isBlockShaped = (para: string[]) =>
+    para.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
     paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
 
@@ -78,7 +117,7 @@ export function parseDirectives(body: string): Directives {
     if (block !== null && index === BLOCK_INDEX) return;
     const shaped = isBlockShaped(para);
     for (const line of para) {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(line)) {
+      if (shaped || FLEET_SYNC_ANYWHERE.test(withoutCodeSpans(line))) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
     }
@@ -86,9 +125,11 @@ export function parseDirectives(body: string): Directives {
   if (block === null) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
 
   const seen = new Set<string>();
-  let repos: string[] = [];
+  let scope: "all" | string[] = [];
   for (const line of block) {
-    const directive = unwrap(line);
+    const justified = JUSTIFIED_LINE.exec(line);
+    const [bracketed, reason] = justified === null ? [line, ""] : [justified[1], justified[2]];
+    const directive = unwrap(bracketed);
     if (directive === null) {
       errors.push(
         `"${line}" has bad backtick fencing: wrap the whole directive in one pair, \`[keyword]\`, or none`,
@@ -110,57 +151,94 @@ export function parseDirectives(body: string): Directives {
       continue;
     }
     seen.add(keyword);
-    const scope = (match[2] ?? "").trim();
-    if (match[2] !== undefined && scope === "") {
+    const value = (match[2] ?? "").trim();
+    if (match[2] === undefined) {
+      errors.push(`"${line}": ${NEEDS_REASON}`);
+      continue;
+    }
+    // parseScope reads "" as the whole fleet (an empty dispatch input); on a
+    // directive it is a typo, refused here before the shared grammar.
+    if (value === "") {
       errors.push(
-        `"${line}" has an empty scope: write [${keyword}] for the whole fleet, or list owner/name slugs`,
+        `"${line}" has an empty scope: write [${keyword}: public], [${keyword}: private], owner/name slugs, or [${keyword}: all] <justification>`,
       );
       continue;
     }
-    if (scope === "") continue;
-    const entries = scope.split(",").map((entry) => entry.trim());
-    if (entries.includes("")) {
-      errors.push(`"${line}" has an empty entry in its list`);
+    // The one scope grammar: what the plans accept, the leg accepts. Its
+    // messages carry counts, never entries, so the line is not quoted here.
+    const parsed = parseScope(value);
+    if (parsed.kind === "error") {
+      errors.push(`[${keyword}] scope: ${parsed.message}`);
       continue;
     }
-    const folded = [...new Set(entries.map((entry) => entry.toLowerCase()))];
-    if (folded.includes("all")) {
-      if (folded.length > 1) {
-        errors.push(`"${line}" mixes "all" with slugs: write [${keyword}] or the slugs alone`);
-      }
+    if (parsed.kind === "all") {
+      if (reason === "") errors.push(`"${line}": ${NEEDS_REASON}`);
+      else scope = "all";
       continue;
     }
-    const bad = entries.filter((entry) => !isSlug(entry));
-    if (bad.length > 0) {
-      errors.push(`"${line}" lists entries that are not owner/name slugs: ${bad.join(", ")}`);
+    if (reason !== "") {
+      errors.push(
+        `"${line}" carries text after the directive: only [${keyword}: all] takes a justification`,
+      );
       continue;
     }
-    repos = folded;
+    scope = [...parsed.visibility, ...parsed.slugs];
   }
   if (errors.length > 0) return { kind: "error", errors };
-  return { kind: "fleet-sync", repos };
+  return { kind: "fleet-sync", scope };
 }
 
 function main(): number {
-  const sha = requireEnv("SOURCE_SHA");
-  const parsed = parseDirectives(mustCapture(["git", "log", "-1", "--format=%B", sha]));
-  switch (parsed.kind) {
-    case "error":
-      return fail(parsed.errors);
-    case "none":
-      notice(
-        `${sha.slice(0, 12)} carries no directives block; the fleet picks it up on the weekly sync`,
-      );
-      setOutput("armed", "false");
-      return 0;
-    case "fleet-sync": {
-      const scope = parsed.repos.length === 0 ? "all" : parsed.repos.join(",");
-      notice(`fleet-sync directive on ${sha.slice(0, 12)}: syncing ${scope} now`);
-      setOutput("armed", "true");
-      setOutput("repos", scope);
-      return 0;
-    }
+  const { sha, before } = judgedRangeEnv();
+  const cwd = process.cwd();
+  let base: DiffBase;
+  try {
+    base = resolveBase(cwd, sha, before);
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
   }
+  if (base.kind !== "build-stamp") {
+    notice(
+      `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading the push alone, from ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
+    );
+  }
+  let armed = false;
+  let all = false;
+  const repos = new Set<string>();
+  for (const commit of rangeCommits(cwd, sha, base)) {
+    const parsed = parseDirectives(
+      mustCapture(["git", "-C", cwd, "log", "-1", "--format=%B", commit]),
+    );
+    if (parsed.kind === "none") continue;
+    if (parsed.kind === "error") {
+      // Only the judged commit's body is this run's fault; an older one
+      // failed its own run, and failing here would poison every later
+      // range until the build tree changes.
+      if (commit === sha) {
+        return fail(parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
+      }
+      warning(
+        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}; its own run was red) and contributes nothing to this range`,
+      );
+      continue;
+    }
+    armed = true;
+    if (parsed.scope === "all") all = true;
+    else for (const entry of parsed.scope) repos.add(entry);
+    const scope = parsed.scope === "all" ? "all" : parsed.scope.join(",");
+    notice(`fleet-sync directive on ${commit.slice(0, 12)}: ${scope}`);
+  }
+  const range = rangeLabel(sha, base);
+  if (!armed) {
+    notice(`${range} carries no directives block; the fleet picks it up on the weekly sync`);
+    setOutput("armed", "false");
+    return 0;
+  }
+  const scope = all ? "all" : [...repos].join(",");
+  notice(`${range} opted in: syncing ${scope} now`);
+  setOutput("armed", "true");
+  setOutput("repos", scope);
+  return 0;
 }
 
 if (import.meta.main) {
