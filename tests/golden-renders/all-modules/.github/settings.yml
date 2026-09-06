@@ -1,11 +1,11 @@
 ---
 # This repository's OWN settings, applied by Vivswan/repo-platform
-# (its central settings run: nightly, and after a green push there that
-# changes settings inputs or syncs the fleet). Rendered once, repo-owned: template sync never
-# rewrites it. Fleet defaults merge UNDER this file - keys here win, null
-# opts out, labels replace by name, rulesets MERGE by name; both must stay
-# lists. The fleet invariants (squash-only merging, the protection
-# rulesets) sit ABOVE and cannot be overridden. Undeclared labels are
+# (its central settings run: after every green main merge there and
+# nightly). Rendered once, repo-owned: template sync never rewrites it.
+# Fleet defaults merge UNDER this file - keys here win, null opts out,
+# labels replace by name, rulesets MERGE by name; both must stay lists.
+# The fleet invariants (squash-only merging, the protection rulesets)
+# sit ABOVE and cannot be overridden. Undeclared labels are
 # deleted by the apply; undeclared rulesets are left alone.
 
 repository:

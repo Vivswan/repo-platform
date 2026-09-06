@@ -39,7 +39,7 @@ One implementation ([merge_settings_layers.ts](../.github/scripts/fleet/merge_se
 
 | Entry | Effect |
 |---|---|
-| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | when a settings input changed since the last published green main, every target is applied - [fleet/settings_inputs_changed.ts](../.github/scripts/fleet/settings_inputs_changed.ts) owns the path list; after a fleet-sync directive synced repos, those repos are applied in the same run |
+| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | every target is applied on every green main run, after the run's fleet sync when a directive armed one - the apply is idempotent, so no diff decides it |
 | Nightly cron | heals out-of-band drift |
 | Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, a comma list of them, or `all` - an entry naming no managed repo fails the run, a repo without a `.repo-platform.yml` is skipped with a notice |
 
@@ -145,7 +145,7 @@ The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts 
 
 Every render carries `.github/settings.yml` once (base content): the four identity keys seeded from the copier answers (`homepage` and `topics` are asked of every repository; a sync rendering the starter for answers that never recorded them seeds both from the live repository), plus commented examples for local labels and rulesets. It is repo-owned from then on (`_skip_if_exists`).
 
-Nothing in the repository applies it: settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) nightly, and after a green push to repo-platform's main that changes settings inputs or runs a fleet sync ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token.
+Nothing in the repository applies it: settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) after every green main merge there and nightly ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token.
 
 ## Opting out
 
