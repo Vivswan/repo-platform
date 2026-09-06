@@ -12,14 +12,17 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
+import { MANIFEST_NAME } from "../../actions/shared/manifest.ts";
 
-const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
+const REPO_ROOT = join(import.meta.dir, "../..");
+const SCRIPT = join(REPO_ROOT, ".github/scripts/sync/commit_push.ts");
 const SENTINEL = "ghp_SENTINEL";
 const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@github.com/o/r.git/': The requested URL returned error: 403`;
 
@@ -100,14 +103,19 @@ beforeAll(() => {
   chmodSync(join(stubBin, "git"), 0o755);
 });
 
-function runCommitPush(mode: string, hideDetails: string, temp: Record<string, string> = {}) {
+function runCommitPush(
+  mode: string,
+  hideDetails: string,
+  temp: Record<string, string> = {},
+  work: string = join(scratch, "work"),
+) {
   const runnerTemp = mkdtempSync(join(scratch, "rt-"));
   writeFileSync(join(runnerTemp, "gh-output.txt"), "");
   for (const [name, content] of Object.entries(temp)) {
     writeFileSync(join(runnerTemp, name), content);
   }
   const result = capture([process.execPath, SCRIPT], {
-    cwd: join(scratch, "work"),
+    cwd: work,
     env: {
       PATH: `${stubBin}:${process.env.PATH}`,
       STUB_MODE: mode,
@@ -227,34 +235,120 @@ describe("commit_push failure diagnostics", () => {
   });
 });
 
+// A public render of the base plus release-please, complete enough for
+// validate-template: every roster path with its managed header or marker
+// pair, the single-call ci.yml gate, and a manifest stamped the way the
+// workflow's stamping step leaves it before commit_push runs. Split files
+// carry nothing outside their marker pair, so every hash is the sha256 of
+// the whole file.
+const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
+const HB = "# BEGIN REPO-PLATFORM MANAGED";
+const HE = "# END REPO-PLATFORM MANAGED";
+const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+const E = "<!-- END REPO-PLATFORM MANAGED -->";
+const COMMIT = "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01";
+const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+const managed = (content: string) => ({
+  content,
+  entry: `{"class": "managed", "hash": "${sha256(content)}"}`,
+});
+const split = (begin: string, end: string, body: string) => {
+  const content = `${begin}\n${body}${end}\n`;
+  return {
+    content,
+    entry: `{"class": "split", "grammar": "managed-region", "begin": "${begin}", "end": "${end}", "hash": "${sha256(content)}"}`,
+  };
+};
+const RENDER: Record<string, { content: string; entry: string }> = {
+  ".repo-platform.yml": { content: "modules: [release-please]\n", entry: '{"class": "starter"}' },
+  ".github/.copier-answers.yml": managed(
+    `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\nprivate: false\n`,
+  ),
+  ".editorconfig": split(HB, HE, "root = true\n"),
+  ".gitattributes": split(HB, HE, "* text=auto eol=lf\n"),
+  ".gitignore": split(HB, HE, ""),
+  ".github/CODEOWNERS": split(HB, HE, "* @vivswan\n"),
+  ".github/SECURITY.md": split(B, E, "# Security policy\n"),
+  "CONTRIBUTING.md": split(B, E, "# Contributing\n"),
+  "LICENSE.md": split(B, E, "# License\n"),
+  ".github/CODE_OF_CONDUCT.md": managed(`${MANAGED_HEADER}# Code of Conduct\n`),
+  ".github/dependabot.yml": managed(`${MANAGED_HEADER}version: 2\nupdates: []\n`),
+  ".typography-allow": managed(MANAGED_HEADER),
+  ".yamllint": managed(`${MANAGED_HEADER}extends: default\n`),
+  ".github/workflows/ci.yml": managed(
+    [
+      MANAGED_HEADER.trimEnd(),
+      "name: CI",
+      "on: push",
+      "jobs:",
+      "  checks:",
+      "    uses: ./.github/workflows/checks.yml",
+      "  ci:",
+      "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
+      "  all-green:",
+      "    needs: [checks, ci]",
+      "    if: always()",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: Vivswan/repo-platform/actions/all-green@build",
+      "        with:",
+      "          needs: ${{ toJSON(needs) }}",
+      "",
+    ].join("\n"),
+  ),
+  ".github/workflows/release.yml": managed(`${MANAGED_HEADER}name: release\n`),
+};
+const WITHHELD_WORKFLOW = ".github/workflows/release.yml";
+const RENDER_ENTRIES: Record<string, string> = {
+  [MANIFEST_NAME]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+  ...Object.fromEntries(Object.entries(RENDER).map(([rel, { entry }]) => [rel, entry])),
+};
+const manifestOf = (entries: Record<string, string>) =>
+  `{\n  "files": {\n${Object.entries(entries)
+    .map(([rel, entry]) => `    ${JSON.stringify(rel)}: ${entry}`)
+    .join(",\n")}\n  }\n}\n`;
+
 describe("commit_push Workflows-scope withhold reconciliation", () => {
-  test("a withheld ADDED workflow is removed and its manifest entry restamped hash-null with the withheld marker", () => {
+  test("a withheld ADDED workflow is removed, its entry restamped hash-null with the marker, and the pushed tree validates", () => {
     // The manifest must describe the tree that is pushed: the added
-    // workflow the token could not create is gone, so its entry stamps
-    // hash-null and carries the marker validate-template reads as the one
-    // legitimate listed-but-missing state; every other entry restamps to
-    // its on-disk hash with no marker.
-    const targetDir = join(scratch, "work", "target");
-    mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
-    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules: []\n");
-    writeFileSync(join(targetDir, ".github/.copier-answers.yml"), "private: false\n");
-    writeFileSync(join(targetDir, ".github/workflows/release.yml"), "name: release\n");
-    writeFileSync(join(targetDir, ".github/workflows/ci.yml"), "name: ci\n");
-    const manifest = (release: string, ci: string) =>
-      `{\n  "files": {\n    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},\n    ".github/workflows/release.yml": {"class": "managed", "hash": ${release}},\n    ".github/workflows/ci.yml": {"class": "managed", "hash": ${ci}}\n  }\n}\n`;
-    writeFileSync(join(targetDir, ".github/repo-platform-manifest.json"), manifest("null", "null"));
-    const result = runCommitPush("withhold-added", "false");
-    expect(result.exitCode).toBe(0);
-    expect(existsSync(join(targetDir, ".github/workflows/release.yml"))).toBe(false);
-    expect(readFileSync(join(targetDir, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
-      manifest(
-        'null, "withheld": true',
-        `"${new Bun.CryptoHasher("sha256").update("name: ci\n").digest("hex")}"`,
-      ),
-    );
-    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toBe(
-      ".github/workflows/release.yml\n",
-    );
+    // workflow the token could not create is gone, so its stamped hash
+    // gives way to null plus the marker validate-template reads as the one
+    // legitimate listed-but-missing state, every other entry keeps its
+    // on-disk hash, and the post-withhold re-validation of that tree
+    // passes with the withheld advisory as its only finding. The validator
+    // checkout the workflow places at validator/ is this repository.
+    const work = mkdtempSync(join(scratch, "work-"));
+    const targetDir = join(work, "target");
+    for (const [rel, { content }] of Object.entries(RENDER)) {
+      mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
+      writeFileSync(join(targetDir, rel), content);
+    }
+    writeFileSync(join(targetDir, MANIFEST_NAME), manifestOf(RENDER_ENTRIES));
+    symlinkSync(REPO_ROOT, join(work, "validator"));
+    const result = runCommitPush("withhold-added", "false", {}, work);
+    expect({
+      exitCode: result.exitCode,
+      withheldFileExists: existsSync(join(targetDir, WITHHELD_WORKFLOW)),
+      manifest: readFileSync(join(targetDir, MANIFEST_NAME), "utf-8"),
+      outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
+      withheld: readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8"),
+    }).toEqual({
+      exitCode: 0,
+      withheldFileExists: false,
+      manifest: manifestOf({
+        ...RENDER_ENTRIES,
+        [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
+      }),
+      outputs: "pushed=true\nvalidation=ok\n",
+      withheld: `${WITHHELD_WORKFLOW}\n`,
+    });
+    const diagnostics = result.stdout
+      .split("\n")
+      .filter((line) => /^(advisory|error): /.test(line));
+    expect(diagnostics).toEqual([
+      `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`,
+    ]);
+    expect(result.stdout).toContain("Validation passed.");
   });
 
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {

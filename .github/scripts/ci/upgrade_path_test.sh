@@ -697,13 +697,12 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 echo "recovery recopy OK: skip_if_exists, repo-owned files, and repo-local content preserved, managed files re-rendered"
 
 # --- Visibility flip (public -> private) --------------------------------
-# The transition machinery issue #25's fix leans on: an update where the
-# live visibility changed between syncs must drop the conditional-filename
-# CONTRIBUTING.md render, leave the repo-owned settings.yml starter alone
-# (the managed baseline follows live visibility centrally), and
-# strip the codeql machinery from ci.yml. Runs on a fresh public fixture
-# through the same workflow scripts as the main leg, with settings-sync
-# KEPT selected - only the visibility changes.
+# A visibility flip between syncs is carried by the update itself: it must
+# drop the conditional-filename CONTRIBUTING.md render, leave the repo-owned
+# settings.yml starter alone (the managed baseline follows live visibility
+# centrally), and strip the codeql machinery from ci.yml. Runs on a fresh
+# public fixture through the same workflow scripts as the main leg, with
+# settings-sync KEPT selected - only the visibility changes.
 VIS="$RUN_DIR/upgrade-vis"
 VIS_WORK="$RUN_DIR/upgrade-vis-work"
 mkdir -p "$VIS_WORK"
@@ -940,9 +939,9 @@ insert_above_sentinel "$agents_tpl" "Split-rebuild fixture managed line (agents)
 insert_above_sentinel "$NEXT_SPLIT/template/.github/SECURITY.md.jinja" \
   "Split-rebuild fixture managed line (security)."
 # The mirror leg's template change: the fleet LICENSE's managed region
-# moves, so the materialized mirrors below must carry the NEW bytes (the
-# skills#82 class: the sync rewrote only the rendered source and every
-# LICENSE template change re-broke the byte-identical copies).
+# moves, so the materialized mirrors below must carry the NEW bytes (a
+# sync that rewrote only the rendered source once left every declared
+# byte-identical copy stale on each LICENSE template change).
 insert_above_sentinel "$NEXT_SPLIT/template/LICENSE.md.jinja" \
   "Split-rebuild fixture managed line (license)."
 awk '{ print } $0 == "# BEGIN REPO-PLATFORM MANAGED" && !done { print "split-rebuild-fixture.tmp"; done = 1 }' \
@@ -1090,7 +1089,7 @@ if grep -rIqF "$split_marker" . --exclude-dir=.git; then
 fi
 echo "split-file rebuild OK: sides byte-preserved, managed regions byte-equal to render-new, managed-region edit reset and flagged"
 
-# Mirror materialization (the skills#82 class): every declared mirror is
+# Mirror materialization: every declared mirror is
 # byte-identical to the DELIVERED LICENSE.md - the fresh managed-region
 # change AND the repo-owned tail included - and the glob created the copy
 # the new skill folder never had, with no declaration edit. The PR-body

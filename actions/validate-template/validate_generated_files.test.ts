@@ -15,7 +15,7 @@ import { BASE_OWNERSHIP, type BaseOwnedFile, MODULE_OWNERSHIP } from "./ownershi
 const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 
 // The smallest tree the validator accepts: registration files (opening with
-// the managed header check 8 requires), the marked .gitignore, and a ci.yml
+// the managed header checks/headers.ts requires), the marked .gitignore, and a ci.yml
 // carrying the all-green + typography convention.
 const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
 const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
@@ -1113,7 +1113,7 @@ describe("release-please-config.json never pins a version", () => {
     }
   });
 
-  test("a conflict-marked config gets check 4's report alone, not a JSON error on top", () => {
+  test("a conflict-marked config gets the conflict-marker check's report alone, not a JSON error on top", () => {
     const r = runValidator({
       "release-please-config.json": `<<<<<<< HEAD\n${config({})}\n=======\n${config({ "release-as": "4.0.0" })}\n>>>>>>> theirs\n`,
     });
@@ -1753,8 +1753,8 @@ describe("ownership-manifest byte parity", () => {
     const entries = { ...SELF_ENTRY, ".github/workflows/ci.yml": '{"class": "starter"}' };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
-      // A drifted ci.yml that keeps the managed header, so neither check 8
-      // nor the (now skipped) hash can be what flags it.
+      // A drifted ci.yml that keeps the managed header, so neither the
+      // headers check nor the (now skipped) hash can be what flags it.
       ".github/workflows/ci.yml": `${BASELINE[".github/workflows/ci.yml"]}# local tweak\n`,
     });
     expect(exitCode).toBe(1);
@@ -2076,7 +2076,7 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(`${MANIFEST}: does not parse as a manifest`);
   });
 
-  test("a conflict-marked manifest is check 4's report, with no parity double", () => {
+  test("a conflict-marked manifest is the conflict-marker check's report, with no parity double", () => {
     const conflicted = [
       `${"<".repeat(7)} before updating`,
       manifestOf(stampedBaseline()),

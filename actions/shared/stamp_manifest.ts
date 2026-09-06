@@ -42,9 +42,9 @@
 // side before parsing - the direction resolve_copier_conflicts.ts uses -
 // and the stamp then rewrites every hash anyway.
 //
-// Data problems (missing or unparseable manifest) warn and exit 0 on the
-// argument-free re-stamp - validate-template's parity check reports an
-// unstamped manifest. Under --commit the provenance pair (answers line +
+// Data problems (a missing or unparseable manifest, entries the line
+// rewrite cannot reach) warn and exit 0 on the argument-free re-stamp -
+// validate-template's parity check reports an unstamped manifest. Under --commit the provenance pair (answers line +
 // manifest slot) must never disagree, so a manifest that cannot take the
 // stamp fails the render before either file is touched. Entry classes are
 // trusted as written; the validator's roster cross-check reports a
@@ -241,37 +241,52 @@ export function normalizeSymlinkTargets(
   return rewritten;
 }
 
-/** Stamp the manifest text against the tree at `root`: conflict blocks
- *  resolve toward the template side, then every entry line's hash token is
- *  replaced with the honest value, and the self entry's commit token with
- *  the render's recorded _commit (its hash stays null - see the manifest's
- *  $comment). `withheld` names the paths the sync could not deliver (its
- *  push token lacked the Workflows scope, so it removed the added workflow
- *  files before pushing): each of those whose file is indeed absent gets
- *  `"withheld": true`, which validate-template reads as the one legitimate
- *  listed-but-missing state. The marker then stays for as long as the
- *  file stays undelivered (copier update honours the committed absence, so
- *  the entry is still withheld after every later stamp) and is stripped
- *  the moment a stamp can hash the file. Only withholdable paths (the
- *  directory the Workflows scope gates) ever carry it; any other withheld
- *  field - elsewhere, on a hashed entry, or with another value - is a hand
- *  edit and goes. Returns the input unchanged with a problem message when
- *  parseManifestFiles rejects the text (unparseable, malformed entries,
- *  duplicated entry lines). Reported soft, never thrown: this function's
- *  contract (see the file header) is that a stamping gap warns and lets
- *  the validator's parity check report it in a DELIVERED PR - and this
- *  same code ships standalone as copier's after-hook, where the manifest
- *  being stamped is copier's MERGED result (the exact place a bad
- *  three-way merge corrupts it), so a throw there would fail the render,
- *  turn the sync red, and deliver no PR for a human to fix the corruption
- *  in. */
+/** One entry line's object, or null when the body is not one JSON object:
+ *  two entries joined on one line are valid manifest JSON, yet the
+ *  greedy entry-line layout reads both as a single body. */
+function entryFields(body: string): Record<string, JsonValue> | null {
+  try {
+    return JSON.parse(body) as Record<string, JsonValue>;
+  } catch {
+    return null;
+  }
+}
+
+/** How many `files` entries the line-by-line rewrite never reaches: an
+ *  entry spread over several lines, or joined with another on one line.
+ *  A count, never the paths - manifest keys are target-repo content that
+ *  reaches public logs. */
+function unreachedEntries(files: Record<string, unknown>, resolved: string): number {
+  const reached = new Set<string>();
+  for (const line of resolved.split("\n").map(parseEntry)) {
+    if (line !== null && entryFields(line.body) !== null) reached.add(line.path);
+  }
+  return Object.keys(files).filter((path) => !reached.has(path)).length;
+}
+
+/** The diagnosis both modes print for a positive unreachedEntries count. */
+function unreachedProblem(unreached: number): string {
+  const noun =
+    unreached === 1
+      ? "files entry not on a one-object line of its own"
+      : "files entries not on one-object lines of their own";
+  return `has ${unreached} ${noun}, which the stamper cannot rewrite`;
+}
+
+/** The text with every reachable entry line's hash token restamped from
+ *  the tree at `root`, the self entry's commit slot from the recorded
+ *  _commit, and `"withheld": true` (withheldMarkerValid's one shape) on the
+ *  hash-null entries of the `withheld` paths. Soft failures only: a text
+ *  the parser rejects comes back unchanged with its problem; entries the
+ *  line rewrite cannot reach come back unchanged, counted in
+ *  `unreachedEntries`. */
 export function stampManifestText(
   text: string,
   root: string,
   withheld: ReadonlySet<string> = new Set(),
-): { out: string; problem: string | null } {
+): { out: string; problem: string | null; unreachedEntries: number } {
   const parsed = parseManifestFiles(text);
-  if (parsed.problem !== null) return { out: text, problem: parsed.problem };
+  if (parsed.problem !== null) return { out: text, problem: parsed.problem, unreachedEntries: 0 };
   const { files, resolved } = parsed;
   const commit = recordedCommit(root);
   const lines = resolved.split("\n").map((line) => {
@@ -280,12 +295,12 @@ export function stampManifestText(
     const { indent, path, quotedPath, comma } = parsedLine;
     const entry = files[path];
     if (entry === undefined) return line;
-    // The body is the one-line object parseManifestFiles already accepted,
-    // so it parses; its field order is kept. Entries without a hash field
-    // (starters, and legacy "mergeable" entries from renders that predate
-    // the class's retirement) are left alone apart from a stray marker,
-    // which no hash-less entry may carry.
-    const fields = JSON.parse(parsedLine.body) as Record<string, JsonValue>;
+    const fields = entryFields(parsedLine.body);
+    if (fields === null) return line;
+    // Field order is kept. Entries without a hash field (starters, and
+    // legacy "mergeable" entries from renders that predate the class's
+    // retirement) are left alone apart from a stray marker, which no
+    // hash-less entry may carry.
     if (!("hash" in fields)) {
       if (!("withheld" in fields)) return line;
       delete fields.withheld;
@@ -310,7 +325,11 @@ export function stampManifestText(
     if (path === MANIFEST_NAME && "commit" in fields) fields.commit = commit;
     return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
   });
-  return { out: lines.join("\n"), problem: null };
+  return {
+    out: lines.join("\n"),
+    problem: null,
+    unreachedEntries: unreachedEntries(files, resolved),
+  };
 }
 
 /** The manifest-gated normalization entry main() runs: parse (which
@@ -391,7 +410,7 @@ function canonicalSelfBody(entry: Record<string, unknown>): string {
   return `{${SELF_ENTRY_KEYS.map((key) => `"${key}": ${JSON.stringify(entry[key])}`).join(", ")}}`;
 }
 
-/** Why manifest `text` cannot carry a provenance stamp, or null. Judged
+/** Why manifest `text` cannot take the --commit stamp, or null. Judged
  *  STRUCTURALLY on the entry consumers read - `files[MANIFEST_NAME]` of
  *  the parsed JSON, which must carry exactly SELF_ENTRY_KEYS - and then on
  *  the lines the stamper will rewrite: every line whose path is
@@ -401,9 +420,13 @@ function canonicalSelfBody(entry: Record<string, unknown>): string {
  *  Identifier keys and JSON-encoded values make the first "hash" and
  *  "commit" token on such a line the top-level slot by construction; the
  *  token check then catches a value the rewrite would skip (a hash that is
- *  not 64 hex). What this cannot see - a canonical decoy line beside a
- *  files entry the stamper never reaches - main()'s structural read-back
- *  catches after the writes and rolls back. */
+ *  not 64 hex). Every files entry must be reached by such a one-object
+ *  line (unreachedEntries), or the render's provenance stamp would ride a
+ *  partial stamp - the soft path stampManifestText keeps for the sync's
+ *  argument-free re-stamp. What this cannot see - a decoy line outside
+ *  `files` beside a files entry the stamper never reaches - main()'s
+ *  structural read-back catches for the self entry after the writes and
+ *  rolls back; for any other entry it is the parity check's report. */
 export function provenanceSlotProblem(text: string): string | null {
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return parsed.problem;
@@ -425,7 +448,8 @@ export function provenanceSlotProblem(text: string): string | null {
   if (!HASH_RE.test(canonical) || !COMMIT_RE.test(canonical)) {
     return 'self entry spells its "hash" and "commit" slots in a form the stamper cannot rewrite';
   }
-  return null;
+  const unreached = unreachedEntries(parsed.files, parsed.resolved);
+  return unreached > 0 ? unreachedProblem(unreached) : null;
 }
 
 /** The self entry's provenance as consumers read it - `files[MANIFEST_NAME]`
@@ -499,7 +523,7 @@ function main(): number {
       answersWritten = true;
       writeFileSync(answersPath, rewrittenAnswers);
     }
-    const { out, problem } = stampManifestText(text, root);
+    const { out, problem, unreachedEntries: unreached } = stampManifestText(text, root);
     if (problem !== null) {
       if (commit !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
       console.error(
@@ -507,6 +531,14 @@ function main(): number {
           "normalization skipped too) for validate-template's parity check to report",
       );
       return 0;
+    }
+    // Reachable on the argument-free re-stamp alone: the --commit
+    // preflight refuses such entries above.
+    if (unreached > 0) {
+      console.error(
+        `warning: ${MANIFEST_NAME} ${unreachedProblem(unreached)}; left unstamped for ` +
+          "validate-template's parity check to report",
+      );
     }
     if (out !== text) {
       manifestWritten = true;
