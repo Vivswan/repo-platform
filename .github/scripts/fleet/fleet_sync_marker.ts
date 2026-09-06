@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
-// The merged commit's directives block: the PR body's FINAL paragraph
-// (git trailers such as the Co-authored-by lines GitHub appends on squash
-// may follow it), one bracketed directive per line -
+// The merged commit's directives block: the PR body's FIRST paragraph
+// (a squash merge writes subject, blank line, PR body), one bracketed
+// directive per line, each optionally fenced in one pair of backticks -
 //
 //   [fleet-sync]                      sync the whole fleet now
-//   [fleet-sync: owner/a, owner/b]    sync those repos now
+//   `[fleet-sync: owner/a, owner/b]`  sync those repos now
 //
 // Squash merges carry the PR body verbatim (.github/settings-override.yml
 // pins PR_BODY), so post-green.yml's read-directives leg reads the opt-in
-// from the commit alone and hands the scope to its sync-fleet leg. A
-// [fleet-sync] anywhere else, an unknown or duplicated keyword, an empty
-// scope, or a bad slug FAILS the leg: a misread opt-in must be loud,
-// never a silent fall-through to the weekly cron. No redaction: the text
-// is already public on main.
+// from the commit alone and hands the scope to its sync-fleet leg.
+//
+// A block-shaped paragraph or a [fleet-sync anywhere else, bad backtick
+// fencing, an unknown or duplicated keyword, an empty scope, or a bad slug
+// FAILS the leg: a misread opt-in is loud, never a silent weekly-cron wait.
 //
 // Env: SOURCE_SHA (the judged commit), GITHUB_OUTPUT (armed, repos).
 
@@ -25,15 +25,16 @@ export type Directives =
   | { kind: "fleet-sync"; repos: string[] }
   | { kind: "error"; errors: string[] };
 
-const KEYWORDS = ["fleet-sync"];
-const BLOCK_LINE = /^\[[^[\]]*\]$/;
+const KEYWORD = "fleet-sync";
+// A block line as written: brackets, any backticks around them. Whether
+// the backticks are one balanced pair is judged per line by unwrap().
+const BLOCK_LINE = /^`*\[[^[\]]*\]`*$/;
 const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
-// A git trailer or Conventional Commits footer (Co-authored-by: x,
-// BREAKING CHANGE: x); a paragraph OPENING with one is a footer
-// paragraph, continuation lines included. Footers may follow the block:
-// GitHub appends co-author trailers below the PR body on squash.
-const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*(?: [A-Za-z0-9-]+)*: \S/;
+// paragraphs()[0] is the subject, so the PR body opens at index 1.
+const BLOCK_INDEX = 1;
+const POSITION =
+  "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 
 function paragraphs(body: string): string[][] {
   const lines = body
@@ -54,40 +55,54 @@ function paragraphs(body: string): string[][] {
   return result;
 }
 
+/** The bracketed text of a block line without its optional backtick pair;
+ * null when the fencing is anything but one pair or none. */
+function unwrap(line: string): string | null {
+  const open = line.length - line.replace(/^`+/, "").length;
+  const close = line.length - line.replace(/`+$/, "").length;
+  if (open === 0 && close === 0) return line;
+  if (open === 1 && close === 1) return line.slice(1, -1);
+  return null;
+}
+
 /** Parses a merged commit message (subject included) for its directives
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  let blockIndex = paras.length - 1;
-  while (blockIndex >= 0 && TRAILER_LINE.test(paras[blockIndex][0])) {
-    blockIndex--;
-  }
-  const isBlock = blockIndex >= 0 && paras[blockIndex].every((line) => BLOCK_LINE.test(line));
+  const isBlockShaped = (para: string[]) => para.every((line) => BLOCK_LINE.test(line));
+  const block =
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
-    if (isBlock && index === blockIndex) return;
+    if (block !== null && index === BLOCK_INDEX) return;
+    const shaped = isBlockShaped(para);
     for (const line of para) {
-      if (FLEET_SYNC_ANYWHERE.test(line)) {
-        errors.push(
-          `misplaced directive "${line.trim()}": directives go in the PR body's final paragraph, one [keyword] per line and nothing else in that paragraph`,
-        );
+      if (shaped || FLEET_SYNC_ANYWHERE.test(line)) {
+        errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
     }
   });
-  if (!isBlock) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
+  if (block === null) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
 
   const seen = new Set<string>();
   let repos: string[] = [];
-  for (const line of paras[blockIndex]) {
-    const match = DIRECTIVE.exec(line);
+  for (const line of block) {
+    const directive = unwrap(line);
+    if (directive === null) {
+      errors.push(
+        `"${line}" has bad backtick fencing: wrap the whole directive in one pair, \`[keyword]\`, or none`,
+      );
+      continue;
+    }
+    const match = DIRECTIVE.exec(directive);
     if (match === null) {
       errors.push(`"${line}" is not a directive: write [keyword] or [keyword: value]`);
       continue;
     }
     const keyword = match[1].toLowerCase();
-    if (!KEYWORDS.includes(keyword)) {
-      errors.push(`unknown directive keyword in "${line}"; known: ${KEYWORDS.join(", ")}`);
+    if (keyword !== KEYWORD) {
+      errors.push(`unknown directive keyword in "${line}"; known: ${KEYWORD}`);
       continue;
     }
     if (seen.has(keyword)) {

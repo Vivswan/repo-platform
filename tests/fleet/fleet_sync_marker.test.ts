@@ -1,10 +1,6 @@
-// The directives-block grammar post-green's read-directives leg reads
-// off the merged commit, pinned as one table: each row is a whole commit
-// message (subject included) and the FULL parse result, so the block
-// detection, keyword grammar, scope folding, trailer tolerance, and every
-// loud-failure path are each proven against the value, never a shape.
-// The main() rows run the script against a real scratch repo and read
-// the GITHUB_OUTPUT lines the sync-fleet leg consumes.
+// The directives-block grammar read-directives reads off the merged
+// commit, as one table of whole commit messages and FULL parse results.
+// The main() rows run the script on a scratch repo and read GITHUB_OUTPUT.
 
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,120 +11,161 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const SUBJECT = "feat: ship the thing (#12)";
 const PROSE = "## How\n\nThe thing ships.\n\n## Proof\n\n- bun run check green";
+const TRAILERS = "Co-authored-by: A <a@x.test>\nSigned-off-by: B <b@x.test>";
 
-function message(...tail: string[]): string {
-  return [SUBJECT, PROSE, ...tail].join("\n\n");
+/** A squash-merge message: the subject, then each paragraph in order. */
+function message(...paras: string[]): string {
+  return [SUBJECT, ...paras].join("\n\n");
 }
 
 const NONE: Directives = { kind: "none" };
 const FLEET: Directives = { kind: "fleet-sync", repos: [] };
+const POSITION =
+  "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
+function misplaced(...lines: string[]): Directives {
+  return {
+    kind: "error",
+    errors: lines.map((line) => `misplaced directive "${line}": ${POSITION}`),
+  };
+}
 
 describe("parseDirectives", () => {
   test.each<{ reason: string; body: string; expected: Directives }>([
-    { reason: "a body without a block", body: message(), expected: NONE },
+    { reason: "a body without a block", body: message(PROSE), expected: NONE },
     { reason: "a bare subject", body: SUBJECT, expected: NONE },
     { reason: "an empty message", body: "", expected: NONE },
+    { reason: "a footer-only body is not a block", body: message(TRAILERS), expected: NONE },
     {
-      reason: "a bare [fleet-sync] arms the whole fleet",
+      reason: "a bare [fleet-sync] opening the body arms the whole fleet",
+      body: message("[fleet-sync]", PROSE),
+      expected: FLEET,
+    },
+    {
+      reason: "a block with nothing after it",
       body: message("[fleet-sync]"),
       expected: FLEET,
     },
     {
+      reason: "a backticked block renders as code and arms the same",
+      body: message("`[fleet-sync]`", PROSE),
+      expected: FLEET,
+    },
+    {
+      reason: "a backticked scoped block",
+      body: message("`[fleet-sync: Vivswan/a, Vivswan/b]`", PROSE),
+      expected: { kind: "fleet-sync", repos: ["vivswan/a", "vivswan/b"] },
+    },
+    {
       reason: "[fleet-sync: all] is the same as bare",
-      body: message("[fleet-sync: all]"),
+      body: message("[fleet-sync: all]", PROSE),
       expected: FLEET,
     },
     {
       reason: "a list is trimmed, folded, and deduped",
-      body: message("[Fleet-Sync: Vivswan/A , vivswan/b,Vivswan/a]"),
+      body: message("[Fleet-Sync: Vivswan/A , vivswan/b,Vivswan/a]", PROSE),
       expected: { kind: "fleet-sync", repos: ["vivswan/a", "vivswan/b"] },
     },
     {
       reason: "no space after the colon",
-      body: message("[fleet-sync:o/r]"),
+      body: message("[fleet-sync:o/r]", PROSE),
       expected: { kind: "fleet-sync", repos: ["o/r"] },
     },
     {
       reason: "trailing whitespace, blank lines, and CRLF are tolerated",
-      body: `${message("[fleet-sync]  ")}\r\n\r\n   \r\n`.replace(/\n/g, "\r\n"),
+      body: `${message("`[fleet-sync]`  ", PROSE)}\r\n\r\n   \r\n`.replace(/\n/g, "\r\n"),
       expected: FLEET,
     },
     {
-      reason: "git trailers GitHub appends on squash may follow the block",
-      body: message("[fleet-sync]", "Co-authored-by: A <a@x.test>\nSigned-off-by: B <b@x.test>"),
+      reason: "git trailers GitHub appends on squash follow the body as before",
+      body: message("[fleet-sync]", PROSE, TRAILERS),
       expected: FLEET,
     },
     {
-      reason: "a Conventional Commits footer may follow the block too",
-      body: message("[fleet-sync: o/r]", "BREAKING CHANGE: the asset is renamed"),
+      reason: "a Conventional Commits footer in the body is prose",
+      body: message("[fleet-sync: o/r]", PROSE, "BREAKING CHANGE: the asset is renamed"),
       expected: { kind: "fleet-sync", repos: ["o/r"] },
     },
     {
-      reason: "a multi-line footer after the block is one footer paragraph",
-      body: message(
-        "[fleet-sync]",
-        "BREAKING CHANGE: the asset is renamed\nold releases keep the old name\nCo-authored-by: A <a@x.test>",
-      ),
-      expected: FLEET,
+      reason: "a block at the bottom of the body (the retired position) fails, naming the position",
+      body: message(PROSE, "[fleet-sync]"),
+      expected: misplaced("[fleet-sync]"),
     },
     {
-      reason: "a footer above the block is prose, not part of it",
-      body: message("BREAKING CHANGE: renamed", "[fleet-sync]"),
-      expected: FLEET,
+      reason: "a backticked block at the bottom fails the same way",
+      body: message(PROSE, "`[fleet-sync: o/r]`", TRAILERS),
+      expected: misplaced("`[fleet-sync: o/r]`"),
     },
     {
-      reason: "a final paragraph that is a markdown link is not a block: misplaced",
-      body: message("[fleet-sync](https://x.test)"),
+      reason: "a block-shaped paragraph anywhere else is misplaced even with an unknown keyword",
+      body: message(PROSE, "[fleet-synk]\n[`fleet-sync`]"),
+      expected: misplaced("[fleet-synk]", "[`fleet-sync`]"),
+    },
+    {
+      reason: "backticks inside the brackets are not a directive",
+      body: message("[`fleet-sync`]", PROSE),
       expected: {
         kind: "error",
-        errors: [
-          'misplaced directive "[fleet-sync](https://x.test)": directives go in the PR body\'s final paragraph, one [keyword] per line and nothing else in that paragraph',
-        ],
+        errors: ['"[`fleet-sync`]" is not a directive: write [keyword] or [keyword: value]'],
       },
     },
     {
-      reason: "a marker mid-body is misplaced even when the final paragraph is prose",
+      reason: "a block in the middle of the body fails",
+      body: message("## How", "[fleet-sync]", "## Proof"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
+      reason: "a first paragraph that is a markdown link is not a block: misplaced",
+      body: message("[fleet-sync](https://x.test)", PROSE),
+      expected: misplaced("[fleet-sync](https://x.test)"),
+    },
+    {
+      reason: "a marker inside prose is misplaced even with no block anywhere",
       body: message("Remember to add [fleet-sync] here.", "Closing thoughts."),
-      expected: {
-        kind: "error",
-        errors: [
-          'misplaced directive "Remember to add [fleet-sync] here.": directives go in the PR body\'s final paragraph, one [keyword] per line and nothing else in that paragraph',
-        ],
-      },
+      expected: misplaced("Remember to add [fleet-sync] here."),
     },
     {
-      reason: "a marker glued to the subject paragraph is misplaced (no blank line above)",
+      reason: "a marker glued to the subject (no blank line) is misplaced",
       body: `${SUBJECT}\n[fleet-sync]`,
-      expected: {
-        kind: "error",
-        errors: [
-          'misplaced directive "[fleet-sync]": directives go in the PR body\'s final paragraph, one [keyword] per line and nothing else in that paragraph',
-        ],
-      },
+      expected: misplaced("[fleet-sync]"),
     },
     {
-      reason: "a marker in prose AND a valid block: the misplaced one still fails",
-      body: message("See [fleet-sync] below.", "[fleet-sync]"),
-      expected: {
-        kind: "error",
-        errors: [
-          'misplaced directive "See [fleet-sync] below.": directives go in the PR body\'s final paragraph, one [keyword] per line and nothing else in that paragraph',
-        ],
-      },
+      reason: "a marker in the subject is misplaced",
+      body: `${SUBJECT} [fleet-sync]\n\n${PROSE}`,
+      expected: misplaced(`${SUBJECT} [fleet-sync]`),
+    },
+    {
+      reason: "a valid block AND a marker in prose: the misplaced one still fails",
+      body: message("[fleet-sync]", "See [fleet-sync] above."),
+      expected: misplaced("See [fleet-sync] above."),
     },
     {
       reason: "a keyword typo outside the block is misplaced, not silently prose",
       body: message("Later: [fleet-syncs] maybe.", "Done."),
+      expected: misplaced("Later: [fleet-syncs] maybe."),
+    },
+    {
+      reason: "an unbalanced backtick fails",
+      body: message("`[fleet-sync]", PROSE),
       expected: {
         kind: "error",
         errors: [
-          'misplaced directive "Later: [fleet-syncs] maybe.": directives go in the PR body\'s final paragraph, one [keyword] per line and nothing else in that paragraph',
+          '"`[fleet-sync]" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
+        ],
+      },
+    },
+    {
+      reason: "doubled backticks fail",
+      body: message("``[fleet-sync]``", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"``[fleet-sync]``" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
         ],
       },
     },
     {
       reason: "an unknown keyword fails, naming the known ones",
-      body: message("[fleet-synk]"),
+      body: message("[fleet-synk]", PROSE),
       expected: {
         kind: "error",
         errors: ['unknown directive keyword in "[fleet-synk]"; known: fleet-sync'],
@@ -136,15 +173,15 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a bracketed line that is not keyword-shaped fails",
-      body: message("[skip ci]"),
+      body: message("[skip ci]", PROSE),
       expected: {
         kind: "error",
         errors: ['"[skip ci]" is not a directive: write [keyword] or [keyword: value]'],
       },
     },
     {
-      reason: "a duplicate keyword fails",
-      body: message("[fleet-sync]\n[fleet-sync: o/r]"),
+      reason: "a multi-line block repeating the keyword fails",
+      body: message("[fleet-sync]\n`[fleet-sync: o/r]`", PROSE),
       expected: {
         kind: "error",
         errors: ["duplicate directive [fleet-sync]: one line per keyword"],
@@ -152,7 +189,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "an empty scope fails",
-      body: message("[fleet-sync:]"),
+      body: message("[fleet-sync:]", PROSE),
       expected: {
         kind: "error",
         errors: [
@@ -162,7 +199,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "an empty list entry fails",
-      body: message("[fleet-sync: o/r,]"),
+      body: message("[fleet-sync: o/r,]", PROSE),
       expected: {
         kind: "error",
         errors: ['"[fleet-sync: o/r,]" has an empty entry in its list'],
@@ -170,7 +207,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "all mixed with slugs fails",
-      body: message("[fleet-sync: all, o/r]"),
+      body: message("[fleet-sync: all, o/r]", PROSE),
       expected: {
         kind: "error",
         errors: [
@@ -180,7 +217,7 @@ describe("parseDirectives", () => {
     },
     {
       reason: "non-slug entries fail, all of them named",
-      body: message("[fleet-sync: o/r, just-a-name, o/r/extra]"),
+      body: message("[fleet-sync: o/r, just-a-name, o/r/extra]", PROSE),
       expected: {
         kind: "error",
         errors: [
@@ -189,13 +226,14 @@ describe("parseDirectives", () => {
       },
     },
     {
-      reason: "every problem in a block is reported at once",
-      body: message("[fleet-synk]\n[fleet-sync:]"),
+      reason: "every problem in a block is reported at once, backticks included",
+      body: message("[fleet-synk]\n`[fleet-sync:]\n`[fleet-sync:]`", PROSE),
       expected: {
         kind: "error",
         errors: [
           'unknown directive keyword in "[fleet-synk]"; known: fleet-sync',
-          '"[fleet-sync:]" has an empty scope: write [fleet-sync] for the whole fleet, or list owner/name slugs',
+          '"`[fleet-sync:]" has bad backtick fencing: wrap the whole directive in one pair, `[keyword]`, or none',
+          '"`[fleet-sync:]`" has an empty scope: write [fleet-sync] for the whole fleet, or list owner/name slugs',
         ],
       },
     },
@@ -256,28 +294,28 @@ describe("main", () => {
   test.each([
     {
       reason: "no block: armed=false and a notice",
-      body: message(),
+      body: message(PROSE),
       exitCode: 0,
       output: "armed=false\n",
       stdout: "::notice::",
     },
     {
       reason: "whole fleet: armed=true, repos=all",
-      body: message("[fleet-sync]"),
+      body: message("`[fleet-sync]`", PROSE),
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
       stdout: "syncing all now",
     },
     {
       reason: "a list: repos is the folded comma list",
-      body: message("[fleet-sync: Vivswan/B, vivswan/a]"),
+      body: message("[fleet-sync: Vivswan/B, vivswan/a]", PROSE),
       exitCode: 0,
       output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
       stdout: "syncing vivswan/b,vivswan/a now",
     },
     {
-      reason: "a misplaced marker: red leg, nothing armed",
-      body: message("Add [fleet-sync] later.", "Done."),
+      reason: "a block at the bottom of the body: red leg, nothing armed",
+      body: message(PROSE, "[fleet-sync]"),
       exitCode: 1,
       output: "",
       stdout: "::error::misplaced directive",

@@ -57,19 +57,20 @@ Post-gate work rides downstream in the same run, `needs: [all-green]` on a push 
 
 ### Opting a PR into an immediate fleet sync
 
-The PR body's LAST paragraph is a directives block: one bracketed directive per line, nothing else in that paragraph. Squash merges carry the body verbatim, so the merged commit carries the block and post-green reads it from git alone.
+The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else, each line optionally fenced in one pair of backticks so it renders as code. Squash merges put the body right under the subject verbatim, so the merged commit carries the block and post-green reads it from git alone.
 
 ```text
-## Proof
+`[fleet-sync: Vivswan/copilot-env, Vivswan/litellm-vscode-chat]`
 
-- bun run check green
+## How
 
-[fleet-sync: Vivswan/copilot-env, Vivswan/litellm-vscode-chat]
+...
 ```
 
-- `[fleet-sync]` or `[fleet-sync: all]`: the whole fleet, the same run the weekly cron performs. `[fleet-sync: owner/a, owner/b]`: those repos only. Case does not matter.
-- Git trailers and footers GitHub or you append below the block (`Co-authored-by:`, `BREAKING CHANGE:`) are fine; anything else after it means there is no block.
-- A `[fleet-sync` in the PR title or anywhere else in the body (the squash subject is the title), an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
+- `[fleet-sync]` or `[fleet-sync: all]`: the whole fleet, the same run the weekly cron performs. `[fleet-sync: owner/a, owner/b]`: those repos only. Case does not matter, and `` `[fleet-sync]` `` reads the same as `[fleet-sync]`.
+- A body whose first paragraph is not a block carries no directives; git trailers GitHub appends on squash (`Co-authored-by:`) change nothing.
+- The parser scans the WHOLE merged message, so a PR body must not quote a block anywhere else, not even inside a fenced code example: write examples with a placeholder such as `[keyword]`.
+- A `[fleet-sync` or a bracket-only paragraph anywhere else in the body or in the PR title (the squash subject is the title), backtick fencing that is not one pair, an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. A block at the BOTTOM of the body, where the retired grammar put it, is the misplaced case and goes red the same way. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
 - The block is public text on `main`. Naming an undisclosed private repository there discloses it; sync those by dispatch.
 - Lost only when the merge's whole CI run is evicted by two later pushes (one pending run per branch); the weekly cron heals that, as it heals every post-green leg.
 
