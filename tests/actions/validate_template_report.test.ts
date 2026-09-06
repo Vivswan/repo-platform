@@ -1725,22 +1725,40 @@ describe("the action's wiring", () => {
     // themselves: a `uses:` of the retired manifest would 404 at job start.
     // One strict scan (a file that cannot be read throws, so a miss is never
     // an unread file) serves the assertion and its control; action
-    // identifiers are case-insensitive, so the match is too, and a `uses:`
-    // may fold its value onto the next line (`>-`), so the pattern spans it.
+    // identifiers are case-insensitive, so the match is too; a `uses:` may
+    // fold its value onto the next line (a block scalar, with indicators and
+    // a trailing comment) or name the repo-local path (`./actions/...`, no
+    // `@`, an optional trailing slash), so the pattern spans every spelling
+    // actionlint accepts.
     const REPO_ROOT = join(import.meta.dir, "../..");
     const usesOf = (action: string) =>
-      new RegExp(`uses:\\s*(?:[>|][-+]?\\s*)?["']?[\\w./-]*actions/${action}@`, "i");
+      new RegExp(
+        `(?:uses|"uses"|'uses')\\s*:\\s*(?:[>|][-+0-9]*(?:[ \\t]*#[^\\n]*)?\\s*)?["']?(?:\\./|[\\w./-]*/)actions/${action}/?(?:@|["']|\\s|$)`,
+        "i",
+      );
     for (const spelling of [
       "uses: Vivswan/repo-platform/actions/validate-template@build",
       'uses: "Vivswan/repo-platform/actions/validate-template@build"',
       "uses: >-\n        Vivswan/repo-platform/actions/validate-template@build",
       "uses: |\n        VIVSWAN/Repo-Platform/actions/validate-template@build",
+      "uses: >- # the build tip\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses: |+2\n        Vivswan/repo-platform/actions/validate-template@build",
+      "uses : ./actions/validate-template",
+      '"uses": ./actions/validate-template',
+      "'uses': Vivswan/repo-platform/actions/validate-template@build",
+      "uses: ./actions/validate-template/",
+      'uses: "./actions/validate-template/"\n      with:',
     ]) {
       expect(usesOf("validate-template").test(spelling)).toBe(true);
     }
-    expect(usesOf("validate-template").test("uses: x/actions/validate-template-report@build")).toBe(
-      false,
-    );
+    for (const spelling of [
+      "uses: x/actions/validate-template-report@build",
+      "uses: ./actions/validate-template-report",
+      "uses: ./actions/validate-template-report/",
+      '"uses": ./actions/validate-template-report',
+    ]) {
+      expect(usesOf("validate-template").test(spelling)).toBe(false);
+    }
     const filesCarrying = (pattern: RegExp): string[] =>
       ["templates", ".github/workflows", "tests/golden-renders", "actions"].flatMap((root) =>
         readdirSync(join(REPO_ROOT, root), { recursive: true, withFileTypes: true })
