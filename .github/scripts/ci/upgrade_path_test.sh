@@ -259,14 +259,9 @@ gate_old_entry() { # <landed path> <module>: wrap the manifest template's entry 
 }
 for p in .github/agents.md .github/copilot-instructions.md .github/instructions/review.instructions.md \
   .github/workflows/copilot-setup-steps.yml AGENTS.md CLAUDE.md; do gate_old_entry "$p" agents; done
-# Model the fleet state before the settings self-apply was retired: the old
-# build rendered a managed settings-sync.yml (the thin caller of the
-# reusable apply), gated on the settings-sync module before the fold. The
-# new build renders no such file, so the sync must DELETE it in every
-# managed repo through retired-file cleanup alone, no rung (a plain
-# non-jinja file: copier copies it verbatim, which is all the retirement
-# diff needs). Planted before the module gates below wrap the manifest
-# entries, so its entry rides its own gate, not auto-assign's.
+# The old build rendered a managed settings-sync.yml that the new build
+# retired outright: retired-file cleanup must delete it, no rung. Planted
+# before gate_old_entry wraps the manifest entries, so it rides its own gate.
 printf '# This file is managed by Vivswan/repo-platform.\nname: Settings Sync\non:\n  push:\n    branches: [main]\n' \
   > "$OLD_TREE/template/.github/workflows/settings-sync.yml"
 python3 - "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" <<'PY'
