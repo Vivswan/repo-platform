@@ -57,9 +57,9 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Copilot review comments are advisory
 
-- Rule: Copilot code review comments only on a defect it can demonstrate in the diff; its comments are advisory, and a one-line reply rejecting one is a valid outcome.
+- Rule: Copilot code review comments only on a defect it can demonstrate in the diff; its comments are advisory, so rejecting one is a valid outcome: reply with the reason, then resolve the thread.
 - Why: speculative hardening and unenforced style opinions cost review time without catching a bug.
-- How: the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (template: `templates/agents/.github/instructions/review.instructions.md.jinja` in repo-platform).
+- How: the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (template: `templates/agents/.github/instructions/review.instructions.md.jinja` in repo-platform). Rejecting a comment is reply then resolve (the UI's "Resolve conversation", or GraphQL `resolveReviewThread`): the managed `main` ruleset sets `required_review_thread_resolution`, so an unresolved thread blocks the merge whatever the reply says.
 - Enforced by: that file for what earns a comment (agents module); advisory because the `main` ruleset requests the review and no ruleset requires Copilot's approval.
 
 ## No backwards-compatibility code
