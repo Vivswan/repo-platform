@@ -11,8 +11,8 @@ Everything between the BEGIN and END markers is managed by {{ github_username }}
 {# compose:agents-toolchain #}
 ## Conventions
 
-- PR titles and commit subjects are Conventional Commits. PRs are squash-merged, so the PR title becomes the commit subject{% if 'release-please' in modules %} and drives release-please versioning{% endif %}.{% if 'pr-title' in modules %} The `pr-title` check validates the title.{% endif %}
-- CI gates on the `all-green` check{% if 'settings-sync' in modules %}, required by the managed ruleset{% endif %}. This repository's own test and lint jobs go in the repo-owned `.github/workflows/checks.yml`, its green-gated work on main in the repo-owned `post-green.yml`; `ci.yml` is managed.
+- PR titles and commit subjects are Conventional Commits{% if 'release-please' in modules %}; they drive release-please versioning{% endif %}.{% if 'settings-sync' in modules %} PRs are squash-merged, so the PR title becomes the commit subject.{% endif %}{% if 'pr-title' in modules %} The `pr-title` check validates the title.{% endif %}
+- CI gates on the `all-green` check{% if 'settings-sync' in modules %}, required by the managed ruleset{% endif %}. Under `.github/workflows/`, this repository's test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.
 {%- if 'release-please' in modules %}
 - A green push to main releases through the managed `release.yml`; this repository's release steps go in the repo-owned `update-release.yml` and `update-release-pr.yml` hooks.
 {%- endif %}

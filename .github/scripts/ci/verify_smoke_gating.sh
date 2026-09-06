@@ -423,11 +423,28 @@ if has agents; then
   # AGENTS.md toolchain section only when a toolchain module is selected,
   # with exactly the selected toolchains' bullets inside it.
   if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absent "## Toolchain" "$SMOKE/AGENTS.md"; fi
-  if has bun; then present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; else absent '`bun install`' "$SMOKE/AGENTS.md"; fi
-  if has node; then present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; else absent '`npm install`' "$SMOKE/AGENTS.md"; fi
-  if has deno; then present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"; else absent '`deno install`' "$SMOKE/AGENTS.md"; fi
+  # The pinned-toolchain modules also emit their dotfile line (the dotfile
+  # itself carries no header, so this is the only place an agent learns
+  # it is managed); asserted exactly, like the command bullet.
+  if has bun; then present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; present_line '- `.bun-version` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`bun install`' "$SMOKE/AGENTS.md"; absent '.bun-version' "$SMOKE/AGENTS.md"; fi
+  if has node; then present_line '- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"; present_line '- `.node-version` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`npm install`' "$SMOKE/AGENTS.md"; absent '.node-version' "$SMOKE/AGENTS.md"; fi
+  if has deno; then present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"; present_line '- `.dvmrc` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$SMOKE/AGENTS.md"; else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
   if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
   if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
+  # Merge policy and the ruleset requiring all-green are managed only with
+  # settings-sync; without it the file must not claim them, and the
+  # settings bullet (edit .github/settings.yml, never the UI) is absent.
+  if has settings-sync; then
+    present "PRs are squash-merged, so the PR title becomes the commit subject." "$SMOKE/AGENTS.md"
+    present_line '- CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository'"'"'s test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.' "$SMOKE/AGENTS.md"
+    present_line '- Repository settings are applied from Vivswan/repo-platform'"'"'s layers plus this repository'"'"'s own `.github/settings.yml`. Edit that file, never the GitHub UI; the merge rules are in repo-platform'"'"'s docs/settings.md.' "$SMOKE/AGENTS.md"
+  else
+    absent "squash-merged" "$SMOKE/AGENTS.md"
+    present_line '- CI gates on the `all-green` check. Under `.github/workflows/`, this repository'"'"'s test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.' "$SMOKE/AGENTS.md"
+    absent "required by the managed ruleset" "$SMOKE/AGENTS.md"
+    absent "Repository settings are applied" "$SMOKE/AGENTS.md"
+    absent ".github/settings.yml" "$SMOKE/AGENTS.md"
+  fi
 else
   # `test ! -e` follows symlinks (a dangling one passes), so also
   # assert not-a-symlink for the three link paths.
