@@ -19,7 +19,9 @@ import {
   destOverlapsRepo,
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
+  parseArgs,
   SHARED_DIR,
+  UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
 
 const REPO = "/home/user/repo-platform";
@@ -42,6 +44,30 @@ const listing = (dir: string): string[] => {
     .map((path) => relative(dir, path))
     .sort();
 };
+
+describe("parseArgs", () => {
+  test("exactly one of --dest DIR or --check selects the target", () => {
+    expect(parseArgs(["--dest", "/x/tree"])).toEqual({ kind: "dest", dest: "/x/tree" });
+    expect(parseArgs(["--check"])).toEqual({ kind: "check" });
+  });
+
+  test("every other shape is refused before anything is touched, naming the fault", () => {
+    // Both flag orders matter: `--dest --check` once read `--check` as the
+    // destination and would have replaced a directory of that name.
+    const refused: [string[], string][] = [
+      [[], "one of --dest DIR or --check is required"],
+      [["--check", "--dest", "/x"], "mutually exclusive"],
+      [["--dest", "/x", "--check"], "mutually exclusive"],
+      [["--dest", "--check"], "argument --dest: expected one argument"],
+      [["--dest"], "argument --dest: expected one argument"],
+      [["--dest", "/x", "extra"], "unrecognized argument: extra"],
+    ];
+    for (const [argv, message] of refused) {
+      expect(() => parseArgs(argv)).toThrow(UsageError);
+      expect(() => parseArgs(argv)).toThrow(message);
+    }
+  });
+});
 
 describe("destOverlapsRepo", () => {
   // The three clauses of the guard - root, ancestor, descendant - each keep

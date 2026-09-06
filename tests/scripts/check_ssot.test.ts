@@ -55,9 +55,11 @@ import {
   renderedSelfPins,
   rosterMismatches,
   ruleRosterMismatches,
+  SCRATCH_SCOPED_SCRIPTS,
   SETUP_VERSION_FILES,
   STAMP_HOOK_ARGV,
   STAMP_HOOK_WHEN,
+  scratchScopedScriptMismatches,
   semanticLines,
   setMismatch,
   settingsHealShaPlumbingMismatches,
@@ -2310,6 +2312,7 @@ describe("asyncSpawnMismatches", () => {
       "actions/fuzz-issue/fuzz-issue.ts",
       "actions/release-health/release-health.ts",
       "scripts/run_tests.ts",
+      "tests/build-branches/publish_behavior.test.ts",
     ]);
   });
 
@@ -2635,6 +2638,53 @@ describe("bunRuntimeMismatches", () => {
   test("an unreadable version throws loudly instead of passing vacuously", () => {
     expect(() => bunRuntimeMismatches("1.4.0-canary.1", "1.4.0")).toThrow("MAJOR.MINOR");
     expect(() => bunRuntimeMismatches("1.4.0", "")).toThrow("MAJOR.MINOR");
+  });
+});
+
+describe("scratchScopedScriptMismatches", () => {
+  test("the live package.json carries every pinned command verbatim", () => {
+    const live = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(scratchScopedScriptMismatches(live.scripts, SCRATCH_SCOPED_SCRIPTS)).toEqual([]);
+  });
+
+  test("a drift back to a shared-scratch command fails, quoting the pin and the drift", () => {
+    // The two retired shapes, each of which passed every other gate while
+    // sibling runs trampled one another's scratch: a bare `bun test`
+    // (fixtures under the shared os.tmpdir) and the fixed --dest path
+    // compose:check once wiped from under a concurrent run.
+    const cases: [string, string][] = [
+      ["test", "bun test"],
+      [
+        "compose:check",
+        "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check && rm -rf /tmp/repo-platform-compose-check",
+      ],
+    ];
+    for (const [name, drifted] of cases) {
+      const found = scratchScopedScriptMismatches(
+        { ...SCRATCH_SCOPED_SCRIPTS, [name]: drifted },
+        SCRATCH_SCOPED_SCRIPTS,
+      );
+      expect(found).toEqual([
+        {
+          file: "package.json",
+          expected: `${name} script '${SCRATCH_SCOPED_SCRIPTS[name]}' (the command scopes its scratch per run)`,
+          got: `'${drifted}'`,
+        },
+      ]);
+    }
+  });
+
+  test("a pinned script deleted outright fails as missing, never passes vacuously", () => {
+    const { test: _, ...withoutTest } = SCRATCH_SCOPED_SCRIPTS;
+    expect(scratchScopedScriptMismatches(withoutTest, SCRATCH_SCOPED_SCRIPTS)).toEqual([
+      {
+        file: "package.json",
+        expected: `test script '${SCRATCH_SCOPED_SCRIPTS.test}' (the command scopes its scratch per run)`,
+        got: "no such script",
+      },
+    ]);
   });
 });
 

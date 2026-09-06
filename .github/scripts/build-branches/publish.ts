@@ -32,7 +32,7 @@
 // head_sha on the green path, the trigger commit otherwise);
 // PREBUILT_REF optional (green path only).
 
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { commitRunWrite, commitStampParse, commitStampWrite } from "../shared/commit_stamp.ts";
@@ -42,6 +42,7 @@ import { capture, must, mustCapture } from "../shared/proc.ts";
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { stampUnhealthyReason } from "../shared/stamp_checks.ts";
 import { PENDING_REF_PREFIX, refSuperseded, staleReason } from "./pending.ts";
+import { scratchWorktrees } from "./scratch.ts";
 
 const BRANCH = "build";
 /** The branch the retired split-channel era published the composed tree
@@ -125,9 +126,7 @@ function hasActionManifest(dir: string): boolean {
  * and both seeds stage the whole tree anyway. */
 function publish(sourceSha: string): void {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
-  for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const scratch = scratchWorktrees();
   // The green path hands over the PUSH run's pre-built tree
   // (build_pending.ts parked it while CI was still executing), so the
   // compose cost was already paid concurrently with CI. Name-matched by
@@ -140,7 +139,7 @@ function publish(sourceSha: string): void {
   if (prebuiltRef !== "") {
     const fetched = capture(["git", "fetch", "--quiet", "origin", prebuiltRef]);
     if (fetched.exitCode === 0) {
-      must(["git", "worktree", "add", "--detach", "/tmp/tree", "FETCH_HEAD"]);
+      must(["git", "worktree", "add", "--detach", scratch.tree, "FETCH_HEAD"]);
       treeSource = `pre-built (${prebuiltRef})`;
     } else {
       console.log(
@@ -152,9 +151,14 @@ function publish(sourceSha: string): void {
     // Compose with the SOURCE ref's own script + sources, so a rebuild of
     // an old commit reproduces that commit's composition. The script's
     // dependencies must resolve from that tree, not this checkout.
-    must(["git", "worktree", "add", "--detach", "/tmp/src", sourceSha]);
-    must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/src"]);
-    must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
+    must(["git", "worktree", "add", "--detach", scratch.src, sourceSha]);
+    must(["bun", "install", "--frozen-lockfile", "--cwd", scratch.src]);
+    must([
+      "bun",
+      join(scratch.src, ".github/scripts/build-branches/branch_tree.ts"),
+      "--dest",
+      scratch.tree,
+    ]);
   }
   console.log(`tree: ${treeSource}`);
   // Unified-tree guard, on EVERY path (composed and pre-built alike): a
@@ -168,7 +172,7 @@ function publish(sourceSha: string): void {
   // old source IS the seed tip's stamped source, so the shape check
   // fails closed here instead: a real directory carrying at least one
   // action manifest, not merely a path named actions.
-  if (!hasActionManifest("/tmp/tree/actions")) {
+  if (!hasActionManifest(join(scratch.tree, "actions"))) {
     fail(
       `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree with an action.yml, so the source predates the unified build branch (or a pending tree is malformed). Re-run the workflow for a main commit that carries the unification.`,
     );
@@ -177,7 +181,7 @@ function publish(sourceSha: string): void {
   let tipSource = "";
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);
-    must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${BRANCH}`]);
+    must(["git", "worktree", "add", "--detach", scratch.out, `origin/${BRANCH}`]);
     // Newest-green-wins (pending.ts owns the rule): under
     // cancel-in-progress: false a queued publisher can execute after a
     // NEWER main already published - its build is stale and must never
@@ -192,7 +196,7 @@ function publish(sourceSha: string): void {
     // group serializes publishers anyway, so the rejection arm is a
     // second net, not the plan).
     tipSource = commitStampParse(
-      mustCapture(["git", "-C", "/tmp/pub", "log", "-1", "--format=%B"]),
+      mustCapture(["git", "-C", scratch.out, "log", "-1", "--format=%B"]),
     );
     const stale = staleReason(
       sourceSha,
@@ -215,15 +219,23 @@ function publish(sourceSha: string): void {
     // reachable through the new branch. Once the old ref is deleted this
     // arm goes dead and can be removed.
     must(["git", "fetch", "--quiet", "origin", LEGACY_BRANCH]);
-    must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${LEGACY_BRANCH}`]);
+    must(["git", "worktree", "add", "--detach", scratch.out, `origin/${LEGACY_BRANCH}`]);
   } else {
-    must(["git", "worktree", "add", "--detach", "/tmp/pub", sourceSha]);
-    must(["git", "-C", "/tmp/pub", "switch", "--orphan", `build-${BRANCH}`]);
+    must(["git", "worktree", "add", "--detach", scratch.out, sourceSha]);
+    must(["git", "-C", scratch.out, "switch", "--orphan", `build-${BRANCH}`]);
   }
   // --checksum: the quick size+mtime check can miss a changed file when
   // both trees were written in the same second and the content is
   // same-size - and every decision below trusts this tree.
-  must(["rsync", "-a", "--delete", "--checksum", "--exclude=.git", "/tmp/tree/", "/tmp/pub/"]);
+  must([
+    "rsync",
+    "-a",
+    "--delete",
+    "--checksum",
+    "--exclude=.git",
+    `${scratch.tree}/`,
+    `${scratch.out}/`,
+  ]);
   // Hermetic staging, the SAME argv the sync's verifier hashes the
   // rebuilt tree with (shared/stage_tree.ts): published tree and rebuilt
   // tree must be the same function of the composed bytes, or the
@@ -232,8 +244,8 @@ function publish(sourceSha: string): void {
   // stages exactly what plain `add -A` did, so the staged-diff
   // decisions below (skip guard, stamp recovery) see the same picture
   // as before.
-  must(stageComposedTreeArgv("/tmp/pub"));
-  const staged = capture(["git", "-C", "/tmp/pub", "diff", "--cached", "--quiet"]).exitCode !== 0;
+  must(stageComposedTreeArgv(scratch.out));
+  const staged = capture(["git", "-C", scratch.out, "diff", "--cached", "--quiet"]).exitCode !== 0;
   // NEVER an empty commit in normal operation: an unchanged composed
   // tree publishes nothing (no commit means no fleet _commit bump and no
   // no-change sync PRs; the sync computes freshness instead). The skip
@@ -248,7 +260,7 @@ function publish(sourceSha: string): void {
     branchExists && !staged
       ? stampUnhealthyReason({
           sourceSha: tipSource,
-          history: mustCapture(["git", "-C", "/tmp/pub", "log", "--format=%B", "HEAD"]),
+          history: mustCapture(["git", "-C", scratch.out, "log", "--format=%B", "HEAD"]),
           mainRef: "origin/main",
           git: {
             resolveCommit: (revspec) => resolves(`${revspec}^{commit}`),
@@ -271,7 +283,7 @@ function publish(sourceSha: string): void {
   must([
     "git",
     "-C",
-    "/tmp/pub",
+    scratch.out,
     "commit",
     "-q",
     ...(staged ? [] : ["--allow-empty"]),
@@ -284,8 +296,8 @@ function publish(sourceSha: string): void {
   ]);
   // Plain push, never force: the branch is append-only, and the plain
   // push doubles as the compare-and-swap on the tip fetched above.
-  must(["git", "-C", "/tmp/pub", "push", "origin", `HEAD:refs/heads/${BRANCH}`]);
-  const short = mustCapture(["git", "-C", "/tmp/pub", "rev-parse", "--short", "HEAD"]);
+  must(["git", "-C", scratch.out, "push", "origin", `HEAD:refs/heads/${BRANCH}`]);
+  const short = mustCapture(["git", "-C", scratch.out, "rev-parse", "--short", "HEAD"]);
   console.log(`${BRANCH}: pushed ${short} (${note})`);
   console.log("::endgroup::");
 }

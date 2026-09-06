@@ -31,7 +31,7 @@ import { commitStampParseAll } from "./commit_stamp.ts";
 
 /** The git questions, injected so both consumers bring their own repo
  * context (the sync verifies a fetched tip in the checkout, the
- * publisher verifies /tmp/pub against origin/main). */
+ * publisher verifies its scratch branch worktree against origin/main). */
 export interface StampCheckGit {
   /** The resolved sha of `<revspec>^{commit}`, "" when unresolvable. */
   resolveCommit: (revspec: string) => string;
