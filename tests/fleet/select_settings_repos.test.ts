@@ -26,9 +26,10 @@ const temp = tempDirs();
 //   unadopted     - no .repo-platform.yml (404): a routine notice-level
 //                   skip, never a warning
 //   locked        - public, push probe 403s: a public repo whose write
-//                   access was revoked stays discovered - one notice by
-//                   slug in every plan whose scope includes public repos
-//                   (a private-scoped plan never probes it), never a target
+//                   access was revoked stays discovered; every plan whose
+//                   scope selects that repository prints one notice that the
+//                   token cannot push to it (a private-scoped plan does not
+//                   select it), never a target
 //   hidden-locked - PRIVATE, push probe 403s: the same notice, by hint
 //   hidden-gone   - PRIVATE, NOT in the listing: a private repo whose write
 //                   access was revoked vanishes from GET /user/repos; the

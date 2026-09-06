@@ -177,8 +177,8 @@ export function scrubSlug(detail: string, slug: string, display: string): string
 
 /** Notice for a discovered repo the token cannot push to. Leaving the fleet
  * = revoking the token's write access: a private repo then disappears from
- * discovery; a public one stays listed, and every plan whose scope includes
- * that repo's visibility prints this line for it. */
+ * discovery; a public one stays listed, and every plan whose scope selects
+ * that repository prints one notice that the token cannot push to it. */
 export function pushProbeSkipNotice(display: string): string {
   return `${display}: not in the fleet (the fleet token cannot push to it); grant write access to enroll it, or ignore this line for a repository you have left.`;
 }

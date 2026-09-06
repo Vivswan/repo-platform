@@ -28,8 +28,8 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 // repos the token can push to, so cross-owner repos the user can write to
 // must not ride into the sync plan. Leaving the fleet = revoking the token's
 // write access: a private repo then disappears from this listing (nothing
-// deleted); a public one stays listed, and every plan whose scope includes
-// its visibility prints the selector's not-in-the-fleet notice for it.
+// deleted); a public one stays listed, and every plan whose scope selects
+// that repository prints one notice that the token cannot push to it.
 const who = captureNetwork(["gh", "api", "user", "--jq", ".login"]);
 if (who.exitCode !== 0) {
   // writeSync: an async stream write racing the process.exit below
