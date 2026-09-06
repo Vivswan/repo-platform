@@ -89,11 +89,9 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    # Selection only: a checkout, a bun install, then the discovery and
-    # per-repo adoption probes, each bounded by NETWORK_TIMEOUT_MS
-    # (fleet/discovery.ts) - minutes in a normal run, with headroom for
-    # several stalled probes.
-    timeout-minutes: 15
+    # Sum of the probe bounds at ten adopted repos: discovery 2 x 120 s +
+    # selection's two 300 s stages + 10 repos x 2 x 120 s = 50 min, plus slack.
+    timeout-minutes: 55
     permissions:
       contents: read
     outputs:

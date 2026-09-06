@@ -1,8 +1,6 @@
 // Rebuild the build-branch tree from a source commit exactly as the builder
-// does: the SOURCE commit's own script and dependencies, so the rebuild
-// reproduces that commit's composition. The consumer,
-// sync/verify_build_provenance.ts (the tree proof), owns what it does
-// with the hash and how it cleans up.
+// does (the SOURCE commit's own script and dependencies); the consumer,
+// sync/verify_build_provenance.ts's tree proof, owns the hash and the cleanup.
 
 import { join } from "node:path";
 import { env } from "./gha.ts";
