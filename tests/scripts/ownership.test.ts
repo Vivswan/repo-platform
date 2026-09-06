@@ -8,19 +8,22 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ModuleManifest } from "../../scripts/lib/module_manifests";
 import {
-  baseOwnershipTables,
-  declarationTextErrors,
-  declaredMarkerTexts,
-  landedPathAndGates,
   loadBaseOwnership,
-  moduleOwnershipEntries,
   type OwnershipDeclaration,
   ownershipEntrySchema,
   ownershipListSchema,
   ownershipOf,
-  skipIfExistsPatterns,
+} from "../../scripts/ownership/declarations";
+import {
+  declarationTextErrors,
+  declaredMarkerTexts,
+} from "../../scripts/ownership/decoration_checks";
+import {
+  baseOwnershipTables,
+  moduleOwnershipEntries,
   translateGates,
-} from "../../scripts/ownership";
+} from "../../scripts/ownership/enforcement_tables";
+import { landedPathAndGates, skipIfExistsPatterns } from "../../scripts/ownership/landed_paths";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

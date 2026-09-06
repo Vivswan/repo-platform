@@ -601,7 +601,7 @@ describe("the live repository", () => {
       MIGRATIONS_HARNESS_REL,
       "actions/shared/grammar.ts",
       "actions/validate-template-report/validator/checks/manifest_parity.ts",
-      "scripts/ownership.ts",
+      "scripts/ownership/declarations.ts",
       "templates/base/ownership.yml",
       "templates/base/.github/SECURITY.md.jinja",
       "copier.yml",

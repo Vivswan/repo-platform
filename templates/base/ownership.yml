@@ -1,5 +1,5 @@
 # Ownership declarations for every file templates/base/ lands in generated
-# repositories (schema and loader: scripts/ownership.ts loadBaseOwnership;
+# repositories (schema and loader: scripts/ownership/declarations.ts loadBaseOwnership;
 # module files declare in their module.yml `ownership:` lists). Paths are
 # LANDED paths - filename gates stay on the template filenames and are
 # recorded from there. The composer errors when a landed file has no

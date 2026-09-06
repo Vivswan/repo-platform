@@ -68,7 +68,7 @@
 // Ownership contract (the manifest's source of truth): every file the
 // template lands carries a DECLARED ownership class - templates/base/
 // ownership.yml covers the base tree and each module.yml's `ownership:`
-// list covers its module's files (schema: scripts/ownership.ts).
+// list covers its module's files (schema: scripts/ownership/declarations.ts).
 // Composition errors on a landed file with no declaration, a declaration
 // whose path never lands, same-path declarations that disagree across
 // sources, starter declarations out of step with copier.yml's
@@ -98,7 +98,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "../lib/module_manifests.ts";
-import { loadBaseOwnership, readExcludeList, skipIfExistsPatterns } from "../ownership.ts";
+import { loadBaseOwnership } from "../ownership/declarations.ts";
+import { readExcludeList, skipIfExistsPatterns } from "../ownership/landed_paths.ts";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,

@@ -8,7 +8,7 @@
 // other grammar is refused loudly with recovery advice
 // (.github/scripts/sync/head_manifest.ts, the validator's parity check).
 //
-// scripts/ownership.ts welds GrammarId to the zod schema's grammar union
+// scripts/ownership/declarations.ts welds GrammarId to the zod schema's grammar union
 // at the type level, so adding a schema arm without a full table row (or a
 // row without a schema arm) is a compile error, and every consumer reads
 // its answer from the row instead of guessing.
@@ -27,7 +27,7 @@
 // only - tests/actions/shared_zone.test.ts enforces it.
 
 /** The managed-region declaration's grammar fields, structurally (the zod
- *  schema in scripts/ownership.ts stays the validation owner; these shapes
+ *  schema in scripts/ownership/declarations.ts stays the validation owner; these shapes
  *  exist so this zone needs no zod). The BEGIN and END marker lines bound
  *  the sync-owned region; the repository owns everything outside it, on
  *  both sides. */
@@ -53,7 +53,7 @@ export type RegionMarkers = Omit<ManagedRegionSplit, "grammar">;
 /** The one marker vocabulary, per comment syntax. These are the shipped
  *  spellings every declaration uses (declarations restate them as data -
  *  YAML cannot import - and the schema validates the syntax); the
- *  contradiction scan in scripts/ownership.ts unions these constants with
+ *  contradiction scan in scripts/ownership/decoration_checks.ts unions these constants with
  *  the live declarations so it stays armed even when a declaration
  *  changes its marker text. */
 export const HASH_REGION_MARKERS: RegionMarkers = {
@@ -141,7 +141,7 @@ export function knownGrammar(value: unknown): GrammarId | null {
 /** How many opening lines may hold the managed header: template sources
  *  keep it at the top, at most below a short jinja preamble that rendering
  *  collapses. One constant for the template-side decoration checks
- *  (scripts/ownership.ts) and the validator's rendered-file check. */
+ *  (scripts/ownership/decoration_checks.ts) and the validator's rendered-file check. */
 export const HEADER_WINDOW = 10;
 
 // --- split-file line semantics ------------------------------------------------

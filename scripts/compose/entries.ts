@@ -5,7 +5,7 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { SETTINGS_LAYER_NAMES } from "../ownership.ts";
+import { SETTINGS_LAYER_NAMES } from "../ownership/declarations.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 

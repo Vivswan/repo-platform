@@ -8,7 +8,8 @@ import {
   manifestEntries,
   manifestTemplate,
 } from "../../../scripts/compose/manifest";
-import { type OwnershipDeclaration, skipIfExistsPatterns } from "../../../scripts/ownership";
+import type { OwnershipDeclaration } from "../../../scripts/ownership/declarations";
+import { skipIfExistsPatterns } from "../../../scripts/ownership/landed_paths";
 
 describe("manifestEntries", () => {
   const skip = skipIfExistsPatterns(

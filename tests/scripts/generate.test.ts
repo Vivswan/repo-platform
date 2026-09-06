@@ -6,20 +6,34 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  actionSetsUpBun,
-  BUN_SETUP_ACTION,
-  baseOwnershipRegion,
-  bunPinnedActionDirs,
-  bunToolchainPin,
+  hasToolchainDefault,
+  moduleChoices,
+  reservedLabelNames,
+  trackingGate,
+  trackingLabelsInput,
+  trackingLabelValidator,
+  trackingStreams,
+} from "../../scripts/generate/copier_questions";
+import {
   dependabotLabelGroups,
   dependabotLabelsSpan,
-  hasToolchainDefault,
-  knownModules,
+  newRepoModuleRoster,
+  readmeModuleRoster,
+  skillModuleRosterBullets,
+  skillModuleRosterRows,
+} from "../../scripts/generate/doc_rosters";
+import {
   markerLines,
   mdMarkers,
-  moduleChoices,
+  spliceInlineRegion,
+  spliceRegion,
+} from "../../scripts/generate/markers";
+import {
+  baseOwnershipRegion,
+  knownModules,
   moduleOwnershipRegion,
-  newRepoModuleRoster,
+} from "../../scripts/generate/ownership_regions";
+import {
   type PagesManifest,
   pagesBuildCommand,
   pagesBuildRow,
@@ -29,25 +43,21 @@ import {
   pagesSetup,
   pagesSetupDefault,
   pagesSetupMeaning,
+} from "../../scripts/generate/pages";
+import {
+  actionSetsUpBun,
+  BUN_SETUP_ACTION,
+  bunPinnedActionDirs,
+  bunToolchainPin,
   pinFileContent,
-  readmeModuleRoster,
-  reservedLabelNames,
-  skillModuleRosterBullets,
-  skillModuleRosterRows,
-  spliceInlineRegion,
-  spliceRegion,
   strayActionPinFiles,
   strayPinFiles,
   toolchainPinRows,
   toolchainPins,
   toolchainPinsRegion,
-  trackingGate,
-  trackingLabelsInput,
-  trackingLabelValidator,
-  trackingStreams,
-} from "../../scripts/generate";
+} from "../../scripts/generate/toolchain_pins";
 import { loadManifests, type ModuleManifest } from "../../scripts/lib/module_manifests";
-import { skipIfExistsMatchers } from "../../scripts/ownership";
+import { skipIfExistsMatchers } from "../../scripts/ownership/landed_paths";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();

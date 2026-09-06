@@ -76,7 +76,7 @@ import {
   type ManifestEntryShape,
   parseManifestFiles,
 } from "../../../actions/shared/manifest.ts";
-import { isCommentMarker } from "../../../scripts/ownership.ts";
+import { isCommentMarker } from "../../../scripts/ownership/declarations.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
