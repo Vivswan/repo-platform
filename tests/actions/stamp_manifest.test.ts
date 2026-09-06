@@ -719,6 +719,52 @@ describe("the hook as copier runs it", () => {
     );
   });
 
+  test.each(UNREACHED_SHAPES)(
+    "entries the rewrite cannot reach (%s): the argument-free re-stamp warns and stamps the rest; --commit refuses whole",
+    (_reason, unreachable, unreached) => {
+      // The argument-free mode is the sync's final re-stamp over a delivered
+      // tree, where warn-and-continue leaves the parity check to report the
+      // unstamped entries in the PR. Under --commit the same manifest is a
+      // preflight refusal: the render's provenance stamp never rides a
+      // partial stamp, and nothing is written. Neither diagnostic may echo
+      // the sentinel key.
+      const manifest = manifestText([
+        SELF,
+        ...unreachable,
+        `    "c.md": {"class": "managed", "hash": null}`,
+      ]);
+      const files = {
+        ".github/.copier-answers.yml": ANSWERS,
+        ".github/repo-platform-manifest.json": manifest,
+        "SECRET-private/a.md": "a\n",
+        "b.md": "b\n",
+        "c.md": "c\n",
+      };
+      const root = tree(files);
+      const plain = run(root, []);
+      expect(plain.exitCode).toBe(0);
+      expect(plain.stderr).toContain(`has ${unreached} files entr`);
+      expect(plain.stderr).not.toContain("SECRET");
+      expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+        manifestText([
+          `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "31beeca"}`,
+          ...unreachable,
+          `    "c.md": {"class": "managed", "hash": "${sha256("c\n")}"}`,
+        ]),
+      );
+      const render = tree(files);
+      const refused = run(render, ["--commit", SHA, "--answers", ".github/.copier-answers.yml"]);
+      expect(refused.exitCode).not.toBe(0);
+      expect(refused.stderr).toContain(`has ${unreached} files entr`);
+      expect(refused.stderr).toContain("nothing was written");
+      expect(refused.stderr).not.toContain("SECRET");
+      expect(readFileSync(join(render, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+      expect(readFileSync(join(render, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+        manifest,
+      );
+    },
+  );
+
   test("a malformed --commit fails the render loudly instead of stamping", () => {
     const root = tree({
       ".github/.copier-answers.yml": "_commit: 31beeca\n",
@@ -732,6 +778,26 @@ describe("the hook as copier runs it", () => {
     expect(recordedCommit(root)).toBe("31beeca");
   });
 });
+
+// The two layouts the line-by-line rewrite cannot reach, each valid JSON the
+// shared parser accepts: entries joined on one line (the greedy layout reads
+// both as one body) and an entry spread over several lines. Keys carry a
+// hostile sentinel: manifest keys are target-repo paths, so no diagnostic
+// may echo them.
+const UNREACHED_SHAPES: [string, string[], number][] = [
+  [
+    "two entries joined on one line",
+    [
+      `    "SECRET-private/a.md": {"class": "managed", "hash": null}, "b.md": {"class": "managed", "hash": null}`,
+    ],
+    2,
+  ],
+  [
+    "an entry spread over several lines",
+    [`    "SECRET-private/a.md": {\n      "class": "managed", "hash": null\n    }`],
+    1,
+  ],
+];
 
 describe("stampManifestText", () => {
   const SELF = '".github/repo-platform-manifest.json"';
@@ -756,8 +822,16 @@ describe("stampManifestText", () => {
       const root = tree(files);
       const text = manifestText([selfLine("null", inputCommit)]);
       const expected = manifestText([selfLine("null", expectedCommit)]);
-      expect(stampManifestText(text, root)).toEqual({ out: expected, problem: null });
-      expect(stampManifestText(expected, root)).toEqual({ out: expected, problem: null });
+      expect(stampManifestText(text, root)).toEqual({
+        out: expected,
+        problem: null,
+        unreachedEntries: 0,
+      });
+      expect(stampManifestText(expected, root)).toEqual({
+        out: expected,
+        problem: null,
+        unreachedEntries: 0,
+      });
     },
   );
 
@@ -797,6 +871,7 @@ describe("stampManifestText", () => {
         self: "null",
       }),
       problem: null,
+      unreachedEntries: 0,
     });
   });
 
@@ -805,8 +880,16 @@ describe("stampManifestText", () => {
     const entry = (hash: string) =>
       manifestText([`    "ci.yml": {"class": "managed", "hash": "${hash}"}`]);
     const once = entry(sha256("new content\n"));
-    expect(stampManifestText(entry("0".repeat(64)), root)).toEqual({ out: once, problem: null });
-    expect(stampManifestText(once, root)).toEqual({ out: once, problem: null });
+    expect(stampManifestText(entry("0".repeat(64)), root)).toEqual({
+      out: once,
+      problem: null,
+      unreachedEntries: 0,
+    });
+    expect(stampManifestText(once, root)).toEqual({
+      out: once,
+      problem: null,
+      unreachedEntries: 0,
+    });
   });
 
   // The withheld marker's lifecycle, one row per entry state. commit_push.ts
@@ -942,12 +1025,18 @@ describe("stampManifestText", () => {
     expect(stampManifestText(text("before"), root, named)).toEqual({
       out: text("after"),
       problem: null,
+      unreachedEntries: 0,
     });
     expect(stampManifestText(text("after"), root, named)).toEqual({
       out: text("after"),
       problem: null,
+      unreachedEntries: 0,
     });
-    expect(stampManifestText(text("after"), root)).toEqual({ out: text("after"), problem: null });
+    expect(stampManifestText(text("after"), root)).toEqual({
+      out: text("after"),
+      problem: null,
+      unreachedEntries: 0,
+    });
     expect(parseManifestFiles(text("after")).problem).toBeNull();
   });
 
@@ -959,6 +1048,7 @@ describe("stampManifestText", () => {
     ).toEqual({
       out: line(`{"class": "managed", "hash": "${sha256("added\n")}"}`),
       problem: null,
+      unreachedEntries: 0,
     });
   });
 
@@ -971,7 +1061,11 @@ describe("stampManifestText", () => {
       ]);
     // Both seeded stale, so each null is a rewrite, not a pass-through.
     const text = entries(`"${"a".repeat(64)}"`, `"${"c".repeat(64)}"`);
-    expect(stampManifestText(text, root)).toEqual({ out: entries("null", "null"), problem: null });
+    expect(stampManifestText(text, root)).toEqual({
+      out: entries("null", "null"),
+      problem: null,
+      unreachedEntries: 0,
+    });
   });
 
   test("resolves update conflict blocks toward the template side, then stamps", () => {
@@ -995,6 +1089,7 @@ describe("stampManifestText", () => {
     expect(stampManifestText(text, root)).toEqual({
       out: manifestText([`    "ci.yml": {"class": "managed", "hash": "${sha256("content\n")}"}`]),
       problem: null,
+      unreachedEntries: 0,
     });
   });
 
@@ -1030,7 +1125,7 @@ describe("stampManifestText", () => {
     ["a top-level JSON null", "null", NO_FILES],
   ];
   test.each(rejected)("%s returns the text unchanged with a problem", (_reason, text, problem) => {
-    expect(stampManifestText(text, tree({}))).toEqual({ out: text, problem });
+    expect(stampManifestText(text, tree({}))).toEqual({ out: text, problem, unreachedEntries: 0 });
   });
 
   test("a duplicated entry line for one path is a soft, value-free problem, never a throw", () => {
@@ -1050,7 +1145,7 @@ describe("stampManifestText", () => {
       `    ${key}: {"class": "managed", "hash": null}`,
       `    ${key}: {"class": "starter"}`,
     ]);
-    let result: { out: string; problem: string | null } | undefined;
+    let result: { out: string; problem: string | null; unreachedEntries: number } | undefined;
     expect(() => {
       result = stampManifestText(text, root);
     }).not.toThrow();
@@ -1061,6 +1156,26 @@ describe("stampManifestText", () => {
     // exits 0 rather than aborting the render.
     expect(result?.out).toBe(text);
   });
+  test.each(UNREACHED_SHAPES)(
+    "entries the line rewrite cannot reach ride through unchanged and counted, never a throw: %s",
+    (_reason, unreachable, unreachedEntries) => {
+      // Both shapes are valid JSON with distinct keys, so the shared parser
+      // accepts the text, yet the one-line layout never rewrites them (the
+      // joined pair reads as one body no JSON.parse takes). A throw here
+      // would abort copier's after-hook; the lines ride through unchanged,
+      // every other line stamps, and the count lets main() warn.
+      const root = tree({ "a.md": "a\n", "b.md": "b\n", "c.md": "c\n" });
+      const text = manifestText([...unreachable, `    "c.md": {"class": "managed", "hash": null}`]);
+      expect(stampManifestText(text, root)).toEqual({
+        out: manifestText([
+          ...unreachable,
+          `    "c.md": {"class": "managed", "hash": "${sha256("c\n")}"}`,
+        ]),
+        problem: null,
+        unreachedEntries,
+      });
+    },
+  );
 });
 
 describe("entryHash", () => {
