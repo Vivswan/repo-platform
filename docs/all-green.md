@@ -69,7 +69,7 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release (release-ple
 
 ### Opting a PR into an immediate fleet sync
 
-The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else; a bracket-only line may be fenced in one pair of backticks so it renders as code, and a justified `all` line is written bare (a code span followed by text is prose). Squash merges put the body right under the subject verbatim, so the merged commit carries the block and post-green reads it from git alone.
+The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else; a bracket-only line may be fenced in one pair of backticks so it renders as code, and a justified `all` line is written bare (a code span followed by text is prose). Squash merges put the body right under the subject, and GitHub re-wraps its prose at 72 columns on the way; the reader joins a wrapped justification back into its line, so the merged commit carries the block and post-green reads it from git alone.
 
 ```text
 `[fleet-sync: public]`
@@ -101,7 +101,7 @@ The PR body OPENS with a directives block: its first paragraph is one bracketed 
 ::notice::<last published build>..<third merge> opted in: syncing public now
 ```
 
-- Several opt-ins in the range union: any `all` wins, otherwise the lists combine into one set, order-insensitive (the plans select by membership): within a line the tokens come first, then the slugs, folded and deduped; across commits, first appearance wins. A red body on the judged commit turns the leg red and nothing syncs; an older commit's red body already failed its own run, so here it is a warning naming the commit and contributes nothing, and the next merge's correct block still syncs.
+- Several opt-ins in the range union: any `all` wins, otherwise the lists combine into one set, order-insensitive (the plans select by membership): within a line the tokens come first, then the slugs, folded and deduped; across commits, first appearance wins. A red body on the judged commit turns the leg red and nothing syncs; an older commit's red body (its own run was red, or was replaced in the concurrency queue before it ran) is a warning naming the commit and contributes nothing, and the next merge's correct block still syncs.
 - A merge loses its OWN run only when a third merge lands while one run is in progress and one is pending (GitHub replaces the pending run; a running main run is never cancelled), and the surviving run's range still reads its directive. The opt-in is lost only when no later green run reaches post-green before the cron, or when the first-publish fallback reads the push alone: the weekly sync cron heals it. The settings apply never depends on the directive, since every green run applies every target.
 
 ## Residuals, stated

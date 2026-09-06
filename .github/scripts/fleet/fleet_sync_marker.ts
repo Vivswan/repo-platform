@@ -2,7 +2,8 @@
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
 // (sync_scope.ts's grammar; only a bare `all` takes, and requires, a trailing justification), read over
 // judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
-// an older one already failed its own run and is a counts-only warning here.
+// an older one (its own run red, or replaced in the concurrency queue before it ran) is a
+// counts-only warning here.
 
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -108,10 +109,35 @@ function withoutCodeSpans(lines: string[]): string[] {
   return bare;
 }
 
-/** A paragraph: its lines as written (`lines`, what the block grammar and every error read) and
- *  with their container prefixes and code spans blanked (`bare`, what the mention scan reads),
- *  computed once here. A line that is only whitespace and blockquote markers is a paragraph break. */
-type Paragraph = { lines: string[]; bare: string[] };
+// A line opening with a bare bracket group that ends or continues with text is directive-shaped
+// (a directive, a typo of one, `[word] prose`); a link, `[text](url)`, or a code span is not.
+const DIRECTIVE_SHAPED = /^\[[^[\]]*\](?:\s|$)/;
+
+/** The lines as the PR body had them: GitHub re-wraps the squash body at 72 columns, so a line
+ *  after a justified directive is its continuation. A line the block grammar or the mention scan
+ *  would judge on its own never folds, so folding hides nothing. */
+function foldJustifications(lines: string[], bare: string[]): string[] {
+  const folded: string[] = [];
+  lines.forEach((line, at) => {
+    const previous = folded.at(-1);
+    const body = containerBody(line);
+    const continues =
+      previous !== undefined &&
+      JUSTIFIED_LINE.test(previous) &&
+      !DIRECTIVE_SHAPED.test(body) &&
+      !BLOCK_LINE.test(body) &&
+      !FENCE_LINE.test(body) &&
+      !FLEET_SYNC_ANYWHERE.test(bare[at]);
+    if (continues) folded[folded.length - 1] = `${previous} ${line}`;
+    else folded.push(line);
+  });
+  return folded;
+}
+
+/** One computation per paragraph of the three views: `lines` as written (what errors quote),
+ *  `folded` (the block grammar's view), `bare` with container prefixes and code spans blanked
+ *  (the mention scan's view). A line of only whitespace and blockquote markers is a break. */
+type Paragraph = { lines: string[]; folded: string[]; bare: string[] };
 
 function paragraphs(text: string): Paragraph[] {
   const lines = text
@@ -122,7 +148,8 @@ function paragraphs(text: string): Paragraph[] {
   let current: string[] = [];
   const flush = () => {
     if (current.length > 0) {
-      result.push({ lines: current, bare: withoutCodeSpans(current.map(containerBody)) });
+      const bare = withoutCodeSpans(current.map(containerBody));
+      result.push({ lines: current, folded: foldJustifications(current, bare), bare });
     }
     current = [];
   };
@@ -148,17 +175,19 @@ function unwrap(line: string): string | null {
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  const isBlockShaped = (para: Paragraph) =>
-    para.lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
+  const isBlockShaped = (lines: string[]) =>
+    lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
-    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX])
-      ? paras[BLOCK_INDEX].lines
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX].folded)
+      ? paras[BLOCK_INDEX].folded
       : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
     if (block !== null && index === BLOCK_INDEX) return;
-    const shaped = isBlockShaped(para);
+    // Folding is for the block position only: elsewhere the raw shape and the
+    // bare view decide, so a wrapped code span holding brackets stays prose.
+    const shaped = isBlockShaped(para.lines);
     para.lines.forEach((line, at) => {
       if (shaped || FLEET_SYNC_ANYWHERE.test(para.bare[at])) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
@@ -254,14 +283,13 @@ function main(): number {
     );
     if (parsed.kind === "none") continue;
     if (parsed.kind === "error") {
-      // Only the judged commit's body is this run's fault; an older one
-      // failed its own run, and failing here would poison every later
-      // range until the build tree changes.
+      // Only the judged commit's body is this run's fault; failing on an
+      // older one would poison every later range until the build tree changes.
       if (commit === sha) {
         return fail(parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
       }
       warning(
-        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}; its own run was red) and contributes nothing to this range`,
+        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}) and contributes nothing to this range; only the judged commit's body fails this leg`,
       );
       continue;
     }

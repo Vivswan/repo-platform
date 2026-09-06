@@ -335,6 +335,122 @@ describe("parseDirectives", () => {
       expected: NONE,
     },
     {
+      reason:
+        "the merged body of #107, its one-line justification wrapped over two lines by GitHub (the observed malformed block on main)",
+      body: readFileSync(join(import.meta.dir, "fixtures", "squash_87829f94.txt"), "utf8"),
+      expected: FLEET,
+    },
+    {
+      reason: "a justification wrapped over three lines is one justified line",
+      body: message(
+        "[fleet-sync: all] every repository renders the workflow today; the\nretirement must reach all of them in this merge's own run, not on\nTuesday",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason:
+        "a wrapped line whose continuation starts with a code span is still the justification",
+      body: message("[fleet-sync: all] every repo renders\n`ci.yml` from this template", PROSE),
+      expected: FLEET,
+    },
+    {
+      reason: "a wrapped justification whose continuation opens with a markdown link is one line",
+      body: message(
+        "[fleet-sync: all] every repo needs the shared workflow updated; see\n[details](https://x.test)",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason:
+        "a quoted directive after a justified line is not a continuation: misplaced, as before",
+      body: message("[fleet-sync: all] why\n> [fleet-sync: public]", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "> [fleet-sync: public]"),
+    },
+    {
+      reason: "an indented directive after a justified line is not a continuation either",
+      body: message("[fleet-sync: all] why\n   [fleet-sync: public]", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "[fleet-sync: public]"),
+    },
+    {
+      reason:
+        "a bracketed lead-in after a justified line is its own line, not a continuation: prose, misplaced",
+      body: message("[fleet-sync: all] why; see\n[RFC] section 2", PROSE),
+      expected: misplaced("[fleet-sync: all] why; see"),
+    },
+    {
+      reason:
+        "a wrapped code span holding a justified line elsewhere stays prose (folding is for the block position)",
+      body: message(PROSE, "`[Context]\n[fleet-sync: all] why\nmore`"),
+      expected: NONE,
+    },
+    {
+      reason:
+        "a fence line after a justified line never folds, mention or not: the paragraph is prose",
+      body: message("[fleet-sync: all] why\n~~~", PROSE),
+      expected: misplaced("[fleet-sync: all] why"),
+    },
+    {
+      reason:
+        "a fenced example after a justified line never folds: its bare mention is misplaced, as before",
+      body: message("[fleet-sync: all] why\n```text\nexample [fleet-sync: public]\n```", PROSE),
+      expected: misplaced("[fleet-sync: all] why", "example [fleet-sync: public]"),
+    },
+    {
+      reason: "a continuation carrying a bare mention never folds: misplaced, as before",
+      body: message(
+        "[fleet-sync: all] why: the\ndefault [fleet-sync: public] is too narrow",
+        PROSE,
+      ),
+      expected: misplaced(
+        "[fleet-sync: all] why: the",
+        "default [fleet-sync: public] is too narrow",
+      ),
+    },
+    {
+      reason: "a continuation carrying the mention in a code span folds (the control)",
+      body: message(
+        "[fleet-sync: all] why: the\n`[fleet-sync: public]` default is too narrow",
+        PROSE,
+      ),
+      expected: FLEET,
+    },
+    {
+      reason: "a continuation line that is itself a directive is a second block line: duplicate",
+      body: message("[fleet-sync: all] every repo changed\n[fleet-sync: public]", PROSE),
+      expected: {
+        kind: "error",
+        errors: ["duplicate directive [fleet-sync]: one line per keyword"],
+      },
+    },
+    {
+      reason:
+        "a backticked directive after a justified line is a second block line, not a continuation",
+      body: message("[fleet-sync: all] every repo changed\n`[fleet-synk]`", PROSE),
+      expected: {
+        kind: "error",
+        errors: ['unknown directive keyword in "`[fleet-synk]`"; known: fleet-sync'],
+      },
+    },
+    {
+      reason:
+        "a wrapped justification on a scope other than all is still red, quoting the rejoined line",
+      body: message("[fleet-sync: public] because the\nci changed", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync: public] because the ci changed" carries text after the directive: only [fleet-sync: all] takes a justification',
+        ],
+      },
+    },
+    {
+      reason:
+        "prose after a bracket-only directive is not a continuation: the paragraph is prose, the mention misplaced",
+      body: message("[fleet-sync: public]\nbecause the ci changed", PROSE),
+      expected: misplaced("[fleet-sync: public]"),
+    },
+    {
       reason: "a code-span block at the bottom is still the misplaced block, not a mention",
       body: message(PROSE, "`[fleet-sync: public]`"),
       expected: misplaced("`[fleet-sync: public]`"),
@@ -701,11 +817,10 @@ describe("main", () => {
     expect(result).toEqual({ exitCode: 0, output, stdout, stderr: "" });
   });
 
-  // A malformed body on an OLDER commit already failed its own run; a
-  // docs-only commit leaves the build stamp in place, so failing again
-  // here would poison every later range. The judged commit's own body
-  // stays fatal.
-  const poisoned = `::warning::${short(bottom)} carries a malformed directives block (1 problem; its own run was red) and contributes nothing to this range`;
+  // A malformed body on an OLDER commit is a warning: a docs-only commit
+  // leaves the build stamp in place, so failing here would poison every
+  // later range. The judged commit's own body stays fatal.
+  const poisoned = `::warning::${short(bottom)} carries a malformed directives block (1 problem) and contributes nothing to this range; only the judged commit's body fails this leg`;
   test.each([
     {
       reason: "a malformed older body warns and the judged commit's valid block arms",
