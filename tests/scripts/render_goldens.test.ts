@@ -249,25 +249,21 @@ describe("normalizeRenderedTree", () => {
   });
 
   test("throws on a manifest with an entry the stamp hook cannot reach: a partial stamp is never normalized", () => {
-    const root = mkdtempSync(join(tmpdir(), "render-goldens-test-"));
-    try {
-      writeFixture(root);
-      stampFixture(root);
-      const stamped = readFileSync(join(root, MANIFEST), "utf-8");
-      const spread = stamped.replace(
-        `    "link": {"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
-        `    "link": {\n      "class": "managed", "hash": "${sha256("AGENTS.md")}"\n    }`,
-      );
-      expect(spread).not.toBe(stamped);
-      writeFileSync(join(root, MANIFEST), spread);
-      const answers = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
-      expect(() => normalizeRenderedTree(root, SHA)).toThrow("not on a one-object line");
-      // Nothing was normalized: the gate runs before the first write.
-      expect(readFileSync(join(root, MANIFEST), "utf-8")).toBe(spread);
-      expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(answers);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const root = temp.dir("render-goldens-test-");
+    writeFixture(root);
+    stampFixture(root);
+    const stamped = readFileSync(join(root, MANIFEST), "utf-8");
+    const spread = stamped.replace(
+      `    "link": {"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
+      `    "link": {\n      "class": "managed", "hash": "${sha256("AGENTS.md")}"\n    }`,
+    );
+    expect(spread).not.toBe(stamped);
+    writeFileSync(join(root, MANIFEST), spread);
+    const answers = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
+    expect(() => normalizeRenderedTree(root, SHA)).toThrow("not on a one-object line");
+    // Nothing was normalized: the gate runs before the first write.
+    expect(readFileSync(join(root, MANIFEST), "utf-8")).toBe(spread);
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(answers);
   });
 
   test("leaves a tree without a manifest or answers file alone", () => {
