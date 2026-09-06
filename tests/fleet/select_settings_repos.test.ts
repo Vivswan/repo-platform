@@ -740,12 +740,20 @@ describe("select_settings_repos.ts", () => {
         JSON.stringify({ inputs: { repo: "Vivswan/steady, vivswan/hidden-server" } }),
       );
       const r = run("list", { env: { GITHUB_EVENT_PATH: eventFile } });
-      expect(r.exitCode).toBe(0);
       // steady is an explicit managed persona absent from discovery:
       // fail-closed private, self-disclosed by its repos.yml entry - the
       // one undiscovered repo THIS scope names, so the warning counts one.
-      expect(r.stdout).toContain(`::warning::${undiscoveredWarning(1)}`);
-      expect(r.summary).toBe(ONE_UNDISCOVERED_SUMMARY);
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout: lines(
+          `::warning::${undiscoveredWarning(1)}`,
+          "settings targets: Vivswan/steady, h**-s**r",
+        ),
+        stderr: "",
+        output: "targets=",
+        summary: ONE_UNDISCOVERED_SUMMARY,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
       expect(targetsOf(r)).toEqual([
         {
           repo: "Vivswan/steady",
@@ -806,14 +814,19 @@ describe("select_settings_repos.ts", () => {
       const eventFile = join(root, "dispatch-declined-event.json");
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/nomodule" } }));
       const r = run("list-declined", { env: { GITHUB_EVENT_PATH: eventFile } });
-      expect(r.exitCode).toBe(0);
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout: lines(
+          `::warning::${undiscoveredWarning(1)}`,
+          "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module, the opt-in to centrally managed settings (docs/settings.md). Nothing installs or heals its rulesets or labels.",
+          "settings targets: (none)",
+        ),
+        stderr: "",
+        output: "targets=",
+        summary: ONE_UNDISCOVERED_SUMMARY,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
       expect(targetsOf(r)).toEqual([]);
-      expect(r.summary).toBe(ONE_UNDISCOVERED_SUMMARY);
-      expect(r.stdout).toContain(
-        "::notice::Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch",
-      );
-      expect(r.stdout).toContain("settings targets: (none)");
-      expect(r.stdout).not.toContain("::error::");
     },
     TEST_TIMEOUT_MS,
   );
