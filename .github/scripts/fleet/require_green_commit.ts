@@ -16,11 +16,14 @@
 // The three triggers split on what the commit MEANS:
 //   - a CALLED run (post-green.yml's settings-fleet leg, SOURCE_SHA set)
 //     rides the judged commit's own CI run, needs-ordered behind the
-//     all-green job: the verdict is final by construction, so there is
-//     no wait - one instant read, refused on anything but a completed
-//     success - and the sha must be the run's own GITHUB_SHA, since the
-//     workflow's checkouts read that commit (a caller handing a
-//     different sha is refused, never silently applied);
+//     all-green job: the verdict is final by construction, but the
+//     Checks API can still report the gate job's just-completed check
+//     run as in progress for a moment after it released this leg, so
+//     the read is the shared predicate's own bounded poll (the one the
+//     template publisher takes), fail-closed - and the sha must be the
+//     run's own GITHUB_SHA, since the workflow's checkouts read that
+//     commit (a caller handing a different sha is refused, never
+//     silently applied);
 //   - workflow_dispatch runs exist to apply the checked-out commit - so
 //     an ungreen tip is a hard refusal after the bounded wait;
 //   - the SCHEDULED nightly heal exists to re-assert known-good state -
@@ -43,10 +46,16 @@
 // empty on schedule and dispatch runs), GITHUB_EVENT_NAME (only
 // "schedule" may fall back; unset degrades to the tip-gated refusal),
 // GITHUB_OUTPUT (the resolved sha for the workflow's later checkouts).
-// GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
+// GREEN_WAIT_MS / GREEN_POLL_MS bound the schedule and dispatch wait;
+// the called path's poll is bounded by the predicate's ALL_GREEN_WAIT_MS.
 
 import { appendFileSync } from "node:fs";
-import { allGreenFailure, type GhRunner, verdictPending } from "../shared/all_green.ts";
+import {
+  allGreenFailure,
+  type GhRunner,
+  type VerdictWait,
+  verdictPending,
+} from "../shared/all_green.ts";
 import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { type GreenWalkOutcome, newestGreenCommit } from "./newest_green_commit.ts";
 
@@ -221,14 +230,15 @@ export function decideGreenCommit(
 /** The called path's verdict: `sourceSha` (the caller's judged commit)
  *  must be the run's own `sha` - the workflow's checkouts read GITHUB_SHA,
  *  so any other value would apply a tree the gate never vouched for - and
- *  must carry a completed all-green success NOW. No wait: the caller is
- *  needs-ordered behind the gate in the same run, so a pending verdict is
- *  a broken caller, not a race worth a deadline. */
+ *  must carry a completed all-green success. The read is the shared
+ *  predicate's default bounded poll, the template publisher's: the Checks
+ *  API can still show the gate job's check run in progress moments after
+ *  that job released this leg. Fail-closed past the bound. */
 export function decideCalledCommit(
   repository: string,
   sha: string,
   sourceSha: string,
-  options: Pick<GreenWaitOptions, "gh"> = {},
+  options: { gh?: GhRunner; wait?: VerdictWait } = {},
 ): GateDecision {
   if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
     return { refusal: `SOURCE_SHA is not a full commit sha (got '${sourceSha}')` };
@@ -241,16 +251,13 @@ export function decideCalledCommit(
         "that called it (post-green.yml), whose checkouts read that commit; nothing else is vouched for.",
     };
   }
-  const notGreen =
-    options.gh === undefined
-      ? allGreenFailure(repository, sha, undefined, { deadlineMs: 0 })
-      : allGreenFailure(repository, sha, options.gh, { deadlineMs: 0 });
+  const notGreen = allGreenFailure(repository, sha, options.gh, options.wait);
   if (notGreen !== null) {
     return {
       refusal:
         `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
-        "The caller must be needs-ordered behind the all-green job of the same run, so a missing " +
-        "or pending verdict here means the call arrived from somewhere else.",
+        "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +
+        "still missing or pending after the wait means the call arrived from somewhere else.",
     };
   }
   return { sha, fallback: false };

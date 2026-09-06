@@ -51,7 +51,7 @@ Every run, on all three entries, applies only from a GREEN commit ([fleet/requir
 
 | Entry | The gate |
 | --- | --- |
-| Post-green call | The sha input must be the run's own judged commit (the workflow's checkouts read that commit, so any other value is refused), and its all-green check is read once, no wait: the caller is needs-ordered behind the gate in the same run, so a pending or missing verdict means the call came from somewhere else and is refused. |
+| Post-green call | The sha input must be the run's own judged commit (the workflow's checkouts read that commit, so any other value is refused), and its all-green check is read through the same bounded poll the template publisher uses (shared/all_green.ts): the Checks API can still show the gate job's check run in progress for a moment after that job released the leg, so one read could refuse a green commit. The poll fails closed: the caller is needs-ordered behind the gate in the same run, so a verdict still pending or missing at the bound means the call came from somewhere else. |
 | Dispatch | Waits (bounded) for the tip's all-green check and fails closed on red or none - applying the checked-out commit is the run's point. `check_only` reports are dispatch runs too, so the drift diagnostic is unavailable exactly while main is red. |
 | Scheduled heal | Falls back: [fleet/newest_green_commit.ts](../.github/scripts/fleet/newest_green_commit.ts) walks main's first-parent history for the newest commit passing the same predicate, and the run re-checks out there, so scripts, dependencies, and layer files are one vouched revision - the heal keeps re-asserting the last vouched state through a red-main window instead of halting. |
 

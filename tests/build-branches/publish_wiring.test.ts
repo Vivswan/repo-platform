@@ -165,8 +165,8 @@ describe("post-green publish wiring", () => {
       changed: "${{ steps.inputs.outputs.changed }}",
     });
     // settings-fleet's own verification is the called workflow's gate
-    // (require_green_commit.ts's called path: the run's own commit, one
-    // instant read). Its wiring: ordered behind the sync it follows, run
+    // (require_green_commit.ts's called path: the run's own commit, the
+    // shared bounded all-green poll). Its wiring: ordered behind the sync it follows, run
     // when the merge touched a settings input OR the sync ran (red legs
     // included - a skipped sync alone must not fire it), the diff job's
     // success guarding only the inputs-changed branch (a red diff must

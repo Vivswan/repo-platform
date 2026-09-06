@@ -2,11 +2,11 @@
 // dispatched run does for the tip's all-green verdict, the hard,
 // fail-closed refusals around it, and the trigger split - dispatch stays
 // tip-gated, the scheduled heal falls back to the newest green commit
-// behind a red tip, and a CALLED run (post-green's leg) takes one
-// instant read of its own judged commit and never waits. The gh probe, the clock, the
-// sleep, and the walk are injected so nothing here touches the network or
-// actually waits (waitForGreen zeroes the predicate's internal poll -
-// this loop owns all waiting).
+// behind a red tip, and a CALLED run (post-green's leg) reads its own
+// judged commit through the predicate's bounded poll, the publisher's. The
+// gh probe, the clock, the sleep, and the walk are injected so nothing here
+// touches the network or actually waits (waitForGreen zeroes the
+// predicate's internal poll - this loop owns all waiting).
 
 import { describe, expect, test } from "bun:test";
 import type { GreenWalkOutcome } from "../../.github/scripts/fleet/newest_green_commit";
@@ -254,38 +254,70 @@ describe("decideGreenCommit", () => {
 describe("decideCalledCommit", () => {
   const OTHER = "00000000000000000000000000000000000000cc";
 
-  test("the run's own green commit passes on ONE probe - a called run never waits", () => {
+  test("the run's own green commit passes on ONE probe, no sleep", () => {
     const { gh, calls } = ghAnswering([{}]);
-    expect(decideCalledCommit("o/r", SHA, SHA, { gh })).toEqual({ sha: SHA, fallback: false });
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 60_000, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
+    expect(decision).toEqual({ sha: SHA, fallback: false });
     expect(calls()).toBe(1);
+    expect(sleeps).toEqual([]);
   });
 
+  test("a check still in progress on the first read and green on the second passes", () => {
+    // The Checks API can report the gate job's just-completed check run as
+    // in progress for a moment after that job released this leg: the read
+    // polls through it instead of refusing a green commit.
+    const { gh, calls } = ghAnswering([{ status: "in_progress", conclusion: null }], [{}]);
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 60_000, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
+    expect(decision).toEqual({ sha: SHA, fallback: false });
+    expect(calls()).toBe(2);
+    expect(sleeps).toEqual([5]);
+  });
+
+  // Past the bound the poll fails CLOSED on every non-green shape. A red
+  // conclusion waits the bound out too (the predicate polls for a fresh
+  // success because a re-judged sha's verdict can trail a stale one), so
+  // the refusal names the conclusion at the bound, not on the first read.
   test.each([
     {
-      reason: "a red verdict refuses",
+      reason: "a red verdict refuses at the bound",
       page: [{ conclusion: "failure" }],
-      refusal: "is not green - its all-green verdict concluded 'failure'",
+      verdict: "its all-green verdict concluded 'failure'",
     },
     {
-      reason:
-        "a pending verdict refuses at once - a wait would only mask a caller outside the gate",
+      reason: "a verdict still in progress past the bound refuses",
       page: [{ status: "in_progress", conclusion: null }],
-      refusal: "is not green - its all-green verdict is still 'in_progress'",
+      verdict: "its all-green verdict is still 'in_progress' after 0s",
     },
     {
-      reason: "no verdict at all refuses (the call arrived from somewhere else)",
+      reason: "no verdict at all past the bound refuses (the call arrived from somewhere else)",
       page: [],
-      refusal: "is not green - no all-green verdict check exists there",
+      verdict:
+        "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; " +
+        "re-run the sha's CI run (the all-green job posts the check) if one should exist",
     },
-  ])("$reason", ({ page, refusal }) => {
+  ])("$reason", ({ page, verdict }) => {
     const { gh, calls } = ghAnswering(page);
-    const decision = decideCalledCommit("o/r", SHA, SHA, { gh });
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 0, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
     expect(decision).toEqual({
-      refusal: expect.stringContaining(
-        `refusing the called settings apply: commit ${SHA.slice(0, 12)} ${refusal}`,
-      ),
+      refusal:
+        `refusing the called settings apply: commit ${SHA.slice(0, 12)} is not green - ${verdict}. ` +
+        "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +
+        "still missing or pending after the wait means the call arrived from somewhere else.",
     });
     expect(calls()).toBe(1);
+    expect(sleeps).toEqual([]);
   });
 
   test.each([

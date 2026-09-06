@@ -62,7 +62,7 @@ on:
         description: >-
           The judged main commit - the caller's own github.sha, which
           the gate step requires (its checkouts read that commit) and
-          verifies green without waiting
+          verifies green
         required: true
         type: string
     secrets:
@@ -134,7 +134,9 @@ jobs:
       # refused outright, since a branch CI run vouches only for that
       # branch. A CALLED run (SOURCE_SHA set) rides the judged commit's
       # own CI run behind the all-green job: the gate requires the input
-      # to be this run's commit and reads the verdict once, no wait. A
+      # to be this run's commit and reads the verdict through the
+      # publisher's bounded poll (the Checks API can trail the gate job
+      # by a moment). A
       # dispatch waits out the race with the tip's CI run, then gates
       # hard - except on the SCHEDULED heal, where a red tip falls back
       # to the newest green commit behind it (itself vouched by the same
