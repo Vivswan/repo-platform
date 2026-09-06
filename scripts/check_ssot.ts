@@ -2105,6 +2105,40 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
   return [];
 }
 
+// --- scratch-scoped scripts ------------------------------------------------
+
+/** package.json scripts pinned to their EXACT command because the command
+ *  itself carries the per-run scratch discipline: `test` reaches bun test
+ *  only through the launcher that scopes TMPDIR per run, and
+ *  `compose:check` assembles through branch_tree's --check mode, which
+ *  mints and removes its own directory. CI reaches both only through the
+ *  check chain (the local-gates rule), so a drift back to a bare `bun
+ *  test` or a fixed `--dest` path would keep every gate green while
+ *  sibling runs trampled each other's scratch. */
+export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
+  test: "bun scripts/run_tests.ts",
+  "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
+};
+
+/** Mismatch per pinned script whose live command differs (a missing script
+ *  counts as a difference). */
+export function scratchScopedScriptMismatches(
+  scripts: Record<string, string>,
+  pins: Record<string, string>,
+): Mismatch[] {
+  return Object.entries(pins).flatMap(([name, command]) =>
+    scripts[name] === command
+      ? []
+      : [
+          {
+            file: "package.json",
+            expected: `${name} script '${command}' (the command scopes its scratch per run)`,
+            got: scripts[name] === undefined ? "no such script" : `'${scripts[name]}'`,
+          },
+        ],
+  );
+}
+
 // --- local runtime pin -------------------------------------------------------
 
 /** Mismatch when the LOCAL bun runtime's MAJOR.MINOR differs from the
@@ -3444,17 +3478,7 @@ const rules: Rule[] = [
         }
       }
 
-      // CI reaches the suite only through `bun run test` (the local-gates
-      // rule pins that step), so the script itself must stay the launcher:
-      // a bare `bun test` here would leak fixtures with every gate green.
-      const TEST_LAUNCHER = "bun scripts/run_tests.ts";
-      if (scripts.test !== TEST_LAUNCHER) {
-        mismatches.push({
-          file: "package.json",
-          expected: `test script '${TEST_LAUNCHER}' (scripts/run_tests.ts scopes TMPDIR per run)`,
-          got: String(scripts.test),
-        });
-      }
+      mismatches.push(...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS));
       return mismatches;
     },
   },

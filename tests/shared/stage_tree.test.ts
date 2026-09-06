@@ -6,9 +6,9 @@
 // divergence vectors planted at once:
 //   - an in-tree .gitignore hiding a sibling (the vector that diverged
 //     the old plain `add -A` producer form from the hermetic verifier);
-//   - a parent-repo .git/info/exclude, which the producers' /tmp
-//     worktrees inherit while the verifier's fresh scratch repo never
-//     sees it (the second skew axis).
+//   - a parent-repo .git/info/exclude, which the producers' scratch
+//     worktrees (worktrees OF the checkout) inherit while the verifier's
+//     fresh scratch repo never sees it (the second skew axis).
 // Plus a CONTROL arm: on a tree no ignore rule touches, the hermetic
 // argv stages exactly what plain `add -A` staged - the equivalence that
 // makes the producers' adoption behavior-preserving for every composed

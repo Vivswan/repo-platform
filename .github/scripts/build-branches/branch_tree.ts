@@ -51,17 +51,24 @@
 //
 // Usage:
 //   bun .github/scripts/build-branches/branch_tree.ts --dest DIR
+//   bun .github/scripts/build-branches/branch_tree.ts --check
+//
+// --check assembles into a fresh per-run scratch directory and removes it
+// afterwards: it proves the tree assembles (`bun run compose:check`) and
+// keeps nothing, so concurrent checks never share a path.
 
 import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
@@ -265,25 +272,39 @@ export function assembleBranchTree(dest: string): void {
   writeFileSync(join(dest, "README.md"), README);
 }
 
+/** A refused invocation: reported as `error: <message>` and exit 2 by the
+ * CLI entry, thrown here so the parser stays testable. */
+export class UsageError extends Error {}
+
 function usageError(message: string): never {
-  console.error(`error: ${message}`);
-  process.exit(2);
+  throw new UsageError(message);
 }
 
-function parseArgs(argv: string[]): { dest: string } {
+/** Where to assemble: a caller-owned directory (replaced, kept), or a
+ * scratch directory this run mints and removes. Exactly one. */
+export type Target = { kind: "dest"; dest: string } | { kind: "check" };
+
+export function parseArgs(argv: string[]): Target {
   let dest: string | undefined;
+  let check = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
       i++;
-      if (i >= argv.length) usageError(`argument ${arg}: expected one argument`);
-      return argv[i];
+      const next = argv[i];
+      if (next === undefined || next.startsWith("--")) {
+        usageError(`argument ${arg}: expected one argument`);
+      }
+      return next;
     };
     if (arg === "--dest") dest = value();
+    else if (arg === "--check") check = true;
     else usageError(`unrecognized argument: ${arg}`);
   }
-  if (!dest) usageError("the following arguments are required: --dest");
-  return { dest };
+  if (check && dest !== undefined) usageError("--check and --dest are mutually exclusive");
+  if (check) return { kind: "check" };
+  if (!dest) usageError("one of --dest DIR or --check is required");
+  return { kind: "dest", dest };
 }
 
 /** True when dest is the repository root, an ancestor of it, or inside it -
@@ -296,9 +317,21 @@ export function destOverlapsRepo(dest: string, repoRoot: string): boolean {
 }
 
 function main(): number {
-  const args = parseArgs(process.argv.slice(2));
+  const target = parseArgs(process.argv.slice(2));
+  if (target.kind === "check") {
+    const scratch = mkdtempSync(join(tmpdir(), "repo-platform-compose-check-"));
+    try {
+      const dest = join(scratch, "tree");
+      mkdirSync(dest);
+      assembleBranchTree(dest);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+    console.log("assembled the build tree into a scratch directory (removed)");
+    return 0;
+  }
 
-  const dest = resolve(args.dest);
+  const dest = resolve(target.dest);
   // Compare canonically - a symlinked parent must not alias the checkout
   // past the guard - but mutate the lexical path: canonicalizing dest for
   // rmSync would dereference a symlinked dest and delete its TARGET
@@ -319,5 +352,11 @@ function main(): number {
 }
 
 if (import.meta.main) {
-  process.exit(main());
+  try {
+    process.exit(main());
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+    console.error(`error: ${error.message}`);
+    process.exit(2);
+  }
 }
