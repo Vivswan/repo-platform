@@ -5,16 +5,10 @@
 
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  BUN_VERSION_FILE,
-  treeOf,
-  VALIDATOR_DIR,
-  VALIDATOR_SCRIPT,
-  validatorOf,
-} from "./aligned_tree.ts";
+import { capture, download, env, error, failureDetail, requireEnv, succeeded } from "../runtime.ts";
+import { writeVerdict } from "../verdict.ts";
 import { OPERATOR_REPO, recordedBuildSha } from "./build_sha.ts";
-import { capture, download, env, error, failureDetail, requireEnv, succeeded } from "./runtime.ts";
-import { writeVerdict } from "./verdict.ts";
+import { ACTION_DIR, actionOf, BUN_VERSION_FILE, treeOf, VALIDATOR_SCRIPT } from "./tree.ts";
 
 const NETWORK_TIMEOUT_MS = 60_000;
 
@@ -144,10 +138,10 @@ if (!succeeded(unpacked.exit)) {
 
 // The judge step runs the script; the setup-bun step before it reads the
 // tree's own bun pin. Both must be there, or the run stops here.
-const validator = validatorOf(alignedDir);
+const action = actionOf(alignedDir);
 for (const name of [VALIDATOR_SCRIPT, BUN_VERSION_FILE]) {
-  if (!existsSync(join(validator, name))) {
-    refuse(`${OPERATOR_REPO} at ${sha} ships no ${VALIDATOR_DIR}/${name}`);
+  if (!existsSync(join(action, name))) {
+    refuse(`${OPERATOR_REPO} at ${sha} ships no ${ACTION_DIR}/${name}`);
   }
 }
 console.log(`Fetched ${OPERATOR_REPO}'s validator at ${sha}`);

@@ -488,7 +488,7 @@ RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 # ownership manifest, so the sync stamps once more when the tree is final.
 bun actions/shared/stamp_manifest.ts --root "$PROJECT"
 
-bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template-report/validator"
+bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template-report"
 bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 
 cd "$PROJECT"

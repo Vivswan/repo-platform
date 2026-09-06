@@ -8,9 +8,9 @@
 // checkout.
 
 import { join, resolve } from "node:path";
-import { reportFilesOf, VALIDATOR_SCRIPT, validatorOf } from "./aligned_tree.ts";
-import { capture, env, error, failureDetail, requireEnv, run, succeeded } from "./runtime.ts";
-import { classify, type Integrity, writeVerdict } from "./verdict.ts";
+import { capture, env, error, failureDetail, requireEnv, run, succeeded } from "../runtime.ts";
+import { classify, type Integrity, writeVerdict } from "../verdict.ts";
+import { actionOf, reportFilesOf, VALIDATOR_SCRIPT } from "./tree.ts";
 
 const INSTALL_TIMEOUT_MS = 180_000;
 const VALIDATE_TIMEOUT_MS = 300_000;
@@ -19,7 +19,7 @@ const alignedDir = requireEnv("ALIGNED_DIR");
 const verdictFile = requireEnv("VERDICT_FILE");
 const alignedBun = env("ALIGNED_BUN");
 const root = resolve(".");
-const validator = validatorOf(alignedDir);
+const action = actionOf(alignedDir);
 
 const conclude: (verdict: Integrity) => never = (verdict) => {
   writeVerdict(verdictFile, verdict);
@@ -37,7 +37,7 @@ if (alignedBun === "") {
 }
 
 const installed = capture([alignedBun, "install", "--frozen-lockfile", "--production"], {
-  cwd: validator,
+  cwd: action,
   timeoutMs: INSTALL_TIMEOUT_MS,
 });
 if (!succeeded(installed.exit)) {
@@ -48,9 +48,9 @@ if (!succeeded(installed.exit)) {
   });
 }
 
-console.log(`Judging the tree with the validator at ${validator} on ${alignedBun}`);
+console.log(`Judging the tree with the validator at ${action} on ${alignedBun}`);
 const files = reportFilesOf(alignedDir);
-const exit = run([alignedBun, join(validator, VALIDATOR_SCRIPT), root], {
+const exit = run([alignedBun, join(action, VALIDATOR_SCRIPT), root], {
   cwd: root,
   env: { FINDINGS_FILE: files.findings, ADVISORIES_FILE: files.advisories },
   timeoutMs: VALIDATE_TIMEOUT_MS,

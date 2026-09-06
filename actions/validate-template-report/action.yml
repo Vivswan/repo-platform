@@ -32,8 +32,8 @@ outputs:
 runs:
   using: composite
   steps:
-    # Installed once up front: every leg's script runs on it, the nested
-    # validator included.
+    # Installed once up front: every leg's script runs on it, the validator
+    # under validator/ included.
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -87,7 +87,8 @@ runs:
 
     # Every predictable scratch path, cleared by ONE fixed /bin/rm before
     # anything reads it: every path is attempted and any failed removal fails
-    # the step. (This action's own scripts have no runtime deps to install.)
+    # the step. (The one runtime dependency, the validator's yaml, is
+    # installed by the latest step below.)
     - name: Clear the scratch root
       id: clear
       continue-on-error: true
@@ -116,7 +117,7 @@ runs:
         BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
-      run: '"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"'
+      run: '"$ACTION_BUN" "${{ github.action_path }}/src/aligned/fetch.ts"'
 
     # The fetched tree runs on the bun ITS pin names (the fetch step
     # refused any tree without one), not on this action's: an older tree's
@@ -128,7 +129,7 @@ runs:
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
       with:
-        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/validator/.bun-version
+        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/.bun-version
 
     - name: Set up the fetched tree's bun (retry)
       id: aligned-bun-retry
@@ -136,14 +137,14 @@ runs:
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
       with:
-        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/validator/.bun-version
+        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/.bun-version
 
     - name: Resolve the fetched tree's bun
       id: aligned-bun-path
       if: steps.fetch.outcome == 'success'
       shell: bash
       env:
-        PIN_FILE: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/validator/.bun-version
+        PIN_FILE: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/.bun-version
       run: |
         pin="$(cat "$PIN_FILE")"
         path="$(command -v bun || true)"
@@ -168,11 +169,11 @@ runs:
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
         ORCHESTRATOR_BUN: ${{ steps.action-bun.outputs.path }}
         ALIGNED_BUN: ${{ steps.aligned-bun-path.outputs.path }}
-      run: '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"'
+      run: '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/src/aligned/judge.ts"'
 
     # Advisory only (report.ts renders it as warnings; its outcome is read by
     # nothing). The build tip's validator is this action's own validator/
-    # directory, run on this action's bun: both pins are one generated value.
+    # directory, installed from and run on this action's package and bun.
     - name: Run the build tip's validator
       id: latest
       if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
@@ -180,12 +181,12 @@ runs:
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-        VALIDATOR_DIR: ${{ github.action_path }}/validator
+        ACTION_PATH: ${{ github.action_path }}
         FINDINGS_FILE: ${{ runner.temp }}/latest-findings.md
         ADVISORIES_FILE: ${{ runner.temp }}/latest-advisories.md
       run: |
-        "$ACTION_BUN" install --frozen-lockfile --production --cwd "$VALIDATOR_DIR"
-        "$ACTION_BUN" "$VALIDATOR_DIR/validate_generated_files.ts" .
+        "$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"
+        "$ACTION_BUN" "$ACTION_PATH/validator/validate_generated_files.ts" .
 
     # The ONE place the verdict is read and `integrity` is set, whatever
     # happened above. Bash so that the no-bun path can still export the
@@ -209,7 +210,7 @@ runs:
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         if [ -n "$ACTION_BUN" ]; then
-          exec "$ACTION_BUN" "$ACTION_PATH/report.ts"
+          exec "$ACTION_BUN" "$ACTION_PATH/src/report.ts"
         fi
         reason="the action's pinned bun is unavailable"
         echo "integrity=failure" >> "$GITHUB_OUTPUT"
