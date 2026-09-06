@@ -105,12 +105,9 @@ export interface DiscoveredRepo {
   private: boolean;
 }
 
-// The redaction invariant as a type, owned here alone: a private row
-// hides its slug behind a hint plus a resolution tag (and its details
-// behind run_hidden.ts), a public row displays the slug itself and
-// carries no tag. Consumers reading rows back from a file re-enter a
-// trust boundary and must parse them with parseEnrichedRows instead of
-// casting.
+// The redaction invariant as a type: a private row is a hint plus a resolution
+// tag (details hidden by run_hidden.ts), a public row is the bare slug and no
+// tag. Rows read back from a file go through parseEnrichedRows, never a cast.
 export const enrichedRowSchema = z
   .discriminatedUnion("private", [
     z.object({

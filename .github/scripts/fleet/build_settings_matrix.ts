@@ -43,20 +43,9 @@ export function declaredModules(registrationText: string): string[] | null {
   return readModules(data).modules;
 }
 
-// `private` rides the matrix because the apply leg's steps consume it: the
-// layer render and the merge run as workflow steps BEFORE the action, and
-// their diagnostics quote repo-owned content (duplicate label and ruleset
-// names, tracking-label values, parser errors). The action's own
-// private-repos redaction cannot cover output produced before it runs, so
-// settings-repos.yml hands the flag to run_hidden.ts (as HIDE_DETAILS),
-// which is the boundary that keeps that content out of the public log.
-//
-// The redaction pair keeps EnrichedRow's discriminated-union shape
-// (RedactionState is derived from the row schema in redact.ts) instead of
-// flattening to two independent fields: a private row always carries a
-// resolution tag and a public one never does, so a tagless private row -
-// the shape the selector's schema exists to prevent - stays
-// unrepresentable here too.
+// `private` rides the matrix so the render and merge steps, which run BEFORE the
+// settings action and quote repo-owned content, can hide it via run_hidden.ts.
+// Derived from EnrichedRow's union, so a tagless private row is unrepresentable.
 export type Target = { repo: string; name: string } & RedactionState;
 
 /** The operator repository's own matrix row: committed workflows disclose
