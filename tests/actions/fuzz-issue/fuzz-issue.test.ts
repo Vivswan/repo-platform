@@ -6,8 +6,7 @@
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tempDirs } from "../../tests/shared/temp_dir";
+import { join, resolve } from "node:path";
 import {
   blockTitle,
   buildBody,
@@ -25,9 +24,11 @@ import {
   resolveIssue,
   runUrl,
   type Stream,
-} from "./fuzz-issue";
+} from "../../../actions/fuzz-issue/fuzz-issue.ts";
+import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+const ACTION_DIR = resolve(import.meta.dir, "../../../actions/fuzz-issue");
 
 const env = {
   GITHUB_SERVER_URL: "https://github.com",
@@ -634,7 +635,7 @@ describe("action.yml input defaults", () => {
   // No yaml dependency in this package: each default is a plain one-line
   // scalar, so line extraction is exact enough.
   const inputDefault = (name: string): string | undefined => {
-    const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
+    const actionYml = readFileSync(join(ACTION_DIR, "action.yml"), "utf-8");
     const re = new RegExp(`^ {2}${name}:\\n(?: {4}.+\\n)*? {4}default: (.+)$`, "m");
     return actionYml.match(re)?.[1];
   };
