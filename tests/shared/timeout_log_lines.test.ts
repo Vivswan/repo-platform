@@ -19,7 +19,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Node } from "ts-morph";
-import { parseTs } from "../../scripts/ts_extract.ts";
+import { parseTs } from "../../scripts/lib/ts_extract.ts";
 
 const SITES = [
   ".github/scripts/sync/clean_renders.ts",

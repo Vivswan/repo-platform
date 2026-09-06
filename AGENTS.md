@@ -9,7 +9,7 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 ## Architecture essentials
 
 - This repo is the push-only operator: `sync-repos.yml` pushes sync PRs into managed repos and `settings-repos.yml` applies settings. Managed repos carry no sync workflow and no sync secret; the REPO_PLATFORM_TOKEN PAT lives only here.
-- `templates/` is the source of truth: `base/` plus one folder per module, each with a `module.yml` manifest (loader: scripts/module_manifests.ts). The composed `template/` tree is NOT committed on main; `bun run compose` writes a gitignored local copy.
+- `templates/` is the source of truth: `base/` plus one folder per module, each with a `module.yml` manifest (loader: scripts/lib/module_manifests.ts). The composed `template/` tree is NOT committed on main; `bun run compose` writes a gitignored local copy.
 - The orphan `build` branch is the generated delivery channel the fleet consumes (branch_tree.ts): copier.yml, the composed `template/`, `actions/`, and the fleet-facing reusable workflows. Fleet refs pin `@build`, never `@main`.
 - Publishing the build branch is green-gated and provenance-verified: the post-green legs, including the `[fleet-sync]` PR-body directive, are in docs/all-green.md; the trust model is in docs/build-provenance.md.
 - Composition rules (gates, `{# compose:<name> #}` anchors, fragments, collisions): the header of scripts/compose/compose.ts. Fleet membership: `repos.yml`. Module selection: each repo's `.repo-platform.yml`. Settings: the six-layer merge in docs/settings.md.
@@ -17,7 +17,7 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 ## Editing rules
 
 - GitHub Actions expressions inside `.jinja` workflow files are wrapped in `{% raw %}...{% endraw %}`. Symlinks in `templates/agents/` stay symlinks (`.gitattributes` marks them `-text`).
-- Never hand-edit generated content; edit the source and run `bun run regen` (CI fails on drift). Exception: `bun scripts/build_gitignore.ts` builds the gitignore outputs (networked; the refresh-gitignore workflow owns it) and `--topology` is its offline gate.
+- Never hand-edit generated content; edit the source and run `bun run regen` (CI fails on drift). Exception: `bun scripts/generate/build_gitignore.ts` builds the gitignore outputs (networked; the refresh-gitignore workflow owns it) and `--topology` is its offline gate.
 - Workflow run blocks longer than a few lines move to TypeScript under `.github/scripts/<owner>/`, run with bun, subprocesses as argv arrays via `shared/proc.ts`. `reusable-*` workflows that check out the CALLER's repository keep their steps inline.
 - The `.sh` files under `.github/scripts/` are the bash exceptions (CI test harnesses independent of the code they verify, and release_freshness.sh, pinned to its template twin); `bun run lint:sh` shellchecks them.
 - A template change that renames a rendered file, retires one, or flips its ownership class ships a migration ladder rung: one self-contained `mNNNN_<slug>.ts` under `.github/scripts/sync/migrations/` (node:/bun: imports only), its unit test, its upgrade_path_test.sh case, and a PR-body note; docs/migrations.md is the contract. Rungs are permanent history and the sync carries no compatibility code outside them.

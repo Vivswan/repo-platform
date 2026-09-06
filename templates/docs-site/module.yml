@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/module_manifests.ts).
+# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
 #
 # Sibling of the pages module, not an extension: pages deploys the repo's
 # OWN build (its command, its tree), docs-site deploys the repo's MARKDOWN

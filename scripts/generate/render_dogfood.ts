@@ -14,17 +14,17 @@
 // context cannot resolve fails the render (see renderJinjaFile).
 //
 // Usage:
-//   bun scripts/render_dogfood.ts           # rewrite every generated copy
-//   bun scripts/render_dogfood.ts --check   # exit 1 listing stale copies
+//   bun scripts/generate/render_dogfood.ts           # rewrite every generated copy
+//   bun scripts/generate/render_dogfood.ts --check   # exit 1 listing stale copies
 
 import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { type JinjaVars, renderJinjaFile, resolveCondition } from "./jinja_subset.ts";
-import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
+import { type JinjaVars, renderJinjaFile, resolveCondition } from "../lib/jinja_subset.ts";
+import { loadManifests, type ModuleManifest } from "../lib/module_manifests.ts";
 
-const REPO_ROOT = resolve(import.meta.dir, "..");
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
 /** This repository's own copier answers file; check_ssot.ts and
  *  verify_dogfood_oracle.ts read the same name. */

@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/module_manifests.ts).
+# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
 description: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
 ownership:
   - { path: .github/workflows/pages.yml, class: managed }

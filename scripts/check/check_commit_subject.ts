@@ -13,11 +13,11 @@
 // scripts/, so the shared module must live inside the action to keep it
 // self-contained for fleet `uses:` refs, while this hook only runs in a
 // full checkout where actions/ exists.
-// tests/scripts/check_commit_subject.test.ts proves the hook and the CI
+// tests/scripts/check/check_commit_subject.test.ts proves the hook and the CI
 // validator judge identically and reds if the grammar ever forks.
 //
 // Usage (wired by .husky/commit-msg):
-//   bun scripts/check_commit_subject.ts <commit-msg-file>
+//   bun scripts/check/check_commit_subject.ts <commit-msg-file>
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -26,7 +26,7 @@ import {
   conventionalSubject,
   isMergeSubject,
   scopeCharacterClass,
-} from "../actions/validate-commit-names/subject.ts";
+} from "../../actions/validate-commit-names/subject.ts";
 
 // The subject sits in the first content line; the bound only limits how
 // far the search reaches past leading blanks and comments, and keeps a
@@ -66,7 +66,7 @@ export function candidateSubjects(raw: string): string[] {
 export function main(argv: string[]): number {
   const messagePath = argv[0];
   if (!messagePath || argv.length !== 1) {
-    console.error("usage: bun scripts/check_commit_subject.ts <commit-msg-file>");
+    console.error("usage: bun scripts/check/check_commit_subject.ts <commit-msg-file>");
     return 2;
   }
   const candidates = candidateSubjects(readFileSync(messagePath, "utf-8"));

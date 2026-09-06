@@ -1,14 +1,14 @@
 // The single source of the Conventional Commit subject grammar. Two
 // consumers import these bytes: the CI action (validate-commit-names.ts,
 // running `@build` in every fleet repo and at ./actions in this repo's
-// CI) and this repo's commit-msg hook (scripts/check_commit_subject.ts).
+// CI) and this repo's commit-msg hook (scripts/check/check_commit_subject.ts).
 // The module lives INSIDE the action directory, not under scripts/,
 // because the direction is forced: the composed build branch ships
 // actions/ but not scripts/, so an action-side import of a repo-root
 // module would break every fleet `uses:` ref, while the hook only ever
 // runs in a full checkout where actions/ exists. Dependency-free on
 // purpose - the action carries no runtime dependencies.
-// tests/scripts/check_commit_subject.test.ts proves the two consumers
+// tests/scripts/check/check_commit_subject.test.ts proves the two consumers
 // judge identically; a fork of this grammar reds there.
 
 export const allowedTypes = [

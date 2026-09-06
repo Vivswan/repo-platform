@@ -1,4 +1,4 @@
-# repo-platform's own copier answers, consumed by scripts/render_dogfood.ts
+# repo-platform's own copier answers, consumed by scripts/generate/render_dogfood.ts
 # to render the template twins this repository dogfoods (bun run dogfood
 # writes the copies; bun run dogfood:check fails on drift). Deliberately
 # minimal: only the answers the generated pairs consume - the identity

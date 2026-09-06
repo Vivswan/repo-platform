@@ -1,6 +1,6 @@
 // Unit tests for the SSOT checker's pure helpers: the comparison and
 // extraction primitives each rule class is built from (the jinja
-// normalizer's tests live in tests/scripts/jinja_subset.test.ts with the
+// normalizer's tests live in tests/scripts/lib/jinja_subset.test.ts with the
 // helper). The rules themselves run against the live repo
 // (bun scripts/check_ssot.ts).
 
@@ -96,7 +96,7 @@ import {
   zToDollar,
 } from "../../scripts/check_ssot";
 import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
-import { templateCarries } from "../../scripts/ts_extract.ts";
+import { templateCarries } from "../../scripts/lib/ts_extract.ts";
 
 describe("applyDivergences", () => {
   const entry = {

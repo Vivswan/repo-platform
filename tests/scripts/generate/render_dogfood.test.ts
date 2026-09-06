@@ -7,8 +7,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { renderJinjaFile } from "../../scripts/jinja_subset";
-import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
   type AnswerSources,
   type Answers,
@@ -22,8 +20,10 @@ import {
   parseAnswers,
   pathExists,
   renderContext,
-} from "../../scripts/render_dogfood";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../scripts/generate/render_dogfood";
+import { renderJinjaFile } from "../../../scripts/lib/jinja_subset";
+import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
@@ -198,7 +198,7 @@ describe("release-please-config template", () => {
   // substitution that breaks the file's syntax.
   test("the seeded owner follows github_username and the render stays valid JSON", () => {
     const tpl = readFileSync(
-      join(import.meta.dir, "../../templates/release-please/release-please-config.json.jinja"),
+      join(import.meta.dir, "../../../templates/release-please/release-please-config.json.jinja"),
       "utf-8",
     );
     const rendered = renderJinjaFile(

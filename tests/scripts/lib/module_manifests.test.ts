@@ -17,8 +17,8 @@ import {
   type ModuleManifest,
   parseManifest,
   readManifest,
-} from "../../scripts/module_manifests";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../scripts/lib/module_manifests";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 

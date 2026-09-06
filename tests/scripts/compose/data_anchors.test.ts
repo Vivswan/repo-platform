@@ -14,7 +14,7 @@ import {
   orChain,
   renderedSeparationErrors,
 } from "../../../scripts/compose/data_anchors";
-import type { ModuleManifest } from "../../../scripts/module_manifests";
+import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
 import { AGENTS, BUN, manifest, NODE, UV } from "./fixtures";
 
 function gateOfFor(manifests: ModuleManifest[]): (module: string) => string {

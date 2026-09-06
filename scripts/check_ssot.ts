@@ -13,12 +13,12 @@
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
 // text disappears fails loudly instead of passing vacuously; structure
 // pulled out of TypeScript SOURCES (pinned consts, argv arrays, spawn and
-// stream-write call shapes) is read from the AST via scripts/ts_extract.ts
+// stream-write call shapes) is read from the AST via scripts/lib/ts_extract.ts
 // under the same loud-anchor contract, so a comment, string, or template
 // decoy can neither satisfy an anchor nor hide the real declaration.
 // Template
 // (.jinja) inputs are compared modulo jinja via normalizeJinja() (from
-// scripts/jinja_subset.ts, shared with scripts/render_dogfood.ts);
+// scripts/lib/jinja_subset.ts, shared with scripts/generate/render_dogfood.ts);
 // recorded, intentional divergences live in RECORDED_DIVERGENCES with a
 // reason.
 //
@@ -54,6 +54,7 @@ import { RUNG_FILE_RE, RUNG_ID_BODY } from "../.github/scripts/sync/run_migratio
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
 import { ANCHOR_RE } from "./compose/splice.ts";
+import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
 import {
   actionSetsUpBun,
   actionSteps,
@@ -61,10 +62,11 @@ import {
   trackingStreams,
   usesSetupBun,
 } from "./generate.ts";
-import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
-import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
-import { landedPathAndGates } from "./ownership.ts";
-import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
+import { type JinjaVars, normalizeJinja, placeholderJinja } from "./lib/jinja_subset.ts";
+import {
+  loadManifests as loadManifestsFresh,
+  type ModuleManifest,
+} from "./lib/module_manifests.ts";
 import {
   argvFlagLeads,
   argvStringAfter,
@@ -80,7 +82,8 @@ import {
   templateCarries,
   unwrapExpression,
   wrappedArgvLabels,
-} from "./ts_extract.ts";
+} from "./lib/ts_extract.ts";
+import { landedPathAndGates } from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -5250,7 +5253,7 @@ const rules: Rule[] = [
     // .github/CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
     // dependabot-bun-lockfile.yml, validate-skills.yml) are GENERATED from
     // their templates by
-    // scripts/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
+    // scripts/generate/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
     // and byte-compared against a REAL copier render by ci.yml's
     // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no
     // comparison here. This rule keeps only the pairs generation cannot

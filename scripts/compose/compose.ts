@@ -13,7 +13,7 @@
 // - templates/<module>/: whole files owned by that module, emitted at
 //   their plain paths; the module's gate (its manifest `gate:` override or
 //   plain membership) is recorded per file. module.yml is the module's
-//   manifest (schema: scripts/module_manifests.ts).
+//   manifest (schema: scripts/lib/module_manifests.ts).
 // - Conditional LANDING happens in copier.yml, not in filenames: its
 //   generated _exclude region (scripts/generate.ts, from exclude.ts's
 //   excludePatterns) carries one jinja-templated pattern per gated landed path,
@@ -97,7 +97,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadManifests, MODULE_ORDER, type ModuleManifest } from "../module_manifests.ts";
+import { loadManifests, MODULE_ORDER, type ModuleManifest } from "../lib/module_manifests.ts";
 import { loadBaseOwnership, readExcludeList, skipIfExistsPatterns } from "../ownership.ts";
 import {
   agentsToolchainErrors,

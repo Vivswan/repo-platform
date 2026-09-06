@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The jinja subset two consumers share: scripts/check_ssot.ts compares the
 // dogfooded twins it still owns modulo these transforms, and
-// scripts/render_dogfood.ts renders this repository's generated copies with
+// scripts/generate/render_dogfood.ts renders this repository's generated copies with
 // them. Tag stripping, if/endif branch evaluation against a boolean
 // context, identity substitution, and the remote-uses -> local-path rewrite
 // all live here so the checker and the generator can never normalize

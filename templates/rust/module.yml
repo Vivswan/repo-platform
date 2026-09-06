@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/module_manifests.ts).
+# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
 description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 # Deliberately no toolchain key: rust contributes no CodeQL language and no
 # auto-format command, and the schema makes a toolchain without a CodeQL

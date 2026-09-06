@@ -3,8 +3,8 @@
 // dogfood-oracle smoke row renders /tmp/smoke with this repository's own
 // answers (.repo-platform-answers.yml), and this script byte-compares each
 // generated pair's rendered file against the committed copy - proving the
-// TS renderer behind `bun run dogfood` (scripts/render_dogfood.ts +
-// scripts/jinja_subset.ts) agrees with what real copier produces from the
+// TS renderer behind `bun run dogfood` (scripts/generate/render_dogfood.ts +
+// scripts/lib/jinja_subset.ts) agrees with what real copier produces from the
 // same templates and answers.
 //
 // No normalization before comparing: the committed copies carry the
@@ -24,7 +24,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { ANSWERS_FILE, PAIRS, parseAnswers } from "../../../scripts/render_dogfood.ts";
+import { ANSWERS_FILE, PAIRS, parseAnswers } from "../../../scripts/generate/render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 

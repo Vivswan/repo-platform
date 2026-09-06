@@ -15,7 +15,7 @@ import {
   PIN_SOURCES,
   proseBumps,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
-import { loadManifests } from "../../scripts/module_manifests";
+import { loadManifests } from "../../scripts/lib/module_manifests";
 
 describe("fetchJson", () => {
   test("a malformed body rejects with the fixed diagnostic, never the body", async () => {

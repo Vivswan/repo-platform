@@ -19,13 +19,13 @@
 // blocks are outside the house dialect - use fenced code - and are
 // reported as wrapped prose.
 //
-// Usage: bun scripts/check_markdown_wrap.ts   # exit 1 listing violations
+// Usage: bun scripts/check/check_markdown_wrap.ts   # exit 1 listing violations
 
 import { lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { capture } from "../.github/scripts/shared/proc.ts";
+import { capture } from "../../.github/scripts/shared/proc.ts";
 
-const REPO_ROOT = resolve(import.meta.dir, "..");
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
 export type LineKind = "blank" | "structural" | "list" | "prose";
 

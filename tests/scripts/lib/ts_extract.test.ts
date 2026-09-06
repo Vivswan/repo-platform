@@ -19,7 +19,7 @@ import {
   templateCarries,
   unwrapExpression,
   wrappedArgvLabels,
-} from "../../scripts/ts_extract.ts";
+} from "../../../scripts/lib/ts_extract.ts";
 
 const anchor = { where: "f.ts", what: "the pinned fact" };
 

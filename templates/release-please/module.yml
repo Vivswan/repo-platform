@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/module_manifests.ts).
+# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
 description: gate-downstream release job in ci.yml + autorelease labels
 ownership:
   - { path: .github/workflows/release.yml, class: managed }

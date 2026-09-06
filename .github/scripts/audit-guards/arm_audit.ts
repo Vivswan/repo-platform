@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Weekly arming proof for the guard registry (audit-guards.yml). Binding
-// (scripts/check_guard_binding.ts) proves each guard and its forcing
+// (scripts/check/check_guard_binding.ts) proves each guard and its forcing
 // test EXIST; this proves the pair is ARMED: per entry, in a scratch
 // clone - never the checkout - apply the mutation, run the forcing test
 // file, require the NAMED test red (per-test junit verdict; a different
@@ -33,7 +33,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { applyMutation, type GuardEntry } from "../../../scripts/guard_registry.ts";
+import { applyMutation, type GuardEntry } from "../../../scripts/check/guard_registry.ts";
 import { error } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 
@@ -305,12 +305,12 @@ export function sweepSurvivors(marker: string, pgrepExecutable = "pgrep"): Sweep
  *  binding check green at that commit is what makes the shape trustable;
  *  the array check is the loud floor for a truncated clone. */
 async function loadCloneRegistry(scratch: string): Promise<readonly GuardEntry[]> {
-  const module = (await import(join(scratch, "scripts", "guard_registry.ts"))) as {
+  const module = (await import(join(scratch, "scripts", "check", "guard_registry.ts"))) as {
     GUARD_REGISTRY?: unknown;
   };
   if (!Array.isArray(module.GUARD_REGISTRY)) {
     throw new Error(
-      "the scratch clone's scripts/guard_registry.ts exports no GUARD_REGISTRY array",
+      "the scratch clone's scripts/check/guard_registry.ts exports no GUARD_REGISTRY array",
     );
   }
   return module.GUARD_REGISTRY as readonly GuardEntry[];

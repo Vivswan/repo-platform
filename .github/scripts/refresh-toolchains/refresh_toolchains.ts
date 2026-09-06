@@ -20,7 +20,7 @@
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadManifests } from "../../../scripts/module_manifests.ts";
+import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
 import { must } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
