@@ -25,9 +25,13 @@ const temp = tempDirs();
 //                   like any other
 //   unadopted     - no .repo-platform.yml (404): a routine notice-level
 //                   skip, never a warning
-//   locked        - public, push probe 403s: the token cannot push, so it
-//                   is not a fleet member - one notice, never a target
+//   locked        - public, push probe 403s: a public repo whose write
+//                   access was revoked stays discovered - one notice by
+//                   slug every run, never a target
 //   hidden-locked - PRIVATE, push probe 403s: the same notice, by hint
+//   hidden-gone   - PRIVATE, NOT in the listing: a private repo whose write
+//                   access was revoked vanishes from GET /user/repos; the
+//                   stubs would admit it, so a control run lists it
 //   hidden-server - PRIVATE: healthy adoption, must reach the matrix as
 //                   its hint with a verify tag, never as a slug
 //   hidden-nomods - PRIVATE: its .repo-platform.yml has no readable
@@ -77,7 +81,11 @@ describe("select_settings_repos.ts", () => {
         "    exit 1",
         "  fi",
         // Every persona, three of them private: the listing is the fleet.
-        `  echo '[[{"full_name":"Vivswan/deadapi","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
+        // hidden-gone joins the listing only under STUB_DISCOVER_GONE: the
+        // control proving its absence elsewhere is discovery's doing.
+        '  gone=""',
+        `  if [ -n "$STUB_DISCOVER_GONE" ]; then gone=',{"full_name":"Vivswan/hidden-gone","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}'; fi`,
+        `  printf '%s%s]]\\n' '[[{"full_name":"Vivswan/deadapi","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/deadprobe","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/flaky","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/nomodule","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
@@ -88,7 +96,7 @@ describe("select_settings_repos.ts", () => {
           `{"full_name":"Vivswan/open-lib","private":false,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
           `{"full_name":"Vivswan/hidden-nomods","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},` +
-          `{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
+          `{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}' "$gone"`,
         "  exit 0",
         "fi",
         'case "$2" in',
@@ -308,11 +316,29 @@ describe("select_settings_repos.ts", () => {
     // Whole outcome for both visibilities: the public one by slug, the
     // private one by hint; the matrix above already excludes both.
     for (const display of ["Vivswan/locked", "h**-l**d"]) {
-      expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice(display, 403)}`);
+      expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice(display)}`);
       expect(main.stdout).not.toContain(`::warning::${display}`);
       expect(main.summary).not.toContain(display);
     }
   });
+
+  test(
+    "a private repo the token can no longer see leaves without a trace; listed, it would select",
+    () => {
+      // Control first: listed, the same stubs select it (adopted, probe
+      // 200), so the main run's silence about it is discovery's doing.
+      const control = run("gone-present", {
+        env: { ONLY_REPO: "private", SOURCE_SHA: SHA, STUB_DISCOVER_GONE: "1" },
+      });
+      expect(control.exitCode).toBe(0);
+      expect(targetsOf(control).map((t) => t.repo)).toEqual(["h**-g**", "h**-s**r"]);
+      for (const channel of [main.stdout, main.stderr, main.output, main.summary]) {
+        expect(channel.toLowerCase()).not.toContain("hidden-gone");
+        expect(channel).not.toContain("h**-g**");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   test("the matrix is intact: skips never drop their neighbors, self included", () => {
     // One flag per row: the public personas print plainly and carry no
@@ -552,7 +578,7 @@ describe("select_settings_repos.ts", () => {
     `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
     "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
     "Vivswan/flaky: settings adoption check failed (attempt 1/3: HTTP 502 from stub); retrying...",
-    `::notice::${pushProbeSkipNotice("Vivswan/locked", 403)}`,
+    `::notice::${pushProbeSkipNotice("Vivswan/locked")}`,
     `::notice::${UNADOPTED_NOTICE}`,
   ];
   const PUBLIC_SUMMARY = `### Settings heal warnings\n${[
@@ -565,7 +591,7 @@ describe("select_settings_repos.ts", () => {
   const PRIVATE_PROBES = [
     ...RETRY("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
     `::warning::${GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL)}`,
-    `::notice::${pushProbeSkipNotice("h**-l**d", 403)}`,
+    `::notice::${pushProbeSkipNotice("h**-l**d")}`,
     `::warning::${NOMODS_WARNING}`,
   ];
   const PRIVATE_SUMMARY = `### Settings heal warnings\n${[

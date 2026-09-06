@@ -162,15 +162,15 @@ describe("scrubSlug", () => {
 // The notice builders are the selectors' shared literals; these pin the
 // emitted text byte-for-byte.
 describe("notice builders", () => {
-  test("pushProbeSkipNotice names a listed-but-unpushable repo a non-member, hint first", () => {
-    expect(pushProbeSkipNotice("h**-l**d", 403)).toBe(
-      "h**-l**d: not in the fleet - the fleet token can see this repository but cannot push to it (push probe HTTP 403), so its grant is read-only. Give the REPO_PLATFORM_TOKEN write access to this repository to enroll it.",
+  test("pushProbeSkipNotice names a discovered-but-unpushable repo a non-member, hint first", () => {
+    expect(pushProbeSkipNotice("h**-l**d")).toBe(
+      "h**-l**d: not in the fleet (the fleet token cannot push to it); grant write access to enroll it, or ignore this line for a repository you have left.",
     );
   });
 
   test("notAdoptedNotice without a consequence matches the sync selector's literal exactly", () => {
     expect(notAdoptedNotice("Vivswan/unadopted")).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's access to silence this.",
+      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's write access to leave the fleet.",
     );
   });
 
@@ -184,7 +184,7 @@ describe("notice builders", () => {
       "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not " +
         "adopted the template. If it carries .github/settings.yml, the central nightly heal no " +
         "longer applies it. Generate it with copier (see the repo-platform README) to opt in, or " +
-        "revoke the fleet token's access to silence this.",
+        "revoke the fleet token's write access to leave the fleet.",
     );
   });
 });

@@ -92,7 +92,7 @@ function probePush(slug: string, display: string): ProbeResult {
   const code = pushProbeStatus(slug, pat);
   if (code === 200) return "pass";
   if (code === 401 || code === 403 || code === 404) {
-    notice(pushProbeSkipNotice(display, code));
+    notice(pushProbeSkipNotice(display));
     return "drop";
   }
   return { detail: `HTTP ${String(code).padStart(3, "0")}` };

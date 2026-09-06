@@ -97,7 +97,7 @@ for (const row of rows) {
   if (!scopeSelects(scope, slug, row.private)) continue;
   const probeCode = pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
-    notice(pushProbeSkipNotice(display, probeCode));
+    notice(pushProbeSkipNotice(display));
     continue;
   }
   if (probeCode !== 200) {

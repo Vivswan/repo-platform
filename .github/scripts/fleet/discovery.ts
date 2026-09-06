@@ -175,16 +175,16 @@ export function scrubSlug(detail: string, slug: string, display: string): string
   return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
-/** Notice for a repo discovery listed but the token cannot push to (a
- * read-only grant). A REVOKED grant drops the repo from the listing itself,
- * so leaving the fleet is silent; `code` is the probe's 401/403/404. */
-export function pushProbeSkipNotice(display: string, code: number): string {
-  return `${display}: not in the fleet - the fleet token can see this repository but cannot push to it (push probe HTTP ${code}), so its grant is read-only. Give the REPO_PLATFORM_TOKEN write access to this repository to enroll it.`;
+/** Notice for a discovered repo the token cannot push to. Leaving the fleet
+ * = revoking the token's write access: a private repo then disappears from
+ * discovery, a public one stays listed and gets this line every plan. */
+export function pushProbeSkipNotice(display: string): string {
+  return `${display}: not in the fleet (the fleet token cannot push to it); grant write access to enroll it, or ignore this line for a repository you have left.`;
 }
 
 /** Skip notice for a repo without .repo-platform.yml on its default
  * branch. The settings heal inserts a consequence sentence. */
 export function notAdoptedNotice(display: string, consequence?: string): string {
   const inserted = consequence === undefined ? "" : `${consequence} `;
-  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. ${inserted}Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's access to silence this.`;
+  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. ${inserted}Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's write access to leave the fleet.`;
 }

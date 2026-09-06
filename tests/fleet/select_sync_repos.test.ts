@@ -16,6 +16,13 @@ const temp = tempDirs();
 //                   roster) must carry its hint
 //   hidden-locked - PRIVATE, push probe 403s (the token cannot push, so it
 //                   is not a fleet member): the notice must carry its hint
+//   locked        - public, push probe 403s: a public repo whose write
+//                   access was revoked stays discovered, so every plan
+//                   prints the notice by slug
+//   hidden-gone   - PRIVATE, NOT discovered: a private repo whose write
+//                   access was revoked vanishes from GET /user/repos; the
+//                   stubs would admit it (adopted, probe 200), so the
+//                   control run below discovers it and it selects
 // The matrix rows are this job's output contract: a private row holds
 // {repo: <hint>, private: true, verify} and never the slug.
 describe("select_sync_repos.ts", () => {
@@ -29,7 +36,9 @@ describe("select_sync_repos.ts", () => {
     { repo: "Vivswan/unadopted", private: false },
     { repo: "Vivswan/hidden-server", private: true },
     { repo: "Vivswan/hidden-locked", private: true },
+    { repo: "Vivswan/locked", private: false },
   ];
+  const HIDDEN_GONE = { repo: "Vivswan/hidden-gone", private: true };
 
   beforeAll(() => {
     mkdirSync(bin);
@@ -65,7 +74,7 @@ describe("select_sync_repos.ts", () => {
         "#!/usr/bin/env bash",
         'while [ "$#" -gt 1 ]; do shift; done',
         'case "$1" in',
-        '  *"/Vivswan/hidden-locked.git/"*) printf 403 ;;',
+        '  *"/Vivswan/hidden-locked.git/"*|*"/Vivswan/locked.git/"*) printf 403 ;;',
         "  *) printf 200 ;;",
         "esac",
         "",
@@ -178,11 +187,30 @@ describe("select_sync_repos.ts", () => {
   });
 
   test("skip notices print hints for private repos and slugs for public ones", () => {
-    expect(main.stdout).toContain(
-      "::notice::h**-l**d: not in the fleet - the fleet token can see this repository but cannot push",
-    );
+    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("h**-l**d")}`);
+    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("Vivswan/locked")}`);
     expect(main.stdout).toContain("::notice::Vivswan/unadopted: skipped - no .repo-platform.yml");
   });
+
+  test(
+    "a private repo the token can no longer see leaves without a trace; discovered, it would select",
+    () => {
+      // Control first: with the persona in the discovered list the same
+      // stubs select it, so its absence from the main run's exact rows and
+      // every channel is discovery's doing, not a stub that never admitted it.
+      const control = run("gone-present", { ONLY_REPO: "private", TARGET_SHA: SHA }, [
+        ...discovered,
+        HIDDEN_GONE,
+      ]);
+      expect(control.exitCode).toBe(0);
+      expect(reposOf(control).map((row) => row.repo)).toEqual(["h**-g**", "h**-s**r"]);
+      for (const channel of [main.stdout, main.stderr, main.output]) {
+        expect(channel).not.toContain("hidden-gone");
+        expect(channel).not.toContain("h**-g**");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   test("the roster line lists hints, not slugs", () => {
     expect(main.stdout).toContain("syncing: h**-s**r, Vivswan/steady");
@@ -274,7 +302,8 @@ describe("select_sync_repos.ts", () => {
   const STEADY_ROW = { repo: "Vivswan/steady", private: false, verify: "" };
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
-  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d", 403)}`;
+  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d")}`;
+  const LOCKED_PUBLIC = `::notice::${pushProbeSkipNotice("Vivswan/locked")}`;
   const NO_FLEET_REPO = (missing: number, total: number) =>
     `::error::${missing} of ${total} scoped repos matched no fleet repository (values withheld - ` +
     "they may be private slugs): not among the fleet token's pushable repositories under Vivswan - " +
@@ -289,11 +318,11 @@ describe("select_sync_repos.ts", () => {
       stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
-      reason: "public selects the public repos",
+      reason: "public selects the public repos (the revoked public one drops with its notice)",
       scope: "public",
       discoveredList: discovered,
       repos: [STEADY_ROW],
-      stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
+      stdout: lines(LOCKED_PUBLIC, UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
       reason: "private selects the private repos, by hint (the locked one drops on its probe)",
@@ -315,7 +344,11 @@ describe("select_sync_repos.ts", () => {
       scope: "public",
       discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
       repos: [],
-      stdout: lines(UNADOPTED, "::notice::no adopted repos selected; nothing to sync."),
+      stdout: lines(
+        LOCKED_PUBLIC,
+        UNADOPTED,
+        "::notice::no adopted repos selected; nothing to sync.",
+      ),
     },
   ])(
     "called with $scope: $reason",
