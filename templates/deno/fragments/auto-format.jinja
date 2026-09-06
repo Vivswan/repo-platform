@@ -3,4 +3,5 @@
           DENO_NO_UPDATE_CHECK: "1"
         run: |
           deno lint --fix || true
-          deno fmt
+          # Markdown prose is never re-wrapped: documents carry no width limit.
+          deno fmt --prose-wrap preserve
