@@ -20,6 +20,8 @@ import {
   asyncSpawnMismatches,
   asyncStreamWriteMismatches,
   BUN_TEST_FILE,
+  type BunDirsInputs,
+  bunDirsMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
   CHECK_RUN_LOOKUP,
@@ -48,6 +50,7 @@ import {
   labelPreflightFileMismatches,
   labelPreflightJobMismatches,
   lockedTypesBunVersion,
+  type Mismatch,
   majorMinor,
   mkdtempSites,
   mustMatch,
@@ -88,6 +91,7 @@ import {
   stickyTreeMismatches,
   stripGeneratedRegions,
   TEMP_DIR_HELPER,
+  TYPECHECK_TSCONFIG_LOOP,
   tempDirSiteMismatches,
   tempDirTreeMismatches,
   templateSelfPins,
@@ -3595,6 +3599,75 @@ describe("bunRuntimeMismatches", () => {
   test("an unreadable version throws loudly instead of passing vacuously", () => {
     expect(() => bunRuntimeMismatches("1.4.0-canary.1", "1.4.0")).toThrow("MAJOR.MINOR");
     expect(() => bunRuntimeMismatches("1.4.0", "")).toThrow("MAJOR.MINOR");
+  });
+});
+
+describe("bunDirsMismatches", () => {
+  // A package nested one level inside an action, as the report action's
+  // validator is: each control drops it from exactly one of the four
+  // homes and the rule names that home and the directory.
+  const NESTED = "actions/validate-template-report/validator";
+  const green: BunDirsInputs = {
+    lockDirs: [".", "actions/check-typography", NESTED],
+    dependabotBunDirs: [".", "actions/check-typography", NESTED],
+    typecheckScript: `bun x tsc -p . && (cd actions/check-typography && bun x tsc -p .) && (cd ${NESTED} && bun x tsc -p .)`,
+    typecheckRuns: `${TYPECHECK_TSCONFIG_LOOP}; do\n  (cd "$(dirname "$tsconfig")" && bun x tsc -p .)\ndone`,
+    tsconfigDirs: [".", "actions/check-typography", NESTED],
+  };
+  const cases: [string, Partial<BunDirsInputs>, Mismatch[]][] = [
+    ["every home covers the nested package", {}, []],
+    [
+      "dependabot's bun entry for the nested package is missing",
+      { dependabotBunDirs: [".", "actions/check-typography"] },
+      [
+        {
+          file: ".github/dependabot.yml",
+          expected: `a bun ecosystem entry for ${NESTED} (it commits bun.lock)`,
+          got: "no entry",
+        },
+      ],
+    ],
+    [
+      "the typecheck script stops at the action level",
+      {
+        typecheckScript: "bun x tsc -p . && (cd actions/check-typography && bun x tsc -p .)",
+      },
+      [
+        {
+          file: "package.json",
+          expected: `typecheck to cover ${NESTED}`,
+          got: "not in the typecheck script",
+        },
+      ],
+    ],
+    [
+      "the ci.yml loop drops the nested glob",
+      {
+        typecheckRuns:
+          'for tsconfig in tsconfig.json actions/*/tsconfig.json; do\n  (cd "$(dirname "$tsconfig")" && bun x tsc -p .)\ndone',
+      },
+      [
+        {
+          file: "ci.yml typecheck",
+          expected: `a glob loop ${TYPECHECK_TSCONFIG_LOOP}`,
+          got: "no such loop",
+        },
+      ],
+    ],
+    [
+      "the nested package commits a lockfile but no tsconfig.json",
+      { tsconfigDirs: [".", "actions/check-typography"] },
+      [
+        {
+          file: `${NESTED}/tsconfig.json`,
+          expected: "present (the ci.yml typecheck glob keys on it)",
+          got: "missing",
+        },
+      ],
+    ],
+  ];
+  test.each(cases)("%s", (_name, drift, expected) => {
+    expect(bunDirsMismatches({ ...green, ...drift })).toEqual(expected);
   });
 });
 

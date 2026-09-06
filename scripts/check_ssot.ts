@@ -1128,6 +1128,65 @@ function smokeRowModules(row: Record<string, unknown>): string[] {
   return (parseYaml(String(row.modules)) as unknown[]).map(String);
 }
 
+/** The ci.yml typecheck job's loop: keyed on tsconfig.json so a new
+ *  action, or a package nested one level inside one, joins without an edit. */
+export const TYPECHECK_TSCONFIG_LOOP =
+  "for tsconfig in tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json";
+
+export interface BunDirsInputs {
+  /** Directories committing a bun.lock, "." for the root. */
+  lockDirs: string[];
+  /** Directories dependabot's bun ecosystem entries name, "." for the root. */
+  dependabotBunDirs: string[];
+  /** package.json's typecheck script. */
+  typecheckScript: string;
+  /** The ci.yml typecheck job's run blocks, joined. */
+  typecheckRuns: string;
+  /** Directories carrying a tsconfig.json, "." for the root. */
+  tsconfigDirs: string[];
+}
+
+/** Every directory committing a bun.lock is under dependabot, in the local
+ *  typecheck script, and carries the tsconfig.json the CI loop keys on. */
+export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const dir of inputs.lockDirs) {
+    if (!inputs.dependabotBunDirs.includes(dir)) {
+      mismatches.push({
+        file: ".github/dependabot.yml",
+        expected: `a bun ecosystem entry for ${dir} (it commits bun.lock)`,
+        got: "no entry",
+      });
+    }
+  }
+  for (const dir of inputs.lockDirs.filter((d) => d !== ".")) {
+    if (!inputs.typecheckScript.includes(`cd ${dir}`)) {
+      mismatches.push({
+        file: "package.json",
+        expected: `typecheck to cover ${dir}`,
+        got: "not in the typecheck script",
+      });
+    }
+  }
+  if (!inputs.typecheckRuns.includes(TYPECHECK_TSCONFIG_LOOP)) {
+    mismatches.push({
+      file: "ci.yml typecheck",
+      expected: `a glob loop ${TYPECHECK_TSCONFIG_LOOP}`,
+      got: "no such loop",
+    });
+  }
+  for (const dir of inputs.lockDirs) {
+    if (!inputs.tsconfigDirs.includes(dir)) {
+      mismatches.push({
+        file: `${dir}/tsconfig.json`,
+        expected: "present (the ci.yml typecheck glob keys on it)",
+        got: "missing",
+      });
+    }
+  }
+  return mismatches;
+}
+
 /** Directories under actions/ carrying `file`, at any depth outside the
  *  published tree's exclusions, as sorted repo-relative paths: a package can
  *  sit nested inside an action (the report action's validator). */
@@ -4936,65 +4995,23 @@ const rules: Rule[] = [
   {
     name: "bun-dirs",
     run: () => {
-      const mismatches: Mismatch[] = [];
-      const lockDirs = [".", ...actionDirsCarrying("bun.lock")];
-
       const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
-      const bunDirs = (dependabot.updates as Record<string, unknown>[])
-        .filter((entry) => entry["package-ecosystem"] === "bun")
-        .map((entry) => String(entry.directory).replace(/^\//, "") || ".");
-      for (const dir of lockDirs) {
-        if (!bunDirs.includes(dir)) {
-          mismatches.push({
-            file: ".github/dependabot.yml",
-            expected: `a bun ecosystem entry for ${dir} (it commits bun.lock)`,
-            got: "no entry",
-          });
-        }
-      }
-
-      const scripts = packageScripts();
-      for (const dir of lockDirs.filter((d) => d !== ".")) {
-        if (!scripts.typecheck.includes(`cd ${dir}`)) {
-          mismatches.push({
-            file: "package.json",
-            expected: `typecheck to cover ${dir}`,
-            got: "not in the typecheck script",
-          });
-        }
-      }
-
       const typecheckJob = asRecord(ciJobs(repoCi(), "ci.yml").typecheck, "typecheck job");
-      const runs = (typecheckJob.steps as Record<string, unknown>[])
-        .map((step) => String(step.run ?? ""))
-        .join("\n");
-      // The job iterates a tsconfig glob, so it cannot drift when actions
-      // are added; pin the glob shape, and require every bun dir to carry
-      // the tsconfig.json the glob keys on so none skips typechecking.
-      if (
-        !runs.includes(
-          "for tsconfig in tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json",
-        )
-      ) {
-        mismatches.push({
-          file: "ci.yml typecheck",
-          expected:
-            "a glob loop over tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json",
-          got: "no such loop",
-        });
-      }
-      for (const dir of lockDirs) {
-        if (!existsSync(join(REPO_ROOT, dir, "tsconfig.json"))) {
-          mismatches.push({
-            file: `${dir}/tsconfig.json`,
-            expected: "present (the ci.yml typecheck glob keys on it)",
-            got: "missing",
-          });
-        }
-      }
-
-      mismatches.push(...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS));
-      return mismatches;
+      const scripts = packageScripts();
+      return [
+        ...bunDirsMismatches({
+          lockDirs: [".", ...actionDirsCarrying("bun.lock")],
+          dependabotBunDirs: (dependabot.updates as Record<string, unknown>[])
+            .filter((entry) => entry["package-ecosystem"] === "bun")
+            .map((entry) => String(entry.directory).replace(/^\//, "") || "."),
+          typecheckScript: scripts.typecheck ?? "",
+          typecheckRuns: (typecheckJob.steps as Record<string, unknown>[])
+            .map((step) => String(step.run ?? ""))
+            .join("\n"),
+          tsconfigDirs: [".", ...actionDirsCarrying("tsconfig.json")],
+        }),
+        ...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS),
+      ];
     },
   },
 

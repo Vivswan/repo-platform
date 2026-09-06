@@ -21,6 +21,7 @@ import {
   PINNED_SCRIPT_DIRS,
   parseArgs,
   SHARED_DIR,
+  TEST_FILE_SUFFIX,
   UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
 import { tempDirs } from "../shared/temp_dir";
@@ -119,6 +120,7 @@ function actionsFixture(): string {
   writeFileSync(join(action, "package.json"), "{}\n");
   writeFileSync(join(action, "bun.lock"), "\n");
   writeFileSync(join(action, "lib", "helper.ts"), "export {};\n");
+  writeFileSync(join(action, "lib", `helper${TEST_FILE_SUFFIX}`), "export {};\n");
   writeFileSync(join(action, "node_modules", "monaco-editor", "index.js"), "module.exports={};\n");
   // One file under every excluded name, spelled here rather than read from
   // EXCLUDED_DIRS so a name dropped from the set fails the listing below.
@@ -137,7 +139,7 @@ describe("copyActions", () => {
 
     // The whole published tree: the manifests ship because the action
     // installs from them when it runs, nested source survives the filter,
-    // and nothing under an EXCLUDED_DIRS name lands.
+    // and nothing under an EXCLUDED_DIRS name or ending in .test.ts lands.
     expect(listing(join(dest, "actions", "check-typography"))).toEqual([
       "action.yml",
       "bun.lock",
@@ -295,10 +297,9 @@ describe("assembleBranchTree", () => {
       (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
     );
     expect(manifestFree).toEqual([SHARED_DIR]);
-    // The retired top-level script directory is gone (the report action's
-    // presence is the control that this is the real roster); its content
-    // is the report action's validator/, published with the action -
-    // lockfile and pin included, no manifest, no installed dependencies.
+    // The retired script directory is gone (the report action's presence is
+    // the control); its content ships as the action's validator/ - lockfile
+    // and pin included, no manifest, no dependencies, no tests.
     expect(actions).not.toContain("validate-template");
     expect(actions).toContain("validate-template-report");
     const validator = join(dest, "actions", "validate-template-report", "validator");
@@ -310,8 +311,18 @@ describe("assembleBranchTree", () => {
         "package.json",
         "action.yml",
         "node_modules",
+        `validate_generated_files${TEST_FILE_SUFFIX}`,
       ].map((name) => existsSync(join(validator, name))),
-    ).toEqual([true, true, true, true, false, false]);
+    ).toEqual([true, true, true, true, false, false, false]);
+    expect(walk(join(dest, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX))).toEqual(
+      [],
+    );
+    // The control: the checkout does carry validator tests for the filter to drop.
+    expect(
+      walk(join(REPO_ROOT, "actions", "validate-template-report", "validator")).filter((path) =>
+        path.endsWith(TEST_FILE_SUFFIX),
+      ),
+    ).not.toEqual([]);
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {

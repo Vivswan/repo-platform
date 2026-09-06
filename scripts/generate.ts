@@ -25,13 +25,9 @@
 //   derived from the zod schema in scripts/lib/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
-// - actions/<dir>/.bun-version for every composite action that sets up
-//   bun and every declared pinned script directory (PINNED_SCRIPT_DIRS
-//   below): WHOLE generated dotfiles carrying the manifests'
-//   bun pin, read by each action's own setup steps (bun-version-file
-//   against github.action_path) so the actions' runtime never rides the
-//   CALLING repository's bun resolution - a consumer pinning an older bun
-//   cannot parse the lockfiles repo-platform's bun writes.
+// - actions/<dir>/.bun-version for every action that sets up bun and every
+//   PINNED_SCRIPT_DIRS entry: WHOLE dotfiles carrying the manifests' bun
+//   pin, so the actions never ride the CALLER's bun resolution.
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
