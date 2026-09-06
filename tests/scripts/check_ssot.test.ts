@@ -146,13 +146,38 @@ describe("ownershipTableMismatches", () => {
     expect(ownershipTableMismatches(twin(rows))).toEqual([{ file: "b.md", expected, got }]);
   });
 
-  test("a table with no rows is a lost anchor, not an empty roster", () => {
+  test("a second table after the roster is not read into it", () => {
+    const trailing = [
+      table(["| Managed | `ci.yml`, `release.yml` | never edit |", "| Split | `AGENTS.md` | ok |"]),
+      "Notes:",
+      "",
+      "| Module | Files |",
+      "|---|---|",
+      "| bun | `.bun-version` |",
+      "",
+    ].join("\n");
+    expect(
+      ownershipTableMismatches([
+        { file: "a.md", markdown: reference },
+        { file: "b.md", markdown: trailing },
+      ]),
+    ).toEqual([]);
+  });
+
+  test.each([
+    { reason: "prose only", markdown: "# Title\n\nprose only\n" },
+    {
+      reason: "a decoy table without the ownership header",
+      markdown:
+        "# Title\n\n| Module | Files | Notes |\n|---|---|---|\n| bun | `.bun-version` | pin |\n",
+    },
+  ])("a file with no ownership header is a lost anchor: $reason", ({ markdown }) => {
     expect(() =>
       ownershipTableMismatches([
         { file: "a.md", markdown: reference },
-        { file: "b.md", markdown: "# Title\n\nprose only\n" },
+        { file: "b.md", markdown },
       ]),
-    ).toThrow(/b\.md: no markdown table rows - anchor lost/);
+    ).toThrow(/b\.md: no \| Class \| Files \| table header - anchor lost/);
   });
 });
 

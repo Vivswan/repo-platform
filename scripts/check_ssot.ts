@@ -961,11 +961,23 @@ export const SKILL_OWNERSHIP_TABLES = [
   "skills/repo-platform-sync-pr/references/file-ownership.md",
 ] as const;
 
-/** Each table row's Class and Files cells, header and separator included;
- *  a file with no table rows is a lost anchor, not an empty roster. */
+/** The ownership table's header row, the anchor the roster is read from. */
+export const OWNERSHIP_TABLE_HEADER = "| Class | Files |";
+
+/** The ownership table's Class and Files cells, header and separator
+ *  included: the contiguous rows from OWNERSHIP_TABLE_HEADER on. Any other
+ *  table in the file is not the roster, so a missing header is a lost anchor. */
 export function ownershipTableRoster(file: string, markdown: string): string[] {
-  const rows = markdown.split("\n").filter((line) => line.startsWith("|"));
-  if (rows.length === 0) throw new Error(`${file}: no markdown table rows - anchor lost`);
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(OWNERSHIP_TABLE_HEADER));
+  if (start === -1) {
+    throw new Error(`${file}: no ${OWNERSHIP_TABLE_HEADER} table header - anchor lost`);
+  }
+  const rows: string[] = [];
+  for (const line of lines.slice(start)) {
+    if (!line.startsWith("|")) break;
+    rows.push(line);
+  }
   return rows.map((line) =>
     line
       .split("|")
