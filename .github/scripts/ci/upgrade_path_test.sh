@@ -516,6 +516,16 @@ job_block() { # <job id> <workflow file> -> the job's own lines
 }
 grep -qxF -- "  post-green:" .github/workflows/ci.yml \
   || fail "the updated ci.yml lacks the post-green hook caller"
+# The caller's target must arrive with it: the repo-owned starter, callable
+# with the sha input the caller passes (a caller rendered without its
+# starter fails every push to main).
+test -f .github/workflows/post-green.yml \
+  || fail "the update rendered the post-green caller without the post-green.yml starter"
+grep -qxF -- "  workflow_call:" .github/workflows/post-green.yml \
+  || fail "the updated post-green.yml starter is not workflow_call-triggered"
+awk '$0 == "  workflow_call:" { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on { print }' \
+  .github/workflows/post-green.yml | grep -qxF -- "      sha:" \
+  || fail "the updated post-green.yml starter does not declare the sha input under workflow_call"
 job_block post-green .github/workflows/ci.yml | grep -qxF -- "    needs: [all-green]" \
   || fail "the updated post-green hook does not run downstream of the gate"
 grep -qxF -- "  release:" .github/workflows/ci.yml \
