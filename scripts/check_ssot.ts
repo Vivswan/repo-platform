@@ -418,16 +418,9 @@ export function settingsHealShaPlumbingMismatches(text: string): Mismatch[] {
   return mismatches;
 }
 
-/** The two fleet WRITERS - the workflows that mutate managed
- *  repositories from this checkout - and how each reaches the fleet
- *  behind the all-green gate: post-green.yml's `callerJob` calls it in a
- *  green main push's own run, holding `lane` (the literal group the
- *  writer's own cron and dispatch runs hold at workflow level, while a
- *  called run keys off `callKey` - a call-only input - into a per-run
- *  group so it never waits on its caller's lane). `callEnv` names the
- *  steps that must read the call inputs, by exact run command: the
- *  input reaching the wrong step, or no step, silently degrades the
- *  called run to the self-woken shape. */
+/** The fleet writers (workflows mutating managed repositories) as post-green.yml's `callerJob`
+ *  reaches them: `lane` is the writer's own cron/dispatch group, `callKey` the call-only input
+ *  keying a called run's per-run group, `callEnv` the exact steps that must read the call inputs. */
 export const FLEET_WRITERS: Record<
   string,
   {

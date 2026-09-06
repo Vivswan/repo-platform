@@ -622,11 +622,8 @@ echo "# local ci note" >> .github/workflows/ci.yml
 printf 'mirrors:\n  - source: .github/SECURITY.md\n    targets:\n      - copies/SECURITY.md\n' \
   >> .repo-platform.yml
 cp .repo-platform.yml "$WORK/registration-before-recopy.yml"
-# Sanctioned repository-owned content the local-content carry must bring
-# back over the re-render (unlike the ci.yml edit above, which must drop):
-# tails below the END markers of AGENTS.md, CONTRIBUTING.md,
-# .editorconfig, and .github/CODEOWNERS, plus a .gitignore entry ABOVE the
-# managed BEGIN marker (the repo owns both sides of the region).
+# Repo-owned content the local-content carry must bring back over the re-render (the ci.yml
+# edit above must drop): tails below END markers, plus a .gitignore entry ABOVE the BEGIN marker.
 echo "recovery-local agents note" >> AGENTS.md
 echo "recovery-local contributing note" >> CONTRIBUTING.md
 printf '[recovery-local/**.js]\nindent_size = 3\n' >> .editorconfig
@@ -642,10 +639,8 @@ mv .gitattributes.tmp .gitattributes
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the base"
 
-# The recovery leg also runs through the workflow's wrapper, the
-# local-content carry, and the repo-owned preserve step (TARGET_DIR is
-# still exported), in the workflow's order, proving their RECOVER routing
-# along with the copier semantics.
+# The recovery leg runs the wrapper, the local-content carry, and the repo-owned preserve step
+# in the workflow's order (TARGET_DIR still exported), proving their RECOVER routing.
 RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
 bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
   --summary "$WORK/local-carryover.md" --root .

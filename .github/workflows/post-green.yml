@@ -182,11 +182,8 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # Did the settings inputs change since the fleet last saw main? Diffs
-  # the build tip's stamped source (the last green main that completed
-  # post-green) to the judged commit - fleet/settings_inputs_changed.ts
-  # owns the path list and the fallbacks; docs/all-green.md the reasoning.
-  # Reads only, so state-shaped trivially.
+  # Did a settings input change? The diff base is the newest earlier build stamp; `before` is
+  # only the first-publish fallback (fleet/settings_inputs_changed.ts; docs/all-green.md).
   settings-inputs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -215,15 +212,9 @@ jobs:
           BEFORE_SHA: ${{ inputs.before }}
         run: bun .github/scripts/fleet/settings_inputs_changed.ts
 
-  # The fleet-wide settings apply, called once per run for either reason:
-  # an input changed (every target) or the sync above ran (its scope). The
-  # diff job's success guards only the first branch and the scope
-  # widening, so a red diff never blocks or widens a completed sync's
-  # apply. State-shaped: the called run gates on this commit's own verdict
-  # and applies per target under a moved-head recheck; a swallowed run
-  # leaves a repo one apply behind, which the nightly heal repairs. Holds
-  # the settings-repos lane; the called run takes a per-run group (the
-  # deadlock law above). Reasoning: docs/all-green.md.
+  # The fleet-wide settings apply, called once per run when an input changed OR the sync ran: a red
+  # diff never blocks or widens a completed sync's apply. Holds the settings-repos lane while the
+  # called run keys a per-run group (the deadlock law above). Model: docs/all-green.md.
   settings-fleet:
     needs: [settings-inputs, read-directives, sync-fleet]
     if: >-

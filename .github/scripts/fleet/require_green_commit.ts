@@ -1,53 +1,7 @@
 #!/usr/bin/env bun
-// The settings apply's green gate. settings-repos.yml is the one
-// fleet-wide WRITER: it mutates every managed repository's settings from
-// this checkout's layer files, and its label reconciliation deletes
-// undeclared labels. The template publisher and the sync both refuse an
-// ungreen source (shared/all_green.ts); without this gate the settings
-// apply ran from the raw pushed commit CONCURRENTLY with the CI run that
-// would have caught a broken or deleted layer file.
-//
-// Same predicate, one difference: a dispatched settings run can race the
-// tip's CI run, so an instant verdict may be "still in progress". This
-// waits, bounded, and then gates hard - a red conclusion fails
-// immediately, a verdict that never arrives fails at the deadline.
-// Fail-closed throughout, like the predicate.
-//
-// The three triggers split on what the commit MEANS:
-//   - a CALLED run (post-green.yml's settings-fleet leg, SOURCE_SHA set)
-//     rides the judged commit's own CI run, needs-ordered behind the
-//     all-green job: the verdict is final by construction, but the
-//     Checks API can still report the gate job's just-completed check
-//     run as in progress for a moment after it released this leg, so
-//     the read is the shared predicate's own bounded poll (the one the
-//     template publisher takes), fail-closed - and the sha must be the
-//     run's own GITHUB_SHA, since the workflow's checkouts read that
-//     commit (a caller handing a different sha is refused, never
-//     silently applied);
-//   - workflow_dispatch runs exist to apply the checked-out commit - so
-//     an ungreen tip is a hard refusal after the bounded wait;
-//   - the SCHEDULED nightly heal exists to re-assert known-good state -
-//     so an ungreen tip falls back to the newest GREEN commit behind it
-//     (newest_green_commit.ts, a bounded first-parent walk probing the
-//     same all-green predicate), and the workflow re-checks the run out
-//     at that commit: scripts, dependencies, and layer files stay one
-//     vouched revision. (The workflow FILE itself still executes from
-//     the tip - a scheduled run always loads the default branch's
-//     workflow - the documented residual in settings-repos.yml.) The
-//     fallback is loud (a warning plus a step-summary line naming both
-//     commits), and a walk that exhausts its bounds refuses - the halt
-//     is the floor.
-//
-// Env: GH_TOKEN (needs checks: read - the workflow's own GITHUB_TOKEN,
-// not the fleet PAT, whose grant carries no Checks read),
-// GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_REF (required, and refused off
-// main - a dispatched CI run vouches for its own branch tip, which must
-// never reach the fleet), SOURCE_SHA (the called path's judged commit;
-// empty on schedule and dispatch runs), GITHUB_EVENT_NAME (only
-// "schedule" may fall back; unset degrades to the tip-gated refusal),
-// GITHUB_OUTPUT (the resolved sha for the workflow's later checkouts).
-// GREEN_WAIT_MS / GREEN_POLL_MS bound the schedule and dispatch wait;
-// the called path's poll is bounded by the predicate's ALL_GREEN_WAIT_MS.
+// settings-repos.yml's green gate: the one fleet-wide settings writer applies only from a commit
+// with a green all-green check (shared/all_green.ts). Per trigger - the called run's own sha, a
+// dispatch's tip, the nightly heal's newest green commit behind a red tip - see docs/settings.md.
 
 import { appendFileSync } from "node:fs";
 import {

@@ -143,10 +143,8 @@ describe("post-green publish wiring", () => {
     expect(syncFleet.secrets).toEqual({
       REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
-    // settings-inputs mutates nothing: it diffs the whole push (the
-    // payload's previous tip to the explicit judged sha) over full
-    // history - a shallow checkout would lack the base, which the script
-    // refuses rather than degrading either way.
+    // Full history: the diff base is the newest earlier build stamp (`before` is only the
+    // first-publish fallback), and the script refuses a checkout that lacks it.
     const inputsCheckout = (jobs["settings-inputs"].steps ?? []).find((step) =>
       (step.uses ?? "").startsWith("actions/checkout@"),
     );

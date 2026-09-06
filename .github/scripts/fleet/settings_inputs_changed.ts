@@ -1,16 +1,7 @@
 #!/usr/bin/env bun
-// Whether the settings inputs changed since the fleet last saw main -
-// post-green.yml's settings-inputs leg, whose `changed` output decides if
-// the fleet-wide settings apply follows the merge. The path list below is
-// the one authority (docs/settings.md points here). The base is the build
-// tip's stamped source, the last green main that completed post-green,
-// so a push superseded in ci.yml's pending slot is still covered; the
-// push payload's `before` serves only when no stamp exists yet
-// (docs/all-green.md has the reasoning).
-//
-// Env: SOURCE_SHA (the judged commit), BEFORE_SHA (the push's previous
-// tip, the fallback base), GITHUB_OUTPUT (changed). The checkout must
-// carry full history and the build branch as refs/remotes/origin/build.
+// post-green.yml's settings-inputs leg: did a settings input (SETTINGS_INPUT_PATHS, the one
+// authority docs/settings.md points at) change between the diff base and SOURCE_SHA? The base
+// is the newest earlier build stamp; BEFORE_SHA is only the first-publish fallback (docs/all-green.md).
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
 import { fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
