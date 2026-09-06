@@ -1,5 +1,5 @@
-// The range every post-green leg covers: (newest earlier build stamp, judged commit], so a push
-// whose CI run was evicted is still read (docs/all-green.md). One owner for both legs.
+// The range the read-directives leg covers: (newest earlier build stamp, judged commit], so a
+// push whose CI run was evicted is still read (docs/all-green.md).
 // Env (judgedRangeEnv): SOURCE_SHA, BEFORE_SHA (the push's `before`, all zeros on branch creation).
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
