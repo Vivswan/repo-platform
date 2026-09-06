@@ -527,18 +527,22 @@ describe("strict check build", () => {
         },
         timeoutMs: 180_000,
       });
-      const page = join(
-        realpathSync(join(root, "runner-temp")),
-        "pages-site",
-        "build-0",
-        ".vitepress",
-        "dist",
-        "page.html",
-      );
+      const buildDir = join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0");
+      const page = join(buildDir, ".vitepress", "dist", "page.html");
       if (fails) {
-        expect(result.exitCode).not.toBe(0);
-        expect(result.stderr).toContain(
-          "TypeError: undefined is not an object (evaluating '_ctx.x.y')",
+        // Never the engine's wording: on bun 1.4.0 the `err.stack` header
+        // vitepress prints after `build error:` is a bare `Error` instead of
+        // `TypeError: <message>` in about 1.5% of native TypeErrors. The
+        // failing page's SSR frame and the action's own annotation are the
+        // stable evidence; picocolors wraps `build error:` in ANSI under CI.
+        const stderr = Bun.stripANSI(result.stderr);
+        expect(result.exitCode).toBe(1);
+        expect(stderr).toContain("build error:\n");
+        expect(stderr).toContain(
+          `at _sfc_ssrRender (${join(buildDir, ".vitepress", ".temp", "page.md.js")}:`,
+        );
+        expect(stderr).toContain(
+          `::error::command failed (exit 1): bun ${join(import.meta.dir, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
         );
         expect(existsSync(page)).toBe(false);
       } else {
