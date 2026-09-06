@@ -21,7 +21,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { compileSkipIfExistsPattern } from "../../../scripts/ownership.ts";
+import { compileSkipIfExistsPattern } from "../../../scripts/ownership/landed_paths.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
@@ -93,7 +93,7 @@ export function customLicenseFlipError(
 // Candidate deletions: in the old render, gone from the new render, not
 // protected, and not matched by any `_skip_if_exists` pattern from either
 // version. Patterns compile through the composer's shared gitwildmatch
-// matcher (scripts/ownership.ts), the ONLY implementation of copier's
+// matcher (scripts/ownership/landed_paths.ts), the ONLY implementation of copier's
 // semantics - a second matcher here (this used to be Bun.Glob) could
 // disagree with composition about what a skip pattern protects, and the
 // shared one fails closed on gitwildmatch features it does not implement

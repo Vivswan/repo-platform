@@ -4,13 +4,12 @@
 
 import { entryLine, MANIFEST_NAME as MANIFEST_LANDED_PATH } from "../../actions/shared/manifest.ts";
 import {
-  declarationTextErrors,
-  declaredMarkerTexts,
-  landedPathAndGates,
   type ManifestOwnership,
   type OwnershipDeclaration,
   ownershipOf,
-} from "../ownership.ts";
+} from "../ownership/declarations.ts";
+import { declarationTextErrors, declaredMarkerTexts } from "../ownership/decoration_checks.ts";
+import { landedPathAndGates } from "../ownership/landed_paths.ts";
 import { JINJA_SUFFIX, type SourcedEntry } from "./entries.ts";
 import { allOf } from "./exclude.ts";
 import { sortedByKey, sourceName } from "./splice.ts";

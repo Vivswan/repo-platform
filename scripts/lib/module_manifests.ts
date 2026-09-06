@@ -23,7 +23,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { ownershipListSchema, SETTINGS_LAYER_NAMES } from "../ownership.ts";
+import { ownershipListSchema, SETTINGS_LAYER_NAMES } from "../ownership/declarations.ts";
 
 const TEMPLATES_DIR = resolve(import.meta.dir, "..", "..", "templates");
 
@@ -31,7 +31,7 @@ const TEMPLATES_DIR = resolve(import.meta.dir, "..", "..", "templates");
  *  keyed by ROLE so no consumer ever assigns meaning by list position:
  *  the module's own layer (merged for every visibility), then the
  *  visibility overlays the fleet's render picks between. The composer's
- *  skip list (SETTINGS_LAYER_NAMES in scripts/ownership.ts) names the
+ *  skip list (SETTINGS_LAYER_NAMES in scripts/ownership/declarations.ts) names the
  *  same files; the check below holds the two rosters together so a layer
  *  name one side learns cannot silently be a landed file (or an
  *  undeclarable layer) on the other. */
@@ -57,7 +57,7 @@ if (
 ) {
   throw new Error(
     "SETTINGS_LAYER_ORDER (scripts/lib/module_manifests.ts) and SETTINGS_LAYER_NAMES " +
-      "(scripts/ownership.ts) disagree - the manifests' declarable layer files and " +
+      "(scripts/ownership/declarations.ts) disagree - the manifests' declarable layer files and " +
       "the composer's skip list must name the same files, or a new layer name would " +
       "be skipped by one side and treated as a landed file (or rejected) by the other",
   );
@@ -127,12 +127,12 @@ const description = mdCellSafe(
   "the description",
 );
 
-/** Exported for scripts/generate.ts, which derives the editor-facing
+/** Exported for scripts/generate/targets.ts, which derives the editor-facing
  *  templates/module.schema.json from it. */
 export const manifestSchema = z.strictObject({
   description,
   // Every file the module lands, with its declared ownership class (the
-  // schema and the split-grammar union live in scripts/ownership.ts). The
+  // schema and the split-grammar union live in scripts/ownership/declarations.ts). The
   // composer errors on a landed file with no declaration and on a
   // declaration whose path never lands, so a module that lands files MUST
   // carry the list; modules landing none (fragment-only modules) omit it.

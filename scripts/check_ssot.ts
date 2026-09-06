@@ -55,16 +55,16 @@ import { cleanManagedRegion } from "../actions/shared/grammar.ts";
 import { bunLockDirs } from "./bootstrap.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose/data_anchors.ts";
 import { ANCHOR_RE } from "./compose/splice.ts";
+import { trackingStreams } from "./generate/copier_questions.ts";
+import { MARKER_TOKENS } from "./generate/markers.ts";
 import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
 import {
   actionSetsUpBun,
   actionSteps,
   BUN_SETUP_ACTION,
-  MARKER_TOKENS,
-  trackingStreams,
   usesBunSetup,
   usesSetupBun,
-} from "./generate.ts";
+} from "./generate/toolchain_pins.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./lib/jinja_subset.ts";
 import {
   loadManifests as loadManifestsFresh,
@@ -86,7 +86,7 @@ import {
   unwrapExpression,
   wrappedArgvLabels,
 } from "./lib/ts_extract.ts";
-import { landedPathAndGates } from "./ownership.ts";
+import { landedPathAndGates } from "./ownership/landed_paths.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -207,7 +207,7 @@ export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mi
  *  doc-quoted constant must live in HAND prose to satisfy a rule: a value
  *  inside a generated region has the manifests as its author
  *  (generate:check polices those). The marker grammar is built from
- *  scripts/generate.ts's MARKER_TOKENS, so renaming the marker text there
+ *  scripts/generate/markers.ts's MARKER_TOKENS, so renaming the marker text there
  *  cannot leave this stripper matching nothing. Markers are parsed
  *  pairwise - a duplicate BEGIN, a mismatched name, a dangling END, or an
  *  unclosed region all throw. */
@@ -252,7 +252,7 @@ export function stripGeneratedRegions(
   return { prose: out, regions };
 }
 
-// The docs generate.ts targets with markdown regions. A strip over one of
+// The docs scripts/generate/targets.ts lists with markdown regions. A strip over one of
 // these that removes nothing means the marker grammar drifted and every
 // stripped-prose rule is silently checking unstripped text.
 const DOCS_WITH_REGIONS = new Set([
@@ -267,7 +267,7 @@ function handProse(rel: string): string {
   if (regions === 0 && DOCS_WITH_REGIONS.has(rel)) {
     throw new Error(
       `${rel}: stripping removed no generated regions from a doc known to ` +
-        "carry them - the marker grammar drifted from scripts/generate.ts",
+        "carry them - the marker grammar drifted from scripts/generate/markers.ts",
     );
   }
   return prose;
@@ -939,7 +939,7 @@ const copierConfig = memoize(
 
 /** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
  *  source the hand-written copier questions and doc constants are anchored
- *  to. The list comes from generate.ts's trackingStreams (which throws when
+ *  to. The list comes from scripts/generate/copier_questions.ts's trackingStreams (which throws when
  *  no manifest declares one), so every rule keyed on it fails loudly rather
  *  than passing vacuously and can never disagree with the generated
  *  tracking-labels regions. */

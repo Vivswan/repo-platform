@@ -10,7 +10,7 @@
 // ever synced into a client repo; the template renders the repo's own
 // settings.yml ONCE as a repo-owned identity starter.
 //
-// Consumers beyond the apply: scripts/generate.ts derives the
+// Consumers beyond the apply: scripts/generate/copier_questions.ts derives the
 // tracking-label validators' reserved-label roster from managedLabelNames,
 // and scripts/check_ssot.ts anchors its label/ruleset rules here.
 //
@@ -176,7 +176,7 @@ export function loadLayer(path: string): SettingsLayer {
 /** Every label tuple any layer can emit, for ANY module selection and
  *  either visibility; tracking labels excluded (those render from the
  *  very answers the copier validators check). The single roster
- *  scripts/generate.ts and check_ssot.ts key on. Reads exactly the
+ *  scripts/generate/copier_questions.ts and check_ssot.ts key on. Reads exactly the
  *  DECLARED layer files (each manifest's settings_layers, which the
  *  loader holds against the tree), so a deleted layer fails the load
  *  loudly instead of quietly shrinking this roster. */

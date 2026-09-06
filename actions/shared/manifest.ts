@@ -37,7 +37,7 @@ export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
 /** What an entry needs to be emitted: the declared class, with the
  *  grammar fields for splits (structural twins of the ownership schema's
- *  arms - scripts/ownership.ts's ManifestOwnership is assignable). */
+ *  arms - scripts/ownership/declarations.ts's ManifestOwnership is assignable). */
 export type OwnershipShape =
   | { class: "starter" }
   | { class: "managed" }

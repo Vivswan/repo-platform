@@ -4,7 +4,7 @@
 // the manifest template so selection and exclusion cannot drift apart).
 
 import type { ModuleManifest } from "../lib/module_manifests.ts";
-import { landedPathAndGates } from "../ownership.ts";
+import { landedPathAndGates } from "../ownership/landed_paths.ts";
 import { GeneratorValidationError } from "./data_anchors.ts";
 import { JINJA_SUFFIX } from "./entries.ts";
 import type { ManifestEntry } from "./manifest.ts";

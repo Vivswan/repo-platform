@@ -139,7 +139,7 @@ export const TOOLCHAIN_PINS: Readonly<Partial<Record<string, ToolchainPin>>> = {
 
 // How each rendered module file declares its ownership while its module is
 // selected (derived from the module.yml ownership declarations by
-// moduleOwnershipEntries in scripts/ownership.ts).
+// moduleOwnershipEntries in scripts/ownership/enforcement_tables.ts).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module.yml ownership declarations and the module templates, not this block)
 export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {
   bun: [

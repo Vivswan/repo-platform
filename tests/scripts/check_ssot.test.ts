@@ -103,7 +103,8 @@ import {
   unsafeStepCondition,
   zToDollar,
 } from "../../scripts/check_ssot";
-import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
+import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate/markers";
+import { actionSetsUpBun } from "../../scripts/generate/toolchain_pins";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
 
 describe("ownershipTableMismatches", () => {
@@ -1039,7 +1040,7 @@ describe("zToDollar", () => {
 });
 
 describe("stripGeneratedRegions", () => {
-  // Markers built by generate.ts's own grammar, so a marker-text rename
+  // Markers built by scripts/generate/markers.ts's own grammar, so a marker-text rename
   // there keeps these fixtures aligned with what the stripper must match.
   const begin = (name: string) => mdMarkers(name).begin;
   const end = (name: string) => mdMarkers(name).end;

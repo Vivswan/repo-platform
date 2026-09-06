@@ -108,7 +108,7 @@ describe("retiredPaths", () => {
       expected: [],
     },
     {
-      // The shared matcher (scripts/ownership.ts) reproduces copier's
+      // The shared matcher (scripts/ownership/landed_paths.ts) reproduces copier's
       // semantics; the old Bun.Glob here anchored bare names to the root
       // and would have deleted a nested generated-once file copier skips.
       reason: "a bare-name skip pattern protects at any depth (copier's gitwildmatch)",
