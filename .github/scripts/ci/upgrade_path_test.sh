@@ -506,15 +506,37 @@ grep -qxF -- "    if: always()" .github/workflows/ci.yml \
   || fail "the updated all-green job is not unconditional over failures (if: always())"
 grep -qF -- "repo-platform/actions/all-green@build" .github/workflows/ci.yml \
   || fail "the updated all-green job does not judge through the shared action at the build ref"
-# The release leg rides downstream of the gate in ci.yml, passing the
-# judged sha into a release.yml that declares and reads the input.
+# The repo-owned post-green hook and the release leg ride downstream of the
+# gate in ci.yml; the release also waits for the hook and passes the judged
+# sha into a release.yml that declares and reads the input. Each needs line
+# is asserted inside ITS job's block: a whole-file grep for a needs line
+# would be satisfied by the other downstream job.
+job_block() { # <job id> <workflow file> -> the job's own lines
+  awk -v job="  $1:" '$0 == job { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on { print }' "$2"
+}
+grep -qxF -- "  post-green:" .github/workflows/ci.yml \
+  || fail "the updated ci.yml lacks the post-green hook caller"
+# The caller's target must arrive with it: the repo-owned starter, callable
+# with the sha input the caller passes (a caller rendered without its
+# starter fails every push to main).
+test -f .github/workflows/post-green.yml \
+  || fail "the update rendered the post-green caller without the post-green.yml starter"
+grep -qxF -- "  workflow_call:" .github/workflows/post-green.yml \
+  || fail "the updated post-green.yml starter is not workflow_call-triggered"
+awk '$0 == "  workflow_call:" { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on { print }' \
+  .github/workflows/post-green.yml | grep -qxF -- "      sha:" \
+  || fail "the updated post-green.yml starter does not declare the sha input under workflow_call"
+job_block post-green .github/workflows/ci.yml | grep -qxF -- "    needs: [all-green]" \
+  || fail "the updated post-green hook does not run downstream of the gate"
 grep -qxF -- "  release:" .github/workflows/ci.yml \
   || fail "the updated ci.yml lacks the release leg (release-please is selected)"
-grep -qxF -- "    needs: [all-green]" .github/workflows/ci.yml \
-  || fail "the updated release leg does not run downstream of the gate"
-grep -qxF -- "      needs.all-green.result == 'success' &&" .github/workflows/ci.yml \
+job_block release .github/workflows/ci.yml | grep -qxF -- "    needs: [all-green, post-green]" \
+  || fail "the updated release leg does not wait for both the gate and the post-green hook"
+job_block release .github/workflows/ci.yml | grep -qxF -- "      needs.all-green.result == 'success' &&" \
   || fail "the updated release leg is not gated on the all-green result"
-grep -qxF -- '      sha: ${{ github.sha }}' .github/workflows/ci.yml \
+job_block release .github/workflows/ci.yml | grep -qxF -- "      needs.post-green.result == 'success' &&" \
+  || fail "the updated release leg is not gated on the post-green result"
+job_block release .github/workflows/ci.yml | grep -qxF -- '      sha: ${{ github.sha }}' \
   || fail "the updated release leg does not pass the judged sha to release.yml"
 grep -qxF -- '          JUDGED: ${{ inputs.sha || github.sha }}' .github/workflows/release.yml \
   || fail "the updated release.yml head gate does not read the judged sha input"

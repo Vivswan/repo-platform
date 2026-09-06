@@ -26,6 +26,7 @@ import {
   declaredCheckName,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
+  duplicateJobKeys,
   expandCheckChain,
   extractUsesPins,
   FETCHED_TREE_PIN_ANCHOR,
@@ -2877,15 +2878,28 @@ describe("fleetCiRenderMismatches", () => {
     "      - uses: {{ github_username }}/repo-platform/actions/all-green@build",
     "        with:",
     "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
+    "  post-green:",
+    "    needs: [all-green]",
+    "    if: >-",
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+    "    permissions:",
+    "      contents: read",
+    "    uses: ./.github/workflows/post-green.yml",
+    "    with:",
+    "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+    "    secrets: inherit",
     "{# compose:all-green-release #}",
     "",
   ].join("\n");
   const leg = [
     "",
     "  release:",
-    "    needs: [all-green]",
+    "    needs: [all-green, post-green]",
     "    if: >-",
     "      needs.all-green.result == 'success' &&",
+    "      needs.post-green.result == 'success' &&",
     "      github.event_name == 'push' &&",
     "      github.ref == 'refs/heads/main'",
     "    concurrency:",
@@ -2958,15 +2972,183 @@ describe("fleetCiRenderMismatches", () => {
       leg,
       releaseWf,
     );
-    expect(found).toHaveLength(1);
-    expect(found[0].got).toContain("extra");
+    expect(found.some((m) => m.got.includes("extra"))).toBe(true);
   });
 
-  test("a job-level name: anywhere, or an if: beyond the gate's always(), goes red", () => {
+  test("a KNOWN job respelled as a flow mapping goes red - its inline if: would evade the job-level if: census", () => {
+    const conditioned = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "  checks:\n",
+        "  checks: {uses: ./.github/workflows/checks.yml, if: github.event_name == 'workflow_dispatch'}\n",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(conditioned.some((m) => m.expected.includes("with nothing after it"))).toBe(true);
+    const legInline = fleetCiRenderMismatches(
+      ciTemplate,
+      `${leg}  release: {needs: [all-green]}\n`,
+      releaseWf,
+    );
+    expect(legInline.some((m) => m.expected.includes("with nothing after it"))).toBe(true);
+  });
+
+  test("a job-level name: anywhere, or an if: beyond the gate's always() and the hook's folded if:, goes red", () => {
     const renamed = fleetCiRenderMismatches(`${ciTemplate}    name: info-checks\n`, leg, releaseWf);
     expect(renamed.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
     const conditioned = fleetCiRenderMismatches(`${ciTemplate}    if: false\n`, leg, releaseWf);
     expect(conditioned.some((m) => m.expected.includes("beyond the gate's exact"))).toBe(true);
+  });
+
+  test("the post-green hook caller: dropping the job, any pin, or a gate clause goes red, and a lane or a wider ceiling goes red", () => {
+    const hook = ciTemplate.slice(
+      ciTemplate.indexOf("  post-green:"),
+      ciTemplate.indexOf("{# compose:"),
+    );
+    const noHook = fleetCiRenderMismatches(ciTemplate.replace(hook, ""), leg, releaseWf);
+    expect(noHook.some((m) => m.expected.includes("'post-green' hook caller"))).toBe(true);
+    expect(noHook.some((m) => m.expected.includes('"  post-green:" exactly once'))).toBe(true);
+    for (const line of [
+      "    needs: [all-green]\n",
+      "    uses: ./.github/workflows/post-green.yml\n",
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
+      "    secrets: inherit\n",
+    ]) {
+      const found = fleetCiRenderMismatches(ciTemplate.replace(line, ""), leg, releaseWf);
+      expect(found.some((m) => m.expected.includes(JSON.stringify(line.trimEnd())))).toBe(true);
+    }
+    // The hook's own gate: every clause, and the scalar's end.
+    for (const clause of [
+      "      needs.all-green.result == 'success' &&\n",
+      "      github.event_name == 'push' &&\n",
+      "      github.ref == 'refs/heads/main'\n",
+    ]) {
+      const dropped = fleetCiRenderMismatches(ciTemplate.replace(clause, ""), leg, releaseWf);
+      expect(
+        dropped.some((m) =>
+          m.expected.includes("the post-green hook caller carrying the verbatim gate block"),
+        ),
+      ).toBe(true);
+    }
+    const weakened = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "      github.ref == 'refs/heads/main'\n    permissions:",
+        "      github.ref == 'refs/heads/main'\n      || always()\n    permissions:",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(
+      weakened.some((m) => m.expected.includes("hook caller's gate block ending the if: scalar")),
+    ).toBe(true);
+    // A folded scalar keeps blank lines as content, so an arm past one
+    // still weakens the gate.
+    const pastBlank = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "      github.ref == 'refs/heads/main'\n    permissions:",
+        "      github.ref == 'refs/heads/main'\n\n      || always()\n    permissions:",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(
+      pastBlank.some((m) => m.expected.includes("hook caller's gate block ending the if: scalar")),
+    ).toBe(true);
+    // A caller lane deadlocks against any repo-owned job taking its name.
+    const laned = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "    secrets: inherit",
+        "    concurrency:\n      group: post-green\n    secrets: inherit",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(laned.some((m) => m.expected.includes("or concurrency:"))).toBe(true);
+    // The ceiling is contents: read alone; a called job cannot raise above
+    // it, so an ADDED grant (contents: read kept) must go red too.
+    for (const ceiling of [
+      "      contents: write\n    uses:",
+      "      contents: read\n      pull-requests: write\n    uses:",
+      // A quoted value is a grant to GitHub all the same.
+      '      contents: read\n      pull-requests: "write"\n    uses:',
+    ]) {
+      const widened = fleetCiRenderMismatches(
+        ciTemplate.replace("      contents: read\n    uses:", ceiling),
+        leg,
+        releaseWf,
+      );
+      expect(widened.some((m) => m.file.includes("post-green permissions ceiling"))).toBe(true);
+    }
+    // A pin moved onto another job is the same disarm.
+    const moved = fleetCiRenderMismatches(
+      ciTemplate
+        .replace("    secrets: inherit\n", "")
+        .replace("  ci:\n", "  ci:\n    secrets: inherit\n"),
+      leg,
+      releaseWf,
+    );
+    expect(moved.some((m) => m.expected.includes("inside the post-green job's own block"))).toBe(
+      true,
+    );
+    // A second uses: after the pinned one ships (YAML's last duplicate wins).
+    const shadowed = fleetCiRenderMismatches(
+      ciTemplate.replace("    secrets: inherit\n", "    secrets: inherit\n    uses: ./evil.yml\n"),
+      leg,
+      releaseWf,
+    );
+    expect(shadowed.some((m) => m.expected.includes("the key 'uses' once"))).toBe(true);
+    // Nested pins shadow the same way: a second with.sha on the hook, a
+    // second with.needs under the gate's judgment step.
+    const shadowedSha = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
+        "      sha: {% raw %}${{ github.sha }}{% endraw %}\n      sha: deadbeef\n",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(shadowedSha.some((m) => m.expected.includes("the key 'with.sha' once"))).toBe(true);
+    const shadowedNeeds = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
+        '          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n          needs: \'{"ci": {"result": "success"}}\'\n',
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(
+      shadowedNeeds.some((m) => m.expected.includes("the key 'steps[0].with.needs' once")),
+    ).toBe(true);
+    // A wider dash prefix scopes the item the same way: the item's keys
+    // sit at the prefix's end, so with: nests under the item, not under
+    // uses (a fixed two-column prefix would path it steps[0].uses.with).
+    expect(
+      duplicateJobKeys([
+        "    steps:",
+        "      -   uses: x",
+        "          with:",
+        "            needs: a",
+        "            needs: b",
+        "      - uses: y",
+      ]),
+    ).toEqual(["steps[0].with.needs"]);
+  });
+
+  test("the release leg must need the post-green hook and read its result - or the tag is minted before the repo's own post-green work", () => {
+    const gateOnly = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("    needs: [all-green, post-green]", "    needs: [all-green]"),
+      releaseWf,
+    );
+    expect(gateOnly.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    const unread = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("      needs.post-green.result == 'success' &&\n", ""),
+      releaseWf,
+    );
+    expect(
+      unread.some((m) => m.expected.includes("the release job carrying the verbatim gate block")),
+    ).toBe(true);
   });
 
   test("dropping any gate pin goes red - needs edge, always(), the shared action, the needs wiring", () => {
@@ -2992,7 +3174,7 @@ describe("fleetCiRenderMismatches", () => {
       leg,
       releaseWf,
     );
-    expect(rivalNeeds.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    expect(rivalNeeds.some((m) => m.expected.includes("exactly two needs: lines"))).toBe(true);
     const stepIf = fleetCiRenderMismatches(
       ciTemplate.replace("        with:", "        if: false\n        with:"),
       leg,
@@ -3117,6 +3299,90 @@ describe("fleetCiRenderMismatches", () => {
     expect(appended.some((m) => m.expected.includes("gate block ending the if: scalar"))).toBe(
       true,
     );
+    const pastBlank = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace(
+        "      github.ref == 'refs/heads/main'\n",
+        "      github.ref == 'refs/heads/main'\n\n      || always()\n",
+      ),
+      releaseWf,
+    );
+    expect(pastBlank.some((m) => m.expected.includes("gate block ending the if: scalar"))).toBe(
+      true,
+    );
+  });
+
+  test("a key spelled with whitespace before its colon goes red at every depth - YAML reads `key :` as `key:`, the censuses do not", () => {
+    for (const [line, spaced] of [
+      [
+        "    permissions:\n      contents: read\n    uses:",
+        "    strategy :\n    permissions:\n      contents: read\n    uses:",
+      ],
+      ["    secrets: inherit\n{#", "    concurrency :\n      group: x\n    secrets: inherit\n{#"],
+      [
+        "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
+        "      sha : deadbeef\n      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
+      ],
+      [
+        "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
+        "          needs : '{}'\n          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
+      ],
+    ]) {
+      expect(ciTemplate).toContain(line);
+      const found = fleetCiRenderMismatches(ciTemplate.replace(line, spaced), leg, releaseWf);
+      expect(found.some((m) => m.expected.includes("no whitespace before a mapping colon"))).toBe(
+        true,
+      );
+    }
+    // YAML allows any run of spaces after a sequence dash.
+    const wideDash = fleetCiRenderMismatches(
+      ciTemplate.replace(
+        "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
+        "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n      -  uses : ./evil.yml\n",
+      ),
+      leg,
+      releaseWf,
+    );
+    expect(wideDash.some((m) => m.expected.includes("no whitespace before a mapping colon"))).toBe(
+      true,
+    );
+    const legSpaced = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace(
+        "      cancel-in-progress: false\n",
+        "      cancel-in-progress: false\n      group : sync-repos\n",
+      ),
+      releaseWf,
+    );
+    expect(legSpaced.some((m) => m.expected.includes("no whitespace before a mapping colon"))).toBe(
+      true,
+    );
+  });
+
+  test("the release ceiling fails closed on a quoted grant, and a duplicate job-level key in the leg goes red", () => {
+    const quoted = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("      issues: read\n", '      issues: read\n      deployments: "write"\n'),
+      releaseWf,
+    );
+    expect(quoted.some((m) => m.file.includes("release permissions ceiling"))).toBe(true);
+    const shadowed = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("    secrets: inherit\n", "    secrets: inherit\n    uses: ./evil.yml\n"),
+      releaseWf,
+    );
+    expect(shadowed.some((m) => m.expected.includes("the key 'uses' once"))).toBe(true);
+    const shadowedLane = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace(
+        "      cancel-in-progress: false\n",
+        "      cancel-in-progress: false\n      group: sync-repos\n",
+      ),
+      releaseWf,
+    );
+    expect(shadowedLane.some((m) => m.expected.includes("the key 'concurrency.group' once"))).toBe(
+      true,
+    );
   });
 
   test("a deleted caller job goes red the same way", () => {
@@ -3156,7 +3422,7 @@ describe("fleetCiRenderMismatches", () => {
 
   test("dropping the needs edge or the judged-sha pass goes red - each is an exact-line pin", () => {
     for (const line of [
-      "    needs: [all-green]\n",
+      "    needs: [all-green, post-green]\n",
       "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
       "      group: post-green-release\n",
       "    secrets: inherit\n",

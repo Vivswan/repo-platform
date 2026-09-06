@@ -937,6 +937,22 @@ describe("the single-call gate shape", () => {
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
   });
+
+  test("the post-green hook caller and a release leg needing it are both gate-downstream", () => {
+    const withHook = [
+      GATE_CI,
+      "  post-green:",
+      "    needs: [all-green]",
+      "    uses: ./.github/workflows/post-green.yml",
+      "  release:",
+      "    needs: [all-green, post-green]",
+      "    uses: ./.github/workflows/release.yml",
+      "",
+    ].join("\n");
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": withHook });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
 });
 
 describe("gitignored paths in self mode", () => {

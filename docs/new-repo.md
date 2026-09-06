@@ -60,6 +60,7 @@ CI is split so the template can keep improving its half while each repo keeps it
 |---|---|---|
 | `.github/workflows/ci.yml` | managed - sync updates it, don't edit | a `checks` job calling checks.yml, plus a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the repo's module selection |
 | `.github/workflows/checks.yml` | repo-owned (`_skip_if_exists`) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
+| `.github/workflows/post-green.yml` | repo-owned (`_skip_if_exists`) | the repository's own green-gated work (applying settings, refreshing generated artifacts): the managed `post-green` job calls it on every push to main whose gate passed, with the judged sha, before the release leg ([after the gate](all-green.md#after-the-gate)). Seeded as a no-op |
 
 The `ci` job runs the standard checks (typography, commit-names, actionlint, gitleaks, yamllint; merged into one `base-checks` job on private repositories), `validate-template`, and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
 
@@ -104,7 +105,7 @@ Two of those workflows push fix commits to PR branches, and a push made with the
 
 ### The release pipeline (release-please)
 
-The `release` leg in the managed ci.yml - `needs: [all-green]`, released only by a green gate on a push to main, with the judged commit passed through ([all-green.md](all-green.md#after-the-gate)) - calls the managed `release.yml`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
+The `release` leg in the managed ci.yml - `needs: [all-green, post-green]`, released only by a green gate and a green repo-owned post-green hook on a push to main, with the judged commit passed through ([all-green.md](all-green.md#after-the-gate)) - calls the managed `release.yml`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
 
 1. release-please cuts the release as a draft with its tag already forced.
 2. The repo-owned `update-release.yml` hook is called with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
