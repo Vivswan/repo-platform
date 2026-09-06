@@ -15,11 +15,11 @@
 # reusable-apply-settings.yml, which computes the same merge.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
-# this workflow in every green main push's own CI run (every target,
-# after the run's fleet sync when one ran), the nightly cron heals
-# out-of-band drift, and a dispatch applies or checks by hand. No push
-# trigger: the apply reaches the fleet only behind the all-green gate,
-# and the post-green call is that gate's one exit.
+# this workflow from a green main push's own CI run (see that workflow
+# for when it calls), the nightly cron heals out-of-band drift, and a
+# dispatch applies or checks by hand. No push trigger: the apply reaches
+# the fleet only behind the all-green gate, and the post-green call is
+# that gate's one exit.
 
 name: Settings Repos
 
