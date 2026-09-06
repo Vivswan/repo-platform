@@ -304,10 +304,8 @@ describe("the CLI", () => {
     expect(proc.stdout).toContain("GITHUB_REF must be set");
   });
 
-  // The script end to end over a gh stub answering the verdict probe: the
-  // halt is the step's exit code plus an ::error:: annotation, and the
-  // gate publishes NO step output on either path - nothing downstream
-  // reads one, every checkout lands on the trigger commit by default.
+  // The script end to end over a gh stub: the halt is exit 1 plus an
+  // ::error::, and the gate publishes NO step output on either path.
   test.each([
     {
       reason: "a red tip exits 1 with the halt as an error annotation",

@@ -120,11 +120,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # THE FLEET-WIDE WRITER'S GREEN GATE: the apply's label reconciliation
-      # deletes undeclared labels, so no commit CI has not vouched for may
-      # reach the fleet. Per-trigger behavior and the red-tip halt:
-      # docs/settings.md. The halt is this step's failure - the job stops
-      # here, so no target is selected and no apply runs.
+      # THE FLEET-WIDE WRITER'S GREEN GATE (docs/settings.md): a red tip
+      # fails this step, so no target is selected and no apply runs.
       - name: Require a green commit
         env:
           GH_TOKEN: ${{ github.token }}

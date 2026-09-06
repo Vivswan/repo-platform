@@ -479,10 +479,8 @@ export interface RetiredGuard {
 }
 
 export const RETIRED_GUARDS: readonly RetiredGuard[] = [
-  // The scheduled settings heal's fallback to the newest green commit
-  // behind a red tip left with its machinery: the heal now halts on a red
-  // main, and every checkout lands on the trigger commit (the
-  // settings-green-gate ssot rule pins that wiring).
+  // The scheduled heal's green-commit fallback left with its machinery: the
+  // heal halts on a red main (the settings-green-gate rule pins the wiring).
   { id: "walk-commit-bound", reason: "retired with fleet/newest_green_commit.ts" },
   { id: "walk-age-bound", reason: "retired with fleet/newest_green_commit.ts" },
   { id: "walk-vouches-candidates", reason: "retired with fleet/newest_green_commit.ts" },
