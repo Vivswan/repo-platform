@@ -4222,6 +4222,9 @@ export function prTitleWorkflowMismatches(
 export const MIGRATIONS_DIR_REL = ".github/scripts/sync/migrations";
 export const MIGRATIONS_TESTS_REL = "tests/sync/migrations";
 export const MIGRATIONS_HARNESS_REL = ".github/scripts/ci/upgrade_path_test.sh";
+/** The harness's helper and leg files, sourced by the entry above in run
+ *  order; a rung's case may live in any of them. */
+export const MIGRATIONS_HARNESS_DIR_REL = ".github/scripts/ci/upgrade_path";
 export const MIGRATIONS_DOC_REL = "docs/migrations.md";
 /** The docs heading under which pruned rungs keep their ids. */
 export const PRUNED_HEADING = "## Pruned from main";
@@ -4513,7 +4516,9 @@ export function migrationLadderMismatches(input: {
   rungFiles: Record<string, string>;
   /** Test file name -> source, for tests/sync/migrations/. */
   testFiles: Record<string, string>;
-  harness: string;
+  /** Repo-relative path -> source for the upgrade-path harness: the entry
+   *  (MIGRATIONS_HARNESS_REL) and every file under MIGRATIONS_HARNESS_DIR_REL. */
+  harness: Record<string, string>;
   doc: string;
 }): Mismatch[] {
   const mismatches: Mismatch[] = [];
@@ -4587,8 +4592,30 @@ export function migrationLadderMismatches(input: {
     prunedAt === -1
       ? input.doc
       : input.doc.slice(0, prunedAt) + (prunedEnd === -1 ? "" : input.doc.slice(prunedEnd));
+  // A rung's case may sit in the entry or in any leg the entry sources (the
+  // legs share the entry's shell). A file under the legs directory the entry
+  // never sources runs nothing: red, and its text does not count as a case.
+  const entryText = input.harness[MIGRATIONS_HARNESS_REL] ?? "";
+  const harnessTexts = [entryText];
+  for (const rel of Object.keys(input.harness).sort()) {
+    if (rel === MIGRATIONS_HARNESS_REL) continue;
+    const name = rel.slice(rel.lastIndexOf("/") + 1);
+    if (new RegExp(`^source "[^"]*/${escapeRegExp(name)}"$`, "m").test(entryText)) {
+      harnessTexts.push(input.harness[rel]);
+    } else {
+      mismatches.push({
+        file: rel,
+        expected: `a source line for it in ${MIGRATIONS_HARNESS_REL} (a leg the entry never sources runs no case)`,
+        got: "none",
+      });
+    }
+  }
   for (const [rel, text, what] of [
-    [MIGRATIONS_HARNESS_REL, input.harness, "upgrade-path harness case"],
+    [
+      MIGRATIONS_HARNESS_REL,
+      harnessTexts.join("\n"),
+      `upgrade-path harness case (in the entry or a sourced file under ${MIGRATIONS_HARNESS_DIR_REL}/)`,
+    ],
     [MIGRATIONS_DOC_REL, listedText, "docs mention"],
   ] as const) {
     const tokens = migrationIdTokens(text);
@@ -4834,6 +4861,16 @@ export function rungSources(): Record<string, string> {
   );
 }
 
+/** The upgrade-path harness as repo-relative path -> source: the entry plus
+ *  every file under its legs directory, so a rung's case counts wherever
+ *  the harness keeps it. */
+export function harnessSources(): Record<string, string> {
+  const legs = readdirSync(join(REPO_ROOT, MIGRATIONS_HARNESS_DIR_REL))
+    .sort()
+    .map((name) => `${MIGRATIONS_HARNESS_DIR_REL}/${name}`);
+  return Object.fromEntries([MIGRATIONS_HARNESS_REL, ...legs].map((rel) => [rel, read(rel)]));
+}
+
 /** The no-retired-shapes scan set as repo-relative path -> text. */
 export function retiredShapeScanFiles(): Record<string, string> {
   const paths = [
@@ -5036,7 +5073,7 @@ const rules: Rule[] = [
             read(`${MIGRATIONS_TESTS_REL}/${name}`),
           ]),
         ),
-        harness: read(MIGRATIONS_HARNESS_REL),
+        harness: harnessSources(),
         doc: read(MIGRATIONS_DOC_REL),
       }),
   },
