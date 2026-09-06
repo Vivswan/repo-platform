@@ -168,7 +168,7 @@ describe("undiscoveredWarning", () => {
   test.each([
     [
       1,
-      "1 targeted repository was not discovered this run and count as private; a `public` scope skips them until the next run",
+      "1 targeted repository was not discovered this run and counts as private; a `public` scope skips them until the next run",
     ],
     [
       3,

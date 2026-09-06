@@ -119,7 +119,8 @@ jobs:
   # The merged PRs' opt-in to an immediate fleet sync, read off every commit
   # since the last published build (fleet_sync_marker.ts) and handed to
   # sync-fleet. State-shaped: mutates nothing; the range covers the merges
-  # whose runs this run evicted. A bad directive on any body fails the leg.
+  # whose runs this run evicted. A bad directive fails the leg on the judged
+  # commit only; an older one already failed its own run and warns here.
   read-directives:
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest

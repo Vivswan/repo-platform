@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
 // (sync_scope.ts's grammar; only `all` takes, and requires, a trailing justification), read over
-// judged_range.ts's range and unioned. Any bad body fails the leg naming its commit.
+// judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
+// an older one already failed its own run and is a counts-only warning here.
 
-import { fail, notice, setOutput } from "../shared/gha.ts";
+import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
 import {
   type DiffBase,
@@ -173,7 +174,6 @@ function main(): number {
       `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading the push alone, from ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
     );
   }
-  const errors: string[] = [];
   let armed = false;
   let all = false;
   const repos = new Set<string>();
@@ -183,7 +183,15 @@ function main(): number {
     );
     if (parsed.kind === "none") continue;
     if (parsed.kind === "error") {
-      errors.push(...parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
+      // Only the judged commit's body is this run's fault; an older one
+      // failed its own run, and failing here would poison every later
+      // range until the build tree changes.
+      if (commit === sha) {
+        return fail(parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
+      }
+      warning(
+        `${commit.slice(0, 12)} carries a malformed directives block (${parsed.errors.length} problem${parsed.errors.length === 1 ? "" : "s"}; its own run was red) and contributes nothing to this range`,
+      );
       continue;
     }
     armed = true;
@@ -192,7 +200,6 @@ function main(): number {
     const scope = parsed.scope === "all" ? "all" : parsed.scope.join(",");
     notice(`fleet-sync directive on ${commit.slice(0, 12)}: ${scope}`);
   }
-  if (errors.length > 0) return fail(errors);
   const range = rangeLabel(sha, base);
   if (!armed) {
     notice(`${range} carries no directives block; the fleet picks it up on the weekly sync`);

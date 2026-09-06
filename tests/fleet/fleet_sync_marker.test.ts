@@ -414,6 +414,7 @@ describe("main", () => {
   const publishedProse2 = cloneWithBuild("published-prose2", prose2);
   const publishedListBA = cloneWithBuild("published-list-ba", listBA);
   const publishedProse3 = cloneWithBuild("published-prose3", prose3);
+  const publishedWhole = cloneWithBuild("published-whole", whole);
   const publishedMixed = cloneWithBuild("published-mixed", mixed);
 
   function run(
@@ -503,29 +504,53 @@ describe("main", () => {
     expect(result).toEqual({ exitCode: 0, output, stdout, stderr: "" });
   });
 
+  // A malformed body on an OLDER commit already failed its own run; a
+  // docs-only commit leaves the build stamp in place, so failing again
+  // here would poison every later range. The judged commit's own body
+  // stays fatal.
+  const poisoned = `::warning::${short(bottom)} carries a malformed directives block (1 problem; its own run was red) and contributes nothing to this range`;
   test.each([
     {
-      reason: "a misplaced block",
+      reason: "a malformed older body warns and the judged commit's valid block arms",
+      cwd: publishedWhole,
+      sha: pub,
+      exitCode: 0,
+      output: "armed=true\nrepos=public\n",
+      stdout: lines(poisoned, directive(pub, "public"), syncing(whole, pub, "public")),
+    },
+    {
+      reason: "a malformed older body warns, a valid block before it still arms",
       cwd: publishedListBA,
       sha: prose3,
+      exitCode: 0,
+      output: "armed=true\nrepos=all\n",
+      stdout: lines(directive(whole, "all"), poisoned, syncing(listBA, prose3, "all")),
+    },
+    {
+      reason: "a malformed older body warns, and the judged commit's own bare form is red",
+      cwd: publishedWhole,
+      sha: bare,
+      exitCode: 1,
+      output: "",
       stdout: lines(
-        directive(whole, "all"),
-        `::error::${short(bottom)}: misplaced directive "[fleet-sync]": ${POSITION}`,
+        poisoned,
+        directive(pub, "public"),
+        directive(mixed, "private,vivswan/b"),
+        `::error::${short(bare)}: "[fleet-sync]": ${NEEDS_REASON}`,
       ),
     },
     {
-      reason: "an unjustified all-scope (the retired bare form)",
+      reason: "the judged commit's own bare form alone is red",
       cwd: publishedMixed,
       sha: bare,
+      exitCode: 1,
+      output: "",
       stdout: lines(`::error::${short(bare)}: "[fleet-sync]": ${NEEDS_REASON}`),
     },
-  ])(
-    "$reason on any commit in the range turns the leg red, naming that commit; nothing is armed",
-    ({ cwd, sha, stdout }) => {
-      const result = run(cwd, sha, git(cwd, ["rev-parse", `${sha}~1`]));
-      expect(result).toEqual({ exitCode: 1, output: "", stdout, stderr: "" });
-    },
-  );
+  ])("$reason", ({ cwd, sha, exitCode, output, stdout }) => {
+    const result = run(cwd, sha, git(cwd, ["rev-parse", `${sha}~1`]));
+    expect(result).toEqual({ exitCode, output, stdout, stderr: "" });
+  });
 
   test.each([
     {

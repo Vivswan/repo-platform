@@ -63,7 +63,7 @@ export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 /** The counts-only warning when the fail-closed default hid targeted repos from a `public`
  *  scope: discovery did not list them this run. */
 export function undiscoveredWarning(count: number): string {
-  return `${count} targeted ${count === 1 ? "repository was" : "repositories were"} not discovered this run and count as private; a \`public\` scope skips them until the next run`;
+  return `${count} targeted ${count === 1 ? "repository was not discovered this run and counts" : "repositories were not discovered this run and count"} as private; a \`public\` scope skips them until the next run`;
 }
 
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {

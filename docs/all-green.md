@@ -100,7 +100,7 @@ The PR body OPENS with a directives block: its first paragraph is one bracketed 
 ::notice::<last published build>..<third merge> opted in: syncing public now
 ```
 
-- Several opt-ins in the range union: any `all` wins, otherwise the tokens and repo lists combine in commit order. A red body anywhere in the range turns the leg red, naming its commit, and nothing syncs.
+- Several opt-ins in the range union: any `all` wins, otherwise the tokens and repo lists combine in commit order. A red body on the judged commit turns the leg red and nothing syncs; an older commit's red body already failed its own run, so here it is a warning naming the commit and contributes nothing, and the next merge's correct block still syncs.
 - Lost only when no later green run reaches post-green before the crons, or when the first-publish fallback reads the push alone: the weekly sync cron heals the sync leg and the nightly settings cron heals the settings leg.
 
 ## Residuals, stated
