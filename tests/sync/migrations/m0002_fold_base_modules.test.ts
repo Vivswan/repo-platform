@@ -3,12 +3,14 @@
 // (the edit left staged for the runner's commit; every byte outside the
 // dropped items and their separators kept - the expected strings below are
 // whole-file bytes, so spacing, quoting, and line endings are pinned, not
-// only the parse), its idempotency, the shapes it
+// only the parse), the fold of a repository's own agent-file aliases into
+// AGENTS.md and the error arm for its own file at another managed arrival,
+// its idempotency, the shapes it
 // leaves to module selection, the error arms, and the runner CLI over a
 // build history in which the rung appears.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import rung from "../../../.github/scripts/sync/migrations/m0002_fold_base_modules.ts";
 import type { Rung } from "../../../.github/scripts/sync/run_migrations.ts";
@@ -55,6 +57,25 @@ const NOTE = (dropped: string) =>
     "> `.github/.copier-answers.yml`. No rendered file moves or leaves.",
     `> Dropped here: ${dropped}.`,
   ].join("\n");
+
+const ALIAS_NOTE = [
+  "> [!WARNING]",
+  "> AGENT FILES FOLDED: this repository carried its own regular file at an",
+  "> agent-file alias path that the template now renders as a symlink to",
+  "> `AGENTS.md`. Its content was moved verbatim into `AGENTS.md` below the",
+  "> managed region, under a heading naming the source path, and the alias",
+  "> became the managed symlink. Reconcile the moved content into your",
+  "> repository-specific section before merging; nothing was deleted.",
+].join("\n");
+
+// The ownership manifest every render stamps; a fixture whose files the
+// template rendered lists them here, a repository's own files are absent.
+const MANIFEST = ".github/repo-platform-manifest.json";
+const manifestOf = (...paths: string[]) =>
+  JSON.stringify({ files: Object.fromEntries(paths.map((p) => [p, { class: "managed" }])) });
+
+const folded = (alias: string, content: string) =>
+  `\n## Folded from ${alias}\n\nThis repository carried its own \`${alias}\` before the agent files became managed symlinks to \`AGENTS.md\`; its content follows verbatim. Reconcile it into the sections above.\n\n${content}`;
 
 describe("m0002_fold_base_modules", () => {
   test.each([
@@ -231,6 +252,188 @@ describe("m0002_fold_base_modules", () => {
     expect(git(dir, "status", "--porcelain")).toBe("");
   });
 
+  // The fold's arrivals: a repository's own regular file at an alias path
+  // is folded into AGENTS.md (created or appended) and removed, both
+  // staged, and the note holds the PR; the declaration part keeps its own
+  // kind and note.
+  test.each([
+    {
+      label: "no AGENTS.md yet, nothing to drop: AGENTS.md is created from the alias",
+      files: {
+        [REGISTRATION]: 'modules: ["uv"]\n',
+        [MANIFEST]: manifestOf(),
+        "CLAUDE.md": "# Ours\n\nours line\n",
+      },
+      kind: "in-place+aliases",
+      noteText: ALIAS_NOTE,
+      agents: folded("CLAUDE.md", "# Ours\n\nours line\n"),
+      status: "A  AGENTS.md\nD  CLAUDE.md\n",
+    },
+    {
+      label:
+        "an existing marked AGENTS.md grows below its END marker; two aliases fold in order; names drop too",
+      files: {
+        [REGISTRATION]: RENDERED,
+        [MANIFEST]: manifestOf("AGENTS.md"),
+        "AGENTS.md":
+          "<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\n\n## Local\n\nlocal tail\n",
+        ".github/agents.md": "agents alias body",
+        ".github/copilot-instructions.md": "copilot alias body\n",
+      },
+      kind: "dropped+aliases",
+      noteText: `${NOTE("`agents`, `auto-assign`, `settings-sync`")}\n>\n${ALIAS_NOTE}`,
+      agents:
+        "<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\n\n## Local\n\nlocal tail\n" +
+        folded(".github/agents.md", "agents alias body\n") +
+        folded(".github/copilot-instructions.md", "copilot alias body\n"),
+      status: `D  .github/agents.md\nD  .github/copilot-instructions.md\nM  ${REGISTRATION}\nM  AGENTS.md\n`,
+    },
+    {
+      // No registration at all: the declaration is `missing` (selection's
+      // preflight reports it), the alias is folded all the same.
+      label: "no registration, an own alias: missing+aliases",
+      files: { [MANIFEST]: manifestOf(), "CLAUDE.md": "ours\n" },
+      kind: "missing+aliases",
+      noteText: ALIAS_NOTE,
+      agents: folded("CLAUDE.md", "ours\n"),
+      status: "A  AGENTS.md\nD  CLAUDE.md\n",
+      again: "missing",
+    },
+    {
+      // An UNTRACKED alias (never committed): its content folds, and only
+      // AGENTS.md is staged - there is no removal to stage.
+      label: "an untracked alias folds with only AGENTS.md staged",
+      files: { [REGISTRATION]: 'modules: ["uv"]\n', [MANIFEST]: manifestOf() },
+      untracked: { "CLAUDE.md": "untracked ours\n" },
+      kind: "in-place+aliases",
+      noteText: ALIAS_NOTE,
+      agents: folded("CLAUDE.md", "untracked ours\n"),
+      status: "A  AGENTS.md\n",
+    },
+  ])("aliases folded: $label", ({ files, kind, noteText, agents, status, again, untracked }) => {
+    const dir = repo(files);
+    for (const [rel, content] of Object.entries(untracked ?? {})) {
+      writeFileSync(join(dir, rel), content);
+    }
+    expect(apply(dir)).toEqual({
+      kind: "verdict",
+      verdict: { kind, note: { text: noteText, review: true } },
+    });
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf-8")).toBe(agents);
+    for (const alias of ["CLAUDE.md", ".github/agents.md", ".github/copilot-instructions.md"]) {
+      if (alias in files) expect(existsSync(join(dir, alias))).toBe(false);
+    }
+    expect(git(dir, "status", "--porcelain")).toBe(status);
+    // Idempotent: the aliases are gone, so a second run is the declaration's
+    // in-place verdict with nothing staged.
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "folded");
+    expect(apply(dir)).toEqual({
+      kind: "verdict",
+      verdict: { kind: again ?? "in-place", note: null },
+    });
+    expect(git(dir, "status", "--porcelain")).toBe("");
+  });
+
+  test("files the template rendered (listed in the manifest) are left to copier: a repo that selected the three", () => {
+    // The main harness leg's shape: every arrival and alias exists, all
+    // template-rendered; the rung drops the names and folds nothing.
+    const rendered = [
+      ".github/instructions/review.instructions.md",
+      ".github/workflows/auto-assign.yml",
+      ".github/workflows/settings-sync.yml",
+      "CLAUDE.md",
+      ".github/agents.md",
+      ".github/copilot-instructions.md",
+    ];
+    const dir = repo({
+      [REGISTRATION]: RENDERED,
+      [MANIFEST]: manifestOf("AGENTS.md", ...rendered),
+      "AGENTS.md": "managed\n",
+      ...Object.fromEntries(rendered.map((rel) => [rel, "rendered\n"])),
+    });
+    expect(apply(dir)).toEqual({
+      kind: "verdict",
+      verdict: {
+        kind: "dropped",
+        note: { text: NOTE("`agents`, `auto-assign`, `settings-sync`"), review: false },
+      },
+    });
+    expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
+  });
+
+  test("an alias that is already a symlink is not folded (its target keeps the content)", () => {
+    const dir = repo({
+      [REGISTRATION]: 'modules: ["uv"]\n',
+      [MANIFEST]: manifestOf(),
+      "docs/agents.md": "elsewhere\n",
+    });
+    symlinkSync("docs/agents.md", join(dir, "CLAUDE.md"));
+    git(dir, "add", "-A");
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "linked alias");
+    expect(apply(dir)).toEqual({ kind: "verdict", verdict: { kind: "in-place", note: null } });
+    expect(git(dir, "status", "--porcelain")).toBe("");
+  });
+
+  test.each([
+    {
+      label: "its own file at a managed arrival that is not an alias",
+      files: {
+        [REGISTRATION]: RENDERED,
+        [MANIFEST]: manifestOf(),
+        ".github/workflows/auto-assign.yml": "name: ours\n",
+      },
+      message: "carries its own regular file at .github/workflows/auto-assign.yml",
+    },
+    {
+      label: "an alias to fold but AGENTS.md is a directory",
+      files: {
+        [REGISTRATION]: RENDERED,
+        [MANIFEST]: manifestOf(),
+        "CLAUDE.md": "ours\n",
+        "AGENTS.md/nested": "x\n",
+      },
+      message: "something other than a regular file at AGENTS.md",
+    },
+    {
+      // Absent or unreadable manifest: whether the template rendered the
+      // file cannot be told, and guessing either way risks its content.
+      label: "a file at an arrival path with no readable manifest",
+      files: { [REGISTRATION]: RENDERED, "CLAUDE.md": "ours\n" },
+      message: "repo-platform-manifest.json cannot be read",
+    },
+    {
+      // lstat follows a symlinked parent, so .github is judged before any
+      // path beneath it is probed (m0001 refuses the same shape).
+      label: "a symlinked .github",
+      files: { [REGISTRATION]: RENDERED, "real-github/keep": "" },
+      link: ["real-github", ".github"] as [string, string],
+      message: ".github is not a real directory",
+    },
+  ])("$label is the error arm before anything is staged", ({ files, message, link }) => {
+    const dir = repo(files);
+    if (link !== undefined) {
+      // repo() plants .github/keep; the linked shape replaces it wholesale.
+      rmSync(join(dir, ".github"), { recursive: true });
+      symlinkSync(link[0], join(dir, link[1]));
+      git(dir, "add", "-A");
+      git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "linked parent");
+    }
+    const before = git(dir, "ls-files", "-s");
+    expect(apply(dir)).toEqual({ kind: "error", message: expect.stringContaining(message) });
+    expect(git(dir, "status", "--porcelain")).toBe("");
+    expect(git(dir, "ls-files", "-s")).toBe(before);
+    expect(readFileSync(join(dir, REGISTRATION), "utf-8")).toBe(RENDERED);
+  });
+
+  test("a directory at the registration path is the non-file error arm, not a thrown read", () => {
+    const dir = repo({ [`${REGISTRATION}/nested`]: "x\n" });
+    expect(apply(dir)).toEqual({
+      kind: "error",
+      message: expect.stringContaining("not a regular file"),
+    });
+    expect(git(dir, "status", "--porcelain")).toBe("");
+  });
+
   test("a symlinked registration is the error arm: nothing is written through it", () => {
     const dir = repo({ "real.yml": RENDERED });
     symlinkSync("real.yml", join(dir, REGISTRATION));
@@ -298,6 +501,26 @@ describe("m0002 through run_migrations.ts", () => {
     expect(again.stdout).not.toContain("(committed)");
     expect(git(target, "rev-list", "--count", "HEAD").trim()).toBe("2");
     expect(readFileSync(join(target, REGISTRATION), "utf-8")).toBe(RENDERED_AFTER);
+  });
+
+  test("an alias fold lands in the review report and holds the PR", () => {
+    const target = repo({
+      [REGISTRATION]: 'modules: ["uv"]\n',
+      [MANIFEST]: manifestOf(),
+      "CLAUDE.md": "ours\n",
+    });
+    const result = runLadder(history(), target, "old");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      `::notice::Vivswan/demo: migration ${rung.id} -> in-place+aliases (committed) (the PR body carries the note)`,
+    );
+    expect(git(target, "log", "-1", "--name-status", "--format=")).toBe(
+      "A\tAGENTS.md\nD\tCLAUDE.md\n",
+    );
+    expect(readFileSync(join(result.temp, MIGRATIONS_REVIEW_NAME), "utf-8")).toBe(
+      `${ALIAS_NOTE}\n`,
+    );
+    expect(readFileSync(join(result.temp, MIGRATIONS_NAME), "utf-8")).toBe("");
   });
 
   test("the error arm fails the step with ::error:: on stdout and writes nothing", () => {

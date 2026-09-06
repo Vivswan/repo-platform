@@ -1659,12 +1659,14 @@ echo "pages answer retirement OK: mounts interface rendered, retired answers dro
 # A repository rendered before the fold WITHOUT agents, auto-assign, or
 # settings-sync has none of their files, and may carry its OWN AGENTS.md.
 # The update delivers the files as base content; the m0002 rung finds
-# nothing to drop (the control: in-place, no commit); the repository's own
-# AGENTS.md rides below the fresh managed region under the recovery
-# appendix (HEAD's manifest never declared the path, so its copy cannot be
-# split by markers), flagged for manual review; .repo-platform.yml is
-# untouched; and the answers file gains the two settings questions every
-# repository is asked now.
+# nothing to drop but FOLDS the repository's own copilot-instructions.md
+# (a regular file where a managed symlink now lands) into AGENTS.md and
+# holds the PR; the repository's own AGENTS.md, folded block included,
+# rides below the fresh managed region under the recovery appendix (HEAD's
+# manifest never declared the path, so its copy cannot be split by
+# markers), flagged for manual review; .repo-platform.yml is untouched;
+# and the answers file gains the two settings questions every repository
+# is asked now.
 ARR="$RUN_DIR/upgrade-arrival"
 ARR_WORK="$RUN_DIR/upgrade-arrival-work"
 mkdir -p "$ARR_WORK"
@@ -1692,7 +1694,10 @@ if grep -qE '^(homepage|topics):' .github/.copier-answers.yml; then
   fail "the pre-fold fixture recorded the settings questions without settings-sync (the old fixture's gates are not modeled)"
 fi
 printf '# House rules\n\narrival-local agents note\n' > AGENTS.md
-cp AGENTS.md "$ARR_WORK/agents-before.md"
+# The repository's own Copilot instructions at a path the fold makes a
+# managed symlink: without the rung's fold, copier replaces the file and
+# its content is gone with no report (measured before the arm existed).
+printf '# Our own Copilot rules\n\narrival-local copilot line\n' > .github/copilot-instructions.md
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with the repository's own AGENTS.md"
@@ -1706,15 +1711,28 @@ export TARGET_REF="$NEW_TAG"
 arrival_head="$(git -C "$ARR" rev-parse HEAD)"
 arrival_out="$(RUNNER_TEMP="$ARR_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts)" \
   || fail "run_migrations.ts failed on the arrival fixture"
-# The control: nothing to drop, so the fold rung reports in-place without a
-# commit; the pending m0001 still moves the root SECURITY.md (one commit).
-grep -qF "migration m0002_fold_base_modules -> in-place" <<<"$arrival_out" \
-  || fail "the fold rung did not report in-place for a declaration naming none of the three: $arrival_out"
-if grep -qF "migration m0002_fold_base_modules -> in-place (committed)" <<<"$arrival_out"; then
-  fail "the fold rung committed although it had nothing to drop"
-fi
-[ "$(git -C "$ARR" rev-list --count "${arrival_head}..HEAD")" = "1" ] \
-  || fail "the ladder did not add exactly one commit (m0001's rename) on the arrival fixture"
+# Nothing to drop from the declaration, but the alias fold commits: the
+# rung reports in-place+aliases (committed) and holds the PR; with m0001's
+# rename that is two commits.
+grep -qF "migration m0002_fold_base_modules -> in-place+aliases (committed)" <<<"$arrival_out" \
+  || fail "the fold rung did not report in-place+aliases (committed) for the repository's own alias file: $arrival_out"
+[ "$(git -C "$ARR" rev-list --count "${arrival_head}..HEAD")" = "2" ] \
+  || fail "the ladder did not add exactly two commits (m0001's rename, m0002's alias fold) on the arrival fixture"
+grep -qF "AGENT FILES FOLDED" "$ARR_WORK/migrations-review.md" \
+  || fail "the alias fold did not write its review-holding note"
+[ "$(git -C "$ARR" log -1 --name-status --format=)" = "$(printf 'D\t.github/copilot-instructions.md\nM\tAGENTS.md')" ] \
+  || fail "the alias fold's commit is not 'remove the alias, grow AGENTS.md': $(git -C "$ARR" log -1 --name-status --format=)"
+# The rung's whole output on AGENTS.md: the repository's own file, then the
+# folded block for the alias, byte for byte (the block's text is the
+# rung's; this harness restates it rather than importing it).
+{
+  printf '# House rules\n\narrival-local agents note\n'
+  printf '\n## Folded from .github/copilot-instructions.md\n\n'
+  printf 'This repository carried its own `.github/copilot-instructions.md` before the agent files became managed symlinks to `AGENTS.md`; its content follows verbatim. Reconcile it into the sections above.\n\n'
+  printf '# Our own Copilot rules\n\narrival-local copilot line\n'
+} > "$ARR_WORK/agents-before.md"
+cmp -s "$ARR_WORK/agents-before.md" "$ARR/AGENTS.md" \
+  || fail "the fold rung's AGENTS.md is not the repository's own file plus the folded alias block: $(diff "$ARR_WORK/agents-before.md" "$ARR/AGENTS.md")"
 cmp -s "$ARR_WORK/registration-before.yml" "$ARR/.repo-platform.yml" \
   || fail "the fold rung rewrote a .repo-platform.yml naming none of the three"
 MODULES="$(select_modules \
@@ -1746,7 +1764,7 @@ RUNNER_TEMP="$ARR_WORK" SRC_PATH="$src_path_arr" OLD_SHA="$OLD_SHA_RESOLVED" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$ARR_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$ARR"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$ARR"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$ARR"
 
 cd "$ARR"
 # The folded files ARRIVE as base content: the managed ones, the two
@@ -1767,10 +1785,13 @@ done
 # The repository's own AGENTS.md: preserved in full BELOW the fresh managed
 # region's END marker under the recovery appendix (one marker pair in the
 # file), and the carry flagged for manual review.
-# The previous copy carried no marker text, so the appendix is the copy
-# verbatim: the file ENDS with its exact bytes.
+# The previous copy (house rules plus the folded Copilot rules) carried no
+# marker text, so the appendix is the copy verbatim: the file ENDS with its
+# exact bytes, and the folded content is in it.
 tail -c "$(wc -c < "$ARR_WORK/agents-before.md")" AGENTS.md | cmp -s - "$ARR_WORK/agents-before.md" \
   || fail "the repository's own AGENTS.md was not preserved verbatim below the managed region when the managed file arrived"
+grep -qF "## Folded from .github/copilot-instructions.md" AGENTS.md \
+  || fail "the folded Copilot rules did not ride the appendix into the delivered AGENTS.md"
 grep -qF "repo-platform:recovery-appendix" AGENTS.md \
   || fail "the repository's own AGENTS.md copy was not marked as a recovery appendix"
 # region_marker, not marker: $marker is the copier conflict marker the check
@@ -1805,7 +1826,7 @@ grep -qxF '  homepage: "https://arrival.example"' .github/settings.yml \
 grep -qxF '  topics: "alpha,beta"' .github/settings.yml \
   || fail "the settings.yml starter does not declare the live topics (the apply would clear them)"
 unset HOMEPAGE TOPICS
-echo "module fold arrival OK: folded files delivered, the repository's own AGENTS.md preserved as a reviewed appendix, rung in-place"
+echo "module fold arrival OK: folded files delivered, the repository's own AGENTS.md and Copilot rules preserved as a reviewed appendix"
 
 # --- Migration history walk (a rung pruned from the delivered tree) --------
 # The ladder runs a rung from the NEWEST build commit that carries it, so a

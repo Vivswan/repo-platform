@@ -6,6 +6,17 @@
 // selection and copier. The answers file is not touched: copier update
 // takes the filtered selection as data and records it itself.
 //
+// The folded files also ARRIVE in a repository that never selected the
+// three, and copier writes a managed path over whatever sits there. A
+// file at one of those paths that HEAD's ownership manifest does not list
+// is the repository's OWN (the template rendered everything the manifest
+// lists): at an agent-file alias path (CLAUDE.md, .github/agents.md,
+// .github/copilot-instructions.md) it is agent guidance, so it is folded
+// into AGENTS.md's repository-owned side ahead of copier (the split-file
+// carry then keeps it below the managed region and holds the PR for a
+// human to reconcile); at one of the other managed arrivals it is the
+// error arm - the sync never overwrites a file it did not render.
+//
 // The edit is a byte splice - each folded item leaves with its own
 // separator and every other byte stays, comments, spacing, line endings,
 // and the `mirrors` declaration included (Bun.YAML has no
@@ -14,7 +25,7 @@
 // written. Self-contained: node builtins and bun only
 // (docs/migrations.md).
 
-import { lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 interface Target {
@@ -27,7 +38,9 @@ type Outcome =
   | {
       readonly kind: "verdict";
       readonly verdict: {
-        readonly kind: "dropped" | "in-place" | "missing" | "unreadable";
+        /** The declaration's outcome, suffixed `+aliases` when the
+         * repository's own agent-file aliases were folded into AGENTS.md. */
+        readonly kind: string;
         readonly note: { readonly text: string; readonly review: boolean } | null;
       };
     }
@@ -37,6 +50,20 @@ const REGISTRATION = ".repo-platform.yml";
 
 /** The module names this rung drops from every declaration. */
 const FOLDED = ["agents", "auto-assign", "settings-sync"];
+
+const AGENTS = "AGENTS.md";
+/** The ownership manifest every render stamps: the paths it lists were
+ * rendered by the template. */
+const MANIFEST = ".github/repo-platform-manifest.json";
+/** The agent-file aliases the template renders as symlinks to AGENTS.md. */
+const ALIASES = ["CLAUDE.md", ".github/agents.md", ".github/copilot-instructions.md"];
+/** The other files the fold makes managed for every repository; a
+ * repository's own file there has no home the sync may choose for it. */
+const MANAGED_ARRIVALS = [
+  ".github/instructions/review.instructions.md",
+  ".github/workflows/auto-assign.yml",
+  ".github/workflows/settings-sync.yml",
+];
 
 const NOTE = [
   "> [!NOTE]",
@@ -54,7 +81,7 @@ const NOTE = [
 /** lstat, so a symlink never reads as the file it points at. ENOENT is
  * absence; ENOTDIR means a parent segment is a file, the same broken shape
  * as a non-file entry; anything else (EACCES, EIO) throws. */
-function entryKind(path: string): "file" | "absent" | "other" {
+function entryKind(path: string): "file" | "dir" | "absent" | "other" {
   let stat: ReturnType<typeof lstatSync>;
   try {
     stat = lstatSync(path);
@@ -64,7 +91,8 @@ function entryKind(path: string): "file" | "absent" | "other" {
     if (code === "ENOTDIR") return "other";
     throw err;
   }
-  return stat.isFile() ? "file" : "other";
+  if (stat.isFile()) return "file";
+  return stat.isDirectory() && !stat.isSymbolicLink() ? "dir" : "other";
 }
 
 /** The declared module list of a registration text, or null when the sync's
@@ -211,13 +239,54 @@ function withoutModules(text: string): string {
   return JSON.stringify(rest);
 }
 
-function git(dir: string, ...args: string[]): { exitCode: number; stderr: string } {
+function git(dir: string, ...args: string[]): { exitCode: number; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
     stdout: "pipe",
     stderr: "pipe",
     timeout: 300_000,
   });
-  return { exitCode: proc.exitCode, stderr: proc.stderr.toString() };
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+  };
+}
+
+/** The paths HEAD's ownership manifest lists, or null when the manifest is
+ * absent or not the shape the stamper writes (nothing can then be told
+ * about a file's origin, and the caller refuses to guess). */
+function manifestPaths(dir: string): Set<string> | null {
+  if (entryKind(join(dir, MANIFEST)) !== "file") return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(readFileSync(join(dir, MANIFEST), "utf-8"));
+  } catch {
+    return null;
+  }
+  const files = (data as { files?: unknown } | null)?.files;
+  if (typeof files !== "object" || files === null || Array.isArray(files)) return null;
+  return new Set(Object.keys(files));
+}
+
+const ALIAS_NOTE = [
+  "> [!WARNING]",
+  "> AGENT FILES FOLDED: this repository carried its own regular file at an",
+  "> agent-file alias path that the template now renders as a symlink to",
+  "> `AGENTS.md`. Its content was moved verbatim into `AGENTS.md` below the",
+  "> managed region, under a heading naming the source path, and the alias",
+  "> became the managed symlink. Reconcile the moved content into your",
+  "> repository-specific section before merging; nothing was deleted.",
+];
+
+/** The block appended to AGENTS.md for one folded alias. */
+function foldedBlock(alias: string, content: string): string {
+  const body = content.endsWith("\n") ? content : `${content}\n`;
+  return (
+    `\n## Folded from ${alias}\n\n` +
+    `This repository carried its own \`${alias}\` before the agent files became managed ` +
+    `symlinks to \`AGENTS.md\`; its content follows verbatim. Reconcile it into the sections above.\n\n` +
+    body
+  );
 }
 
 const HAND_EDIT =
@@ -230,10 +299,65 @@ export default {
   id: "m0002_fold_base_modules",
 
   apply(target: Target): Outcome {
+    // Every arrival path but two sits under .github, and lstat follows a
+    // symlinked PARENT: a linked .github would have the fold read and
+    // remove files wherever the link points, so the parent is judged first
+    // (m0001 refuses the same shape).
+    const parent = entryKind(join(target.dir, ".github"));
+    if (parent === "file" || parent === "other") {
+      return {
+        kind: "error",
+        message:
+          ".github is not a real directory (a symlink or a file), so the files this template " +
+          "now renders beneath it cannot be judged. The sync refuses to read or write through " +
+          "it: fix the default branch by hand, then re-run the sync.",
+      };
+    }
+    // The arrivals are judged before anything is staged, so an error arm
+    // leaves the checkout untouched. A regular file at an arrival path is
+    // the repository's own unless HEAD's manifest lists the path (the
+    // template rendered it, and copier updates it as always).
+    const presentFiles = [...ALIASES, ...MANAGED_ARRIVALS].filter(
+      (rel) => entryKind(join(target.dir, rel)) === "file",
+    );
+    const listed = presentFiles.length === 0 ? new Set<string>() : manifestPaths(target.dir);
+    if (listed === null) {
+      return {
+        kind: "error",
+        message:
+          `carries a regular file at ${presentFiles[0]}, a path this template now manages for every ` +
+          `repository, and its ${MANIFEST} cannot be read, so whether the template rendered ` +
+          "that file cannot be judged (the sync never overwrites a file it did not render). " +
+          "Fix the default branch by hand, then re-run the sync.",
+      };
+    }
+    const own = presentFiles.filter((rel) => !listed.has(rel));
+    const ownArrival = own.find((rel) => MANAGED_ARRIVALS.includes(rel));
+    if (ownArrival !== undefined) {
+      return {
+        kind: "error",
+        message:
+          `carries its own regular file at ${ownArrival}, a path this template now manages ` +
+          "for every repository (the sync never overwrites a file it did not render). Move the " +
+          "file aside on the default branch - its content has no place the sync may choose - " +
+          "then re-run the sync.",
+      };
+    }
+    const ownAliases = own.filter((rel) => ALIASES.includes(rel));
+    const agentsKind = entryKind(join(target.dir, AGENTS));
+    if (ownAliases.length > 0 && agentsKind !== "file" && agentsKind !== "absent") {
+      return {
+        kind: "error",
+        message:
+          `carries its own regular file at ${ownAliases[0]} and something other than a regular ` +
+          `file at ${AGENTS} (a symlink or a directory), so the alias content cannot be folded ` +
+          "into it. Fix the default branch by hand, then re-run the sync.",
+      };
+    }
     const path = join(target.dir, REGISTRATION);
     const kind = entryKind(path);
-    if (kind === "absent") return { kind: "verdict", verdict: { kind: "missing", note: null } };
-    if (kind === "other") {
+    if (kind === "absent") return this.foldAliases(target, ownAliases, "missing", []);
+    if (kind !== "file") {
       return {
         kind: "error",
         message:
@@ -245,13 +369,15 @@ export default {
     }
     const text = readFileSync(path, "utf-8");
     const declared = declaredModules(text);
-    if (declared === null) {
-      return { kind: "verdict", verdict: { kind: "unreadable", note: null } };
-    }
+    const listKind =
+      declared === null
+        ? "unreadable"
+        : declared.some((name) => FOLDED.includes(name))
+          ? "dropped"
+          : "in-place";
+    if (listKind !== "dropped") return this.foldAliases(target, ownAliases, listKind, []);
+    if (declared === null) throw new Error("unreachable: a dropped list was declared");
     const present = declared.filter((name) => FOLDED.includes(name));
-    if (present.length === 0) {
-      return { kind: "verdict", verdict: { kind: "in-place", note: null } };
-    }
     const expected = declared.filter((name) => !FOLDED.includes(name));
     const rewritten = dropFolded(text);
     // The whole outcome is checked before the write: the list is exactly
@@ -273,12 +399,55 @@ export default {
       };
     }
     const names = present.map((name) => `\`${name}\``).join(", ");
-    return {
-      kind: "verdict",
-      verdict: {
-        kind: "dropped",
-        note: { text: [...NOTE, `> Dropped here: ${names}.`].join("\n"), review: false },
-      },
-    };
+    return this.foldAliases(target, ownAliases, "dropped", [...NOTE, `> Dropped here: ${names}.`]);
+  },
+
+  /** The alias fold, after the declaration edit: each of the repository's
+   * own alias files is appended to AGENTS.md (created when absent) and
+   * removed, both staged; the verdict's kind gains `+aliases` and its note
+   * the warning that holds the PR. Nothing to fold keeps `listKind` and its
+   * informational note as they were. */
+  foldAliases(
+    target: Target,
+    ownAliases: readonly string[],
+    listKind: string,
+    noteLines: readonly string[],
+  ): Outcome {
+    const note = (review: boolean) =>
+      noteLines.length === 0 && !review
+        ? null
+        : {
+            text: [
+              ...noteLines,
+              ...(review ? [...(noteLines.length ? [">"] : []), ...ALIAS_NOTE] : []),
+            ].join("\n"),
+            review,
+          };
+    if (ownAliases.length === 0) {
+      return { kind: "verdict", verdict: { kind: listKind, note: note(false) } };
+    }
+    const agentsPath = join(target.dir, AGENTS);
+    let agents = entryKind(agentsPath) === "file" ? readFileSync(agentsPath, "utf-8") : "";
+    // Only a TRACKED alias has a removal to stage; `git add` of a deleted
+    // untracked path matches nothing and fails, so the index is asked first
+    // (before the removal, while the path still exists).
+    const tracked = ownAliases.filter(
+      (alias) => git(target.dir, "ls-files", "--", alias).stdout.trim() !== "",
+    );
+    for (const alias of ownAliases) {
+      const aliasPath = join(target.dir, alias);
+      agents += foldedBlock(alias, readFileSync(aliasPath, "utf-8"));
+      rmSync(aliasPath);
+    }
+    writeFileSync(agentsPath, agents);
+    const added = git(target.dir, "add", "--", AGENTS, ...tracked);
+    if (added.exitCode !== 0) {
+      const lines = added.stderr.split("\n").filter((line) => line.trim() !== "");
+      return {
+        kind: "error",
+        message: `git add ${AGENTS} failed (exit ${added.exitCode}: ${lines.length === 0 ? "no output" : lines[lines.length - 1].trim()})`,
+      };
+    }
+    return { kind: "verdict", verdict: { kind: `${listKind}+aliases`, note: note(true) } };
   },
 };
