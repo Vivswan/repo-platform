@@ -14,6 +14,7 @@ Standalone, deploys run on pushes touching `docs/**`, nightly (04:41 UTC), and o
 ## Content conventions
 
 - Plain `.md` only - no MDX, no per-repo Vue components, no repo-local `.vitepress/` (the build REFUSES one: it could never apply, since the theme is central). Rich widgets arrive as theme-provided markdown containers for every repo at once.
+- Double curly braces are Vue interpolation syntax, compiled even inside an inline code span (fenced code blocks are exempt): the build fails on them instead of shipping a blank page, so wrap literal ones in `<span v-pre>` or a `::: v-pre` container.
 - `docs/README.md` is the site's landing page; each directory's `README.md` is its index. The sidebar and nav derive from the file tree - there is nothing to configure.
 - Links must resolve INSIDE `docs/` (or be absolute URLs). A link to `../README.md` works on GitHub but is dead on the site, and dead internal links fail the build - that failure is the point, see the PR check below.
 - Translations: put them in `docs/<lang>/` (a two-letter ISO 639-1 code, optionally with a region: `zh-cn/`, `zh-tw/`, `ja/`) mirroring the root structure. Detected directories become locales with the language switcher in the nav; the root tree is the default (English) locale, and a tagged version serves its own translations.
