@@ -68,9 +68,7 @@ function main(): void {
     );
   }
   const oldModules = isStringList(recordedModules) ? recordedModules : [];
-  const presentLicenses = ["LICENSE", "LICENSE.md"].filter((name) =>
-    licensePresentAtHead(targetDir, name),
-  );
+  const presentLicenses = ["LICENSE.md"].filter((name) => licensePresentAtHead(targetDir, name));
   const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
   if (flipError !== null) {
     fail(flipError);

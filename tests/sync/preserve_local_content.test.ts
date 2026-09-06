@@ -29,15 +29,14 @@ const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
 
-// The RETIRED grammars' spellings: the fixtures below use them to prove
-// that a straggler repo still carrying an old shape (or an old-vintage
-// manifest) gets the loud fail-closed path, never a conversion - the
-// one-time conversion machinery is deleted (fleet censused
-// post-conversion).
-const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
-const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-// The retired .gitignore guidance line, verbatim: with the conversion
-// strip deleted, a repo-owned side holding it keeps it byte-identical.
+// Marker-shaped spellings the sync does not own: the fixtures below use
+// them to prove that a repo whose HEAD carries some other shape (or a
+// manifest the sync cannot read) gets the loud fail-closed path, never a
+// conversion.
+const OLD_SENTINEL = "<!-- other-tool:section -->";
+const OLD_LOCAL_BEGIN = "# BEGIN OTHER LOCAL";
+// A guidance-shaped comment line in repo-owned space: kept byte-identical
+// like any other repo-owned line.
 const OLD_GUIDANCE = "# Add repository-specific ignore patterns in this section only.";
 
 const MANIFEST_REL = ".github/repo-platform-manifest.json";
@@ -85,16 +84,15 @@ function manifestJson(entries: SplitSpec[]): string {
   });
 }
 
-/** A RETIRED-vintage manifest, exactly as the old compose emitted the
- * tail-marker wire - what a straggler repo's HEAD would still carry. The
- * sync no longer reads it: headSplitEntries refuses, and the carry falls
- * back to the new entries' markers with the appendix behind them. */
-function legacyManifestJson(entries: { path: string; marker: string }[]): string {
+/** A manifest declaring a grammar the sync does not read (one-marker).
+ * headSplitEntries refuses it, and the carry falls back to the new
+ * entries' markers with the appendix behind them. */
+function otherGrammarManifestJson(entries: { path: string; marker: string }[]): string {
   return JSON.stringify({
     files: Object.fromEntries(
       entries.map((e) => [
         e.path,
-        { class: "split", grammar: "tail-marker", marker: e.marker, managed: "above", hash: null },
+        { class: "split", grammar: "one-marker", marker: e.marker, managed: "above", hash: null },
       ]),
     ),
   });
@@ -199,9 +197,9 @@ describe("carryManagedRegion", () => {
     expect(flipped?.kind).toBe("sides-restored");
   });
 
-  test("a relic-shaped line the repo owns is NEVER stripped (the conversion strip is gone)", () => {
-    // Post-census scope: retired spellings in repo-owned space are the
-    // repository's bytes, kept byte-identical on every sync, forever.
+  test("a marker-shaped line the repo owns is NEVER stripped", () => {
+    // Any spelling in repo-owned space is the repository's bytes, kept
+    // byte-identical on every sync, forever.
     const target = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
     const carry = carryManagedRegion(
       gitignoreRender,
@@ -222,11 +220,10 @@ describe("carryManagedRegion", () => {
       headDecl: undefined,
     },
     {
-      // STRAGGLER: the one-time conversion is deleted, so an old
-      // tail-marker-shaped copy (whose manifest headSplitEntries refuses)
-      // has no trustworthy split - loud, manual review, zero repo-owned
-      // bytes lost.
-      reason: "a retired-sentinel copy under an unusable HEAD manifest",
+      // A one-marker-shaped copy (whose manifest headSplitEntries
+      // refuses) has no trustworthy split - loud, manual review, zero
+      // repo-owned bytes lost.
+      reason: "a one-marker copy under an unusable HEAD manifest",
       previous: `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`,
       headDecl: "unusable" as const,
     },
@@ -403,7 +400,15 @@ function runScript(
   };
 }
 
-function makeTarget(files: Record<string, string>): string {
+/** A target checkout's files. Every managed repository carries an
+ * ownership manifest at HEAD (a fixture without one models the state the
+ * carry refuses as unusable), so a fixture that names none gets the
+ * standard split declarations. */
+function makeTarget(given: Record<string, string>, options: { headManifest?: false } = {}): string {
+  const files =
+    MANIFEST_REL in given || options.headManifest === false
+      ? given
+      : { [MANIFEST_REL]: manifestJson(RECOPY_ENTRIES), ...given };
   const base = temp.dir("preserve-local-");
   const root = join(base, "target");
   mkdirSync(root);
@@ -495,17 +500,17 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(result.summary).not.toContain("SECURITY.md");
   });
 
-  test("a recopy over a retired-vintage repo takes the appendix, never a conversion", () => {
-    // HEAD still carries the old tail-marker shape and manifest: the
-    // refused manifest makes HEAD's declarations unusable, so the whole
-    // previous copy is preserved below the appendix - a recovery sync is
-    // exactly where a straggler lands. The repo-owned tail carries one
+  test("a recopy over an unreadable-manifest repo takes the appendix, never a conversion", () => {
+    // HEAD carries a one-marker shape and manifest: the refused manifest
+    // makes HEAD's declarations unusable, so the whole previous copy is
+    // preserved below the appendix - a recovery sync is exactly where such
+    // a repo lands. The repo-owned tail carries one
     // clean CURRENT marker pair on purpose: a carry that ignored the
     // refused manifest would split there "honestly" and hand the bytes
     // between the markers to the managed discard.
     const oldShape = `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\ntail intro\n${B}\nREPO-OWNED SECRET\n${E}\ntail outro\n`;
     const root = makeTarget({
-      [MANIFEST_REL]: legacyManifestJson([{ path: "AGENTS.md", marker: OLD_SENTINEL }]),
+      [MANIFEST_REL]: otherGrammarManifestJson([{ path: "AGENTS.md", marker: OLD_SENTINEL }]),
       "AGENTS.md": oldShape,
     });
     initGitRepo(root);
@@ -587,6 +592,8 @@ describe("preserve_local_content script (recopy mode)", () => {
   test("a working tree without the recopied manifest fails loudly", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
+    // HEAD keeps its manifest; the recopy is what failed to write one.
+    rmSync(join(root, MANIFEST_REL));
     const result = runScript(root);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("needs the recopied render's manifest");
@@ -685,7 +692,7 @@ describe("splitEntries", () => {
     ]);
   });
 
-  test("throws on a split entry with no grammar (a pre-grammar manifest)", () => {
+  test("throws on a split entry with no grammar (a grammar-less manifest)", () => {
     const manifest = JSON.stringify({
       files: { "AGENTS.md": { class: "split", begin: B, end: E, hash: null } },
     });
@@ -693,12 +700,11 @@ describe("splitEntries", () => {
   });
 
   test("throws on an unknown grammar instead of degrading", () => {
-    // Registered in scripts/check/guard_registry.ts
-    // (split-entries-unknown-grammar-refusal). The RETIRED grammars are
-    // unknown too: the fresh render's manifest is generated by this
-    // change's own compose and the conversion machinery is deleted, so a
-    // retired grammar anywhere is damage, never a shape to read.
-    for (const grammar of ["prefix", "tail-marker", "bounded-region"]) {
+    // Registered in scripts/guard_registry.ts
+    // (split-entries-unknown-grammar-refusal). The fresh render's
+    // manifest is generated by this change's own compose, so any other
+    // grammar is damage, never a shape to read.
+    for (const grammar of ["prefix", "one-marker", "four-marker"]) {
       const manifest = JSON.stringify({
         files: { "AGENTS.md": regionEntry({ grammar }) },
       });
@@ -883,9 +889,30 @@ describe("preserve_local_content render mode", () => {
     expect(result.review).toBe("");
   });
 
-  test("STRAGGLER: a tail-marker repo gets the appendix and a review hold, never a conversion", () => {
-    // HEAD state: old-shape file + old-vintage manifest - a straggler the
-    // census says should not exist. The refused manifest yields no HEAD
+  test("a HEAD with no manifest at all is unusable: the appendix and a review hold, never a guessed split", () => {
+    // The previous copy carries one clean CURRENT marker pair on purpose:
+    // a carry that fell back to the new markers would split there
+    // "honestly" and hand the bytes between them to the managed discard.
+    const previous = `intro\n${B}\nREPO-OWNED SECRET\n${E}\noutro\n`;
+    const root = makeTarget({ "AGENTS.md": previous }, { headManifest: false });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_MARKERS],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      htmlAppendixCarry(agentsRender, previous),
+    );
+    expect(result.review).toContain("AGENTS.md: recovery-appendix");
+  });
+
+  test("a one-marker repo gets the appendix and a review hold, never a conversion", () => {
+    // HEAD state: a one-marker file plus a manifest declaring that
+    // grammar. The refused manifest yields no HEAD
     // declarations, the old shape has no BEGIN/END region, and the whole
     // previous copy (non-UTF-8 byte included) is preserved below the
     // appendix with the PR held for review - loud beats a guessed split.
@@ -899,7 +926,7 @@ describe("preserve_local_content render mode", () => {
       tailBytes,
     ]);
     const root = makeTarget({
-      [MANIFEST_REL]: legacyManifestJson([{ path: "AGENTS.md", marker: OLD_SENTINEL }]),
+      [MANIFEST_REL]: otherGrammarManifestJson([{ path: "AGENTS.md", marker: OLD_SENTINEL }]),
     });
     writeFileSync(join(root, "AGENTS.md"), oldShapeHead);
     initGitRepo(root);
@@ -922,17 +949,16 @@ describe("preserve_local_content render mode", () => {
     expect(result.review).toContain("AGENTS.md: recovery-appendix");
   });
 
-  test("STRAGGLER: an old .gitignore takes the appendix too, its relic lines preserved", () => {
-    // The old bounded shape carries the current BEGIN/END pair inside its
+  test("a four-marker .gitignore takes the appendix too, its extra lines preserved", () => {
+    // The four-marker shape carries the current BEGIN/END pair inside its
     // managed half, so it WOULD split at the new markers - but HEAD's
     // refused manifest makes every declaration untrustworthy, and a
     // guessed split is exactly the misattribution hazard. The whole copy
-    // rides the appendix, retired relic lines included (they are repo
-    // bytes now; the conversion strip is deleted).
+    // rides the appendix, the extra marker lines included (repo bytes).
     const above = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\nsecret.env\n\n`;
     const oldHead = `${above}${HB}\n*.old\n${HE}\n`;
     const root = makeTarget({
-      [MANIFEST_REL]: legacyManifestJson([{ path: ".gitignore", marker: HB }]),
+      [MANIFEST_REL]: otherGrammarManifestJson([{ path: ".gitignore", marker: HB }]),
       ".gitignore": oldHead,
     });
     initGitRepo(root);
@@ -953,9 +979,9 @@ describe("preserve_local_content render mode", () => {
     expect(result.review).toContain(".gitignore: recovery-appendix");
   });
 
-  test("a STEADY-STATE sync of a relic-spelling .gitignore strips nothing, ever", () => {
-    // The conversion strip is deleted: a repo-owned side that happens to
-    // hold a retired spelling keeps it byte-identical on every sync.
+  test("a STEADY-STATE sync of a marker-spelling .gitignore strips nothing, ever", () => {
+    // A repo-owned side that happens to hold a marker-shaped spelling
+    // keeps it byte-identical on every sync.
     const above = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\n\n`;
     const oldHead = `${above}${HB}\n*.old\n${HE}\n`;
     const root = makeTarget({
@@ -1408,7 +1434,7 @@ describe("preserve_local_content render mode", () => {
     expect(result.stderr).toContain("needs the new render's manifest");
   });
 
-  test("a pre-grammar RENDER manifest fails loudly instead of guessing the carry", () => {
+  test("a grammar-less RENDER manifest fails loudly instead of guessing the carry", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
     const base = temp.dir("preserve-render-");

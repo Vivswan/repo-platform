@@ -49,14 +49,13 @@ export function listRenderPaths(root: string): Set<string> {
 
 // Repo-owned wherever they exist: never deletion candidates even when a
 // module selection removes them from the render. settings.yml is applied
-// remotely by settings-repos regardless of who renders it. The license
-// files are protected only on the custom-license module: there the
-// repo's own replacement license (either spelling) must survive the
-// de-render, while a fleet repo's license is template-managed - its old
-// extensionless LICENSE must be deletable across the LICENSE.md rename.
+// remotely by settings-repos regardless of who renders it. LICENSE.md is
+// protected only on the custom-license module: there the repo's own
+// replacement license must survive the de-render, while a fleet repo's
+// license is template-managed.
 export function protectedPaths(modules: readonly string[]): ReadonlySet<string> {
   return modules.includes("custom-license")
-    ? new Set([".github/settings.yml", "LICENSE", "LICENSE.md"])
+    ? new Set([".github/settings.yml", "LICENSE.md"])
     : new Set([".github/settings.yml"]);
 }
 

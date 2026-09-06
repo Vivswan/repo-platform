@@ -16,8 +16,8 @@ export interface CopierAnswers {
    * and the default YAML 1.2 schema would resolve it as a number
    * ("1.626e+56"); an all-digit sha arrives quoted (the stamp hook and
    * copier both quote it) and failsafe undoes that quoting. The stamp
-   * hook records the full 40-hex sha; a repo rendered before it did
-   * still carries the 7-char abbreviation until its next sync. */
+   * hook records the full 40-hex sha, and recorded_commit.ts refuses any
+   * other shape. */
   commit: string;
   /** Every recorded answer, for field-specific consumers reading TYPED
    * values (settings_drift's boolean private, rehearse's description).
@@ -95,7 +95,13 @@ export function readAnswersFile(targetDir: string): CopierAnswers {
     const detail = err instanceof Error ? err.message.split("\n")[0] : String(err);
     throw new AnswersFileError(`cannot read as YAML: ${detail}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  // A plain mapping only: the YAML parser hands back Set, Map, or Date for
+  // tagged top levels (!!set, !!omap, !!timestamp), none of them answers.
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Object.getPrototypeOf(parsed) !== Object.prototype
+  ) {
     throw new AnswersFileError("top level must be a mapping");
   }
   return { commit: commitOf(text), fields: parsed as Record<string, unknown> };

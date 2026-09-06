@@ -9,11 +9,12 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  MIGRATIONS_NAME,
+  MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
-  SECURITY_MOVE_NAME,
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -193,11 +194,18 @@ describe("open_pr sections and auto-merge", () => {
       forcesReview: false,
     },
     {
-      reason: "security policy move: nothing leaves the repository",
+      reason: "migration notes: the rung says nothing leaves the repository",
       where: "temp",
-      name: SECURITY_MOVE_NAME,
+      name: MIGRATIONS_NAME,
       content: "> [!NOTE]\n> SECURITY POLICY MOVE: `SECURITY.md` -> `.github/SECURITY.md`\n",
       forcesReview: false,
+    },
+    {
+      reason: "migration review notes: the rung's verdict needs a human",
+      where: "temp",
+      name: MIGRATIONS_REVIEW_NAME,
+      content: "> [!WARNING]\n> MIGRATION m0002_example: the rewrite needs a look\n",
+      forcesReview: true,
     },
     {
       reason: "withheld workflow files: the update is incomplete",
@@ -452,9 +460,10 @@ describe("open_pr sections and auto-merge", () => {
 
   test("an oversized recorded _commit cannot starve the reserved validation excerpt", () => {
     // The base body sits OUTSIDE the section budget and interpolates the
-    // target's recorded _commit, which resolve_refs leaves unbounded (a
-    // long-but-valid revision expression still resolves) - display must
-    // clip it, or the inflated base pushes the reserved section out.
+    // target's recorded _commit as RAW text: the resolver refuses anything
+    // but a full sha, yet recovery keeps the unusable value for display, so
+    // display must clip it or the inflated base pushes the reserved
+    // section out.
     const hugeOldCommit = `abc1234${"^0".repeat(30000)}`;
     const capture = `validation diagnostic sentinel line ${"d".repeat(30000)}`;
     const r = run({

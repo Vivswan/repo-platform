@@ -29,6 +29,8 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Use a different toolchain version in one repo | [Toolchains: overriding](toolchains.md#overriding-per-toolchain) |
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
+| Move or rewrite a rendered file across the fleet (a one-shot transition) | [Migrations: adding a rung](migrations.md#adding-a-rung) |
+| Find out why a sync PR moved a file before the copier diff | [Migrations: the walk](migrations.md#the-walk-over-build-history) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
 | Find where a private repo's failure details land | [Private repos: seeing the full detail](private-repos.md#seeing-the-full-detail) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
@@ -58,7 +60,8 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 13. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
 14. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+15. [Migrations](migrations.md) - the ladder of one-shot fleet transitions: one self-contained file per rung on the build branch, and the sync's walk over build history that runs the rungs a repository has not crossed.
 
 ### Leaving
 
-15. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+16. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

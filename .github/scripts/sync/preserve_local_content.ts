@@ -8,12 +8,10 @@
 // ONE grammar (managed-region): every split file is [optional repo-owned
 // content above] BEGIN marker line, managed content, END marker line,
 // [optional repo-owned content below]. The rebuild delivers the target's
-// own sides byte-for-byte around the fresh render's managed region. The
-// retired split shapes (tail-marker, the old four-marker bounded-region
-// .gitignore shape) are no longer converted: the fleet is censused fully
-// post-conversion, head_manifest.ts refuses their manifests loudly with
-// recovery advice, and a straggler's old-shaped copy rides the recovery
-// appendix (manual review) instead of a conversion.
+// own sides byte-for-byte around the fresh render's managed region. No
+// other shape is converted: head_manifest.ts refuses a manifest declaring
+// any other grammar loudly with recovery advice, and such a copy rides the
+// recovery appendix (manual review) whole.
 //
 // RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
 // after `copier update`, the merged result for every split-class file is
@@ -191,9 +189,9 @@ export type RegionCarry =
  * falling back to the new entry's markers only when HEAD's manifest is
  * usable and simply does not declare the path (an ownership flip).
  * "unusable" means HEAD's declarations exist but cannot be trusted (a
- * refused manifest - retired-grammar, pre-grammar, damaged - or a non-blob
+ * refused manifest - an unknown or missing grammar, damage - or a non-blob
  * at the manifest path): splitting such a copy by the NEW markers would be
- * a guess - an old-shaped copy whose repo-owned content happens to carry
+ * a guess - a copy whose repo-owned content happens to carry
  * one clean marker pair would hand the bytes between them to the managed
  * discard - so the whole copy rides the appendix instead. Null means keep
  * the render with nothing to say: the previous copy never diverged
@@ -398,24 +396,21 @@ function requireHead(root: string): void {
 }
 
 /** HEAD's split declarations for splitting HEAD's copies with HEAD's own
- * manifest. Three states, because the two failure shapes must not blur:
+ * manifest. Two states:
  * - a Map when the manifest is usable (a path absent from it falls back to
  *   the new entry's markers - an ownership flip, with its own review
  *   machinery);
- * - "unusable" when a manifest EXISTS at HEAD but cannot be trusted (a
- *   non-blob at the path, or headSplitEntries' loud refusal: pre-grammar,
- *   retired-grammar, damaged) - declarations exist that the carry cannot
- *   read, so every previous copy rides the appendix rather than a
+ * - "unusable" when HEAD's manifest cannot be trusted: absent (every
+ *   managed repository carries one, so its absence is a target-state
+ *   anomaly, never a reason to guess), a non-blob at the path, or
+ *   headSplitEntries' loud refusal (an unknown or missing grammar,
+ *   damage). Every previous copy then rides the appendix rather than a
  *   guessed split, and the tail tripwire independently reports the
- *   refusal with its recovery advice;
- * - null when no manifest exists at HEAD at all (nothing ever declared a
- *   split, so the new entries' markers are the only truth available and
- *   the carry falls back to them). */
-type HeadDecls = Map<string, HeadSplit> | "unusable" | null;
+ *   problem with its recovery advice. */
+type HeadDecls = Map<string, HeadSplit> | "unusable";
 
 function readHeadDecls(root: string): HeadDecls {
   const headManifest = headEntry(root, MANIFEST_NAME);
-  if (headManifest.kind === "absent") return null;
   if (headManifest.kind !== "blob") return "unusable";
   try {
     return headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
@@ -424,9 +419,8 @@ function readHeadDecls(root: string): HeadDecls {
   }
 }
 
-/** One path's declaration under the three HeadDecls states. */
+/** One path's declaration under the two HeadDecls states. */
 function headDeclFor(headDecls: HeadDecls, path: string): HeadSplit | "unusable" | undefined {
-  if (headDecls === null) return undefined;
   if (headDecls === "unusable") return "unusable";
   return headDecls.get(path);
 }

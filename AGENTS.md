@@ -20,7 +20,7 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 - Never hand-edit generated content; edit the source and run `bun run regen` (CI fails on drift). Exception: `bun scripts/generate/build_gitignore.ts` builds the gitignore outputs (networked; the refresh-gitignore workflow owns it) and `--topology` is its offline gate.
 - Workflow run blocks longer than a few lines move to TypeScript under `.github/scripts/<owner>/`, run with bun, subprocesses as argv arrays via `shared/proc.ts`. `reusable-*` workflows that check out the CALLER's repository keep their steps inline.
 - The `.sh` files under `.github/scripts/` are the bash exceptions (CI test harnesses independent of the code they verify, and release_freshness.sh, pinned to its template twin); `bun run lint:sh` shellchecks them.
-- A template change that renames a rendered file, retires one, or flips its ownership class ships an upgrade_path_test.sh case and a PR-body note; the sync pipeline carries the transition, and no version-gated migration system exists.
+- A template change that renames a rendered file, retires one, or flips its ownership class ships a migration ladder rung: one self-contained `mNNNN_<slug>.ts` under `.github/scripts/sync/migrations/` (node:/bun: imports only), its unit test, its upgrade_path_test.sh case, and a PR-body note; docs/migrations.md is the contract. Rungs are permanent history and the sync carries no compatibility code outside them.
 - Update the matching `docs/` guide when changing behavior it describes.
 
 ## Verification

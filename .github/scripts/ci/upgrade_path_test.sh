@@ -2,7 +2,8 @@
 # Upgrade-path test: generate a project from a synthetic OLD build tree,
 # add the local modifications a real repo carries, then update it to a
 # freshly assembled build tree the way reusable-template-sync does - module
-# selection via sync/modules.ts, live -d data via sync/apply_update.ts,
+# selection via sync/modules.ts, the migration ladder via
+# sync/run_migrations.ts, live -d data via sync/apply_update.ts,
 # conflict resolution, retired-file cleanup via sync/retired_cleanup.ts,
 # and the settings preserve step via sync/preserve_repo_owned.ts. Asserts
 # that files the template dropped are deleted while repo-owned content
@@ -16,7 +17,7 @@
 # version from _src_path), so build trees are committed to local orphan
 # refs + tags. The old fixture is SYNTHETIC: the current templates
 # assembled by the current tooling, plus a sentinel file the new build no
-# longer renders and the pre-relicense LICENSE shape.
+# longer renders and the pre-transition shapes the legs below model.
 # shellcheck disable=SC2016  # assertion strings carry literal backticks
 set -euo pipefail
 GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
@@ -60,6 +61,8 @@ REF_NS="ci-build-${RUN_DIR##*.}"
 OLD_TAG="$REF_NS/old"
 NEW_TAG="$REF_NS/new"
 SPLIT_TAG="$REF_NS/split"
+PROBE1_TAG="$REF_NS/probe1"
+PROBE2_TAG="$REF_NS/probe2"
 WT="$RUN_DIR/wt"
 
 PROJECT="$RUN_DIR/upgrade"
@@ -72,7 +75,7 @@ NEXT_TREE="$RUN_DIR/next"
 cleanup() {
   git -C "$REPO_ROOT" worktree remove --force "$WT" 2>/dev/null || true
   git -C "$REPO_ROOT" branch -q -D "$REF_NS" 2>/dev/null || true
-  git -C "$REPO_ROOT" tag -d "$OLD_TAG" "$NEW_TAG" "$SPLIT_TAG" 2>/dev/null || true
+  git -C "$REPO_ROOT" tag -d "$OLD_TAG" "$NEW_TAG" "$SPLIT_TAG" "$PROBE1_TAG" "$PROBE2_TAG" 2>/dev/null || true
   rm -rf "$RUN_DIR"
 }
 trap cleanup EXIT
@@ -102,6 +105,16 @@ rendered_fleet_license() {
 fail() {
   echo "FAIL: $*" >&2
   exit 1
+}
+
+# `git status --porcelain` with its exit code checked BEFORE its emptiness
+# is trusted: a failed status prints nothing, which a bare [ -z ] would
+# read as a clean tree.
+assert_clean_tree() { # <dir> <failure message>
+  local porcelain
+  porcelain="$(git -C "$1" status --porcelain)" \
+    || fail "git status failed in $1 (cannot judge whether the tree is clean)"
+  [ -z "$porcelain" ] || fail "$2"
 }
 
 # modules.ts reports its failures on stdout, which the callers' $( )
@@ -160,8 +173,8 @@ echo "Building synthetic old fixture ${prev}"
 # behavior.
 bun .github/scripts/build-branches/branch_tree.ts --dest "$OLD_TREE"
 # Model the fleet state before the community health files left the root:
-# SECURITY.md and CODE_OF_CONDUCT.md rendered and manifest-classed there.
-mv "$OLD_TREE/template/.github/SECURITY.md.jinja" "$OLD_TREE/template/SECURITY.md.jinja"
+# CODE_OF_CONDUCT.md rendered and manifest-classed there (its move is a
+# plain re-render plus retired-file cleanup, no migration rung).
 mv "$OLD_TREE/template/.github/CODE_OF_CONDUCT.md.jinja" \
   "$OLD_TREE/template/CODE_OF_CONDUCT.md.jinja"
 sed 's|%}\.github/CODE_OF_CONDUCT\.md{%|%}/CODE_OF_CONDUCT.md{%|' "$OLD_TREE/copier.yml" \
@@ -169,16 +182,27 @@ sed 's|%}\.github/CODE_OF_CONDUCT\.md{%|%}/CODE_OF_CONDUCT.md{%|' "$OLD_TREE/cop
 mv "$OLD_TREE/copier.coc.tmp" "$OLD_TREE/copier.yml"
 grep -qF '%}/CODE_OF_CONDUCT.md{%' "$OLD_TREE/copier.yml" \
   || fail "could not point the old fixture's CODE_OF_CONDUCT.md exclude at the root path"
-sed -e 's|"\.github/SECURITY\.md"|"SECURITY.md"|' \
-  -e 's|"\.github/CODE_OF_CONDUCT\.md"|"CODE_OF_CONDUCT.md"|' \
+sed -e 's|"\.github/CODE_OF_CONDUCT\.md"|"CODE_OF_CONDUCT.md"|' \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
   > "$OLD_TREE/manifest.community.tmp"
 mv "$OLD_TREE/manifest.community.tmp" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
-grep -qF '"SECURITY.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  || fail "could not model the pre-move manifest entry for the root SECURITY.md"
 grep -qF '"CODE_OF_CONDUCT.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
   || fail "could not model the pre-move manifest entry for the root CODE_OF_CONDUCT.md"
+# The old build predates the security policy's move: SECURITY.md rendered
+# and manifest-classed at the root, and the ladder's rung for the move
+# absent - so the runner below must find the rung pending.
+mv "$OLD_TREE/template/.github/SECURITY.md.jinja" "$OLD_TREE/template/SECURITY.md.jinja"
+sed -e 's|"\.github/SECURITY\.md"|"SECURITY.md"|' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.security.tmp"
+mv "$OLD_TREE/manifest.security.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+grep -qF '"SECURITY.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the pre-move manifest entry for the root SECURITY.md"
+test -f "$OLD_TREE/migrations/m0001_security_policy_to_github.ts" \
+  || fail "the fresh build tree carries no rung file for m0001_security_policy_to_github (is the rung still on the ladder?)"
+rm "$OLD_TREE/migrations/m0001_security_policy_to_github.ts"
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # Model the fleet state before the Copilot gate moved into the ruleset: the
 # old template shipped a managed rerun-copilot-gate.yml (the re-arm half of
@@ -188,16 +212,6 @@ echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # all the retirement diff needs).
 printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
   > "$OLD_TREE/template/.github/workflows/rerun-copilot-gate.yml"
-# Model the historical fleet state the relicensing moved away from: the
-# old template shipped a different LICENSE, ungated and listed in
-# _skip_if_exists. Without this the synthetic fixture would already carry
-# the current license and the transition assertions below would be
-# vacuous.
-rm "$OLD_TREE/template/LICENSE.md.jinja"
-echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
-awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
-  > "$OLD_TREE/copier.yml.tmp"
-mv "$OLD_TREE/copier.yml.tmp" "$OLD_TREE/copier.yml"
 # Model the fleet state before pr-title became its own natively-required
 # workflow: the old build rendered no pr-title.yml (the check was a
 # fleet-ci job), so the update below is what must land it. Its manifest
@@ -268,8 +282,7 @@ test -f .github/workflows/rerun-copilot-gate.yml \
 # machinery whose RETIREMENT is under test.
 test ! -e .github/workflows/pr-title.yml \
   || fail "the synthetic old fixture must predate the standalone pr-title.yml workflow"
-[ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
-  || fail "synthetic fixture did not render the old fleet license"
+test -f LICENSE.md || fail "fixture render is missing the fleet LICENSE.md"
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
@@ -291,9 +304,10 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 # - src/keep_me.txt is repo-owned content the template never rendered
 # - .repo-platform.yml drops settings-sync (the module-deselection edit a
 #   repo merges before the sync)
-# - SECURITY.md carries a repository-owned tail below its END marker: the
-#   security-policy move must carry it byte-for-byte to .github/SECURITY.md
+# - a pending migration rung's input (the root SECURITY.md tail below)
 echo "# local settings note" >> .github/settings.yml
+# SECURITY.md carries a repository-owned tail below its END marker: the
+# security-policy rung must carry it byte-for-byte to .github/SECURITY.md.
 test -f SECURITY.md \
   || fail "the synthetic old fixture must render SECURITY.md at the root (or the move assertions below are vacuous)"
 test ! -e .github/SECURITY.md \
@@ -301,14 +315,9 @@ test ! -e .github/SECURITY.md \
 printf '\nScope note: upgrade-local security tail\n' >> SECURITY.md
 echo "# local checks note" >> .github/workflows/checks.yml
 echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
-echo "Repo-owned custom license" > LICENSE
-# Adopting custom-license REPLACES the fleet license: a repo drops the
-# rendered LICENSE.md in the same commit (the one-license rule; the
-# synthetic old build renders the extensionless spelling, which the echo
-# above already overwrote).
-if [ -e LICENSE.md ]; then
-  git rm -q LICENSE.md
-fi
+# Adopting custom-license REPLACES the fleet license under the one-license
+# rule: the repo's own LICENSE.md takes the rendered fleet copy's place.
+echo "Repo-owned custom license" > LICENSE.md
 echo "# local sentinel note" >> .github/retired-sentinel.txt
 mkdir -p src
 echo "repo-owned sentinel" > src/keep_me.txt
@@ -331,7 +340,76 @@ commit_build_tree "$NEXT_TREE" "$NEW_TAG" "$prev"
 git show "${prev}:copier.yml" > "$WORK/copier-old.yml"
 git show "$NEW_TAG":copier.yml > "$WORK/copier-new.yml"
 
-# Module selection exactly as reusable-template-sync computes it: the
+export PRIVATE=false
+export DESCRIPTION="Upgraded description"
+
+# The -d data mirrors reusable-template-sync: the update runs through the
+# same apply_update.ts wrapper the workflow uses, with the filtered
+# modules plus live private/description, so drift in any of them
+# re-renders.
+export TARGET_DIR="$PROJECT"
+export TARGET_REF="$NEW_TAG"
+OLD_SHA_RESOLVED="$(git rev-parse "${prev}^{commit}")"
+# The walk's NEGATIVE CONTROL, run FIRST: with the same build on both sides
+# (OLD_SHA = the new tag) every rung is crossed, so the ladder must touch
+# nothing - same HEAD, clean tree, both reports written and empty. A walk
+# that ran rungs regardless of the recorded build would move files here.
+# The control bites only while the ladder holds a rung; an empty ladder is
+# a legitimate state, announced rather than failed.
+new_rungs="$(git ls-tree --name-only "$NEW_TAG" migrations/)" \
+  || fail "could not list the new build tree's rung files"
+if [ -n "$new_rungs" ]; then
+  echo "migration ladder populated: the no-op control below is armed"
+else
+  echo "migration ladder empty: the no-op control below is vacuous by construction"
+fi
+control_head="$(git -C "$PROJECT" rev-parse HEAD)"
+# The runner takes the resolved base only (the sync's resolver hands it a
+# full sha), so the tag is resolved here as the workflow would.
+NEW_SHA_RESOLVED="$(git rev-parse "${NEW_TAG}^{commit}")"
+control_out="$(RUNNER_TEMP="$WORK" OLD_SHA="$NEW_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts)" \
+  || fail "run_migrations.ts failed with identical trees (nothing should be pending)"
+# The runner's own report is checked too: an idempotent rung that ran
+# anyway (an in-place verdict) leaves HEAD and the tree untouched, so the
+# postconditions alone could not see it.
+grep -qF "no pending migrations" <<<"$control_out" \
+  || fail "the ladder did not report 'no pending migrations' with identical trees"
+if grep -qE "migration m[0-9]{4}_" <<<"$control_out"; then
+  fail "the ladder ran a rung although both trees carry every rung: $control_out"
+fi
+[ "$(git -C "$PROJECT" rev-parse HEAD)" = "$control_head" ] \
+  || fail "the ladder committed although both trees carry every rung"
+assert_clean_tree "$PROJECT" "the ladder modified the tree although both trees carry every rung"
+for report in migrations.md migrations-review.md; do
+  test -f "$WORK/$report" || fail "the ladder did not write $report on a no-op run"
+  [ ! -s "$WORK/$report" ] || fail "the ladder wrote a note into $report although nothing was pending"
+done
+test -f "$PROJECT/SECURITY.md" \
+  || fail "the ladder moved SECURITY.md although both trees carry the m0001_security_policy_to_github rung"
+cp "$PROJECT/SECURITY.md" "$WORK/security-before-move.md"
+# THE MIGRATION LADDER (sync/run_migrations.ts), replayed BEFORE the update
+# like the workflow: every rung that appears in build history after the
+# old build acts on the fixture, committed so copier sees a clean tree.
+RUNNER_TEMP="$WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts \
+  || fail "run_migrations.ts failed on the old-vintage fixture"
+assert_clean_tree "$PROJECT" "the migration ladder left the tree dirty (copier update refuses a dirty tree)"
+# The rung's own commit: exactly one, as the sync identity, a pure rename.
+[ "$(git -C "$PROJECT" rev-list --count "${control_head}..HEAD")" = "1" ] \
+  || fail "the ladder did not add exactly one commit for the pending rung"
+[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0001_security_policy_to_github" ] \
+  || fail "the rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s')"
+[ "$(git -C "$PROJECT" log -1 --name-status --format=)" = "$(printf 'R100\tSECURITY.md\t.github/SECURITY.md')" ] \
+  || fail "the rung's commit is not a pure rename of SECURITY.md"
+# The pending rung moved the policy byte-for-byte (tail included), so the
+# split-file rebuild finds the previous copy at the new path.
+test ! -e "$PROJECT/SECURITY.md" \
+  || fail "the security-policy rung left the root copy behind"
+cmp -s "$WORK/security-before-move.md" "$PROJECT/.github/SECURITY.md" \
+  || fail "the security-policy rung did not carry SECURITY.md byte-for-byte"
+grep -qF "SECURITY POLICY MOVE" "$WORK/migrations.md" \
+  || fail "the security-policy rung did not write its PR-body note"
+# Module selection exactly as reusable-template-sync computes it, in its
+# slot AFTER the ladder (a rung may rewrite .repo-platform.yml): the
 # target's .repo-platform.yml filtered against the new template's choices.
 MODULES="$(select_modules \
   --repo-file "$PROJECT/.repo-platform.yml" \
@@ -346,29 +424,6 @@ case "$MODULES" in
   *) fail "sync/modules.ts dropped the newly selected custom-license" ;;
 esac
 export MODULES
-export PRIVATE=false
-export DESCRIPTION="Upgraded description"
-
-# The -d data mirrors reusable-template-sync: the update runs through the
-# same apply_update.ts wrapper the workflow uses, with the filtered
-# modules plus live private/description, so drift in any of them
-# re-renders.
-export TARGET_DIR="$PROJECT"
-export TARGET_REF="$NEW_TAG"
-# THE SECURITY-POLICY MOVE (one-shot transition), replayed BEFORE the
-# update like the workflow: byte-for-byte, so the split-file rebuild finds
-# the previous copy (tail included) at the new path.
-cp "$PROJECT/SECURITY.md" "$WORK/security-before-move.md"
-RUNNER_TEMP="$WORK" bun .github/scripts/sync/relocate_security_policy.ts \
-  || fail "relocate_security_policy.ts failed on a root-vintage SECURITY.md"
-test ! -e "$PROJECT/SECURITY.md" \
-  || fail "the security-policy move left the root copy behind"
-cmp -s "$WORK/security-before-move.md" "$PROJECT/.github/SECURITY.md" \
-  || fail "the security-policy move did not carry SECURITY.md byte-for-byte"
-grep -qF "SECURITY POLICY MOVE" "$WORK/security-move.md" \
-  || fail "the security-policy move did not write its PR-body note"
-[ -z "$(git -C "$PROJECT" status --porcelain)" ] \
-  || fail "the security-policy move left the tree dirty (copier update refuses a dirty tree)"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 
 # The workflow's post-update order: clean renders, split-file rebuild,
@@ -382,10 +437,9 @@ test -n "$src_path" || fail ".github/.copier-answers.yml records no _src_path"
 # integer), so strip optional quotes before comparing.
 old_commit="$(sed -n 's/^_commit:[[:space:]]*//p' <<<"$answers_old" \
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
-[ "$old_commit" = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "${prev}^{commit}" || echo unresolvable)" ] \
+[ "$old_commit" = "$OLD_SHA_RESOLVED" ] \
   || fail "recorded _commit '${old_commit}' is not the commit ${prev} names"
-RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
-  OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
+RUNNER_TEMP="$WORK" SRC_PATH="$src_path" OLD_SHA="$OLD_SHA_RESOLVED" \
   bun .github/scripts/sync/clean_renders.ts
 bun .github/scripts/sync/preserve_local_content.ts \
   --summary "$WORK/local-carryover.md" --root "$PROJECT" \
@@ -404,8 +458,7 @@ bun .github/scripts/sync/resolve_copier_conflicts.ts \
 echo "retired sentinel" > "$PROJECT/.github/retired-sentinel.txt"
 printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
   > "$PROJECT/.github/workflows/rerun-copilot-gate.yml"
-RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
-  OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
+RUNNER_TEMP="$WORK" SRC_PATH="$src_path" OLD_SHA="$OLD_SHA_RESOLVED" \
   bun .github/scripts/sync/retired_cleanup.ts
 if grep -qF '.github/settings.yml' "$WORK/retired-paths.json"; then
   fail "retired_paths must never list the repo-owned settings.yml (protectedPaths)"
@@ -413,8 +466,8 @@ fi
 if grep -qF 'checks.yml' "$WORK/retired-paths.json"; then
   fail "retired_paths must never list the generated-once checks.yml"
 fi
-if grep -qF '"LICENSE"' "$WORK/retired-paths.json"; then
-  fail "retired_paths must never list the repo-owned LICENSE (protectedPaths)"
+if grep -qF '"LICENSE.md"' "$WORK/retired-paths.json"; then
+  fail "retired_paths must never list the repo-owned LICENSE.md (protectedPaths)"
 fi
 grep -qF '.github/retired-sentinel.txt' "$WORK/retired-paths.json" \
   || fail "retired_paths did not flag the sentinel that left the render"
@@ -425,9 +478,9 @@ grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/retired-paths.json" \
 grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected rerun-copilot-gate.yml"
 
-# The workflow's preserve step: settings.yml and the opted-out LICENSE are
-# repo-owned; if the update de-rendered and deleted either, it comes back
-# from the base commit.
+# The workflow's preserve step: settings.yml and the opted-out LICENSE.md
+# are repo-owned; if the update de-rendered and deleted either, it comes
+# back from the base commit.
 RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 
 # The workflow's final stamping step: conflict resolution and the preserve
@@ -472,27 +525,31 @@ grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "generated-once checks.yml lost its local modification"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "generated-once bug_report.yml lost its local modification (_skip_if_exists must hold)"
-# LICENSE opted out via the custom-license module: the repo's own license
-# must survive the update, the de-render, and the retired-file cleanup.
-[ "$(cat LICENSE)" = "Repo-owned custom license" ] \
-  || fail "the repo-owned LICENSE was modified despite the custom-license opt-out"
+# LICENSE.md opted out via the custom-license module: the repo's own
+# license must survive the update, the de-render, and the retired-file
+# cleanup.
+[ "$(cat LICENSE.md)" = "Repo-owned custom license" ] \
+  || fail "the repo-owned LICENSE.md was modified despite the custom-license opt-out"
 # Public-only community files must be in the updated render (they arrive
 # via the update when the old fixture predates them), and ci.yml must
 # carry the in-run gate after the update.
 test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
-# THE COMMUNITY-FILE MOVE: both files land under .github/ and leave the
-# root; SECURITY.md's repository-owned tail rides along, and the rename
-# must not read as a split-file deletion (nothing left the repository).
+# THE COMMUNITY-FILE MOVE: CODE_OF_CONDUCT.md lands under .github/ and
+# leaves the root through the re-render plus retired-file cleanup.
 test -f .github/CODE_OF_CONDUCT.md \
   || fail ".github/CODE_OF_CONDUCT.md is missing after the public update"
 test ! -e CODE_OF_CONDUCT.md \
   || fail "the root CODE_OF_CONDUCT.md survived the move to .github/"
+# SECURITY.md's repository-owned tail rode the rung's move, and the rename
+# must not read as a split-file deletion (nothing left the repository).
 test -f .github/SECURITY.md || fail ".github/SECURITY.md is missing after the update"
 test ! -e SECURITY.md || fail "the root SECURITY.md survived the move to .github/"
 grep -qF "upgrade-local security tail" .github/SECURITY.md \
   || fail "the security policy's repository-owned tail did not ride the move into .github/SECURITY.md"
-if [ -s "$WORK/removed-splits.md" ] && grep -qF '`SECURITY.md`' "$WORK/removed-splits.md"; then
-  fail "the security-policy move still raised the removed-splits hold for SECURITY.md (the rename must be lossless, not held)"
+test -f "$WORK/removed-splits.md" \
+  || fail "the preserve step wrote no removed-splits report (the hold's absence cannot be judged)"
+if grep -qF '`SECURITY.md`' "$WORK/removed-splits.md"; then
+  fail "the security-policy rung still raised the removed-splits hold for SECURITY.md (the rename must be lossless, not held)"
 fi
 grep -qF -- "repo-platform/.github/workflows/fleet-ci.yml@build" .github/workflows/ci.yml \
   || fail "ci.yml does not call fleet-ci at the build ref after the update"
@@ -641,6 +698,29 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the 
 
 # The recovery leg runs the wrapper, the local-content carry, and the repo-owned preserve step
 # in the workflow's order (TARGET_DIR still exported), proving their RECOVER routing.
+# The migration ladder runs first as in the workflow, with the empty OLD_SHA recovery resolves:
+# no base tree, so EVERY rung runs - and this fixture crossed them all in the main leg, so each
+# is idempotent here: same HEAD, clean tree, both reports written and empty. (A recovery over a
+# pre-move fixture is the rung's own unit test.)
+recovery_head="$(git rev-parse HEAD)"
+recovery_out="$(RUNNER_TEMP="$WORK" OLD_SHA="" PLATFORM_DIR="$GITHUB_WORKSPACE" \
+  bun "$GITHUB_WORKSPACE/.github/scripts/sync/run_migrations.ts")" \
+  || fail "run_migrations.ts failed on the recovery leg (no base tree)"
+# Every rung file on the new tree must have RUN exactly once, in ladder
+# (filename) order, and reported a verdict: the no-op postconditions alone
+# cannot tell a skipped rung from an idempotent one.
+recovery_rungs="$(git -C "$GITHUB_WORKSPACE" ls-tree --name-only "$NEW_TAG" migrations/ | sed -e 's|^migrations/||' -e 's|\.ts$||')" \
+  || fail "could not list the new build tree's rung files on the recovery leg"
+recovery_ran="$(sed -nE 's/^.*: migration (m[0-9]{4}_[a-z0-9_]+) -> .*$/\1/p' <<<"$recovery_out")"
+[ "$recovery_ran" = "$recovery_rungs" ] \
+  || fail "the ladder did not run exactly the new tree's rungs once each, in order, on the recovery leg (ran: $(tr '\n' ' ' <<<"$recovery_ran"); rungs: $(tr '\n' ' ' <<<"$recovery_rungs"))"
+[ "$(git rev-parse HEAD)" = "$recovery_head" ] \
+  || fail "the ladder committed on the recovery leg although every rung was already crossed"
+assert_clean_tree . "the ladder modified the tree on the recovery leg although every rung was already crossed"
+for report in migrations.md migrations-review.md; do
+  test -f "$WORK/$report" || fail "the ladder did not write $report on the recovery leg"
+  [ ! -s "$WORK/$report" ] || fail "the ladder wrote a note into $report on the recovery leg"
+done
 RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
 bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
   --summary "$WORK/local-carryover.md" --root .
@@ -657,8 +737,8 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
 cmp -s "$WORK/registration-before-recopy.yml" .repo-platform.yml \
   || fail "recovery rewrote the repo-owned .repo-platform.yml (_skip_if_exists must hold under recopy --overwrite, or the mirrors declaration is silently lost)"
-[ "$(cat LICENSE)" = "Repo-owned custom license" ] \
-  || fail "recovery touched the repo-owned LICENSE (custom-license de-renders it; recopy deletes nothing)"
+[ "$(cat LICENSE.md)" = "Repo-owned custom license" ] \
+  || fail "recovery touched the repo-owned LICENSE.md (custom-license de-renders it; recopy deletes nothing)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "recovery touched the repo-owned src/keep_me.txt"
 grep -qF "# local settings note" .github/settings.yml \
@@ -730,19 +810,14 @@ git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
-# A divergent license WITHOUT the custom-license opt-out: the fleet
-# license must win - the old fixture ships the extensionless LICENSE, so
-# the update crosses the LICENSE -> LICENSE.md rename with divergent local
-# content in the old spelling.
-echo "Divergent unopted license" > LICENSE
-git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: divergent license"
-
 # Same pipeline as the main leg, but the live data says PRIVATE=true while
 # the recorded answers still say false - the drift the sync re-renders.
 cd "$GITHUB_WORKSPACE"
 git show "${prev}:copier.yml" > "$VIS_WORK/copier-old.yml"
 git show "$NEW_TAG":copier.yml > "$VIS_WORK/copier-new.yml"
+export TARGET_DIR="$VIS"
+export TARGET_REF="$NEW_TAG"
+RUNNER_TEMP="$VIS_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts
 MODULES="$(select_modules \
   --repo-file "$VIS/.repo-platform.yml" \
   --template-copier "$VIS_WORK/copier-new.yml" \
@@ -750,9 +825,6 @@ MODULES="$(select_modules \
 export MODULES
 export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
-export TARGET_DIR="$VIS"
-export TARGET_REF="$NEW_TAG"
-RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
@@ -776,14 +848,13 @@ grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$VIS"
 # Deleting a split-classed file takes its repository-owned half with it,
-# so the removals must raise the removed-splits hold that keeps the PR
-# manual: the old extensionless LICENSE (no manifest entry classes it -
-# the pointwise license candidate) and CONTRIBUTING.md (class `split` at
-# HEAD - the general class-level rule).
+# so the removal must raise the removed-splits hold that keeps the PR
+# manual: CONTRIBUTING.md (class `split` at HEAD - the class-level rule).
 test -s "$VIS_WORK/removed-splits.md" \
-  || fail "the split-file deletions did not raise the removed-splits hold that keeps the PR manual"
-grep -qF '`LICENSE`' "$VIS_WORK/removed-splits.md" \
-  || fail "the removed-splits hold does not name the deleted LICENSE"
+  || fail "the split-file deletion did not raise the removed-splits hold that keeps the PR manual"
+if grep -qF '`SECURITY.md`' "$VIS_WORK/removed-splits.md"; then
+  fail "the removed-splits hold names SECURITY.md on the flip (the rung's rename must not read as a deletion)"
+fi
 grep -qF '`CONTRIBUTING.md`' "$VIS_WORK/removed-splits.md" \
   || fail "the removed-splits hold does not name the deleted split-classed CONTRIBUTING.md"
 
@@ -793,17 +864,13 @@ cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
 # survive the flip, at its new home.
 test -f .github/SECURITY.md || fail ".github/SECURITY.md did not survive the flip to private"
-test ! -e SECURITY.md || fail "the root SECURITY.md survived the flip (the move must have relocated it)"
+test ! -e SECURITY.md || fail "the root SECURITY.md survived the flip (the rung must have relocated it)"
 # The release leg is release-please-gated; this fixture selects no
 # release-please, so no leg may render next to the gate.
 if grep -qxF -- "  release:" .github/workflows/ci.yml; then
   fail "the flipped ci.yml carries a release leg without the release-please module"
 fi
-# The public-only base files and gates must retire on the flip; the
-# license is visibility-independent and (without custom-license)
-# template-managed, so LICENSE.md must converge to the fleet license -
-# this is the migration path a relicensing (and the LICENSE -> LICENSE.md
-# rename) takes through a real sync, deleting the old spelling.
+# The public-only base files and gates must retire on the flip.
 test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
 test ! -e CODE_OF_CONDUCT.md || fail "the root CODE_OF_CONDUCT.md survived the flip to private"
 test ! -e .github/CODE_OF_CONDUCT.md || fail ".github/CODE_OF_CONDUCT.md rendered on the flip to private"
@@ -811,25 +878,14 @@ test ! -e .github/CODE_OF_CONDUCT.md || fail ".github/CODE_OF_CONDUCT.md rendere
 # entries render under the same `not private` gates as the files).
 [ "$(mf "CONTRIBUTING.md" class)" = "absent" ] \
   || fail "the manifest still lists CONTRIBUTING.md after the flip to private"
-# Assign first: a failed substitution inside a case WORD does not trip
-# errexit, and an empty pattern would collapse to a match-everything *.
+# The license is visibility-independent and (without custom-license)
+# template-managed: the flip must leave the fleet LICENSE.md in place.
 fleet_license="$(rendered_fleet_license)"
 [ -n "$fleet_license" ] || fail "could not render the fleet license"
 case "$(cat LICENSE.md)" in
   "$fleet_license"*) ;;
   *) fail "the fleet license is not a prefix of LICENSE.md after the flip to private" ;;
 esac
-# The old extensionless spelling is template-managed without the
-# custom-license module: the rename must delete it. Copier resolves the
-# delete-vs-modify by dropping the file, so divergent local content
-# survives only in the target's git history and the PR's own file
-# diff - which is why a license deletion always holds the PR for human
-# review (git history stays the record of prior licensing; nothing is
-# ported into LICENSE.md).
-test ! -e LICENSE || fail "the old extensionless LICENSE survived the rename"
-# No pipe into grep -q: under pipefail its early exit SIGPIPEs git log.
-[ -n "$(git log --all --format=%H -- LICENSE)" ] \
-  || fail "the deleted LICENSE left no history to recover the divergent content from"
 if ! grep -qxF "      private: true" .github/workflows/ci.yml; then
   fail "ci.yml does not pass private: true to fleet-ci after the flip"
 fi
@@ -1284,246 +1340,6 @@ if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
 fi
 echo "tail tripwire OK: report produced, PR-body section present, manual review forced"
 
-# --- Pre-grammar manifest refusal (legacy tripwire fallback retired) -------
-# A HEAD manifest whose split entries lack the stamped grammar field was
-# once served by a legacy marker/managed fallback inside the tripwire;
-# that path is retired (the fleet censused all-post-grammar before the
-# removal). A straggler manifest arriving at the new sync must fail
-# LOUDLY: every split file unverifiable, the report naming the fix (a
-# recovery sync), the PR forced manual - and with NO fabricated loss
-# claim, because the delivered tree here keeps every local line. The run
-# itself stays green: a red tripwire would block the very sync that heals
-# the manifest.
-PREG="$RUN_DIR/upgrade-pregrammar"
-PREG_WORK="$RUN_DIR/upgrade-pregrammar-work"
-mkdir -p "$PREG_WORK"
-cd "$GITHUB_WORKSPACE"
-copier copy "$GITHUB_WORKSPACE" "$PREG" \
-  --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Pre-grammar" \
-  -d description="Pre-grammar project" \
-  -d 'modules=[agents]' \
-  -d private="false"
-cd "$PREG"
-printf '\n## Local agent docs\n\npregrammar-local tail line\n' >> AGENTS.md
-# HEAD's manifest in the retired pre-grammar shape: split entries carry
-# only the marker/managed pair. The stamped post-grammar copy is kept
-# aside and restored below as the delivered (post-sync) manifest.
-cp .github/repo-platform-manifest.json "$PREG_WORK/manifest-stamped.json"
-python3 - <<'PY'
-import json
-path = ".github/repo-platform-manifest.json"
-with open(path) as f:
-    manifest = json.load(f)
-stripped = 0
-for entry in manifest["files"].values():
-    if entry.get("class") == "split":
-        for key in ("grammar", "managed_end", "local_begin", "local_end"):
-            entry.pop(key, None)
-        stripped += 1
-assert stripped > 0, "fixture has no split entries to strip"
-with open(path, "w") as f:
-    json.dump(manifest, f, indent=4)
-    f.write("\n")
-PY
-git init -q -b main
-git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-grammar manifest"
-# The delivered state: the post-grammar stamped manifest is back and the
-# local tail SURVIVED - nothing was lost, so any loss claim is fabricated.
-cp "$PREG_WORK/manifest-stamped.json" .github/repo-platform-manifest.json
-cd "$GITHUB_WORKSPACE"
-RUNNER_TEMP="$PREG_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$PREG" \
-  > "$PREG_WORK/tripwire.out"
-test -s "$PREG_WORK/tail-shrank.md" \
-  || fail "a pre-grammar HEAD manifest produced no tripwire report (the retired legacy fallback must not be silently back)"
-grep -qF "predates the stamped split grammar" "$PREG_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not name the pre-grammar refusal"
-grep -qF "recover=recopy" "$PREG_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not name the recovery-sync fix"
-grep -qF '`AGENTS.md`' "$PREG_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not list AGENTS.md as unverifiable"
-if grep -qF "missing from this update's copy" "$PREG_WORK/tail-shrank.md"; then
-  fail "the pre-grammar refusal fabricated a loss claim for a preserved tail"
-fi
-grep -qF "::warning::" "$PREG_WORK/tripwire.out" \
-  || fail "the pre-grammar refusal did not warn (silent misbehavior)"
-echo "pre-grammar manifest OK: loud unverifiable refusal, recovery advice named, no fabricated loss"
-
-# --- Retired-grammar straggler refusal (conversion machinery deleted) ------
-# The tail-marker and four-marker bounded-region grammars were retired into
-# ONE (managed-region), the fleet census confirmed every managed repo
-# converted, and the one-time conversion machinery was deleted. A straggler
-# repo arriving NOW - old-shaped files plus an old-vintage manifest - gets
-# the loud refusal, not a conversion: headSplitEntries refuses the manifest,
-# so HEAD's declarations are UNUSABLE and every previous split copy is
-# preserved in full under a recovery appendix (never split by a guessed
-# boundary - the old .gitignore's managed half carries the current marker
-# pair, and splitting there could misattribute repo-owned bytes to the
-# managed discard), the PR is held for review, the retired relic lines ride
-# through as repo-owned bytes (NO strip exists anymore), and the tail
-# tripwire reports every split file unverifiable with the refusal naming
-# the fix (recover=recopy). The run itself stays green: a red tripwire
-# would block the very sync that heals.
-TRANS="$RUN_DIR/upgrade-straggler"
-TRANS_WORK="$RUN_DIR/upgrade-straggler-work"
-mkdir -p "$TRANS_WORK"
-cd "$GITHUB_WORKSPACE"
-copier copy "$GITHUB_WORKSPACE" "$TRANS" \
-  --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Straggler" \
-  -d description="Straggler project" \
-  -d 'modules=[agents]' \
-  -d private="false"
-cp -R "$TRANS" "$TRANS_WORK/render-new"
-cp -R "$TRANS" "$TRANS_WORK/render-old"
-cd "$TRANS"
-# Rewrite AGENTS.md and .gitignore to the retired shapes, byte-controlled,
-# and the manifest's two entries to the retired wire vintages. Standalone
-# python: the harness must stay independent of the code it verifies.
-python3 - <<'PY'
-import json
-
-B = "<!-- BEGIN REPO-PLATFORM MANAGED -->"
-E = "<!-- END REPO-PLATFORM MANAGED -->"
-HB = "# BEGIN REPO-PLATFORM MANAGED"
-OLD_SENTINEL = "<!-- repo-platform:local-section -->"
-OLD_GUIDANCE = "# Add repository-specific ignore patterns in this section only."
-
-# AGENTS.md: old shape = the new render's managed content with the marker
-# pair replaced by one terminal tail marker; the repo's tail sits below it
-# (with a non-UTF-8 byte, so byte-fidelity is really proven).
-with open("AGENTS.md", "rb") as f:
-    fresh = f.read().decode("latin-1")
-region = fresh[fresh.index(B) : fresh.index(E) + len(E) + 1]
-body = region.replace(f"{B}\n", "").replace(f"{E}\n", "")
-old_managed = f"{body}\n{OLD_SENTINEL}\n"
-tail = "\n## Project docs\n\ncaf\xe9 repo-local instructions\n"
-with open("AGENTS.md", "wb") as f:
-    f.write((old_managed + tail).encode("latin-1"))
-with open("../upgrade-straggler-work/agents-old-shape.bin", "wb") as f:
-    f.write((old_managed + tail).encode("latin-1"))
-
-# .gitignore: old shape = a LOCAL region (retired markers, the retired
-# guidance line, a repo entry) above the managed half, which ran from the
-# BEGIN line to end of file.
-with open(".gitignore", "rb") as f:
-    gi = f.read().decode("latin-1")
-managed_half = gi[gi.index(HB) :]
-above = (
-    "# BEGIN REPOSITORY LOCAL\n"
-    f"{OLD_GUIDANCE}\n"
-    "\n"
-    "straggler-local-cache/\n"
-    "# END REPOSITORY LOCAL\n"
-    "\n"
-)
-with open(".gitignore", "wb") as f:
-    f.write((above + managed_half).encode("latin-1"))
-
-# The manifest: the two entries in their retired wire vintages.
-path = ".github/repo-platform-manifest.json"
-with open(path) as f:
-    manifest = json.load(f)
-manifest["files"]["AGENTS.md"] = {
-    "class": "split",
-    "grammar": "tail-marker",
-    "marker": OLD_SENTINEL,
-    "managed": "above",
-    "hash": None,
-}
-manifest["files"][".gitignore"] = {
-    "class": "split",
-    "grammar": "bounded-region",
-    "marker": HB,
-    "managed": "below",
-    "managed_end": "# END REPO-PLATFORM MANAGED",
-    "local_begin": "# BEGIN REPOSITORY LOCAL",
-    "local_end": "# END REPOSITORY LOCAL",
-    "hash": None,
-}
-with open(path, "w") as f:
-    json.dump(manifest, f, indent=4)
-    f.write("\n")
-PY
-git init -q -b main
-git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the retired shapes"
-# The working tree holds copier's merged junk the rebuild must discard.
-echo "merged result to discard" > AGENTS.md
-echo "merged result to discard" > .gitignore
-# Restore the post-sync manifest (the new render's own copy).
-cp "$TRANS_WORK/render-new/.github/repo-platform-manifest.json" .github/repo-platform-manifest.json
-cd "$GITHUB_WORKSPACE"
-bun .github/scripts/sync/preserve_local_content.ts \
-  --summary "$TRANS_WORK/local-carryover.md" --root "$TRANS" \
-  --needs-review "$TRANS_WORK/carry-review.txt" \
-  --rebuilt-paths "$TRANS_WORK/rebuilt-paths.txt" \
-  --render-dir "$TRANS_WORK/render-new" --old-render-dir "$TRANS_WORK/render-old"
-# AGENTS.md: NO conversion - the fresh render, then the whole old copy
-# byte-identical (non-UTF-8 byte included) under the recovery appendix.
-grep -qF "repo-platform:recovery-appendix" "$TRANS/AGENTS.md" \
-  || fail "the straggler AGENTS.md carries no recovery appendix (a conversion path is silently back?)"
-OLD_SIZE=$(wc -c < "$TRANS_WORK/agents-old-shape.bin")
-tail -c "$OLD_SIZE" "$TRANS/AGENTS.md" | cmp -s - "$TRANS_WORK/agents-old-shape.bin" \
-  || fail "the recovery appendix did not preserve the old-shaped copy byte-identical"
-# .gitignore: the appendix too, NEVER a guessed split at the current
-# markers (the old managed half carries the pair, so a guessed split would
-# hand old bytes to the managed discard) - the fresh render stands on top,
-# the whole old copy is preserved below the appendix comment, its retired
-# marker pair and the old guidance line INCLUDED (repo-owned bytes now,
-# with the one-time strip deleted; only the current markers are dash-joined
-# inert so the validator's exactly-once rule holds).
-grep -qF "# repo-platform:recovery-appendix" "$TRANS/.gitignore" \
-  || fail "the straggler .gitignore carries no recovery appendix (a guessed split is silently back?)"
-grep -qxF "# BEGIN REPOSITORY LOCAL" "$TRANS/.gitignore" \
-  || fail "the retired REPOSITORY LOCAL marker was stripped - the deleted conversion strip is back"
-grep -qxF "# Add repository-specific ignore patterns in this section only." "$TRANS/.gitignore" \
-  || fail "the retired guidance line was stripped - the deleted conversion strip is back"
-grep -qxF "straggler-local-cache/" "$TRANS/.gitignore" \
-  || fail "the straggler .gitignore lost the repository's own ignore pattern"
-# The summary must state dispositions without any conversion-era wording,
-# and the appendixes must hold the PR for review.
-if grep -qF "converted from the retired" "$TRANS_WORK/local-carryover.md"; then
-  fail "the carry summary still names a conversion (the retired machinery must be gone)"
-fi
-if grep -qF "platform-authored relic line(s)" "$TRANS_WORK/local-carryover.md"; then
-  fail "the carry summary still names a relic strip (the retired machinery must be gone)"
-fi
-grep -qF "recovery-appendix" "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not name the recovery appendix"
-grep -qF "AGENTS.md: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
-  || fail "the straggler AGENTS.md appendix did not hold the PR for review"
-grep -qF ".gitignore: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
-  || fail "the straggler .gitignore appendix did not hold the PR for review"
-# The stamp, then the tripwire: the retired-grammar HEAD manifest must be
-# REFUSED - every split file unverifiable, the report naming the retired
-# grammar and the recovery fix, with no fabricated loss claim (the
-# appendixes kept every previous line). Warn-only: the run stays green so
-# the healing sync can deliver.
-bun actions/shared/stamp_manifest.ts --root "$TRANS"
-RUNNER_TEMP="$TRANS_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$TRANS" \
-  > "$TRANS_WORK/tripwire.out"
-test -s "$TRANS_WORK/tail-shrank.md" \
-  || fail "a retired-grammar HEAD manifest produced no tripwire report (a conversion fallback must not be silently back)"
-# The refusal names whichever retired entry the manifest lists first -
-# either retired grammar proves the arm.
-grep -qE 'split grammar "(tail-marker|bounded-region)"' "$TRANS_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not name the retired-grammar refusal"
-grep -qF "recover=recopy" "$TRANS_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not name the recovery-sync fix"
-grep -qF '`AGENTS.md`' "$TRANS_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not list AGENTS.md as unverifiable"
-grep -qF '`.gitignore`' "$TRANS_WORK/tail-shrank.md" \
-  || fail "the tripwire report does not list .gitignore as unverifiable"
-if grep -qF "missing from this update's copy" "$TRANS_WORK/tail-shrank.md"; then
-  fail "the retired-grammar refusal fabricated a loss claim for preserved content"
-fi
-grep -qF "::warning::" "$TRANS_WORK/tripwire.out" \
-  || fail "the retired-grammar refusal did not warn (silent misbehavior)"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$TRANS"
-echo "retired-grammar straggler OK: both old copies preserved under review-held appendixes, relic lines kept, loud unverifiable refusal with recovery advice, no conversion"
-
 # --- Split-file retirement (module deselection) ----------------------------
 # Deselecting a module retires its files from the render, and a retired
 # file HEAD's manifest classes `split` carries a repository-owned half
@@ -1649,6 +1465,9 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the 
 cd "$GITHUB_WORKSPACE"
 git show "${prev}:copier.yml" > "$PAGES_WORK/copier-old.yml"
 git show "$NEW_TAG":copier.yml > "$PAGES_WORK/copier-new.yml"
+export TARGET_DIR="$PAGES_FIX"
+export TARGET_REF="$NEW_TAG"
+RUNNER_TEMP="$PAGES_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts
 MODULES="$(select_modules \
   --repo-file "$PAGES_FIX/.repo-platform.yml" \
   --template-copier "$PAGES_WORK/copier-new.yml" \
@@ -1656,9 +1475,6 @@ MODULES="$(select_modules \
 export MODULES
 export PRIVATE=false
 export DESCRIPTION="Pages-retirement project"
-export TARGET_DIR="$PAGES_FIX"
-export TARGET_REF="$NEW_TAG"
-RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$PAGES_WORK/dropped-local-hunks.md" --root "$PAGES_FIX"
@@ -1691,3 +1507,106 @@ grep -qF -- "repo-platform/.github/workflows/reusable-auto-assign.yml@build" \
   "$PAGES_FIX/.github/workflows/auto-assign.yml" \
   || fail "updated auto-assign.yml does not call reusable-auto-assign at the build ref"
 echo "pages answer retirement OK: mounts interface rendered, retired answers dropped, surviving answers kept"
+
+# --- Migration history walk (a rung pruned from the delivered tree) --------
+# The ladder runs a rung from the NEWEST build commit that carries it, so a
+# rung deleted from main after a repository fell behind still runs for that
+# repository, from history. Chain: NEW_TAG -> P1 (adds a self-contained
+# probe rung) -> P2 (the probe pruned again). A repo rendered at NEW_TAG
+# syncing to P2 must run the probe, loaded from P1; the control, a repo
+# rendered at P1, has crossed it and runs nothing.
+PROBE_ID="m9999_harness_probe"
+P1_TREE="$RUN_DIR/probe1"
+P2_TREE="$RUN_DIR/probe2"
+cd "$GITHUB_WORKSPACE"
+cp -R "$NEXT_TREE" "$P1_TREE"
+cat > "$P1_TREE/migrations/$PROBE_ID.ts" <<'PROBE'
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+export default {
+  id: "m9999_harness_probe",
+  apply(target: { dir: string; oldSha: string | null; newSha: string }) {
+    writeFileSync(join(target.dir, ".github", "harness-probe.txt"), `${target.oldSha}\n${target.newSha}\n`);
+    Bun.spawnSync(["git", "-C", target.dir, "add", ".github/harness-probe.txt"]);
+    return { kind: "verdict", verdict: { kind: "planted", note: { text: "> HARNESS PROBE ran", review: false } } };
+  },
+};
+PROBE
+commit_build_tree "$P1_TREE" "$PROBE1_TAG" "$NEW_TAG"
+cp -R "$NEXT_TREE" "$P2_TREE"
+commit_build_tree "$P2_TREE" "$PROBE2_TAG" "$PROBE1_TAG"
+# The premise: P1 carries the probe and the delivered P2 does not (each
+# listing captured with its exit code checked, so a failed ls-tree cannot
+# read as absence).
+p1_rungs="$(git ls-tree --name-only "$PROBE1_TAG" migrations/)" \
+  || fail "could not list the probe build's rung files"
+p2_rungs="$(git ls-tree --name-only "$PROBE2_TAG" migrations/)" \
+  || fail "could not list the delivered build's rung files"
+grep -qxF "migrations/$PROBE_ID.ts" <<<"$p1_rungs" \
+  || fail "the probe build does not carry the probe rung"
+if grep -qxF "migrations/$PROBE_ID.ts" <<<"$p2_rungs"; then
+  fail "the delivered build still carries the probe rung (the leg would prove nothing)"
+fi
+P1_SHA="$(git rev-parse "$PROBE1_TAG^{commit}")"
+P2_SHA="$(git rev-parse "$PROBE2_TAG^{commit}")"
+walk_fixture() { # <dir> <build tag> -> a rendered, committed repo at that build
+  copier copy "$GITHUB_WORKSPACE" "$1" \
+    --vcs-ref "$2" --defaults --trust \
+    -d project_name="History Walk" \
+    -d description="History-walk project" \
+    -d 'modules=[agents]' \
+    -d private="false"
+  git -C "$1" init -q -b main
+  git -C "$1" add --all
+  git -C "$1" -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
+}
+WALK="$RUN_DIR/upgrade-walk"
+WALK_WORK="$RUN_DIR/upgrade-walk-work"
+mkdir -p "$WALK_WORK"
+walk_fixture "$WALK" "$NEW_TAG"
+# OLD_SHA exactly as the sync derives it: the fixture's own recorded _commit.
+walk_recorded="$(sed -n 's/^_commit:[[:space:]]*//p' "$WALK/.github/.copier-answers.yml" \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
+[ "$walk_recorded" = "$NEW_SHA_RESOLVED" ] \
+  || fail "the history-walk fixture does not record the commit $NEW_TAG names"
+walk_out="$(TARGET_DIR="$WALK" TARGET_REF="$P2_SHA" RUNNER_TEMP="$WALK_WORK" OLD_SHA="$walk_recorded" \
+  bun .github/scripts/sync/run_migrations.ts)" \
+  || fail "run_migrations.ts failed on the history walk"
+grep -qF "migration $PROBE_ID -> planted (committed)" <<<"$walk_out" \
+  || fail "the pruned probe rung did not run from build history: $walk_out"
+test -f "$WALK/.github/harness-probe.txt" || fail "the probe rung left no trace in the fixture"
+[ "$(cat "$WALK/.github/harness-probe.txt")" = "$(printf '%s\n%s' "$NEW_SHA_RESOLVED" "$P2_SHA")" ] \
+  || fail "the probe rung saw shas other than the recorded build and the delivered build"
+[ "$(git -C "$WALK" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration $PROBE_ID" ] \
+  || fail "the probe rung's change was not committed as the sync identity's 'chore: run migration' commit"
+assert_clean_tree "$WALK" "the history walk left the tree dirty"
+grep -qF "HARNESS PROBE ran" "$WALK_WORK/migrations.md" \
+  || fail "the probe rung's note did not land in the PR-body report"
+# The control: a repo rendered at P1 has crossed the probe, so nothing runs.
+CTRL="$RUN_DIR/upgrade-walk-control"
+CTRL_WORK="$RUN_DIR/upgrade-walk-control-work"
+mkdir -p "$CTRL_WORK"
+walk_fixture "$CTRL" "$PROBE1_TAG"
+ctrl_recorded="$(sed -n 's/^_commit:[[:space:]]*//p' "$CTRL/.github/.copier-answers.yml" \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
+[ "$ctrl_recorded" = "$P1_SHA" ] \
+  || fail "the control fixture does not record the probe build's commit"
+ctrl_head="$(git -C "$CTRL" rev-parse HEAD)"
+ctrl_out="$(TARGET_DIR="$CTRL" TARGET_REF="$P2_SHA" RUNNER_TEMP="$CTRL_WORK" OLD_SHA="$ctrl_recorded" \
+  bun .github/scripts/sync/run_migrations.ts)" \
+  || fail "run_migrations.ts failed on the history-walk control"
+grep -qF "no pending migrations" <<<"$ctrl_out" \
+  || fail "the control did not report 'no pending migrations': $ctrl_out"
+if grep -qE "migration m[0-9]{4}_" <<<"$ctrl_out"; then
+  fail "the control ran a rung although its recorded build carried every rung: $ctrl_out"
+fi
+[ "$(git -C "$CTRL" rev-parse HEAD)" = "$ctrl_head" ] \
+  || fail "the control's HEAD moved although nothing was pending"
+assert_clean_tree "$CTRL" "the control's tree was modified although nothing was pending"
+for report in migrations.md migrations-review.md; do
+  test -f "$CTRL_WORK/$report" || fail "the control did not write $report"
+  [ ! -s "$CTRL_WORK/$report" ] || fail "the control wrote a note into $report although nothing was pending"
+done
+test ! -e "$CTRL/.github/harness-probe.txt" \
+  || fail "the probe rung ran for a repository whose recorded build already carried it"
+echo "migration history walk OK: a pruned rung ran from the build commit that carried it; the crossed control ran nothing"

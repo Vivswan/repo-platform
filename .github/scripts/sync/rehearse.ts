@@ -2,8 +2,9 @@
 // Local rehearsal of one managed repo's sync PR: clones the target shallow
 // into /tmp, assembles a build tree from THIS working tree (uncommitted
 // template changes included), commits it as a synthetic build chained onto
-// the target's recorded _commit, and runs the legs
-// reusable-template-sync.yml runs - module selection, copier update,
+// the fetched build tip, and runs the legs
+// reusable-template-sync.yml runs - the pending migration rungs, module
+// selection, copier update,
 // clean-render materialization, the split-file structural rebuild,
 // conflict resolution (rebuilt files skipped), retired-file cleanup, the
 // repo-owned preserve step, the final manifest stamp, the post-stamp tail
@@ -53,7 +54,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
@@ -73,18 +74,15 @@ import {
   readAnswersBytes,
   readAnswersFile,
 } from "./answers_file.ts";
+import { resolveRecordedCommit, unusableReason } from "./recorded_commit.ts";
+import { applyPending } from "./run_migrations.ts";
 import {
-  declaresLegacyMirrorSource,
-  relocateSecurityPolicy,
-  SECURITY_PATH,
-  securityMoveNote,
-} from "./relocate_security_policy.ts";
-import {
+  MIGRATIONS_NAME,
+  MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
-  SECURITY_MOVE_NAME,
   TAIL_SHRANK_NAME,
 } from "./section_files.ts";
 import { rewriteSrcPath } from "./src_path.ts";
@@ -109,8 +107,9 @@ const NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: 
  * one-line reason fit for a fleet report row. */
 export class RehearsalError extends Error {}
 
-/** The target's recorded _commit does not resolve: the real sync would
- * need recover=recopy, which the rehearsal does not model. */
+/** The target's recorded _commit is unusable (not a full sha, not a build
+ * commit, or ahead of the build): the real sync would need recover=recopy,
+ * which the rehearsal does not model. */
 export class RecoveryNeededError extends RehearsalError {}
 
 /** The target has not adopted the template (no .repo-platform.yml on its
@@ -273,9 +272,10 @@ export const PR_BODY_SECTIONS: readonly (readonly [string, string])[] = [
   ],
   ["retired-modules.txt", "Retired modules dropped from the selection"],
   ["removed-paths.txt", "The template retired these files; this update deletes them"],
+  [MIGRATIONS_NAME, "Migration rungs that acted ahead of copier (informational)"],
   [
-    SECURITY_MOVE_NAME,
-    "Security policy move (one-time transition note: SECURITY.md -> .github/SECURITY.md)",
+    MIGRATIONS_REVIEW_NAME,
+    "Migration rungs whose verdict needs a human (the PR would stay manual-review)",
   ],
   ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
   [MIRRORS_NOTE_NAME, "Mirror copies materialized from the repo's own `mirrors` declaration"],
@@ -425,34 +425,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         `${slug} is not managed by repo-platform: .repo-platform.yml is missing from its default branch`,
       );
     }
-    // The security-policy move (relocate_security_policy.ts) replays
-    // here: a pre-move clone gets the same git mv plus commit and the same
-    // PR-body note; the two refusals the production leg fails on fail the
-    // rehearsal too.
-    const securityLocation = relocateSecurityPolicy(targetDir);
-    writeFileSync(
-      join(temp, SECURITY_MOVE_NAME),
-      securityMoveNote(securityLocation, declaresLegacyMirrorSource(targetDir)),
-      "utf-8",
-    );
-    if (securityLocation === "both") {
-      throw new RehearsalError(
-        `${slug} carries a security policy at both ${SECURITY_PATH} and the retired root ` +
-          "path; the sync would refuse it - merge and delete the root copy",
-      );
-    }
-    if (securityLocation === "not-a-file") {
-      throw new RehearsalError(
-        `${slug} carries something other than a regular file at ${SECURITY_PATH} or the ` +
-          "retired root path; the sync would refuse it",
-      );
-    }
-    if (securityLocation === "unsafe-parent") {
-      throw new RehearsalError(
-        `${slug}'s ${dirname(SECURITY_PATH)} is not a real directory (a symlink or a file); ` +
-          "the sync would refuse to move the security policy through it",
-      );
-    }
     // Adopted but broken (a missing or unreadable answers file included)
     // is a failure, not a skip: production's selector only gates on
     // .repo-platform.yml, and the sync leg would fail here.
@@ -485,59 +457,62 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       "get-url",
       "origin",
     ]).stdout.trim();
-    // The build ref lives only on origin, never in this checkout; main
-    // rides along because legacy repos record a plain main-history _commit
-    // (the workflow checks out full history for the same reason).
-    // Best-effort per ref: a fleet missing one of them can still rehearse
-    // as long as _commit resolves. The credential helper stays (a private
-    // origin may legitimately need it); prompts are off and the deadline
-    // turns a stall into a fast failure.
-    const fetches = ["+refs/heads/main:refs/heads/main", "+refs/heads/build:refs/heads/build"].map(
-      (refspec) =>
-        capture(["git", "-C", platformDir, "fetch", "--quiet", originUrl, refspec], {
-          env: NO_PROMPT_ENV,
-          timeoutMs: NETWORK_TIMEOUT_MS,
-        }),
+    // The build ref lives only on origin, never in this checkout, and the
+    // whole branch must land: the recorded-commit resolver probes ancestry
+    // against it (a missing ref is a git failure there, not a "no") and
+    // the ladder walks the build commits from the recorded base. The
+    // credential helper stays (a private origin may legitimately need it);
+    // prompts are off and the deadline turns a stall into a fast failure.
+    const fetch = capture(
+      [
+        "git",
+        "-C",
+        platformDir,
+        "fetch",
+        "--quiet",
+        originUrl,
+        "+refs/heads/build:refs/heads/build",
+      ],
+      { env: NO_PROMPT_ENV, timeoutMs: NETWORK_TIMEOUT_MS },
     );
-    // One failed ref is normal (best-effort, above), but a timeout or a
-    // failure of every ref is a network problem, and the _commit probe
-    // below must not mislabel that as recovery-needed.
-    if (fetches.some((fetch) => fetch.timedOut === true)) {
+    // A timeout or a failed fetch is a network or repository problem, and
+    // the _commit judgment below must not mislabel it as recovery-needed.
+    if (fetch.timedOut) {
       throw new RehearsalError(
-        `fetching build refs from ${originUrl} timed out after ${NETWORK_TIMEOUT_MS}ms (stalled network?)`,
+        `fetching the build ref from ${originUrl} timed out after ${NETWORK_TIMEOUT_MS}ms (stalled network?)`,
       );
     }
-    if (fetches.every((fetch) => fetch.exitCode !== 0)) {
+    if (fetch.exitCode !== 0) {
       throw new RehearsalError(
-        `fetching build refs from ${originUrl} failed: ${lastLine(fetches[fetches.length - 1].stderr)}`,
+        `fetching the build ref from ${originUrl} failed: ${lastLine(fetch.stderr)}`,
       );
     }
-    const oldShaProbe = capture([
-      "git",
-      "-C",
-      platformDir,
-      "rev-parse",
-      "--verify",
-      "--quiet",
-      `${answers.commit}^{commit}`,
-    ]);
-    if (oldShaProbe.exitCode !== 0) {
+    // The sync's own judgment of the recorded base (recorded_commit.ts);
+    // the rehearsal build is chained onto it below, so the delivered-build
+    // ancestry holds by construction and is not re-checked here.
+    const recorded = resolveRecordedCommit(answers.commit, {
+      dir: platformDir,
+      buildRef: "refs/heads/build",
+    });
+    if (recorded.kind !== "ok") {
       throw new RecoveryNeededError(
-        `${slug}'s recorded _commit '${answers.commit}' does not resolve on ${originUrl}'s build refs or main history; ` +
+        `${slug}'s .github/.copier-answers.yml ${unusableReason(recorded, answers.commit)} (${originUrl}); ` +
           "the real sync would need recover=recopy, which this rehearsal does not model",
       );
     }
-    const oldSha = oldShaProbe.stdout.trim();
+    const oldSha = recorded.sha;
 
     run(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", buildDir], {
       cwd: REPO_ROOT,
     });
-    // Chain the rehearsal build onto the recorded base, mirroring the real
-    // append-only build branches (ci/upgrade_path_test.sh does the same):
-    // copier's downgrade check orders unparseable refs by dunamai's
-    // commit-count fallback, so the new commit must descend from the old.
+    // Chain the rehearsal build onto the fetched build TIP (the recorded
+    // base is its ancestor, so copier's downgrade check - dunamai's
+    // commit-count fallback for unparseable refs - still sees a descendant
+    // of the old commit). Parenting onto the base instead would drop every
+    // real build commit between the two from the ladder's walk, and a rung
+    // added and pruned in that span would run in production but not here.
     capture(["git", "-C", platformDir, "tag", "-d", REHEARSAL_TAG]);
-    run(["git", "-C", platformDir, "checkout", "--quiet", "--detach", oldSha]);
+    run(["git", "-C", platformDir, "checkout", "--quiet", "--detach", "refs/heads/build"]);
     for (const entry of readdirSync(platformDir)) {
       if (entry !== ".git") rmSync(join(platformDir, entry), { recursive: true, force: true });
     }
@@ -554,6 +529,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       ...GIT_IDENT,
       "commit",
       "--quiet",
+      // Build trees are deterministic: a working tree without template
+      // changes reproduces the tip's tree exactly, and the descendant
+      // commit copier's downgrade check needs must still exist.
+      "--allow-empty",
       "-m",
       `build(rehearsal): ${REHEARSAL_TAG}`,
     ]);
@@ -579,6 +558,29 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       "-am",
       "rehearsal: point _src_path at the local build",
     ]);
+
+    // The workflow's migration leg (run_migrations.ts), in its slot ahead
+    // of the module selection and copier: the rungs the walk from the
+    // recorded base to the rehearsal build finds pending act on the clone
+    // (a root-vintage clone gets the same git mv plus commit) and write
+    // the same PR-body notes; an error arm fails the rehearsal as it
+    // fails the sync.
+    section("pending migrations");
+    const ladder = applyPending({
+      platformDir,
+      targetDir,
+      oldSha,
+      newSha: REHEARSAL_TAG,
+      runnerTemp: temp,
+      hidden: false,
+    });
+    for (const entry of ladder.applied) say(`migration ${entry.id} -> ${entry.kind}`);
+    if (ladder.error !== null) {
+      throw new RehearsalError(
+        `${slug}: migration ${ladder.error.id} refused: ${ladder.error.message}`,
+      );
+    }
+    if (ladder.applied.length === 0) say("no pending migrations");
 
     section("selecting modules");
     // modules.ts prints its ::error:: detail on stdout (where workflow

@@ -26,11 +26,12 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
+  MIGRATIONS_NAME,
+  MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
-  SECURITY_MOVE_NAME,
   TAIL_SHRANK_NAME,
 } from "./section_files.ts";
 
@@ -219,12 +220,11 @@ const sections: FlagSection[] = [
         .join("\n")}`,
     forcesReview: false,
   },
-  // relocate_security_policy.ts's transition note: the one-time
-  // byte-for-byte move of SECURITY.md to .github/SECURITY.md ahead of
-  // copier, so the local-content carry finds the repository-owned half at
-  // the new path. Informational - nothing leaves the repository - so it
-  // never forces the manual path.
-  { path: join(runnerTemp, SECURITY_MOVE_NAME), render: slurp, forcesReview: false },
+  // run_migrations.ts's notes, one report per severity: the rungs that
+  // acted ahead of copier and say nothing leaves the repository
+  // (informational), and the rungs whose verdict needs a human (holds).
+  { path: join(runnerTemp, MIGRATIONS_NAME), render: slurp, forcesReview: false },
+  { path: join(runnerTemp, MIGRATIONS_REVIEW_NAME), render: slurp, forcesReview: true },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]
@@ -255,8 +255,8 @@ ${lines(path)
   { path: join(runnerTemp, REFERENCED_LABELS_NAME), render: slurp, forcesReview: true },
   // preserve_repo_owned.ts's removed-split-files report: the update
   // deletes a path whose previous copy carried a repository-owned half
-  // (class `split` at HEAD, or a license spelling the manifest cannot
-  // class); the section names the content that leaves and the PR waits
+  // (class `split` at HEAD, or LICENSE.md, which no manifest classes
+  // under custom-license); the section names the content that leaves and the PR waits
   // for a human to restore what must stay.
   { path: join(runnerTemp, REMOVED_SPLITS_NAME), render: slurp, forcesReview: true },
   { path: requireEnv("CARRY_REVIEW_FILE"), render: null, forcesReview: true },
@@ -396,7 +396,8 @@ body = capBody(body);
 // out-of-band settings drift, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
 // so the reference breaks), a refused mirror declaration (its copies are
-// stale in this update) - stays
+// stale in this update), a migration rung whose verdict needs a human -
+// stays
 // manual; a clean update (clean side-restore carries included) arms
 // squash auto-merge below. The flag-file
 // reasons ride the section list above (forcesReview), so a new section
@@ -486,6 +487,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, a referenced-but-undeclared label, a refused mirror declaration, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, a referenced-but-undeclared label, a refused mirror declaration, a migration rung needing review, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
   );
 }

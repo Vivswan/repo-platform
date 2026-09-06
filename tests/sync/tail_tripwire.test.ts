@@ -1,8 +1,8 @@
 // tail_tripwire.ts: the post-stamp defense-in-depth check that no split
 // file's repository-owned content lost non-blank lines it held at the
 // target's HEAD - each side split by its OWN manifest declaration (one
-// grammar: managed-region) - plus the loud refusal of pre-grammar,
-// retired-grammar, and unknown-grammar HEAD manifests. The script-level
+// grammar: managed-region) - plus the loud refusal of grammar-less and
+// unknown-grammar HEAD manifests. The script-level
 // tests build a real git repo whose HEAD carries both the previous file
 // copies and the previous manifest, then overwrite the working tree with
 // the "delivered" state - exactly the shape the sync leg hands the
@@ -38,9 +38,9 @@ const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
-const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
-const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const OLD_LOCAL_END = "# END REPOSITORY LOCAL";
+const OLD_SENTINEL = "<!-- other-tool:section -->";
+const OLD_LOCAL_BEGIN = "# BEGIN OTHER LOCAL";
+const OLD_LOCAL_END = "# END OTHER LOCAL";
 
 const agentsHead = `${B}\n# AGENTS.md\n\nold managed guidance\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
 const agentsDelivered = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
@@ -71,28 +71,28 @@ const rawRegion = (begin: string = B, end: string = E): RawEntry => ({
   begin,
   end,
 });
-/** The RETIRED vintages' wire shapes, exactly as the old compose emitted
- * them. The sync no longer reads them (the one-time conversion machinery
- * is deleted) - these builders exist to prove the loud refusal. */
-const rawLegacyTail = (marker: string = OLD_SENTINEL): RawEntry => ({
+/** Wire shapes of grammars the sync does not read, with the extra fields
+ * such a shape would carry - these builders exist to prove the loud
+ * refusal. */
+const rawOneMarker = (marker: string = OLD_SENTINEL): RawEntry => ({
   class: "split",
-  grammar: "tail-marker",
+  grammar: "one-marker",
   marker,
   managed: "above",
 });
-const rawLegacyBounded = (): RawEntry => ({
+const rawFourMarker = (): RawEntry => ({
   class: "split",
-  grammar: "bounded-region",
+  grammar: "four-marker",
   marker: HB,
   managed: "below",
-  managed_end: HE,
-  local_begin: OLD_LOCAL_BEGIN,
-  local_end: OLD_LOCAL_END,
+  region_end: HE,
+  extra_begin: OLD_LOCAL_BEGIN,
+  extra_end: OLD_LOCAL_END,
 });
-/** The retired pre-grammar wire shape: split entries stamped before the
- * grammar field existed carried only a marker/managed pair. The sync no
- * longer reads it - these builders exist to prove the refusal. */
-const rawPreGrammar = (marker: string, managed: "above" | "below"): RawEntry => ({
+/** A split entry with no grammar field at all (a marker/managed pair
+ * only). The sync does not read it - these builders exist to prove the
+ * refusal. */
+const rawGrammarless = (marker: string, managed: "above" | "below"): RawEntry => ({
   class: "split",
   marker,
   managed,
@@ -184,7 +184,7 @@ describe("headSplitEntries (re-exported for the sync legs)", () => {
   // head_manifest.test.ts pins the plain refusals (unknown grammar -
   // registry-proven there - unknown class, non-JSON, files: [],
   // entry-level duplicate keys, non-ASCII markers). These rows are the
-  // shapes it does not: the retired and pre-grammar vintages with the
+  // shapes it does not: the unknown and grammar-less shapes with the
   // ADVICE ORDER pinned (the recovery advice precedes the target-controlled
   // values, so it always survives the PR-body clip), and the damage shapes
   // whose silent acceptance would skip a real file's check or reclassify
@@ -197,27 +197,27 @@ describe("headSplitEntries (re-exported for the sync legs)", () => {
   const escapedKey = String.raw`"AGENTS.m\u0064"`;
   test.each([
     {
-      reason: "a pre-grammar entry: the diagnosis, then the advice",
-      text: manifestText({ "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above") }),
-      error: /predates the stamped split grammar.*recover=recopy/,
+      reason: "a grammar-less entry: the diagnosis, then the advice",
+      text: manifestText({ "AGENTS.md": rawGrammarless(OLD_SENTINEL, "above") }),
+      error: /declares no grammar.*recover=recopy/,
     },
     {
-      reason: "a mixed manifest (grammar beside a pre-grammar entry) is refused the same way",
+      reason: "a mixed manifest (grammar beside a grammar-less entry) is refused the same way",
       text: manifestText({
         "AGENTS.md": rawRegion(),
-        "SECURITY.md": rawPreGrammar(OLD_SENTINEL, "above"),
+        "SECURITY.md": rawGrammarless(OLD_SENTINEL, "above"),
       }),
-      error: /predates the stamped split grammar/,
+      error: /declares no grammar/,
     },
     {
-      reason: "the RETIRED tail-marker vintage: advice before the target-controlled grammar",
-      text: manifestText({ "AGENTS.md": rawLegacyTail() }),
-      error: /recover=recopy.*split grammar "tail-marker"/,
+      reason: "an unknown one-marker grammar: advice before the target-controlled grammar",
+      text: manifestText({ "AGENTS.md": rawOneMarker() }),
+      error: /recover=recopy.*split grammar "one-marker"/,
     },
     {
-      reason: "the RETIRED bounded-region vintage: advice before the target-controlled grammar",
-      text: manifestText({ ".gitignore": rawLegacyBounded() }),
-      error: /recover=recopy.*split grammar "bounded-region"/,
+      reason: "an unknown four-marker grammar: advice before the target-controlled grammar",
+      text: manifestText({ ".gitignore": rawFourMarker() }),
+      error: /recover=recopy.*split grammar "four-marker"/,
     },
     {
       reason: "an unclean split path ('../AGENTS.md') could never match the post-sync key",
@@ -356,10 +356,9 @@ describe("compareHalves", () => {
     expect(compareHalves(regionSplit(), headRegion(), head, delivered)?.kind).toBe("unverifiable");
   });
 
-  test("nothing is ever subtracted: a relic-shaped line the repo owns is guarded", () => {
-    // The conversion-era relic strip is deleted: a retired spelling in
-    // repo-owned space is the repository's content, and losing it fires
-    // like any other repo-owned line.
+  test("nothing is ever subtracted: a marker-shaped line the repo owns is guarded", () => {
+    // Any spelling in repo-owned space is the repository's content, and
+    // losing it fires like any other repo-owned line.
     const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
     const delivered = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
     expect(
@@ -545,10 +544,9 @@ describe("tail_tripwire script", () => {
     expect(result.report).toContain(missingLine);
   });
 
-  // The retired conversion and the retired legacy fallback used to serve
-  // exactly these HEAD states silently; a straggler manifest now trips the
-  // wire on every split file - warn, manual review, the report naming the
-  // refusal and the fix - with NO loss claim fabricated: the delivered
+  // A HEAD manifest the sync cannot read trips the wire on every split
+  // file - warn, manual review, the report naming the refusal and the
+  // fix - with NO loss claim fabricated: the delivered
   // copies keep every previous line. The refusal messages themselves are
   // unit-pinned (head_manifest.test.ts and the headSplitEntries rows
   // above); these rows prove the script routes them into the findings.
@@ -556,17 +554,17 @@ describe("tail_tripwire script", () => {
   // follow-up heals the manifest.
   test.each([
     {
-      vintage: "RETIRED-vintage (tail-marker/bounded-region)",
-      straggler: manifestText({ "AGENTS.md": rawLegacyTail(), ".gitignore": rawLegacyBounded() }),
-      phrase: 'split grammar "tail-marker"',
+      vintage: "unknown-grammar (one-marker/four-marker)",
+      straggler: manifestText({ "AGENTS.md": rawOneMarker(), ".gitignore": rawFourMarker() }),
+      phrase: 'split grammar "one-marker"',
     },
     {
-      vintage: "pre-grammar",
+      vintage: "grammar-less",
       straggler: manifestText({
-        "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
-        ".gitignore": rawPreGrammar(HB, "below"),
+        "AGENTS.md": rawGrammarless(OLD_SENTINEL, "above"),
+        ".gitignore": rawGrammarless(HB, "below"),
       }),
-      phrase: "predates the stamped split grammar",
+      phrase: "declares no grammar",
     },
   ])(
     "a $vintage HEAD manifest fails loudly: unverifiable findings with the recovery advice",

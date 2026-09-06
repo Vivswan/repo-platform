@@ -57,28 +57,26 @@ describe("retiredPaths", () => {
       expected: WORKFLOWS,
     },
     {
-      reason: "both license spellings are protected on the custom-license module",
-      extraOld: ["LICENSE", "LICENSE.md"],
+      reason: "LICENSE.md is protected on the custom-license module",
+      extraOld: ["LICENSE.md"],
       skip: [],
       modules: ["custom-license"],
       expected: WORKFLOWS,
     },
     {
-      // Without the module the license is template-managed: both
-      // spellings are deletable, so the extensionless LICENSE retires
-      // across the LICENSE.md rename.
-      reason: "a fleet repo's license is deletable in both spellings",
-      extraOld: ["LICENSE", "LICENSE.md"],
+      // Without the module the license is template-managed and deletable.
+      reason: "a fleet repo's LICENSE.md is deletable",
+      extraOld: ["LICENSE.md"],
       skip: [],
       modules: [],
-      expected: [...WORKFLOWS, "LICENSE", "LICENSE.md"],
+      expected: [...WORKFLOWS, "LICENSE.md"],
     },
     {
       reason: "module membership is exact, not a substring match",
-      extraOld: ["LICENSE"],
+      extraOld: ["LICENSE.md"],
       skip: [],
       modules: ["my-custom-license-fork"],
-      expected: [...WORKFLOWS, "LICENSE"],
+      expected: [...WORKFLOWS, "LICENSE.md"],
     },
     {
       reason: "a _skip_if_exists path from the OLD version's list never appears",
@@ -138,38 +136,31 @@ describe("customLicenseFlipError", () => {
 
   test.each([
     {
-      reason: "fires when the module is dropped and the old extensionless LICENSE remains",
+      reason: "fires when the module is dropped and the repo's LICENSE.md remains",
       oldModules: ["agents", "custom-license"],
       newModules: ["agents"],
-      present: ["LICENSE"],
-      expected: flipMessage("LICENSE"),
-    },
-    {
-      reason: "fires for a remaining LICENSE.md and names every leftover spelling",
-      oldModules: ["custom-license"],
-      newModules: [],
-      present: ["LICENSE", "LICENSE.md"],
-      expected: flipMessage("LICENSE and LICENSE.md"),
+      present: ["LICENSE.md"],
+      expected: flipMessage("LICENSE.md"),
     },
     {
       reason: "silent when the module is kept",
       oldModules: ["custom-license"],
       newModules: ["custom-license"],
-      present: ["LICENSE"],
+      present: ["LICENSE.md"],
       expected: null,
     },
     {
       reason: "silent when the module was never selected",
       oldModules: ["agents"],
       newModules: ["agents"],
-      present: ["LICENSE"],
+      present: ["LICENSE.md"],
       expected: null,
     },
     {
       reason: "silent when the module is newly added",
       oldModules: ["agents"],
       newModules: ["custom-license"],
-      present: ["LICENSE"],
+      present: ["LICENSE.md"],
       expected: null,
     },
     {

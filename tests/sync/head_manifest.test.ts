@@ -10,9 +10,7 @@ const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
-const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
-const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const OLD_LOCAL_END = "# END REPOSITORY LOCAL";
+const OTHER_MARKER = "<!-- some other marker -->";
 
 function manifestOf(files: Record<string, unknown>): string {
   return JSON.stringify({ files });
@@ -29,45 +27,35 @@ describe("headSplitEntries", () => {
     ]);
   });
 
-  test("a split entry with NO grammar is refused loudly (pre-grammar manifest)", () => {
+  test("a split entry with NO grammar is refused loudly, with the recovery advice", () => {
     const text = manifestOf({
-      "AGENTS.md": { class: "split", marker: OLD_SENTINEL, managed: "above", hash: null },
+      "AGENTS.md": { class: "split", marker: OTHER_MARKER, managed: "above", hash: null },
     });
-    expect(() => headSplitEntries(text, "m")).toThrow("predates the stamped split grammar");
+    expect(() => headSplitEntries(text, "m")).toThrow("declares no grammar");
     expect(() => headSplitEntries(text, "m")).toThrow("recover=recopy");
   });
 
   test("a grammar this sync does not read is refused, never skipped", () => {
     // Not the one grammar: a guessed boundary could overwrite repo-owned
-    // bytes, so the reader refuses and every caller fails closed. The
-    // retired vintages land here too, exactly as the old compose emitted
-    // them: the one-time conversion shim is deleted (fleet censused
-    // post-conversion), so the loud refusal with recovery advice is the
-    // ONLY behavior.
+    // bytes, so the reader refuses and every caller fails closed - whatever
+    // fields the entry carries alongside.
     for (const { grammar, path, entry } of [
+      { grammar: "prefix", path: "AGENTS.md", entry: { marker: OTHER_MARKER } },
       {
-        grammar: "prefix",
+        grammar: "one-marker",
         path: "AGENTS.md",
-        entry: { marker: OLD_SENTINEL },
-        reason: "never a wire shape",
+        entry: { marker: OTHER_MARKER, managed: "above" },
       },
       {
-        grammar: "tail-marker",
-        path: "AGENTS.md",
-        entry: { marker: OLD_SENTINEL, managed: "above" },
-        reason: "retired vintage the deleted shim converted",
-      },
-      {
-        grammar: "bounded-region",
+        grammar: "four-marker",
         path: ".gitignore",
         entry: {
           marker: HB,
           managed: "below",
-          managed_end: HE,
-          local_begin: OLD_LOCAL_BEGIN,
-          local_end: OLD_LOCAL_END,
+          region_end: HE,
+          extra_begin: "# X",
+          extra_end: "# Y",
         },
-        reason: "retired four-marker vintage, as the old compose stamped .gitignore",
       },
     ]) {
       const text = manifestOf({ [path]: { class: "split", grammar, ...entry, hash: null } });
@@ -77,10 +65,13 @@ describe("headSplitEntries", () => {
     }
   });
 
-  test("an unknown ownership class is refused (damage could hide a split)", () => {
-    const text = manifestOf({ "AGENTS.md": { class: "spllt" } });
-    expect(() => headSplitEntries(text, "m")).toThrow("no ownership class this sync knows");
-  });
+  test.each(["spllt", "template"])(
+    "an ownership class the stamp does not write (%s) is refused: damage could hide a split",
+    (cls) => {
+      const text = manifestOf({ "AGENTS.md": { class: cls } });
+      expect(() => headSplitEntries(text, "m")).toThrow("no ownership class this sync knows");
+    },
+  );
 
   test("duplicate keys, non-JSON, and files-less shapes are refused", () => {
     expect(() => headSplitEntries("not json", "m")).toThrow("does not parse as JSON");

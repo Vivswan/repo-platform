@@ -22,8 +22,8 @@
 // conflict-marker-shaped text, and rewriting it would mutate the bytes the
 // rebuild just preserved; real leftover markers there fail validation
 // instead). The conflicts resolved here live in non-split files - fully
-// managed ones, where the template side is the owner by definition, plus
-// the mergeable settings.yml. The full summary goes to stdout; the
+// managed ones, where the template side is the owner by definition. The
+// full summary goes to stdout; the
 // --summary file drops whole trailing sections past --limit bytes so it
 // fits a PR body with its markdown fences intact.
 //

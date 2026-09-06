@@ -22,9 +22,10 @@ import { parse } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 
-// Modules the template has deliberately retired: a repo still listing one
-// gets it dropped with a notice instead of a hard failure. Empty today;
-// add the name here when retiring a module.
+// Module names the selection drops with a notice instead of a hard
+// failure. Empty by policy: a module retirement is a migration ladder
+// rung that rewrites `.repo-platform.yml` before this selection runs
+// (docs/migrations.md), not an allowlist entry here.
 export const RETIRED_MODULES: ReadonlySet<string> = new Set();
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

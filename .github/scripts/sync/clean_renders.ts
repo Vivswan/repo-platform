@@ -71,10 +71,10 @@ export function ensureRenders(): CleanRenders {
   const renderOld = join(runnerTemp, "render-old");
   const renderNew = join(runnerTemp, "render-new");
 
-  // The old render uses the answers recorded BEFORE this update (HEAD
-  // still points at the pre-update commit - the security-policy move and
-  // the _src_path normalization rode earlier commits, bytes preserved);
-  // captured even on the no-op
+  // The old render uses the answers recorded BEFORE this update: HEAD is
+  // the last pre-copier commit (the _src_path normalization and any
+  // migration rung committed ahead of copier; normalization changes only
+  // the underscore metadata render_data drops); captured even on the no-op
   // path so consumers of answers-old.yml never depend on call order.
   // Caveat: the renders are NOT re-captured on that path, so if HEAD ever
   // moved between two calls in one RUNNER_TEMP, answers-old.yml could
