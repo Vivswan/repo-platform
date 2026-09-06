@@ -1234,13 +1234,14 @@ ${RUN_STEP}`;
   // The rule's fixed-message mismatches, built from the same pin the
   // generator writes, so the expectations below can never demand
   // different bytes from the judgment.
-  const regionMismatch = {
-    file: FILE,
+  const regionMismatchFor = (file: string, region: string, problem: string) => ({
+    file,
     expected:
-      `the generated bun setup region '${REGION}' (a BEGIN/END GENERATED marker pair at step depth, ` +
+      `the generated bun setup region '${region}' (exactly one BEGIN/END GENERATED marker pair at step depth, ` +
       "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
-    got: "no such region - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer",
-  };
+    got: `${problem} - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer`,
+  });
+  const regionMismatch = regionMismatchFor(FILE, REGION, `no '${REGION}' marker pair`);
   const perStepMismatch = {
     file: FILE,
     expected: `every setup-bun step carrying 'bun-version-file: ${ACTION_BUN_PIN}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
@@ -1268,15 +1269,57 @@ ${RUN_STEP}`;
     const report = "actions/validate-template-report/action.yml";
     expect(bunSetupRegionName(report)).toBe("bun-setup-ready");
     expect(actionsBunGuardMismatches(report, canonical)).toEqual([
-      {
-        ...regionMismatch,
-        file: report,
-        expected: regionMismatch.expected.replace(`'${REGION}'`, "'bun-setup-ready'"),
-      },
+      regionMismatchFor(report, "bun-setup-ready", "no 'bun-setup-ready' marker pair"),
     ]);
     const ready = markerLines("bun-setup-ready", "#", "", "scripts/action_bun_setup.ts");
     const fenced = `runs:\n  using: composite\n  steps:\n    ${ready.begin}\n${bunSetupSteps("bun-setup-ready").join("\n")}\n    ${ready.end}\n\n${RUN_STEP}`;
     expect(actionsBunGuardMismatches(report, fenced)).toEqual([]);
+  });
+
+  // The rule matches its promise: one pair, at the step list's depth, in
+  // order. A pair moved to column 1 would still splice (markers match
+  // trimmed) while reading as prose in the manifest; a doubled or lone
+  // marker would break the next regeneration.
+  test.each([
+    {
+      reason: "both markers at column 1",
+      text: canonical
+        .replace(`    ${markers.begin}\n`, `${markers.begin}\n`)
+        .replace(`    ${markers.end}\n`, `${markers.end}\n`),
+      problem: `a '${REGION}' marker at column 0 where the step list sits at column 4`,
+    },
+    {
+      reason: "the END marker one column deeper than the steps",
+      text: canonical.replace(`    ${markers.end}\n`, `     ${markers.end}\n`),
+      problem: `a '${REGION}' marker at column 5 where the step list sits at column 4`,
+    },
+    {
+      reason: "a duplicate region",
+      text: `${canonical}    ${markers.begin}\n${bunSetupSteps(REGION).join("\n")}\n    ${markers.end}\n`,
+      problem: `2 BEGIN and 2 END markers for '${REGION}' - exactly one of each`,
+    },
+    {
+      reason: "a lone BEGIN",
+      text: canonical.replace(`    ${markers.end}\n`, ""),
+      problem: `1 BEGIN and 0 END markers for '${REGION}' - exactly one of each`,
+    },
+    {
+      reason: "a lone END",
+      text: canonical.replace(`    ${markers.begin}\n`, ""),
+      problem: `0 BEGIN and 1 END markers for '${REGION}' - exactly one of each`,
+    },
+    {
+      reason: "the END marker before the BEGIN",
+      text: canonical
+        .replace(`    ${markers.begin}\n`, `    ${markers.end}\n`)
+        .replace(`    ${markers.end}\n\n`, `    ${markers.begin}\n\n`),
+      problem: `the '${REGION}' END marker sits before its BEGIN`,
+    },
+  ])("$reason is refused for the malformed region", ({ text, problem }) => {
+    expect(text).not.toBe(canonical);
+    expect(actionsBunGuardMismatches(FILE, text)).toEqual([
+      regionMismatchFor(FILE, REGION, problem),
+    ]);
   });
 
   // A later setup-bun (the fetched tree's, a caller's) can put another bun

@@ -60,7 +60,7 @@ import { ANSWERS_FILE, parseAnswers } from "./generate/render_dogfood.ts";
 import {
   actionSetsUpBun,
   actionSteps,
-  carriesBunSetupRegion,
+  bunSetupRegionProblem,
   MARKER_TOKENS,
   trackingStreams,
   usesSetupBun,
@@ -3113,14 +3113,14 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   const runsRecordedBun = text.includes(`steps.${RESOLVER_STEP_ID}.outputs.`);
   if (bareBunLines.length === 0 && setupSteps.length === 0 && !runsRecordedBun) return [];
   const mismatches: Mismatch[] = [];
-  const region = bunSetupRegionName(file);
-  if (!carriesBunSetupRegion(file, text)) {
+  const regionProblem = bunSetupRegionProblem(file, text);
+  if (regionProblem !== null) {
     mismatches.push({
       file,
       expected:
-        `the generated bun setup region '${region}' (a BEGIN/END GENERATED marker pair at step depth, ` +
+        `the generated bun setup region '${bunSetupRegionName(file)}' (exactly one BEGIN/END GENERATED marker pair at step depth, ` +
         "filled by bun run generate from scripts/action_bun_setup.ts: pin probe, pinned install, pinned retry, the recorded bun path)",
-      got: "no such region - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer",
+      got: `${regionProblem} - a hand-written or missing setup is what let a bare or caller-resolved setup-bun break every consumer whose own bun predates the action lockfiles' writer`,
     });
   }
   // `bun` by name resolves through PATH, where a later setup-bun (a fetched

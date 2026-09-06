@@ -5,20 +5,16 @@
 /** What the BEGIN markers tell editors to edit instead of the region. */
 export const BUN_SETUP_SOURCES = "scripts/action_bun_setup.ts";
 
-/** The action-local pin both setup steps read: the generated .bun-version
- *  beside the action.yml (generate.ts emits it from the manifests' bun
- *  pin), never the CALLING repository's dotfile - a caller pinning an
- *  older bun cannot parse the lockfiles repo-platform's bun writes. */
+/** The action-local generated .bun-version both setup steps read, never the
+ *  CALLING repository's dotfile. */
 export const ACTION_BUN_PIN = "${{ github.action_path }}/.bun-version";
 
 /** The step id every later step binds its ACTION_BUN env to
  *  (`steps.action-bun.outputs.path`). */
 export const RESOLVER_STEP_ID = "action-bun";
 
-/** The actions whose setup must never end the action: the retry is allowed
- *  to fail and the resolver exports a `ready` output, so the action's own
- *  report step still runs and renders the missing bun. Every other action
- *  fails at the retry, where setup-bun's own error is the loudest signal. */
+/** The actions whose setup must never end the action: the retry may fail and
+ *  the resolver exports `ready`, so their own report step still runs. */
 export const READY_OUTPUT_ACTIONS: ReadonlySet<string> = new Set([
   "actions/validate-template-report/action.yml",
 ]);

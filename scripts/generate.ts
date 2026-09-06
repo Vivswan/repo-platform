@@ -623,18 +623,49 @@ function actionManifests(actionsDir: string): { dir: string; file: string; text:
   return found;
 }
 
-/** Whether an action manifest carries the BEGIN marker of the bun-setup
- *  region its variant derives. */
-export function carriesBunSetupRegion(file: string, text: string): boolean {
-  const { begin } = markerLines(bunSetupRegionName(file), "#", "", BUN_SETUP_SOURCES);
-  return text.split("\n").some((line) => line.trim() === begin);
+/** The indentation of a composite manifest's step list: the shallowest
+ *  `- key:` line after `steps:` (block-scalar bodies sit deeper). */
+function stepListIndent(lines: string[]): number | null {
+  const stepsAt = lines.findIndex((line) => /^ *steps:\s*$/.test(line));
+  if (stepsAt === -1) return null;
+  const indents = lines
+    .slice(stepsAt + 1)
+    .flatMap((line) => (/^ *- [A-Za-z_-]+:/.test(line) ? [line.search(/\S/)] : []));
+  return indents.length === 0 ? null : Math.min(...indents);
+}
+
+/** Why an action manifest's bun-setup region (the one its variant derives)
+ *  is not a well-formed target: null when exactly one BEGIN and one END
+ *  marker sit at the step list's depth, END after BEGIN. */
+export function bunSetupRegionProblem(file: string, text: string): string | null {
+  const name = bunSetupRegionName(file);
+  const { begin, end } = markerLines(name, "#", "", BUN_SETUP_SOURCES);
+  const lines = text.split("\n");
+  const at = (marker: string) =>
+    lines.flatMap((line, index) => (line.trim() === marker ? [index] : []));
+  const begins = at(begin);
+  const ends = at(end);
+  if (begins.length === 0 && ends.length === 0) return `no '${name}' marker pair`;
+  if (begins.length !== 1 || ends.length !== 1) {
+    return `${begins.length} BEGIN and ${ends.length} END markers for '${name}' - exactly one of each`;
+  }
+  if (ends[0] < begins[0]) return `the '${name}' END marker sits before its BEGIN`;
+  const depth = stepListIndent(lines);
+  if (depth === null) return "no step list to sit in";
+  for (const index of [begins[0], ends[0]]) {
+    const indent = lines[index].search(/\S/);
+    if (indent !== depth) {
+      return `a '${name}' marker at column ${indent} where the step list sits at column ${depth}`;
+    }
+  }
+  return null;
 }
 
 /** The action manifests carrying their bun-setup region, sorted: the
  *  generator's roster. */
 export function bunSetupActionFiles(actionsDir: string): string[] {
   return actionManifests(actionsDir)
-    .filter(({ file, text }) => carriesBunSetupRegion(file, text))
+    .filter(({ file, text }) => bunSetupRegionProblem(file, text) === null)
     .map(({ file }) => file)
     .sort();
 }
@@ -644,7 +675,7 @@ export function bunSetupActionFiles(actionsDir: string): string[] {
  *  fence is filled and pinned in one run; EXCLUDED_DIRS bounds the walk). */
 export function bunPinnedActionDirs(actionsDir: string): string[] {
   const dirs = actionManifests(actionsDir)
-    .filter(({ file, text }) => actionSetsUpBun(text) || carriesBunSetupRegion(file, text))
+    .filter(({ file, text }) => actionSetsUpBun(text) || bunSetupRegionProblem(file, text) === null)
     .map(({ dir }) => dir);
   return dirs.sort();
 }

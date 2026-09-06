@@ -17,8 +17,8 @@ import {
   baseOwnershipRegion,
   bunPinnedActionDirs,
   bunSetupActionFiles,
+  bunSetupRegionProblem,
   bunToolchainPin,
-  carriesBunSetupRegion,
   dependabotLabelGroups,
   dependabotLabelsSpan,
   hasToolchainDefault,
@@ -69,7 +69,7 @@ function fenced(file: string, body: string[]): string {
     "",
     "scripts/action_bun_setup.ts",
   );
-  return `runs:\n  using: composite\n  steps:\n    ${begin}\n${body.map((line) => `${line}\n`).join("")}    ${end}\n`;
+  return `runs:\n  using: composite\n  steps:\n    ${begin}\n${body.map((line) => `${line}\n`).join("")}    ${end}\n    - name: Run\n      shell: bash\n      run: echo ok\n`;
 }
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
@@ -811,7 +811,9 @@ describe("the actions' generated bun setup", () => {
     mkdirSync(join(dir, "validate-template-report"));
     const plain = fenced("actions/typo/action.yml", []);
     writeFileSync(join(dir, "validate-template-report", "action.yml"), plain);
-    expect(carriesBunSetupRegion("actions/validate-template-report/action.yml", plain)).toBe(false);
+    expect(bunSetupRegionProblem("actions/validate-template-report/action.yml", plain)).toBe(
+      "no 'bun-setup-ready' marker pair",
+    );
     // Never scanned: installed dependencies.
     mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
     writeFileSync(
