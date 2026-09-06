@@ -1,0 +1,99 @@
+name: Bun Setup
+description: >-
+  The one bun setup for repo-platform's composite actions: given the path
+  of a .bun-version pin (a caller passes its own generated one, so its
+  scripts and lockfiles never ride the CALLING repository's bun
+  resolution), reuses a bun already on PATH at that version or installs it
+  with oven-sh/setup-bun, one retry for the known network flake, and
+  records the absolute path of the bun that prints the pin. One call per
+  job: setup-bun installs every version at the same path, so `path` is
+  valid only until another setup-bun runs in that job.
+
+inputs:
+  pin:
+    description: Path to the .bun-version file naming the version to run.
+    required: true
+  required:
+    description: >-
+      Fail when no bun matching the pin is on PATH after the setup. Pass
+      "false" to leave the verdict to the caller through `ready`, for an
+      action that must reach its own report step whatever happened.
+    required: false
+    default: "true"
+
+outputs:
+  path:
+    description: >-
+      Absolute path of the bun that prints the pinned version; empty when
+      none does. Callers run this path, never `bun` by name.
+    value: ${{ steps.resolve.outputs.path }}
+  ready:
+    description: Whether `path` is set ("true" or "false").
+    value: ${{ steps.resolve.outputs.ready }}
+  installed:
+    description: Whether setup-bun ran, "true" unless the pin was already satisfied.
+    value: ${{ steps.resolve.outputs.installed }}
+  version:
+    description: What `path` printed for --version when resolved; empty when `path` is.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    # Pinned by the resolver's own test below: an absolute path that prints
+    # the pin and exits 0, so the setup is skipped only for a bun the
+    # resolver will accept.
+    - name: Check for a bun matching the pin
+      id: probe
+      shell: bash
+      env:
+        PIN_FILE: ${{ inputs.pin }}
+      run: |
+        pin="$(cat "$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        echo "pinned=$([ -n "$pin" ] && [ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up bun
+      id: setup-bun
+      if: steps.probe.outputs.pinned != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ inputs.pin }}
+
+    - name: Set up bun (retry)
+      id: setup-bun-retry
+      if: steps.setup-bun.outcome == 'failure'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ inputs.pin }}
+
+    # Ready means an absolute path that prints the pinned version and exits
+    # 0; a later setup-bun can put another bun first on PATH, so callers run
+    # the path, never the name.
+    - name: Resolve the pinned bun
+      id: resolve
+      shell: bash
+      env:
+        PIN_FILE: ${{ inputs.pin }}
+        REQUIRED: ${{ inputs.required }}
+        SETUP_OUTCOME: ${{ steps.setup-bun.outcome }}
+      run: |
+        pin="$(cat "$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "version=$([ -n "$path" ] && echo "$have")" >> "$GITHUB_OUTPUT"
+        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        echo "installed=$([ "$SETUP_OUTCOME" != "skipped" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        if [ -z "$path" ] && [ "$REQUIRED" != "false" ]; then
+          echo "::error::no bun matching the pin '$pin' ($PIN_FILE) is on PATH after the setup and its retry"
+          exit 1
+        fi

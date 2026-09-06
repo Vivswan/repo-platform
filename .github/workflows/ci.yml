@@ -617,6 +617,47 @@ jobs:
     with:
       language: javascript-typescript
 
+  # The shared bun-setup action dogfooded from the working tree: the runner
+  # gets the manifests' bun, then one call per planted pin (that version:
+  # reused, not installed; an earlier release: installed), judged by ci/.
+  bun-setup-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Plant the two pins
+        id: pins
+        run: bun .github/scripts/ci/bun_setup_smoke.ts plant
+      - name: Set up the current bun (already on PATH)
+        id: first
+        uses: ./actions/bun-setup
+        with:
+          pin: ${{ runner.temp }}/bun-setup-smoke/current/.bun-version
+      - name: Set up an earlier release (not the bun on PATH)
+        id: second
+        uses: ./actions/bun-setup
+        with:
+          pin: ${{ runner.temp }}/bun-setup-smoke/previous/.bun-version
+      - name: Judge both calls
+        shell: bash
+        env:
+          CURRENT: ${{ steps.pins.outputs.current }}
+          PREVIOUS: ${{ steps.pins.outputs.previous }}
+          FIRST_PATH: ${{ steps.first.outputs.path }}
+          FIRST_READY: ${{ steps.first.outputs.ready }}
+          FIRST_INSTALLED: ${{ steps.first.outputs.installed }}
+          FIRST_VERSION: ${{ steps.first.outputs.version }}
+          SECOND_PATH: ${{ steps.second.outputs.path }}
+          SECOND_READY: ${{ steps.second.outputs.ready }}
+          SECOND_INSTALLED: ${{ steps.second.outputs.installed }}
+          SECOND_VERSION: ${{ steps.second.outputs.version }}
+        # Whichever bun is current by now (the second call overwrote the
+        # shared install path); the judge reads recorded outputs only.
+        run: bun .github/scripts/ci/bun_setup_smoke.ts judge
+
   # THE gate: this job's own check run (named all-green, created by the
   # GitHub Actions app) is the ruleset's required check. `needs` must list
   # every gating job above - check_ssot.ts's ALL_GREEN_ROSTER is that list's
@@ -651,6 +692,7 @@ jobs:
       - pages-site-build
       - rehearse-fleet
       - codeql-javascript
+      - bun-setup-smoke
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

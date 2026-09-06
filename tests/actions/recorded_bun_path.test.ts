@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { actionManifestFiles } from "../../scripts/check_ssot";
-import { actionSetsUpBun } from "../../scripts/generate";
+import { actionSetsUpBun, BUN_SETUP_ACTION } from "../../scripts/generate";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -34,8 +34,12 @@ describe("the actions' recorded bun path", () => {
   const recording = files.filter((file) => stepsOf(file).some((step) => step.id === "action-bun"));
 
   test("every action that sets up bun resolves it afterwards, and no other does", () => {
-    const setups = files.filter((file) =>
-      actionSetsUpBun(readFileSync(join(REPO_ROOT, file), "utf8")),
+    // The shared setup action installs and resolves in one; it records no
+    // action-bun step of its own.
+    const setups = files.filter(
+      (file) =>
+        file !== `${BUN_SETUP_ACTION}/action.yml` &&
+        actionSetsUpBun(readFileSync(join(REPO_ROOT, file), "utf8")),
     );
     expect(recording.sort()).toEqual(setups.sort());
     expect(recording.length).toBeGreaterThan(0);
