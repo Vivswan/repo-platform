@@ -9,7 +9,7 @@
 //   tracking-label questions' validators (shape, the reserved-label
 //   roster the settings baseline generator declares, and cross-stream
 //   distinctness).
-// - actions/validate-template/validate_generated_files.ts: the
+// - actions/validate-template/ownership.ts: the
 //   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
 //   MODULE_OWNERSHIP and BASE_OWNERSHIP records (each rendered file's
 //   declared ownership, from the module.yml `ownership:` lists and
@@ -411,9 +411,13 @@ export function pagesBuildCommand(withPages: PagesManifest[]): string[] {
   return pagesCommandChain(withPages, (pages) => pages.build);
 }
 
-/** validate_generated_files.ts KNOWN_MODULES set literal. */
+/** validate-template ownership.ts KNOWN_MODULES set literal. */
 export function knownModules(manifests: ModuleManifest[]): string[] {
-  return ["const KNOWN_MODULES = new Set([", ...manifests.map((m) => `  "${m.module}",`), "]);"];
+  return [
+    "export const KNOWN_MODULES: ReadonlySet<string> = new Set([",
+    ...manifests.map((m) => `  "${m.module}",`),
+    "]);",
+  ];
 }
 
 export interface ToolchainPin {
@@ -438,7 +442,7 @@ export function pinFileContent(pin: ToolchainPin): string {
   return `${pin.version}\n`;
 }
 
-/** validate_generated_files.ts TOOLCHAIN_PINS record literal. */
+/** validate-template ownership.ts TOOLCHAIN_PINS record literal. */
 export function toolchainPinsRegion(manifests: ModuleManifest[]): string[] {
   const pins = toolchainPins(manifests);
   if (pins.length === 0) {
@@ -449,7 +453,7 @@ export function toolchainPinsRegion(manifests: ModuleManifest[]): string[] {
     );
   }
   return [
-    "const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {",
+    "export const TOOLCHAIN_PINS: Readonly<Partial<Record<string, ToolchainPin>>> = {",
     // Keys stay biome-stable: bare where valid, quoted where a dash in the
     // module name requires it (matching the formatter's as-needed quoting).
     ...pins.map((p) => {
@@ -504,13 +508,15 @@ function ownedFileFields(entry: BaseOwnershipEntry): string[] {
   return fields;
 }
 
-/** validate_generated_files.ts MODULE_OWNERSHIP record literal, sourced
+/** validate-template ownership.ts MODULE_OWNERSHIP record literal, sourced
  *  from the module.yml ownership declarations (moduleOwnershipEntries) and
  *  laid out the way biome's formatter prints it. */
 export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]>): string[] {
   // References the hand-written OwnedFile union above the region: inlining
   // it would push the line past the formatter's width.
-  const lines = ["const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {"];
+  const lines = [
+    "export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {",
+  ];
   for (const [module, entries] of Object.entries(ownership)) {
     // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
     const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
@@ -530,12 +536,12 @@ export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]
   return lines;
 }
 
-/** validate_generated_files.ts BASE_OWNERSHIP literal, sourced from
+/** validate-template ownership.ts BASE_OWNERSHIP literal, sourced from
  *  templates/base/ownership.yml (baseOwnershipTables): the enforced base
  *  files - header, class-only, and region-split entries - with their
  *  render conditions. */
 export function baseOwnershipRegion(tables: { enforced: BaseOwnershipEntry[] }): string[] {
-  const lines = ["const BASE_OWNERSHIP: BaseOwnedFile[] = ["];
+  const lines = ["export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = ["];
   for (const entry of tables.enforced) {
     lines.push(...objectLiteralLines(ownedFileFields(entry), "  ", ","));
   }
@@ -914,7 +920,7 @@ function targets(manifests: ModuleManifest[]): Target[] {
       ],
     },
     {
-      file: "actions/validate-template/validate_generated_files.ts",
+      file: "actions/validate-template/ownership.ts",
       syntax: "line",
       prefix: "//",
       regions: [
