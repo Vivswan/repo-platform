@@ -11,12 +11,12 @@
     "lint:actions": "if command -v actionlint >/dev/null; then actionlint; else echo 'actionlint not installed locally; CI runs it (brew install actionlint)'; fi",
     "lint:secrets": "if command -v gitleaks >/dev/null; then gitleaks git --no-banner --redact && gitleaks git --no-banner --redact --pre-commit --staged; else echo 'gitleaks not installed locally; CI runs it (brew install gitleaks)'; fi",
     "lint:sh": "if command -v shellcheck >/dev/null; then find .github/scripts -name \"*.sh\" -print0 | xargs -0 shellcheck -x; else echo 'shellcheck not installed locally; CI runs it (brew install shellcheck)'; fi",
-    "typecheck": "bun x tsc -p . && (cd actions/check-file-size && bun x tsc -p .) && (cd actions/check-typography && bun x tsc -p .) && (cd actions/fuzz-issue && bun x tsc -p .) && (cd actions/pages-site && bun x tsc -p .) && (cd actions/release-health && bun x tsc -p .) && (cd actions/validate-commit-names && bun x tsc -p .) && (cd actions/validate-skills && bun x tsc -p .) && (cd actions/validate-template && bun x tsc -p .) && (cd actions/validate-template-report && bun x tsc -p .)",
+    "typecheck": "bun x tsc -p . && (cd actions/check-file-size && bun x tsc -p .) && (cd actions/check-typography && bun x tsc -p .) && (cd actions/fuzz-issue && bun x tsc -p .) && (cd actions/pages-site && bun x tsc -p .) && (cd actions/release-health && bun x tsc -p .) && (cd actions/validate-commit-names && bun x tsc -p .) && (cd actions/validate-skills && bun x tsc -p .) && (cd actions/validate-template-report && bun x tsc -p .) && (cd actions/validate-template-report/validator && bun x tsc -p .)",
     "typography": "bun actions/check-typography/check-typography.ts .",
     "file-size": "bun actions/check-file-size/check-file-size.ts . --rendered tests/golden-renders/all-modules",
     "wrap:check": "bun scripts/check/check_markdown_wrap.ts",
     "lint:yaml": "uvx yamllint -s .",
-    "validate": "bun actions/validate-template/validate_generated_files.ts --self .",
+    "validate": "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
     "validate:registry": "bun .github/scripts/fleet/repos_registry.ts validate",
     "validate:skills": "bun actions/validate-skills/validate_skills.ts",
     "ssot:check": "bun scripts/check_ssot.ts",
@@ -33,7 +33,7 @@
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
     "rehearse:fleet": "bun .github/scripts/sync/rehearse_fleet.ts",
     "test": "bun scripts/run_tests.ts",
-    "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
+    "postinstall": "for pkg in actions/*/package.json actions/*/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
     "prepare": "husky"
   },
   "devDependencies": {

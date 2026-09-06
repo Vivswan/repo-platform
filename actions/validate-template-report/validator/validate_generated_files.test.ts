@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tempDirs } from "../../tests/shared/temp_dir.ts";
+import { tempDirs } from "../../../tests/shared/temp_dir.ts";
 import { BASE_OWNERSHIP, type BaseOwnedFile, MODULE_OWNERSHIP } from "./ownership.ts";
 
 const temp = tempDirs();

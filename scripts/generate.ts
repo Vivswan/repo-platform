@@ -9,7 +9,7 @@
 //   tracking-label questions' validators (shape, the reserved-label
 //   roster the settings baseline generator declares, and cross-stream
 //   distinctness).
-// - actions/validate-template/ownership.ts: the
+// - actions/validate-template-report/validator/ownership.ts: the
 //   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
 //   MODULE_OWNERSHIP and BASE_OWNERSHIP records (each rendered file's
 //   declared ownership, from the module.yml `ownership:` lists and
@@ -26,8 +26,8 @@
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
 // - actions/<dir>/.bun-version for every composite action that sets up
-//   bun and every declared pinned script directory (branch_tree.ts's
-//   PINNED_SCRIPT_DIRS): WHOLE generated dotfiles carrying the manifests'
+//   bun and every declared pinned script directory (PINNED_SCRIPT_DIRS
+//   below): WHOLE generated dotfiles carrying the manifests'
 //   bun pin, read by each action's own setup steps (bun-version-file
 //   against github.action_path) so the actions' runtime never rides the
 //   CALLING repository's bun resolution - a consumer pinning an older bun
@@ -72,10 +72,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import {
-  EXCLUDED_DIRS,
-  PINNED_SCRIPT_DIRS,
-} from "../.github/scripts/build-branches/branch_tree.ts";
+import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
 import { compose } from "./compose/compose.ts";
 import { dependabotLabels } from "./compose/data_anchors.ts";
@@ -610,6 +607,13 @@ export function actionSetsUpBun(text: string): boolean {
   return actionSteps(text).some(usesSetupBun);
 }
 
+/** Script directories under actions/ (paths relative to it) run by path on
+ *  a pinned bun, never resolved as a `uses:` action, so with no action.yml
+ *  of their own: each carries the generated .bun-version the actions carry. */
+export const PINNED_SCRIPT_DIRS: ReadonlySet<string> = new Set([
+  "validate-template-report/validator",
+]);
+
 /** Every directory under actions/ carrying a generated .bun-version, sorted:
  *  each whose action.yml sets up bun (EXCLUDED_DIRS bounds the walk as
  *  publication does) plus the declared script directories (manifest-free). */
@@ -630,12 +634,12 @@ export function bunPinnedActionDirs(
   for (const name of scriptDirs) {
     if (!existsSync(join(actionsDir, name))) {
       throw new Error(
-        `actions/${name} is declared a pinned script directory (branch_tree.ts PINNED_SCRIPT_DIRS) but does not exist`,
+        `actions/${name} is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) but does not exist`,
       );
     }
     if (existsSync(join(actionsDir, name, "action.yml"))) {
       throw new Error(
-        `actions/${name} is declared a pinned script directory (branch_tree.ts PINNED_SCRIPT_DIRS) yet carries an action.yml - it is one or the other`,
+        `actions/${name} is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) yet carries an action.yml - it is one or the other`,
       );
     }
     dirs.push(`actions/${name}`);
@@ -944,7 +948,7 @@ function targets(manifests: ModuleManifest[]): Target[] {
       ],
     },
     {
-      file: "actions/validate-template/ownership.ts",
+      file: "actions/validate-template-report/validator/ownership.ts",
       syntax: "line",
       prefix: "//",
       regions: [
@@ -1076,7 +1080,7 @@ function main(): number {
         `stray action .bun-version dotfile(s) whose directory neither sets up bun in an action.yml nor is a declared pinned script directory: ` +
           `${actionStrays.join(", ")} - the generator would stop refreshing them ` +
           "while the stale pin keeps shipping on the build branch; delete the " +
-          "file (or restore the action's setup-bun step, or declare the directory in branch_tree.ts PINNED_SCRIPT_DIRS)",
+          "file (or restore the action's setup-bun step, or declare the directory in generate.ts PINNED_SCRIPT_DIRS)",
       );
     }
     const inputs: RegionInputs = {

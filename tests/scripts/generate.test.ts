@@ -630,10 +630,10 @@ describe("toolchain pins", () => {
     // A declaration is held to the tree: the directory must exist, and
     // must not also be an action.
     expect(() => bunPinnedActionDirs(dir, new Set(["gone"]))).toThrow(
-      "actions/gone is declared a pinned script directory (branch_tree.ts PINNED_SCRIPT_DIRS) but does not exist",
+      "actions/gone is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) but does not exist",
     );
     expect(() => bunPinnedActionDirs(dir, new Set(["typo"]))).toThrow(
-      "actions/typo is declared a pinned script directory (branch_tree.ts PINNED_SCRIPT_DIRS) yet carries an action.yml",
+      "actions/typo is declared a pinned script directory (generate.ts PINNED_SCRIPT_DIRS) yet carries an action.yml",
     );
   });
 

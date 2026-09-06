@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tempDirs } from "../../../tests/shared/temp_dir.ts";
-import { MANIFEST_NAME } from "../../shared/manifest.ts";
+import { tempDirs } from "../../../../tests/shared/temp_dir.ts";
+import { MANIFEST_NAME } from "../../../shared/manifest.ts";
 import { loadContext } from "../context.ts";
 import { checkManifestParity } from "./manifest_parity.ts";
 

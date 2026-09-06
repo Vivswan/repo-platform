@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { substringCount } from "../../shared/grammar.ts";
+import { substringCount } from "../../../shared/grammar.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 import { ungatedBaseRegionPaths } from "../ownership.ts";

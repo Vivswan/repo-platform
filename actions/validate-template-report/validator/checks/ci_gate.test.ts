@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tempDirs } from "../../../tests/shared/temp_dir.ts";
+import { tempDirs } from "../../../../tests/shared/temp_dir.ts";
 import { loadContext } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { checkCiGate } from "./ci_gate.ts";

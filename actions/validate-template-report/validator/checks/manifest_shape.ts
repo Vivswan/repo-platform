@@ -1,4 +1,4 @@
-import { MANIFEST_NAME } from "../../shared/manifest.ts";
+import { MANIFEST_NAME } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { coveredPaths } from "../ownership.ts";

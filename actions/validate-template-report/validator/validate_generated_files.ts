@@ -4,7 +4,7 @@
 // catalogue and the run order; each check is a pure function of the
 // Context (context.ts) returning Findings (findings.ts).
 //
-// Usage: bun actions/validate-template/validate_generated_files.ts [--self] [target-dir]
+// Usage: bun actions/validate-template-report/validator/validate_generated_files.ts [--self] [target-dir]
 //
 // --self validates repo-platform itself (SelfContext in context.ts). The
 // optional FINDINGS_FILE / ADVISORIES_FILE environment variables receive

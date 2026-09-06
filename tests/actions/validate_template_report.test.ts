@@ -188,7 +188,7 @@ function writeAnswers(root: string, answers: string | undefined): void {
   writeFileSync(join(root, ".github/.copier-answers.yml"), answers);
 }
 
-/** A fake validator script directory (actions/validate-template) at `dir`. */
+/** A fake validator script directory (the report action's validator/) at `dir`. */
 function layValidator(dir: string, opts: { lockfile?: string; bunVersion?: boolean }): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, VALIDATOR_SCRIPT), fakeValidator);
@@ -1368,12 +1368,12 @@ interface LatestOptions {
 }
 
 /** The latest step's run block as the runner would execute it, against a
- *  fake sibling validator: the poisoned `bun` on PATH would exit 97. */
+ *  fake nested validator: the poisoned `bun` on PATH would exit 97. */
 function runLatest(opts: LatestOptions = {}) {
   const { root, bin } = scratch();
   const repo = join(root, "repo");
   mkdirSync(repo);
-  const validator = join(root, "validate-template");
+  const validator = join(root, "validator");
   layValidator(validator, { lockfile: opts.lockfile });
   const findings = join(root, "latest-findings.md");
   const advisories = join(root, "latest-advisories.md");
@@ -1539,8 +1539,8 @@ describe("the action's wiring", () => {
       "latest",
       "report",
     ]);
-    // One input, the token: the build tip's validator is this action's
-    // sibling on the same branch, not a ref an input could move.
+    // One input, the token: the build tip's validator ships inside this
+    // action, not at a ref an input could move.
     expect(Object.keys(action.inputs)).toEqual(["github-token"]);
     // ONE writer of integrity: the report step's output, never a step outcome.
     expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
@@ -1644,11 +1644,11 @@ describe("the action's wiring", () => {
       '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"',
     );
 
-    // The latest leg runs the sibling validator (the build branch ships the
-    // whole actions/ tree beside this action) on the recorded bun, with a
-    // frozen install of the sibling's lockfile first; only behind a cleared
-    // scratch root, since report.ts reads its pair on that condition.
-    const sibling = `\${{ github.action_path }}/../${basename(VALIDATOR_DIR)}`;
+    // The latest leg runs the validator nested in this action (the build
+    // branch ships the whole action directory) on the recorded bun, with a
+    // frozen install of its lockfile first; only behind a cleared scratch
+    // root, since report.ts reads its pair on that condition.
+    const nested = `\${{ github.action_path }}/${basename(VALIDATOR_DIR)}`;
     expect(latest).toEqual({
       name: "Run the build tip's validator",
       id: "latest",
@@ -1657,7 +1657,7 @@ describe("the action's wiring", () => {
       shell: "bash",
       env: {
         ACTION_BUN: BUN_PATH,
-        VALIDATOR_DIR: sibling,
+        VALIDATOR_DIR: nested,
         FINDINGS_FILE: "${{ runner.temp }}/latest-findings.md",
         ADVISORIES_FILE: "${{ runner.temp }}/latest-advisories.md",
       },
@@ -1667,15 +1667,18 @@ describe("the action's wiring", () => {
         "",
       ].join("\n"),
     });
-    // The sibling is a script directory, not an action: no manifest, and the
-    // same generated pin as this action, so ACTION_BUN can read its lockfile.
-    const siblingDir = join(ACTION, "..", basename(VALIDATOR_DIR));
+    // The validator is a script directory inside this action, not an action
+    // of its own: no manifest, and the same generated pin as this action, so
+    // ACTION_BUN can read its lockfile. The layout constant the fetch leg
+    // reads in a fetched tree names this same directory.
+    const validatorDir = join(ACTION, basename(VALIDATOR_DIR));
+    expect(join(ACTION, "..", "..", VALIDATOR_DIR)).toBe(validatorDir);
     expect(
       ["action.yml", BUN_VERSION_FILE, "bun.lock", VALIDATOR_SCRIPT].map((name) =>
-        existsSync(join(siblingDir, name)),
+        existsSync(join(validatorDir, name)),
       ),
     ).toEqual([false, true, true, true]);
-    expect(readFileSync(join(siblingDir, BUN_VERSION_FILE), "utf8")).toBe(
+    expect(readFileSync(join(validatorDir, BUN_VERSION_FILE), "utf8")).toBe(
       readFileSync(join(ACTION, BUN_VERSION_FILE), "utf8"),
     );
 

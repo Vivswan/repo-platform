@@ -1128,6 +1128,23 @@ function smokeRowModules(row: Record<string, unknown>): string[] {
   return (parseYaml(String(row.modules)) as unknown[]).map(String);
 }
 
+/** Directories under actions/ carrying `file`, at any depth outside the
+ *  published tree's exclusions, as sorted repo-relative paths: a package can
+ *  sit nested inside an action (the report action's validator). */
+function actionDirsCarrying(file: string): string[] {
+  const dirs: string[] = [];
+  const visit = (rel: string): void => {
+    for (const entry of readdirSync(join(REPO_ROOT, rel), { withFileTypes: true })) {
+      if (!entry.isDirectory() || EXCLUDED_ACTION_DIRS.has(entry.name)) continue;
+      const sub = `${rel}/${entry.name}`;
+      if (existsSync(join(REPO_ROOT, sub, file))) dirs.push(sub);
+      visit(sub);
+    }
+  };
+  visit("actions");
+  return dirs.sort();
+}
+
 /** All non-directory paths below `rel` (repo-relative), sorted; skips
  *  node_modules. Symlinks are returned but flagged. */
 function walkFiles(rel: string): { path: string; symlink: boolean }[] {
@@ -4920,13 +4937,7 @@ const rules: Rule[] = [
     name: "bun-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const lockDirs = [
-        ".",
-        ...readdirSync(join(REPO_ROOT, "actions"))
-          .sort()
-          .map((name) => `actions/${name}`)
-          .filter((dir) => existsSync(join(REPO_ROOT, dir, "bun.lock"))),
-      ];
+      const lockDirs = [".", ...actionDirsCarrying("bun.lock")];
 
       const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
       const bunDirs = (dependabot.updates as Record<string, unknown>[])
@@ -4960,10 +4971,15 @@ const rules: Rule[] = [
       // The job iterates a tsconfig glob, so it cannot drift when actions
       // are added; pin the glob shape, and require every bun dir to carry
       // the tsconfig.json the glob keys on so none skips typechecking.
-      if (!runs.includes("for tsconfig in tsconfig.json actions/*/tsconfig.json")) {
+      if (
+        !runs.includes(
+          "for tsconfig in tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json",
+        )
+      ) {
         mismatches.push({
           file: "ci.yml typecheck",
-          expected: "a glob loop over tsconfig.json actions/*/tsconfig.json",
+          expected:
+            "a glob loop over tsconfig.json actions/*/tsconfig.json actions/*/*/tsconfig.json",
           got: "no such loop",
         });
       }
@@ -5113,14 +5129,8 @@ const rules: Rule[] = [
         throw new Error("templates/bun/module.yml declares no toolchain.pin - anchor lost");
       }
       const types: { file: string; version: string }[] = [];
-      for (const dir of [
-        ".",
-        ...readdirSync(join(REPO_ROOT, "actions"))
-          .sort()
-          .map((name) => `actions/${name}`),
-      ]) {
+      for (const dir of [".", ...actionDirsCarrying("package.json")]) {
         const pkgRel = dir === "." ? "package.json" : `${dir}/package.json`;
-        if (!existsSync(join(REPO_ROOT, pkgRel))) continue;
         const pkg = asRecord(JSON.parse(read(pkgRel)), pkgRel);
         const declares = ["dependencies", "devDependencies"].some(
           (key) => (pkg[key] as Record<string, unknown> | undefined)?.["@types/bun"] !== undefined,
@@ -5300,7 +5310,7 @@ const rules: Rule[] = [
         "bun run dogfood:check",
         "bun run gitignore:topology",
         "bun .github/scripts/fleet/repos_registry.ts validate",
-        "bun actions/validate-template/validate_generated_files.ts --self .",
+        "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
         // The copier-render oracle for the generated dogfood copies: its
         // only home is a step of the smoke-generate job (dogfood-oracle
         // row), so losing the step would fail the gate open silently.

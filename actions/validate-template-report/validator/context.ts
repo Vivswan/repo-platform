@@ -2,7 +2,11 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { MANIFEST_NAME, type ManifestEntryShape, parseManifestFiles } from "../shared/manifest.ts";
+import {
+  MANIFEST_NAME,
+  type ManifestEntryShape,
+  parseManifestFiles,
+} from "../../shared/manifest.ts";
 import { declaredOwnership, type OwnedFile } from "./ownership.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HEADER_WINDOW } from "../../shared/grammar.ts";
+import { HEADER_WINDOW } from "../../../shared/grammar.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 import { isRegularFile, regexLiteral } from "../readers.ts";

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
-import { cleanManagedRegion, knownGrammar } from "../../shared/grammar.ts";
-import { MANIFEST_NAME, withheldMarkerValid } from "../../shared/manifest.ts";
+import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
+import { MANIFEST_NAME, withheldMarkerValid } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 

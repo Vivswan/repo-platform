@@ -192,23 +192,30 @@ describe("copyActions", () => {
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
   });
 
-  test("a declared pinned script directory ships without an action.yml, and satisfies no roster", () => {
-    // Run by path (the report action's sibling validator, a fetched tree's
-    // copy), never resolved as an action: exempt from the manifest guard
-    // like the shared zone, and no more an action than it for the roster.
-    const [script] = [...PINNED_SCRIPT_DIRS];
+  test("a package nested inside an action ships whole, its installed dependencies excluded", () => {
+    // The report action carries its validator as a nested package: script,
+    // lockfile and bun pin publish with the action, and the exclusion
+    // filter applies at every depth, not only at the action root.
     const root = actionsFixture();
-    mkdirSync(join(root, "actions", script), { recursive: true });
-    writeFileSync(join(root, "actions", script, "run.ts"), "export {};\n");
-    writeFileSync(join(root, "actions", script, ".bun-version"), "1.4.0\n");
+    const nested = join(root, "actions", "check-typography", "validator");
+    mkdirSync(join(nested, "node_modules", "yaml"), { recursive: true });
+    writeFileSync(join(nested, "run.ts"), "export {};\n");
+    writeFileSync(join(nested, "package.json"), "{}\n");
+    writeFileSync(join(nested, "bun.lock"), "\n");
+    writeFileSync(join(nested, ".bun-version"), "1.4.0\n");
+    writeFileSync(join(nested, "node_modules", "yaml", "index.js"), "module.exports={};\n");
     const dest = temp.dir("branch-actions-dest-");
-    expect(copyActions(root, dest)).toBe(6);
-    expect(existsSync(join(dest, "actions", script, ".bun-version"))).toBe(true);
-
-    const scriptOnly = temp.dir("branch-actions-script-only-");
-    mkdirSync(join(scriptOnly, "actions", script), { recursive: true });
-    writeFileSync(join(scriptOnly, "actions", script, "run.ts"), "export {};\n");
-    expect(() => copyActions(scriptOnly, dest)).toThrow("holds no action directories");
+    expect(copyActions(root, dest)).toBe(8);
+    expect(listing(join(dest, "actions", "check-typography"))).toEqual([
+      "action.yml",
+      "bun.lock",
+      "lib/helper.ts",
+      "package.json",
+      "validator/.bun-version",
+      "validator/bun.lock",
+      "validator/package.json",
+      "validator/run.ts",
+    ]);
   });
 
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
@@ -279,6 +286,32 @@ describe("assembleBranchTree", () => {
     for (const name of shipped) {
       expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
+  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships nested in the report action", () => {
+    const actions = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+    const manifestFree = actions.filter(
+      (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
+    );
+    expect(manifestFree).toEqual([SHARED_DIR]);
+    // The retired top-level script directory is gone (the report action's
+    // presence is the control that this is the real roster); its content
+    // is the report action's validator/, published with the action -
+    // lockfile and pin included, no manifest, no installed dependencies.
+    expect(actions).not.toContain("validate-template");
+    expect(actions).toContain("validate-template-report");
+    const validator = join(dest, "actions", "validate-template-report", "validator");
+    expect(
+      [
+        "validate_generated_files.ts",
+        "bun.lock",
+        ".bun-version",
+        "package.json",
+        "action.yml",
+        "node_modules",
+      ].map((name) => existsSync(join(validator, name))),
+    ).toEqual([true, true, true, true, false, false]);
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {
