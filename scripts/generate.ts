@@ -617,9 +617,7 @@ export function bunPinnedActionDirs(actionsDir: string): string[] {
 }
 
 /** .bun-version files under actions/ that bunPinnedActionDirs no longer
- *  emits (the action.yml sets up no bun, or is gone): the generator would
- *  silently stop refreshing them while the stale pin keeps shipping on the
- *  build branch. Returned for the caller to throw on, like strayPinFiles. */
+ *  emits: a stale pin the generator stopped refreshing. The caller throws. */
 export function strayActionPinFiles(actionsDir: string): string[] {
   const emitted = new Set(bunPinnedActionDirs(actionsDir));
   const strays: string[] = [];
