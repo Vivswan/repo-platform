@@ -530,19 +530,19 @@ describe("strict check build", () => {
       const buildDir = join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0");
       const page = join(buildDir, ".vitepress", "dist", "page.html");
       if (fails) {
-        // Never the engine's wording: on bun 1.4.0 the `err.stack` header
-        // vitepress prints after `build error:` is a bare `Error` instead of
-        // `TypeError: <message>` in about 1.5% of native TypeErrors. The
-        // failing page's SSR frame and the action's own annotation are the
-        // stable evidence; picocolors wraps `build error:` in ANSI under CI.
+        // The SSR frame must sit inside vitepress's fatal block (`build error:`,
+        // ANSI-colored under CI, up to the action's annotation) and is never matched
+        // by wording: bun 1.4.0 prints a bare `Error` stack header in ~1.5% of throws.
         const stderr = Bun.stripANSI(result.stderr);
-        expect(result.exitCode).toBe(1);
-        expect(stderr).toContain("build error:\n");
-        expect(stderr).toContain(
-          `at _sfc_ssrRender (${join(buildDir, ".vitepress", ".temp", "page.md.js")}:`,
-        );
-        expect(stderr).toContain(
+        const fatal = stderr.indexOf("build error:\n");
+        const annotation = stderr.indexOf(
           `::error::command failed (exit 1): bun ${join(import.meta.dir, "node_modules", ".bin", "vitepress")} build ${buildDir}\n`,
+        );
+        expect(result.exitCode).toBe(1);
+        expect(fatal).toBeGreaterThanOrEqual(0);
+        expect(annotation).toBeGreaterThan(fatal);
+        expect(stderr.slice(fatal, annotation)).toContain(
+          `at _sfc_ssrRender (${join(buildDir, ".vitepress", ".temp", "page.md.js")}:`,
         );
         expect(existsSync(page)).toBe(false);
       } else {
