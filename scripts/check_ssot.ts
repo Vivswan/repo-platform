@@ -156,16 +156,9 @@ function workflowSteps(rel: string): WorkflowStep[] {
 }
 
 /** The unsafe term of a step condition, or null when every term is safe.
- *  A step that did not run publishes an ABSENT output, which Actions
- *  compares as the number 0 (null, '' and '0' all coerce to it), so a
- *  test an absent output can SATISFY - `!= 'true'`, `!x`, `== ''`,
- *  `== '0'`, `== false` - opens the gate exactly when the step it guards
- *  on never happened. Rather than enumerate those shapes, this admits
- *  only the ones that cannot: equality against a literal that is not a
- *  spelling of zero (Number() reads more spellings than Actions does, the
- *  strict direction), and inequality against ''. Terms that mention no
- *  step output (`success()`, `env.X != ''`, `needs.*`) are not this
- *  hazard - a failed dependency blocks the job outright - and pass. */
+ *  An unrun step's ABSENT output compares as the number 0 in Actions, so
+ *  only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by one.
+ *  Terms without a step output (`env.*`, `needs.*`) are not this hazard. */
 export function unsafeStepCondition(condition: string): string | null {
   const OUTPUT = /steps\.[\w-]+\.outputs\./;
   if (!OUTPUT.test(condition)) return null;
@@ -184,13 +177,9 @@ export function unsafeStepCondition(condition: string): string | null {
   return null;
 }
 
-/** Every step condition in a workflow that an unrun step's absent output
- *  would satisfy (unsafeStepCondition's rule), except on FAIL steps: a run
- *  block whose last line is a bare `exit <non-zero>` with no
- *  continue-on-error. There the condition opening on an absent output
- *  turns the job red, the fail-closed direction - fleet-ci's
- *  `integrity != 'success'` re-raise, which must stay an inequality so a
- *  broken output mapping cannot read as green. */
+/** unsafeStepCondition over a workflow's steps, exempting FAIL steps (a
+ *  bare `exit <non-zero>` last line, no continue-on-error): a gate that
+ *  opens on an absent output there turns the job red, which is the point. */
 export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mismatch[] {
   const mismatches: Mismatch[] = [];
   for (const step of steps) {
