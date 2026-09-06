@@ -1,11 +1,16 @@
-// The directives-block grammar read-directives reads off the merged
+// The directives-block grammar read-directives reads off each merged
 // commit, as one table of whole commit messages and FULL parse results.
-// The main() rows run the script on a scratch repo and read GITHUB_OUTPUT.
+// The main() rows run the script on scratch clones and assert the whole
+// outcome: exit code, GITHUB_OUTPUT, and every log line - the range walk
+// from the last published build (the coalesced-merge case that motivates
+// it, with the old single-commit read as the control), the union rule,
+// and a red body anywhere in the range.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
+import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -291,84 +296,212 @@ describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
   const root = temp.dir("fleet-sync-marker-");
 
-  function git(args: string[]): string {
-    const proc = boundedSpawnSync(["git", "-C", root, ...args]);
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
-    return proc.stdout.trimEnd();
-  }
-  git(["init", "-q", "-b", "main"]);
-  git([
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@x.test",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "seed",
-  ]);
-
-  function commit(body: string): string {
-    const file = join(root, `msg-${Bun.hash(body).toString(16)}.txt`);
-    writeFileSync(file, body);
-    git([
+  function git(cwd: string, args: string[]): string {
+    const proc = boundedSpawnSync([
+      "git",
+      "-C",
+      cwd,
       "-c",
       "user.name=t",
       "-c",
       "user.email=t@x.test",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-F",
-      file,
+      ...args,
     ]);
-    return git(["rev-parse", "HEAD"]);
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
+    return proc.stdout.trimEnd();
   }
 
-  function run(sha: string): { exitCode: number; stdout: string; output: string } {
-    const outputFile = join(root, `out-${sha}.txt`);
+  // main's history, one squash merge per commit: the fixture every clone
+  // below is taken from. The leg's checkout sees the build branch as
+  // refs/remotes/origin/build, so each scenario is a clone of a bare
+  // origin carrying (or lacking) a build branch stamped at one commit.
+  const source = join(root, "source");
+  mkdirSync(source);
+  git(source, ["init", "-q", "-b", "main"]);
+  function commit(body: string): string {
+    const file = join(root, `msg-${Bun.hash(body).toString(16)}.txt`);
+    writeFileSync(file, body);
+    git(source, ["commit", "-q", "--allow-empty", "-F", file]);
+    return git(source, ["rev-parse", "HEAD"]);
+  }
+  const seed = commit("seed");
+  const listA = commit(message("`[fleet-sync: Vivswan/a]`", PROSE));
+  const prose1 = commit(message(PROSE));
+  const prose2 = commit(message(PROSE));
+  const listBC = commit(message("[fleet-sync: Vivswan/b, vivswan/c]", PROSE));
+  const whole = commit(message("`[fleet-sync]`", PROSE));
+  const bottom = commit(message(PROSE, "[fleet-sync]"));
+  const prose3 = commit(message(PROSE));
+
+  /** A clone whose origin carries main plus, when `stamp` is given, a
+   *  build branch of one orphan commit stamped like publish.ts stamps. */
+  function cloneWithBuild(name: string, stamp: string | null): string {
+    const bare = join(root, `${name}.git`);
+    git(root, ["clone", "-q", "--bare", source, bare]);
+    if (stamp !== null) {
+      const scratch = join(root, `${name}-build`);
+      git(root, ["clone", "-q", bare, scratch]);
+      git(scratch, ["checkout", "-q", "--orphan", "build"]);
+      writeFileSync(join(scratch, "tree.txt"), "0\n");
+      git(scratch, ["add", "-A"]);
+      git(scratch, [
+        "commit",
+        "-q",
+        "-m",
+        `build\n\n${commitStampWrite("https://x.test", "o/r", stamp)}\nrun: https://x.test/run`,
+      ]);
+      git(scratch, ["push", "-q", "origin", "build"]);
+    }
+    const clone = join(root, name);
+    git(root, ["clone", "-q", bare, clone]);
+    return clone;
+  }
+
+  const unpublished = cloneWithBuild("unpublished", null);
+  const publishedSeed = cloneWithBuild("published-seed", seed);
+  const publishedProse2 = cloneWithBuild("published-prose2", prose2);
+  const publishedListBC = cloneWithBuild("published-list-bc", listBC);
+
+  function run(
+    cwd: string,
+    sha: string,
+    before: string,
+  ): { exitCode: number; stdout: string; output: string } {
+    const outputFile = join(root, `out-${Bun.hash(cwd + sha + before).toString(16)}.txt`);
     writeFileSync(outputFile, "");
     const proc = boundedSpawnSync(["bun", script], {
-      cwd: root,
-      env: { ...process.env, SOURCE_SHA: sha, GITHUB_OUTPUT: outputFile },
+      cwd,
+      env: { ...process.env, SOURCE_SHA: sha, BEFORE_SHA: before, GITHUB_OUTPUT: outputFile },
     });
     return { ...proc, output: readFileSync(outputFile, "utf-8") };
   }
 
+  const short = (sha: string) => sha.slice(0, 12);
+  const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
+  const pushAlone = (sha: string, before: string) =>
+    `::notice::no build stamp older than ${short(sha)} exists (nothing published before this run); reading the push alone, from ${short(before)}`;
+  const noBlock = (base: string, sha: string) =>
+    `::notice::${short(base)}..${short(sha)} carries no directives block; the fleet picks it up on the weekly sync`;
+  const directive = (sha: string, scope: string) =>
+    `::notice::fleet-sync directive on ${short(sha)}: ${scope}`;
+  const syncing = (base: string, sha: string, scope: string) =>
+    `::notice::${short(base)}..${short(sha)} opted in: syncing ${scope} now`;
+
+  test("the coalescing case: three merges within a minute, only the first opted in, and only the last one's CI run survived", () => {
+    // The stamped base covers every commit since the last publish, so the
+    // surviving run carries the first merge's directive.
+    const stamped = run(publishedSeed, prose2, prose1);
+    expect(stamped).toEqual({
+      exitCode: 0,
+      output: "armed=true\nrepos=vivswan/a\n",
+      stdout: lines(directive(listA, "vivswan/a"), syncing(seed, prose2, "vivswan/a")),
+      stderr: "",
+    });
+    // The control, the old single-commit read: the same run against an
+    // origin with no build branch reads the surviving push alone and
+    // arms nothing - the defect as observed.
+    const pushOnly = run(unpublished, prose2, prose1);
+    expect(pushOnly).toEqual({
+      exitCode: 0,
+      output: "armed=false\n",
+      stdout: lines(pushAlone(prose2, prose1), noBlock(prose1, prose2)),
+      stderr: "",
+    });
+  });
+
+  test.each([
+    {
+      reason: "two directives with different repo lists: the union, in commit order",
+      cwd: publishedSeed,
+      sha: listBC,
+      output: "armed=true\nrepos=vivswan/a,vivswan/b,vivswan/c\n",
+      stdout: lines(
+        directive(listA, "vivswan/a"),
+        directive(listBC, "vivswan/b,vivswan/c"),
+        syncing(seed, listBC, "vivswan/a,vivswan/b,vivswan/c"),
+      ),
+    },
+    {
+      reason: "a whole-fleet directive beside a list: all wins",
+      cwd: publishedProse2,
+      sha: whole,
+      output: "armed=true\nrepos=all\n",
+      stdout: lines(
+        directive(listBC, "vivswan/b,vivswan/c"),
+        directive(whole, "all"),
+        syncing(prose2, whole, "all"),
+      ),
+    },
+  ])("$reason", ({ cwd, sha, output, stdout }) => {
+    const result = run(cwd, sha, git(cwd, ["rev-parse", `${sha}~1`]));
+    expect(result).toEqual({ exitCode: 0, output, stdout, stderr: "" });
+  });
+
+  test("a misplaced block on any commit in the range turns the leg red, naming that commit; nothing is armed", () => {
+    const result = run(publishedListBC, prose3, bottom);
+    expect(result).toEqual({
+      exitCode: 1,
+      output: "",
+      stdout: lines(
+        directive(whole, "all"),
+        `::error::${short(bottom)}: misplaced directive "[fleet-sync]": ${POSITION}`,
+      ),
+      stderr: "",
+    });
+  });
+
   test.each([
     {
       reason: "no block: armed=false and a notice",
-      body: message(PROSE),
+      sha: prose1,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: "::notice::",
+      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
     },
     {
       reason: "whole fleet: armed=true, repos=all",
-      body: message("`[fleet-sync]`", PROSE),
+      sha: whole,
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
-      stdout: "syncing all now",
+      stdout: (base: string, sha: string) =>
+        lines(pushAlone(sha, base), directive(sha, "all"), syncing(base, sha, "all")),
     },
     {
       reason: "a list: repos is the folded comma list",
-      body: message("[fleet-sync: Vivswan/B, vivswan/a]", PROSE),
+      sha: listBC,
       exitCode: 0,
-      output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
-      stdout: "syncing vivswan/b,vivswan/a now",
+      output: "armed=true\nrepos=vivswan/b,vivswan/c\n",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          directive(sha, "vivswan/b,vivswan/c"),
+          syncing(base, sha, "vivswan/b,vivswan/c"),
+        ),
     },
     {
       reason: "a block at the bottom of the body: red leg, nothing armed",
-      body: message(PROSE, "[fleet-sync]"),
+      sha: bottom,
       exitCode: 1,
       output: "",
-      stdout: "::error::misplaced directive",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          `::error::${short(sha)}: misplaced directive "[fleet-sync]": ${POSITION}`,
+        ),
     },
-  ])("$reason", ({ body, exitCode, output, stdout }) => {
-    const result = run(commit(body));
-    expect(result.exitCode).toBe(exitCode);
-    expect(result.output).toBe(output);
-    expect(result.stdout).toContain(stdout);
+  ])("a one-commit push without a build stamp, $reason", ({ sha, exitCode, output, stdout }) => {
+    const before = git(unpublished, ["rev-parse", `${sha}~1`]);
+    const result = run(unpublished, sha, before);
+    expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
+  });
+
+  test("a truncated judged sha is refused with no output line", () => {
+    const result = run(unpublished, prose1.slice(0, 12), seed);
+    expect(result).toEqual({
+      exitCode: 1,
+      output: "",
+      stdout: `::error::SOURCE_SHA is not a full commit sha (got '${short(prose1)}')\n`,
+      stderr: "",
+    });
   });
 });

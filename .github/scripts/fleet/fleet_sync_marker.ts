@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The merged commit's directives block: the PR body's FIRST paragraph
+// The merged commits' directives blocks: each PR body's FIRST paragraph
 // (a squash merge writes subject, blank line, PR body), one bracketed
 // directive per line, each optionally fenced in one pair of backticks -
 //
@@ -7,17 +7,29 @@
 //   `[fleet-sync: owner/a, owner/b]`  sync those repos now
 //
 // Squash merges carry the PR body verbatim (.github/settings-override.yml
-// pins PR_BODY), so post-green.yml's read-directives leg reads the opt-in
-// from the commit alone and hands the scope to its sync-fleet leg.
+// pins PR_BODY), so post-green.yml's read-directives leg reads the opt-ins
+// from git alone and hands the scope to its sync-fleet leg. It reads EVERY
+// commit since the last published build (judged_range.ts), not the judged
+// commit alone: merges landing within a minute share one surviving CI run,
+// and the opt-in may sit on an evicted one. The scopes union - any `all`
+// wins, otherwise the repo lists in commit order.
 //
 // A block-shaped paragraph or a [fleet-sync anywhere else, bad backtick
 // fencing, an unknown or duplicated keyword, an empty scope, or a bad slug
-// FAILS the leg: a misread opt-in is loud, never a silent weekly-cron wait.
+// on ANY body in the range FAILS the leg, naming the commit: a misread
+// opt-in is loud, never a silent weekly-cron wait.
 //
-// Env: SOURCE_SHA (the judged commit), GITHUB_OUTPUT (armed, repos).
+// Env: judged_range.ts's SOURCE_SHA and BEFORE_SHA; GITHUB_OUTPUT (armed, repos).
 
-import { fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { fail, notice, setOutput } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
+import {
+  type DiffBase,
+  judgedRangeEnv,
+  rangeCommits,
+  rangeLabel,
+  resolveBase,
+} from "./judged_range.ts";
 import { isSlug } from "./repos_registry.ts";
 
 export type Directives =
@@ -142,25 +154,50 @@ export function parseDirectives(body: string): Directives {
 }
 
 function main(): number {
-  const sha = requireEnv("SOURCE_SHA");
-  const parsed = parseDirectives(mustCapture(["git", "log", "-1", "--format=%B", sha]));
-  switch (parsed.kind) {
-    case "error":
-      return fail(parsed.errors);
-    case "none":
-      notice(
-        `${sha.slice(0, 12)} carries no directives block; the fleet picks it up on the weekly sync`,
-      );
-      setOutput("armed", "false");
-      return 0;
-    case "fleet-sync": {
-      const scope = parsed.repos.length === 0 ? "all" : parsed.repos.join(",");
-      notice(`fleet-sync directive on ${sha.slice(0, 12)}: syncing ${scope} now`);
-      setOutput("armed", "true");
-      setOutput("repos", scope);
-      return 0;
-    }
+  const { sha, before } = judgedRangeEnv();
+  const cwd = process.cwd();
+  let base: DiffBase;
+  try {
+    base = resolveBase(cwd, sha, before);
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
   }
+  if (base.kind !== "build-stamp") {
+    notice(
+      `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading the push alone, from ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
+    );
+  }
+  const errors: string[] = [];
+  let armed = false;
+  let all = false;
+  const repos = new Set<string>();
+  for (const commit of rangeCommits(cwd, sha, base)) {
+    const parsed = parseDirectives(
+      mustCapture(["git", "-C", cwd, "log", "-1", "--format=%B", commit]),
+    );
+    if (parsed.kind === "none") continue;
+    if (parsed.kind === "error") {
+      errors.push(...parsed.errors.map((error) => `${commit.slice(0, 12)}: ${error}`));
+      continue;
+    }
+    armed = true;
+    if (parsed.repos.length === 0) all = true;
+    for (const repo of parsed.repos) repos.add(repo);
+    const scope = parsed.repos.length === 0 ? "all" : parsed.repos.join(",");
+    notice(`fleet-sync directive on ${commit.slice(0, 12)}: ${scope}`);
+  }
+  if (errors.length > 0) return fail(errors);
+  const range = rangeLabel(sha, base);
+  if (!armed) {
+    notice(`${range} carries no directives block; the fleet picks it up on the weekly sync`);
+    setOutput("armed", "false");
+    return 0;
+  }
+  const scope = all ? "all" : [...repos].join(",");
+  notice(`${range} opted in: syncing ${scope} now`);
+  setOutput("armed", "true");
+  setOutput("repos", scope);
+  return 0;
 }
 
 if (import.meta.main) {
