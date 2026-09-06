@@ -36,19 +36,25 @@ const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 
-/** `line` without its code spans (CommonMark: a run of N backticks closes at the next run of
- *  exactly N; an unclosed run is literal text). A body may describe the grammar in code spans; a
- *  bare [fleet-sync outside the block may not. Linear: the runs are tokenized once and each one's
- *  next equal-length run is found in one right-to-left pass. */
-function withoutCodeSpans(line: string): string {
+// A fence line (CommonMark: up to three spaces, three or more backticks, an info string without
+// backticks) opens or closes a code block: its backticks are never code-span delimiters, and no
+// span pairs across it.
+const FENCE_LINE = /^ {0,3}`{3,}[^`]*$/;
+
+/** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
+ *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
+ *  unclosed run is literal text). Linear: the runs are tokenized once and each one's next
+ *  equal-length run is found in one right-to-left pass. */
+function blankCodeSpans(lines: string[]): string[] {
+  const text = lines.join("\n");
   const runs: { start: number; end: number }[] = [];
-  for (let i = 0; i < line.length; ) {
-    if (line[i] !== "`") {
+  for (let i = 0; i < text.length; ) {
+    if (text[i] !== "`") {
       i++;
       continue;
     }
     let j = i;
-    while (j < line.length && line[j] === "`") j++;
+    while (j < text.length && text[j] === "`") j++;
     runs.push({ start: i, end: j });
     i = j;
   }
@@ -67,29 +73,56 @@ function withoutCodeSpans(line: string): string {
       r++;
       continue;
     }
-    out += line.slice(cursor, runs[r].start);
+    out += text.slice(cursor, runs[r].start);
+    out += text.slice(runs[r].start, runs[close].end).replace(/[^\n]/g, "");
     cursor = runs[close].end;
     r = close + 1;
   }
-  return out + line.slice(cursor);
+  return (out + text.slice(cursor)).split("\n");
 }
 
-function paragraphs(body: string): string[][] {
+/** One paragraph's lines with their code spans blanked: each stretch between fence lines is one
+ *  inline run scanned as a whole (GitHub wraps the squash body at 72 columns, so a one-line span
+ *  in the PR body arrives as several lines here); a fence line passes through as written. */
+function withoutCodeSpans(lines: string[]): string[] {
+  const bare: string[] = [];
+  let inline: string[] = [];
+  const flush = () => {
+    bare.push(...blankCodeSpans(inline));
+    inline = [];
+  };
+  for (const line of lines) {
+    if (FENCE_LINE.test(line)) {
+      if (inline.length > 0) flush();
+      bare.push(line);
+    } else {
+      inline.push(line);
+    }
+  }
+  if (inline.length > 0) flush();
+  return bare;
+}
+
+/** A blank-line-delimited paragraph: its lines as written, and the same lines with their code
+ *  spans blanked, computed once here so every judgement below reads one stripping. */
+type Paragraph = { lines: string[]; bare: string[] };
+
+function paragraphs(body: string): Paragraph[] {
   const lines = body
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => line.trimEnd());
-  const result: string[][] = [];
+  const result: Paragraph[] = [];
   let current: string[] = [];
+  const flush = () => {
+    if (current.length > 0) result.push({ lines: current, bare: withoutCodeSpans(current) });
+    current = [];
+  };
   for (const line of lines) {
-    if (line === "") {
-      if (current.length > 0) result.push(current);
-      current = [];
-    } else {
-      current.push(line);
-    }
+    if (line === "") flush();
+    else current.push(line);
   }
-  if (current.length > 0) result.push(current);
+  flush();
   return result;
 }
 
@@ -107,20 +140,22 @@ function unwrap(line: string): string | null {
  * block. Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
-  const isBlockShaped = (para: string[]) =>
-    para.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
+  const isBlockShaped = (para: Paragraph) =>
+    para.lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
-    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX])
+      ? paras[BLOCK_INDEX].lines
+      : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
     if (block !== null && index === BLOCK_INDEX) return;
     const shaped = isBlockShaped(para);
-    for (const line of para) {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(withoutCodeSpans(line))) {
+    para.lines.forEach((line, at) => {
+      if (shaped || FLEET_SYNC_ANYWHERE.test(para.bare[at])) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
-    }
+    });
   });
   if (block === null) return errors.length > 0 ? { kind: "error", errors } : { kind: "none" };
 

@@ -291,6 +291,45 @@ describe("parseDirectives", () => {
       expected: NONE,
     },
     {
+      reason:
+        "the same span wrapped over three lines (GitHub's 72-column squash body) is still one code span",
+      body: message(
+        PROSE,
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a\njustification; use `public` unless private repos need this now - write\n[fleet-sync: all] <why every repo needs this now>``',
+      ),
+      expected: NONE,
+    },
+    {
+      reason:
+        "the wrapped span without its closer is literal text: both mentions are bare (the control)",
+      body: message(
+        PROSE,
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a\njustification; use `public` unless private repos need this now - write\n[fleet-sync: all] <why every repo needs this now>',
+      ),
+      expected: misplaced(
+        '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a',
+        "[fleet-sync: all] <why every repo needs this now>",
+      ),
+    },
+    {
+      reason:
+        "a span never crosses a blank line: the paragraph after an unclosed run is scanned on its own",
+      body: message(PROSE, "See ``x", "and [fleet-sync] here``."),
+      expected: misplaced("and [fleet-sync] here``."),
+    },
+    {
+      reason:
+        "a span never crosses a fence line: the bare mention inside the fence stays misplaced",
+      body: message(PROSE, "Before `\n```text\n[fleet-sync]\n```\nAfter `"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
+      reason:
+        "the merged body of #89 as GitHub wrapped it (the observed red read-directives on main)",
+      body: readFileSync(join(import.meta.dir, "fixtures", "squash_731d2d37.txt"), "utf8"),
+      expected: NONE,
+    },
+    {
       reason: "a code-span block at the bottom is still the misplaced block, not a mention",
       body: message(PROSE, "`[fleet-sync: public]`"),
       expected: misplaced("`[fleet-sync: public]`"),
@@ -391,16 +430,21 @@ describe("parseDirectives", () => {
   });
 });
 
-test("a 100k-backtick run is scanned in linear time: the unclosed run leaves the mention bare", () => {
-  // The control for the scanner: the regex it replaced backtracked
-  // quadratically on one long run (about a second at this length).
-  const line = `${"`".repeat(100_000)} [fleet-sync]`;
-  const started = performance.now();
-  const parsed = parseDirectives(message(PROSE, line));
-  const elapsed = performance.now() - started;
-  expect(parsed).toEqual(misplaced(line));
-  expect(elapsed).toBeLessThan(300);
-});
+test.each([
+  { shape: "in prose (the run tokenizer)", line: `x ${"`".repeat(100_000)} [fleet-sync]` },
+  { shape: "as a fence line (the fence regex)", line: `${"`".repeat(100_000)} [fleet-sync]` },
+])(
+  "a 100k-backtick run $shape is scanned in linear time: the run leaves the mention bare",
+  ({ line }) => {
+    // The control for the scanner: the regex it replaced backtracked
+    // quadratically on one long run (about a second at this length).
+    const started = performance.now();
+    const parsed = parseDirectives(message(PROSE, line));
+    const elapsed = performance.now() - started;
+    expect(parsed).toEqual(misplaced(line));
+    expect(elapsed).toBeLessThan(300);
+  },
+);
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");

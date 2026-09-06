@@ -1,0 +1,208 @@
+feat(post-green)!: read fleet-sync directives since the last build, with visibility scopes and a required all-justification (#89)
+
+## Before
+
+Three PRs (#82, #83, #84) merged within one minute; ci.yml's concurrency
+group cancelled the first two runs. The surviving run read only its own
+commit's body, and #82's opt-in was lost:
+
+```text
+$ bun .github/scripts/fleet/fleet_sync_marker.ts      # read-directives, SOURCE_SHA = #84's merge
+::notice::75176f5690bb carries no directives block; the fleet picks it up on the weekly sync
+GITHUB_OUTPUT: armed=false
+```
+
+## After
+
+The same three merges, the build stamped at the commit before them; the
+surviving run walks every commit since that stamp:
+
+```text
+$ bun .github/scripts/fleet/fleet_sync_marker.ts      # SOURCE_SHA = third merge, build stamped at the merge before the three
+::notice::fleet-sync directive on 06c6176d7eeb: public
+::notice::748c47270ad6..8f9f8ff0ef32 opted in: syncing public now
+GITHUB_OUTPUT: armed=true, repos=public
+```
+
+The control, the old read (no build branch, so the leg falls back to the
+push alone), still arms nothing:
+
+```text
+::notice::no build stamp older than 8f9f8ff0ef32 exists (nothing published before this run); reading the push alone, from 8bed4256ef7b
+::notice::8bed4256ef7b..8f9f8ff0ef32 carries no directives block; the fleet picks it up on the weekly sync
+GITHUB_OUTPUT: armed=false
+```
+
+The retired bare form, on any commit in the range, is red and names the
+commit, with no GITHUB_OUTPUT and exit 1 (the line as one code span, so
+this body passes its own reader):
+
+``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a
+justification; use `public` unless private repos need this now - write
+[fleet-sync: all] <why every repo needs this now>``
+
+## How
+
+```text
+before: read-directives -> git log -1 sha -> parse one body -> armed?
+after:  read-directives -> judged_range.resolveBase (newest earlier build stamp; `before` only as the first-publish fallback)
+                        -> rev-list --first-parent (base, sha]
+                        -> parse every body -> union -> armed?, repos = tokens as written
+        sync-repos plan -> sync_scope.parseScope(repos) -> expand public/private against discovery
+                        -> refuse a private repo named by slug (called path, counts only, names the judged commit)
+```
+
+- `fleet/judged_range.ts` is the one owner of the base: the resolution
+and ancestry checks settings_inputs_changed.ts carried since #68, moved
+there unchanged; both legs call it.
+- Union rule: any `all` wins; otherwise the tokens and repo lists
+combine in commit order (folded, deduped, each repo once). One notice
+per contributing commit.
+- The grammar (`fleet/sync_scope.ts` owns the tokens for the leg and
+both writers' plans):
+
+| Scope line | Syncs now | Reason line |
+| --- | --- | --- |
+| `[fleet-sync: public]` | the public repos (the default) | none |
+| `[fleet-sync: private]` | the private repos (paid Actions minutes) |
+none |
+| `[fleet-sync: public, owner/a]` | tokens and PUBLIC slugs union | none
+|
+| `[fleet-sync: all] <why>` | the whole fleet | required, same line,
+names no private repo |
+| `[fleet-sync]` | nothing: red | the retired bare form, no
+compatibility (repo policy) |
+| `[Context] ordinary prose` | not a directive: green | trailing text
+belongs to the `fleet-sync` keyword only |
+
+- The leg has no visibility source (contents: read, no PAT), so it
+passes the tokens through; the plans (`select_sync_repos.ts`,
+`select_settings_repos.ts`) expand `public`/`private` against discovery
+(fail-closed: not discovered as public counts as private) and refuse a
+scope that names a private repo by slug on the called path, counts only,
+naming the judged commit (`TARGET_SHA` / `SOURCE_SHA` on the select
+steps). A dispatched private slug (event payload, never step env) still
+works.
+- A targeted repo discovery missed this run counts as private, so a
+`public` scope skips it; both plans say so once, counting only
+(`::warning::N targeted repositories were not discovered this run ...`),
+and the next run heals it.
+- Both selectors filter the enriched rows the same way instead of the
+sync's `--repo` registry pass; the matrix builder gets `--self` only
+when the scope selects the operator repo.
+- post-green.yml's `read-directives` job checks out with `fetch-depth:
+0` and passes `BEFORE_SHA`, mirroring `settings-inputs`.
+- docs/all-green.md: the shared range paragraph covers both legs; the
+directives section has the scope table, the justification rule, the
+private-repo rule, and the coalesced-merge example. README, AGENTS.md,
+docs/settings.md (the dispatch row lists the tokens),
+docs/build-provenance.md, and the two writers' input descriptions
+follow.
+
+## Proof
+
+- tests/fleet/fleet_sync_marker.test.ts, whole-outcome rows (exit code,
+GITHUB_OUTPUT, every log line): the coalesced case with its control, two
+overlapping lists -> union with each repo once, `all` beside a list ->
+`all`, tokens beside a list -> pass-through, a misplaced block on an
+older commit -> warning and the judged commit's valid block still arms,
+the judged commit's own bare form -> red naming it, `[fleet-sync: all]`
+without a reason and a reason on `public` -> red, `[Context] prose` ->
+green control, the one-commit cases. Run against the pre-fix script, the
+coalesced row reads `armed=false` with the exact Before line.
+- tests/fleet/sync_scope.test.ts: the grammar, the selection verdicts,
+the two refusals (private slug on the called path names the judged
+commit; the same slug from a dispatch runs), the warning text.
+- tests/fleet/select_sync_repos.test.ts and
+select_settings_repos.test.ts: `public`, `private`, token plus slug, a
+planted discovery miss (warning, counts only, scoped to what the scope
+could select; `public` skips the repo), the private-slug refusal (no
+slug in any channel), each row asserting the whole {exitCode, stdout,
+stderr, GITHUB_OUTPUT, summary}; the dispatch path unchanged.
+- tests/fleet/settings_inputs_changed.test.ts unchanged, 22 pass: the
+extraction kept the settings leg's behaviour.
+- `bun run check` green.
+
+## Concurrency decision (user)
+
+ci.yml's main-push group keeps serializing post-green and never cancels
+a running run; pull-request groups keep cancelling. That is what
+`cancel-in-progress: ${{ github.event_name == 'pull_request' }}` has
+meant since the initial commit, so ci.yml is unchanged here; the wiring
+test now pins the group and that expression as one shape, and
+docs/all-green.md states the queue semantics: GitHub keeps one running
+plus one pending run per group and replaces the pending one, so a burst
+of three merges loses the middle merge's OWN run, and the range union in
+this PR is what still reads its directive.
+
+## Review rounds, recorded
+
+- Rejected (codex landing review 1): the refusal text in judged_range.ts
+("before the settings apply reads it" -> "before the post-green legs
+read it") was called a settings behaviour change. Same refusal on the
+same condition, worded for both callers; the settings tests never
+asserted that phrase. Kept.
+- Rejected (codex landing review 2): the leg echoing the directive's raw
+tokens and passing them as ONLY_REPO. The tokens are the merged PR body,
+already public text on main; the leg adds no exposure, and the refusal
+exists to make the author fix the body. No opaque carrier.
+- Fixed (round 1): the union row repeats a repo across the two
+directives and expects it once; header comments compressed to the
+constraint.
+- Fixed (round 2): `[word] prose` first paragraphs were read as
+directives; only the `fleet-sync` keyword accepts trailing text now,
+with the normal-body control. An undiscovered targeted repo hidden from
+a `public` scope warns once, counting only. `scope === null` (never true
+after the Scope type) became `scope.kind === "all"`.
+- Fixed (Copilot round): a malformed block on an OLDER commit in the
+range is a counts-only warning naming the commit (its own run was
+already red) and contributes nothing; only the judged commit's body is
+fatal. Before, a docs-only commit (tree unchanged, stamp unmoved) with a
+bad block poisoned every later range, contradicting the documented
+recovery. Also the singular "counts as private".
+- Fixed (Copilot round 2): the undiscovered-target warning counts as the
+scope sees them - a slug-only scope counts only its own slugs (it could
+never select the others); `all` and the visibility tokens keep the
+fleet-wide count.
+- Fixed (observed on main, #94 red): a directive mention inside a code
+span outside the block is prose; a bare mention stays a misplaced
+directive. This body carries seven code-span mentions and passes its own
+reader.
+- Fixed (Copilot round 3): the block's scope text goes through
+`sync_scope.parseScope`, so the leg and the plans accept the same lists
+(`[fleet-sync: all, all] why` is red on both); a code-span bracket
+followed by text (`` `[fleet-sync: public]` is the default scope. ``) is
+prose, so the justified all-scope is written bare.
+- Grammar decision: a justification on any scope other than `all` is red
+("carries text after the directive") so a line is never partly ignored.
+
+## Recorded, not built
+
+- A future post-green leg is not mechanically forced onto
+judged_range.ts; convention plus review hold it.
+- The first-parent walk assumes the squash-merged main history the repo
+enforces.
+- A handled directive replays when a later unrelated merge finds the
+build tree unchanged (a docs-only merge with a block leaves the stamp in
+place, so the next range still sees it): one redundant sync of an
+already-handled scope, idempotent in the fleet. The fix, if it ever
+bites, is a directive checkpoint separate from content-changing build
+commits.
+- An evicted malformed merge B whose CI was cancelled by C surfaces as
+C's older-commit warning, not red, by design: the warning is the signal,
+and blocking C on B's body is the poisoning we retired.
+- A `public,private` list selects the whole fleet but skips the
+whole-fleet exclusion reminder (`all` carries it); repos.yml has no
+exclusions today.
+- Escaped backticks (`\`` in Markdown) are literal text, yet the
+code-span scanner reads them as run delimiters; no PR body writes
+escaped backticks.
+- A code span crossing lines is scanned per line, so its middle lines
+are prose to the scanner; directives blocks are one paragraph by
+contract, and no body has needed a multi-line span.
+- Directive-line errors that still quote the line in the leg's log, as
+before this PR: misplaced, bad fencing, not-a-directive, unknown
+keyword, missing justification, empty scope, carries-text.
+Duplicate-directive and the three parseScope refusals (empty entry, all
+mixed, non-slug entries) carry counts only. The line is the merged PR
+body, public text on main.
