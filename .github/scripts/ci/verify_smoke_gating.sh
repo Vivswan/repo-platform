@@ -731,7 +731,7 @@ print("null" if value is None else value)' "$manifest" "$1" "$2"
 expect_class() { # <path> <expected class, or "absent">
   got="$(mf "$1" class)"
   if [ "$got" != "$2" ]; then
-    echo "::error::manifest check failed: expected class '$2' for '$1' in $manifest but got '$got' for modules=$MODULES private=$PRIVATE. Fix the manifest emission in scripts/compose_template.ts (or this expectation in verify_smoke_gating.sh)."
+    echo "::error::manifest check failed: expected class '$2' for '$1' in $manifest but got '$got' for modules=$MODULES private=$PRIVATE. Fix the manifest emission in scripts/compose/manifest.ts (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 }
@@ -744,7 +744,7 @@ expect_class ".github/workflows/post-green.yml" starter
 # selection, the mirrors declaration) the file exists for.
 expect_class ".repo-platform.yml" starter
 if [ "$(mf ".repo-platform.yml" hash)" != "missing" ]; then
-  echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE - starters make no byte-parity promise. Fix the manifest emission in scripts/compose_template.ts or stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE - starters make no byte-parity promise. Fix the manifest emission in scripts/compose/manifest.ts or stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 expect_class ".github/SECURITY.md" split

@@ -1,7 +1,7 @@
 // The ownership manifest's ONE emitter and ONE parser.
 //
 // .github/repo-platform-manifest.json is written and read at four stations
-// - compose_template.ts renders its template, copier's stamp hook rewrites
+// - compose/manifest.ts renders its template, copier's stamp hook rewrites
 // its hash tokens in place, the sync legs read it to rebuild split files,
 // and validate-template verifies byte parity against it - and each station
 // once carried its own private copy of the entry-line layout or the

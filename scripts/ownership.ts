@@ -19,12 +19,12 @@
 // scripts/module_manifests.ts). Headers and marker lines in template
 // sources are validated DECORATION: declarationTextErrors reports a
 // source whose text contradicts its declared class, and the composer
-// (scripts/compose_template.ts) errors on a landed file with no
+// (scripts/compose/manifest.ts) errors on a landed file with no
 // declaration, a declaration whose path never lands, and same-path
 // declarations that disagree across sources.
 //
 // Consumers, all reading the same declarations so ownership can never fork:
-// - scripts/compose_template.ts emits the ownership manifest
+// - scripts/compose/manifest.ts emits the ownership manifest
 //   (.github/repo-platform-manifest.json) into the composed template tree.
 // - scripts/generate.ts derives validate-template's MODULE_OWNERSHIP and
 //   BASE_OWNERSHIP records (moduleOwnershipEntries / baseOwnershipTables
@@ -383,7 +383,7 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
 }
 
 /** copier.yml's _exclude list, verbatim: the generated conditional-landing
- *  patterns (compose_template.ts's excludePatterns via scripts/generate.ts).
+ *  patterns (compose/exclude.ts's excludePatterns via scripts/generate.ts).
  *  Throws when the list is missing or malformed - the composed tree carries
  *  plain filenames, so a copier.yml without the generated excludes would
  *  land every conditional file unconditionally. */

@@ -94,7 +94,7 @@ const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
 /** The module-level layer filenames, next to each templates/<module>/
  *  module.yml, bound by ROLE (never by list position) from the manifest
- *  loader's roster. compose_template.ts skips them: they are read here,
+ *  loader's roster. compose/entries.ts skips them: they are read here,
  *  never rendered into a repository. */
 const MODULE_LAYER = SETTINGS_LAYER_FILES.module;
 const MODULE_PUBLIC_LAYER = SETTINGS_LAYER_FILES.public;

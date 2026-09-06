@@ -44,7 +44,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../actions/shared/grammar.ts";
-import { gateExpression } from "./compose_template.ts";
+import { gateExpression } from "./compose/exclude.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");

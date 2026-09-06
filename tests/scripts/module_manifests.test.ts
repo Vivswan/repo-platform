@@ -7,13 +7,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MODULE_ORDER } from "../../scripts/compose_template";
 import {
   assertDependabotLabelConsistency,
   assertModuleOrderIntegrity,
   assertSettingsLayerFiles,
   assertTrackingLabelUniqueness,
   loadManifests,
+  MODULE_ORDER,
   type ModuleManifest,
   parseManifest,
   readManifest,
