@@ -32,7 +32,7 @@ describe("PR_BODY_SECTIONS", () => {
   });
 
   test("every fixed-name report constant has one row, and no file or env repeats", () => {
-    const constants = Object.values(sectionFiles).filter(
+    const constants = Object.values<unknown>(sectionFiles).filter(
       (value): value is string => typeof value === "string",
     );
     const fixed = PR_BODY_SECTIONS.filter((row) => row.env === null).map((row) => row.file);

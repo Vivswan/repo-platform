@@ -285,7 +285,10 @@ describe("loadCloneRegistry", () => {
 
   test("reads the entries from the clone's registry at REGISTRY_PATH", async () => {
     const clone = cloneWithRegistryAt(REGISTRY_PATH, registrySource(["alpha", "beta"]));
-    expect(await loadCloneRegistry(clone)).toEqual([{ id: "alpha" }, { id: "beta" }]);
+    expect<readonly { id: string }[]>(await loadCloneRegistry(clone)).toEqual([
+      { id: "alpha" },
+      { id: "beta" },
+    ]);
   });
 
   test("CONTROL: a registry at the pre-move spelling (one segment short) is not found", async () => {

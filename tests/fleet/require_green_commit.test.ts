@@ -17,6 +17,8 @@ import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "000000000000000000000000000000000000000a";
 const dirs = tempDirs();
+/** The RunResult fields a stubbed gh never exercises: no child ran. */
+const NOT_SPAWNED = { timedOut: false, pid: 0 };
 
 function ghAnswering(...pages: { status?: string; conclusion?: string | null }[][]): {
   gh: GhRunner;
@@ -27,6 +29,7 @@ function ghAnswering(...pages: { status?: string; conclusion?: string | null }[]
     const page = pages[Math.min(call, pages.length - 1)];
     call++;
     return {
+      ...NOT_SPAWNED,
       exitCode: 0,
       stdout: JSON.stringify({
         check_runs: page.map((check) => ({
@@ -122,7 +125,7 @@ describe("waitForGreen", () => {
   });
 
   test("an API failure gets the deadline, then still fails closed", () => {
-    const gh: GhRunner = () => ({ exitCode: 1, stdout: "", stderr: "boom" });
+    const gh: GhRunner = () => ({ ...NOT_SPAWNED, exitCode: 1, stdout: "", stderr: "boom" });
     const result = waitForGreen("o/r", SHA, {
       gh,
       deadlineMs: 0,
@@ -214,7 +217,7 @@ describe("calledRefusal", () => {
   // conclusion waits the bound out too (the predicate polls for a fresh
   // success because a re-judged sha's verdict can trail a stale one), so
   // the refusal names the conclusion at the bound, not on the first read.
-  test.each([
+  test.each<{ reason: string; page: Parameters<typeof ghAnswering>[number]; verdict: string }>([
     {
       reason: "a red verdict refuses at the bound",
       page: [{ conclusion: "failure" }],

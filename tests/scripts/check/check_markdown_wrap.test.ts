@@ -50,9 +50,9 @@ describe("scanMarkdown", () => {
   // One table, one whole-result assertion: every row pins BOTH halves of
   // the scan ({ hits, unterminated }), so a fixture that leaves a fence or
   // comment open by accident reads as that, not as a clean pass.
-  const clean = (hits: number[]) => ({ hits, unterminated: null });
+  const clean = (hits: number[]): ReturnType<typeof scanMarkdown> => ({ hits, unterminated: null });
 
-  test.each([
+  test.each<{ reason: string; text: string; expected: ReturnType<typeof scanMarkdown> }>([
     {
       reason: "a wrapped paragraph's continuation lines are flagged",
       text: "One paragraph\nwrapped onto\nthree lines.",

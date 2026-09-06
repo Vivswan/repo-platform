@@ -20,7 +20,6 @@ describe("manifestEntries", () => {
     origin: "module",
     module,
     gate: `'${module}' in modules`,
-    gateDirs: [],
     entry: file(text),
   });
   const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
@@ -54,7 +53,6 @@ describe("manifestEntries", () => {
         origin: "module",
         module: "agents",
         gate: "'agents' in modules",
-        gateDirs: [],
         entry: { kind: "symlink", target: "AGENTS.md" },
       },
     ],

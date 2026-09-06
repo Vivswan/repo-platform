@@ -55,7 +55,7 @@ function labelNames(f: RepoFacts): string[] {
 }
 
 describe("managedLabels", () => {
-  test.each([
+  test.each<{ reason: string; facts: RepoFacts; labels: string[] }>([
     {
       reason: "a bare selection gets the baseline's unconditional roster alone",
       facts: facts(),
@@ -240,7 +240,7 @@ describe("layerPaths", () => {
   const names = (f: RepoFacts) =>
     layerPaths(f, manifests).map((p) => p.split("/").slice(-2).join("/"));
 
-  test.each([
+  test.each<{ reason: string; facts: RepoFacts; paths: string[] }>([
     {
       reason: "a bare public selection is the baseline plus the public overlay",
       facts: facts(),

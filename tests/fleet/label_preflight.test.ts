@@ -379,7 +379,7 @@ describe("label_preflight script", () => {
     expect(r.output).toContain("listed but unreadable");
   });
 
-  test.each([
+  test.each<{ reason: string; args: string[]; refusal: string }>([
     {
       reason: "no source at all",
       args: [],

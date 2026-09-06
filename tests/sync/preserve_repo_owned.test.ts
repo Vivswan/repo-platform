@@ -175,7 +175,12 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
   // boundary (answers_file.ts), so a symlinked file or a symlinked .github
   // is refused here exactly as every other sync-side reader refuses it.
   const validAnswers = 'copyright_holder: "Vivswan Shah"\ngithub_username: Vivswan\n';
-  test.each([
+  test.each<{
+    reason: string;
+    answers: string | null;
+    files?: Parameters<typeof makeTarget>[0];
+    message: string;
+  }>([
     { reason: "no answers file", answers: null, message: "missing from the default branch" },
     {
       reason: "answers that are not a YAML mapping",
@@ -396,7 +401,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("not a regular file");
   });
 
-  test.each([
+  test.each<{ reason: string; object: string; head: Parameters<typeof runHold>[0] }>([
     {
       // The old bytes probe fed the answer to the marker parser as if it
       // were the previous copy.
@@ -602,7 +607,11 @@ describe("deleted-path decode boundary", () => {
   const fffdName = `weird-${REPLACEMENT}.txt`;
   const bomName = `${String.fromCharCode(0xfeff)}secret.txt`;
 
-  test.each([
+  test.each<{
+    reason: string;
+    input: Buffer;
+    expected: ReturnType<typeof decodeTrackedPathBytes>;
+  }>([
     {
       reason: "valid entries decode; a non-UTF-8 entry comes back as raw bytes, never mangled",
       input: Buffer.concat([

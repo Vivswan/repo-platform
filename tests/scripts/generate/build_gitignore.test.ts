@@ -171,7 +171,7 @@ describe("argument parsing", () => {
     }
   }
 
-  test.each([
+  test.each<{ argv: string[]; reason: string }>([
     { argv: ["--locked"], reason: "the retired --locked pin mode" },
     { argv: ["--check"], reason: "the retired --check pin mode" },
     { argv: ["--dry-run", "x"], reason: "any other argument, several at once" },

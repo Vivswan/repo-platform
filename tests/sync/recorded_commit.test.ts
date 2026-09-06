@@ -53,7 +53,7 @@ function scratch() {
 describe("resolveRecordedCommit", () => {
   const s = scratch();
 
-  test.each([
+  test.each<[string, () => string, ReturnType<typeof resolveRecordedCommit>]>([
     ["the delivered build's ancestor", () => s.oldSha, { kind: "ok", sha: s.oldSha }],
     ["the delivered build itself", () => s.newSha, { kind: "ok", sha: s.newSha }],
     ["a short sha of a real build commit", () => s.oldSha.slice(0, 12), { kind: "not-a-sha" }],

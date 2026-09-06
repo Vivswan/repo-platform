@@ -62,7 +62,13 @@ describe("run_tests launcher", () => {
     expect(runLauncher(LEAKING_PASS)).toEqual({ exitCode: 1, noticed: true, named: true });
   });
 
-  test.each([
+  test.each<{
+    probe: string;
+    ending: string;
+    flags?: string[];
+    exitCode: number;
+    leaked: boolean;
+  }>([
     {
       probe: "clean passing",
       ending: `rmSync(fixture, { recursive: true }); ${LEAKING_PASS}`,

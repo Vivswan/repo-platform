@@ -21,14 +21,27 @@ import {
   nameKeyedUnion,
   repoSourceFrom,
 } from "../../.github/scripts/fleet/merge_settings_layers";
-import { managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
-import { parseSettingsDoc } from "../../.github/scripts/fleet/settings_document";
+import { type Label, managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
+import {
+  type MergedSettings,
+  type MergedValue,
+  parseSettingsDoc,
+  type SettingsLayer,
+} from "../../.github/scripts/fleet/settings_document";
 import { loadManifests } from "../../scripts/lib/module_manifests";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
-const managed = {
+/** The baseline fixture: already merged-shaped (no nulls), so it is both a
+ *  layer and an expected document, and its sections spread into rows. */
+type Fixture = MergedSettings & {
+  repository: MergedSettings;
+  labels: Label[];
+  rulesets: MergedSettings[];
+};
+
+const managed: Fixture = {
   repository: {
     has_issues: true,
     has_wiki: false,
@@ -298,7 +311,12 @@ describe("hardening the merged document (the choke-point)", () => {
   // Every row feeds a ONE-SIDED input (no merge partner), so the only
   // thing that can strip the null is the document-level normalization
   // pass; each pins the WHOLE merged document, not the one located key.
-  test.each([
+  test.each<{
+    where: string;
+    lower: SettingsLayer;
+    higher: SettingsLayer;
+    expected: MergedSettings;
+  }>([
     {
       // Mapping every element preserved a null instead of removing it, so
       // "no null survives" was false for lists.
@@ -410,7 +428,12 @@ describe("hardening the merged document (the choke-point)", () => {
     expect(merged.repository.metadata.rulesets).toEqual([{ rules: ["keep", "keep"] }]);
   });
 
-  test.each([
+  test.each<{
+    side: string;
+    lower: SettingsLayer;
+    higher: SettingsLayer;
+    expected: MergedSettings;
+  }>([
     {
       // Duplicate rule types in ONE entry still collapse - the entry-level
       // treatment survives the root narrowing.
@@ -482,7 +505,7 @@ describe("a rule without a type, or a null rule, is fatal - never dropped", () =
   // reduced - the silent-unprotect class through the drop path itself.
   // Every row pins the message's head: the ruleset it names and the
   // defect it saw.
-  test.each([
+  test.each<{ reason: string; lower: SettingsLayer; higher: SettingsLayer; message: string }>([
     {
       reason: "a lower-layer rule without a type",
       lower: { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { parameters: {} }] }] },
@@ -554,7 +577,12 @@ describe("appendRules", () => {
   // GitHub rejects a ruleset carrying one rule type twice, and a rejected
   // ruleset means the override never applies at all - so every row pins
   // the full emitted rule list, parameters included.
-  test.each([
+  test.each<{
+    reason: string;
+    lower: MergedValue[];
+    higher: MergedValue[];
+    expected: MergedValue[];
+  }>([
     {
       reason: "a duplicate type in the LOWER list collapses to one",
       lower: [del, del],
@@ -757,7 +785,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // repo file stops carrying it.
   const manifests = loadManifests();
   const privateFleet = managedSettings(
-    { modules: [], private: true, trackingLabels: [] },
+    { modules: [], private: true, trackingLabels: [], prTitleWorkflowPresent: false },
     manifests,
   );
   const mainRuleTypes = (repoText: string) => {

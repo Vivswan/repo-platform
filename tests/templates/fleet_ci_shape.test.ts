@@ -24,7 +24,7 @@ interface Step {
   run?: string;
   if?: string;
   id?: string;
-  with?: Record<string, string>;
+  with?: Record<string, string | number>;
   env?: Record<string, string>;
   "continue-on-error"?: boolean;
 }

@@ -214,7 +214,7 @@ describe("answerMismatches", () => {
     `modules: the generated pair ${repo} belongs to module '${module}', ` +
     "which the answers do not select";
 
-  test.each([
+  test.each<{ reason: string; override: Partial<Answers>; expected: string[] }>([
     {
       reason: "a slug disagreeing with package.json AND the project_name derivation",
       override: { project_slug: "other" },

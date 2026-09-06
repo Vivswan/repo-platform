@@ -269,7 +269,7 @@ describe("missingLines", () => {
   // the shrink this wire exists to catch), byte-exact (split-file repo
   // sides are carried byte-for-byte, so a line-ending flip IS a byte
   // change worth a manual look - warn-cheap by design).
-  test.each([
+  test.each<{ reason: string; previous: string; delivered: string; missing: string[] }>([
     {
       reason: "every non-blank line survives, wherever it moved",
       previous: "one\ntwo\n",

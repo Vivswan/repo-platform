@@ -254,7 +254,7 @@ describe("failure_issue.ts", () => {
     expect(r.body).not.toContain("undefined");
   });
 
-  test.each([
+  test.each<{ rawRows: string[]; reason: string }>([
     { rawRows: ["branch push\t1"], reason: "a short row is the only row" },
     { rawRows: [""], reason: "a newline-only file passes the non-empty-file guard" },
   ])(

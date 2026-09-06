@@ -13,6 +13,16 @@
     "scripts/**/*.ts",
     ".github/scripts/**/*.ts",
     "actions/shared/**/*.ts",
-    "tests/actions/**/*.ts"
+    "tests/**/*.ts"
+  ],
+  // Temporary: these six files are being edited by PRs #102 and #110; the
+  // follow-up commit fixes their type errors and empties this list.
+  "exclude": [
+    "tests/fleet/build_settings_matrix.test.ts",
+    "tests/fleet/fleet_sync_marker.test.ts",
+    "tests/fleet/redact.test.ts",
+    "tests/fleet/repos_registry.test.ts",
+    "tests/fleet/select_settings_repos.test.ts",
+    "tests/fleet/select_sync_repos.test.ts"
   ]
 }

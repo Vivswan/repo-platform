@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type Drift,
   detectDrift,
   driftSummary,
   driftWarnings,
@@ -16,7 +17,13 @@ const NOT_BOOLEAN = (recorded: string) =>
   "visibility drift cannot be detected until it is fixed";
 
 describe("detectDrift", () => {
-  test.each([
+  test.each<{
+    reason: string;
+    answers: Record<string, unknown>;
+    livePrivate: string;
+    liveDescription: string;
+    expected: ReturnType<typeof detectDrift>;
+  }>([
     {
       reason: "no drift when live values match the recorded answers",
       answers: ANSWERS,
@@ -218,13 +225,19 @@ describe("driftWarnings", () => {
   // opt-in and lives in the PR body alone.
   const TAIL = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
 
-  test.each([
+  test.each<{
+    reason: string;
+    repo: string;
+    drifts: Drift[];
+    hideDetails: boolean;
+    expected: string[];
+  }>([
     {
       reason: "one single-line warning per drifted field, values shown",
       repo: "Vivswan/demo",
       drifts: [
-        { field: "private" as const, recorded: "false", live: "true" },
-        { field: "description" as const, recorded: "old", live: "new" },
+        { field: "private", recorded: "false", live: "true" },
+        { field: "description", recorded: "old", live: "new" },
       ],
       hideDetails: false,
       expected: [
@@ -235,7 +248,7 @@ describe("driftWarnings", () => {
     {
       reason: "escapes workflow-command data",
       repo: "Vivswan/demo",
-      drifts: [{ field: "description" as const, recorded: "50% done", live: "done" }],
+      drifts: [{ field: "description", recorded: "50% done", live: "done" }],
       hideDetails: false,
       expected: [
         `::warning::Vivswan/demo: description changed out of band: "50%25 done" -> "done". ${TAIL}`,
@@ -245,8 +258,8 @@ describe("driftWarnings", () => {
       reason: "hideDetails names the field but never the values",
       repo: "h**-s**r",
       drifts: [
-        { field: "private" as const, recorded: "false", live: "true" },
-        { field: "description" as const, recorded: "secret words", live: "other secret words" },
+        { field: "private", recorded: "false", live: "true" },
+        { field: "description", recorded: "secret words", live: "other secret words" },
       ],
       hideDetails: true,
       expected: [
