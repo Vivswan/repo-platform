@@ -264,15 +264,16 @@ const ALIAS_NOTE = [
   "> repository-specific section before merging; nothing was deleted.",
 ];
 
-/** The block appended to AGENTS.md for one folded alias. */
-function foldedBlock(alias: string, content: string): string {
-  const body = content.endsWith("\n") ? content : `${content}\n`;
-  return (
+/** The block appended to AGENTS.md for one folded alias. Repository bytes
+ * ride as Buffers (a utf-8 decode would fold a non-UTF-8 byte onto U+FFFD). */
+function foldedBlock(alias: string, content: Buffer): Buffer {
+  const heading =
     `\n## Folded from ${alias}\n\n` +
     `This repository carried its own \`${alias}\` before the agent files became managed ` +
-    `symlinks to \`AGENTS.md\`; its content follows verbatim. Reconcile it into the sections above.\n\n` +
-    body
-  );
+    `symlinks to \`AGENTS.md\`; its content follows verbatim. Reconcile it into the sections above.\n\n`;
+  const newline =
+    content.length > 0 && content[content.length - 1] === 0x0a ? [] : [Buffer.from("\n")];
+  return Buffer.concat([Buffer.from(heading, "utf-8"), content, ...newline]);
 }
 
 const HAND_EDIT =
@@ -424,7 +425,9 @@ export default {
       return { kind: "verdict", verdict: { kind: listKind, note: note(false) } };
     }
     const agentsPath = join(target.dir, AGENTS);
-    let agents = entryKind(agentsPath) === "file" ? readFileSync(agentsPath, "utf-8") : "";
+    const parts: Buffer[] = [
+      entryKind(agentsPath) === "file" ? readFileSync(agentsPath) : Buffer.alloc(0),
+    ];
     // Only a TRACKED alias has a removal to stage; `git add` of a deleted
     // untracked path matches nothing and fails, so the index is asked first
     // (before the removal, while the path still exists).
@@ -433,10 +436,10 @@ export default {
     );
     for (const alias of ownAliases) {
       const aliasPath = join(target.dir, alias);
-      agents += foldedBlock(alias, readFileSync(aliasPath, "utf-8"));
+      parts.push(foldedBlock(alias, readFileSync(aliasPath)));
       rmSync(aliasPath);
     }
-    writeFileSync(agentsPath, agents);
+    writeFileSync(agentsPath, Buffer.concat(parts));
     const added = git(target.dir, "add", "--", AGENTS, ...tracked);
     if (added.exitCode !== 0) {
       const lines = added.stderr.split("\n").filter((line) => line.trim() !== "");

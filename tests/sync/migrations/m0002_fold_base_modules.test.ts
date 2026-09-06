@@ -359,6 +359,23 @@ describe("m0002_fold_base_modules", () => {
     expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
   });
 
+  test("repository bytes ride the fold verbatim: a non-UTF-8 byte and no trailing newline", () => {
+    // A utf-8 read would turn 0xFF into U+FFFD (EF BF BD) and the write would
+    // store that; the fold must carry the repository's exact bytes.
+    const dir = repo({ [REGISTRATION]: 'modules: ["uv"]\n', [MANIFEST]: manifestOf() });
+    const ours = Buffer.from([0x23, 0x20, 0xff, 0x20, 0x6f, 0x75, 0x72, 0x73]);
+    writeFileSync(join(dir, "CLAUDE.md"), ours);
+    git(dir, "add", "-A");
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "latin1 alias");
+    expect(apply(dir)).toMatchObject({ kind: "verdict", verdict: { kind: "in-place+aliases" } });
+    const expected = Buffer.concat([
+      Buffer.from(folded("CLAUDE.md", ""), "utf-8"),
+      ours,
+      Buffer.from("\n"),
+    ]);
+    expect(Buffer.compare(readFileSync(join(dir, "AGENTS.md")), expected)).toBe(0);
+  });
+
   test("the template's own alias symlinks (a repo that selected agents, or a Windows-free render) are left to copier", () => {
     const dir = repo({
       [REGISTRATION]: RENDERED,
