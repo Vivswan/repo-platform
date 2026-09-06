@@ -33,6 +33,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { REGISTRY_PATH } from "../../../scripts/check/check_guard_binding.ts";
 import { applyMutation, type GuardEntry } from "../../../scripts/check/guard_registry.ts";
 import { error } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
@@ -304,14 +305,10 @@ export function sweepSurvivors(marker: string, pgrepExecutable = "pgrep"): Sweep
  *  revisions (a working-tree registry auditing HEAD's guard files). The
  *  binding check green at that commit is what makes the shape trustable;
  *  the array check is the loud floor for a truncated clone. */
-async function loadCloneRegistry(scratch: string): Promise<readonly GuardEntry[]> {
-  const module = (await import(join(scratch, "scripts", "check", "guard_registry.ts"))) as {
-    GUARD_REGISTRY?: unknown;
-  };
+export async function loadCloneRegistry(scratch: string): Promise<readonly GuardEntry[]> {
+  const module = (await import(join(scratch, REGISTRY_PATH))) as { GUARD_REGISTRY?: unknown };
   if (!Array.isArray(module.GUARD_REGISTRY)) {
-    throw new Error(
-      "the scratch clone's scripts/check/guard_registry.ts exports no GUARD_REGISTRY array",
-    );
+    throw new Error(`the scratch clone's ${REGISTRY_PATH} exports no GUARD_REGISTRY array`);
   }
   return module.GUARD_REGISTRY as readonly GuardEntry[];
 }
