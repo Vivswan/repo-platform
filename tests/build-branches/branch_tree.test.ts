@@ -334,10 +334,20 @@ describe("assembleBranchTree", () => {
     expect(walk(join(dest, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX))).toEqual(
       [],
     );
-    // The control: the checkout does carry colocated action tests for the filter to drop.
+    // The control is planted, not read off the checkout (which carries no
+    // colocated test): the same copy drops a test file under a fixture
+    // action, so the empty listing above is a verdict, not a vacuous walk.
+    const planted = temp.dir("branch-actions-planted-");
+    const probe = join(planted, "actions", "probe");
+    mkdirSync(join(probe, "lib"), { recursive: true });
+    writeFileSync(join(probe, "action.yml"), "name: Probe\n");
+    writeFileSync(join(probe, "lib", `probe${TEST_FILE_SUFFIX}`), "export {};\n");
+    const plantedDest = temp.dir("branch-actions-planted-dest-");
+    copyActions(planted, plantedDest);
     expect(
-      walk(join(REPO_ROOT, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX)),
-    ).not.toEqual([]);
+      walk(join(planted, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX)),
+    ).toHaveLength(1);
+    expect(listing(join(plantedDest, "actions", "probe"))).toEqual(["action.yml"]);
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {

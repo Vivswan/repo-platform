@@ -4,8 +4,8 @@
 // at a per-run scratch directory, removes the scratch when the run ends,
 // and fails a judged run that left anything inside it (a fixture made
 // outside tests/shared/temp_dir.ts, or one whose file never finished).
-// Arguments replace the default targets: `bun run test tests/foo.test.ts`
-// runs one file, `bun run test -t name ./tests ./actions` filters.
+// Arguments replace the default target: `bun run test tests/foo.test.ts`
+// runs one file, `bun run test -t name ./tests` filters.
 //
 // Usage: bun scripts/run_tests.ts [bun test arguments]
 
@@ -16,7 +16,9 @@ import type { Subprocess } from "bun";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
-const DEFAULT_TARGETS = ["./tests", "./actions"];
+// tests/ is the one root: check_ssot.ts's no-tests-under-actions rule keeps
+// actions/ free of test files.
+const DEFAULT_TARGETS = ["./tests"];
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const LISTED_LEFTOVERS = 20;
 

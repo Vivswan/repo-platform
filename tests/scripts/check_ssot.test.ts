@@ -14,6 +14,7 @@ import {
   ASYNC_SPAWN_FILES,
   actionManifestFiles,
   actionsBunGuardMismatches,
+  actionTestFileMismatches,
   agentsStagingMismatches,
   allGreenGateMismatches,
   applyDivergences,
@@ -3202,15 +3203,15 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
     );
   });
 
-  test("selection and judgment together: symlinks fail closed, action helpers are not selected", () => {
+  test("selection and judgment together: symlinks fail closed, actions/ is not selected", () => {
     const helperSource = "const dir = mkdtempSync(join(tmpdir(), prefix));\n";
     const bare = 'import { mkdtempSync } from "node:fs";\n';
     const sources: Record<string, string> = {
       [TEMP_DIR_HELPER]: helperSource,
       "tests/sync/clean.test.ts": 'import { tempDirs } from "../shared/temp_dir";\n',
       "tests/shared/support.ts": bare,
+      // actions/ belongs to the no-tests-under-actions rule, test-named or not.
       "actions/x/x.test.ts": bare,
-      "actions/x/x_spec.mts": bare,
       "actions/x/x.ts": bare,
       "tests/golden-renders/a/README.md": "mkdtempSync in prose\n",
     };
@@ -3231,15 +3232,36 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
         "tests/shared/support.ts:1",
         "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
       ],
-      [
-        "actions/x/x.test.ts:1",
-        "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
-      ],
-      [
-        "actions/x/x_spec.mts:1",
-        "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
-      ],
       ["tests/shared/leaky.ts", "a symlink"],
+    ]);
+  });
+
+  test("actionTestFileMismatches: a clean actions/ tree passes, every planted test spelling reds by name", () => {
+    const clean = [
+      { path: "actions/x/x.ts" },
+      { path: "actions/x/lib/helper.ts" },
+      { path: "actions/x/test.ts" },
+      { path: "actions/shared/stamp_manifest.ts" },
+    ];
+    expect(actionTestFileMismatches(clean)).toEqual([]);
+    const planted = [
+      ...clean,
+      { path: "actions/x/x.test.ts" },
+      { path: "actions/x/lib/x_spec.mts" },
+    ];
+    expect(actionTestFileMismatches(planted)).toEqual([
+      {
+        file: "actions/x/x.test.ts",
+        expected:
+          "no test file under actions/ (tests live under tests/actions/<action>/, mirroring the action's tree)",
+        got: "a bun-discoverable test file beside an action's sources",
+      },
+      {
+        file: "actions/x/lib/x_spec.mts",
+        expected:
+          "no test file under actions/ (tests live under tests/actions/<action>/, mirroring the action's tree)",
+        got: "a bun-discoverable test file beside an action's sources",
+      },
     ]);
   });
 
