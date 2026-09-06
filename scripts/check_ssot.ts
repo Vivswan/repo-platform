@@ -2108,13 +2108,8 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
 // --- scratch-scoped scripts ------------------------------------------------
 
 /** package.json scripts pinned to their EXACT command because the command
- *  itself carries the per-run scratch discipline: `test` reaches bun test
- *  only through the launcher that scopes TMPDIR per run, and
- *  `compose:check` assembles through branch_tree's --check mode, which
- *  mints and removes its own directory. CI reaches both only through the
- *  check chain (the local-gates rule), so a drift back to a bare `bun
- *  test` or a fixed `--dest` path would keep every gate green while
- *  sibling runs trampled each other's scratch. */
+ *  itself scopes scratch per run (the TMPDIR launcher, branch_tree's
+ *  self-cleaning --check); a drift to a bare `bun test` would stay green. */
 export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
   test: "bun scripts/run_tests.ts",
   "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",

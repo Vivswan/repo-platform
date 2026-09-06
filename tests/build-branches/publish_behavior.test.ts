@@ -25,6 +25,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
@@ -47,12 +48,14 @@ const ghStub = `#!/usr/bin/env bash
 printf '%s' '{"check_runs":[{"name":"all-green","status":"completed","conclusion":"success","external_id":"workflow_run","app":{"slug":"github-actions"}}]}'
 `;
 
-/** The two marker files a held publish's rsync stub talks through. */
+/** The marker files a held publish's rsync stub talks through. */
 interface Hold {
-  /** Created by the stub once it is parked. */
+  /** Written by the stub once it is parked, carrying the stub's own PID. */
   ready: string;
   /** Created by the test to let the stub proceed. */
   release: string;
+  /** Created by the stub when its wait ran out unreleased. */
+  expired: string;
 }
 
 /** An rsync that parks until released: rsync is the first command
@@ -66,11 +69,12 @@ function heldRsyncStub(hold: Hold): string {
   const polls = Math.ceil(SPAWN_TIMEOUT_MS / 50);
   return [
     "#!/usr/bin/env bash",
-    `: > "${hold.ready}"`,
+    `echo $$ > "${hold.ready}.tmp" && mv "${hold.ready}.tmp" "${hold.ready}"`,
     `for _ in $(seq 1 ${polls}); do`,
     `  [ -e "${hold.release}" ] && exec "${real}" "$@"`,
     "  sleep 0.05",
     "done",
+    `: > "${hold.expired}"`,
     'echo "the rsync hold was never released" >&2',
     "exit 70",
     "",
@@ -105,6 +109,9 @@ interface Scenario {
   malformedPending?: boolean;
   /** Puts heldRsyncStub on the publish's PATH. */
   holdInRsync?: boolean;
+  /** Parks the release marker under a missing directory, so the harness's
+   * own release write fails after the hold. */
+  unreleasable?: boolean;
   /** The RUNNER_TEMP handed to the publish; absent = a private one under
    * the fixture. Two publishes sharing one prove the per-run root is
    * what keeps them apart, as on the runner where a job has one. */
@@ -129,7 +136,12 @@ function prepareFixture(scenario: Scenario): Fixture {
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
-  const hold = { ready: join(root, "rsync-ready"), release: join(root, "rsync-release") };
+  const releaseDir = scenario.unreleasable === true ? join(root, "missing") : root;
+  const hold = {
+    ready: join(root, "rsync-ready"),
+    release: join(releaseDir, "rsync-release"),
+    expired: join(root, "rsync-expired"),
+  };
   if (scenario.holdInRsync === true) {
     writeFileSync(join(bin, "rsync"), heldRsyncStub(hold), { mode: 0o755 });
   }
@@ -249,25 +261,30 @@ function runPublish(scenario: Scenario): Outcome {
   return outcome(f, boundedSpawnSync([process.execPath, script], { cwd: f.work, env: f.env }));
 }
 
-/** Runs a holdInRsync publish in the background, runs `meanwhile` once
- * the publish is parked in its rsync stub (every scratch worktree
- * populated), releases it, and returns both results. The child is
- * always released and reaped before this returns or throws - a
- * `meanwhile` failure surfaces after the child has exited, not around a
- * still-running one. One timer SIGKILLs the child at the harness bound;
- * a child that dies on a signal or exits before reaching the hold throws
- * (failed to look), never an outcome. */
+/** Runs a holdInRsync publish, runs `meanwhile` while it is parked, releases
+ * it, and returns both results. Child and stub are dead and the pipes drained
+ * before this returns or throws; a signal death or a pre-hold exit throws. */
 async function runPublishHeldAcross<T>(
   f: Fixture,
   meanwhile: () => T,
 ): Promise<{ held: Outcome; meanwhile: T }> {
+  // Its own process group: the stub is a grandchild holding the same pipes,
+  // so a kill aimed at the child alone would leave it polling to its bound.
   const child = Bun.spawn([process.execPath, script], {
     cwd: f.work,
     env: f.env,
     stdout: "pipe",
     stderr: "pipe",
+    detached: true,
   });
-  const deadline = setTimeout(() => child.kill("SIGKILL"), SPAWN_TIMEOUT_MS);
+  const killAll = () => {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  };
+  const deadline = setTimeout(killAll, SPAWN_TIMEOUT_MS);
   const output = Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -303,6 +320,19 @@ async function runPublishHeldAcross<T>(
     return { held: outcome(f, done), meanwhile: ran.result };
   } finally {
     clearTimeout(deadline);
+    if (child.exitCode === null && child.signalCode === null) killAll();
+    await Promise.all([child.exited, output]);
+  }
+}
+
+/** Whether `pid` still exists; a zombie counts until its parent reaps it. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
   }
 }
 
@@ -422,6 +452,30 @@ describe("publish.ts behavior (real git)", () => {
       );
       expectContentChangePublished(held);
       expectContentChangePublished(meanwhile);
+    },
+    2 * SPAWN_TIMEOUT_MS,
+  );
+
+  test(
+    "a harness failure after the hold leaves no publish or stub running",
+    async () => {
+      // The release write fails once the publish is parked, so the harness
+      // must take child and stub down itself. The stub's PID off its marker
+      // proves the hold was reached; no expiry marker means it was killed.
+      const f = prepareFixture({
+        tipTree: "drift",
+        tipMessage: healthyStamp,
+        holdInRsync: true,
+        unreleasable: true,
+      });
+      await expect(runPublishHeldAcross(f, () => undefined)).rejects.toThrow("ENOENT");
+      const stub = Number(readFileSync(f.hold.ready, "utf-8"));
+      expect(stub).toBeGreaterThan(1);
+      // A reparented stub is reaped by init a moment after its death.
+      for (let i = 0; i < 40 && alive(stub); i++) await Bun.sleep(50);
+      expect(alive(stub)).toBe(false);
+      expect(existsSync(f.hold.expired)).toBe(false);
+      expect(git(f.origin, ["rev-parse", "refs/heads/build"])).toBe(f.tip);
     },
     2 * SPAWN_TIMEOUT_MS,
   );

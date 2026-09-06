@@ -216,23 +216,9 @@ describe("rebuildBranchTree", () => {
   test(
     "a step past REBUILD_STEP_TIMEOUT_MS throws the deadline instead of hanging",
     () => {
-      // The knob is read at call time, so setting it here reaches the
-      // helper in-process. The thrown message must NAME the expiring step,
-      // pinning step()'s own bound: without that pin an unbounded step()
-      // would still satisfy a bare "timed out" match via stepCapture's
-      // write-tree deadline at the end. Without the bound, a wedged install
-      // runs unbounded under wait_for_build's 15-minute headroom and dies
-      // as a runner-level job kill instead of degrading to the warn path.
-      //
-      // The step that expires is a PATH stub, never real git: a SIGKILL
-      // landing between git's gitdir and commondir writes leaves a LOCKED
-      // admin entry with an empty commondir, which prune keeps and which
-      // kills every later `worktree add` in the checkout ("failed to read
-      // .git/worktrees/src/commondir") - measured once in CI as the hostile
-      // test below dying. The marker proves the stub started before the
-      // deadline, and the worktree listing must be the main worktree alone
-      // before and after (a non-empty reading, so an unobservable admin
-      // path cannot pass as "no residue").
+      // The message must NAME the expiring step: a bare "timed out" match
+      // would pass via stepCapture's write-tree deadline. The stub is not real
+      // git, since a SIGKILL mid-`worktree add` leaves a locked admin entry.
       const bin = mkdtempSync(join(tmpdir(), "rebuild-slow-git-"));
       const invoked = join(bin, "invoked");
       writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\n: > "${invoked}"\nexec sleep 30\n`, {
