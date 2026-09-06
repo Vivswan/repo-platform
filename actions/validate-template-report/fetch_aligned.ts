@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // The integrity leg's FETCH of the build tree at the recorded `_commit`. Its
 // build-branch compare both admits the sha and feeds freshness; a second
-// holds `_commit` at or ahead of the base ref's (the vintage floor).
+// holds `_commit` at or ahead of the base ref's (the vintage floor). The
+// compare's outputs are published only once both have passed.
 //
 // Env: GH_TOKEN, ALIGNED_DIR (cleared here), VERDICT_FILE (cleared here),
 // GITHUB_OUTPUT, GITHUB_REPOSITORY, BASE_REF (the vintage floor's ref).
@@ -62,14 +63,11 @@ const compared = capture(
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
 if (!succeeded(compared.exit)) {
-  setOutput("compare", "error");
   refuse(
     `could not confirm ${sha} is on ${OPERATOR_REPO}'s build branch: ${failureDetail(compared)}`,
   );
 }
 const [status = "", aheadBy = ""] = compared.stdout.trim().split(" ");
-setOutput("compare", status);
-setOutput("ahead-by", aheadBy);
 if (status !== "identical" && status !== "ahead") {
   refuse(
     `_commit ${sha} is not a published commit of ${OPERATOR_REPO}'s build branch (compare: ${status})`,
@@ -125,6 +123,13 @@ if (!succeeded(baseAnswers.exit)) {
     }
   }
 }
+
+// Freshness is the admission's outcome, published only once every part of
+// it passed: a refusal above leaves no compare for the report to set
+// beside the refusal, and a refusal below (fetch, unpack, layout) keeps a
+// distance the build branch did confirm.
+setOutput("compare", status);
+setOutput("ahead-by", aheadBy);
 
 const tree = treeOf(alignedDir);
 mkdirSync(tree, { recursive: true });

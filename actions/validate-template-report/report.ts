@@ -22,14 +22,16 @@ const MARKER = "<!-- repo-platform:validate-template -->";
 
 // A verdict is read only from a run whose scratch root was cleared: with the
 // clear step failed, fetch never ran and any verdict file on disk is stale.
+// The latest leg's report pair sits under the same root and is read on the
+// same condition.
 const clearOutcome = env("CLEAR_OUTCOME");
-const verdict: Integrity =
-  clearOutcome === "success"
-    ? readVerdict(requireEnv("VERDICT"))
-    : {
-        kind: "not-judged",
-        reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
-      };
+const cleared = clearOutcome === "success";
+const verdict: Integrity = cleared
+  ? readVerdict(requireEnv("VERDICT"))
+  : {
+      kind: "not-judged",
+      reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
+    };
 // Exported before anything else can go wrong: this line IS the gate.
 appendFileSync(
   requireEnv("GITHUB_OUTPUT"),
@@ -85,25 +87,29 @@ const bullets = (text: string | null): string[] =>
 // validator already reported is not said twice. A latest pass that never
 // wrote its findings is a setup failure worth a line, not silence.
 const LATEST_HEADING = "#### After your next sync";
-const alreadySaid = new Set([
-  ...bullets(verdict.kind === "findings" ? verdict.findings : ""),
-  ...bullets(advisories),
-]);
-const latestFindings = readReport(latestFindingsFile);
-const upcoming = [...bullets(latestFindings), ...bullets(readReport(latestAdvisoriesFile))].filter(
-  (line) => !alreadySaid.has(line),
-);
-const latest =
-  latestFindings === null
-    ? `\n\n${LATEST_HEADING}\n\nThe current template's validator exited before reporting. See the [run log](${runUrl}).`
-    : upcoming.length > 0
-      ? `\n\n${LATEST_HEADING}\n\n${upcoming.join("\n")}\n\nThese are warnings. The next sync brings these rules.`
-      : "";
+const latestSection = (): string => {
+  if (!cleared) return "";
+  const latestFindings = readReport(latestFindingsFile);
+  if (latestFindings === null) {
+    return `\n\n${LATEST_HEADING}\n\nThe current template's validator exited before reporting. See the [run log](${runUrl}).`;
+  }
+  const alreadySaid = new Set([
+    ...bullets(verdict.kind === "findings" ? verdict.findings : ""),
+    ...bullets(advisories),
+  ]);
+  const upcoming = [
+    ...bullets(latestFindings),
+    ...bullets(readReport(latestAdvisoriesFile)),
+  ].filter((line) => !alreadySaid.has(line));
+  if (upcoming.length === 0) return "";
+  return `\n\n${LATEST_HEADING}\n\n${upcoming.join("\n")}\n\nThese are warnings. The next sync brings these rules.`;
+};
+const latest = latestSection();
 
-// Freshness reads the fetch step's compare: `ahead` is the build branch
-// ahead of the recorded commit, `identical` is up to date, and anything
-// else (a diverged or unknown sha, a failed call, no call at all) is a run
-// the integrity leg already refused, so the refusal is the reason.
+// Freshness reads the fetch step's compare, published only once the whole
+// admission passed: `ahead` is the build branch ahead of the recorded
+// commit, `identical` is up to date, and no compare at all is a run the
+// integrity leg refused (or never reached), so the refusal is the reason.
 let freshness: string;
 let behind = false;
 if (compareStatus === "identical") {

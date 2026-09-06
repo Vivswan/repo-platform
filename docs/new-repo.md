@@ -81,7 +81,7 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 - The fetched tree runs on the bun its own `.bun-version` names, not on the current action's, so an older tree's lockfile is read by the bun that wrote it.
 - Integrity is ONE verdict per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
-- Freshness reads the same compare that admitted the commit, so a refused commit shows the refusal there too rather than a distance.
+- Freshness reads the same compare that admitted the commit, published only once the whole admission (build-branch membership, then the vintage floor) has passed, so a refused commit shows the refusal there too rather than a distance.
 
 ### What each module adds
 

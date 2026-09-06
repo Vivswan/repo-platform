@@ -87,9 +87,11 @@ runs:
 
     # No install step for this action's own scripts: no runtime deps.
     #
-    # The scratch root and the verdict file are predictable paths: cleared
-    # before anything reads them by a fixed rm on the literal paths, with the
-    # inherited shell knobs that could skip or rewrite the lines emptied.
+    # The scratch root, the verdict file, and the latest leg's report pair
+    # are predictable paths: cleared before anything reads them by ONE fixed
+    # rm on the literal paths (it attempts every removal and fails when any
+    # did), with the inherited shell knobs that could skip or rewrite the
+    # line emptied.
     - name: Clear the scratch root
       id: clear
       continue-on-error: true
@@ -97,9 +99,12 @@ runs:
       env:
         BASH_ENV: ""
         SHELLOPTS: ""
-      run: |
-        /bin/rm -rf "${{ runner.temp }}/aligned-validator"
-        /bin/rm -rf "${{ runner.temp }}/aligned-verdict.json"
+      run: >-
+        /bin/rm -rf
+        "${{ runner.temp }}/aligned-validator"
+        "${{ runner.temp }}/aligned-verdict.json"
+        "${{ runner.temp }}/latest-findings.md"
+        "${{ runner.temp }}/latest-advisories.md"
 
     # The integrity leg: fetch, the tree's bun, judge. A failed fetch writes
     # its own not-judged verdict and skips the steps behind it. BASE_REF is
