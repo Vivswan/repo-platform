@@ -147,6 +147,10 @@ Consume the template with copier, e.g.:
  *  dependencies, both reproducible from what is published. */
 export const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".turbo"]);
 
+/** Test files never publish either: nothing on the branch runs them, and
+ *  they import fixtures from tests/, which the branch does not carry. */
+export const TEST_FILE_SUFFIX = ".test.ts";
+
 /** The dependency-free library zone under actions/: shared code the
  *  composite actions and the shipped hooks import relatively, not an
  *  action of its own, so it ships with no action.yml. */
@@ -200,7 +204,8 @@ export function copyActions(repoRoot: string, dest: string): number {
       // filter the whole copy away.
       filter: (src) => {
         const segments = relative(actionRoot, src).split("/");
-        return !segments.some((segment) => EXCLUDED_DIRS.has(segment));
+        if (segments.some((segment) => EXCLUDED_DIRS.has(segment))) return false;
+        return !basename(src).endsWith(TEST_FILE_SUFFIX);
       },
     });
     files += countFiles(join(dest, "actions", name));

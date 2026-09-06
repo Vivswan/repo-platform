@@ -1400,10 +1400,9 @@ function runLatest(opts: LatestOptions = {}) {
 }
 
 describe("the action's latest leg", () => {
-  // Judged whole: the exit code (the step's colour only; continue-on-error
-  // keeps the action going), whether the validator judged the caller's
-  // checkout, and the report pair as report.ts will find it (null = never
-  // written, which report.ts tells apart from empty).
+  // Judged whole: exit code (the step's colour only), whether the validator
+  // judged the caller's checkout, and the report pair as report.ts finds it
+  // (null = never written, which report.ts tells apart from empty).
   const runs: [string, LatestOptions, ReturnType<typeof runLatest>][] = [
     [
       "a clean run writes an empty pair",
