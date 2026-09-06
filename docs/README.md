@@ -7,6 +7,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Goal | Read |
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
+| Know which conventions every managed repo follows, and what enforces each | [Fleet guidelines](fleet-guidelines.md) |
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
 | Read a `validate-template` result: what blocks, what only warns | [New repo: the template check](new-repo.md#the-template-check) |
 | Change a repository's settings or labels | [Settings](settings.md) |
@@ -41,22 +42,23 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 2. [Settings](settings.md) - the six-layer settings merge and how applies run.
 3. [All-green](all-green.md) - the required check: ci.yml's own gate job judging every needed result.
 4. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
+5. [Fleet guidelines](fleet-guidelines.md) - the conventions every managed repository follows, each with what enforces it.
 
 ### Modules
 
-5. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest served tag, latest/ = main).
-6. [Docs site](docs-site.md) - the repo's docs/ markdown as a versioned VitePress site under the central fleet theme.
-7. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
-8. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
-9. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
-10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, and docs-site modules share: lifecycle, release gating, renaming.
-11. [Toolchains](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+6. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest served tag, latest/ = main).
+7. [Docs site](docs-site.md) - the repo's docs/ markdown as a versioned VitePress site under the central fleet theme.
+8. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
+9. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
+10. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
+11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, and docs-site modules share: lifecycle, release gating, renaming.
+12. [Toolchains](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 
 ### Platform internals
 
-12. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
-13. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+13. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
+14. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
 
 ### Leaving
 
-14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+15. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
