@@ -44,6 +44,7 @@ import {
   skillModuleRosterRows,
   spliceInlineRegion,
   spliceRegion,
+  stepListIndent,
   strayActionPinFiles,
   strayPinFiles,
   targets,
@@ -62,14 +63,16 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 
 /** A composite manifest fenced for its bun-setup region, `body` inside. */
-function fenced(file: string, body: string[]): string {
+function fenced(file: string, body: string[], indent = 4): string {
   const { begin, end } = markerLines(
     bunSetupRegionName(file),
     "#",
     "",
     "scripts/action_bun_setup.ts",
   );
-  return `runs:\n  using: composite\n  steps:\n    ${begin}\n${body.map((line) => `${line}\n`).join("")}    ${end}\n    - name: Run\n      shell: bash\n      run: echo ok\n`;
+  const pad = " ".repeat(indent);
+  const region = body.map((line) => `${line}\n`).join("");
+  return `runs:\n  using: composite\n  steps:\n${pad}${begin}\n${region}${pad}${end}\n${pad}- name: Run\n${pad}  shell: bash\n${pad}  run: echo ok\n`;
 }
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
@@ -740,11 +743,18 @@ describe("the actions' generated bun setup", () => {
         },
       ],
     ],
-  ] as const)("bunSetupSteps(%s) renders the four steps at step depth", (variant, expected) => {
-    const body = bunSetupSteps(variant);
-    expect(body.every((line) => line === "" || line.startsWith("    "))).toBe(true);
-    expect(steps(body)).toEqual(expected);
-  });
+  ] as const)(
+    "bunSetupSteps(%s) renders the four steps at the given step depth",
+    (variant, expected) => {
+      for (const indent of [4, 6]) {
+        const body = bunSetupSteps(variant, indent);
+        const pad = " ".repeat(indent);
+        expect(body.every((line) => line === "" || line.startsWith(pad))).toBe(true);
+        expect(body.some((line) => line.startsWith(`${pad}- name:`))).toBe(true);
+        expect(steps(body)).toEqual(expected);
+      }
+    },
+  );
 
   test("the region name follows the declared ready-output roster", () => {
     expect([...READY_OUTPUT_ACTIONS]).toEqual(["actions/validate-template-report/action.yml"]);
@@ -760,7 +770,15 @@ describe("the actions' generated bun setup", () => {
     const file = "actions/x/action.yml";
     const name = bunSetupRegionName(file);
     const splice = (text: string) =>
-      spliceRegion(text, file, name, "#", bunSetupSteps(name), "", "scripts/action_bun_setup.ts");
+      spliceRegion(
+        text,
+        file,
+        name,
+        "#",
+        bunSetupSteps(name, 4),
+        "",
+        "scripts/action_bun_setup.ts",
+      );
     const once = splice(fenced(file, []));
     expect(splice(once)).toBe(once);
     const edited = once.replace(
@@ -776,8 +794,9 @@ describe("the actions' generated bun setup", () => {
   // targets from the roster (leaving a hand edit inside a region unheld by
   // generate:check) is red here, not silent.
   test("every fenced action in the live tree is a generator target under its region name", () => {
-    const fencedFiles = bunSetupActionFiles(join(import.meta.dir, "../../actions"));
-    expect(fencedFiles.length).toBeGreaterThanOrEqual(8);
+    const fenced = bunSetupActionFiles(join(import.meta.dir, "../../actions"));
+    expect(fenced.length).toBeGreaterThanOrEqual(8);
+    const fencedFiles = fenced.map(({ file }) => file);
     const actionTargets = targets(loadManifests()).flatMap((target) =>
       target.syntax === "line" && fencedFiles.includes(target.file)
         ? [
@@ -790,9 +809,9 @@ describe("the actions' generated bun setup", () => {
         : [],
     );
     expect(actionTargets).toEqual(
-      fencedFiles.map((file) => {
+      fenced.map(({ file, indent }) => {
         const name = bunSetupRegionName(file);
-        return [file, "#", [[name, bunSetupSteps(name), "scripts/action_bun_setup.ts"]]];
+        return [file, "#", [[name, bunSetupSteps(name, indent), "scripts/action_bun_setup.ts"]]];
       }),
     );
   });
@@ -805,7 +824,7 @@ describe("the actions' generated bun setup", () => {
     writeFileSync(join(dir, "pages", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
     writeFileSync(
       join(dir, "pages", "links", "action.yml"),
-      fenced("actions/pages/links/action.yml", bunSetupSteps("bun-setup")),
+      fenced("actions/pages/links/action.yml", bunSetupSteps("bun-setup", 4)),
     );
     // The ready-output action fenced as the plain variant: not its region.
     mkdirSync(join(dir, "validate-template-report"));
@@ -821,14 +840,61 @@ describe("the actions' generated bun setup", () => {
       fenced("actions/typo/node_modules/dep/action.yml", []),
     );
     expect(bunSetupActionFiles(dir)).toEqual([
-      "actions/pages/links/action.yml",
-      "actions/typo/action.yml",
+      { file: "actions/pages/links/action.yml", indent: 4 },
+      { file: "actions/typo/action.yml", indent: 4 },
     ]);
     writeFileSync(
       join(dir, "validate-template-report", "action.yml"),
       fenced("actions/validate-template-report/action.yml", []),
     );
-    expect(bunSetupActionFiles(dir)).toContain("actions/validate-template-report/action.yml");
+    expect(bunSetupActionFiles(dir)).toContainEqual({
+      file: "actions/validate-template-report/action.yml",
+      indent: 4,
+    });
+  });
+
+  // The rendered depth is the detected depth: a six-space step list gets a
+  // six-space region that parses to the same steps, and regenerating it
+  // (what --check computes) changes nothing.
+  test("a six-space action regenerates to valid YAML with its region at six spaces, a fixed point", () => {
+    const dir = temp.dir("action-six-");
+    const file = "actions/six/action.yml";
+    const name = bunSetupRegionName(file);
+    mkdirSync(join(dir, "six"));
+    writeFileSync(join(dir, "six", "action.yml"), fenced(file, [], 6));
+    const roster = bunSetupActionFiles(dir);
+    expect(roster).toEqual([{ file, indent: 6 }]);
+    const render = (text: string) =>
+      spliceRegion(
+        text,
+        file,
+        name,
+        "#",
+        bunSetupSteps(name, roster[0].indent),
+        "",
+        "scripts/action_bun_setup.ts",
+      );
+    const once = render(fenced(file, [], 6));
+    expect(render(once)).toBe(once);
+    expect(bunSetupRegionProblem(file, once)).toBeNull();
+    expect(stepListIndent(once.split("\n"))).toBe(6);
+    const { begin, end } = markerLines(name, "#", "", "scripts/action_bun_setup.ts");
+    const region = once.split("\n");
+    const inside = region.slice(
+      region.indexOf(`      ${begin}`) + 1,
+      region.indexOf(`      ${end}`),
+    );
+    expect(inside.every((line) => line === "" || line.startsWith("      "))).toBe(true);
+    expect(parseYaml(once).runs.steps.map((step: Record<string, unknown>) => step.id)).toEqual([
+      "bun",
+      "setup-bun",
+      "setup-bun-retry",
+      "action-bun",
+      undefined,
+    ]);
+    expect(parseYaml(once).runs.steps.slice(0, 4)).toEqual(
+      parseYaml(fenced(file, bunSetupSteps(name, 4), 4)).runs.steps.slice(0, 4),
+    );
   });
 });
 

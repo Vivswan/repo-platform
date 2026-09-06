@@ -99,7 +99,13 @@ import {
   unsafeStepCondition,
   zToDollar,
 } from "../../scripts/check_ssot";
-import { actionSetsUpBun, MARKER_TOKENS, markerLines, mdMarkers } from "../../scripts/generate";
+import {
+  actionSetsUpBun,
+  actionSteps,
+  MARKER_TOKENS,
+  markerLines,
+  mdMarkers,
+} from "../../scripts/generate";
 import { templateCarries } from "../../scripts/lib/ts_extract.ts";
 
 describe("applyDivergences", () => {
@@ -1222,7 +1228,7 @@ describe("actionsBunGuardMismatches", () => {
   using: composite
   steps:
     ${markers.begin}
-${bunSetupSteps(REGION).join("\n")}
+${bunSetupSteps(REGION, 4).join("\n")}
     ${markers.end}
 
 ${RUN_STEP}`;
@@ -1272,14 +1278,13 @@ ${RUN_STEP}`;
       regionMismatchFor(report, "bun-setup-ready", "no 'bun-setup-ready' marker pair"),
     ]);
     const ready = markerLines("bun-setup-ready", "#", "", "scripts/action_bun_setup.ts");
-    const fenced = `runs:\n  using: composite\n  steps:\n    ${ready.begin}\n${bunSetupSteps("bun-setup-ready").join("\n")}\n    ${ready.end}\n\n${RUN_STEP}`;
+    const fenced = `runs:\n  using: composite\n  steps:\n    ${ready.begin}\n${bunSetupSteps("bun-setup-ready", 4).join("\n")}\n    ${ready.end}\n\n${RUN_STEP}`;
     expect(actionsBunGuardMismatches(report, fenced)).toEqual([]);
   });
 
-  // The rule matches its promise: one pair, at the step list's depth, in
-  // order. A pair moved to column 1 would still splice (markers match
-  // trimmed) while reading as prose in the manifest; a doubled or lone
-  // marker would break the next regeneration.
+  // One pair, at the step list's depth, in order: a column-1 pair would
+  // still splice (markers match trimmed); a doubled or lone marker breaks
+  // the next regeneration.
   test.each([
     {
       reason: "both markers at column 1",
@@ -1295,7 +1300,7 @@ ${RUN_STEP}`;
     },
     {
       reason: "a duplicate region",
-      text: `${canonical}    ${markers.begin}\n${bunSetupSteps(REGION).join("\n")}\n    ${markers.end}\n`,
+      text: `${canonical}    ${markers.begin}\n${bunSetupSteps(REGION, 4).join("\n")}\n    ${markers.end}\n`,
       problem: `2 BEGIN and 2 END markers for '${REGION}' - exactly one of each`,
     },
     {
@@ -1320,6 +1325,25 @@ ${RUN_STEP}`;
     expect(actionsBunGuardMismatches(FILE, text)).toEqual([
       regionMismatchFor(FILE, REGION, problem),
     ]);
+  });
+
+  // The region renders at whatever column the step list sits at; the rule
+  // accepts the pair there.
+  test("a six-space step list with its region rendered at six spaces passes", () => {
+    const six = `runs:
+  using: composite
+  steps:
+      ${markers.begin}
+${bunSetupSteps(REGION, 6).join("\n")}
+      ${markers.end}
+      - name: Run
+        shell: bash
+        env:
+          ACTION_BUN: \${{ steps.action-bun.outputs.path }}
+        run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
+`;
+    expect(actionSteps(six)).toEqual(actionSteps(canonical));
+    expect(actionsBunGuardMismatches(FILE, six)).toEqual([]);
   });
 
   // A later setup-bun (the fetched tree's, a caller's) can put another bun

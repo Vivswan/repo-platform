@@ -625,7 +625,7 @@ function actionManifests(actionsDir: string): { dir: string; file: string; text:
 
 /** The indentation of a composite manifest's step list: the shallowest
  *  `- key:` line after `steps:` (block-scalar bodies sit deeper). */
-function stepListIndent(lines: string[]): number | null {
+export function stepListIndent(lines: string[]): number | null {
   const stepsAt = lines.findIndex((line) => /^ *steps:\s*$/.test(line));
   if (stepsAt === -1) return null;
   const indents = lines
@@ -661,13 +661,14 @@ export function bunSetupRegionProblem(file: string, text: string): string | null
   return null;
 }
 
-/** The action manifests carrying their bun-setup region, sorted: the
- *  generator's roster. */
-export function bunSetupActionFiles(actionsDir: string): string[] {
+/** The action manifests carrying a well-formed bun-setup region, sorted, each
+ *  with the step-list indent its region is rendered at: the generator's
+ *  roster. */
+export function bunSetupActionFiles(actionsDir: string): { file: string; indent: number }[] {
   return actionManifests(actionsDir)
     .filter(({ file, text }) => bunSetupRegionProblem(file, text) === null)
-    .map(({ file }) => file)
-    .sort();
+    .map(({ file, text }) => ({ file, indent: stepListIndent(text.split("\n")) as number }))
+    .sort((a, b) => a.file.localeCompare(b.file));
 }
 
 /** Every directory under actions/ carrying a generated .bun-version, sorted:
@@ -994,13 +995,13 @@ export function targets(manifests: ModuleManifest[]): Target[] {
         ],
       ],
     },
-    ...bunSetupActionFiles(join(REPO_ROOT, "actions")).map((file): Target => {
+    ...bunSetupActionFiles(join(REPO_ROOT, "actions")).map(({ file, indent }): Target => {
       const name = bunSetupRegionName(file);
       return {
         file,
         syntax: "line",
         prefix: "#",
-        regions: [[name, () => bunSetupSteps(name), BUN_SETUP_SOURCES]],
+        regions: [[name, () => bunSetupSteps(name, indent), BUN_SETUP_SOURCES]],
       };
     }),
     {
