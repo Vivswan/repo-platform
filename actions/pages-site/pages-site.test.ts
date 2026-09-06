@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../../tests/shared/bounded_spawn.ts";
 import { tempDirs } from "../../tests/shared/temp_dir.ts";
 import {
   deriveRewrites,
@@ -487,6 +488,67 @@ describe("central theme guard", () => {
     writeFileSync(join(dir, "README.md"), "# Home\n");
     expect(() => assertCentralTheme(dir)).not.toThrow();
   });
+});
+
+describe("strict check build", () => {
+  // The whole CHECK path through a real `vitepress build`: Vue's production
+  // SSR renderer used to log a page's render error and emit the page with
+  // an empty body while the build exited 0, so the check job stayed green
+  // on blank pages.
+  test.each([
+    {
+      name: "a Vue interpolation in markdown fails the build with the render error",
+      body: "Use `{{ x.y }}` here.",
+      fails: true,
+    },
+    {
+      name: "plain markdown passes with its body rendered",
+      body: "Plain text here.",
+      fails: false,
+    },
+  ])(
+    "$name",
+    ({ body, fails }) => {
+      const root = temp.dir("pages-site-check-");
+      const docs = join(root, "ws", "docs");
+      mkdirSync(docs, { recursive: true });
+      mkdirSync(join(root, "runner-temp"));
+      writeFileSync(join(docs, "README.md"), "# Home\n\nSee [page](page.md).\n");
+      writeFileSync(join(docs, "page.md"), `# Page\n\n${body}\n`);
+      const result = boundedSpawnSync([process.execPath, join(import.meta.dir, "build.ts")], {
+        env: {
+          ...process.env,
+          GITHUB_WORKSPACE: join(root, "ws"),
+          GITHUB_REPOSITORY: "o/r",
+          RUNNER_TEMP: join(root, "runner-temp"),
+          CHECK: "true",
+          DOCS_DIR: "docs",
+          SITE_TITLE: "t",
+        },
+        timeoutMs: 180_000,
+      });
+      const page = join(
+        realpathSync(join(root, "runner-temp")),
+        "pages-site",
+        "build-0",
+        ".vitepress",
+        "dist",
+        "page.html",
+      );
+      if (fails) {
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain(
+          "TypeError: undefined is not an object (evaluating '_ctx.x.y')",
+        );
+        expect(existsSync(page)).toBe(false);
+      } else {
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("docs build check passed");
+        expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
+      }
+    },
+    200_000,
+  );
 });
 
 describe("link-rot reporting", () => {
