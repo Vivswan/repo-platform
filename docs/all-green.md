@@ -69,7 +69,7 @@ checks + ci -> all-green -> post-green (repo-owned hook) -> release (release-ple
 
 ### Opting a PR into an immediate fleet sync
 
-The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else, each line optionally fenced in one pair of backticks so it renders as code. Squash merges put the body right under the subject verbatim, so the merged commit carries the block and post-green reads it from git alone.
+The PR body OPENS with a directives block: its first paragraph is one bracketed directive per line and nothing else; a bracket-only line may be fenced in one pair of backticks so it renders as code, and a justified `all` line is written bare (a code span followed by text is prose). Squash merges put the body right under the subject verbatim, so the merged commit carries the block and post-green reads it from git alone.
 
 ```text
 `[fleet-sync: public]`

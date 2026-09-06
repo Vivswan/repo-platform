@@ -246,7 +246,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: `o/r`, o/s]": 1 of 2 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)',
+          "[fleet-sync] scope: 1 of 2 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
         ],
       },
     },
@@ -335,7 +335,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: o/r,]": the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma',
+          "[fleet-sync] scope: the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma",
         ],
       },
     },
@@ -345,7 +345,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: all, public] every repo changed": "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+          '[fleet-sync] scope: "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
         ],
       },
     },
@@ -355,7 +355,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: all, all] every repo changed": "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+          '[fleet-sync] scope: "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
         ],
       },
     },
@@ -365,7 +365,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: o/r, just-a-name, o/r/extra]": 2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)',
+          "[fleet-sync] scope: 2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
         ],
       },
     },
@@ -443,6 +443,7 @@ describe("main", () => {
   const unjustified = commit(message("`[fleet-sync: all]`", PROSE));
   const reasoned = commit(message("[fleet-sync: public] the ci changed", PROSE));
   const context = commit(message("[Context] This is ordinary PR prose.", PROSE));
+  const leaky = commit(message("[fleet-sync: SecretOrg/PrivateRepo,]", PROSE));
   const mention = commit(message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."));
 
   /** A clone whose origin carries main plus, when `stamp` is given, a
@@ -685,6 +686,17 @@ describe("main", () => {
       stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
     },
     {
+      reason: "a scope error names no entry: the private slug never reaches the log",
+      sha: leaky,
+      exitCode: 1,
+      output: "",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          `::error::${short(sha)}: [fleet-sync] scope: the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma`,
+        ),
+    },
+    {
       reason: "a block at the bottom of the body: red leg, nothing armed",
       sha: bottom,
       exitCode: 1,
@@ -699,6 +711,10 @@ describe("main", () => {
     const before = git(unpublished, ["rev-parse", `${sha}~1`]);
     const result = run(unpublished, sha, before);
     expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
+    for (const channel of [result.stdout, result.stderr, result.output]) {
+      expect(channel).not.toContain("SecretOrg");
+      expect(channel).not.toContain("PrivateRepo");
+    }
   });
 
   test("a truncated judged sha is refused with no output line", () => {

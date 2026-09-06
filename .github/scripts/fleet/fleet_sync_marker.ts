@@ -156,16 +156,19 @@ export function parseDirectives(body: string): Directives {
       errors.push(`"${line}": ${NEEDS_REASON}`);
       continue;
     }
+    // parseScope reads "" as the whole fleet (an empty dispatch input); on a
+    // directive it is a typo, refused here before the shared grammar.
     if (value === "") {
       errors.push(
         `"${line}" has an empty scope: write [${keyword}: public], [${keyword}: private], owner/name slugs, or [${keyword}: all] <justification>`,
       );
       continue;
     }
-    // The one scope grammar: what the plans accept, the leg accepts.
+    // The one scope grammar: what the plans accept, the leg accepts. Its
+    // messages carry counts, never entries, so the line is not quoted here.
     const parsed = parseScope(value);
     if (parsed.kind === "error") {
-      errors.push(`"${line}": ${parsed.message}`);
+      errors.push(`[${keyword}] scope: ${parsed.message}`);
       continue;
     }
     if (parsed.kind === "all") {
