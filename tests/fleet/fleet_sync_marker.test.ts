@@ -324,6 +324,11 @@ describe("parseDirectives", () => {
       expected: misplaced("[fleet-sync]"),
     },
     {
+      reason: "a tilde fence line ends a span the same way: the mention inside it stays misplaced",
+      body: message(PROSE, "Before `\n~~~text\n[fleet-sync]\n~~~\nAfter `"),
+      expected: misplaced("[fleet-sync]"),
+    },
+    {
       reason:
         "the merged body of #89 as GitHub wrapped it (the observed red read-directives on main)",
       body: readFileSync(join(import.meta.dir, "fixtures", "squash_731d2d37.txt"), "utf8"),

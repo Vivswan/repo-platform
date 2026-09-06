@@ -36,15 +36,14 @@ const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 
-// A fence line (CommonMark: up to three spaces, three or more backticks, an info string without
-// backticks) opens or closes a code block: its backticks are never code-span delimiters, and no
-// span pairs across it.
-const FENCE_LINE = /^ {0,3}`{3,}[^`]*$/;
+// A fence line (CommonMark: up to three spaces, then three or more backticks with an info string
+// free of backticks, or three or more tildes) opens or closes a code block: its marks are never
+// code-span delimiters, and no span pairs across it.
+const FENCE_LINE = /^ {0,3}(?:`{3,}[^`]*|~{3,}.*)$/;
 
 /** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
  *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
- *  unclosed run is literal text). Linear: the runs are tokenized once and each one's next
- *  equal-length run is found in one right-to-left pass. */
+ *  unclosed run is literal text). Linear: one tokenizing pass, one right-to-left pairing pass. */
 function blankCodeSpans(lines: string[]): string[] {
   const text = lines.join("\n");
   const runs: { start: number; end: number }[] = [];
