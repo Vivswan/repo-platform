@@ -12,14 +12,12 @@ import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
 import {
@@ -29,6 +27,9 @@ import {
   renderReport,
 } from "../../.github/scripts/sync/tail_tripwire.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/tail_tripwire.ts");
 
@@ -128,7 +129,7 @@ function makeTarget(
   headFiles: Record<string, string | Buffer>,
   delivered: Record<string, string | Buffer>,
 ): string {
-  const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+  const base = temp.dir("tail-tripwire-");
   const root = join(base, "target");
   mkdirSync(root);
   for (const [rel, content] of Object.entries(headFiles)) {
@@ -734,7 +735,7 @@ describe("tail_tripwire script", () => {
     // symlink (a real managed-repo shape: CLAUDE.md and friends are links
     // to AGENTS.md by design); the old bytes probe handed that string to
     // the marker parser as if it were the previous copy.
-    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const base = temp.dir("tail-tripwire-");
     const root = join(base, "target");
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, MANIFEST_NAME), headManifest);
@@ -755,7 +756,7 @@ describe("tail_tripwire script", () => {
     // `git show HEAD:AGENTS.md` answers "tree HEAD:AGENTS.md" plus entry
     // names for a directory; that prose must never stand in for the
     // previous copy.
-    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const base = temp.dir("tail-tripwire-");
     const root = join(base, "target");
     mkdirSync(join(root, ".github"), { recursive: true });
     mkdirSync(join(root, "AGENTS.md"));
@@ -774,7 +775,7 @@ describe("tail_tripwire script", () => {
   test("a symlinked HEAD manifest is as unusable as a damaged one", () => {
     // The manifest path itself as a link: `git show` would answer the
     // link target, not manifest JSON - only a blob is ever parsed.
-    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const base = temp.dir("tail-tripwire-");
     const root = join(base, "target");
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".github", "manifest-real.json"), headManifest);

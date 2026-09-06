@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { selectsSettingsSync } from "../../.github/scripts/fleet/build_settings_matrix";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 // End-to-end harness for the selector: the script runs against stub `gh`
 // and `curl` binaries on PATH (plus a no-op `sleep`, so the retry loop
@@ -50,7 +52,7 @@ describe("selectsSettingsSync", () => {
 describe("select_settings_repos.ts", () => {
   const repoRoot = join(import.meta.dir, "..", "..");
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
-  const root = mkdtempSync(join(tmpdir(), "select-settings-"));
+  const root = temp.dir("select-settings-");
   const bin = join(root, "bin");
   const fixture = join(root, "fixture");
 

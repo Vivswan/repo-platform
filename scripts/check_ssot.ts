@@ -2437,7 +2437,7 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
   "tests/build-branches/publish_behavior.test.ts":
     "one publish.ts child runs in the background, parked inside a PATH-stubbed rsync while a second publish runs to completion in the foreground; a timer SIGKILLs the child at SPAWN_TIMEOUT_MS, the stub bounds its own wait, and a killed child throws instead of yielding an outcome",
   "scripts/run_tests.ts":
-    "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child and removes the per-run TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
+    "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child, fails a run that left entries in the per-run TMPDIR, and removes that TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
 };
 
 /** The exact-set judgment for one file's async Bun.spawn mentions
@@ -2480,6 +2480,87 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
     ];
   }
   return [];
+}
+
+/** The one file allowed to call mkdtemp in the test trees: the fixture
+ *  owner whose afterAll removes what it made. */
+export const TEMP_DIR_HELPER = "tests/shared/temp_dir.ts";
+
+/** A file `bun test` discovers and runs: `.test`, `_test`, `.spec`, or
+ *  `_spec` before a script extension. Measured on bun 1.4.0: the .mts,
+ *  .cts, and .mjs spellings run too, beyond the four the docs list; JSX
+ *  variants are included (none exist here, and one would fail the parse
+ *  loudly rather than escape). */
+export const BUN_TEST_FILE = /[._](test|spec)\.[mc]?[jt]sx?$/;
+const SCRIPT_FILE = /\.[mc]?[jt]sx?$/;
+
+/** Every mkdtemp identifier in a source file, one entry per identifier,
+ *  read off the AST: a named import (`mkdtempSync`, `mkdtemp`, from
+ *  node:fs or fs/promises, any alias), a member access (`fs.mkdtempSync`,
+ *  `promises.mkdtemp`), a destructure, a bare reference - any Identifier
+ *  node spelling either name is a site, so a mention in a comment, a
+ *  string, or a template body (the launcher test's generated probe
+ *  source) is not one. */
+export function mkdtempSites(source: string): number[] {
+  return parseTs(source)
+    .forEachDescendantAsArray()
+    .filter((node) => Node.isIdentifier(node) && /^mkdtemp(Sync)?$/.test(node.getText()))
+    .map((node) => node.getStartLineNumber());
+}
+
+/** The judgment for one selected file: a symlink fails closed (its
+ *  target is not audited in place, wherever it points); otherwise,
+ *  outside TEMP_DIR_HELPER no mkdtemp at all, per site; the helper
+ *  itself must carry one, or the scan has lost its anchor (the
+ *  identifier detection proven against the real call). */
+export function tempDirFileMismatches(
+  file: { path: string; symlink: boolean },
+  source: () => string,
+): Mismatch[] {
+  if (file.symlink) {
+    return [
+      {
+        file: file.path,
+        expected: "a regular file (a symlink's target is not audited in place)",
+        got: "a symlink",
+      },
+    ];
+  }
+  return tempDirSiteMismatches(file.path, source());
+}
+
+/** Selection and judgment for the walked tests/ and actions/ trees: every
+ *  script under tests/, every file bun test discovers under actions/,
+ *  each judged by tempDirFileMismatches; the helper must be among them
+ *  as a regular file, or the anchor is lost. */
+export function tempDirTreeMismatches(
+  files: { path: string; symlink: boolean }[],
+  read: (rel: string) => string,
+): Mismatch[] {
+  const selected = files.filter(
+    (f) =>
+      (f.path.startsWith("tests/") && SCRIPT_FILE.test(f.path)) ||
+      (f.path.startsWith("actions/") && BUN_TEST_FILE.test(f.path)),
+  );
+  if (!selected.some((f) => f.path === TEMP_DIR_HELPER && !f.symlink)) {
+    throw new Error(`${TEMP_DIR_HELPER}: the temp-dir helper is missing - anchor lost`);
+  }
+  return selected.flatMap((f) => tempDirFileMismatches(f, () => read(f.path)));
+}
+
+export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
+  const lines = mkdtempSites(source);
+  if (rel === TEMP_DIR_HELPER) {
+    if (lines.length === 0) {
+      throw new Error(`${rel}: no mkdtemp call in the temp-dir helper - anchor lost`);
+    }
+    return [];
+  }
+  return lines.map((line) => ({
+    file: `${rel}:${line}`,
+    expected: `a fixture from ${TEMP_DIR_HELPER} (tempDirs() at the file's top level, then temp.dir(prefix)) - the helper removes it after the file's tests`,
+    got: "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
+  }));
 }
 
 // --- scratch-scoped scripts ------------------------------------------------
@@ -6512,6 +6593,14 @@ const rules: Rule[] = [
   },
 
   {
+    // No bare mkdtemp in the test trees: TEMP_DIR_HELPER owns fixtures
+    // and is the one file that may call it. Fixed-name writes under
+    // os.tmpdir() are the launcher's leftover check's to catch.
+    name: "temp-dirs-through-helper",
+    run: () => tempDirTreeMismatches([...walkFiles("tests"), ...walkFiles("actions")], read),
+  },
+
+  {
     // No async process stream write in the executable trees: on
     // pipe-backed stdio (the Actions runner shape) bun queues these
     // writes, and a process.exit anywhere later in the run drops
@@ -6625,6 +6714,7 @@ export const RULE_ROSTER = [
   "settings-hidden-step-notices",
   "settings-label-preflight",
   "spawn-sync-hang-bound",
+  "temp-dirs-through-helper",
   "stream-write-sync",
   "local-bun-runtime",
 ] as const;

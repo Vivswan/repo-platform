@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureNetwork,
@@ -11,6 +10,9 @@ import {
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 // captureNetwork is the fleet's hang backstop: every gh/curl subprocess in
 // the plan jobs goes through it, so a stalled network fails the run at the
@@ -185,7 +187,7 @@ describe("notice builders", () => {
 });
 
 describe("readDispatchRepo", () => {
-  const root = mkdtempSync(join(tmpdir(), "discovery-dispatch-"));
+  const root = temp.dir("discovery-dispatch-");
 
   function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
     const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
@@ -370,7 +372,7 @@ describe("readDispatchRepo", () => {
 // discoverWritableRepos and runStage exit the process on failure, so both
 // run behind a subprocess entry file with a stub gh on PATH.
 describe("discoverWritableRepos and runStage", () => {
-  const root = mkdtempSync(join(tmpdir(), "discovery-proc-"));
+  const root = temp.dir("discovery-proc-");
   const bin = join(root, "bin");
   const discoveryPath = join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts");
 

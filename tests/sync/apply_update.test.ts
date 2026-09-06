@@ -8,18 +8,12 @@
 // untouched and never invokes copier.
 
 import { describe, expect, test } from "bun:test";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/apply_update.ts");
 const STALE = "_commit: stale\n";
@@ -58,7 +52,7 @@ function gitIn(cwd: string) {
 }
 
 function run(row: Row) {
-  const root = mkdtempSync(join(tmpdir(), "apply-update-"));
+  const root = temp.dir("apply-update-");
   const locked = join(root, "locked");
   try {
     const src = join(root, "src");
@@ -163,7 +157,6 @@ function run(row: Row) {
     };
   } finally {
     chmodSync(locked, 0o700);
-    rmSync(root, { recursive: true, force: true });
   }
 }
 

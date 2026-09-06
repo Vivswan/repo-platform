@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   assignHints,
@@ -13,6 +12,9 @@ import {
   verifyTag,
 } from "../../.github/scripts/fleet/redact.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 describe("hintName", () => {
   test.each([
@@ -268,7 +270,7 @@ describe("parseSelectionList", () => {
 
 describe("enrich CLI", () => {
   test("end to end over fixture files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "redact-"));
+    const dir = temp.dir("redact-");
     writeFileSync(
       join(dir, "selection.json"),
       JSON.stringify([
@@ -336,7 +338,7 @@ describe("enrich CLI", () => {
     // The bare identifier is the leaking form: a raw JSON.parse error
     // quotes it ('Unexpected identifier "hiddenserver"') into this public
     // log, and both readJson inputs carry private slugs.
-    const dir = mkdtempSync(join(tmpdir(), "redact-unparseable-"));
+    const dir = temp.dir("redact-unparseable-");
     writeFileSync(join(dir, "selection.json"), '[{"repo": hiddenserver}]');
     writeFileSync(join(dir, "discovered.json"), "[]");
     writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');

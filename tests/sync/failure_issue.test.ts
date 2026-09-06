@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const fixtures = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/failure_issue.ts");
 const SLUG = "Vivswan/hidden-server";
@@ -72,7 +74,7 @@ interface Options {
 }
 
 function run(mode: string | undefined, opts: Options = {}) {
-  const root = mkdtempSync(join(tmpdir(), "failure-issue-"));
+  const root = fixtures.dir("failure-issue-");
   const temp = join(root, "temp");
   const bin = join(root, "bin");
   mkdirSync(temp);

@@ -5,8 +5,7 @@
 // rejected by BOTH the same way, never sliced differently.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { carryManagedRegion } from "../../.github/scripts/sync/preserve_local_content";
 import {
@@ -15,6 +14,9 @@ import {
   splitManagedRegion,
 } from "../../actions/shared/grammar";
 import { existingLocalSides } from "../../scripts/build_gitignore";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const HB = HASH_REGION_MARKERS.begin;
 const HE = HASH_REGION_MARKERS.end;
@@ -32,7 +34,7 @@ const MALFORMED: Record<string, string> = {
 };
 
 function onDisk(content: string): string {
-  const path = join(mkdtempSync(join(tmpdir(), "gitignore-region-")), ".gitignore");
+  const path = join(temp.dir("gitignore-region-"), ".gitignore");
   writeFileSync(path, content);
   return path;
 }
@@ -77,9 +79,7 @@ describe("the two writers agree on the shared accept/reject", () => {
   });
 
   test("a file that does not exist yet gets the regenerator's default seed", () => {
-    const sides = existingLocalSides(
-      join(mkdtempSync(join(tmpdir(), "gitignore-region-")), "none"),
-    );
+    const sides = existingLocalSides(join(temp.dir("gitignore-region-"), "none"));
     expect(sides).toEqual({
       above:
         "# Repository-specific ignore patterns go outside the managed region:\n" +

@@ -3,14 +3,12 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   carryManagedRegion,
@@ -18,6 +16,9 @@ import {
   splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_local_content.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -403,7 +404,7 @@ function runScript(
 }
 
 function makeTarget(files: Record<string, string>): string {
-  const base = mkdtempSync(join(tmpdir(), "preserve-local-"));
+  const base = temp.dir("preserve-local-");
   const root = join(base, "target");
   mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
@@ -821,7 +822,7 @@ describe("preserve_local_content render mode", () => {
     newFiles: Record<string, string>,
     oldFiles: Record<string, string>,
   ): { renderDir: string; oldRenderDir: string } {
-    const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
+    const base = temp.dir("preserve-render-");
     const renderDir = join(base, "render-new");
     const oldRenderDir = join(base, "render-old");
     for (const [dir, files] of [
@@ -1020,7 +1021,7 @@ describe("preserve_local_content render mode", () => {
     // outside the checkout with the final component looking clean.
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    const outside = mkdtempSync(join(tmpdir(), "preserve-outside-"));
+    const outside = temp.dir("preserve-outside-");
     symlinkSync(outside, join(root, "docs"));
     const { renderDir, oldRenderDir } = makeRenderPair(
       [{ path: "docs/AGENTS.md", begin: B, end: E }],
@@ -1399,7 +1400,7 @@ describe("preserve_local_content render mode", () => {
   test("a render tree without the ownership manifest fails loudly", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
+    const base = temp.dir("preserve-render-");
     mkdirSync(join(base, "render-new"));
     mkdirSync(join(base, "render-old"));
     const result = runRender(root, join(base, "render-new"), join(base, "render-old"));
@@ -1410,7 +1411,7 @@ describe("preserve_local_content render mode", () => {
   test("a pre-grammar RENDER manifest fails loudly instead of guessing the carry", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
+    const base = temp.dir("preserve-render-");
     const renderDir = join(base, "render-new");
     mkdirSync(join(renderDir, ".github"), { recursive: true });
     mkdirSync(join(base, "render-old"));
@@ -1477,7 +1478,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
   test(
     "restores the repo-owned sides a recovery re-render wipes",
     () => {
-      const base = mkdtempSync(join(tmpdir(), "preserve-local-e2e-"));
+      const base = temp.dir("preserve-local-e2e-");
       const tree = join(base, "bt");
       const target = join(base, "out");
       // Only the copier renders need a wide bound; everything else keeps

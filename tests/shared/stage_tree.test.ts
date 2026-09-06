@@ -15,12 +15,14 @@
 // tree shipped today (publish.ts's skip guard and stamp recovery see
 // the same staged diff).
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import { boundedSpawnSync } from "./bounded_spawn";
+import { tempDirs } from "./temp_dir";
+
+const temp = tempDirs();
 
 const root = join(import.meta.dir, "../..");
 
@@ -141,14 +143,10 @@ function stagedBlob(
 }
 
 beforeAll(() => {
-  fixtures = mkdtempSync(join(tmpdir(), "stage-tree-"));
+  fixtures = temp.dir("stage-tree-");
   writeFileSync(join(fixtures, "empty-gitconfig"), "");
   mkdirSync(join(fixtures, "empty-xdg"));
   hermeticEnv = buildHermeticEnv();
-});
-
-afterAll(() => {
-  rmSync(fixtures, { recursive: true, force: true });
 });
 
 describe("stageComposedTreeArgv", () => {

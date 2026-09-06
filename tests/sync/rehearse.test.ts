@@ -5,8 +5,7 @@
 // a real rehearsal.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   manifestStatus,
@@ -15,6 +14,9 @@ import {
   validationErrorLines,
 } from "../../.github/scripts/sync/rehearse.ts";
 import * as sectionFiles from "../../.github/scripts/sync/section_files.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 describe("PR_BODY_SECTIONS", () => {
   const source = (rel: string) => readFileSync(join(import.meta.dir, "../..", rel), "utf-8");
@@ -165,7 +167,7 @@ describe("manifestStatus", () => {
   }
 
   function tree(manifest: string | null, files: Record<string, string> = {}): string {
-    const root = mkdtempSync(join(tmpdir(), "rehearse-manifest-"));
+    const root = temp.dir("rehearse-manifest-");
     mkdirSync(join(root, ".github"), { recursive: true });
     if (manifest !== null) writeFileSync(join(root, MANIFEST), manifest);
     for (const [rel, content] of Object.entries(files)) {

@@ -6,8 +6,7 @@
 // writers use (section_files.ts), so a renamed report file fails here.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   MIRRORS_NOTE_NAME,
@@ -18,6 +17,9 @@ import {
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/open_pr.ts");
 
@@ -48,7 +50,7 @@ interface Options {
 }
 
 function run(opts: Options = {}) {
-  const root = mkdtempSync(join(tmpdir(), "open-pr-"));
+  const root = temp.dir("open-pr-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });

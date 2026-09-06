@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   appendHiddenFailure,
@@ -8,6 +7,9 @@ import {
   parseHiddenFailures,
 } from "../../.github/scripts/sync/run_hidden.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const fixtures = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/run_hidden.ts");
 
@@ -15,7 +17,7 @@ function run(
   hide: string,
   cmd: string[],
 ): { exitCode: number; stdout: string; stderr: string; temp: string } {
-  const temp = join(mkdtempSync(join(tmpdir(), "run-hidden-")), "temp");
+  const temp = join(fixtures.dir("run-hidden-"), "temp");
   mkdirSync(temp);
   const proc = boundedSpawnSync(["bun", script, "leak test", "--", ...cmd], {
     env: { ...process.env, HIDE_DETAILS: hide, RUNNER_TEMP: temp },
@@ -87,7 +89,7 @@ describe("run_hidden.ts", () => {
     // silently lost. Unreachable today (labels are literals, capture paths
     // squeeze through captureName), so the writer treats it as a
     // programmer error instead of guarding every reader.
-    const temp = join(mkdtempSync(join(tmpdir(), "run-hidden-")), "temp");
+    const temp = join(fixtures.dir("run-hidden-"), "temp");
     mkdirSync(temp);
     expect(() => appendHiddenFailure(temp, "tab\tlabel", 1, "/tmp/rt/a.log")).toThrow();
     expect(() => appendHiddenFailure(temp, "label", 1, "/tmp/rt/a\n.log")).toThrow();

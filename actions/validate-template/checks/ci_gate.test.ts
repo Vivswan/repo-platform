@@ -1,15 +1,12 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tempDirs } from "../../../tests/shared/temp_dir.ts";
 import { loadContext } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { checkCiGate } from "./ci_gate.ts";
 
-const roots: string[] = [];
-afterAll(() => {
-  for (const root of roots) rmSync(root, { recursive: true, force: true });
-});
+const temp = tempDirs();
 
 const ANSWERS = "_commit: x\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n";
 
@@ -17,8 +14,7 @@ const ANSWERS = "_commit: x\n_src_path: gh:Vivswan/repo-platform\ngithub_usernam
  *  (omitted when null); the result is the whole findings list, remedy text
  *  included - a regression in the wording readers act on must fail here. */
 function gate(ci: string | null, answers: string | null = ANSWERS): Finding[] {
-  const root = mkdtempSync(join(tmpdir(), "ci-gate-"));
-  roots.push(root);
+  const root = temp.dir("ci-gate-");
   const files: Record<string, string> = {};
   if (answers !== null) files[".github/.copier-answers.yml"] = answers;
   if (ci !== null) files[".github/workflows/ci.yml"] = ci;

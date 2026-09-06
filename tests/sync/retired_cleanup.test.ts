@@ -5,10 +5,12 @@
 // stubbed on PATH so the test reaches the parse without a template tree.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/retired_cleanup.ts");
 
@@ -25,7 +27,7 @@ function gitFreeEnv(): Record<string, string> {
 
 describe("retired_cleanup retired-paths parse", () => {
   test("malformed retired_paths output fails value-free (no SyntaxError echo)", () => {
-    const root = mkdtempSync(join(tmpdir(), "retired-cleanup-"));
+    const root = temp.dir("retired-cleanup-");
     const bin = join(root, "bin");
     mkdirSync(bin);
     // The stub bun intercepts the two pipeline stages and forwards

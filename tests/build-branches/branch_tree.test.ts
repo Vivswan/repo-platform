@@ -2,14 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
   assembleBranchTree,
@@ -23,6 +21,9 @@ import {
   SHARED_DIR,
   UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const REPO = "/home/user/repo-platform";
 const REPO_ROOT = join(import.meta.dir, "../..");
@@ -88,21 +89,19 @@ describe("destOverlapsRepo", () => {
 
 describe("canonicalize", () => {
   test("dereferences a symlinked parent so an alias of the repo still overlaps", () => {
-    const root = mkdtempSync(join(tmpdir(), "bt-"));
+    const root = temp.dir("bt-");
     const repo = join(root, "real", "repo");
     mkdirSync(repo, { recursive: true });
     symlinkSync(join(root, "real"), join(root, "alias"));
     const aliased = canonicalize(join(root, "alias", "repo"));
     expect(destOverlapsRepo(aliased, canonicalize(repo))).toBe(true);
-    rmSync(root, { recursive: true, force: true });
   });
 
   test("re-attaches a not-yet-existing tail unresolved", () => {
-    const root = mkdtempSync(join(tmpdir(), "bt-"));
+    const root = temp.dir("bt-");
     expect(canonicalize(join(root, "no", "such", "dir"))).toBe(
       join(canonicalize(root), "no", "such", "dir"),
     );
-    rmSync(root, { recursive: true, force: true });
   });
 });
 
@@ -110,7 +109,7 @@ describe("canonicalize", () => {
 // sources and dependency manifests ship, every EXCLUDED_DIRS name is cut, and
 // a tree with nothing to publish fails here rather than 404ing every fleet run.
 function actionsFixture(): string {
-  const root = mkdtempSync(join(tmpdir(), "branch-actions-"));
+  const root = temp.dir("branch-actions-");
   const action = join(root, "actions", "check-typography");
   mkdirSync(join(action, "node_modules", "monaco-editor"), { recursive: true });
   mkdirSync(join(action, "lib"), { recursive: true });
@@ -131,7 +130,7 @@ function actionsFixture(): string {
 describe("copyActions", () => {
   test("publishes source and manifests, never installed dependencies or build output", () => {
     const root = actionsFixture();
-    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    const dest = temp.dir("branch-actions-dest-");
     const files = copyActions(root, dest);
 
     // The whole published tree: the manifests ship because the action
@@ -147,8 +146,8 @@ describe("copyActions", () => {
   });
 
   test("refuses a tree with no actions at all", () => {
-    const empty = mkdtempSync(join(tmpdir(), "branch-actions-empty-"));
-    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    const empty = temp.dir("branch-actions-empty-");
+    const dest = temp.dir("branch-actions-dest-");
     // No actions/ directory: the checkout is wrong, and shipping anyway
     // would break the fleet rather than this run.
     expect(() => copyActions(empty, dest)).toThrow("no actions/ directory");
@@ -165,7 +164,7 @@ describe("copyActions", () => {
     const orphan = join(root, "actions", "orphaned-action");
     mkdirSync(orphan, { recursive: true });
     writeFileSync(join(orphan, "runtime.ts"), "export {};\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    const dest = temp.dir("branch-actions-dest-");
     expect(() => copyActions(root, dest)).toThrow("actions/orphaned-action");
     expect(() => copyActions(root, dest)).toThrow("no action.yml");
     // The guard fires before the first copy: even the VALID sibling action
@@ -181,11 +180,11 @@ describe("copyActions", () => {
     const root = actionsFixture();
     mkdirSync(join(root, "actions", SHARED_DIR), { recursive: true });
     writeFileSync(join(root, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    const dest = temp.dir("branch-actions-dest-");
     expect(copyActions(root, dest)).toBe(5);
     expect(existsSync(join(dest, "actions", SHARED_DIR, "grammar.ts"))).toBe(true);
 
-    const sharedOnly = mkdtempSync(join(tmpdir(), "branch-actions-shared-only-"));
+    const sharedOnly = temp.dir("branch-actions-shared-only-");
     mkdirSync(join(sharedOnly, "actions", SHARED_DIR), { recursive: true });
     writeFileSync(join(sharedOnly, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
@@ -194,11 +193,11 @@ describe("copyActions", () => {
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
     // The exclusion filter tests segments relative to the action root: a
     // checkout parked under some node_modules/ ancestor must still publish.
-    const parent = mkdtempSync(join(tmpdir(), "branch-actions-ancestor-"));
+    const parent = temp.dir("branch-actions-ancestor-");
     const root = join(parent, "node_modules", "repo");
     mkdirSync(join(root, "actions", "demo"), { recursive: true });
     writeFileSync(join(root, "actions", "demo", "action.yml"), "name: Demo\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    const dest = temp.dir("branch-actions-dest-");
     expect(copyActions(root, dest)).toBe(1);
     expect(existsSync(join(dest, "actions", "demo", "action.yml"))).toBe(true);
   });
@@ -207,7 +206,7 @@ describe("copyActions", () => {
 describe("assembleBranchTree", () => {
   // One real assembly shared by the layout and extraction-safety tests
   // (compose runs once; the tree is read-only afterwards).
-  const dest = mkdtempSync(join(tmpdir(), "branch-tree-real-"));
+  const dest = temp.dir("branch-tree-real-");
   assembleBranchTree(dest);
 
   test("the branch root carries exactly the unified layout, actions/ mirroring the checkout", () => {
@@ -300,7 +299,7 @@ describe("copyFleetWorkflows", () => {
   /** A checkout whose rostered workflows each carry distinct content (so a
    *  copy that swaps or rewrites one is visible), fleet-ci's given. */
   function fixture(fleetCiContent: string): { root: string; contents: Record<string, string> } {
-    const root = mkdtempSync(join(tmpdir(), "branch-workflows-"));
+    const root = temp.dir("branch-workflows-");
     const wf = join(root, ".github", "workflows");
     mkdirSync(wf, { recursive: true });
     const contents: Record<string, string> = {};
@@ -314,7 +313,7 @@ describe("copyFleetWorkflows", () => {
 
   test("ships the whole roster of workflow_call-only workflows byte-for-byte", () => {
     const { root, contents } = fixture("on:\n  workflow_call:\n    inputs: {}\njobs: {}\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    const dest = temp.dir("branch-workflows-dest-");
     copyFleetWorkflows(root, dest);
     // The whole shipped set, name to bytes: the fleet runs the file at the
     // ref, so a dropped, swapped, or rewritten workflow is an unreviewed
@@ -328,20 +327,20 @@ describe("copyFleetWorkflows", () => {
 
   test("refuses a workflow with any trigger beyond workflow_call, naming file and trigger", () => {
     const { root } = fixture("on:\n  workflow_call:\n  push:\n    branches: [main]\njobs: {}\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    const dest = temp.dir("branch-workflows-dest-");
     expect(() => copyFleetWorkflows(root, dest)).toThrow(/fleet-ci\.yml.*'push'/);
   });
 
   test("refuses a workflow with no triggers at all (nothing provable is nothing shippable)", () => {
     const { root } = fixture("jobs: {}\n");
-    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    const dest = temp.dir("branch-workflows-dest-");
     expect(() => copyFleetWorkflows(root, dest)).toThrow("declares no triggers");
   });
 
   test("refuses a tree missing a rostered workflow, naming it", () => {
     const { root } = fixture("on:\n  workflow_call:\njobs: {}\n");
     rmSync(join(root, ".github", "workflows", "reusable-codeql.yml"));
-    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    const dest = temp.dir("branch-workflows-dest-");
     expect(() => copyFleetWorkflows(root, dest)).toThrow("reusable-codeql.yml is missing");
   });
 });

@@ -3,11 +3,13 @@
 // The main() rows run the script on a scratch repo and read GITHUB_OUTPUT.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const SUBJECT = "feat: ship the thing (#12)";
 const PROSE = "## How\n\nThe thing ships.\n\n## Proof\n\n- bun run check green";
@@ -287,7 +289,7 @@ describe("parseDirectives", () => {
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
-  const root = mkdtempSync(join(tmpdir(), "fleet-sync-marker-"));
+  const root = temp.dir("fleet-sync-marker-");
 
   function git(args: string[]): string {
     const proc = boundedSpawnSync(["git", "-C", root, ...args]);

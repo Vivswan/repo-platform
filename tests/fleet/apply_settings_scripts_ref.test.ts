@@ -9,12 +9,14 @@
 // with shared/commit_stamp.ts, the shape's owner, on every fixture.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { commitStampParse, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const workflowPath = resolve(
   import.meta.dir,
@@ -45,7 +47,7 @@ function resolveRunBlock(): string {
  *  with a stub `gh` whose commit message and compare status come from the
  *  fixture. Every stub call is logged so the no-call path is provable. */
 function run(workflowSha: string, gh: { message?: string; status?: string }) {
-  const root = mkdtempSync(join(tmpdir(), "scripts-ref-"));
+  const root = temp.dir("scripts-ref-");
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
   writeFileSync(

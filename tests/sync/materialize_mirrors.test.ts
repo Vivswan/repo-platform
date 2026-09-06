@@ -6,14 +6,7 @@
 // each must go red when its guard branch is stubbed out.
 
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -29,12 +22,15 @@ import {
 } from "../../.github/scripts/sync/materialize_mirrors.ts";
 import type { ManifestEntryShape } from "../../actions/shared/manifest.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 /** The tree lives one level under its scratch dir so a `..` target the
  *  escape tests refuse resolves to per-test scratch, never the shared
  *  tmpdir (an unarmed write there would poison every later run). */
 function makeTree(files: Record<string, string>): string {
-  const root = join(mkdtempSync(join(tmpdir(), "mirrors-")), "tree");
+  const root = join(temp.dir("mirrors-"), "tree");
   mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(join(root, rel, ".."), { recursive: true });
@@ -325,7 +321,7 @@ describe("planMirrors", () => {
 
   test("a symlinked source ancestor is refused - the read could leave the checkout", () => {
     const root = makeTree({ "LICENSE.md": "l" });
-    const outside = mkdtempSync(join(tmpdir(), "mirrors-src-"));
+    const outside = temp.dir("mirrors-src-");
     writeFileSync(join(outside, "x.md"), "outside bytes");
     symlinkSync(outside, join(root, "docs"));
     const manifest: Record<string, ManifestEntryShape> = {
@@ -339,7 +335,7 @@ describe("planMirrors", () => {
 
   test("a symlinked literal glob prefix is refused, not read as matched-nothing", () => {
     const root = makeTree({ "LICENSE.md": "l" });
-    symlinkSync(mkdtempSync(join(tmpdir(), "mirrors-out-")), join(root, "linked"));
+    symlinkSync(temp.dir("mirrors-out-"), join(root, "linked"));
     const plan = planMirrors(root, decl("LICENSE.md", "linked/*/LICENSE.md"), MANIFEST, "");
     expect(plan.writes).toEqual([]);
     expect(plan.unmatched).toEqual([]);
@@ -422,7 +418,7 @@ describe("materializeWrites", () => {
 
   test("a symlinked target is refused - the write would follow the link", () => {
     const root = makeTree({ "LICENSE.md": "l" });
-    const outside = join(mkdtempSync(join(tmpdir(), "mirrors-out-")), "victim.md");
+    const outside = join(temp.dir("mirrors-out-"), "victim.md");
     writeFileSync(outside, "untouched");
     symlinkSync(outside, join(root, "copy.md"));
     const { written, refusals } = materializeWrites(root, [
@@ -435,7 +431,7 @@ describe("materializeWrites", () => {
 
   test("a symlinked ancestor is refused", () => {
     const root = makeTree({ "LICENSE.md": "l" });
-    symlinkSync(mkdtempSync(join(tmpdir(), "mirrors-out-")), join(root, "linked"));
+    symlinkSync(temp.dir("mirrors-out-"), join(root, "linked"));
     const { written, refusals } = materializeWrites(root, [
       { source: "LICENSE.md", target: "linked/copy.md" },
     ]);

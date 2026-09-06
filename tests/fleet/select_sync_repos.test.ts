@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 // End-to-end harness for the sync fan-out selector, stub-gh/curl style
 // (see select_settings_repos.test.ts). Personas:
@@ -16,7 +18,7 @@ import { join } from "node:path";
 describe("select_sync_repos.ts", () => {
   const repoRoot = join(import.meta.dir, "..", "..");
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
-  const root = mkdtempSync(join(tmpdir(), "select-sync-"));
+  const root = temp.dir("select-sync-");
   const bin = join(root, "bin");
   const fixture = join(root, "fixture");
 

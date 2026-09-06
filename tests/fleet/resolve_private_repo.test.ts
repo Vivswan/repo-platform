@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { verifyTag } from "../../.github/scripts/fleet/redact.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 // End-to-end harness for the leg-side resolver, stub-gh style (see
 // select_settings_repos.test.ts). The resolver imports redact.ts's own
@@ -11,7 +13,7 @@ import { boundedSpawnSync } from "../shared/bounded_spawn";
 // resolve; only `gh` is stubbed.
 describe("resolve_private_repo.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/resolve_private_repo.ts");
-  const root = mkdtempSync(join(tmpdir(), "resolve-private-"));
+  const root = temp.dir("resolve-private-");
   const bin = join(root, "bin");
   const PAT = "resolver-test-pat";
   const RUN_ID = "31337";

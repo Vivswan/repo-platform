@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boundedSpawnSync } from "./bounded_spawn";
+import { tempDirs } from "./temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/shared/open_automation_pr.ts");
 
@@ -46,7 +48,7 @@ interface Options {
 }
 
 function run(opts: Options = {}) {
-  const root = mkdtempSync(join(tmpdir(), "open-automation-pr-"));
+  const root = temp.dir("open-automation-pr-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "git"), stub("git"), { mode: 0o755 });

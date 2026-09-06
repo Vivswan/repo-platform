@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SKIP_DIRS, walkFiles } from "../../.github/scripts/sync/walk.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 /** The conflict-recovery skip set, spelled out: every name is planted in
  * the fixture below, so a member dropped from SKIP_DIRS surfaces as an
@@ -11,7 +13,7 @@ const SKIP_NAMES = [".git", ".repo-platform-src", "node_modules", ".venv", "__py
 
 describe("walkFiles", () => {
   test("returns regular files sorted, skipping every SKIP_DIRS name and symlinks", () => {
-    const root = mkdtempSync(join(tmpdir(), "walk-"));
+    const root = temp.dir("walk-");
     mkdirSync(join(root, "docs"));
     writeFileSync(join(root, "b.txt"), "b");
     writeFileSync(join(root, "docs", "a.md"), "a");
@@ -28,7 +30,7 @@ describe("walkFiles", () => {
     // Both conflict-recovery passes skipped the name before stat-ing it;
     // the shared walk must keep that shape or the passes would diverge
     // from their history on a file literally named node_modules.
-    const root = mkdtempSync(join(tmpdir(), "walk-"));
+    const root = temp.dir("walk-");
     writeFileSync(join(root, "node_modules"), "a file, not a directory");
     writeFileSync(join(root, "kept.txt"), "kept");
     expect(walkFiles(root)).toEqual(["kept.txt"]);

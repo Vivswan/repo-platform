@@ -5,8 +5,7 @@
 // can be target-derived (private repo names, descriptions).
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -15,10 +14,13 @@ import {
   parseWith,
 } from "../../.github/scripts/shared/json.ts";
 import { boundedSpawnSync } from "./bounded_spawn";
+import { tempDirs } from "./temp_dir";
+
+const temp = tempDirs();
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
 
-const root = mkdtempSync(join(tmpdir(), "json-proc-"));
+const root = temp.dir("json-proc-");
 const entry = join(root, "entry.ts");
 writeFileSync(
   entry,

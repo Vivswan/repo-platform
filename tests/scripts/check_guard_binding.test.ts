@@ -5,9 +5,8 @@
 // guard-binding-vanished-snippet-branch entry): the weekly arming audit
 // neuters the branch in a scratch clone and requires that test red.
 
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   deletionTripwire,
@@ -25,6 +24,9 @@ import {
   RETIRED_GUARDS,
 } from "../../scripts/guard_registry.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const root = join(import.meta.dir, "../..");
 
@@ -236,18 +238,12 @@ describe("extractRegistryIds", () => {
 // own three forwarding lines stay review-covered: a CLI-level red would
 // need mutating this real repo's registry.
 describe("deletionTripwire (real git plumbing)", () => {
-  const scratchDirs: string[] = [];
-  afterAll(() => {
-    for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
-  });
-
   // Hermetic env for the scratch SETUP (stage_tree.test.ts's pattern):
   // GIT_* scrubbed (hook-driven runs export GIT_DIR, which would redirect
   // the fixture git at this repo), config scopes and XDG pinned empty so
   // a machine-global hook, template, or signing rule cannot false-red
   // the fixture commits - the arming audit runs this whole file.
-  const fixtures = mkdtempSync(join(tmpdir(), "guard-tripwire-env-"));
-  scratchDirs.push(fixtures);
+  const fixtures = temp.dir("guard-tripwire-env-");
   writeFileSync(join(fixtures, "empty-gitconfig"), "");
   mkdirSync(join(fixtures, "empty-xdg"));
   const hermeticEnv = (() => {
@@ -275,8 +271,7 @@ describe("deletionTripwire (real git plumbing)", () => {
   /** A scratch repo whose origin/main registry carries kept+dropped;
    *  origin/main is HEAD's commit (the on-main shape) until advanced. */
   function baseRepo(): string {
-    const dir = mkdtempSync(join(tmpdir(), "guard-tripwire-"));
-    scratchDirs.push(dir);
+    const dir = temp.dir("guard-tripwire-");
     git(dir, ["init", "--quiet", "-b", "main"]);
     mkdirSync(join(dir, "scripts"));
     writeFileSync(join(dir, "scripts/guard_registry.ts"), registrySource(["kept", "dropped"]));
@@ -315,8 +310,7 @@ describe("deletionTripwire (real git plumbing)", () => {
   });
 
   test("no origin/main ref fails OPEN: a named skip, never problems", () => {
-    const dir = mkdtempSync(join(tmpdir(), "guard-tripwire-"));
-    scratchDirs.push(dir);
+    const dir = temp.dir("guard-tripwire-");
     git(dir, ["init", "--quiet", "-b", "main"]);
     writeFileSync(join(dir, "lone.txt"), "no remote here\n");
     git(dir, ["add", "-A"]);

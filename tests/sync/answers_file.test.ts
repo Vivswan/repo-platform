@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
@@ -10,10 +9,13 @@ import {
   readAnswersFile,
   recordedCommitMismatch,
 } from "../../.github/scripts/sync/answers_file.ts";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 /** A checkout root with only its .github/ directory. */
 function checkout(): string {
-  const dir = mkdtempSync(join(tmpdir(), "answers-file-"));
+  const dir = temp.dir("answers-file-");
   mkdirSync(join(dir, ".github"));
   return dir;
 }
@@ -113,7 +115,7 @@ describe("readAnswersFile", () => {
   });
 
   test("a failure to look (ELOOP through a symlink loop) propagates, never reads as absence", () => {
-    const dir = mkdtempSync(join(tmpdir(), "answers-file-"));
+    const dir = temp.dir("answers-file-");
     symlinkSync(join(dir, "loop"), join(dir, "loop"));
     let caught: unknown;
     try {

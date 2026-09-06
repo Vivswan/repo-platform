@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
@@ -9,9 +8,12 @@ import {
   readSkipIfExists,
   retiredPaths,
 } from "../../.github/scripts/sync/retired_paths";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 function makeRender(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "render-"));
+  const root = temp.dir("render-");
   for (const [rel, content] of Object.entries(files)) {
     const path = join(root, rel);
     mkdirSync(join(path, ".."), { recursive: true });

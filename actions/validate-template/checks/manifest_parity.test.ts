@@ -1,15 +1,12 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tempDirs } from "../../../tests/shared/temp_dir.ts";
 import { MANIFEST_NAME } from "../../shared/manifest.ts";
 import { loadContext } from "../context.ts";
 import { checkManifestParity } from "./manifest_parity.ts";
 
-const roots: string[] = [];
-afterAll(() => {
-  for (const root of roots) rmSync(root, { recursive: true, force: true });
-});
+const temp = tempDirs();
 
 const sha = (text: string) =>
   new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
@@ -23,8 +20,7 @@ const split = (begin: string, end: string, hash: string, grammar = "managed-regi
  *  roster cross-check contributes nothing and this check's own verdicts,
  *  remedies included, are the whole list. */
 function render(): string {
-  const root = mkdtempSync(join(tmpdir(), "manifest-parity-"));
-  roots.push(root);
+  const root = temp.dir("manifest-parity-");
   const region = `${B}\n# Notes\n${E}\n`;
   const files: Record<string, string> = {
     ".github/.copier-answers.yml": "_commit: c0ffee\n_src_path: gh:Vivswan/repo-platform\n",

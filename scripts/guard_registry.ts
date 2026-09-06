@@ -500,6 +500,29 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block",
   },
+  // The test trees' fixture discipline: each fails OPEN if unarmed -
+  // fixtures pile up under the real temp directory with every gate green.
+  {
+    id: "temp-dir-afterall-removal",
+    hazard:
+      "the fixture owner's afterAll stops removing: every test file's directories outlive the run under the real os.tmpdir() on direct `bun test` invocations, and only the launcher's scratch ever hides it",
+    guardFile: "tests/shared/temp_dir.ts",
+    snippet: "rmSync(dir, { recursive: true, force: true });",
+    mutated: "void dir;",
+    testFile: "tests/shared/temp_dir.test.ts",
+    testName:
+      "the afterAll removal is ARMED: a passing file's fixture is gone once the child exits",
+  },
+  {
+    id: "run-tests-leftover-verdict",
+    hazard:
+      "the launcher's leftover judgment rewired to the bare exit code: a fixture made outside the helper, or one whose file never finished, passes `bun run test` green and leaks on every direct run",
+    guardFile: "scripts/run_tests.ts",
+    snippet: "return leftoverExitCode(exitCodeOf(child), readdirSync(scratch));",
+    mutated: "return exitCodeOf(child);",
+    testFile: "tests/scripts/run_tests.test.ts",
+    testName: "the leftover verdict is ARMED: a leaking green run exits 1 naming the fixture",
+  },
 ];
 
 /** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY

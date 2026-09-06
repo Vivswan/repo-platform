@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/wait_for_build.ts");
 
@@ -103,7 +105,7 @@ interface Options {
 }
 
 function run(opts: Options = {}) {
-  const root = mkdtempSync(join(tmpdir(), "wait-for-build-"));
+  const root = temp.dir("wait-for-build-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "git"), gitStub, { mode: 0o755 });
@@ -391,7 +393,7 @@ describe("wait_for_build.ts", () => {
     // the rebuild: pointing RUNNER_TEMP under a regular FILE makes
     // mkdtemp throw before any rebuild step, and the wait must still
     // warn-and-continue.
-    const root = mkdtempSync(join(tmpdir(), "wait-broken-temp-"));
+    const root = temp.dir("wait-broken-temp-");
     writeFileSync(join(root, "a-file"), "not a directory\n");
     const r = run({
       tipMessage: stampMessage(OLD_SOURCE),

@@ -5,9 +5,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDirs } from "../../tests/shared/temp_dir";
 import {
   blockTitle,
   buildBody,
@@ -26,6 +26,8 @@ import {
   runUrl,
   type Stream,
 } from "./fuzz-issue";
+
+const temp = tempDirs();
 
 const env = {
   GITHUB_SERVER_URL: "https://github.com",
@@ -86,13 +88,12 @@ describe("failureDirs", () => {
   });
 
   test("ignores top-level files and non-contract names", () => {
-    const root = mkdtempSync(join(tmpdir(), "dirs-"));
+    const root = temp.dir("dirs-");
     mkdirSync(join(root, "good_target-1.x"));
     mkdirSync(join(root, "bad name with spaces"));
     writeFileSync(join(root, "stray-file"), "not a dir");
     const dirs = failureDirs(root).map((d) => d.split("/").pop());
     expect(dirs).toEqual(["good_target-1.x"]);
-    rmSync(root, { recursive: true, force: true });
   });
 });
 
@@ -117,7 +118,7 @@ describe("buildBody", () => {
   let root: string;
 
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), "failures-"));
+    root = temp.dir("failures-");
     const crash = join(root, "nm_frame");
     mkdirSync(crash, { recursive: true });
     writeFileSync(
@@ -139,10 +140,6 @@ describe("buildBody", () => {
     // failureDirs orders by mtime; two mkdirs can tie, so pin nm_frame older.
     utimesSync(crash, new Date(1_000_000), new Date(1_000_000));
     utimesSync(orphan, new Date(2_000_000), new Date(2_000_000));
-  });
-
-  afterAll(() => {
-    rmSync(root, { recursive: true, force: true });
   });
 
   test.each([
@@ -182,7 +179,7 @@ describe("buildBody", () => {
   );
 
   test("caps the body under the GitHub limit and says how many were omitted", () => {
-    const bigRoot = mkdtempSync(join(tmpdir(), "big-"));
+    const bigRoot = temp.dir("big-");
     const filler = "x".repeat(5000);
     for (let i = 0; i < 40; i++) {
       const dir = join(bigRoot, `target-${i}`);
@@ -192,21 +189,19 @@ describe("buildBody", () => {
     const body = buildBody(failureDirs(bigRoot), env, "a");
     expect(body.length).toBeLessThan(65_536);
     expect(body).toContain("omitted to stay under the GitHub body limit");
-    rmSync(bigRoot, { recursive: true, force: true });
   });
 
   test("a single giant single-line report still produces a body under the limit", () => {
     // One report that is a single 70,000-char line, which line truncation
     // cannot shorten. The character cap must keep the whole body under
     // GitHub's 65,536 limit so the filing itself does not fail.
-    const giantRoot = mkdtempSync(join(tmpdir(), "giant-"));
+    const giantRoot = temp.dir("giant-");
     const dir = join(giantRoot, "handshake");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "report.md"), `# handshake crashed\n${"x".repeat(70_000)}`);
     const body = buildBody(failureDirs(giantRoot), env, "a");
     expect(body.length).toBeLessThan(65_536);
     expect(body).toContain("## handshake crashed");
-    rmSync(giantRoot, { recursive: true, force: true });
   });
 
   test("files a bare notice when there are no failure dirs", () => {

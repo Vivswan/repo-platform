@@ -7,15 +7,7 @@
 // path), the refusals, and the GITHUB_OUTPUT line settings-fleet reads.
 
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import {
   SETTINGS_INPUT_PATHS,
@@ -24,6 +16,9 @@ import {
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { SETTINGS_LAYER_ORDER } from "../../scripts/module_manifests.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const ZEROS = "0".repeat(40);
 // git's empty tree, the base a branch-creating push is diffed from.
@@ -182,7 +177,7 @@ function relativeImports(source: string): { path: string }[] {
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/settings_inputs_changed.ts");
-  const root = mkdtempSync(join(tmpdir(), "settings-inputs-changed-"));
+  const root = temp.dir("settings-inputs-changed-");
 
   function git(cwd: string, args: string[]): string {
     const proc = boundedSpawnSync([

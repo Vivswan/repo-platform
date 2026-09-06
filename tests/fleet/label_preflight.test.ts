@@ -5,12 +5,14 @@
 // label and its referencing file - the message a human acts on.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockedRemovals } from "../../.github/scripts/fleet/label_preflight.ts";
 import { collectReferences } from "../../.github/scripts/fleet/label_references.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/fleet/label_preflight.ts");
 
@@ -78,7 +80,7 @@ interface Options {
 }
 
 function run(opts: Options) {
-  const root = mkdtempSync(join(tmpdir(), "label-preflight-"));
+  const root = temp.dir("label-preflight-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });

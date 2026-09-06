@@ -23,17 +23,18 @@ import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pendingRefFor } from "../../.github/scripts/build-branches/pending.ts";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/build-branches/publish.ts");
 
@@ -132,7 +133,7 @@ interface Fixture {
 }
 
 function prepareFixture(scenario: Scenario): Fixture {
-  const root = mkdtempSync(join(tmpdir(), "publish-behavior-"));
+  const root = temp.dir("publish-behavior-");
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
@@ -434,7 +435,7 @@ describe("publish.ts behavior (real git)", () => {
       // branch worktree with its own, and the first's commit would have
       // landed on the second's origin. Each fixture's outcome must be
       // the single-publish outcome, scratch residue included.
-      const runnerTemp = mkdtempSync(join(tmpdir(), "publish-behavior-runner-temp-"));
+      const runnerTemp = temp.dir("publish-behavior-runner-temp-");
       const { held, meanwhile } = await runPublishHeldAcross(
         prepareFixture({
           tipTree: "drift",
