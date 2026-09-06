@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { checkCiGate } from "../../../../../actions/validate-template-report/validator/checks/ci_gate.ts";
 import { loadContext } from "../../../../../actions/validate-template-report/validator/context.ts";
 import {
-  advisory,
   error,
   type Finding,
 } from "../../../../../actions/validate-template-report/validator/findings.ts";
@@ -29,9 +28,6 @@ function gate(ci: string | null, answers: string | null = ANSWERS): Finding[] {
   return checkCiGate(loadContext(root, false));
 }
 
-const addJob = (job: string) => advisory(`ci.yml: consider adding a \`${job}\` job`);
-const FANOUT_ADVISORIES = ["actionlint", "gitleaks", "yamllint", "commit-names"].map(addJob);
-
 const SINGLE_CALL = [
   "jobs:",
   "  checks:",
@@ -49,19 +45,35 @@ const SINGLE_CALL = [
   "",
 ].join("\n");
 
-const LEGACY_GATE = [
+/** A gate judging through an inline script, in a fan-out ci.yml with no
+ *  fleet caller: both checks of the current shape speak at once. */
+const INLINE_GATE_FANOUT = [
+  "jobs:",
+  "  typography:",
+  "    runs-on: ubuntu-latest",
   "  all-green:",
   "    if: always()",
   "    needs: [typography]",
   "    runs-on: ubuntu-latest",
   "    steps:",
-  "      - run: |",
-  '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+  "      - env:",
+  "          NEEDS: ${{ toJson(needs) }}",
+  "        run: |",
+  '          failed="$(jq -r \'to_entries[] | select(.value.result != "success") | .key\' <<< "$NEEDS")"',
+  '          if [ -n "$failed" ]; then exit 1; fi',
   "",
-];
+].join("\n");
 
-const LEGACY_FANOUT = ["jobs:", "  typography:", "    runs-on: ubuntu-latest", ...LEGACY_GATE].join(
-  "\n",
+const NO_JUDGMENT = error(
+  "ci.yml: the all-green job has no judgment step - the gate is repo-platform's all-green " +
+    "action with `needs: ${{ toJSON(needs) }}` wired in, unconditioned and unsoftened; an inline " +
+    "`run:` script or a disabled action step judges nothing this validator reads; run a template " +
+    "sync to restore the managed ci.yml",
+);
+const NO_FLEET_CALLER = error(
+  "ci.yml: no job calls repo-platform's fleet-ci.yml reusable - the fleet's gate jobs " +
+    "never run and the gate passes on the repo-owned checks alone; restore the managed " +
+    "`ci` job via a template sync",
 );
 
 describe("checkCiGate", () => {
@@ -93,24 +105,26 @@ describe("checkCiGate", () => {
       ],
     },
     {
-      reason: "a legacy public fan-out draws only the fan-out advisories (typography job present)",
-      ci: LEGACY_FANOUT,
-      expected: [...FANOUT_ADVISORIES, addJob("dependency-review")],
+      reason:
+        "an inline-script gate in a fan-out has no judgment step, and the fleet caller is missed",
+      ci: INLINE_GATE_FANOUT,
+      expected: [NO_JUDGMENT, NO_FLEET_CALLER],
     },
     {
-      reason: "a private legacy fan-out silences dependency-review and demands typography",
-      ci: LEGACY_FANOUT.replace("  typography:", "  lint:").replace(
-        "needs: [typography]",
-        "needs: [lint]",
+      reason: "a run: step beside the action step is no finding: the action judges",
+      ci: SINGLE_CALL.replace(
+        "    steps:\n",
+        "    steps:\n      - run: echo ${{ toJSON(needs) }}\n",
       ),
-      answers: `${ANSWERS}private: true\n`,
-      expected: [
-        error(
-          "ci.yml: no `typography` job - the no-look-alike-characters rule is unenforced; " +
-            "add a job using Vivswan/repo-platform/actions/check-typography",
-        ),
-        ...FANOUT_ADVISORIES,
-      ],
+      expected: [],
+    },
+    {
+      reason: "a logging run: step beside a disabled action step is the one judgment error",
+      ci: SINGLE_CALL.replace(
+        "      - uses: Vivswan/repo-platform/actions/all-green@build\n",
+        "      - run: echo diagnostics\n      - if: false\n        uses: Vivswan/repo-platform/actions/all-green@build\n",
+      ),
+      expected: [NO_JUDGMENT],
     },
     {
       reason:
@@ -127,7 +141,7 @@ describe("checkCiGate", () => {
         "    if: success()",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - run: echo unjudged",
+        "      - uses: actions/checkout@v7",
         "",
       ].join("\n"),
       expected: [
@@ -139,12 +153,7 @@ describe("checkCiGate", () => {
           "ci.yml: the all-green job must carry exactly `if: always()` - without it a failed " +
             "dependency skips the gate instead of failing it, and extra conditions weaken the gate",
         ),
-        error(
-          "ci.yml: the all-green job has no judgment step - it must use repo-platform's " +
-            "all-green action with `needs: ${{ toJSON(needs) }}` wired in (or the legacy inline " +
-            "gate failing on non-success results) so failed, cancelled, and all-skipped runs " +
-            "block the merge",
-        ),
+        NO_JUDGMENT,
         error(
           "ci.yml: the fleet-ci caller job carries a job-level if: - a skipped caller stands " +
             "down from the all-green gate and every fleet gate silently drops; remove the condition",
@@ -161,13 +170,7 @@ describe("checkCiGate", () => {
     {
       reason: "a pinned owner rejects another owner's fleet-ci caller",
       ci: SINGLE_CALL.replace("Vivswan/repo-platform/.github", "evil/repo-platform/.github"),
-      expected: [
-        error(
-          "ci.yml: no job calls repo-platform's fleet-ci.yml reusable - the fleet's gate jobs " +
-            "never run and the gate passes on the repo-owned checks alone; restore the managed " +
-            "`ci` job via a template sync",
-        ),
-      ],
+      expected: [NO_FLEET_CALLER],
     },
   ])("$reason", ({ ci, answers, expected }) => {
     expect(gate(ci, answers)).toEqual(expected);

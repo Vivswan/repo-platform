@@ -1,30 +1,20 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "../context.ts";
-import { advisory, error, type Finding } from "../findings.ts";
+import { error, type Finding } from "../findings.ts";
 import { isRecord, isRegularFile, regexLiteral, shapeOfYaml } from "../readers.ts";
 
 const CI_PATH = ".github/workflows/ci.yml";
 
-const ADVISORY_JOBS = ["actionlint", "gitleaks", "yamllint", "commit-names", "dependency-review"];
-
 type Step = Record<string, unknown>;
 
-/** The regex source matching the owner whose fleet actions and reusable
- *  workflows this tree must use: the pinned answer on a render, any
- *  well-formed owner in self mode, and null while a render's answers cannot
- *  pin one (the owner-dependent checks then stand down; the registration
- *  check reports the cause). */
+/** The regex source matching the owner whose fleet-ci reusable this tree
+ *  must call: the pinned answer on a render, any well-formed owner in self
+ *  mode, and null while a render's answers cannot pin one (the fleet-caller
+ *  check then stands down; the registration check reports the cause). */
 function ownerPattern(ctx: Context): string | null {
   if (ctx.mode === "self") return "[A-Za-z0-9-]+";
   return ctx.owner === null ? null : regexLiteral(ctx.owner);
-}
-
-/** The uses: pattern of one of this fleet's composite actions, anchored to
- *  the full action identity so a look-alike name from another owner or
- *  repository does not count. */
-function ownedAction(owner: string, name: string): RegExp {
-  return new RegExp(`^${owner}/repo-platform/actions/${name}@`);
 }
 
 function jobNeeds(job: unknown): string[] {
@@ -37,31 +27,6 @@ function jobSteps(job: unknown): Step[] {
   const steps = isRecord(job) ? job.steps : null;
   if (!Array.isArray(steps)) return [];
   return steps.filter(isRecord);
-}
-
-/** A step in the private merged shape counts only when nothing can disable
- *  it: no `if`, or exactly the shape's run-even-after-failure guard (bare
- *  or wrapped - GitHub treats `!cancelled()` and its expression form
- *  identically). */
-function stepUnconditional(step: Step): boolean {
-  if (!("if" in step)) return true;
-  if (typeof step.if !== "string") return false;
-  const guard = step.if.trim();
-  const inner = /^\$\{\{([\s\S]*)\}\}$/.exec(guard)?.[1]?.trim() ?? guard;
-  return inner === "!cancelled()";
-}
-
-/** How each advisory check appears as a base-checks step in the private
- *  merged shape (dependency-review never renders there). */
-function mergedStepMarkers(owner: string): Record<string, (step: Step) => boolean> {
-  const uses = (step: Step, action: RegExp) =>
-    typeof step.uses === "string" && action.test(step.uses);
-  return {
-    actionlint: (step) => uses(step, /^raven-actions\/actionlint@/),
-    gitleaks: (step) => uses(step, /^gitleaks\/gitleaks-action@/),
-    yamllint: (step) => uses(step, ownedAction(owner, "yamllint")),
-    "commit-names": (step) => uses(step, ownedAction(owner, "validate-commit-names")),
-  };
 }
 
 /** The judgment itself: the shared all-green action (local path on the
@@ -81,17 +46,6 @@ function judgesThroughAction(step: Step): boolean {
   if (step.if !== undefined || step["continue-on-error"] !== undefined) return false;
   const withBlock = isRecord(step.with) ? step.with : {};
   return String(withBlock.needs ?? "") === "${{ toJSON(needs) }}";
-}
-
-/** The legacy inline gate step pre-single-call renders carry. */
-function judgesInline(step: Step): boolean {
-  return (
-    step.if === undefined &&
-    step["continue-on-error"] === undefined &&
-    typeof step.run === "string" &&
-    step.run.includes('!= "success"') &&
-    step.run.includes("exit 1")
-  );
 }
 
 /** The all-green gate in ci.yml. The file is template-managed and always
@@ -130,11 +84,6 @@ export function checkCiGate(ctx: Context): Finding[] {
     ];
   }
   const findings: Finding[] = [];
-  // Legacy pre-single-call renders judge through the aggregate job's INLINE
-  // gate step; the current shape judges through the shared action. The
-  // judgment style routes the shape-specific checks below (a job census
-  // would misroute a degenerate legacy render that lost its fan-out jobs).
-  let legacyShape = false;
   if (!("all-green" in jobs)) {
     findings.push(
       error(
@@ -175,17 +124,13 @@ export function checkCiGate(ctx: Context): Finding[] {
         ),
       );
     }
-    const steps = jobSteps(allGreen);
-    const throughAction = steps.some(judgesThroughAction);
-    const inline = steps.some(judgesInline);
-    legacyShape = inline && !throughAction;
-    if (!throughAction && !inline) {
+    if (!jobSteps(allGreen).some(judgesThroughAction)) {
       findings.push(
         error(
-          "ci.yml: the all-green job has no judgment step - it must use " +
-            "repo-platform's all-green action with `needs: ${{ toJSON(needs) }}` " +
-            "wired in (or the legacy inline gate failing on non-success " +
-            "results) so failed, cancelled, and all-skipped runs block the merge",
+          "ci.yml: the all-green job has no judgment step - the gate is repo-platform's " +
+            "all-green action with `needs: ${{ toJSON(needs) }}` wired in, unconditioned and " +
+            "unsoftened; an inline `run:` script or a disabled action step judges nothing this " +
+            "validator reads; run a template sync to restore the managed ci.yml",
         ),
       );
     }
@@ -195,10 +140,9 @@ export function checkCiGate(ctx: Context): Finding[] {
   // RESULTS and a skipped job stands down, so a deleted or conditioned-away
   // caller would leave the repo-owned checks as the whole gate - every
   // fleet gate silently dropped. Self mode is exempt (repo-platform's own
-  // gating jobs are roster-pinned by check_ssot's all-green-roster rule),
-  // and legacy renders get the fan-out shape checks below instead.
+  // gating jobs are roster-pinned by check_ssot's all-green-roster rule).
   const owner = ownerPattern(ctx);
-  if (ctx.mode === "render" && owner !== null && !legacyShape) {
+  if (ctx.mode === "render" && owner !== null) {
     const fleetCiUses = new RegExp(`^${owner}/repo-platform/\\.github/workflows/fleet-ci\\.yml@`);
     const fleetCaller = Object.values(jobs)
       .map((job) => (isRecord(job) ? job : {}))
@@ -220,67 +164,6 @@ export function checkCiGate(ctx: Context): Finding[] {
             "every fleet gate silently drops; remove the condition",
         ),
       );
-    }
-  }
-  if (!legacyShape) return findings;
-  // Legacy-shape-only checks (an aggregate gate next to fan-out jobs, no
-  // fleet caller): a base-checks job means the private merged shape (the
-  // five base checks are its steps), anything else is the public fan-out.
-  // Under the single-call shape the base checks live in the fleet-ci
-  // reusable, invisible to this tree.
-  const shape =
-    "base-checks" in jobs
-      ? ({ kind: "private-merged", steps: jobSteps(jobs["base-checks"]) } as const)
-      : ({ kind: "public-fanout" } as const);
-  if (shape.kind === "private-merged") {
-    if (owner !== null) {
-      const action = ownedAction(owner, "check-typography");
-      const enforced = shape.steps.some(
-        (step) =>
-          typeof step.uses === "string" && action.test(step.uses) && stepUnconditional(step),
-      );
-      // base-checks itself must gate the merge, which the needs census
-      // above already errors on.
-      if (!enforced) {
-        findings.push(
-          error(
-            "ci.yml: base-checks has no unconditional check-typography step " +
-              "(private renders carry the typography check there) - the " +
-              "no-look-alike-characters rule is unenforced; add a step using " +
-              "Vivswan/repo-platform/actions/check-typography",
-          ),
-        );
-      }
-    }
-  } else if (!("typography" in jobs)) {
-    findings.push(
-      error(
-        "ci.yml: no `typography` job - the no-look-alike-characters rule " +
-          "is unenforced; add a job using " +
-          "Vivswan/repo-platform/actions/check-typography",
-      ),
-    );
-  }
-  // dependency-review renders only on public repos (the dependency graph
-  // behind it is free just there), so a private render's answers silence
-  // that advisory instead of nagging about a job it must not have.
-  const stepMarkers = owner === null ? null : mergedStepMarkers(owner);
-  for (const job of ADVISORY_JOBS) {
-    if (job === "dependency-review") {
-      if (!ctx.isPrivateRender && !(job in jobs)) {
-        findings.push(advisory(`ci.yml: consider adding a \`${job}\` job`));
-      }
-      continue;
-    }
-    if (shape.kind === "private-merged") {
-      const marker = stepMarkers?.[job];
-      if (marker && !shape.steps.some((step) => marker(step) && stepUnconditional(step))) {
-        findings.push(
-          advisory(`ci.yml: base-checks is missing the ${job} check - consider adding its step`),
-        );
-      }
-    } else if (!(job in jobs)) {
-      findings.push(advisory(`ci.yml: consider adding a \`${job}\` job`));
     }
   }
   return findings;

@@ -579,7 +579,7 @@ describe("the live repository", () => {
     ).toEqual([]);
   });
 
-  test("no retired-shape token in the sync, the actions, the scripts, or the tests; the scan covers them", () => {
+  test("no retired-shape token in the sync, the actions, the scripts, the templates, or the tests; the scan covers them", () => {
     const files = retiredShapeScanFiles();
     const paths = Object.keys(files);
     expect(RETIRED_SHAPE_SCAN.dirs).toEqual(
@@ -588,6 +588,7 @@ describe("the live repository", () => {
         ".github/workflows",
         "actions",
         "scripts",
+        "templates",
         "tests",
       ]),
     );
@@ -598,6 +599,9 @@ describe("the live repository", () => {
       "actions/shared/grammar.ts",
       "actions/validate-template-report/validator/checks/manifest_parity.ts",
       "scripts/ownership.ts",
+      "templates/base/ownership.yml",
+      "templates/base/.github/SECURITY.md.jinja",
+      "copier.yml",
       "tests/actions/stamp_manifest.test.ts",
     ]) {
       expect(paths).toContain(covered);

@@ -4817,13 +4817,16 @@ const SETTINGS_STARTER =
   "settings.yml becoming a starter with its baseline computed centrally; no rung: every render restamps the manifest";
 const LICENSE_CENSUS =
   "the fleet LICENSE.md rename; no rung: every managed repository carried LICENSE.md (census)";
+const ALL_GREEN_INVERSION =
+  "the all-green inversion: the gate became the all-green action's verdict check run; no rung: copier re-renders ci.yml (census: every render on the single-call shape)";
 
 /** Identifying tokens of shapes the platform once tolerated and no longer
  *  does, one line per token with what retired it: the retired split
  *  grammars, their manifest fields and marker vocabulary, the retired
  *  ownership class (as a class value, so a gh `--json mergeable` field
- *  stays legal), the retired one-shot transition script, and the bare
- *  LICENSE spelling. No compatibility code lives outside the migration
+ *  stays legal), the retired one-shot transition script, the bare
+ *  LICENSE spelling, and the inline all-green gate (its rendered step name
+ *  and the validator predicate that read it). No compatibility code lives outside the migration
  *  ladder (docs/migrations.md), so none of these may appear in the sync,
  *  the actions, the scripts, or their tests. A tripwire for the audited
  *  shapes, not a proof of the policy: a new tolerance needs a new line. */
@@ -4851,15 +4854,19 @@ export const RETIRED_SHAPE_TOKENS: readonly RetiredShape[] = [
     sample: '"LICENSE", "LICENSE.md"',
     retiredBy: LICENSE_CENSUS,
   },
+  bounded("All jobs green", ALL_GREEN_INVERSION),
+  bounded("judgesInline", ALL_GREEN_INVERSION),
 ];
 
 /** Where the no-retired-shapes rule looks: the workflow script zones and
- *  workflows, the shipped actions, the repo scripts, and every test - minus
- *  the ladder directory and its tests (the one place a retired shape may
- *  be named: a rung exists to move a repository off it), this rule's own
- *  file (the token list) and its test (the planted controls). */
+ *  workflows, the shipped actions, the repo scripts, the template sources
+ *  with copier.yml, and every test - minus the ladder directory and its
+ *  tests (the one place a retired shape may be named: a rung exists to
+ *  move a repository off it), this rule's own file (the token list) and
+ *  its test (the planted controls). */
 export const RETIRED_SHAPE_SCAN = {
-  dirs: [".github/scripts", ".github/workflows", "actions", "scripts", "tests"],
+  dirs: [".github/scripts", ".github/workflows", "actions", "scripts", "templates", "tests"],
+  files: ["copier.yml"],
   exempt: [
     MIGRATIONS_DIR_REL,
     MIGRATIONS_TESTS_REL,
@@ -4908,13 +4915,14 @@ export function rungSources(): Record<string, string> {
 
 /** The no-retired-shapes scan set as repo-relative path -> text. */
 export function retiredShapeScanFiles(): Record<string, string> {
-  const paths = RETIRED_SHAPE_SCAN.dirs
-    .flatMap((dir) =>
+  const paths = [
+    ...RETIRED_SHAPE_SCAN.files,
+    ...RETIRED_SHAPE_SCAN.dirs.flatMap((dir) =>
       walkFiles(dir)
         .filter((entry) => !entry.symlink)
         .map((entry) => entry.path),
-    )
-    .filter((rel) => !retiredShapeExempt(rel));
+    ),
+  ].filter((rel) => !retiredShapeExempt(rel));
   return Object.fromEntries(paths.map((rel) => [rel, read(rel)]));
 }
 
@@ -5123,7 +5131,8 @@ const rules: Rule[] = [
   {
     // No compatibility code outside the migration ladder: the identifying
     // tokens of the shapes the platform once tolerated (RETIRED_SHAPE_TOKENS)
-    // appear nowhere in the sync, the actions, the scripts, or their tests.
+    // appear nowhere in the sync, the actions, the scripts, the template
+    // sources, or their tests.
     name: "no-retired-shapes",
     run: () => retiredShapeMismatches(retiredShapeScanFiles()),
   },
