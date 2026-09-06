@@ -1742,11 +1742,9 @@ describe("the action's wiring", () => {
     );
   });
 
-  // The fetched tree's resolver, executed as the runner would: a path is
-  // recorded exactly when an absolute executable on PATH prints the pinned
-  // version AND exits 0, and `ready` derives from the path. A bun that lies
-  // about its version, one found through a relative PATH entry, another
-  // version, or no bun at all all read as no path.
+  // The fetched tree's resolver, run as the runner would: a path is recorded
+  // only for an absolute executable on PATH printing the pin and exiting 0;
+  // a lying, relative, other-version, or absent bun reads as no path.
   const BUN_DIR = realpathSync(join(process.execPath, ".."));
   const cases: [string, string, (dir: string) => { path: string; cwd?: string }, string][] = [
     [

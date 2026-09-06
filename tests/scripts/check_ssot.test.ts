@@ -1698,9 +1698,8 @@ ${extra}      shell: ${shell}
   });
 
   test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup", () => {
-    // The live-file forcing test the guard registry names: unpinning any
-    // real action's setup-bun (the staged mutation strips the primary
-    // setup step's with: block in check-typography) goes red here.
+    // The live-file forcing test the guard registry names: its mutation
+    // hands check-typography's shared step the CALLER's pin, red here.
     const files = actionManifestFiles();
     const setups = files.filter((file) => actionSetsUpBun(readFileSync(file, "utf-8")));
     expect(setups.length).toBeGreaterThan(0);
