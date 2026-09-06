@@ -2924,9 +2924,10 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
  *  in PIN_FILE and exits 0 (a bun that prints the version but dies is no
  *  bun; a newline in the path would forge a second $GITHUB_OUTPUT record);
  *  `pinned` derives from it. Only bash builtins run here (the pin is read
- *  with `$(<file)`, output goes through printf with a static format: under
- *  POSIXLY_CORRECT, which -p does not ignore, echo expands backslashes), so
- *  the caller's PATH resolves nothing but bun. Run as
+ *  with `$(<file)`, output goes through printf with a static format: echo
+ *  may expand backslashes under POSIXLY_CORRECT, which -p does not ignore;
+ *  xpg_echo forces that behaviour across bash builds), so the caller's PATH
+ *  resolves nothing but bun. Run as
  *  the pre-setup probe and again post-setup, so later steps run the
  *  installed bun by path, never `bun` through PATH. */
 export const ACTIONS_BUN_RESOLVER: readonly string[] = [
@@ -3115,7 +3116,7 @@ export type RunLine =
  *  - `NAME=<data>`: a plain assignment
  *  - `printf <format> <data>...`: output (the format a static literal with
  *    only %s and %% conversions: `printf -v` and `%n` assign; echo has no
- *    place here, since POSIXLY_CORRECT makes it expand backslashes)
+ *    place here, since under xpg_echo it expands backslashes)
  *  - `/bin/rm -rf "<clean runner-scratch path>"...`: the scratch clearing
  *    (cleanScratchPath: nothing outside `${{ runner.temp }}/` can be removed)
  *  The recorded-bun, output, and removal forms take an optional
