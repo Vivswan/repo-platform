@@ -31,18 +31,19 @@ function probeSource(body: string): string {
   ].join("\n");
 }
 
-/** Runs a probe file under `bun test` with extra flags and returns the
- * whole outcome: exit code, whether the fixture (which existed at
- * collection time; the removal is afterAll, never eager) survives the
- * child, and the child's output so a mismatch says why. CI is unset in
- * the child unless the caller sets it: bun refuses `.only` under CI=1,
- * and the shapes here exercise bun's own semantics, not the runner's. */
+/** Runs a probe under `bun test` and returns its whole outcome, output
+ * included. CI=false is set, not deleted: bun also reads runner markers
+ * such as GITHUB_ACTIONS, and CI=false is the override that beats them. */
 let probes = 0;
-function runProbe(body: string, flags: string[] = [], env: Record<string, string> = {}) {
+function runProbe(
+  body: string,
+  flags: string[] = [],
+  env: Record<string, string | undefined> = {},
+) {
   const probe = join(root, `probe-${probes++}.test.ts`);
   writeFileSync(probe, probeSource(body));
   const r = boundedSpawnSync(["bun", "test", ...flags, probe], {
-    env: { ...process.env, CI: undefined, TMPDIR: root, ...env },
+    env: { ...process.env, CI: "false", TMPDIR: root, ...env },
     timeoutMs: 60_000,
   });
   const seen = /^FIXTURE=(.+) exists=(true|false)$/m.exec(r.stderr);
@@ -101,11 +102,19 @@ describe("tempDirs", () => {
       flags: ["--only"],
       exitCode: 0,
     },
+    {
+      // The override the probes rest on: a runner marker with CI=false set
+      // is not CI to bun.
+      shape: ".only under GITHUB_ACTIONS=true with the CI=false override",
+      body: 'test.only("chosen", () => {});',
+      env: { GITHUB_ACTIONS: "true" },
+      exitCode: 0,
+    },
     { shape: "file with no tests", body: "", exitCode: 0 },
   ])(
     "a $shape file's fixtures are gone once the child exits (exit $exitCode)",
-    ({ body, flags, exitCode, inner }) => {
-      const r = runProbe(body, flags);
+    ({ body, flags, env, exitCode, inner }) => {
+      const r = runProbe(body, flags, env);
       expectOutcome(r, { exitCode, fixtureSurvives: false });
       expect(r.inner !== undefined).toBe(inner === true);
       if (r.inner !== undefined) expect(existsSync(r.inner)).toBe(false);
@@ -147,14 +156,18 @@ describe("tempDirs", () => {
       env: {},
       notice: /matched 0 tests/,
     },
-    {
-      // bun 1.4.0 refuses `.only` under CI=1 before any test or hook runs.
-      shape: "a .only file under CI=1",
+    // bun refuses `.only` under any CI marker before any test or hook
+    // runs; with CI deleted, a sibling marker alone still counts.
+    ...[
+      { name: "CI=1", env: { CI: "1" } },
+      { name: "GITHUB_ACTIONS=true with CI unset", env: { CI: undefined, GITHUB_ACTIONS: "true" } },
+    ].map(({ name, env }) => ({
+      shape: `a .only file under ${name}`,
       body: 'test.only("chosen", () => {});',
       flags: [],
-      env: { CI: "1" },
+      env,
       notice: /\.only is disabled in CI environments/,
-    },
+    })),
   ])(
     "PINNED bun behaviour: $shape skips afterAll, so the fixture survives",
     ({ body, flags, env, notice }) => {
