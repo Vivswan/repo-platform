@@ -137,9 +137,9 @@ describe("verify_build_provenance.ts", () => {
     // no-op against that tip. The hint must name the remedy that always
     // works too - an admin reset of refs/heads/build (or the next
     // tree-moving landing).
-    expect(r.output).toContain(
-      "dispatch post-green.yml with `sha=<green main commit>` to rebuild it from main",
-    );
+    expect(r.output).toContain("dispatch post-green.yml with sha=");
+    expect(r.output).toContain("(the tip's stamped MAIN source");
+    expect(r.output).toContain("to rebuild it from main");
     expect(r.output).toContain("reset refs/heads/build");
     expect(r.output).toContain("moves the composed tree");
   });

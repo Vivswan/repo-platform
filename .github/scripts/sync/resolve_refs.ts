@@ -110,7 +110,7 @@ const targetSha = tipProbe.stdout.trimEnd();
 const validateRef = stampOf(targetSha);
 if (validateRef === "") {
   console.log(
-    `::error::the build branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so publish.ts did not push it and the sync will not ship it. Re-run that commit's CI, or dispatch post-green.yml with sha=<green main commit> to rebuild the branch from main, then re-run the sync.`,
+    `::error::the build branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so publish.ts did not push it and the sync will not ship it. Publish it from a green MAIN commit: dispatch post-green.yml with sha=<the newest green main commit> to rebuild the branch from main (re-run that main commit's CI first if its all-green check is missing), then re-run the sync.`,
   );
   process.exit(1);
 }
