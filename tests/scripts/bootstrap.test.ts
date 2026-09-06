@@ -27,8 +27,8 @@ describe("bunLockDirs", () => {
       "actions/release-health",
       "actions/validate-commit-names",
       "actions/validate-skills",
-      "actions/validate-template",
       "actions/validate-template-report",
+      "actions/validate-template-report/validator",
     ]);
   });
 
