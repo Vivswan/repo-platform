@@ -82,6 +82,11 @@ describe("parseDirectives", () => {
       expected: { kind: "fleet-sync", scope: ["private"] },
     },
     {
+      reason: "a slug written before a token is emitted after it: the scope is a set, tokens first",
+      body: message("[fleet-sync: Vivswan/a, private]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["private", "vivswan/a"] },
+    },
+    {
       reason: "a token mixes with slugs, folded",
       body: message("[fleet-sync: public, Vivswan/Dotfiles]", PROSE),
       expected: { kind: "fleet-sync", scope: ["public", "vivswan/dotfiles"] },
@@ -444,6 +449,7 @@ describe("main", () => {
   const reasoned = commit(message("[fleet-sync: public] the ci changed", PROSE));
   const context = commit(message("[Context] This is ordinary PR prose.", PROSE));
   const leaky = commit(message("[fleet-sync: SecretOrg/PrivateRepo,]", PROSE));
+  const ordered = commit(message("[fleet-sync: Vivswan/a, private]", PROSE));
   const mention = commit(message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."));
 
   /** A clone whose origin carries main plus, when `stamp` is given, a
@@ -684,6 +690,18 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=false\n",
       stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+    },
+    {
+      reason: "a slug before a token: repos= carries tokens first, then slugs",
+      sha: ordered,
+      exitCode: 0,
+      output: "armed=true\nrepos=private,vivswan/a\n",
+      stdout: (base: string, sha: string) =>
+        lines(
+          pushAlone(sha, base),
+          directive(sha, "private,vivswan/a"),
+          syncing(base, sha, "private,vivswan/a"),
+        ),
     },
     {
       reason: "a scope error names no entry: the private slug never reaches the log",
