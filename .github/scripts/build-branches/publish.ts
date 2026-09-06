@@ -1,46 +1,17 @@
 #!/usr/bin/env bun
-// Composes and publishes the `build` branch - the ONE generated delivery
-// channel: copier renders from its template/ subtree and `uses: ...@build`
-// refs execute its actions/ subtree. One invoker, post-green.yml's
-// publish-build job, on two paths: the GREEN path (ci.yml's post-green
-// job calls post-green.yml once the all-green gate passes on a main
-// push; the sha input is the judged commit) and the SELF-HEAL path (a
-// workflow_dispatch of post-green.yml naming a green main commit by
-// hand, for a publish that went missing after its gate passed - a failed
-// or evicted post-green run - or a stamp that needs recovery). Both
-// compose here, in this run, from SOURCE_SHA's own script and sources.
+// Composes and publishes the `build` branch (the model, the flow, and the
+// residuals: docs/build-provenance.md). One invoker, post-green.yml's
+// publish-build job: SOURCE_SHA is the judged commit on the call, the sha
+// input on a dispatch; both compose here from that commit's own script.
 //
-// The branch is an ORPHAN, APPEND-ONLY branch: each build commit parents
-// the previous build commit, never a main commit, so a main history
-// rewrite can never invalidate it and old build commits (downstream
-// repos' recorded _commit, needed by copier update's three-way merge)
-// stay reachable forever. Every path on it is extraction-safe (plain
-// filenames only), and nothing can run ON it: branch_tree.ts refuses any
-// shipped workflow whose trigger is not workflow_call alone.
+// Invariants this file owns: the branch is an orphan, append-only chain (a
+// build commit never parents a main commit); a publish commits only on a
+// content change, stamp recovery being the one tree-identical exception;
+// newest-green wins (a stale source never rolls the tip back), with the plain
+// push as the compare-and-swap; only green main history is ever stamped.
 //
-// A publish COMMITS only on a content change - never an empty commit in
-// normal operation: a rerun of an already-published source or a
-// byte-identical landing stages nothing and publishes nothing, so no
-// fleet repo ever sees a content-free _commit bump (no commit, no sync
-// PR). Freshness needs no commit either: sync/wait_for_build.ts reads the
-// tip's stamp (fast path) or rebuilds the composed tree at main's HEAD
-// and compares hashes (slow path, counted only under a healthy tip stamp
-// - the shared stamp_checks.ts battery) - an unchanged tree is proven
-// fresh by computation, never by a trusted marker ref or a filler
-// commit. The one exception is STAMP RECOVERY: the no-change skip fires
-// only when the tip's stamp is healthy (shared/stamp_checks.ts), so a
-// dispatch heals a tampered or unparseable stamp with a freshly stamped
-// tree-identical commit instead of wedging every sync.
-//
-// Concurrent publishers are race-safe: under cancel-in-progress: false a
-// queued publisher can run after a NEWER main already published, and the
-// staleness preflight skips it - newest-green wins, a stale build never
-// overwrites a newer published tree (its plain push doubles as the
-// compare-and-swap on the exact tip the preflight read).
-//
-// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY,
-// GITHUB_REF, SOURCE_SHA (the commit to publish: the judged commit on
-// the green path, the dispatch's sha input on the self-heal).
+// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
+// SOURCE_SHA.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -149,18 +120,9 @@ function publish(sourceSha: string): void {
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);
     must(["git", "worktree", "add", "--detach", scratch.out, `origin/${BRANCH}`]);
-    // Newest-green-wins: under cancel-in-progress: false a queued
-    // publisher can execute after a NEWER main already published - its
-    // build is stale and must never roll the branch back. Loud skip,
-    // green run: this is normal operation under concurrent pushes, and
-    // the newer tip's own run already delivered the newer tree. The
-    // check-then-push pair is atomic in effect: the new commit below
-    // CHAINS onto the exact tip fetched here, and the plain (never
-    // force) push succeeds only while the remote ref still points at
-    // that tip - if any other writer advanced it in between, the push is
-    // rejected as non-fast-forward instead of rolling anything back (and
-    // the workflow's concurrency group serializes publishers anyway, so
-    // the rejection arm is a second net, not the plan).
+    // Newest-green-wins, decided on the tip fetched here: the commit below
+    // chains onto exactly this tip, and the plain push rejects any other
+    // writer's advance as non-fast-forward (the lane is the first net).
     tipSource = commitStampParse(
       mustCapture(["git", "-C", scratch.out, "log", "-1", "--format=%B"]),
     );
@@ -185,15 +147,9 @@ function publish(sourceSha: string): void {
     "--dest",
     scratch.tree,
   ]);
-  // Unified-tree guard: a tree without actions/ is not this branch's
-  // shape. A dispatch naming a PRE-unification main commit composes the
-  // retired template-only tree (jinja filenames, no actions/); minting
-  // `build` from it would 404 every fleet @build ref and kill uses:
-  // extraction until the next green publish. The staleness check above
-  // cannot catch the case where that old source IS the tip's stamped
-  // source, so the shape check fails closed here instead: a real
-  // directory carrying at least one action manifest, not merely a path
-  // named actions.
+  // Unified-tree guard: a pre-unification source composes a template-only
+  // tree (no actions/), and publishing it would 404 every fleet @build ref.
+  // The staleness check cannot catch it when that source IS the tip's own.
   if (!hasActionManifest(join(scratch.tree, "actions"))) {
     fail(
       `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree with an action.yml, so the source predates the unified build branch. Re-run the workflow for a main commit that carries the unification.`,
@@ -217,16 +173,9 @@ function publish(sourceSha: string): void {
   // provenance proof reads the skew as tampering.
   must(stageComposedTreeArgv(scratch.out));
   const staged = capture(["git", "-C", scratch.out, "diff", "--cached", "--quiet"]).exitCode !== 0;
-  // NEVER an empty commit in normal operation: an unchanged composed
-  // tree publishes nothing (no commit means no fleet _commit bump and no
-  // no-change sync PRs; the sync computes freshness instead). The skip
-  // is GUARDED by the tip's stamp health (shared/stamp_checks.ts, the
-  // sync's checks 1+2): a tree-identical tip with a tampered,
-  // unparseable, or orphaned stamp must NOT skip, or no dispatch could
-  // ever heal it (the composed tree never changes just because the stamp
-  // broke). That recovery publish is the ONE lane that commits an
-  // identical tree - and the only reason --allow-empty appears below,
-  // ternary-scoped to it.
+  // The no-change skip is guarded by the tip's stamp health: a tree-identical
+  // tip with a broken stamp must NOT skip, or no dispatch could heal it. That
+  // recovery is the one tree-identical commit, hence the scoped --allow-empty.
   const stampProblem =
     branchExists && !staged
       ? stampUnhealthyReason({

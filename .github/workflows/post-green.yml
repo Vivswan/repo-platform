@@ -1,40 +1,12 @@
-# Everything that runs AFTER the all-green gate passed on a push to main
-# - the post-green home. Two ways in, both explicit about the commit they
-# act on: workflow_call from ci.yml's post-green job (the sole caller;
-# the sha input is the judged commit) runs every leg, and a
-# workflow_dispatch naming a green main commit by hand runs the
-# publish-build leg alone - the self-heal for a publish that went
-# missing after its gate passed (a failed or evicted post-green run) or
-# a stamp that needs recovery. Nothing here carries a trigger of its own
-# beyond those two: the gate is the one green authority on the call, and
-# publish.ts's own hard-verify (main history, completed successful
-# all-green at the sha) is the whole gate on a dispatch.
+# The post-green home (docs/build-provenance.md, docs/all-green.md). Two ways in:
+# the workflow_call from ci.yml's post-green job runs every leg on the judged
+# sha, and a workflow_dispatch runs publish-build alone on a green main sha.
 #
-# EVERY leg added here must be STATE-shaped: idempotent, and able to
-# leave the world no worse than one trigger behind. GitHub keeps at most
-# one running plus one pending run per concurrency group and replaces the
-# pending one (latest wins, independent of cancel-in-progress), so a
-# superseded pending leg never executes - its work must either be covered
-# by the run that evicted it, or be a staleness the leg's next trigger
-# (or a manual dispatch) repairs. Each job below states why it
-# qualifies; a leg that CANNOT tolerate a swallowed pending run does not
-# belong in a coalescing lane.
-#
-# A workflow_call'd workflow executes at the caller's ref with the
-# caller's event context; the sha input keeps the judged commit explicit
-# instead of re-deriving it from that context, so a future caller cannot
-# silently hand a leg the wrong commit. The same context rule gates the
-# call-only legs: inside a called run github.event_name is the CALLER's
-# event (push, per ci.yml's post-green condition), so
-# `github.event_name != 'workflow_dispatch'` is exactly "not the
-# dispatch", and a dispatch runs publish-build alone.
-#
-# The caller is needs-ordered behind the all-green job in the SAME run,
-# so a leg's own green verification is defense in depth rather than the
-# sole authority - but a leg that MUTATES shared state keeps one anyway
-# (publish.ts hard-verifies the all-green check run via
-# shared/all_green.ts): the caller's gate guards entry, not the world the
-# leg reads at run time.
+# Invariants every leg must hold: STATE-shaped (a coalesced pending run is
+# covered by its evictor or healed by the next trigger); the commit comes from
+# the sha input, never re-derived from context; a leg that mutates shared state
+# keeps its own green verification. Inside a called run github.event_name is
+# the caller's event, so `!= 'workflow_dispatch'` gates the call-only legs.
 
 name: Post Green
 

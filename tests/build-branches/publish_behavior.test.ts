@@ -1,27 +1,6 @@
-// publish.ts run for real - real git, real rsync, a stubbed gh (the
-// all-green gate) - proving the no-empty-commits publish decision
-// BEHAVIORALLY, where the wiring suite pins only source shape:
-//
-//   1. a changed composed tree publishes a stamped commit chained onto
-//      the tip (also the moved-control for the skip case: the same
-//      harness demonstrably CAN move the branch);
-//   2. an unchanged tree under a HEALTHY tip stamp publishes NOTHING -
-//      the quiet case, the tip must not move;
-//   3. an unchanged tree under a BROKEN tip stamp publishes the recovery
-//      commit - freshly stamped, tree-identical - so a dispatch heals
-//      stamp damage instead of skipping forever;
-//   4. a STALE source - the tip already ships a descendant - is skipped
-//      before anything is composed (newest-green wins), and a source
-//      that is not main history is refused before any probe;
-//   5. the scratch worktrees live under the run's own root (RUNNER_TEMP
-//      here, as on the runner) and are gone when the process exits, on
-//      the success and failure routes alike, and a publish held
-//      mid-flight is untouched by another running start to finish.
-//
-// The compose is real: the source commit carries a stub branch_tree.ts
-// that copies its committed composed/ directory to --dest, so publish.ts
-// runs its worktree + frozen install + builder path exactly as on the
-// runner, against a fixture the test controls.
+// publish.ts run for real - real git, real rsync, a stubbed gh, and a real
+// compose through a stub branch_tree.ts committed in the fixture source - so
+// each publish decision is proven behaviorally (the wiring suite pins shape).
 
 import { describe, expect, test } from "bun:test";
 import {
