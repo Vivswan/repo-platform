@@ -30,6 +30,9 @@ const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
+// A code span (a backtick run closed by the same run) is prose: a body may
+// describe the grammar; a bare [fleet-sync outside the block may not.
+const CODE_SPAN = /(`+).*?\1/g;
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
 const POSITION =
@@ -78,7 +81,7 @@ export function parseDirectives(body: string): Directives {
     if (block !== null && index === BLOCK_INDEX) return;
     const shaped = isBlockShaped(para);
     for (const line of para) {
-      if (shaped || FLEET_SYNC_ANYWHERE.test(line)) {
+      if (shaped || FLEET_SYNC_ANYWHERE.test(line.replace(CODE_SPAN, ""))) {
         errors.push(`misplaced directive "${line.trim()}": ${POSITION}`);
       }
     }

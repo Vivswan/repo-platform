@@ -250,9 +250,29 @@ describe("parseDirectives", () => {
       expected: misplaced("[fleet-sync]"),
     },
     {
-      reason: "a valid block AND a backticked marker in a fenced example: the fenced one fails",
+      reason: "a code-span mention in a fenced example beside a valid block is prose",
       body: message("[fleet-sync: public]", PROSE, "```text\n`[fleet-sync: o/r]`\n```"),
-      expected: misplaced("`[fleet-sync: o/r]`"),
+      expected: { kind: "fleet-sync", scope: ["public"] },
+    },
+    {
+      reason: "a code-span mention in later prose is prose (the #94 body shape)",
+      body: message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."),
+      expected: NONE,
+    },
+    {
+      reason: "the same mention without backticks is misplaced",
+      body: message(PROSE, "The sync leg is untouched, so no [fleet-sync]."),
+      expected: misplaced("The sync leg is untouched, so no [fleet-sync]."),
+    },
+    {
+      reason: "a double-backtick span holding a single-backtick span is one code span",
+      body: message(PROSE, "Write ``[fleet-sync: all] `why` here`` on one line."),
+      expected: NONE,
+    },
+    {
+      reason: "a code-span block at the bottom is still the misplaced block, not a mention",
+      body: message(PROSE, "`[fleet-sync: public]`"),
+      expected: misplaced("`[fleet-sync: public]`"),
     },
     {
       reason: "a fenced example written with the [keyword] placeholder is prose",
@@ -384,6 +404,7 @@ describe("main", () => {
   const unjustified = commit(message("`[fleet-sync: all]`", PROSE));
   const reasoned = commit(message("[fleet-sync: public] the ci changed", PROSE));
   const context = commit(message("[Context] This is ordinary PR prose.", PROSE));
+  const mention = commit(message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."));
 
   /** A clone whose origin carries main plus, when `stamp` is given, a
    *  build branch of one orphan commit stamped like publish.ts stamps. */
@@ -613,6 +634,13 @@ describe("main", () => {
     {
       reason: "a bracketed lead-in with prose is a normal body: armed=false",
       sha: context,
+      exitCode: 0,
+      output: "armed=false\n",
+      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+    },
+    {
+      reason: "a code-span mention in later prose (the #94 body shape): armed=false",
+      sha: mention,
       exitCode: 0,
       output: "armed=false\n",
       stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
