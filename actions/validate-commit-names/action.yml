@@ -11,10 +11,20 @@ runs:
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
+        PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
-        pin="$(cat "${{ github.action_path }}/.bun-version")"
-        have="$(command -v bun >/dev/null && bun --version || true)"
-        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        pin="$(<"$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Skipped only when the caller's bun already IS the pinned version
     # (reuse then just skips a second network fetch): the action's scripts
@@ -38,6 +48,31 @@ runs:
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
+    # Re-resolved after the setup so the recorded path is the bun it
+    # installed; every later step runs that path, never bun through PATH.
+    - name: Resolve the action's bun
+      id: action-bun
+      if: always()
+      shell: bash
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
+        PIN_FILE: ${{ github.action_path }}/.bun-version
+      run: |
+        pin="$(<"$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
     - name: Validate commit subjects
       shell: bash
-      run: bun "${{ github.action_path }}/validate-commit-names.ts"
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/validate-commit-names.ts"'

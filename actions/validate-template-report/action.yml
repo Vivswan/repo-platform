@@ -33,14 +33,25 @@ runs:
   steps:
     # Installed once up front: the fetch and report scripts run on it, the
     # wrapped latest-pass action probes for a bun matching the same
-    # generated pin and finds this one.
+    # generated pin and finds this one. The probe is the resolver the
+    # actions-bun-guard rule pins, run before the setup.
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
+        PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
-        pin="$(cat "${{ github.action_path }}/.bun-version")"
-        have="$(command -v bun >/dev/null && bun --version || true)"
-        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        pin="$(<"$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Skipped only when the caller's bun already IS the pinned version
     # (reuse then just skips a second network fetch): the action's scripts
@@ -67,23 +78,27 @@ runs:
       id: setup-bun-retry
       continue-on-error: true
 
-    # A bun is ready only as an absolute path that prints the pinned version
+    # A bun is pinned only as an absolute path that prints the pinned version
     # and exits 0; scripts run by that path, never by name, since later
     # setups put other buns on PATH. The tree's resolver is this same block.
     - name: Resolve the action's bun
       id: action-bun
+      if: always()
       shell: bash
       env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
         PIN_FILE: ${{ github.action_path }}/.bun-version
       run: |
-        pin="$(cat "$PIN_FILE")"
+        pin="$(<"$PIN_FILE")"
         path="$(command -v bun || true)"
         case "$path" in /*) ;; *) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
         echo "path=$path" >> "$GITHUB_OUTPUT"
-        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # No install step for this action's own scripts: no runtime deps.
     #
@@ -111,10 +126,12 @@ runs:
     # the vintage floor: `_commit` may not move behind the base ref's.
     - name: Fetch the validator at the recorded _commit
       id: fetch
-      if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
+      if: steps.action-bun.outputs.pinned == 'true' && steps.clear.outcome == 'success'
       continue-on-error: true
       shell: bash
       env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         GH_TOKEN: ${{ inputs.github-token }}
         BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
@@ -147,16 +164,19 @@ runs:
       if: steps.fetch.outcome == 'success'
       shell: bash
       env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
         PIN_FILE: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
       run: |
-        pin="$(cat "$PIN_FILE")"
+        pin="$(<"$PIN_FILE")"
         path="$(command -v bun || true)"
         case "$path" in /*) ;; *) path="" ;; esac
         have=""
         if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
         if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "bun ${pin:-(no pin)}: ${path:-none on PATH}"
         echo "path=$path" >> "$GITHUB_OUTPUT"
-        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        echo "pinned=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # The judge script runs on the action's bun; only the fetched tree's
     # install and validator run on the tree's (an empty path is a
@@ -168,6 +188,8 @@ runs:
       continue-on-error: true
       shell: bash
       env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
         ORCHESTRATOR_BUN: ${{ steps.action-bun.outputs.path }}
@@ -179,7 +201,7 @@ runs:
     # operator repository is a constant (build_sha.ts), not an input.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: latest
-      if: steps.action-bun.outputs.ready == 'true'
+      if: steps.action-bun.outputs.pinned == 'true'
       continue-on-error: true
       with:
         findings-file: ${{ runner.temp }}/latest-findings.md
@@ -193,6 +215,8 @@ runs:
       if: always()
       shell: bash
       env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
         GH_TOKEN: ${{ inputs.github-token }}
