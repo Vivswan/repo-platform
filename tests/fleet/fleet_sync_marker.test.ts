@@ -677,6 +677,61 @@ describe("parseDirectives inside a container", () => {
     },
     {
       reason:
+        "a nested quote resumed after a lazy line is the same paragraph (commonmark.js: one <code>): the span pairs, the mention is code",
+      body: message(PROSE, "> > Before `\n> middle\n> > [fleet-sync]\n> > After `"),
+      expected: NONE,
+    },
+    {
+      reason: "an ATX heading interrupts the paragraph (the Copilot input): the mention is bare",
+      body: message(PROSE, "Before `\n# [fleet-sync]\nAfter `"),
+      expected: misplaced("# [fleet-sync]"),
+    },
+    {
+      reason: "a thematic break ends the paragraph: the mention after it is bare",
+      body: message(PROSE, "Before `\n* * *\n[fleet-sync] `"),
+      expected: misplaced("[fleet-sync] `"),
+    },
+    {
+      reason: "a setext underline ends the paragraph: the mention after it is bare",
+      body: message(PROSE, "Before `\n===\n[fleet-sync] `"),
+      expected: misplaced("[fleet-sync] `"),
+    },
+    {
+      reason: "a bullet item interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n- [fleet-sync]\nAfter `"),
+      expected: misplaced("- [fleet-sync]"),
+    },
+    {
+      reason: "an ordered item interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n1. [fleet-sync]\nAfter `"),
+      expected: misplaced("1. [fleet-sync]"),
+    },
+    {
+      reason: "an HTML block start interrupts the paragraph: the mention is bare",
+      body: message(PROSE, "Before `\n<details>[fleet-sync]\nAfter `"),
+      expected: misplaced("<details>[fleet-sync]"),
+    },
+    {
+      reason: "a quoted heading interrupts the quoted paragraph the same way",
+      body: message(PROSE, "> Before `\n> # [fleet-sync]\n> After `"),
+      expected: misplaced("> # [fleet-sync]"),
+    },
+    {
+      reason:
+        "each boundary kind is its own reading: a heading inside a quote never re-pairs the backticks the quote reading left bare",
+      body: message(
+        "[fleet-sync: public]",
+        "Before `\n> start `\n> # extra `\n> [fleet-sync: private] `",
+      ),
+      expected: misplaced("> [fleet-sync: private] `"),
+    },
+    {
+      reason: "a hash without a space is text, not a heading: the span pairs (the control)",
+      body: message(PROSE, "Before `\n#[fleet-sync]\nAfter `"),
+      expected: NONE,
+    },
+    {
+      reason:
         "a constant quote depth with the markers written differently is one paragraph: the span pairs",
       body: message(PROSE, "> Before `\n>[fleet-sync]\n > After `"),
       expected: NONE,

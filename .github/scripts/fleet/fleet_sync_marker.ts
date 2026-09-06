@@ -54,6 +54,16 @@ function quoteDepth(line: string): number {
   return (/^[ \t]*(?:>[ \t]*)*/.exec(line)?.[0].match(/>/g) ?? []).length;
 }
 
+// What CommonMark lets interrupt a paragraph, on the container-stripped line: an ATX heading, a
+// thematic break or setext underline, a list item, an HTML block start. Generous where the spec is
+// fussy (any list number, any tag). Fences are hard boundaries everywhere; blockquotes are depth.
+const INTERRUPTS_PARAGRAPH = [
+  /^ {0,3}#{1,6}(?:[ \t]|$)/,
+  /^ {0,3}(?:([-*_])(?:[ \t]*\1){2,}|=+|-+)[ \t]*$/,
+  /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/,
+  /^ {0,3}<[A-Za-z/!?]/,
+];
+
 /** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
  *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
  *  unclosed run is literal text). Linear: one tokenizing pass, one right-to-left pairing pass. */
@@ -125,17 +135,18 @@ function withoutCodeSpans(
   return bare;
 }
 
-/** Per line, whether a bare mention survives span blanking under EITHER reading of a blockquote
- *  start: spans pairing across it (a lazy continuation) or ending there (a `>` interrupts a
- *  paragraph). The union keeps every exposure of the pairing-across reading (main's), so a
- *  boundary the body did not have hides nothing that reading shows. */
+/** Per line, whether a bare mention survives span blanking under ANY reading of where inline runs
+ *  end: at fences only (main's reading), or also at one kind of paragraph-interrupting line. One
+ *  reading per kind, so adding a kind adds exposures and never hides one another reading shows. */
 function bareMentions(lines: string[]): boolean[] {
   const body = lines.map(containerBody);
   const depth = lines.map(quoteDepth);
-  const readings = [
-    withoutCodeSpans(body, () => false),
-    withoutCodeSpans(body, (at, runStart) => depth[at] > depth[runStart]),
+  const boundaries: ((at: number, runStart: number) => boolean)[] = [
+    () => false,
+    (at, runStart) => depth[at] > depth[runStart],
+    ...INTERRUPTS_PARAGRAPH.map((shape) => (at: number) => shape.test(body[at])),
   ];
+  const readings = boundaries.map((opensBlock) => withoutCodeSpans(body, opensBlock));
   return lines.map((_, at) => readings.some((bare) => FLEET_SYNC_ANYWHERE.test(bare[at])));
 }
 
