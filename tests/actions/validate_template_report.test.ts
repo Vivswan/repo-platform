@@ -43,7 +43,14 @@ import {
   validatorOf,
 } from "../../actions/validate-template-report/aligned_tree";
 import { recordedBuildSha } from "../../actions/validate-template-report/build_sha";
-import { type ChildExit, failureDetail, run } from "../../actions/validate-template-report/runtime";
+import {
+  type ChildExit,
+  capture,
+  childExit,
+  failureDetail,
+  run,
+  succeeded,
+} from "../../actions/validate-template-report/runtime";
 import {
   classify,
   type Integrity,
@@ -60,11 +67,8 @@ const RUN_URL = "https://example.invalid/run/1";
 const OPERATOR = "Vivswan/repo-platform";
 
 // Serves the gate's gh calls and records every call so a scenario can
-// assert the exact sequence. GH_FAIL fails every call before recording.
-// The stub stands in for `gh api --jq`, so each fixture is already the
-// filter's OUTPUT: the compare prints "<status> <ahead_by>", the comment
-// listing the bare comment id (or nothing when the marker matched none),
-// and the tarball endpoint streams the file GH_TARBALL names.
+// assert the exact sequence; GH_FAIL fails every call before recording. It
+// stands in for `gh api --jq`, so each fixture is already the filter's output.
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 if [ -n "\${GH_FAIL:-}" ]; then
@@ -80,10 +84,24 @@ case "$*" in
     cat "$GH_TARBALL"
     exit 0
     ;;
-  *compare/*)
+  *compare/*...build*)
     echo "COMPARE $*" >> "$CALLS"
     if [ -n "\${GH_COMPARE_FAIL:-}" ]; then exit 1; fi
     printf '%s %s\\n' "\${GH_COMPARE_STATUS:-ahead}" "\${GH_AHEAD:-3}"
+    exit 0
+    ;;
+  *compare/*)
+    echo "COMPARE $*" >> "$CALLS"
+    if [ -n "\${GH_VINTAGE_FAIL:-}" ]; then echo "gh: HTTP 500" >&2; exit 1; fi
+    printf '%s\\n' "\${GH_VINTAGE_STATUS:-ahead}"
+    exit 0
+    ;;
+  *contents/*)
+    echo "CONTENTS $*" >> "$CALLS"
+    if [ -n "\${GH_BASE_MISSING:-}" ]; then echo "gh: HTTP 404: Not Found (https://api.github.com/...)" >&2; exit 1; fi
+    if [ -n "\${GH_BASE_KILLED:-}" ]; then echo "gh: HTTP 404: Not Found" >&2; kill -KILL $$; fi
+    if [ -n "\${GH_BASE_FAIL:-}" ]; then echo "gh: HTTP 500" >&2; exit 1; fi
+    cat "$GH_BASE_ANSWERS"
     exit 0
     ;;
 esac
@@ -131,16 +149,18 @@ function scratch(): { root: string; bin: string } {
 const RUNNER_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
 
 /** A step's run block from action.yml as the runner would execute it: the
- *  action-path expression resolved, any other expression refused (env is
- *  the only other channel, and each harness supplies it). */
-function stepRun(id: string): string {
+ *  action-path expression resolved, the runner-temp expression resolved to
+ *  `runnerTemp` when given, any other expression refused (env is the only
+ *  other channel, and each harness supplies it). */
+function stepRun(id: string, runnerTemp?: string): string {
   const steps = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8")).runs.steps as Record<
     string,
     unknown
   >[];
   const step = steps.find((s) => s.id === id);
   if (step === undefined) throw new Error(`no step ${id}`);
-  const run = String(step.run).replaceAll("${{ github.action_path }}", ACTION);
+  let run = String(step.run).replaceAll("${{ github.action_path }}", ACTION);
+  if (runnerTemp !== undefined) run = run.replaceAll("${{ runner.temp }}", runnerTemp);
   if (run.includes("${{")) throw new Error(`step ${id} run block carries an expression: ${run}`);
   return run;
 }
@@ -221,6 +241,7 @@ function runReport(opts: ReportOptions = {}) {
       GITHUB_OUTPUT: outputs,
       GH_TOKEN: "x",
       VERDICT: verdictPath,
+      CLEAR_OUTCOME: "success",
       LATEST_FINDINGS: latestFindingsPath,
       LATEST_ADVISORIES: latestAdvisoriesPath,
       COMPARE_STATUS: opts.compare ?? "identical",
@@ -413,6 +434,25 @@ describe("the action's reporting script", () => {
         integrity: "failure",
         body: bodyOf(notJudged(NO_VERDICT), FRESH),
         calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
+      },
+    ],
+    // With the clear step failed, fetch never ran: a clean verdict on disk is
+    // stale (or planted) and must not be read, and no compare exists either.
+    [
+      "a failed clear ignores a planted clean verdict and blocks",
+      { env: { CLEAR_OUTCOME: "failure" }, compare: "" },
+      {
+        integrity: "failure",
+        body: bodyOf(
+          notJudged("the scratch root could not be cleared (clear step outcome: failure)"),
+          notChecked("the scratch root could not be cleared (clear step outcome: failure)"),
+        ),
+        calls: post(
+          bodyOf(
+            notJudged("the scratch root could not be cleared (clear step outcome: failure)"),
+            notChecked("the scratch root could not be cleared (clear step outcome: failure)"),
+          ),
+        ),
       },
     ],
     [
@@ -699,11 +739,10 @@ describe("the integrity verdict", () => {
 // failureDetail's formatting, pinned on known input so the end-to-end fetch
 // and judge cases below need not name a platform-specific tool.
 describe("a failed child's one-line detail", () => {
-  const failed = (stderr: string, timedOut = false) => ({
-    exitCode: 2,
+  const failed = (stderr: string, exit: ChildExit = { kind: "exited", code: 2 }) => ({
+    exit,
     stdout: "",
     stderr,
-    timedOut,
   });
   test.each([
     [
@@ -718,9 +757,54 @@ describe("a failed child's one-line detail", () => {
     ],
     ["the exit code when stderr is empty", failed(""), "exit 2"],
     ["the exit code when stderr is only whitespace", failed(" \n\t\n"), "exit 2"],
-    ["the deadline over any stderr", failed("tar: something", true), "timed out"],
+    ["the deadline over any stderr", failed("tar: something", { kind: "timed-out" }), "timed out"],
+    [
+      "the signal over any stderr",
+      failed("tar: something", { kind: "signaled", signal: "SIGKILL" }),
+      "died on SIGKILL",
+    ],
   ])("%s", (_name, result, expected) => {
     expect(failureDetail(result)).toBe(expected);
+  });
+});
+
+// How a child ended is classified once for capture(), download(), and
+// run(): the deadline wins over everything else the runtime reports.
+describe("how a child ended", () => {
+  test.each([
+    [
+      "the deadline, even beside exit 0 (an orphan held the pipe open)",
+      { exitedDueToTimeout: true, exitCode: 0, signalCode: null },
+      { kind: "timed-out" },
+    ],
+    [
+      "a normal exit",
+      { exitedDueToTimeout: false, exitCode: 3, signalCode: null },
+      { kind: "exited", code: 3 },
+    ],
+    [
+      "a signal",
+      { exitCode: null, signalCode: "SIGKILL" },
+      { kind: "signaled", signal: "SIGKILL" },
+    ],
+    [
+      "an exit code beside a signal is the exit",
+      { exitedDueToTimeout: false, exitCode: 3, signalCode: "SIGKILL" },
+      { kind: "exited", code: 3 },
+    ],
+    [
+      "nothing reported at all",
+      { exitCode: null, signalCode: undefined },
+      { kind: "signaled", signal: "an unknown signal" },
+    ],
+  ])("%s", (_name, proc, expected) => {
+    expect(childExit(proc)).toEqual(expected);
+  });
+
+  test("capture() reports a child whose orphan held the pipe past the deadline as timed out, not exit 0", () => {
+    const result = capture(["sh", "-c", "sleep 3 & exit 0"], { timeoutMs: 300 });
+    expect(result).toEqual({ exit: { kind: "timed-out" }, stdout: "", stderr: "" });
+    expect(succeeded(result.exit)).toBe(false);
   });
 });
 
@@ -791,6 +875,8 @@ interface FetchOptions {
   /** true = ALIGNED_DIR is a symlink into another directory (a planted
    *  link must be replaced, never written through). */
   symlinked?: boolean;
+  /** The base ref's answers file; null = none there (a 404, a first onboarding). */
+  base?: string | null;
   env?: Record<string, string>;
 }
 
@@ -839,6 +925,10 @@ function runFetch(opts: FetchOptions = {}) {
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");
   const calls = join(root, "calls.txt");
+  // The base ref's answers, served by the gh stub's contents endpoint: the
+  // same sha by default, so the floor holds without a second compare.
+  const baseAnswers = join(root, "base-answers.yml");
+  writeFileSync(baseAnswers, opts.base ?? `_commit: ${SHA}\n`);
   const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("fetch")], {
     cwd: repo,
     timeoutMs: 60_000,
@@ -848,6 +938,10 @@ function runFetch(opts: FetchOptions = {}) {
       ACTION_BUN: process.execPath,
       GH_TOKEN: "x",
       GH_TARBALL: tarball,
+      GH_BASE_ANSWERS: baseAnswers,
+      ...(opts.base === null ? { GH_BASE_MISSING: "1" } : {}),
+      GITHUB_REPOSITORY: "Vivswan/managed-repo",
+      BASE_REF: "main",
       ALIGNED_DIR: alignedDir,
       VERDICT_FILE: verdict,
       GITHUB_OUTPUT: outputs,
@@ -858,7 +952,8 @@ function runFetch(opts: FetchOptions = {}) {
   return {
     exitCode: proc.exitCode,
     outputs: read(outputs),
-    /** The gh calls made, in order: the build-branch compare, then the fetch. */
+    /** The gh calls made, in order: the build-branch compare, the base answers
+     *  read, the floor compare when the shas differ, then the fetch. */
     calls: read(calls).trim(),
     /** null = no refusal was written (the judge step decides). */
     verdict: verdictIn(verdict),
@@ -875,8 +970,13 @@ function runFetch(opts: FetchOptions = {}) {
 }
 
 describe("the action's fetch script", () => {
+  const BASE = "1111111111111111111111111111111111111111";
   const compared = `COMPARE api repos/${OPERATOR}/compare/${SHA}...build --jq "\\(.status) \\(.ahead_by)"`;
-  const fetched = `${compared}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`;
+  const contents = `CONTENTS api --method GET -H Accept: application/vnd.github.raw+json repos/Vivswan/managed-repo/contents/.github/.copier-answers.yml -f ref=main`;
+  const floor = `COMPARE api repos/${OPERATOR}/compare/${BASE}...${SHA} --jq .status`;
+  const admitted = `${compared}\n${contents}`;
+  const fetched = `${admitted}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`;
+  const AHEAD = "compare=ahead\nahead-by=3\n";
   const refused = (reason: string, calls = "", outputs = "") => ({
     exitCode: 1,
     outputs,
@@ -887,10 +987,10 @@ describe("the action's fetch script", () => {
     elsewhereIntact: true,
     errors: [`::error::${reason}`],
   });
-  const laidOut = (outputs: string) => ({
+  const laidOut = (outputs: string, calls = fetched) => ({
     exitCode: 0,
     outputs,
-    calls: fetched,
+    calls,
     verdict: null,
     tree: true,
     ownDir: true,
@@ -902,7 +1002,78 @@ describe("the action's fetch script", () => {
     [
       "a full sha the build branch is ahead of lays the tree out and reports the distance",
       { answers: `_commit: ${SHA}\n` },
-      laidOut("compare=ahead\nahead-by=3\n"),
+      laidOut(AHEAD),
+    ],
+    // The base ref rides as a query parameter, never spliced into the URL:
+    // a `#` or `+` in a valid branch name would otherwise change the request.
+    [
+      "a base ref with URL-sensitive characters reaches gh as a parameter",
+      { answers: `_commit: ${SHA}\n`, env: { BASE_REF: "feature/#12+x" } },
+      laidOut(AHEAD, fetched.replace("-f ref=main", "-f ref=feature/#12+x")),
+    ],
+    // The vintage floor: `_commit` may move forward from the base ref's
+    // along the build branch, never back to an older validator.
+    [
+      "a PR whose _commit is ahead of the base ref's is admitted after one more compare",
+      { answers: `_commit: ${SHA}\n`, base: `_commit: ${BASE}\n` },
+      laidOut(AHEAD, `${admitted}\n${floor}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`),
+    ],
+    [
+      "a base ref with no answers file sets no floor",
+      { answers: `_commit: ${SHA}\n`, base: null },
+      laidOut(AHEAD),
+    ],
+    ...(["behind", "diverged"] as const).map(
+      (relation): [string, FetchOptions, ReturnType<typeof runFetch>] => [
+        `a PR moving _commit ${relation} the base ref's is refused unfetched`,
+        {
+          answers: `_commit: ${SHA}\n`,
+          base: `_commit: ${BASE}\n`,
+          env: { GH_VINTAGE_STATUS: relation },
+        },
+        refused(
+          `_commit moves backwards from main's ${BASE} to ${SHA} (compare: ${relation})`,
+          `${admitted}\n${floor}`,
+          AHEAD,
+        ),
+      ],
+    ),
+    [
+      "a floor compare that fails is refused, not waved through",
+      { answers: `_commit: ${SHA}\n`, base: `_commit: ${BASE}\n`, env: { GH_VINTAGE_FAIL: "1" } },
+      refused(
+        `could not compare main's _commit ${BASE} with ${SHA}: gh: HTTP 500`,
+        `${admitted}\n${floor}`,
+        AHEAD,
+      ),
+    ],
+    [
+      "a base answers read that fails for any reason but 404 is refused",
+      { answers: `_commit: ${SHA}\n`, env: { GH_BASE_FAIL: "1" } },
+      refused(
+        "could not read main's .github/.copier-answers.yml on Vivswan/managed-repo: gh: HTTP 500",
+        admitted,
+        AHEAD,
+      ),
+    ],
+    [
+      "a base read killed mid-flight is refused even with 404 in its stderr",
+      { answers: `_commit: ${SHA}\n`, env: { GH_BASE_KILLED: "1" } },
+      refused(
+        "could not read main's .github/.copier-answers.yml on Vivswan/managed-repo: died on SIGKILL",
+        admitted,
+        AHEAD,
+      ),
+    ],
+    [
+      "a base ref recording a short sha is refused as the floor",
+      { answers: `_commit: ${SHA}\n`, base: "_commit: abc1234\n" },
+      refused(`on main, _commit 'abc1234' is not a full build sha; ${REMEDY}`, admitted, AHEAD),
+    ],
+    [
+      "no base ref at all is refused before anything else",
+      { answers: `_commit: ${SHA}\n`, env: { BASE_REF: "" } },
+      refused("no base ref to read the vintage floor from (BASE_REF is empty)"),
     ],
     [
       "a quoted full sha at the build tip lays the tree out and reports identical",
@@ -1159,6 +1330,41 @@ describe("the action's judge script", () => {
 
 // --- action.yml --------------------------------------------------------------
 
+// --- the clear step ------------------------------------------------------------
+
+describe("the action's clear step", () => {
+  // Executed as the runner would, with a planted scratch tree and a planted
+  // clean verdict where the action expects them: both must be gone after,
+  // whatever the inherited PATH, BASH_ENV, or SHELLOPTS say.
+  test("removes a planted scratch tree and verdict under a hostile environment", () => {
+    const { root, bin } = scratch();
+    const runnerTemp = join(root, "runner-temp");
+    const alignedDir = join(runnerTemp, "aligned-validator");
+    const verdict = join(runnerTemp, "aligned-verdict.json");
+    layValidator(validatorOf(alignedDir), {});
+    writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
+    // A poisoned rm first on PATH, a BASH_ENV that redefines rm, and
+    // SHELLOPTS=noexec: the step's own env must defeat all three.
+    writeFileSync(join(bin, "rm"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+    const bashEnv = join(root, "bash_env.sh");
+    writeFileSync(bashEnv, "rm() { :; }\n/bin/rm() { :; }\n");
+    const steps = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8")).runs.steps as Record<
+      string,
+      unknown
+    >[];
+    const clear = steps.find((s) => s.id === "clear") as { env: Record<string, string> };
+    const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("clear", runnerTemp)], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        BASH_ENV: bashEnv,
+        SHELLOPTS: "noexec",
+        ...clear.env,
+      },
+    });
+    expect([proc.exitCode, existsSync(alignedDir), existsSync(verdict)]).toEqual([0, false, false]);
+  });
+});
+
 describe("the action's wiring", () => {
   // The plumbing the behaviour tests cannot see. Order is the contract, no
   // setup failure ends the action before the report, every bun-running
@@ -1175,6 +1381,7 @@ describe("the action's wiring", () => {
       "setup-bun",
       "setup-bun-retry",
       "action-bun",
+      "clear",
       "fetch",
       "aligned-bun",
       "aligned-bun-retry",
@@ -1190,11 +1397,20 @@ describe("the action's wiring", () => {
     expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
     expect(JSON.stringify(action.outputs)).not.toMatch(/steps\.(integrity|latest|fetch)\./);
 
-    // Neither bun setup can end the action: both retries continue, and the
-    // readiness of the action's bun is resolved once for every consumer.
-    for (const id of ["setup-bun", "setup-bun-retry", "aligned-bun", "aligned-bun-retry"]) {
-      expect(byId(id)?.["continue-on-error"]).toBe(true);
-    }
+    // No setup-bun step, primary or retry, can end the action: a double
+    // failure must reach the report step as a rendered not-judged reason.
+    const setupBunSteps = steps.filter((step) =>
+      String(step.uses ?? "")
+        .toLowerCase()
+        .startsWith("oven-sh/setup-bun@"),
+    );
+    expect(setupBunSteps.map((step) => step.id)).toEqual([
+      "setup-bun",
+      "setup-bun-retry",
+      "aligned-bun",
+      "aligned-bun-retry",
+    ]);
+    for (const step of setupBunSteps) expect(step["continue-on-error"]).toBe(true);
     expect(byId("setup-bun-retry")?.if).toBe("steps.setup-bun.outcome == 'failure'");
     const actionBun = byId("action-bun");
     // Readiness has one truth, a bun on PATH at the pinned version, resolved
@@ -1204,7 +1420,7 @@ describe("the action's wiring", () => {
     expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
     expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
     const READY = "steps.action-bun.outputs.ready == 'true'";
-    expect(byId("fetch")?.if).toBe(READY);
+    expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
     expect(byId("latest")?.if).toBe(READY);
 
     // Every action script runs by the recorded absolute path, never `bun`
@@ -1212,7 +1428,22 @@ describe("the action's wiring", () => {
     const BUN_PATH = "${{ steps.action-bun.outputs.path }}";
     const fetch = byId("fetch");
     expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
+    // The scratch root is cleared by a fixed rm on the literal path with
+    // BASH_ENV emptied (no variable or PATH entry a caller could poison);
+    // both aligned setups require it, and the actions-bun-guard rule reads it.
+    expect(byId("clear")).toEqual({
+      name: "Clear the scratch root",
+      id: "clear",
+      "continue-on-error": true,
+      shell: "bash",
+      env: { BASH_ENV: "", SHELLOPTS: "" },
+      run: `/bin/rm -rf "${envOf(fetch).ALIGNED_DIR}"\n/bin/rm -rf "${envOf(fetch).VERDICT_FILE}"\n`,
+    });
     expect(envOf(fetch).ACTION_BUN).toBe(BUN_PATH);
+    // The vintage floor reads the PR's base ref, or the default branch off a PR.
+    expect(envOf(fetch).BASE_REF).toBe(
+      "${{ github.base_ref || github.event.repository.default_branch }}",
+    );
     expect(fetch?.["continue-on-error"]).toBe(true);
     const alignedDir = envOf(fetch).ALIGNED_DIR;
     const verdictFile = envOf(fetch).VERDICT_FILE;
@@ -1229,8 +1460,11 @@ describe("the action's wiring", () => {
         (step.with as Record<string, string>)["bun-version-file"] === pin,
     );
     expect(setups.map((step) => [step.id, step.if])).toEqual([
-      ["aligned-bun", "steps.fetch.outcome == 'success'"],
-      ["aligned-bun-retry", "steps.aligned-bun.outcome == 'failure'"],
+      ["aligned-bun", "steps.clear.outcome == 'success' && steps.fetch.outcome == 'success'"],
+      [
+        "aligned-bun-retry",
+        "steps.clear.outcome == 'success' && steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'",
+      ],
     ]);
     expect(envOf(byId("aligned-bun-path")).PIN_FILE).toBe(pin);
 
@@ -1266,6 +1500,7 @@ describe("the action's wiring", () => {
       ACTION_BUN: BUN_PATH,
       ACTION_PATH: "${{ github.action_path }}",
       VERDICT: verdictFile,
+      CLEAR_OUTCOME: "${{ steps.clear.outcome }}",
       LATEST_FINDINGS: latestWith["findings-file"],
       LATEST_ADVISORIES: latestWith["advisories-file"],
       COMPARE_STATUS: "${{ steps.fetch.outputs.compare }}",

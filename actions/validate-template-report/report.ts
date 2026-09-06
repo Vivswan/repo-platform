@@ -4,12 +4,12 @@
 // value. Never fails the job; the caller re-raises `integrity` last.
 //
 // Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, GITHUB_OUTPUT,
-// VERDICT, LATEST_FINDINGS, LATEST_ADVISORIES, COMPARE_STATUS, AHEAD_BY,
-// EVENT_NAME, PR_NUMBER, RUN_URL.
+// VERDICT, CLEAR_OUTCOME, LATEST_FINDINGS, LATEST_ADVISORIES, COMPARE_STATUS,
+// AHEAD_BY, EVENT_NAME, PR_NUMBER, RUN_URL.
 
 import { appendFileSync, readFileSync, statSync } from "node:fs";
-import { capture, env, requireEnv, warning } from "./runtime.ts";
-import { readVerdict } from "./verdict.ts";
+import { capture, env, requireEnv, succeeded, warning } from "./runtime.ts";
+import { type Integrity, readVerdict } from "./verdict.ts";
 
 const NETWORK_TIMEOUT_MS = 20_000;
 /** The paginated comment listing fetches N sequential pages under ONE
@@ -20,7 +20,16 @@ const PAGINATED_TIMEOUT_MS = NETWORK_TIMEOUT_MS * 4;
 // strands every comment already posted under the old one.
 const MARKER = "<!-- repo-platform:validate-template -->";
 
-const verdict = readVerdict(requireEnv("VERDICT"));
+// A verdict is read only from a run whose scratch root was cleared: with the
+// clear step failed, fetch never ran and any verdict file on disk is stale.
+const clearOutcome = env("CLEAR_OUTCOME");
+const verdict: Integrity =
+  clearOutcome === "success"
+    ? readVerdict(requireEnv("VERDICT"))
+    : {
+        kind: "not-judged",
+        reason: `the scratch root could not be cleared (clear step outcome: ${clearOutcome || "none"})`,
+      };
 // Exported before anything else can go wrong: this line IS the gate.
 appendFileSync(
   requireEnv("GITHUB_OUTPUT"),
@@ -136,7 +145,7 @@ const listing = capture(
   ],
   { timeoutMs: PAGINATED_TIMEOUT_MS, env: { MARKER } },
 );
-if (listing.exitCode !== 0) {
+if (!succeeded(listing.exit)) {
   warning("could not list PR comments; the findings are in the job summary instead.");
   process.exit(0);
 }
@@ -158,7 +167,7 @@ if (existing !== "") {
     ],
     { timeoutMs: NETWORK_TIMEOUT_MS },
   );
-  if (patch.exitCode !== 0) {
+  if (!succeeded(patch.exit)) {
     warning("could not update the findings comment; the findings are in the job summary instead.");
   }
 } else {
@@ -175,7 +184,7 @@ if (existing !== "") {
     ],
     { timeoutMs: NETWORK_TIMEOUT_MS },
   );
-  if (post.exitCode !== 0) {
+  if (!succeeded(post.exit)) {
     warning("could not post the findings comment; the findings are in the job summary instead.");
   }
 }

@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 // The integrity leg's FETCH of the build tree at the recorded `_commit`. Its
-// one compare call both admits the sha and feeds freshness.
+// build-branch compare both admits the sha and feeds freshness; a second
+// holds `_commit` at or ahead of the base ref's (the vintage floor).
 //
 // Env: GH_TOKEN, ALIGNED_DIR (cleared here), VERDICT_FILE (cleared here),
-// GITHUB_OUTPUT. Runs from the caller's checkout.
+// GITHUB_OUTPUT, GITHUB_REPOSITORY, BASE_REF (the vintage floor's ref).
+// Runs from the caller's checkout.
 
-import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   BUN_VERSION_FILE,
@@ -15,7 +17,7 @@ import {
   validatorOf,
 } from "./aligned_tree.ts";
 import { OPERATOR_REPO, recordedBuildSha } from "./build_sha.ts";
-import { capture, download, error, failureDetail, requireEnv } from "./runtime.ts";
+import { capture, download, env, error, failureDetail, requireEnv, succeeded } from "./runtime.ts";
 import { writeVerdict } from "./verdict.ts";
 
 const NETWORK_TIMEOUT_MS = 60_000;
@@ -37,6 +39,10 @@ const refuse: (reason: string) => never = (reason) => {
   writeVerdict(verdictFile, { kind: "not-judged", reason });
   process.exit(1);
 };
+const callerRepo = requireEnv("GITHUB_REPOSITORY");
+const baseRef = env("BASE_REF");
+if (baseRef === "") refuse("no base ref to read the vintage floor from (BASE_REF is empty)");
+
 const recorded = recordedBuildSha(root);
 if ("refusal" in recorded) refuse(recorded.refusal);
 const { sha } = recorded;
@@ -55,7 +61,7 @@ const compared = capture(
   ],
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
-if (compared.exitCode !== 0) {
+if (!succeeded(compared.exit)) {
   setOutput("compare", "error");
   refuse(
     `could not confirm ${sha} is on ${OPERATOR_REPO}'s build branch: ${failureDetail(compared)}`,
@@ -70,19 +76,69 @@ if (status !== "identical" && status !== "ahead") {
   );
 }
 
+// The vintage floor: `_commit` may move forward along the build branch,
+// never back to an older validator with fewer rules. The base ref's
+// recorded `_commit` is the floor; no answers file there sets none.
+const baseAnswers = capture(
+  [
+    "gh",
+    "api",
+    "--method",
+    "GET",
+    "-H",
+    "Accept: application/vnd.github.raw+json",
+    `repos/${callerRepo}/contents/.github/.copier-answers.yml`,
+    "-f",
+    `ref=${baseRef}`,
+  ],
+  { timeoutMs: NETWORK_TIMEOUT_MS },
+);
+if (!succeeded(baseAnswers.exit)) {
+  // Only a normal exit reporting 404 means "no file"; a timeout or a signal
+  // death with that text in its stderr is still a failed read.
+  if (!(baseAnswers.exit.kind === "exited" && /\bHTTP 404\b/.test(baseAnswers.stderr))) {
+    refuse(
+      `could not read ${baseRef}'s .github/.copier-answers.yml on ${callerRepo}: ${failureDetail(baseAnswers)}`,
+    );
+  }
+} else {
+  const baseRoot = join(alignedDir, "base");
+  mkdirSync(join(baseRoot, ".github"), { recursive: true });
+  writeFileSync(join(baseRoot, ".github", ".copier-answers.yml"), baseAnswers.stdout);
+  const base = recordedBuildSha(baseRoot);
+  if ("refusal" in base) refuse(`on ${baseRef}, ${base.refusal}`);
+  if (base.sha !== sha) {
+    const floor = capture(
+      ["gh", "api", `repos/${OPERATOR_REPO}/compare/${base.sha}...${sha}`, "--jq", ".status"],
+      { timeoutMs: NETWORK_TIMEOUT_MS },
+    );
+    if (!succeeded(floor.exit)) {
+      refuse(
+        `could not compare ${baseRef}'s _commit ${base.sha} with ${sha}: ${failureDetail(floor)}`,
+      );
+    }
+    const relation = floor.stdout.trim();
+    if (relation !== "identical" && relation !== "ahead") {
+      refuse(
+        `_commit moves backwards from ${baseRef}'s ${base.sha} to ${sha} (compare: ${relation})`,
+      );
+    }
+  }
+}
+
 const tree = treeOf(alignedDir);
 mkdirSync(tree, { recursive: true });
 const tarball = join(alignedDir, "tree.tgz");
 const fetched = download(["gh", "api", `repos/${OPERATOR_REPO}/tarball/${sha}`], tarball, {
   timeoutMs: NETWORK_TIMEOUT_MS,
 });
-if (fetched.exitCode !== 0) {
+if (!succeeded(fetched.exit)) {
   refuse(`could not fetch ${OPERATOR_REPO} at ${sha}: ${failureDetail(fetched)}`);
 }
 const unpacked = capture(["tar", "-xzf", tarball, "-C", tree, "--strip-components=1"], {
   timeoutMs: NETWORK_TIMEOUT_MS,
 });
-if (unpacked.exitCode !== 0) {
+if (!succeeded(unpacked.exit)) {
   refuse(`could not unpack ${OPERATOR_REPO} at ${sha}: ${failureDetail(unpacked)}`);
 }
 

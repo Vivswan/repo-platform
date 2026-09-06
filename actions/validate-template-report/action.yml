@@ -87,16 +87,32 @@ runs:
 
     # No install step for this action's own scripts: no runtime deps.
     #
+    # The scratch root and the verdict file are predictable paths: cleared
+    # before anything reads them by a fixed rm on the literal paths, with the
+    # inherited shell knobs that could skip or rewrite the lines emptied.
+    - name: Clear the scratch root
+      id: clear
+      continue-on-error: true
+      shell: bash
+      env:
+        BASH_ENV: ""
+        SHELLOPTS: ""
+      run: |
+        /bin/rm -rf "${{ runner.temp }}/aligned-validator"
+        /bin/rm -rf "${{ runner.temp }}/aligned-verdict.json"
+
     # The integrity leg: fetch, the tree's bun, judge. A failed fetch writes
-    # its own not-judged verdict and skips the steps behind it.
+    # its own not-judged verdict and skips the steps behind it. BASE_REF is
+    # the vintage floor: `_commit` may not move behind the base ref's.
     - name: Fetch the validator at the recorded _commit
       id: fetch
-      if: steps.action-bun.outputs.ready == 'true'
+      if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
       continue-on-error: true
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         GH_TOKEN: ${{ inputs.github-token }}
+        BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
       run: '"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"'
@@ -107,7 +123,7 @@ runs:
     # above; a double failure leaves the resolver's path empty.
     - name: Set up the fetched tree's bun
       id: aligned-bun
-      if: steps.fetch.outcome == 'success'
+      if: steps.clear.outcome == 'success' && steps.fetch.outcome == 'success'
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
       with:
@@ -115,7 +131,7 @@ runs:
 
     - name: Set up the fetched tree's bun (retry)
       id: aligned-bun-retry
-      if: steps.aligned-bun.outcome == 'failure'
+      if: steps.clear.outcome == 'success' && steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
       with:
@@ -176,6 +192,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
         GH_TOKEN: ${{ inputs.github-token }}
         VERDICT: ${{ runner.temp }}/aligned-verdict.json
+        CLEAR_OUTCOME: ${{ steps.clear.outcome }}
         LATEST_FINDINGS: ${{ runner.temp }}/latest-findings.md
         LATEST_ADVISORIES: ${{ runner.temp }}/latest-advisories.md
         COMPARE_STATUS: ${{ steps.fetch.outputs.compare }}

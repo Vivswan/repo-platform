@@ -33,23 +33,39 @@ export function error(message: string): void {
   console.log(`::error::${escapeData(message)}`);
 }
 
+/** How a child ended. The deadline wins over the exit code: a child that
+ *  exited 0 while an orphan held its pipe open still hit the deadline. */
+export type ChildExit =
+  | { kind: "exited"; code: number }
+  | { kind: "signaled"; signal: string }
+  | { kind: "timed-out" };
+
+export function childExit(proc: {
+  exitedDueToTimeout?: boolean;
+  exitCode: number | null;
+  signalCode?: string | null;
+}): ChildExit {
+  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
+  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
+  return { kind: "signaled", signal: proc.signalCode ?? "an unknown signal" };
+}
+
+export function succeeded(exit: ChildExit): boolean {
+  return exit.kind === "exited" && exit.code === 0;
+}
+
 export interface RunResult {
-  exitCode: number;
+  exit: ChildExit;
   stdout: string;
   stderr: string;
-  timedOut: boolean;
 }
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
-  /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
-   *  the result reports `timedOut`. REQUIRED, unlike the repository's
-   *  shared proc.ts where it is optional. This action runs on a billed
-   *  runner with a job timeout, and a `gh` call that hangs there burns
-   *  the budget and then fails the job on the clock instead of on its
-   *  own verdict. Making the deadline unskippable is what retires the
-   *  grep that used to scan the rendered bash for a bare `gh api`. */
+  /** Hard deadline in milliseconds, REQUIRED: on expiry the child is
+   *  SIGKILLed and the result reports `timed-out`. A `gh` call that hangs on
+   *  a billed runner would otherwise fail the job on the clock, not on a verdict. */
   timeoutMs: number;
 }
 
@@ -62,23 +78,19 @@ export function capture(command: string[], options: RunOptions): RunResult {
     timeout: options.timeoutMs,
     killSignal: "SIGKILL",
   });
-  return {
-    exitCode: proc.exitCode ?? 1,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
-    timedOut: proc.exitedDueToTimeout === true,
-  };
+  return { exit: childExit(proc), stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
 }
 
-/** One line saying why a captured child failed: the deadline, its first
- *  stderr line, or its exit code. */
+/** One line saying why a captured child failed: the deadline, the signal,
+ *  its first stderr line, or its exit code. */
 export function failureDetail(result: RunResult): string {
-  if (result.timedOut) return "timed out";
+  if (result.exit.kind === "timed-out") return "timed out";
+  if (result.exit.kind === "signaled") return `died on ${result.exit.signal}`;
   const line = result.stderr
     .split("\n")
     .find((l) => l.trim() !== "")
     ?.trim();
-  return line || `exit ${result.exitCode}`;
+  return line || `exit ${result.exit.code}`;
 }
 
 /** capture() with stdout streamed to a file instead of a string: for
@@ -94,23 +106,11 @@ export function download(command: string[], toFile: string, options: RunOptions)
       timeout: options.timeoutMs,
       killSignal: "SIGKILL",
     });
-    return {
-      exitCode: proc.exitCode ?? 1,
-      stdout: "",
-      stderr: proc.stderr.toString(),
-      timedOut: proc.exitedDueToTimeout === true,
-    };
+    return { exit: childExit(proc), stdout: "", stderr: proc.stderr.toString() };
   } finally {
     closeSync(fd);
   }
 }
-
-/** How a child ended: a normal exit, a signal death, or our deadline (the
- *  SIGKILL is ours, so it is not reported as a signal). */
-export type ChildExit =
-  | { kind: "exited"; code: number }
-  | { kind: "signaled"; signal: string }
-  | { kind: "timed-out" };
 
 /** A child whose output belongs in the job log as it happens (stdio
  *  inherited); only how it ended comes back. */
@@ -123,7 +123,5 @@ export function run(command: string[], options: RunOptions): ChildExit {
     timeout: options.timeoutMs,
     killSignal: "SIGKILL",
   });
-  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
-  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
-  return { kind: "signaled", signal: proc.signalCode ?? "an unknown signal" };
+  return childExit(proc);
 }

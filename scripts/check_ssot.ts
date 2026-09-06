@@ -2349,6 +2349,57 @@ export function fetchedTreePin(value: unknown): boolean {
   );
 }
 
+/** Whether `condition` is a pure `&&`-conjunction carrying `atom` as one of
+ *  its terms; any `||`, negation, or parenthesis anywhere means the setup
+ *  may run without that term, so the answer is no. */
+function conjunctionRequires(condition: string, atom: string): boolean {
+  if (/\|\||[()]|!(?!=)/.test(condition)) return false;
+  return condition
+    .split("&&")
+    .map((term) => term.trim())
+    .includes(atom);
+}
+
+/** Inherited shell variables that could skip or rewrite a bash step's lines
+ *  before they run; a clearing step must carry each one emptied. */
+export const NEUTRALIZED_SHELL_ENV = ["BASH_ENV", "SHELLOPTS"];
+
+/** The paths a bash step removes beyond a caller's reach: the shell knobs
+ *  above emptied, and every non-blank non-comment line `/bin/rm -rf
+ *  "<literal path>"` (no variable to rebind, no rm from PATH); else nothing. */
+function pathsClearedBy(step: Record<string, unknown>): string[] {
+  const stepEnv =
+    typeof step.env === "object" && step.env !== null ? (step.env as Record<string, unknown>) : {};
+  const neutralized = NEUTRALIZED_SHELL_ENV.every((name) => stepEnv[name] === "");
+  if (step.shell !== "bash" || !neutralized || typeof step.run !== "string") return [];
+  const cleared: string[] = [];
+  const lines = step.run.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line));
+  for (const line of lines) {
+    const removed = /^\s*\/bin\/rm -rf (?:-- )?"([^"]+)"\s*$/.exec(line);
+    if (removed === null) return [];
+    cleared.push(removed[1]);
+  }
+  return cleared;
+}
+
+/** Clearing evidence for a runner-scratch pin: a step before `index` that
+ *  removes a path the pin sits under (any prefix of a clean pin is clean)
+ *  and whose success the setup step's own condition requires. */
+export function pinRootCleared(
+  pin: string,
+  steps: Record<string, unknown>[],
+  index: number,
+): boolean {
+  const setupIf = String(steps[index]?.if ?? "");
+  return steps
+    .slice(0, index)
+    .some(
+      (step) =>
+        conjunctionRequires(setupIf, `steps.${String(step.id)}.outcome == 'success'`) &&
+        pathsClearedBy(step).some((root) => pin.startsWith(`${root}/`)),
+    );
+}
+
 /** How one action.yml violates the pinned-bun setup contract: any action
  *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
  *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
@@ -2401,8 +2452,19 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       typeof withBlock === "object" && withBlock !== null
         ? (withBlock as Record<string, unknown>)["bun-version-file"]
         : undefined;
-    const pinned = value === pinValue || fetchedTreePin(value);
-    if (pinned) continue;
+    if (value === pinValue) continue;
+    if (fetchedTreePin(value)) {
+      // The scratch path is predictable, so a caller could plant the pin
+      // before the action runs; only an earlier step of THIS action
+      // clearing the pin's root makes the path the action's own.
+      if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
+      mismatches.push({
+        file,
+        expected: `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root (a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is /bin/rm -rf of literal paths, and whose success this setup's condition requires)`,
+        got: "no such step - a caller could plant that pin before the action runs",
+      });
+      continue;
+    }
     mismatches.push({
       file,
       expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,

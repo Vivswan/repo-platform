@@ -9,7 +9,7 @@
 
 import { join, resolve } from "node:path";
 import { reportFilesOf, VALIDATOR_SCRIPT, validatorOf } from "./aligned_tree.ts";
-import { capture, env, error, failureDetail, requireEnv, run } from "./runtime.ts";
+import { capture, env, error, failureDetail, requireEnv, run, succeeded } from "./runtime.ts";
 import { classify, type Integrity, writeVerdict } from "./verdict.ts";
 
 const INSTALL_TIMEOUT_MS = 180_000;
@@ -40,7 +40,7 @@ const installed = capture([alignedBun, "install", "--frozen-lockfile", "--produc
   cwd: validator,
   timeoutMs: INSTALL_TIMEOUT_MS,
 });
-if (installed.exitCode !== 0) {
+if (!succeeded(installed.exit)) {
   console.log(installed.stdout + installed.stderr);
   conclude({
     kind: "not-judged",
