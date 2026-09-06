@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
-import { MANIFEST_NAME, withheldMarkerValid } from "../../../shared/manifest.ts";
+import { MANIFEST_NAME } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
-import { advisory, error, type Finding } from "../findings.ts";
+import { error, type Finding } from "../findings.ts";
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -15,16 +15,7 @@ function sha256(data: Buffer): string {
  *  managed region alone, from the entry's BEGIN marker line through its
  *  END marker line). Drift means the file changed since the last stamp;
  *  the next sync replaces it. A listed file missing from the repo is
- *  deletion damage and errors, with one exception the sync itself
- *  records: a workflow file it could not deliver (the push token lacks the
- *  Workflows scope) is removed from the pushed tree and its entry
- *  restamped hash-null with `"withheld": true` (stamp_manifest.ts owns the
- *  marker: it writes it for the withheld paths, keeps it while the file
- *  stays undelivered, and strips it once it can hash the file). That entry
- *  is an advisory naming the withheld cause; hash-null and absent without
- *  the marker is a deleted managed file. The marker is valid only under
- *  .github/workflows/, the one directory that scope gates, so a marker
- *  anywhere else cannot launder a deletion. The roster cross-check
+ *  deletion damage and errors. The roster cross-check
  *  (manifest_shape) has already judged the class metadata of every roster
  *  path; this check reads each entry's fields as they stand. */
 export function checkManifestParity(ctx: Context): Finding[] {
@@ -32,21 +23,6 @@ export function checkManifestParity(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
-    // The marker has one shape: `true` on a hash-null managed or split
-    // entry under .github/workflows/. The stamper writes nothing else, so
-    // any other combination is a hand edit; judged before the class
-    // dispatch so a starter or the self entry cannot carry it unseen.
-    if ("withheld" in entry && !withheldMarkerValid(rel, entry)) {
-      findings.push(
-        error(
-          `${where} carries a withheld marker outside its one shape (\`true\` on a hash-null ` +
-            "managed or split entry under .github/workflows/) - the sync writes the marker only " +
-            "for a workflow it could not deliver; revert the entry (git history has the stamped " +
-            "original) or run a recovery sync (recover=recopy)",
-        ),
-      );
-      continue;
-    }
     // The self entry's invariant comes before any class dispatch: a
     // corrupted class (say, starter) must not slip past it. Its commit slot
     // holds the provenance stamp (null or a string; manifest_shape judges
@@ -161,24 +137,13 @@ export function checkManifestParity(ctx: Context): Finding[] {
       stat = null;
     }
     if (stat === null) {
-      if (entry.withheld === true) {
-        findings.push(
-          advisory(
-            `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but withheld from the ` +
-              "repo - the sync's push token lacked the Workflows scope, so it could not " +
-              "create the workflow file; grant Workflows read/write to the sync token and " +
-              "run a recovery sync (recover=recopy), which re-renders it",
-          ),
-        );
-      } else {
-        findings.push(
-          error(
-            `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing from the ` +
-              "repo - a managed file deleted outside a sync; restore it from git history " +
-              "or run a recovery sync (recover=recopy)",
-          ),
-        );
-      }
+      findings.push(
+        error(
+          `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing from the ` +
+            "repo - a managed file deleted outside a sync; restore it from git history " +
+            "or run a recovery sync (recover=recopy)",
+        ),
+      );
       continue;
     }
     if (hash === null) {

@@ -297,7 +297,7 @@ describe("stageComposedTreeArgv", () => {
       {
         rel: ".github/scripts/sync/commit_push.ts",
         composed: false,
-        allowedPlainAdds: ['git("add", "--all")', 'git("add", "--all")'],
+        allowedPlainAdds: ['git("add", "--all")'],
       },
     ];
     for (const { rel, composed, allowedPlainAdds = [] } of sites) {

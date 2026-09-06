@@ -1,5 +1,5 @@
 // The fail-closed timeout contract on the sync scripts' git probe owners:
-// preserve_repo_owned's git() and retired_cleanup's licensePresentAtHead
+// preserve_repo_owned's git() and retired_cleanup's presentAtHead
 // feed consumers that read `exitCode === 0` as a benign answer (absent,
 // skip the restore, stand the flip guard down), so a probe whose deadline
 // expires must ABORT the step loudly instead of returning - a hung git is
@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import "../../.github/scripts/sync/preserve_repo_owned.ts";
-import { licensePresentAtHead } from "../../.github/scripts/sync/retired_cleanup.ts";
+import { presentAtHead } from "../../.github/scripts/sync/retired_cleanup.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -36,7 +36,7 @@ const PROBE_TIMEOUT_MS = 250;
 
 // Hook-driven runs (husky pre-commit) export GIT_DIR/GIT_INDEX_FILE, which
 // would redirect this file's in-process git calls at the exporting repo.
-// The helpers under test (git(), licensePresentAtHead) take no env
+// The helpers under test (git(), presentAtHead) take no env
 // parameter, so this ambient scrub is their one channel - and it reaches
 // their children only because proc.ts hands every spawn live process.env
 // (bun's own default is a process-start snapshot that kept this scrub
@@ -142,11 +142,11 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     expect(result.stdout).not.toContain("PROBE-RETURNED");
   });
 
-  test("retired_cleanup's licensePresentAtHead aborts loudly when the probe hangs", () => {
+  test("retired_cleanup's presentAtHead aborts loudly when the probe hangs", () => {
     const result = runDriver(
       [
-        `import { licensePresentAtHead } from ${JSON.stringify(cleanupScript)};`,
-        `const present = licensePresentAtHead(${JSON.stringify(
+        `import { presentAtHead } from ${JSON.stringify(cleanupScript)};`,
+        `const present = presentAtHead(${JSON.stringify(
           initRepo({ "README.md": "readme\n" }),
         )}, "LICENSE", ${PROBE_TIMEOUT_MS});`,
         `console.log("PROBE-RETURNED " + present);`,
@@ -155,7 +155,7 @@ describe("probe timeouts fail closed (never read as absent)", () => {
       { PATH: `${hangingGitDir()}:${process.env.PATH}` },
     );
     expect(result.exitCode).toBe(1); // fail()'s contract
-    expect(result.stdout).toContain("::error::git cat-file timed out probing HEAD:LICENSE");
+    expect(result.stdout).toContain("::error::git ls-tree timed out probing HEAD:LICENSE");
     // The old bug: false ("license absent") standing the flip guard down.
     expect(result.stdout).not.toContain("PROBE-RETURNED");
   });
@@ -229,8 +229,26 @@ describe("probe timeouts fail closed (never read as absent)", () => {
   test("positive control: real probes answer both ways without aborting", () => {
     const withLicense = initRepo({ LICENSE: "license\n", "README.md": "readme\n" });
     const without = initRepo({ "README.md": "readme\n" });
-    expect(licensePresentAtHead(withLicense, "LICENSE")).toBe(true);
-    expect(licensePresentAtHead(without, "LICENSE")).toBe(false);
+    expect(presentAtHead(withLicense, "LICENSE")).toBe(true);
+    expect(presentAtHead(without, "LICENSE")).toBe(false);
+  });
+
+  test("retired_cleanup's presentAtHead aborts on a git failure instead of reading it as absent", () => {
+    // Not a repository: ls-tree exits 128. Absent is exit 0 with no
+    // output, so anything else must abort - "absent" stands the flip
+    // guard down and clears a new starter of its hold.
+    const result = runDriver(
+      [
+        `import { presentAtHead } from ${JSON.stringify(cleanupScript)};`,
+        `const present = presentAtHead(${JSON.stringify(temp.dir("not-a-repo-"))}, "LICENSE");`,
+        `console.log("PROBE-RETURNED " + present);`,
+        "",
+      ].join("\n"),
+      {},
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("::error::git ls-tree failed probing HEAD:LICENSE (exit 128)");
+    expect(result.stdout).not.toContain("PROBE-RETURNED");
   });
 
   test("near-miss: without the owner's guard a timeout reads exactly like absence", () => {
@@ -295,6 +313,7 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     expect(preserve).toMatch(/showFleetLicense\(targetRef\)/);
     expect(preserve).toMatch(/const deleted = deletedTrackedPaths\(\);/);
     const cleanup = readFileSync(cleanupScript, "utf-8");
-    expect(cleanup).toMatch(/licensePresentAtHead\(targetDir, name\)/);
+    expect(cleanup).toMatch(/presentAtHead\(targetDir, name\)/);
+    expect(cleanup).toMatch(/presentAtHead\(targetDir, path\)/);
   });
 });

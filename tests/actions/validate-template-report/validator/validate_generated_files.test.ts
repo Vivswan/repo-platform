@@ -1410,31 +1410,17 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(".yamllint: .github/repo-platform-manifest.json records no hash");
   });
 
-  // One listed-but-missing state is not damage: a workflow the sync's push
-  // token could not create, which the withhold removes from the pushed
-  // tree and restamps hash-null with the withheld marker. The advisory
-  // keys on the marker; the path only bounds where a marker is valid (the
-  // directory the Workflows scope gates), so a marker elsewhere cannot
-  // launder a deletion. The workflow rows select release-please, whose
-  // managed release.yml the roster then expects (the tree the withhold
-  // pushes for a repo that just selected the module); the docs rows are the
-  // plain baseline with one entry the roster does not cover.
+  // A listed file missing from the repo is deletion damage, whatever its hash state. The
+  // workflow row selects release-please (the roster then expects release.yml); the docs row is
+  // the baseline plus one entry the roster does not cover.
   const RELEASE_PLEASE = BASELINE[".repo-platform.yml"].replace(
     "modules: [uv]",
     "modules: [uv, release-please]",
   );
-  const WITHHELD = "but withheld from the repo - the sync's push token lacked the Workflows scope";
   const DELETED = "but missing from the repo - a managed file deleted outside a sync";
   test.each([
     {
-      reason: "a withheld entry with no file is the advisory",
-      path: ".github/workflows/release.yml",
-      registration: RELEASE_PLEASE,
-      entry: '{"class": "managed", "hash": null, "withheld": true}',
-      verdict: { exitCode: 0, stream: "stdout", text: WITHHELD },
-    },
-    {
-      reason: "a hash-null workflow entry without the marker is a deleted managed file",
+      reason: "a hash-null workflow entry is a deleted managed file",
       path: ".github/workflows/release.yml",
       registration: RELEASE_PLEASE,
       entry: '{"class": "managed", "hash": null}',
@@ -1463,72 +1449,6 @@ describe("ownership-manifest byte parity", () => {
     expect(result[verdict.stream].split("\n").filter((line) => line.includes(path))).toHaveLength(
       1,
     );
-  });
-
-  // The marker has one shape (true, on a hash-null managed or split entry
-  // other than the self entry): the stamper writes nothing else, so any
-  // other combination is a hand edit and draws exactly one diagnostic.
-  test.each([
-    {
-      reason: "a non-true value",
-      path: ".github/workflows/nightly.yml",
-      entry: '{"class": "managed", "hash": null, "withheld": "yes"}',
-    },
-    {
-      reason: "a marker next to a stamped hash",
-      path: ".github/workflows/nightly.yml",
-      entry: `{"class": "managed", "hash": "${"a".repeat(64)}", "withheld": true}`,
-    },
-    {
-      reason: "a marker on a starter",
-      path: ".github/workflows/nightly.yml",
-      entry: '{"class": "starter", "withheld": true}',
-    },
-    {
-      reason: "a marker outside .github/workflows/ (a deleted managed file cannot launder itself)",
-      path: "docs/handbook.md",
-      entry: '{"class": "managed", "hash": null, "withheld": true}',
-    },
-    {
-      reason: "a marker on a path that only lexically starts under .github/workflows/",
-      path: ".github/workflows/../../docs/handbook.md",
-      entry: '{"class": "managed", "hash": null, "withheld": true}',
-    },
-    {
-      reason: "a marker on the manifest's own entry",
-      path: MANIFEST,
-      entry: `{"class": "managed", "hash": null, "commit": "${COMMIT}", "withheld": true}`,
-    },
-  ])("a withheld marker outside its one shape is an error: $reason", ({ path, entry }) => {
-    const { exitCode, stdout, stderr } = runValidator({
-      [MANIFEST]: manifestOf({ ...stampedBaseline(), [path]: entry }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr.split("\n").filter((line) => line.includes(`'${path}'`))).toEqual([
-      `error: ${MANIFEST}: entry '${path}' carries a withheld marker outside its one shape ` +
-        `(\`true\` on a hash-null managed or split entry under .github/workflows/) - the sync ` +
-        `writes the marker only for a workflow it could not deliver; revert the entry (git ` +
-        `history has the stamped original) or run a recovery sync (recover=recopy)`,
-    ]);
-    expect(stdout).not.toContain(path);
-  });
-
-  test("a withheld marker on a present hash-null file is the unstamped error, not the advisory", () => {
-    // The file arrived by hand after the withhold; the next stamp hashes it
-    // and strips the marker, and until then the entry reads as unstamped.
-    const path = ".github/workflows/nightly.yml";
-    const { exitCode, stdout, stderr } = runValidator({
-      [path]: "name: nightly\n",
-      [MANIFEST]: manifestOf({
-        ...stampedBaseline(),
-        [path]: '{"class": "managed", "hash": null, "withheld": true}',
-      }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr.split("\n").filter((line) => line.includes(path))).toEqual([
-      `error: ${path}: ${MANIFEST} records no hash for it (unstamped) - the render's stamp hook did not run; run a template sync (or bun stamp_manifest.ts from the build branch) to stamp it`,
-    ]);
-    expect(stdout).not.toContain(path);
   });
 
   test("an unlisted roster path is an error even when its file is absent too", () => {
@@ -2023,6 +1943,27 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(
       ".github/workflows/ci.yml: the managed-region marker lines ('# no-such-begin'",
     );
+  });
+
+  test("an entry field outside the vocabulary is an error naming the entry and the keys", () => {
+    // A retired sync's `withheld` marker left on the registration starter (rostered, selected):
+    // reported until the next sync restamps the entry without it. The control is the whole
+    // outcome of the same manifest without the key: exit 0 and no findings.
+    const stale = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        ".repo-platform.yml": '{"class": "starter", "withheld": true}',
+      }),
+    });
+    expect(stale.exitCode).toBe(1);
+    expect(stale.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
+      `error: ${MANIFEST}: entry '.repo-platform.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; the next template sync restamps the entry without them, or revert the edit`,
+    ]);
+    const control = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
+    expect({ exitCode: control.exitCode, stderr: control.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
   });
 
   test("a manifest that does not list itself is an error", () => {

@@ -113,8 +113,8 @@ describe("mirrorPathProblem", () => {
   const ESCAPE = "carries an empty, '.', or '..' segment, so it could escape the repository";
   const GIT = "carries a .git segment";
   const WORKFLOWS =
-    "sits under .github/workflows/ - the push step withholds workflow files when the " +
-    "token lacks the Workflows scope, so a workflow-file mirror cannot be promised";
+    "sits under .github/workflows/ - workflow files are template-owned, so a mirror " +
+    "there would be a second writer over the template's paths";
   const CONTROL = "carries control characters";
 
   test.each([
@@ -131,7 +131,7 @@ describe("mirrorPathProblem", () => {
     {
       path: ".github/workflows/ci.yml",
       problem: WORKFLOWS,
-      reason: "the withhold push can rewrite workflow files after mirrors",
+      reason: "workflow files are template-owned",
     },
     {
       path: ".GitHub/Workflows/ci.yml",
@@ -292,7 +292,7 @@ describe("planMirrors", () => {
     expect(readFileSync(join(root, ".git/config"), "utf-8")).toBe("[core]");
   });
 
-  test("a workflow-path source or target is refused - the withhold push can rewrite those after mirrors", () => {
+  test("a workflow-path source or target is refused - workflow files are template-owned", () => {
     const root = makeTree({ "LICENSE.md": "l", ".github/workflows/ci.yml": "jobs:" });
     const manifest: Record<string, ManifestEntryShape> = {
       ...MANIFEST,
@@ -300,7 +300,7 @@ describe("planMirrors", () => {
     };
     const asSource = planMirrors(root, decl(".github/workflows/ci.yml", "copy.yml"), manifest, "");
     expect(asSource.writes).toEqual([]);
-    expect(asSource.refusals[0]).toContain("Workflows scope");
+    expect(asSource.refusals[0]).toContain("template-owned");
     const asTarget = planMirrors(
       root,
       decl("LICENSE.md", ".github/workflows/mirror.yml"),
@@ -308,7 +308,7 @@ describe("planMirrors", () => {
       "",
     );
     expect(asTarget.writes).toEqual([]);
-    expect(asTarget.refusals[0]).toContain("Workflows scope");
+    expect(asTarget.refusals[0]).toContain("template-owned");
   });
 
   test("a planned target that is a path prefix of another refuses both sides", () => {

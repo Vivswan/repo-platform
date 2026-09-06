@@ -87,10 +87,25 @@ export interface GrammarSpec<Declaration> {
   wireFields: readonly Exclude<keyof Declaration, "grammar">[];
 }
 
+/** A type that compiles only when `T` is never: the exhaustiveness pin for
+ *  each wire-field tuple below (a declaration field missing from its tuple
+ *  is a compile error, not a runtime gap). */
+export type AssertNever<T extends never> = T;
+
+/** The managed-region declaration's wire fields as a tuple: `satisfies`
+ *  refuses a stranger, the AssertNever pin refuses an omission. */
+export const MANAGED_REGION_WIRE_FIELDS = ["begin", "end"] as const satisfies readonly Exclude<
+  keyof ManagedRegionSplit,
+  "grammar"
+>[];
+export type ManagedRegionWireFieldsExhaustive = AssertNever<
+  Exclude<Exclude<keyof ManagedRegionSplit, "grammar">, (typeof MANAGED_REGION_WIRE_FIELDS)[number]>
+>;
+
 export const GRAMMAR: { [K in GrammarId]: GrammarSpec<SplitShapes[K]> } = {
   "managed-region": {
     markers: (declaration) => [declaration.begin, declaration.end],
-    wireFields: ["begin", "end"],
+    wireFields: MANAGED_REGION_WIRE_FIELDS,
   },
 };
 

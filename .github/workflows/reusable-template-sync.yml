@@ -1,11 +1,6 @@
-# Push-only template sync into one managed repo; called only by
-# sync-repos.yml. The PAT is required but adapts: without the Workflows
-# scope, workflow-file changes are withheld with a warning. The rolling
-# branch is regenerated every run (--force-with-lease); manual commits on
-# it are overwritten by design. Clean updates arm squash auto-merge;
-# conflicts, carries needing review, a tripped tripwire, withheld
-# workflows, failed validation, and settings drift stay MANUAL. Only
-# validation failures and broken inputs go red.
+# Push-only template sync into one managed repo, called only by sync-repos.yml: a refused push is
+# a red step (the PAT must grant Contents and Workflows read/write), the rolling branch is
+# regenerated every run, clean updates auto-merge and anything needing a human stays MANUAL.
 
 name: Reusable Template Sync
 
@@ -382,8 +377,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The push authenticates with the PAT at push time and withholds
-      # workflow files when the token lacks the Workflows scope. This
+      # The push authenticates with the PAT at push time. This
       # disarm is unconditional and BEFORE the push: whatever this run
       # delivers, an auto-merge armed by an earlier clean run must never
       # fire on it. open_pr.ts re-arms clean revisions.
@@ -399,19 +393,8 @@ jobs:
         env:
           BRANCH: ${{ steps.versions.outputs.branch }}
           DISPLAY: ${{ steps.versions.outputs.display }}
-          BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/commit_push.ts
-
-      # The push step re-validates when it rewrites the tree (withheld
-      # workflow files); its verdict supersedes the full-tree one. Derived
-      # once so the PR body and the fail gate below can never disagree.
-      - name: Resolve the effective validation verdict
-        id: verdict
-        env:
-          PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
-          TREE_VALIDATION: ${{ steps.validate.outputs.result }}
-        run: echo "verdict=${PUSH_VALIDATION:-$TREE_VALIDATION}" >> "$GITHUB_OUTPUT"
 
       - name: Create or refresh pull request
         if: steps.push.outputs.pushed == 'true'
@@ -421,34 +404,31 @@ jobs:
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
-          VALIDATION: ${{ steps.verdict.outputs.verdict }}
+          VALIDATION: ${{ steps.validate.outputs.result }}
+          RESOLVED: ${{ steps.conflicts.outputs.resolved }}
           DRIFT_FILE: ${{ runner.temp }}/settings-drift.md
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           CARRIED_FILE: ${{ runner.temp }}/local-carryover.md
           CARRY_REVIEW_FILE: ${{ runner.temp }}/carry-review.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
-          WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
           MANIFEST_LICENSE_FILE: ${{ runner.temp }}/manifest-license-warnings.md
           RECOVER: ${{ inputs.recover }}
           FORCE_MANUAL: ${{ inputs.force_manual }}
         run: bun .github/scripts/sync/open_pr.ts
 
       - name: Fail on validation errors
-        if: steps.verdict.outputs.verdict == 'failed'
+        if: steps.validate.outputs.result == 'failed'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
-          PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
         run: |
           if [ "$HIDE_DETAILS" = "true" ] && [ -n "$PR_URL" ]; then
-            # run_hidden.ts withheld the diagnostics from this log;
+            # run_hidden.ts hid the diagnostics from this log;
             # open_pr.ts appended them to the PR body instead.
             where="the PR body - this public log hides them (private repository)"
           elif [ "$HIDE_DETAILS" = "true" ]; then
             # No PR exists to carry them; the deliver step below routes
             # the capture to the target's failure-report issue.
             where="hidden from this public log (private repository); delivered to the target's failure-report issue, or reproduce validation locally per docs/private-repos.md"
-          elif [ -n "$PUSH_VALIDATION" ]; then
-            where="the 'Commit and push' step log - the tree was re-validated after workflow files were withheld"
           else
             where="the 'Validate the updated tree' step log"
           fi

@@ -25,22 +25,9 @@
 // the `_commit:` line to the full template sha copier.yml hands it, then
 // stamps the manifest's slot from it (why: docs/build-provenance.md).
 //
-// Only the "hash" field - plus the self entry's "commit" provenance slot,
-// filled with the render's recorded _commit, and the "withheld" marker the
-// sync's withhold path asks for - is rewritten, in place, line by line:
-// the rendered manifest keeps one entry per line (the layout
-// manifest.ts's entryLine emits and parseEntry reads back), each entry's
-// object is parsed, its fields edited, and the object re-emitted through
-// the same layout (entryBody), so a stamped manifest differs from the raw
-// render in those field values alone and copier's three-way update merge
-// sees minimal local edits. Split entries carry their grammar and its
-// begin/end marker lines; the stamper reads the marker pair to hash the
-// managed region and passes every other field through untouched. An
-// update can still leave inline
-// conflict blocks in the manifest (both sides touch the hash lines);
-// parseManifestFiles resolves those toward the template ("after updating")
-// side before parsing - the direction resolve_copier_conflicts.ts uses -
-// and the stamp then rewrites every hash anyway.
+// Each entry line is re-emitted through entryBody from the ENTRY_FIELDS vocabulary alone, hash
+// (and the self entry's commit) rewritten, unknown keys dropped, so a stamped manifest differs
+// from the render in those values only. Conflict blocks resolve toward the template first.
 //
 // Data problems (a missing or unparseable manifest, entries the line
 // rewrite cannot reach) warn and exit 0 on the argument-free re-stamp -
@@ -59,7 +46,6 @@
 
 import { createHash } from "node:crypto";
 import {
-  existsSync,
   lstatSync,
   readFileSync,
   readlinkSync,
@@ -72,13 +58,13 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { cleanManagedRegion } from "./grammar.ts";
 import {
   entryBody,
+  isEntryField,
   type JsonValue,
   MANIFEST_NAME,
   type ManifestEntryShape,
   type ParsedEntryLine,
   parseEntry,
   parseManifestFiles,
-  withheldMarkerValid,
 } from "./manifest.ts";
 
 /** The template suffix the build branch's symlink targets keep: links on
@@ -348,14 +334,9 @@ export type StampResult =
  *  line walk would misread every line as unreached, a diagnosis that names the wrong fault. */
 const CRLF_PROBLEM = "uses CRLF line endings; the generator writes LF";
 
-/** `text` with every reachable entry line restamped from the tree at `root`: the hash token,
- *  the self entry's commit slot, and `"withheld": true` on the hash-null entries of `withheld`.
- *  Soft on purpose: this runs inside copier's hooks, where a throw would fail the render. */
-export function stampManifestText(
-  text: string,
-  root: string,
-  withheld: ReadonlySet<string> = new Set(),
-): StampResult {
+/** `text` with every reachable entry line restamped from the tree at `root`: hash and self commit
+ *  slot rewritten, fields outside ENTRY_FIELDS dropped. Soft: it runs inside copier's hooks. */
+export function stampManifestText(text: string, root: string): StampResult {
   if (text.includes("\r")) return { status: "rejected", problem: CRLF_PROBLEM };
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { status: "rejected", problem: parsed.problem };
@@ -369,33 +350,17 @@ export function stampManifestText(
     if (entry === undefined) return line;
     const fields = entryFields(parsedLine.body);
     if (fields === null) return line;
-    // Field order is kept. Entries without a hash field (starters, and
-    // legacy "mergeable" entries from renders that predate the class's
-    // retirement) are left alone apart from a stray marker, which no
-    // hash-less entry may carry.
-    if (!("hash" in fields)) {
-      if (!("withheld" in fields)) return line;
-      delete fields.withheld;
-      return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
+    // Field order is kept; a key outside the vocabulary goes. Entries without a hash field
+    // (starters, and legacy "mergeable" entries) take no hash.
+    const known = Object.fromEntries(Object.entries(fields).filter(([key]) => isEntryField(key)));
+    if (!("hash" in known)) {
+      return Object.keys(known).length === Object.keys(fields).length
+        ? line
+        : `${indent}${quotedPath}: ${entryBody(known)}${comma}`;
     }
-    const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
-    // A marker is written for a named path when the entry it would produce
-    // has the one valid shape, or kept when the ENTRY AS STAMPED already
-    // carried a valid one and the file is still absent; judging the
-    // original entry (not the recomputed hash) keeps a hand edit that
-    // decorates a deleted, once-hashed entry from maturing into the valid
-    // shape on the next stamp. The same predicate the validator applies
-    // decides both, so the stamper cannot emit a marker it rejects.
-    const stillWithheld =
-      hash === null &&
-      (withheld.has(path)
-        ? withheldMarkerValid(path, { ...entry, hash: null, withheld: true })
-        : withheldMarkerValid(path, entry) && !existsSync(join(root, path)));
-    fields.hash = hash;
-    delete fields.withheld;
-    if (stillWithheld) fields.withheld = true;
-    if (path === MANIFEST_NAME && "commit" in fields) fields.commit = commit;
-    return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
+    known.hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
+    if (path === MANIFEST_NAME && "commit" in known) known.commit = commit;
+    return `${indent}${quotedPath}: ${entryBody(known)}${comma}`;
   };
   const entryLines = filesEntryLineIndices(resolved);
   const out = resolved

@@ -50,10 +50,9 @@
 //   - no target may itself be a manifest-listed path: the template is that
 //     path's writer, and a mirror over it would be a second writer whose
 //     winner depends on step order;
-//   - neither side may sit under .github/workflows/: commit_push.ts
-//     restores workflow files from the base branch when the token lacks
-//     the Workflows scope, AFTER this step - a workflow-file mirror could
-//     ship unequal to what this step wrote and its listing would lie;
+//   - neither side may sit under .github/workflows/: workflow files are
+//     template-owned (managed renders or generated-once starters), so a
+//     mirror there would be a second writer over the template's paths;
 //   - no two sources may claim one target, and no planned target may be a
 //     path prefix of another (both sides of either conflict are refused -
 //     declaration order must never choose the winner);
@@ -209,8 +208,8 @@ export function mirrorPathProblem(path: string): string | null {
   if (folded.includes(".git")) return "carries a .git segment";
   if (folded[0] === ".github" && folded[1] === "workflows") {
     return (
-      "sits under .github/workflows/ - the push step withholds workflow files when the " +
-      "token lacks the Workflows scope, so a workflow-file mirror cannot be promised"
+      "sits under .github/workflows/ - workflow files are template-owned, so a mirror " +
+      "there would be a second writer over the template's paths"
     );
   }
   return null;

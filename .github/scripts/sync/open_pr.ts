@@ -8,7 +8,7 @@
 // HIDE_DETAILS, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RECOVER, FORCE_MANUAL, DRIFT_FILE, the env-named section
 // files of section_files.ts's PR_BODY_SECTIONS (SUMMARY_FILE,
-// CARRIED_FILE, CARRY_REVIEW_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
+// CARRIED_FILE, CARRY_REVIEW_FILE, REMOVED_PATHS_FILE,
 // MANIFEST_LICENSE_FILE),
 // GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
@@ -179,18 +179,12 @@ if (validation === "failed") {
   let validationWhere = "details in the sync run log";
   let validationExtra = "";
   if (hideDetails()) {
-    // run_hidden.ts withheld the diagnostics from the public log; this
-    // body ships to the private repo, so they belong here instead. The
-    // post-withhold re-validation supersedes the full-tree run. The
-    // filenames derive from the run_hidden labels - a check_ssot rule
-    // pins the two sides. The promise of diagnostics below is only made
-    // once a non-empty capture is actually in hand.
+    // run_hidden.ts hid the diagnostics from the public log; this body ships to the private
+    // repo, so they belong here (the filename derives from the run_hidden label, pinned by a
+    // check_ssot rule). The promise below is made only once a non-empty capture is in hand.
     validationWhere =
       "the public sync log hides the diagnostics (private repository); reproduce validation locally per docs/private-repos.md";
-    for (const file of [
-      join(runnerTemp, "hidden-post-withhold-re-validation.log"),
-      join(runnerTemp, "hidden-template-validation.log"),
-    ]) {
+    for (const file of [join(runnerTemp, "hidden-template-validation.log")]) {
       if (nonEmpty(file)) {
         validationWhere =
           "the public sync log hides the diagnostics (private repository); they are below";
@@ -285,10 +279,10 @@ body = capBody(body);
 
 // Anything that needs human review - dropped local hunks, a split-file
 // carry that needs a human (appendix, reset managed-half edits, duplicate
-// markers), a tripped tail tripwire, withheld workflow files, failed
+// markers), a tripped tail tripwire, failed
 // validation, a recovery re-render, a dispatch that forced manual review,
 // a deleted split-class file (its repository-owned half leaves with it),
-// out-of-band settings drift, a
+// a new starter at a path the repository already owns, out-of-band settings drift, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
 // so the reference breaks), a refused mirror declaration (its copies are
 // stale in this update), a migration rung whose verdict needs a human -
@@ -381,9 +375,10 @@ if (!needsReview) {
 } else {
   console.log(
     "auto-merge left off: this PR needs review (conflicts, split-file carries needing " +
-      "review, a tripped tail tripwire, withheld files, failed validation, out-of-band " +
+      "review, a tripped tail tripwire, failed validation, out-of-band " +
       "settings drift, a referenced-but-undeclared label, a refused mirror declaration, a " +
-      "migration rung needing review, a recovery re-render, a forced-manual dispatch, or a " +
-      "deleted split-class file whose repository-owned half leaves with it).",
+      "migration rung needing review, a recovery re-render, a forced-manual dispatch, a " +
+      "deleted split-class file whose repository-owned half leaves with it, or a new starter " +
+      "at a path this repository already owns).",
   );
 }

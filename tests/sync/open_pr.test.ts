@@ -13,6 +13,7 @@ import {
   MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
+  NEW_STARTERS_REVIEW_NAME,
   PR_BODY_SECTIONS,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
@@ -68,7 +69,6 @@ function run(opts: Options = {}) {
     "CARRIED_FILE",
     "CARRY_REVIEW_FILE",
     "REMOVED_PATHS_FILE",
-    "WITHHELD_FILE",
     "MANIFEST_LICENSE_FILE",
     "SUMMARY_FILE",
   ];
@@ -201,15 +201,6 @@ describe("open_pr sections and auto-merge", () => {
       forcesReview: true,
     },
     {
-      reason: "withheld workflow files: the update is incomplete",
-      where: "files",
-      name: "WITHHELD_FILE",
-      content: ".github/workflows/ci.yml\n",
-      section:
-        "> [!WARNING]\n> Workflow-file changes were WITHHELD from this update: the sync\n> token lacks the Workflows scope. Grant Workflows read/write to\n> the REPO_PLATFORM_TOKEN and re-run the sync to include them.\n\n- .github/workflows/ci.yml",
-      forcesReview: true,
-    },
-    {
       reason: "manifest license note: metadata only",
       where: "files",
       name: "MANIFEST_LICENSE_FILE",
@@ -247,6 +238,14 @@ describe("open_pr sections and auto-merge", () => {
       name: REMOVED_SPLITS_NAME,
       content:
         "> [!WARNING]\n> This update DELETES file(s) whose previous copy carries a\n> repository-owned half.\n\n- `AGENTS.md`: this repository-owned content leaves with the deletion:\n\n  ````text\n  local agents tail\n  ````\n",
+      forcesReview: true,
+    },
+    {
+      reason: "new starter at an owned path: copier kept the repository's copy unreviewed",
+      where: "temp",
+      name: NEW_STARTERS_REVIEW_NAME,
+      content:
+        "> [!WARNING]\n> NEW STARTER at a path this repository already owns.\n\n- `.github/workflows/post-green.yml`: kept as this repository's own file\n",
       forcesReview: true,
     },
     {

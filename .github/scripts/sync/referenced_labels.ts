@@ -15,9 +15,7 @@
 // Invoked by reusable-template-sync.yml after the preserve steps, so the
 // working tree it reads is the delivered content - the post-merge state
 // the invariant is about (delivered issue forms and workflows plus the
-// preserved repo-owned ones, including a freshly seeded settings.yml) -
-// and re-invoked by commit_push.ts's Workflows-scope withhold path, whose
-// restore rewrites .github/workflows after this check first ran.
+// preserved repo-owned ones, including a freshly seeded settings.yml).
 //
 // Not applicable (empty report) when no apply would reconcile labels: no
 // .repo-platform.yml, no settings.yml to merge, or no labels key in the merged
@@ -113,14 +111,8 @@ export function checkFailedSection(reason: string): string {
 
 /** The whole check against `root`'s working tree: writes `report` (the
  *  PR-body section, or "" when nothing needs review) and prints the
- *  hide-details-aware status line. Exported for commit_push.ts's
- *  Workflows-scope withhold path, which restores .github/workflows after
- *  the workflow's own check step ran and must not push a stale report. */
-export function writeReferencedLabelsReport(
-  root: string,
-  report: string,
-  hideDetails: boolean,
-): void {
+ *  hide-details-aware status line. */
+function writeReferencedLabelsReport(root: string, report: string, hideDetails: boolean): void {
   let note = "";
   let log = "";
   try {

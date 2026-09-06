@@ -30,8 +30,8 @@
 // Known parity gaps vs the workflow (this is an operator convenience, not
 // a second pipeline): visibility, description, and the homepage/topics seeds
 // come from the recorded answers, not the GitHub API (an unrecorded seed
-// rehearses as "" where production seeds the live value), so drift is not rehearsed; token-scope workflow withholding, hide-details
-// redaction, and the PR/auto-merge machinery do not apply locally (the
+// rehearses as "" where production seeds the live value), so drift is not rehearsed; hide-details redaction and the PR/auto-merge
+// machinery do not apply locally (the
 // tail tripwire CHECK runs and its report rides the outcome, but its
 // PR-body section and forced manual review are PR machinery); and
 // validation uses this working tree's validator, not a version-aligned

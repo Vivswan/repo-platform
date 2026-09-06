@@ -41,7 +41,7 @@ function render(): string {
   symlinkSync("intact.md", join(root, "docs/link.md"));
   mkdirSync(join(root, "docs/dir.md"));
   const entries: Record<string, string> = {
-    [MANIFEST_NAME]: '{"class": "managed", "hash": null, "commit": "c0ffee", "withheld": true}',
+    [MANIFEST_NAME]: '{"class": "managed", "hash": null, "commit": "c0ffee"}',
     "docs/intact.md": `{"class": "managed", "hash": "${sha("managed content\n")}"}`,
     "docs/drifted.md": `{"class": "managed", "hash": "${sha("original content\n")}"}`,
     "docs/notes.md": split(B, E, sha(region)),
@@ -56,13 +56,7 @@ function render(): string {
     "docs/link.md": `{"class": "managed", "hash": "${sha("intact.md")}"}`,
     "docs/dir.md": `{"class": "managed", "hash": "${"e".repeat(64)}"}`,
     "docs/deleted.md": `{"class": "managed", "hash": "${"f".repeat(64)}"}`,
-    ".github/workflows/withheld.yml": '{"class": "managed", "hash": null, "withheld": true}',
-    ".github/workflows/split-withheld.yml": `{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null, "withheld": true}`,
-    "docs/withheld.md": '{"class": "managed", "hash": null, "withheld": true}',
     ".github/workflows/gone-unstamped.yml": '{"class": "managed", "hash": null}',
-    "docs/bad-marker.md": '{"class": "managed", "hash": null, "withheld": "yes"}',
-    "docs/marked-stamped.md": `{"class": "managed", "hash": "${"f".repeat(64)}", "withheld": true}`,
-    "docs/marked-starter.md": '{"class": "starter", "withheld": true}',
   };
   writeFileSync(
     join(root, MANIFEST_NAME),
@@ -77,15 +71,6 @@ describe("checkManifestParity", () => {
   test("one render walks every dispatch branch and reports exactly these verdicts", () => {
     const findings = checkManifestParity(loadContext(render(), false));
     expect(findings).toEqual([
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry '.github/repo-platform-manifest.json' " +
-          "carries a withheld marker outside its one shape (`true` on a hash-null managed or split " +
-          "entry under .github/workflows/) - the sync writes the marker only for a workflow it " +
-          "could not deliver; revert the entry (git history has the stamped original) or run a " +
-          "recovery sync (recover=recopy)",
-      },
       {
         severity: "error",
         message:
@@ -155,63 +140,9 @@ describe("checkManifestParity", () => {
           "docs/deleted.md: listed as managed in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
       },
       {
-        severity: "advisory",
-        message:
-          ".github/workflows/withheld.yml: listed as managed in " +
-          ".github/repo-platform-manifest.json but withheld from the repo - the sync's push token " +
-          "lacked the Workflows scope, so it could not create the workflow file; grant Workflows " +
-          "read/write to the sync token and run a recovery sync (recover=recopy), which re-renders " +
-          "it",
-      },
-      {
-        severity: "advisory",
-        message:
-          ".github/workflows/split-withheld.yml: listed as split in " +
-          ".github/repo-platform-manifest.json but withheld from the repo - the sync's push token " +
-          "lacked the Workflows scope, so it could not create the workflow file; grant Workflows " +
-          "read/write to the sync token and run a recovery sync (recover=recopy), which re-renders " +
-          "it",
-      },
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry 'docs/withheld.md' carries a withheld marker " +
-          "outside its one shape (`true` on a hash-null managed or split entry under " +
-          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
-          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
-          "(recover=recopy)",
-      },
-      {
         severity: "error",
         message:
           ".github/workflows/gone-unstamped.yml: listed as managed in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
-      },
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry 'docs/bad-marker.md' carries a withheld " +
-          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
-          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
-          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
-          "(recover=recopy)",
-      },
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry 'docs/marked-stamped.md' carries a withheld " +
-          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
-          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
-          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
-          "(recover=recopy)",
-      },
-      {
-        severity: "error",
-        message:
-          ".github/repo-platform-manifest.json: entry 'docs/marked-starter.md' carries a withheld " +
-          "marker outside its one shape (`true` on a hash-null managed or split entry under " +
-          ".github/workflows/) - the sync writes the marker only for a workflow it could not " +
-          "deliver; revert the entry (git history has the stamped original) or run a recovery sync " +
-          "(recover=recopy)",
       },
     ]);
   });
