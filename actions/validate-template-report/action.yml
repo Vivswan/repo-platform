@@ -86,9 +86,7 @@ runs:
         echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # Every predictable scratch path, cleared by ONE fixed /bin/rm before
-    # anything reads it: every path is attempted and any failed removal fails
-    # the step. (The one runtime dependency, the validator's yaml, is
-    # installed by the latest step below.)
+    # anything reads it; any failed removal fails the step.
     - name: Clear the scratch root
       id: clear
       continue-on-error: true

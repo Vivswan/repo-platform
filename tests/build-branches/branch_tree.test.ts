@@ -312,9 +312,8 @@ describe("assembleBranchTree", () => {
     );
     expect(manifestFree).toEqual([SHARED_DIR]);
     // The retired script directory is gone (the report action's presence is
-    // the control); its content ships as the action's validator/, a plain
-    // script directory: the lockfile, pin and manifest sit once at the
-    // action root, and neither dependencies nor tests ship.
+    // the control); validator/ ships as a plain script directory, package
+    // files only at the action root, no dependencies, no tests.
     expect(actions).not.toContain("validate-template");
     expect(actions).toContain("validate-template-report");
     const report = join(dest, "actions", "validate-template-report");

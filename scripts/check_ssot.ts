@@ -4987,10 +4987,8 @@ const rules: Rule[] = [
   },
 
   {
-    // The lockfile roster is the bootstrap's own (recursive under actions/):
-    // the other homes discover one level down, so a package nested inside
-    // an action installs locally yet fails here, never silently escaping
-    // dependabot and the typecheck glob.
+    // Lockfiles come from the bootstrap's recursive walk, the other homes
+    // from one level down: a package nested inside an action fails here.
     name: "bun-dirs",
     run: () => {
       const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");

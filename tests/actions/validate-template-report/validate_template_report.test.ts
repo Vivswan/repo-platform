@@ -1634,10 +1634,8 @@ describe("the action's wiring", () => {
       '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/src/aligned/judge.ts"',
     );
 
-    // The latest leg runs the validator inside this action (the build
-    // branch ships the whole action directory) on the recorded bun, with a
-    // frozen install of the action's lockfile first; only behind a cleared
-    // scratch root, since report.ts reads its pair on that condition.
+    // The latest leg: a frozen install of the action's lockfile, then the
+    // validator under it on the recorded bun, only behind a cleared scratch.
     expect(latest).toEqual({
       name: "Run the build tip's validator",
       id: "latest",
@@ -1656,10 +1654,8 @@ describe("the action's wiring", () => {
         "",
       ].join("\n"),
     });
-    // The validator is a script directory inside this action's one package,
-    // not a package of its own: the layout constant the fetch leg reads in
-    // a fetched tree names this action's directory, the script sits under
-    // it, and the manifest, pin and lockfile sit once at the action root.
+    // One package: the fetch leg's layout constant names this action's
+    // directory, and manifest, pin and lockfile sit only at its root.
     expect(join(ACTION, "..", "..", ACTION_DIR)).toBe(ACTION);
     expect(
       [

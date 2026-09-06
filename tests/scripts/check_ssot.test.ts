@@ -3650,6 +3650,17 @@ describe("bunDirsMismatches", () => {
       ],
     ],
     [
+      "the root commits a lockfile but no tsconfig.json",
+      { tsconfigDirs: ["actions/check-typography", ACTION] },
+      [
+        {
+          file: "./tsconfig.json",
+          expected: "present (the ci.yml typecheck glob keys on it)",
+          got: "missing",
+        },
+      ],
+    ],
+    [
       "the package commits a lockfile but no tsconfig.json",
       { tsconfigDirs: [".", "actions/check-typography"] },
       [
