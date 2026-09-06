@@ -435,28 +435,30 @@ describe("parseDirectives", () => {
   });
 });
 
-// Every shape decision reads the line behind its container prefixes, so the same input inside
-// a blockquote or a three-space indent gets the unprefixed verdict; the error still quotes the raw line.
+// The mention scan reads each line behind its leading whitespace and blockquote markers, so a
+// quoted fence is a fence and a quoted span a span; the block grammar reads the raw line, so a
+// quoted or indented directive is no block: misplaced, as before the container rule.
 describe("parseDirectives inside a container", () => {
   const quoted = (prefix: string, para: string) =>
     para
       .split("\n")
-      .map((line) => `${prefix}${line}`)
+      .map((line) => (line === "" ? prefix.trimEnd() : `${prefix}${line}`))
       .join("\n");
   test.each(
     [
       {
-        shape: "a block-shaped first paragraph",
+        shape: "a directive as the first paragraph arms only when written bare",
         body: (p: string) => message(quoted(p, "[fleet-sync: public]"), PROSE),
-        expected: (): Directives => ({ kind: "fleet-sync", scope: ["public"] }),
+        expected: (p: string): Directives =>
+          p === ""
+            ? { kind: "fleet-sync", scope: ["public"] }
+            : misplaced(`${p}[fleet-sync: public]`.trim()),
       },
       {
-        shape: "a block error names the raw line",
-        body: (p: string) => message(quoted(p, "[fleet-synk]"), PROSE),
-        expected: (p: string): Directives => ({
-          kind: "error",
-          errors: [`unknown directive keyword in "${p}[fleet-synk]"; known: fleet-sync`],
-        }),
+        shape: "a justified all-scope as the first paragraph arms only when written bare",
+        body: (p: string) => message(quoted(p, "[fleet-sync: all] every ci.yml changed"), PROSE),
+        expected: (p: string): Directives =>
+          p === "" ? FLEET : misplaced(`${p}[fleet-sync: all] every ci.yml changed`.trim()),
       },
       {
         shape: "a fence line: the fenced mention stays misplaced",
@@ -474,12 +476,19 @@ describe("parseDirectives inside a container", () => {
           message(PROSE, quoted(p, "Before `\n```text\n[fleet-sync]\n```\nAfter `")),
         expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
       },
+      {
+        shape: "a quote-only line is a paragraph break: a span never crosses it",
+        body: (p: string) => message(PROSE, quoted(p, "Before `\n\n[fleet-sync]\nAfter `")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
     ].flatMap((row) =>
       [
         { container: "unprefixed", prefix: "" },
         { container: "in a blockquote", prefix: "> " },
         { container: "in a nested blockquote without spaces", prefix: ">>" },
+        { container: "in a nested blockquote with spaces", prefix: "> > " },
         { container: "in a tab-separated blockquote", prefix: ">\t" },
+        { container: "in a tab-indented blockquote", prefix: "\t> " },
         {
           container: "in a blockquote with spaces and tabs mixed around the markers",
           prefix: " \t> \t>  \t",
@@ -490,6 +499,12 @@ describe("parseDirectives inside a container", () => {
     ),
   )("$shape $container", ({ body, prefix, expected }) => {
     expect(parseDirectives(body(prefix))).toEqual(expected(prefix));
+  });
+
+  test("the quote-only-line input as reviewed, byte for byte", () => {
+    expect(
+      parseDirectives("feat: probe\n\nIntro.\n\n> Before `\n>\n> [fleet-sync]\n> After `"),
+    ).toEqual(misplaced("> [fleet-sync]"));
   });
 });
 

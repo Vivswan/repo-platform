@@ -41,10 +41,8 @@ const POSITION =
 // and no span pairs across it. Read on the container-stripped line.
 const FENCE_LINE = /^(?:`{3,}[^`]*|~{3,}.*)$/;
 
-/** The line behind its container prefixes: leading whitespace and blockquote markers, in any mix
- *  (CommonMark counts columns here; the reader models no indented code, so every leading space,
- *  tab, and `>` is a prefix). Every shape decision reads this form, so a shape inside a quote or an
- *  indent is the same shape. One regex pass, linear. */
+/** The line behind its leading whitespace and blockquote markers, in any mix: what the mention
+ *  scan reads (a quoted fence is a fence, a quoted span a span). The block grammar reads raw lines. */
 function containerBody(line: string): string {
   return line.replace(/^[ \t]*(?:>[ \t]*)*/, "");
 }
@@ -110,10 +108,10 @@ function withoutCodeSpans(lines: string[]): string[] {
   return bare;
 }
 
-/** A blank-line-delimited paragraph: its lines as written (`lines`, what an error quotes), behind
- *  their container prefixes (`body`, what every shape decision reads), and with their code spans
- *  blanked (`bare`), all computed once here. */
-type Paragraph = { lines: string[]; body: string[]; bare: string[] };
+/** A paragraph: its lines as written (`lines`, what the block grammar and every error read) and
+ *  with their container prefixes and code spans blanked (`bare`, what the mention scan reads),
+ *  computed once here. A line that is only whitespace and blockquote markers is a paragraph break. */
+type Paragraph = { lines: string[]; bare: string[] };
 
 function paragraphs(text: string): Paragraph[] {
   const lines = text
@@ -124,13 +122,12 @@ function paragraphs(text: string): Paragraph[] {
   let current: string[] = [];
   const flush = () => {
     if (current.length > 0) {
-      const body = current.map(containerBody);
-      result.push({ lines: current, body, bare: withoutCodeSpans(body) });
+      result.push({ lines: current, bare: withoutCodeSpans(current.map(containerBody)) });
     }
     current = [];
   };
   for (const line of lines) {
-    if (line === "") flush();
+    if (containerBody(line) === "") flush();
     else current.push(line);
   }
   flush();
@@ -152,9 +149,11 @@ function unwrap(line: string): string | null {
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
   const isBlockShaped = (para: Paragraph) =>
-    para.body.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
+    para.lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
-    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX])
+      ? paras[BLOCK_INDEX].lines
+      : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
@@ -170,36 +169,35 @@ export function parseDirectives(body: string): Directives {
 
   const seen = new Set<string>();
   let scope: "all" | string[] = [];
-  block.body.forEach((text, at) => {
-    const line = block.lines[at];
-    const justified = JUSTIFIED_LINE.exec(text);
-    const [bracketed, reason] = justified === null ? [text, ""] : [justified[1], justified[2]];
+  for (const line of block) {
+    const justified = JUSTIFIED_LINE.exec(line);
+    const [bracketed, reason] = justified === null ? [line, ""] : [justified[1], justified[2]];
     const directive = unwrap(bracketed);
     if (directive === null) {
       errors.push(
         `"${line}" has bad backtick fencing: wrap the whole directive in one pair, \`[keyword]\`, or none`,
       );
-      return;
+      continue;
     }
     const match = DIRECTIVE.exec(directive);
     if (match === null) {
       errors.push(`"${line}" is not a directive: write [keyword] or [keyword: value]`);
-      return;
+      continue;
     }
     const keyword = match[1].toLowerCase();
     if (keyword !== KEYWORD) {
       errors.push(`unknown directive keyword in "${line}"; known: ${KEYWORD}`);
-      return;
+      continue;
     }
     if (seen.has(keyword)) {
       errors.push(`duplicate directive [${keyword}]: one line per keyword`);
-      return;
+      continue;
     }
     seen.add(keyword);
     const value = (match[2] ?? "").trim();
     if (match[2] === undefined) {
       errors.push(`"${line}": ${NEEDS_REASON}`);
-      return;
+      continue;
     }
     // parseScope reads "" as the whole fleet (an empty dispatch input); on a
     // directive it is a typo, refused here before the shared grammar.
@@ -207,28 +205,28 @@ export function parseDirectives(body: string): Directives {
       errors.push(
         `"${line}" has an empty scope: write [${keyword}: public], [${keyword}: private], owner/name slugs, or [${keyword}: all] <justification>`,
       );
-      return;
+      continue;
     }
     // The one scope grammar: what the plans accept, the leg accepts. Its
     // messages carry counts, never entries, so the line is not quoted here.
     const parsed = parseScope(value);
     if (parsed.kind === "error") {
       errors.push(`[${keyword}] scope: ${parsed.message}`);
-      return;
+      continue;
     }
     if (parsed.kind === "all") {
       if (reason === "") errors.push(`"${line}": ${NEEDS_REASON}`);
       else scope = "all";
-      return;
+      continue;
     }
     if (reason !== "") {
       errors.push(
         `"${line}" carries text after the directive: only [${keyword}: all] takes a justification`,
       );
-      return;
+      continue;
     }
     scope = [...parsed.visibility, ...parsed.slugs];
-  });
+  }
   if (errors.length > 0) return { kind: "error", errors };
   return { kind: "fleet-sync", scope };
 }
