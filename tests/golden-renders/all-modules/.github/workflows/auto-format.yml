@@ -62,7 +62,8 @@ jobs:
           DENO_NO_UPDATE_CHECK: "1"
         run: |
           deno lint --fix || true
-          deno fmt
+          # Markdown prose is never re-wrapped: documents carry no width limit.
+          deno fmt --prose-wrap preserve
 
       - uses: astral-sh/setup-uv@v10.0.1
       - name: Format (ruff)

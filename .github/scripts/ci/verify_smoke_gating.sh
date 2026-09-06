@@ -41,6 +41,10 @@ present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' 
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+# Every `deno fmt` in a rendered file must carry --prose-wrap preserve: the
+# default hard-wraps markdown prose at 80 columns, and documents carry no
+# width limit. (Formatter drift into a new bare spelling fails here.)
+prose_preserved() { test -r "$1" || { echo "::error::gating check failed: cannot read $1 (modules=$MODULES private=$PRIVATE)."; exit 1; }; if awk '/deno[[:space:]]+fmt/ && !/--prose-wrap preserve/ { bare = 1 } END { exit !bare }' "$1"; then echo "::error::gating check failed: a 'deno fmt' in $1 lacks '--prose-wrap preserve' (modules=$MODULES private=$PRIVATE): markdown prose would be hard-wrapped at 80 columns. Fix the deno fragment in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 
 # Single-call CI: the rendered ci.yml is a thin caller of fleet-ci.yml at
 # the green-gated @build ref, handing over the module selection as a JSON
@@ -603,20 +607,24 @@ fi
 # auto-format follows the toolchain modules; its formatter steps, like the
 # checks.yml example comments, are spliced from the toolchain module
 # fragments. Formatter markers are command-specific: a bare "biome" would
-# false-positive between the bun and node steps.
+# false-positive between the bun and node steps. The deno markers pin the
+# exact rendered line; prose_preserved below sweeps every rendered workflow.
 if has bun; then present "Example bun checks" "$wf/checks.yml"; else absent "Example bun checks" "$wf/checks.yml"; fi
 if has node; then present "Example node checks" "$wf/checks.yml"; else absent "Example node checks" "$wf/checks.yml"; fi
 if has deno; then present "Example deno checks" "$wf/checks.yml"; else absent "Example deno checks" "$wf/checks.yml"; fi
+if has deno; then present_line "      # - run: deno fmt --check --prose-wrap preserve" "$wf/checks.yml"; else absent "deno fmt" "$wf/checks.yml"; fi
 if has uv; then present "Example uv checks" "$wf/checks.yml"; else absent "Example uv checks" "$wf/checks.yml"; fi
 if has_codeql_toolchain; then
   test -f "$wf/auto-format.yml"
   if has bun; then present "bun x @biomejs/biome" "$wf/auto-format.yml"; else absent "bun x @biomejs/biome" "$wf/auto-format.yml"; fi
   if has node; then present "npx --yes @biomejs/biome" "$wf/auto-format.yml"; else absent "npx --yes @biomejs/biome" "$wf/auto-format.yml"; fi
-  if has deno; then present "deno fmt" "$wf/auto-format.yml"; else absent "deno fmt" "$wf/auto-format.yml"; fi
+  if has deno; then present_line "          deno fmt --prose-wrap preserve" "$wf/auto-format.yml"; else absent "deno fmt" "$wf/auto-format.yml"; fi
   if has uv; then present "ruff" "$wf/auto-format.yml"; else absent "ruff" "$wf/auto-format.yml"; fi
 else
   test ! -e "$wf/auto-format.yml"
 fi
+# No rendered workflow may run a bare `deno fmt`, whichever fragment emits it.
+for f in "$wf"/*.yml; do prose_preserved "$f"; done
 
 # The bun module's Dependabot lockfile fixer is managed machinery (always
 # overwritten by sync, unlike the repo-owned auto-format starter above): it

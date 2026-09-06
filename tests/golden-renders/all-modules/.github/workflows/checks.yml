@@ -39,7 +39,7 @@ jobs:
       #     deno-version-file: .dvmrc
       # - run: deno ci
       # - run: deno lint
-      # - run: deno fmt --check
+      # - run: deno fmt --check --prose-wrap preserve
       # - run: deno test
 
       # Example uv checks; replace the placeholder below with real ones.
