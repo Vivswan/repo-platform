@@ -20,8 +20,9 @@
 // One summary line prints per repo as it completes, then a final
 // repo | status | detail table. Repos that have not adopted the template
 // report as "skipped (not adopted)" (production's selector skips them the
-// same way); an unresolvable recorded _commit reports as "recovery
-// needed". A repo whose rehearsal throws otherwise prints
+// same way); an unusable recorded _commit (shape, ancestry, or ahead of
+// the build) reports as "recovery needed". A repo whose rehearsal throws
+// otherwise prints
 // "REHEARSAL FAILED: <reason>" - the reason names the failing pipeline
 // phase when a known leg script threw - and the loop CONTINUES; per-repo
 // failure is information, never an abort. EXIT CODE: 0 whenever the loop

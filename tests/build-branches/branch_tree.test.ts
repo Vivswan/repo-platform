@@ -17,6 +17,7 @@ import {
   destOverlapsRepo,
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
+  MIGRATIONS_SRC_REL,
   parseArgs,
   SHARED_DIR,
   UsageError,
@@ -217,6 +218,7 @@ describe("assembleBranchTree", () => {
       "README.md",
       "actions",
       "copier.yml",
+      "migrations",
       "template",
     ]);
     // Every action directory of this checkout ships (the shared zone
@@ -243,6 +245,19 @@ describe("assembleBranchTree", () => {
       join("actions", SHARED_DIR, "stamp_manifest.ts"),
     ]) {
       expect(existsSync(join(dest, anchor))).toBe(true);
+    }
+  });
+
+  test("migrations/ is the source directory's rung files, byte for byte", () => {
+    // A rung is its own marker and runs from the build commit that carries
+    // it, so the branch must ship exactly the source files: a missing rung
+    // would run for nobody, an altered one would not be the reviewed code.
+    const src = join(REPO_ROOT, MIGRATIONS_SRC_REL);
+    const shipped = readdirSync(join(dest, "migrations")).sort();
+    expect(shipped).toEqual(readdirSync(src).sort());
+    expect(shipped.length).toBeGreaterThan(0);
+    for (const name of shipped) {
+      expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
   });
 

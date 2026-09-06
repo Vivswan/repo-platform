@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
+import { lastLine } from "../shared/lines.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
+import { resolveRecordedCommit, unusableReason } from "./recorded_commit.ts";
 
 const target = requireEnv("TARGET");
 const targetDisplay = env("TARGET_DISPLAY") || target;
@@ -42,7 +44,22 @@ if (recover !== "" && recover !== "recopy") {
 // main is refreshed too: a build published after the checkout can stamp a
 // main commit the checkout has not seen yet.
 must(["git", "fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
-capture(["git", "fetch", "--quiet", "origin", "+refs/heads/build:refs/remotes/origin/build"]);
+// Mandatory: the full-history checkout already holds an origin/build, so
+// a failed refresh would leave a STALE tip that every later probe accepts
+// - an older build delivered, and its ladder read as already crossed.
+const buildFetch = capture([
+  "git",
+  "fetch",
+  "--quiet",
+  "origin",
+  "+refs/heads/build:refs/remotes/origin/build",
+]);
+if (buildFetch.exitCode !== 0) {
+  console.log(
+    `::error::fetching ${repository}'s build branch failed (${lastLine(buildFetch.stderr)}); a stale local ref must not stand in for it. If the repository has no build branch yet, dispatch the Build Branches workflow, then re-run.`,
+  );
+  process.exit(1);
+}
 
 let answers: CopierAnswers;
 try {
@@ -57,7 +74,7 @@ try {
     );
   } else {
     console.log(
-      `::error::${targetDisplay}'s .github/.copier-answers.yml: ${err.message}. Fix the file, or regenerate the repo through Sync Repos with recover=recopy.`,
+      `::error::${targetDisplay}'s .github/.copier-answers.yml: ${err.message}. Fix the file on the default branch, then re-run (a recovery sync reads it too).`,
     );
   }
   process.exit(1);
@@ -127,20 +144,22 @@ const display = `build@${targetSha.slice(0, 12)}`;
 // unverified content. Pin copier to the verified commit itself.
 const targetRef = targetSha;
 
-// Recovery exists precisely because the recorded base may be unusable:
-// resolve it best-effort there, and hard-error everywhere else - the
-// update has no base without it.
-const oldShaProbe = capture(["git", "rev-parse", "--verify", "--quiet", `${oldCommit}^{commit}`]);
-let oldSha = oldShaProbe.stdout.trimEnd();
-if (oldShaProbe.exitCode !== 0) {
-  if (recover === "recopy") {
-    oldSha = "";
-  } else {
-    console.log(
-      `::error::${targetDisplay}'s recorded _commit '${hideUnlessRefShaped(oldCommit)}' does not resolve on ${repository}'s build branch, so there is no base to update from. Fix the _commit in its .github/.copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
-    );
-    process.exit(1);
-  }
+// The recorded base is judged by recorded_commit.ts, never resolved as a
+// revspec; an unusable value reads as no base under recovery (which
+// exists for exactly that case) and is a hard error everywhere else.
+const recorded = resolveRecordedCommit(oldCommit, {
+  dir: ".",
+  buildRef: "refs/remotes/origin/build",
+  deliveredSha: targetSha,
+});
+let oldSha = "";
+if (recorded.kind === "ok") {
+  oldSha = recorded.sha;
+} else if (recover !== "recopy") {
+  console.log(
+    `::error::${targetDisplay}'s .github/.copier-answers.yml ${unusableReason(recorded, hideUnlessRefShaped(oldCommit))}, so there is no base to update from. Fix the _commit, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
+  );
+  process.exit(1);
 }
 // The recorded _commit hands off through a file, not a step output: an
 // output would surface in the PR step's env-group print, and the value is

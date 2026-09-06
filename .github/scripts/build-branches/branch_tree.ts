@@ -22,6 +22,11 @@
 //                     workflows call `@build`; a reusable-workflow
 //                     `uses:` fetches the FILE at the named ref, so a build
 //                     branch without them 404s every fleet caller run)
+// - migrations/      (every migration-ladder rung file, verbatim from
+//                     .github/scripts/sync/migrations/: a rung is its own
+//                     marker, and the sync runs the rungs that appear in
+//                     build history after a target's recorded build -
+//                     docs/migrations.md)
 // - README.md        (static explainer)
 //
 // One branch serves both consumers because the whole tree is
@@ -72,6 +77,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { build, writeOutput } from "../../../scripts/compose/compose.ts";
+import { MIGRATIONS_DIR, RUNG_FILE_RE } from "../sync/run_migrations.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -120,9 +126,11 @@ sources in \`actions/\`.
 
 \`build\` is rebuilt from each \`main\` commit whose CI run succeeds (the
 branch ships only green main commits). It carries the composed copier tree
-under \`template/\`, the composite actions under \`actions/\`, and the
+under \`template/\`, the composite actions under \`actions/\`, the
 fleet-facing reusable workflows (${FLEET_WORKFLOWS.join(", ")})
-under \`.github/workflows/\` - every path is
+under \`.github/workflows/\`, and the migration ladder's rungs under
+\`migrations/\` (self-contained scripts; the sync runs the ones that
+appeared after a repository's recorded build) - every path is
 extraction-safe (no jinja-expression filenames), so
 \`uses: <owner>/repo-platform/actions/<name>@build\` refs extract cleanly
 on the runner, and an @build pin runs only action and workflow code CI has
@@ -258,16 +266,35 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
   }
 }
 
+/** The ladder's source directory on main. */
+export const MIGRATIONS_SRC_REL = `.github/scripts/sync/${MIGRATIONS_DIR}`;
+
+/** Copies every rung file verbatim to `<dest>/migrations`. The directory
+ *  holds nothing but rungs (the migration-ladder ssot rule), so any other
+ *  entry is a hard failure here rather than a stray path on the branch. */
+export function copyMigrations(repoRoot: string, dest: string): void {
+  const src = join(repoRoot, MIGRATIONS_SRC_REL);
+  mkdirSync(join(dest, MIGRATIONS_DIR), { recursive: true });
+  for (const name of readdirSync(src).sort()) {
+    if (!RUNG_FILE_RE.test(name)) {
+      throw new Error(`${MIGRATIONS_SRC_REL}/${name} is not a rung file (mNNNN_<slug>.ts)`);
+    }
+    writeFileSync(join(dest, MIGRATIONS_DIR, name), readFileSync(join(src, name)));
+  }
+}
+
 /** Assemble the whole branch tree at `dest` (which must exist and be
  *  empty): the composed template/, actions/ (the stamp hook rides inside
- *  actions/shared/), the fleet-facing reusable workflows, copier.yml, and
- *  the README. Exported for the extraction-safety regression, which
- *  asserts no assembled path carries a jinja expression. */
+ *  actions/shared/), the fleet-facing reusable workflows, the migration
+ *  rungs, copier.yml, and the README. Exported for the extraction-safety
+ *  regression, which asserts no assembled path carries a jinja
+ *  expression. */
 export function assembleBranchTree(dest: string): void {
   const composed = build();
   writeOutput(composed, join(dest, "template"));
   copyActions(REPO_ROOT, dest);
   copyFleetWorkflows(REPO_ROOT, dest);
+  copyMigrations(REPO_ROOT, dest);
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
   writeFileSync(join(dest, "README.md"), README);
 }

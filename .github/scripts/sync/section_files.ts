@@ -9,17 +9,20 @@ export const TAIL_SHRANK_NAME = "tail-shrank.md";
 
 /** preserve_repo_owned.ts's removed-split-files report: every path this
  * update deletes whose previous copy HEAD's manifest classes `split` (plus
- * the pointwise license spellings a pre-manifest-era HEAD cannot class),
+ * LICENSE.md pointwise, which no manifest classes under custom-license),
  * with the repository-owned content that leaves. Forces the manual-review
  * path in open_pr.ts. */
 export const REMOVED_SPLITS_NAME = "removed-splits.md";
 
-/** relocate_security_policy.ts's transition note: the one-time
- * byte-for-byte move of SECURITY.md from the repository root to
- * .github/SECURITY.md, its repository-owned half riding the rename.
- * Informational, never forces review (nothing leaves the repository);
- * self-retires once the fleet has crossed. */
-export const SECURITY_MOVE_NAME = "security-move.md";
+/** run_migrations.ts's informational notes: what each pending migration
+ * rung did to the target ahead of copier (a file moved byte-for-byte, say)
+ * when the rung says nothing leaves the repository. Never forces review.
+ * A rung's note lands here or in MIGRATIONS_REVIEW_NAME, never both. */
+export const MIGRATIONS_NAME = "migrations.md";
+
+/** run_migrations.ts's review notes: the migration rungs whose verdict
+ * needs a human before the PR merges. Forces the manual-review path. */
+export const MIGRATIONS_REVIEW_NAME = "migrations-review.md";
 
 /** referenced_labels.ts's report: label(s) the target's issue forms or
  * workflows reference that the merged settings label roster does not
