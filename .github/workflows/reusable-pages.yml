@@ -215,8 +215,19 @@ jobs:
         with:
           site-dir: _site
 
+      # A count the gates below can test positively (check_ssot's
+      # step-output-gates rule): an absent count fails here rather than
+      # reading as a clean night, and neither the report nor the close runs.
+      - name: Read the link-rot count
+        id: rot
+        env:
+          BROKEN: ${{ steps.links.outputs.broken }}
+        run: |
+          [[ "$BROKEN" =~ ^[0-9]+$ ]] || { echo "::error::check-links published no broken count: '$BROKEN'"; exit 1; }
+          echo "found=$([ "$BROKEN" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Upload the link-rot report
-        if: steps.links.outputs.broken != '0'
+        if: steps.rot.outputs.found == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: link-rot-${{ github.run_attempt }}
@@ -224,7 +235,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: File or update the link-rot issue
-        if: steps.links.outputs.broken != '0'
+        if: steps.rot.outputs.found == 'true'
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         with:
           mode: report
@@ -239,7 +250,7 @@ jobs:
           stream: generic
 
       - name: Close the link-rot issue on a clean night
-        if: steps.links.outputs.broken == '0'
+        if: steps.rot.outputs.found == 'false'
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         with:
           mode: resolve

@@ -133,6 +133,8 @@ interface WorkflowStep {
   name?: string;
   uses?: string;
   if?: string;
+  run?: string;
+  "continue-on-error"?: boolean | string;
 }
 
 /** Every step of every job in a workflow, parsed. Rules about step
@@ -151,13 +153,9 @@ function workflowSteps(rel: string): WorkflowStep[] {
 }
 
 /** The unsafe term of a step condition, or null when every term is safe.
- *  A step that did not run publishes an EMPTY output, so a test that an
- *  absent output can SATISFY - `!= 'true'`, `!x`, `== ''`, `== false` -
- *  opens the gate exactly when the step it guards on never happened.
- *  Rather than enumerate those shapes, this admits only the one that
- *  cannot: equality against a non-empty literal. Terms that mention no
- *  step output (`success()`, `env.X != ''`, `needs.*`) are not this
- *  hazard - a failed dependency blocks the job outright - and pass. */
+ *  An unrun step's ABSENT output compares as the number 0 in Actions, so
+ *  only `== '<non-zero literal>'` and `!= ''` cannot be satisfied by one.
+ *  Terms without a step output (`env.*`, `needs.*`) are not this hazard. */
 export function unsafeStepCondition(condition: string): string | null {
   const OUTPUT = /steps\.[\w-]+\.outputs\./;
   if (!OUTPUT.test(condition)) return null;
@@ -168,9 +166,34 @@ export function unsafeStepCondition(condition: string): string | null {
   for (const raw of condition.split(/&&|\|\|/)) {
     const term = raw.replaceAll(/[()]/g, "").trim();
     if (!OUTPUT.test(term)) continue;
-    if (!/^steps\.[\w-]+\.outputs\.[\w-]+ == '[^']+'$/.test(term)) return term;
+    const match = /^steps\.[\w-]+\.outputs\.[\w-]+ (==|!=) '([^']*)'$/.exec(term);
+    if (match === null) return term;
+    const [, operator, literal] = match;
+    if (operator === "==" ? Number(literal) === 0 : literal !== "") return term;
   }
   return null;
+}
+
+/** unsafeStepCondition over a workflow's steps, exempting FAIL steps (a
+ *  bare `exit <non-zero>` last line, no continue-on-error): a gate that
+ *  opens on an absent output there turns the job red, which is the point. */
+export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const step of steps) {
+    const failStep =
+      /(^|\n)\s*exit [1-9]\d*$/.test(String(step.run ?? "").trimEnd()) &&
+      !step["continue-on-error"];
+    if (failStep) continue;
+    const unsafe = unsafeStepCondition(String(step.if ?? ""));
+    if (unsafe !== null) {
+      mismatches.push({
+        file: rel,
+        expected: `step "${step.id ?? step.name ?? step.uses}" tests step outputs positively`,
+        got: `${unsafe} (a step that did not run has an ABSENT output, which passes)`,
+      });
+    }
+  }
+  return mismatches;
 }
 
 /** A markdown doc with its generated regions removed (and how many), so a
@@ -5681,21 +5704,21 @@ const rules: Rule[] = [
             }
           }
         }
-        // Defense in depth over the REST of the workflow: a condition that
-        // tests a step output negatively passes when the step never ran.
-        for (const step of steps) {
-          const unsafe = unsafeStepCondition(String(step.if ?? ""));
-          if (unsafe !== null) {
-            mismatches.push({
-              file: rel,
-              expected: `step "${step.id ?? step.name ?? step.uses}" tests step outputs positively`,
-              got: `${unsafe} (a step that did not run has an EMPTY output, which passes)`,
-            });
-          }
-        }
       }
       return mismatches;
     },
+  },
+
+  {
+    // Every workflow, not only the settings pair: a condition that tests
+    // a step output negatively passes when the step never ran, wherever
+    // the guarded step is a push, a PR, or an issue write.
+    name: "step-output-gates",
+    run: () =>
+      readdirSync(join(REPO_ROOT, ".github/workflows"))
+        .filter((name) => /\.ya?ml$/.test(name))
+        .map((name) => `.github/workflows/${name}`)
+        .flatMap((rel) => stepOutputGateMismatches(rel, workflowSteps(rel))),
   },
 
   {
@@ -6829,6 +6852,7 @@ export const RULE_ROSTER = [
   "self-apply-fact-source",
   "settings-hide-details",
   "settings-apply-skip-gate",
+  "step-output-gates",
   "pins-and-identities",
   "tracking-label-regex",
   "pages-grammar",
