@@ -50,7 +50,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Managed vs repo-owned files
 
-- Rule: a file whose header says "This file is managed by <owner>/repo-platform." changes only through sync PRs; a repo-owned starter (`checks.yml`, `post-green.yml`, `.github/settings.yml`, ...) is rendered once and never overwritten.
+- Rule: a file whose header says `This file is managed by <owner>/repo-platform.` changes only through sync PRs; a repo-owned starter (`checks.yml`, `post-green.yml`, `.github/settings.yml`, ...) is rendered once and never overwritten.
 - Why: an edit to a managed file is overwritten by the next sync PR, so the change belongs in repo-platform.
 - How: change the template under `templates/` in repo-platform; the starters are the `_skip_if_exists` list in its copier.yml ([new-repo.md](new-repo.md#3-add-checks-to-checksyml) has the table).
 - Enforced by: validate-template (the headers and manifest parity checks) for managed files; copier's `_skip_if_exists` for the starters.
@@ -59,7 +59,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - Rule: Copilot code review comments only on a defect it can demonstrate in the diff; its comments are advisory, and a one-line reply rejecting one is a valid outcome.
 - Why: speculative hardening and unenforced style opinions cost review time without catching a bug.
-- How: the rules Copilot reads are the managed `.github/instructions/review.instructions.md` ([template](../templates/agents/.github/instructions/review.instructions.md.jinja)).
+- How: the rules Copilot reads are the managed `.github/instructions/review.instructions.md` (template: `templates/agents/.github/instructions/review.instructions.md.jinja` in repo-platform).
 - Enforced by: that file for what earns a comment (agents module); advisory because the `main` ruleset requests the review and no ruleset requires Copilot's approval.
 
 ## No backwards-compatibility code
