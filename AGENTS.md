@@ -25,7 +25,7 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 
 ## Verification
 
-- `bun run check` chains every local gate.
+- `bun run check` chains every local gate and bootstraps the root and per-action deps itself when a `node_modules` is missing (`bun run bootstrap` runs every frozen install on demand).
 - Smoke-generate locally (main is not copier-consumable; copier needs bun on PATH): `bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/bt`, then `git -C /tmp/bt init -b build && git -C /tmp/bt -c core.attributesFile=/dev/null -c core.autocrlf=false add -A --force && git -C /tmp/bt commit -m build`.
 - Then `copier copy /tmp/bt /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false` and run actions/validate-template on `/tmp/out`. The multiselect value must be a YAML list in ONE `-d` argument.
 
