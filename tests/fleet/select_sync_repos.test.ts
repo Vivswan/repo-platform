@@ -311,7 +311,13 @@ describe("select_sync_repos.ts", () => {
     "they may be private slugs): not among the fleet token's pushable repositories under Vivswan - " +
     "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
     "misspelled (matching ignores case)\n";
-  test.each([
+  test.each<{
+    reason: string;
+    scope: string;
+    discoveredList: typeof discovered;
+    repos: ReturnType<typeof reposOf>;
+    stdout: string;
+  }>([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
       scope: "Vivswan/steady,Vivswan/unadopted",

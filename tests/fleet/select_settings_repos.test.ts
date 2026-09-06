@@ -602,7 +602,13 @@ describe("select_settings_repos.ts", () => {
   ]
     .map((line) => `- ${line}\n`)
     .join("")}`;
-  test.each([
+  test.each<{
+    reason: string;
+    scope: string;
+    targets: ReturnType<typeof targetsOf>;
+    stdout: string;
+    summary: string;
+  }>([
     {
       reason: "a public slug selects it alone, and slugs alone never probe other repos",
       scope: "Vivswan/open-lib",

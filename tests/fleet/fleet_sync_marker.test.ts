@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -870,11 +870,7 @@ describe("main", () => {
   const publishedWhole = cloneWithBuild("published-whole", whole);
   const publishedMixed = cloneWithBuild("published-mixed", mixed);
 
-  function run(
-    cwd: string,
-    sha: string,
-    before: string,
-  ): { exitCode: number; stdout: string; output: string } {
+  function run(cwd: string, sha: string, before: string): BoundedSpawnResult & { output: string } {
     const outputFile = join(root, `out-${Bun.hash(cwd + sha + before).toString(16)}.txt`);
     writeFileSync(outputFile, "");
     const proc = boundedSpawnSync(["bun", script], {
