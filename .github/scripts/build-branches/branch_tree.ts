@@ -179,7 +179,8 @@ function hasPublishableFile(actionRoot: string, dir = actionRoot): boolean {
 export function actionDirNames(repoRoot: string): string[] {
   const source = join(repoRoot, "actions");
   return readdirSync(source, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && hasPublishableFile(join(source, entry.name)))
+    .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
+    .filter((entry) => hasPublishableFile(join(source, entry.name)))
     .map((entry) => entry.name)
     .sort();
 }

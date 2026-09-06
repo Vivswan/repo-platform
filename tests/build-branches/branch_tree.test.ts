@@ -232,6 +232,9 @@ describe("copyActions", () => {
     mkdirSync(join(ghost, "dist"));
     writeFileSync(join(ghost, "dist", "bundle.js"), "module.exports={};\n");
     writeFileSync(join(ghost, `run${TEST_FILE_SUFFIX}`), "export {};\n");
+    // A top-level excluded name is never an action root, whatever it holds.
+    mkdirSync(join(root, "actions", "node_modules", "pkg"), { recursive: true });
+    writeFileSync(join(root, "actions", "node_modules", "pkg", "index.js"), "module.exports={};\n");
     expect(actionDirNames(root)).toEqual(["check-typography"]);
     const dest = temp.dir("branch-actions-dest-");
     expect(copyActions(root, dest)).toBe(4);
