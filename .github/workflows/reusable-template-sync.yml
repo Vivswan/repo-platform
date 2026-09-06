@@ -186,9 +186,10 @@ jobs:
 
       # No up-to-date shortcut: modules, private, and description are live
       # inputs that must re-render even at an unchanged template ref.
-      # MODULES and DESCRIPTION come from files via the shell so the
-      # env-group print never carries them; run_hidden.ts captures
-      # copier's output for a hidden target.
+      # MODULES, DESCRIPTION, HOMEPAGE, and TOPICS come from files via the
+      # shell so the env-group print never carries them (the last two seed
+      # the settings starter's answers where the recorded file lacks them);
+      # run_hidden.ts captures copier's output for a hidden target.
       - name: Apply copier update
         env:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
@@ -197,6 +198,8 @@ jobs:
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
           DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
+          HOMEPAGE="$(cat "$RUNNER_TEMP/homepage.txt")" \
+          TOPICS="$(cat "$RUNNER_TEMP/topics.txt")" \
             bun .github/scripts/sync/run_hidden.ts "copier update" -- \
             bun .github/scripts/sync/apply_update.ts
 
@@ -213,6 +216,8 @@ jobs:
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
           DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
+          HOMEPAGE="$(cat "$RUNNER_TEMP/homepage.txt")" \
+          TOPICS="$(cat "$RUNNER_TEMP/topics.txt")" \
             bun .github/scripts/sync/run_hidden.ts "clean renders" -- \
             bun .github/scripts/sync/clean_renders.ts
 

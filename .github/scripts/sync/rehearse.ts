@@ -397,6 +397,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     const privateAnswer = answers.fields.private === true ? "true" : "false";
     const description =
       typeof answers.fields.description === "string" ? answers.fields.description : "";
+    // The seeded answers' "live" values: the recorded ones, like description
+    // (a rehearsal has no GitHub to read), so an unrecorded key seeds "".
+    const recordedString = (key: string) =>
+      typeof answers.fields[key] === "string" ? (answers.fields[key] as string) : "";
 
     section("fetching build refs and assembling the rehearsal release");
     run(["git", "init", "--quiet", platformDir]);
@@ -556,6 +560,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       MODULES: modules,
       PRIVATE: privateAnswer,
       DESCRIPTION: description,
+      HOMEPAGE: recordedString("homepage"),
+      TOPICS: recordedString("topics"),
       RUNNER_TEMP: temp,
       SRC_PATH: platformDir,
       OLD_SHA: oldSha,

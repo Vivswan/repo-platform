@@ -1,7 +1,10 @@
 // Builds the copier --data-file inputs for the sync's two clean renders:
 // the OLD render replays the answers recorded before the update
 // (non-underscore keys only), and the NEW render applies the live
-// module/private/description data on top of them.
+// module/private/description data on top of them, plus the live homepage
+// and topics where the recorded answers lack them (answers_file.ts's
+// unrecordedSeeds - the same seed `copier update` gets, so the two renders
+// agree byte for byte).
 //
 // The recorded answers ride through VERBATIM (answers_file.ts's
 // dataFileYaml): copier re-parses the data file with PyYAML (YAML 1.1),
@@ -16,6 +19,7 @@
 //   bun .github/scripts/sync/render_data.ts --answers-old <file>
 //     --out-old <file> --out-new <file> --modules <json-list>
 //     --private <true|false> --description <text>
+//     [--homepage <text>] [--topics <text>]
 //
 // Errors print as ::error:: workflow commands (on stdout, where the
 // runner parses them) with a nonzero exit.
@@ -35,8 +39,10 @@ const FLAGS = [
   "--description",
 ] as const;
 
+const OPTIONAL_FLAGS = ["--homepage", "--topics"] as const;
+
 function main(args: string[]): void {
-  const flags = parseFlags(args, FLAGS);
+  const flags = parseFlags(args, FLAGS, OPTIONAL_FLAGS);
 
   const modules = parseModules(flags["--modules"]);
   if (modules === null) {
@@ -53,6 +59,7 @@ function main(args: string[]): void {
       modules,
       private: flags["--private"] === "true",
       description: flags["--description"],
+      seeds: { homepage: flags["--homepage"] ?? "", topics: flags["--topics"] ?? "" },
     });
   } catch (err) {
     fail(`${answersPath}: ${err instanceof Error ? err.message : String(err)}`);

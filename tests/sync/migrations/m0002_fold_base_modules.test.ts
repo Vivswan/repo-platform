@@ -88,6 +88,20 @@ describe("m0002_fold_base_modules", () => {
       note: "`agents`, `auto-assign`",
     },
     {
+      // YAML allows a trailing comma; it is not an item (the selector
+      // reads the list fine), so the splice keeps it while items remain.
+      label: "a trailing comma stays while an item is kept",
+      before: "modules: [agents, uv,]\n",
+      after: "modules: [uv,]\n",
+      note: "`agents`",
+    },
+    {
+      label: "a trailing comma leaves with the last folded item",
+      before: "modules: [agents, settings-sync, ]\n",
+      after: "modules: []\n",
+      note: "`agents`, `settings-sync`",
+    },
+    {
       label: "a padded flow list keeps its padding",
       before: 'modules: [ "agents" , "uv" ]\n',
       after: 'modules: [ "uv" ]\n',

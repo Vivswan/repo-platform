@@ -21,8 +21,8 @@
 // harness and rehearse create fresh scratch dirs per run - a reused
 // directory would serve renders from whatever inputs built them.
 //
-// Env: OLD_SHA, TARGET_REF, MODULES, PRIVATE, DESCRIPTION,
-// SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
+// Env: OLD_SHA, TARGET_REF, MODULES, PRIVATE, DESCRIPTION, HOMEPAGE,
+// TOPICS, SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
 
 import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
@@ -120,6 +120,10 @@ export function ensureRenders(): CleanRenders {
     requireEnv("PRIVATE"),
     "--description",
     env("DESCRIPTION"),
+    "--homepage",
+    env("HOMEPAGE"),
+    "--topics",
+    env("TOPICS"),
   ]);
 
   const srcPath = requireEnv("SRC_PATH");

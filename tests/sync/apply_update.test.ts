@@ -41,6 +41,9 @@ interface Row {
    *  _src_path as the fixture wrote it. */
   answers: (ctx: { sha: string; src: string }) => string;
   copierRan: boolean;
+  /** Extra recorded answers in the pre-render file (the seeded keys, when
+   *  a row records them). */
+  recorded?: string;
 }
 
 function gitIn(cwd: string) {
@@ -117,7 +120,7 @@ function run(row: Row) {
         : place(row.recordedSrcPath);
     writeFileSync(
       join(target, ".github/.copier-answers.yml"),
-      `${STALE}_src_path: ${recordedSrc}\n`,
+      `${STALE}_src_path: ${recordedSrc}\n${row.recorded ?? ""}`,
     );
     const written = (row.written ?? ((s) => s))(sha);
     const bin = join(root, "bin");
@@ -142,6 +145,8 @@ function run(row: Row) {
         MODULES: "[uv]",
         PRIVATE: "false",
         DESCRIPTION: "d",
+        HOMEPAGE: "https://live.example",
+        TOPICS: "live,topics",
         RECOVER: "",
       },
     });
@@ -271,8 +276,44 @@ describe("apply_update.ts outcomes (subprocess)", () => {
         "private=false",
         "-d",
         "description=d",
+        // The live seeds for the keys this row's answers never recorded (the
+        // rows record none): the starter declares them instead of clearing.
+        ...(row.recorded === undefined
+          ? ["-d", "homepage=https://live.example", "-d", "topics=live,topics"]
+          : []),
       ]);
     }
     expect(r.answers).toBe(row.answers({ sha: r.sha, src: r.recordedSrc }));
+  });
+
+  test("a recorded homepage or topics answer wins over the live value: no seed is passed", () => {
+    // An EMPTY recorded value counts as recorded: declare-and-clear was
+    // the repository's own choice, and re-seeding would undo it.
+    const r = run({
+      reason: "recorded seeds",
+      recorded: "homepage: ''\ntopics: recorded,topics\n",
+      exitCode: 0,
+      answers: ({ sha, src }) => `_commit: ${sha}\n_src_path: ${src}\n`,
+      copierRan: true,
+    });
+    expect(r.proc.exitCode).toBe(0);
+    expect(r.argv.filter((arg) => /^(homepage|topics)=/.test(arg))).toEqual([]);
+    expect(r.argv).toContain("description=d");
+  });
+
+  test("an unreadable answers file seeds nothing: unknown is not unrecorded", () => {
+    // A list appended below the mapping keys is a YAML parse error, one of
+    // the AnswersFileError shapes: the file records nothing KNOWN, and
+    // seeding both live values here would override whatever it did record
+    // once copier (or a human) reads it.
+    const r = run({
+      reason: "unreadable answers",
+      recorded: "- a list line where a mapping key belongs\n",
+      exitCode: 0,
+      answers: ({ sha, src }) => `_commit: ${sha}\n_src_path: ${src}\n`,
+      copierRan: true,
+    });
+    expect(r.proc.exitCode).toBe(0);
+    expect(r.argv.filter((arg) => /^(homepage|topics)=/.test(arg))).toEqual([]);
   });
 });

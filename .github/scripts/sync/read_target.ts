@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // Reads the target's live repo data for the sync: default branch and
-// private flag to GITHUB_OUTPUT, description to a RUNNER_TEMP file (step
-// outputs ride into later steps' env-group prints, and a hidden target's
-// description must not). For hide-details targets the description and any
-// non-default branch name are registered with the masker BEFORE either
-// value is written anywhere.
+// private flag to GITHUB_OUTPUT; description, homepage, and the
+// comma-joined topics to RUNNER_TEMP files (step outputs ride into later
+// steps' env-group prints, and a hidden target's values must not). For
+// hide-details targets those values and any non-default branch name are
+// registered with the masker BEFORE anything is written.
 //
 // Env: TARGET, TARGET_DISPLAY, HIDE_DETAILS, GH_TOKEN, RUNNER_TEMP,
 // GITHUB_OUTPUT.
@@ -36,6 +36,8 @@ const info = parseJsonWith(
   z.object({
     default_branch: z.string(),
     description: z.string().nullable(),
+    homepage: z.string().nullable(),
+    topics: z.array(z.string()),
     private: z.boolean(),
   }),
   proc.stdout,
@@ -43,14 +45,21 @@ const info = parseJsonWith(
 );
 const branch = info.default_branch;
 const description = info.description ?? "";
-writeFileSync(join(requireEnv("RUNNER_TEMP"), "description.txt"), `${description}\n`);
+const homepage = info.homepage ?? "";
+// The starter's `topics` answer is the comma-separated form copier asks for.
+const topics = info.topics.join(",");
+const runnerTemp = requireEnv("RUNNER_TEMP");
+writeFileSync(join(runnerTemp, "description.txt"), `${description}\n`);
+writeFileSync(join(runnerTemp, "homepage.txt"), `${homepage}\n`);
+writeFileSync(join(runnerTemp, "topics.txt"), `${topics}\n`);
 if (hideDetails()) {
   // addMask escapes %/CR/LF: workflow-command data must be single-line,
   // or the runner misparses the command and the raw value hits the log.
   // GitHub descriptions cannot hold real newlines, but this must not
-  // depend on that staying true.
-  if (description.length >= 4) {
-    addMask(description);
+  // depend on that staying true. Short values stay unmasked: masking a
+  // three-letter topic would garble every log line containing it.
+  for (const value of [description, homepage, ...info.topics]) {
+    if (value.length >= 4) addMask(value);
   }
   // An unusual branch name is target-derived, whatever its length; only
   // main/master stay unmasked (masking those would garble every log line

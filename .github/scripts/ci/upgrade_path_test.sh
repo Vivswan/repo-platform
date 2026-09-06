@@ -534,6 +534,11 @@ case "$MODULES" in
   *) fail "sync/modules.ts dropped the newly selected custom-license" ;;
 esac
 export MODULES
+# The seeded-answer CONTROL: this fixture RECORDED homepage and topics (the
+# pre-fold render asked them with settings-sync), so live values must not
+# win over the recorded ones - the answers and the starter keep "".
+export HOMEPAGE="https://must-not-win.example"
+export TOPICS="must,not,win"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 
 # The workflow's post-update order: clean renders, split-file rebuild,
@@ -639,6 +644,12 @@ done
 recorded_modules="$(awk '/^modules:/ { on = 1; next } on && /^- / { sub(/^- /, ""); sub(/^["\x27]/, ""); sub(/["\x27]$/, ""); print; next } on { exit }' .github/.copier-answers.yml | tr '\n' ' ')"
 [ "$recorded_modules" = "uv release-please issue-templates pr-title custom-license " ] \
   || fail "the recorded modules list is not exactly the five surviving modules in choice order: ${recorded_modules}"
+{ grep -qE "^homepage: ''$" .github/.copier-answers.yml && grep -qE "^topics: ''$" .github/.copier-answers.yml; } \
+  || fail "a live homepage/topics value overrode the RECORDED answers: $(grep -E '^(homepage|topics):' .github/.copier-answers.yml | tr '\n' ' ')"
+if grep -qF "must-not-win" .github/settings.yml .github/.copier-answers.yml; then
+  fail "a live homepage/topics value reached a file although the answers were recorded"
+fi
+unset HOMEPAGE TOPICS
 # settings.yml is repo-owned (PROTECTED_PATHS + the preserve step): the
 # update must leave the file AND its local edit alone.
 test -f .github/settings.yml || fail "repo-owned settings.yml was deleted"
@@ -1712,6 +1723,11 @@ MODULES="$(select_modules \
 export MODULES
 export PRIVATE=false
 export DESCRIPTION="Fold-arrival project"
+# The repository never recorded homepage or topics (it never selected
+# settings-sync), so the sync seeds both from the LIVE repository: the
+# starter must declare what the repository already shows, never clear it.
+export HOMEPAGE="https://arrival.example"
+export TOPICS="alpha,beta"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 answers_arr="$(git -C "$ARR" show HEAD:.github/.copier-answers.yml)"
 src_path_arr="$(sed -n 's/^_src_path: //p' <<<"$answers_arr")"
@@ -1778,10 +1794,17 @@ fi
 # repository now.
 cmp -s "$ARR_WORK/registration-before.yml" .repo-platform.yml \
   || fail "the arrival update rewrote a .repo-platform.yml naming none of the three"
-for key in homepage topics; do
-  grep -qE "^$key:" .github/.copier-answers.yml \
-    || fail "the answers file did not record the $key answer after the update"
-done
+grep -qxF "homepage: https://arrival.example" .github/.copier-answers.yml \
+  || fail "the answers file did not record the LIVE homepage: $(grep -E '^homepage:' .github/.copier-answers.yml)"
+grep -qxF "topics: alpha,beta" .github/.copier-answers.yml \
+  || fail "the answers file did not record the LIVE topics: $(grep -E '^topics:' .github/.copier-answers.yml)"
+# The starter declares the live values (the render-new byte comparison
+# above already holds, so the clean render was seeded identically).
+grep -qxF '  homepage: "https://arrival.example"' .github/settings.yml \
+  || fail "the settings.yml starter does not declare the live homepage (the apply would clear it)"
+grep -qxF '  topics: "alpha,beta"' .github/settings.yml \
+  || fail "the settings.yml starter does not declare the live topics (the apply would clear them)"
+unset HOMEPAGE TOPICS
 echo "module fold arrival OK: folded files delivered, the repository's own AGENTS.md preserved as a reviewed appendix, rung in-place"
 
 # --- Migration history walk (a rung pruned from the delivered tree) --------

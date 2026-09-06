@@ -117,13 +117,18 @@ function splitComment(line: string): [body: string, comment: string] {
 /** A one-line flow list's inner text with the folded items spliced out:
  * each dropped item leaves with the separator that joined it to its
  * predecessor (the first item takes the separator after it), so the kept
- * items keep their own spacing and quoting byte for byte. Null when an item
- * is not a plain or quoted scalar. */
+ * items keep their own spacing and quoting byte for byte. A trailing comma
+ * (YAML allows one) is not an item: it stays while any item is kept and
+ * leaves with the last item otherwise. Null when an item is not a plain or
+ * quoted scalar. */
 function spliceFlowItems(inner: string): string | null {
   if (inner.trim() === "") return inner;
+  const segments = inner.split(",");
+  const trailingComma = segments.length > 1 && segments[segments.length - 1].trim() === "";
+  if (trailingComma) segments.pop();
   const items: { start: number; end: number; name: string; index: number }[] = [];
   let cursor = 0;
-  for (const [index, segment] of inner.split(",").entries()) {
+  for (const [index, segment] of segments.entries()) {
     const name = itemName(segment);
     if (name === null) return null;
     const start = cursor + segment.indexOf(segment.trim());
@@ -133,6 +138,9 @@ function spliceFlowItems(inner: string): string | null {
   const kept = items.filter((item) => !FOLDED.includes(item.name));
   const first = items[0];
   const last = items[items.length - 1];
+  // Everything after the last item: the trailing comma and its whitespace,
+  // kept only while an item remains to trail.
+  const tail = inner.slice(last.end);
   let out = inner.slice(0, first.start);
   kept.forEach((item, j) => {
     // A kept item keeps the separator to its OWN predecessor in the original
@@ -141,7 +149,7 @@ function spliceFlowItems(inner: string): string | null {
     if (j > 0) out += inner.slice(items[item.index - 1].end, item.start);
     out += inner.slice(item.start, item.end);
   });
-  return out + inner.slice(last.end);
+  return out + (kept.length === 0 && trailingComma ? tail.replace(/^\s*,\s*/, "") : tail);
 }
 
 /** `text` with the folded names removed from its top-level `modules` list,
