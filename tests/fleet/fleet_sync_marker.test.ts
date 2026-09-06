@@ -1,10 +1,6 @@
-// The directives-block grammar read-directives reads off each merged
-// commit, as one table of whole commit messages and FULL parse results.
-// The main() rows run the script on scratch clones and assert the whole
-// outcome: exit code, GITHUB_OUTPUT, and every log line - the range walk
-// from the last published build (the coalesced-merge case that motivates
-// it, with the old single-commit read as the control), the union rule,
-// and a red body anywhere in the range.
+// The directives grammar as one table of whole messages and FULL parse
+// results; the main() rows run the script on scratch clones and assert the
+// whole outcome (exit code, GITHUB_OUTPUT, every log line).
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -328,7 +324,7 @@ describe("main", () => {
   const listA = commit(message("`[fleet-sync: Vivswan/a]`", PROSE));
   const prose1 = commit(message(PROSE));
   const prose2 = commit(message(PROSE));
-  const listBC = commit(message("[fleet-sync: Vivswan/b, vivswan/c]", PROSE));
+  const listBA = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
   const whole = commit(message("`[fleet-sync]`", PROSE));
   const bottom = commit(message(PROSE, "[fleet-sync]"));
   const prose3 = commit(message(PROSE));
@@ -360,7 +356,7 @@ describe("main", () => {
   const unpublished = cloneWithBuild("unpublished", null);
   const publishedSeed = cloneWithBuild("published-seed", seed);
   const publishedProse2 = cloneWithBuild("published-prose2", prose2);
-  const publishedListBC = cloneWithBuild("published-list-bc", listBC);
+  const publishedListBA = cloneWithBuild("published-list-ba", listBA);
 
   function run(
     cwd: string,
@@ -411,14 +407,15 @@ describe("main", () => {
 
   test.each([
     {
-      reason: "two directives with different repo lists: the union, in commit order",
+      reason:
+        "two directives with overlapping repo lists: the union, in commit order, each repo once",
       cwd: publishedSeed,
-      sha: listBC,
-      output: "armed=true\nrepos=vivswan/a,vivswan/b,vivswan/c\n",
+      sha: listBA,
+      output: "armed=true\nrepos=vivswan/a,vivswan/b\n",
       stdout: lines(
         directive(listA, "vivswan/a"),
-        directive(listBC, "vivswan/b,vivswan/c"),
-        syncing(seed, listBC, "vivswan/a,vivswan/b,vivswan/c"),
+        directive(listBA, "vivswan/b,vivswan/a"),
+        syncing(seed, listBA, "vivswan/a,vivswan/b"),
       ),
     },
     {
@@ -427,7 +424,7 @@ describe("main", () => {
       sha: whole,
       output: "armed=true\nrepos=all\n",
       stdout: lines(
-        directive(listBC, "vivswan/b,vivswan/c"),
+        directive(listBA, "vivswan/b,vivswan/a"),
         directive(whole, "all"),
         syncing(prose2, whole, "all"),
       ),
@@ -438,7 +435,7 @@ describe("main", () => {
   });
 
   test("a misplaced block on any commit in the range turns the leg red, naming that commit; nothing is armed", () => {
-    const result = run(publishedListBC, prose3, bottom);
+    const result = run(publishedListBA, prose3, bottom);
     expect(result).toEqual({
       exitCode: 1,
       output: "",
@@ -468,14 +465,14 @@ describe("main", () => {
     },
     {
       reason: "a list: repos is the folded comma list",
-      sha: listBC,
+      sha: listBA,
       exitCode: 0,
-      output: "armed=true\nrepos=vivswan/b,vivswan/c\n",
+      output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
       stdout: (base: string, sha: string) =>
         lines(
           pushAlone(sha, base),
-          directive(sha, "vivswan/b,vivswan/c"),
-          syncing(base, sha, "vivswan/b,vivswan/c"),
+          directive(sha, "vivswan/b,vivswan/a"),
+          syncing(base, sha, "vivswan/b,vivswan/a"),
         ),
     },
     {

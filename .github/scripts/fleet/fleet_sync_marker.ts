@@ -6,20 +6,11 @@
 //   [fleet-sync]                      sync the whole fleet now
 //   `[fleet-sync: owner/a, owner/b]`  sync those repos now
 //
-// Squash merges carry the PR body verbatim (.github/settings-override.yml
-// pins PR_BODY), so post-green.yml's read-directives leg reads the opt-ins
-// from git alone and hands the scope to its sync-fleet leg. It reads EVERY
-// commit since the last published build (judged_range.ts), not the judged
-// commit alone: merges landing within a minute share one surviving CI run,
-// and the opt-in may sit on an evicted one. The scopes union - any `all`
-// wins, otherwise the repo lists in commit order.
-//
-// A block-shaped paragraph or a [fleet-sync anywhere else, bad backtick
-// fencing, an unknown or duplicated keyword, an empty scope, or a bad slug
-// on ANY body in the range FAILS the leg, naming the commit: a misread
-// opt-in is loud, never a silent weekly-cron wait.
-//
-// Env: judged_range.ts's SOURCE_SHA and BEFORE_SHA; GITHUB_OUTPUT (armed, repos).
+// Squash merges carry the body verbatim (settings-override.yml pins
+// PR_BODY), so the leg reads git alone: every commit in judged_range.ts's
+// range, scopes unioned (any `all` wins). A malformed or misplaced block on
+// any body fails the leg, naming the commit. Env: judged_range.ts's, plus
+// GITHUB_OUTPUT (armed, repos).
 
 import { fail, notice, setOutput } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";

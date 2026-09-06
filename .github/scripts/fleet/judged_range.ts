@@ -1,12 +1,6 @@
-// The range a post-green leg covers: from the last published green main to the judged commit.
-// ci.yml keeps one pending main run and a newer push evicts it, so a leg that read only its own
-// push (`before..sha`, or the judged commit alone) would miss every commit whose run was
-// superseded. The build tip's stamped source is a durable base that covers them all; the push's
-// `before` is only the first-publish fallback (docs/all-green.md). Shared by the read-directives
-// and settings-inputs legs, so the two cannot disagree on what "since the last publish" means.
-//
-// Env contract (judgedRangeEnv): SOURCE_SHA the judged commit, BEFORE_SHA the push payload's
-// `before` (all zeros for a branch-creating push), both full shas.
+// The range every post-green leg covers: (newest earlier build stamp, judged commit], so a push
+// whose CI run was evicted is still read (docs/all-green.md). One owner for both legs.
+// Env (judgedRangeEnv): SOURCE_SHA, BEFORE_SHA (the push's `before`, all zeros on branch creation).
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
 import { fail, requireEnv } from "../shared/gha.ts";

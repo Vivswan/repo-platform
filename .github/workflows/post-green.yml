@@ -116,15 +116,10 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
 
-  # The merged PRs' opt-in to an immediate fleet sync: reads the directives
-  # block of every commit since the last published build, the judged one
-  # included (fleet_sync_marker.ts's header has the grammar and the union
-  # rule; the range is judged_range.ts's, shared with settings-inputs) and
-  # hands the scope to sync-fleet. State-shaped: it mutates nothing, and
-  # the range covers the merges whose own runs this run evicted. A
-  # malformed or misplaced directive on any body in the range fails this
-  # leg: loud, so a mistyped opt-in never degrades silently into "wait
-  # for Tuesday".
+  # The merged PRs' opt-in to an immediate fleet sync, read off every commit
+  # since the last published build (fleet_sync_marker.ts) and handed to
+  # sync-fleet. State-shaped: mutates nothing; the range covers the merges
+  # whose runs this run evicted. A bad directive on any body fails the leg.
   read-directives:
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
