@@ -648,6 +648,17 @@ test.each([
   expect(elapsed).toBeLessThan(300);
 });
 
+test("a justification wrapped over 100k lines folds in linear time and arms", () => {
+  // The control for the fold: rescanning the growing joined line on every
+  // continuation took 3.8 s here.
+  const body = message(`[fleet-sync: all] why\n${"more\n".repeat(100_000)}`.trimEnd(), PROSE);
+  const started = performance.now();
+  const parsed = parseDirectives(body);
+  const elapsed = performance.now() - started;
+  expect(parsed).toEqual(FLEET);
+  expect(elapsed).toBeLessThan(300);
+});
+
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
   const root = temp.dir("fleet-sync-marker-");

@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
-// (sync_scope.ts's grammar; only a bare `all` takes, and requires, a trailing justification), read over
-// judged_range.ts's range and unioned. A bad body fails the leg only on the judged commit;
-// an older one (its own run red, or replaced in the concurrency queue before it ran) is a
-// counts-only warning here.
+// (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
+// range and unioned. Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
 
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
@@ -118,19 +116,27 @@ const DIRECTIVE_SHAPED = /^\[[^[\]]*\](?:\s|$)/;
  *  would judge on its own never folds, so folding hides nothing. */
 function foldJustifications(lines: string[], bare: string[]): string[] {
   const folded: string[] = [];
+  let justified: string[] | null = null;
+  const flush = () => {
+    if (justified !== null) folded.push(justified.join(" "));
+    justified = null;
+  };
   lines.forEach((line, at) => {
-    const previous = folded.at(-1);
     const body = containerBody(line);
-    const continues =
-      previous !== undefined &&
-      JUSTIFIED_LINE.test(previous) &&
-      !DIRECTIVE_SHAPED.test(body) &&
-      !BLOCK_LINE.test(body) &&
-      !FENCE_LINE.test(body) &&
-      !FLEET_SYNC_ANYWHERE.test(bare[at]);
-    if (continues) folded[folded.length - 1] = `${previous} ${line}`;
+    const ownLine =
+      DIRECTIVE_SHAPED.test(body) ||
+      BLOCK_LINE.test(body) ||
+      FENCE_LINE.test(body) ||
+      FLEET_SYNC_ANYWHERE.test(bare[at]);
+    if (justified !== null && !ownLine) {
+      justified.push(line);
+      return;
+    }
+    flush();
+    if (JUSTIFIED_LINE.test(line)) justified = [line];
     else folded.push(line);
   });
+  flush();
   return folded;
 }
 
