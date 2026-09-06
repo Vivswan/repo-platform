@@ -58,6 +58,14 @@ describe("parseScope", () => {
       },
     },
     {
+      raw: "o/a, just-a-name",
+      expected: {
+        kind: "error",
+        message:
+          "1 of 2 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+      },
+    },
+    {
       raw: "o/a, just-a-name, o/b/c",
       expected: {
         kind: "error",

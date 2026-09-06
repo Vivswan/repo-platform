@@ -50,7 +50,7 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
   if (invalid > 0) {
     return {
       kind: "error",
-      message: `${invalid} of ${entries.length} scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)`,
+      message: `${invalid} of ${entries.length} scope entries ${invalid === 1 ? "is" : "are"} neither owner/name slugs nor public/private (values withheld - they may be private slugs)`,
     };
   }
   return { kind: "list", visibility, slugs };

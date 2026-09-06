@@ -251,7 +251,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          "[fleet-sync] scope: 1 of 2 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
+          "[fleet-sync] scope: 1 of 2 scope entries is neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
         ],
       },
     },
