@@ -435,21 +435,87 @@ describe("parseDirectives", () => {
   });
 });
 
+// Every shape decision reads the line behind its container prefixes, so the same input inside
+// a blockquote or a three-space indent gets the unprefixed verdict; the error still quotes the raw line.
+describe("parseDirectives inside a container", () => {
+  const quoted = (prefix: string, para: string) =>
+    para
+      .split("\n")
+      .map((line) => `${prefix}${line}`)
+      .join("\n");
+  test.each(
+    [
+      {
+        shape: "a block-shaped first paragraph",
+        body: (p: string) => message(quoted(p, "[fleet-sync: public]"), PROSE),
+        expected: (): Directives => ({ kind: "fleet-sync", scope: ["public"] }),
+      },
+      {
+        shape: "a block error names the raw line",
+        body: (p: string) => message(quoted(p, "[fleet-synk]"), PROSE),
+        expected: (p: string): Directives => ({
+          kind: "error",
+          errors: [`unknown directive keyword in "${p}[fleet-synk]"; known: fleet-sync`],
+        }),
+      },
+      {
+        shape: "a fence line: the fenced mention stays misplaced",
+        body: (p: string) => message(PROSE, quoted(p, "```text\n[fleet-sync]\n```")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
+      {
+        shape: "a code span in prose",
+        body: (p: string) => message(PROSE, quoted(p, "No `[fleet-sync]` here.")),
+        expected: (): Directives => NONE,
+      },
+      {
+        shape: "a span never crosses a fence line (the Copilot input at the blockquote prefix)",
+        body: (p: string) =>
+          message(PROSE, quoted(p, "Before `\n```text\n[fleet-sync]\n```\nAfter `")),
+        expected: (p: string) => misplaced(`${p}[fleet-sync]`.trim()),
+      },
+    ].flatMap((row) =>
+      [
+        { container: "unprefixed", prefix: "" },
+        { container: "in a blockquote", prefix: "> " },
+        { container: "in a nested blockquote without spaces", prefix: ">>" },
+        { container: "in a tab-separated blockquote", prefix: ">\t" },
+        {
+          container: "in a blockquote with spaces and tabs mixed around the markers",
+          prefix: " \t> \t>  \t",
+        },
+        { container: "indented three spaces", prefix: "   " },
+        { container: "indented four spaces", prefix: "    " },
+      ].map((c) => ({ ...row, ...c })),
+    ),
+  )("$shape $container", ({ body, prefix, expected }) => {
+    expect(parseDirectives(body(prefix))).toEqual(expected(prefix));
+  });
+});
+
 test.each([
-  { shape: "in prose (the run tokenizer)", line: `x ${"`".repeat(100_000)} [fleet-sync]` },
-  { shape: "as a fence line (the fence regex)", line: `${"`".repeat(100_000)} [fleet-sync]` },
-])(
-  "a 100k-backtick run $shape is scanned in linear time: the run leaves the mention bare",
-  ({ line }) => {
-    // The control for the scanner: the regex it replaced backtracked
-    // quadratically on one long run (about a second at this length).
-    const started = performance.now();
-    const parsed = parseDirectives(message(PROSE, line));
-    const elapsed = performance.now() - started;
-    expect(parsed).toEqual(misplaced(line));
-    expect(elapsed).toBeLessThan(300);
+  {
+    shape: "100k backticks in prose (the run tokenizer)",
+    line: `x ${"`".repeat(100_000)} [fleet-sync]`,
   },
-);
+  {
+    shape: "100k backticks as a fence line (the fence regex)",
+    line: `${"`".repeat(100_000)} [fleet-sync]`,
+  },
+  {
+    // 400k markers: the repeated-replace scan this row retired took 1.8 s here and 130 ms at 100k.
+    shape: "400k blockquote markers (the container scan)",
+    line: `${">".repeat(400_000)} [fleet-sync]`,
+  },
+])("a run of $shape is scanned in linear time: the mention stays bare", ({ line }) => {
+  // The control for the scanner: the regex it replaced backtracked
+  // quadratically on one long run (about a second at this length).
+  const started = performance.now();
+  const parsed = parseDirectives(message(PROSE, line));
+  const elapsed = performance.now() - started;
+  expect(parsed).toEqual(misplaced(line));
+  expect(elapsed).toBeLessThan(300);
+});
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");

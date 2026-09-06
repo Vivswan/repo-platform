@@ -36,10 +36,18 @@ const BLOCK_INDEX = 1;
 const POSITION =
   "the directives block must be the first paragraph of the PR body, right under the subject: one [keyword] per line and nothing else in that paragraph";
 
-// A fence line (CommonMark: up to three spaces, then three or more backticks with an info string
-// free of backticks, or three or more tildes) opens or closes a code block: its marks are never
-// code-span delimiters, and no span pairs across it.
-const FENCE_LINE = /^ {0,3}(?:`{3,}[^`]*|~{3,}.*)$/;
+// A fence line (CommonMark: three or more backticks with an info string free of backticks, or
+// three or more tildes) opens or closes a code block: its marks are never code-span delimiters,
+// and no span pairs across it. Read on the container-stripped line.
+const FENCE_LINE = /^(?:`{3,}[^`]*|~{3,}.*)$/;
+
+/** The line behind its container prefixes: leading whitespace and blockquote markers, in any mix
+ *  (CommonMark counts columns here; the reader models no indented code, so every leading space,
+ *  tab, and `>` is a prefix). Every shape decision reads this form, so a shape inside a quote or an
+ *  indent is the same shape. One regex pass, linear. */
+function containerBody(line: string): string {
+  return line.replace(/^[ \t]*(?:>[ \t]*)*/, "");
+}
 
 /** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
  *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
@@ -102,19 +110,23 @@ function withoutCodeSpans(lines: string[]): string[] {
   return bare;
 }
 
-/** A blank-line-delimited paragraph: its lines as written, and the same lines with their code
- *  spans blanked, computed once here so every judgement below reads one stripping. */
-type Paragraph = { lines: string[]; bare: string[] };
+/** A blank-line-delimited paragraph: its lines as written (`lines`, what an error quotes), behind
+ *  their container prefixes (`body`, what every shape decision reads), and with their code spans
+ *  blanked (`bare`), all computed once here. */
+type Paragraph = { lines: string[]; body: string[]; bare: string[] };
 
-function paragraphs(body: string): Paragraph[] {
-  const lines = body
+function paragraphs(text: string): Paragraph[] {
+  const lines = text
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => line.trimEnd());
   const result: Paragraph[] = [];
   let current: string[] = [];
   const flush = () => {
-    if (current.length > 0) result.push({ lines: current, bare: withoutCodeSpans(current) });
+    if (current.length > 0) {
+      const body = current.map(containerBody);
+      result.push({ lines: current, body, bare: withoutCodeSpans(body) });
+    }
     current = [];
   };
   for (const line of lines) {
@@ -140,11 +152,9 @@ function unwrap(line: string): string | null {
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
   const isBlockShaped = (para: Paragraph) =>
-    para.lines.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
+    para.body.every((line) => BLOCK_LINE.test(line) || JUSTIFIED_LINE.test(line));
   const block =
-    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX])
-      ? paras[BLOCK_INDEX].lines
-      : null;
+    paras.length > BLOCK_INDEX && isBlockShaped(paras[BLOCK_INDEX]) ? paras[BLOCK_INDEX] : null;
 
   const errors: string[] = [];
   paras.forEach((para, index) => {
@@ -160,35 +170,36 @@ export function parseDirectives(body: string): Directives {
 
   const seen = new Set<string>();
   let scope: "all" | string[] = [];
-  for (const line of block) {
-    const justified = JUSTIFIED_LINE.exec(line);
-    const [bracketed, reason] = justified === null ? [line, ""] : [justified[1], justified[2]];
+  block.body.forEach((text, at) => {
+    const line = block.lines[at];
+    const justified = JUSTIFIED_LINE.exec(text);
+    const [bracketed, reason] = justified === null ? [text, ""] : [justified[1], justified[2]];
     const directive = unwrap(bracketed);
     if (directive === null) {
       errors.push(
         `"${line}" has bad backtick fencing: wrap the whole directive in one pair, \`[keyword]\`, or none`,
       );
-      continue;
+      return;
     }
     const match = DIRECTIVE.exec(directive);
     if (match === null) {
       errors.push(`"${line}" is not a directive: write [keyword] or [keyword: value]`);
-      continue;
+      return;
     }
     const keyword = match[1].toLowerCase();
     if (keyword !== KEYWORD) {
       errors.push(`unknown directive keyword in "${line}"; known: ${KEYWORD}`);
-      continue;
+      return;
     }
     if (seen.has(keyword)) {
       errors.push(`duplicate directive [${keyword}]: one line per keyword`);
-      continue;
+      return;
     }
     seen.add(keyword);
     const value = (match[2] ?? "").trim();
     if (match[2] === undefined) {
       errors.push(`"${line}": ${NEEDS_REASON}`);
-      continue;
+      return;
     }
     // parseScope reads "" as the whole fleet (an empty dispatch input); on a
     // directive it is a typo, refused here before the shared grammar.
@@ -196,28 +207,28 @@ export function parseDirectives(body: string): Directives {
       errors.push(
         `"${line}" has an empty scope: write [${keyword}: public], [${keyword}: private], owner/name slugs, or [${keyword}: all] <justification>`,
       );
-      continue;
+      return;
     }
     // The one scope grammar: what the plans accept, the leg accepts. Its
     // messages carry counts, never entries, so the line is not quoted here.
     const parsed = parseScope(value);
     if (parsed.kind === "error") {
       errors.push(`[${keyword}] scope: ${parsed.message}`);
-      continue;
+      return;
     }
     if (parsed.kind === "all") {
       if (reason === "") errors.push(`"${line}": ${NEEDS_REASON}`);
       else scope = "all";
-      continue;
+      return;
     }
     if (reason !== "") {
       errors.push(
         `"${line}" carries text after the directive: only [${keyword}: all] takes a justification`,
       );
-      continue;
+      return;
     }
     scope = [...parsed.visibility, ...parsed.slugs];
-  }
+  });
   if (errors.length > 0) return { kind: "error", errors };
   return { kind: "fleet-sync", scope };
 }
