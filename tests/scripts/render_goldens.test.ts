@@ -154,9 +154,9 @@ describe("normalizeRenderedTree", () => {
    *  honestly against the tree as rendered. The honesty gate requires it. */
   const stampFixture = (root: string) => {
     const path = join(root, MANIFEST);
-    const { out, problem } = stampManifestText(readFileSync(path, "utf-8"), root);
-    if (problem !== null) throw new Error(problem);
-    writeFileSync(path, out);
+    const stamped = stampManifestText(readFileSync(path, "utf-8"), root);
+    if (stamped.status !== "stamped") throw new Error(stamped.problem);
+    writeFileSync(path, stamped.out);
   };
 
   test("rewrites only the provenance fields and re-stamps the manifest against them", () => {
@@ -246,6 +246,24 @@ describe("normalizeRenderedTree", () => {
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, MANIFEST), "not json");
     expect(() => normalizeRenderedTree(root, SHA)).toThrow("does not parse");
+  });
+
+  test("throws on a manifest with an entry the stamp hook cannot reach: a partial stamp is never normalized", () => {
+    const root = temp.dir("render-goldens-test-");
+    writeFixture(root);
+    stampFixture(root);
+    const stamped = readFileSync(join(root, MANIFEST), "utf-8");
+    const spread = stamped.replace(
+      `    "link": {"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
+      `    "link": {\n      "class": "managed", "hash": "${sha256("AGENTS.md")}"\n    }`,
+    );
+    expect(spread).not.toBe(stamped);
+    writeFileSync(join(root, MANIFEST), spread);
+    const answers = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
+    expect(() => normalizeRenderedTree(root, SHA)).toThrow("not on a one-object line");
+    // Nothing was normalized: the gate runs before the first write.
+    expect(readFileSync(join(root, MANIFEST), "utf-8")).toBe(spread);
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(answers);
   });
 
   test("leaves a tree without a manifest or answers file alone", () => {

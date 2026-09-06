@@ -218,7 +218,26 @@ if (existsSync(manifestPath)) {
     "target",
     new Set(addedPaths),
   );
-  if (stamped.problem === null) writeFileSync(manifestPath, stamped.out);
+  switch (stamped.status) {
+    case "stamped":
+      writeFileSync(manifestPath, stamped.out);
+      break;
+    case "partial":
+      console.log(
+        `::warning::${targetDisplay}: ${MANIFEST_NAME} ${stamped.problem}; validate-template's parity check reports the unstamped entries`,
+      );
+      writeFileSync(manifestPath, stamped.partialOut);
+      break;
+    case "rejected":
+      console.log(
+        `::warning::${targetDisplay}: ${MANIFEST_NAME} ${stamped.problem}; left unstamped for validate-template's parity check to report`,
+      );
+      break;
+    default: {
+      const unhandled: never = stamped;
+      throw new Error(`unhandled stamp result ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 must(git("add", "--all"));
 if (capture(git("diff", "--quiet", baseSha)).exitCode === 0) {

@@ -865,13 +865,8 @@ export function translateGates(gates: string[], where: string): RenderWhen | und
   return when;
 }
 
-/** The validator's base tables, derived from templates/base/ownership.yml
- *  plus each base source's decoration and declared filename gates:
- *  `enforced` drives the validator's split-markers check (region
- *  entries), its headers check (header self-declarations), and the class
- *  cross-check in checks/manifest_shape.ts that checks/manifest_parity.ts
- *  builds on. Drift between the declarations and the base tree throws,
- *  mirroring moduleOwnershipEntries. */
+/** The validator's base tables from templates/base/ownership.yml plus each base source's
+ *  decoration and filename gates. Drift between the declarations and the base tree throws. */
 export function baseOwnershipTables(templatesDir: string): {
   enforced: BaseOwnershipEntry[];
 } {

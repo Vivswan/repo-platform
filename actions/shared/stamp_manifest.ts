@@ -75,6 +75,7 @@ import {
   type JsonValue,
   MANIFEST_NAME,
   type ManifestEntryShape,
+  type ParsedEntryLine,
   parseEntry,
   parseManifestFiles,
   withheldMarkerValid,
@@ -252,14 +253,75 @@ function entryFields(body: string): Record<string, JsonValue> | null {
   }
 }
 
+/** The indices of the lines that START as direct children of the top-level `files` object (brace
+ *  depth 2, inside `files`, not its brace lines) in a manifest parseManifestFiles accepted. Only
+ *  these lines are entries: a same-path line anywhere else - a sibling object, or nested inside a
+ *  multi-line entry - must neither be rewritten nor count as reached. */
+function filesEntryLineIndices(resolved: string): Set<number> {
+  const indices = new Set<number>();
+  let depth = 0;
+  let line = 0;
+  let inString = false;
+  let escaped = false;
+  let stringStart = -1;
+  let lastString: string | null = null;
+  let key: string | null = null;
+  let inFiles = false;
+  for (let i = 0; i < resolved.length; i++) {
+    const ch = resolved[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+        lastString = resolved.slice(stringStart, i + 1);
+      }
+      continue;
+    }
+    if (ch === "\n") {
+      // A newline is structural (JSON strings cannot contain one): the next line starts here.
+      line++;
+      if (inFiles && depth === 2) indices.add(line);
+    } else if (ch === '"') {
+      inString = true;
+      stringStart = i;
+    } else if (ch === ":") {
+      key = lastString;
+    } else if (ch === "{") {
+      depth++;
+      if (depth === 2 && key !== null && JSON.parse(key) === "files") inFiles = true;
+      key = null;
+    } else if (ch === "}") {
+      if (inFiles && depth === 2) {
+        indices.delete(line);
+        return indices;
+      }
+      depth--;
+    } else if (!/\s/.test(ch)) {
+      key = null;
+    }
+  }
+  throw new Error("no top-level files object in a manifest the parser accepted");
+}
+
+/** The entry lines the rewrite can reach: parseEntry over the files object's own lines alone. */
+function filesEntryLines(resolved: string): ParsedEntryLine[] {
+  const lines = resolved.split("\n");
+  return [...filesEntryLineIndices(resolved)]
+    .map((index) => parseEntry(lines[index]))
+    .filter((line) => line !== null);
+}
+
 /** How many `files` entries the line-by-line rewrite never reaches: an
  *  entry spread over several lines, or joined with another on one line.
  *  A count, never the paths - manifest keys are target-repo content that
  *  reaches public logs. */
 function unreachedEntries(files: Record<string, unknown>, resolved: string): number {
   const reached = new Set<string>();
-  for (const line of resolved.split("\n").map(parseEntry)) {
-    if (line !== null && entryFields(line.body) !== null) reached.add(line.path);
+  for (const line of filesEntryLines(resolved)) {
+    if (entryFields(line.body) !== null) reached.add(line.path);
   }
   return Object.keys(files).filter((path) => !reached.has(path)).length;
 }
@@ -273,23 +335,33 @@ function unreachedProblem(unreached: number): string {
   return `has ${unreached} ${noun}, which the stamper cannot rewrite`;
 }
 
-/** The text with every reachable entry line's hash token restamped from
- *  the tree at `root`, the self entry's commit slot from the recorded
- *  _commit, and `"withheld": true` (withheldMarkerValid's one shape) on the
- *  hash-null entries of the `withheld` paths. Soft failures only: a text
- *  the parser rejects comes back unchanged with its problem; entries the
- *  line rewrite cannot reach come back unchanged, counted in
- *  `unreachedEntries`. */
+/** stampManifestText's verdict. `rejected`: the parser refused the text, nothing to write.
+ *  `partial`: `partialOut` stamps every reachable entry and `problem` counts the rest. The text
+ *  field differs per arm, so a caller must name the arm to take it and cannot pass a partial off
+ *  as stamped. */
+export type StampResult =
+  | { status: "stamped"; out: string }
+  | { status: "partial"; partialOut: string; problem: string }
+  | { status: "rejected"; problem: string };
+
+/** The manifest is LF by contract (the generator writes LF), so a CR anywhere is a foreign edit: the
+ *  line walk would misread every line as unreached, a diagnosis that names the wrong fault. */
+const CRLF_PROBLEM = "uses CRLF line endings; the generator writes LF";
+
+/** `text` with every reachable entry line restamped from the tree at `root`: the hash token,
+ *  the self entry's commit slot, and `"withheld": true` on the hash-null entries of `withheld`.
+ *  Soft on purpose: this runs inside copier's hooks, where a throw would fail the render. */
 export function stampManifestText(
   text: string,
   root: string,
   withheld: ReadonlySet<string> = new Set(),
-): { out: string; problem: string | null; unreachedEntries: number } {
+): StampResult {
+  if (text.includes("\r")) return { status: "rejected", problem: CRLF_PROBLEM };
   const parsed = parseManifestFiles(text);
-  if (parsed.problem !== null) return { out: text, problem: parsed.problem, unreachedEntries: 0 };
+  if (parsed.problem !== null) return { status: "rejected", problem: parsed.problem };
   const { files, resolved } = parsed;
   const commit = recordedCommit(root);
-  const lines = resolved.split("\n").map((line) => {
+  const stampLine = (line: string): string => {
     const parsedLine = parseEntry(line);
     if (parsedLine === null) return line;
     const { indent, path, quotedPath, comma } = parsedLine;
@@ -324,12 +396,17 @@ export function stampManifestText(
     if (stillWithheld) fields.withheld = true;
     if (path === MANIFEST_NAME && "commit" in fields) fields.commit = commit;
     return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
-  });
-  return {
-    out: lines.join("\n"),
-    problem: null,
-    unreachedEntries: unreachedEntries(files, resolved),
   };
+  const entryLines = filesEntryLineIndices(resolved);
+  const out = resolved
+    .split("\n")
+    .map((line, i) => (entryLines.has(i) ? stampLine(line) : line))
+    .join("\n");
+  const unreached = unreachedEntries(files, resolved);
+  if (unreached > 0) {
+    return { status: "partial", partialOut: out, problem: unreachedProblem(unreached) };
+  }
+  return { status: "stamped", out };
 }
 
 /** The manifest-gated normalization entry main() runs: parse (which
@@ -342,6 +419,7 @@ export function normalizeFromText(
   text: string,
   root: string,
 ): { rewritten: string[]; problem: string | null } {
+  if (text.includes("\r")) return { rewritten: [], problem: CRLF_PROBLEM };
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { rewritten: [], problem: parsed.problem };
   return { rewritten: normalizeSymlinkTargets(root, parsed.files), problem: null };
@@ -410,24 +488,11 @@ function canonicalSelfBody(entry: Record<string, unknown>): string {
   return `{${SELF_ENTRY_KEYS.map((key) => `"${key}": ${JSON.stringify(entry[key])}`).join(", ")}}`;
 }
 
-/** Why manifest `text` cannot take the --commit stamp, or null. Judged
- *  STRUCTURALLY on the entry consumers read - `files[MANIFEST_NAME]` of
- *  the parsed JSON, which must carry exactly SELF_ENTRY_KEYS - and then on
- *  the lines the stamper will rewrite: every line whose path is
- *  MANIFEST_NAME (the stamper rewrites each of them, wherever it sits in
- *  the JSON) must be byte-equal to that entry's canonical rendering, and
- *  there must be at least one (a multi-line entry is never rewritten).
- *  Identifier keys and JSON-encoded values make the first "hash" and
- *  "commit" token on such a line the top-level slot by construction; the
- *  token check then catches a value the rewrite would skip (a hash that is
- *  not 64 hex). Every files entry must be reached by such a one-object
- *  line (unreachedEntries), or the render's provenance stamp would ride a
- *  partial stamp - the soft path stampManifestText keeps for the sync's
- *  argument-free re-stamp. What this cannot see - a decoy line outside
- *  `files` beside a files entry the stamper never reaches - main()'s
- *  structural read-back catches for the self entry after the writes and
- *  rolls back; for any other entry it is the parity check's report. */
+/** Why manifest `text` cannot take the --commit stamp, or null. Judged on the entry consumers
+ *  read (`files[MANIFEST_NAME]`, exactly SELF_ENTRY_KEYS) and on the lines the stamper rewrites:
+ *  every self line byte-equal to that entry's canonical rendering, and no files entry unreached. */
 export function provenanceSlotProblem(text: string): string | null {
+  if (text.includes("\r")) return CRLF_PROBLEM;
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return parsed.problem;
   const entry = parsed.files[MANIFEST_NAME] as Record<string, unknown> | undefined;
@@ -437,12 +502,9 @@ export function provenanceSlotProblem(text: string): string | null {
     return `self entry keys are ${JSON.stringify(keys)}, expected exactly ${JSON.stringify(SELF_ENTRY_KEYS)} (the rendered shape)`;
   }
   const canonical = canonicalSelfBody(entry);
-  const lines = parsed.resolved
-    .split("\n")
-    .map(parseEntry)
-    .filter((line) => line !== null && line.path === MANIFEST_NAME);
+  const lines = filesEntryLines(parsed.resolved).filter((line) => line.path === MANIFEST_NAME);
   if (lines.length === 0) return "self entry is not on one line, so the stamper cannot rewrite it";
-  if (lines.some((line) => line?.body !== canonical)) {
+  if (lines.some((line) => line.body !== canonical)) {
     return "self entry is not in the rendered layout (the stamper rewrites tokens in place)";
   }
   if (!HASH_RE.test(canonical) || !COMMIT_RE.test(canonical)) {
@@ -523,23 +585,24 @@ function main(): number {
       answersWritten = true;
       writeFileSync(answersPath, rewrittenAnswers);
     }
-    const { out, problem, unreachedEntries: unreached } = stampManifestText(text, root);
-    if (problem !== null) {
-      if (commit !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
+    const stamped = stampManifestText(text, root);
+    if (stamped.status === "rejected") {
+      if (commit !== null) throw new Error(`${MANIFEST_NAME} ${stamped.problem}`);
       console.error(
-        `warning: ${MANIFEST_NAME} ${problem}; left unstamped (symlink target ` +
+        `warning: ${MANIFEST_NAME} ${stamped.problem}; left unstamped (symlink target ` +
           "normalization skipped too) for validate-template's parity check to report",
       );
       return 0;
     }
-    // Reachable on the argument-free re-stamp alone: the --commit
-    // preflight refuses such entries above.
-    if (unreached > 0) {
+    if (stamped.status === "partial") {
+      // The --commit preflight (provenanceSlotProblem) refuses these entries before any write.
+      if (commit !== null) throw new Error(`${MANIFEST_NAME} ${stamped.problem}`);
       console.error(
-        `warning: ${MANIFEST_NAME} ${unreachedProblem(unreached)}; left unstamped for ` +
+        `warning: ${MANIFEST_NAME} ${stamped.problem}; left unstamped for ` +
           "validate-template's parity check to report",
       );
     }
+    const out = stamped.status === "partial" ? stamped.partialOut : stamped.out;
     if (out !== text) {
       manifestWritten = true;
       writeFileSync(manifestPath, out);

@@ -28,6 +28,7 @@ import {
   provenanceSlotProblem,
   recordedCommit,
   rewriteRecordedCommit,
+  type StampResult,
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -395,6 +396,24 @@ describe("the root the hook stamps", () => {
   });
 });
 
+// The two layouts the line-by-line rewrite cannot reach, each valid JSON the shared parser
+// accepts, with the value-free problem the stamper reports for it. Keys carry a hostile
+// sentinel: manifest keys are target-repo paths, so no diagnostic may echo them.
+const UNREACHED_SHAPES: [string, string[], string][] = [
+  [
+    "two entries joined on one line",
+    [
+      `    "SECRET-private/a.md": {"class": "managed", "hash": null}, "b.md": {"class": "managed", "hash": null}`,
+    ],
+    "has 2 files entries not on one-object lines of their own, which the stamper cannot rewrite",
+  ],
+  [
+    "an entry spread over several lines",
+    [`    "SECRET-private/a.md": {\n      "class": "managed", "hash": null\n    }`],
+    "has 1 files entry not on a one-object line of its own, which the stamper cannot rewrite",
+  ],
+];
+
 describe("the hook as copier runs it", () => {
   const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
   const hook = join(import.meta.dir, "../../actions/shared/stamp_manifest.ts");
@@ -506,17 +525,9 @@ describe("the hook as copier runs it", () => {
       stderr: 'expected exactly ["class","hash","commit"]',
     },
     {
-      reason: "a decoy line differing from the files entry",
-      manifest: [
-        "{",
-        '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "x"},',
-        '  "files": {',
-        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
-        "  }",
-        "}",
-        "",
-      ].join("\n"),
-      stderr: "not in the rendered layout",
+      reason: "CRLF line endings (a foreign edit: the generator writes LF)",
+      manifest: manifestText([SELF]).replace(/\n/g, "\r\n"),
+      stderr: "uses CRLF line endings",
     },
     {
       reason: "a hash value the stamper's token match skips",
@@ -546,16 +557,34 @@ describe("the hook as copier runs it", () => {
   );
 
   test.each([
-    { reason: "the answers write itself fails half way", target: ".github/.copier-answers.yml" },
     {
-      reason: "the manifest write itself fails half way",
-      target: ".github/repo-platform-manifest.json",
+      reason: "the answers write fails half way",
+      mode: "truncate",
+      target: ".github/.copier-answers.yml",
+      stderr: "EIO: injected write failure",
     },
-  ])("$reason: both files read back byte-identical", ({ target }) => {
-    // A write that truncates and then fails (fault_write.preload.ts
-    // injects EIO after the truncate) is the half-written state; each
-    // write is marked attempted BEFORE it starts, so the rollback covers
-    // it. Under the old order the truncated file would have been left.
+    {
+      reason: "the manifest write fails half way",
+      mode: "truncate",
+      target: ".github/repo-platform-manifest.json",
+      stderr: "EIO: injected write failure",
+    },
+    {
+      reason: "the answers write is lost",
+      mode: "lost",
+      target: ".github/.copier-answers.yml",
+      stderr: "provenance disagrees after stamping",
+    },
+    {
+      reason: "the manifest write is lost",
+      mode: "lost",
+      target: ".github/repo-platform-manifest.json",
+      stderr: "provenance disagrees after stamping",
+    },
+  ])("$reason: both files read back byte-identical", ({ mode, target, stderr }) => {
+    // fault_write.preload.ts fakes the two faults a write can leave: truncated-then-thrown (each
+    // write is marked attempted BEFORE it starts, so the rollback covers it) and reported-but-lost,
+    // which no preflight can see - only the disk read-back catches it, and it must roll back too.
     const manifest = manifestText([SELF]);
     const root = tree({
       ".github/.copier-answers.yml": ANSWERS,
@@ -574,10 +603,10 @@ describe("the hook as copier runs it", () => {
         "--answers",
         ".github/.copier-answers.yml",
       ],
-      { env: { ...process.env, FAULT_WRITE_PATH: join(root, target) } },
+      { env: { ...process.env, FAULT_WRITE_PATH: join(root, target), FAULT_WRITE_MODE: mode } },
     );
     expect(proc.exitCode).not.toBe(0);
-    expect(proc.stderr).toContain("EIO: injected write failure");
+    expect(proc.stderr).toContain(stderr);
     expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
     expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
   });
@@ -608,63 +637,68 @@ describe("the hook as copier runs it", () => {
     }
   });
 
-  test("what the preflight cannot see, the structural read-back catches and rolls back BOTH files", () => {
-    // A canonical decoy line at the top level passes every line check; the
-    // real files entry spans lines, so the stamper rewrites only the decoy.
-    // The read-back reads files[MANIFEST_NAME] structurally, sees the null
-    // commit, throws, and restores the answers file AND the written
-    // manifest byte for byte.
-    const manifest = [
-      "{",
-      '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},',
-      '  "files": {',
-      '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
-      `    ".github/repo-platform-manifest.json": {`,
-      '      "class": "managed", "hash": null, "commit": null',
-      "    }",
-      "  }",
-      "}",
-      "",
-    ].join("\n");
-    const root = tree({
-      ".github/.copier-answers.yml": ANSWERS,
-      ".github/repo-platform-manifest.json": manifest,
-    });
-    const proc = run(root, ["--commit", SHA, "--answers", ".github/.copier-answers.yml"]);
-    expect(proc.exitCode).not.toBe(0);
-    expect(proc.stderr).toContain("provenance disagrees after stamping");
-    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
-    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
-  });
+  test.each([
+    ["null provenance", "null", "null"],
+    ["a matching commit beside a non-null self-hash", `"${"a".repeat(64)}"`, `"${SHA}"`],
+  ])(
+    "a canonical self line outside files never stands in for the multi-line entry inside it (%s)",
+    (_reason, hash, commit) => {
+      // The decoy sits at the top level, byte-for-byte an entry line; the real self entry
+      // spans lines. The walk is scoped to files, so the preflight refuses and nothing is written.
+      const manifest = [
+        "{",
+        `  ".github/repo-platform-manifest.json": {"class": "managed", "hash": ${hash}, "commit": ${commit}},`,
+        '  "files": {',
+        '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
+        `    ".github/repo-platform-manifest.json": {`,
+        `      "class": "managed", "hash": ${hash}, "commit": ${commit}`,
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n");
+      const root = tree({
+        ".github/.copier-answers.yml": ANSWERS,
+        ".github/repo-platform-manifest.json": manifest,
+      });
+      const proc = run(root, ["--commit", SHA, "--answers", ".github/.copier-answers.yml"]);
+      expect(proc.exitCode).not.toBe(0);
+      expect(proc.stderr).toContain("self entry is not on one line");
+      expect(proc.stderr).toContain("nothing was written");
+      expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+      expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+        manifest,
+      );
+    },
+  );
 
-  test("a decoy hiding a multi-line entry whose commit already matches still fails on the self-hash", () => {
-    // The real files entry already records the sha but carries a non-null
-    // self-hash (which the stamper resets only on the lines it rewrites).
-    // A byte-identical decoy passes the preflight and gets reset; the real
-    // entry keeps its hash. The read-back verifies the WHOLE self entry -
-    // commit AND a null hash - so this rolls back too.
-    const hash = "a".repeat(64);
-    const manifest = [
-      "{",
-      `  ".github/repo-platform-manifest.json": {"class": "managed", "hash": "${hash}", "commit": "${SHA}"},`,
-      '  "files": {',
-      '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
-      `    ".github/repo-platform-manifest.json": {`,
-      `      "class": "managed", "hash": "${hash}", "commit": "${SHA}"`,
-      "    }",
-      "  }",
-      "}",
-      "",
-    ].join("\n");
+  test("a self-path line outside files is not an entry: the real entry stamps and the decoy stays byte-identical", () => {
+    const decoy = `  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "x"},`;
+    const doc = (self: string) =>
+      [
+        "{",
+        decoy,
+        '  "files": {',
+        '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
+        `    ".github/repo-platform-manifest.json": ${self}`,
+        "  }",
+        "}",
+        "",
+      ].join("\n");
     const root = tree({
       ".github/.copier-answers.yml": ANSWERS,
-      ".github/repo-platform-manifest.json": manifest,
+      ".github/repo-platform-manifest.json": doc(
+        '{"class": "managed", "hash": null, "commit": null}',
+      ),
     });
     const proc = run(root, ["--commit", SHA, "--answers", ".github/.copier-answers.yml"]);
-    expect(proc.exitCode).not.toBe(0);
-    expect(proc.stderr).toContain("provenance disagrees after stamping");
-    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
-    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+    expect(proc.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+      doc(`{"class": "managed", "hash": null, "commit": "${SHA}"}`).replace(
+        '".github/.copier-answers.yml": {"class": "managed", "hash": null}',
+        `".github/.copier-answers.yml": {"class": "managed", "hash": "${sha256(`# managed\n_commit: ${SHA}\n_src_path: ./tree\n`)}"}`,
+      ),
+    );
   });
 
   test("a recorded commit value carrying an escaped quote is replaced whole", () => {
@@ -706,6 +740,29 @@ describe("the hook as copier runs it", () => {
     );
   });
 
+  test("a CRLF manifest on the argument-free stamp: warned by name, nothing stamped, no symlink normalized", () => {
+    // normalizeFromText refuses CRLF with the stamp, so the warning's "normalization skipped too"
+    // stays true: the .jinja link target is untouched.
+    const manifest = manifestText([
+      SELF,
+      `    "AGENTS.md": {"class": "managed", "hash": null}`,
+    ]).replace(/\n/g, "\r\n");
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+    });
+    symlinkSync("CLAUDE.md.jinja", join(root, "AGENTS.md"));
+    const proc = run(root, []);
+    expect({ exitCode: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr }).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr:
+        "warning: .github/repo-platform-manifest.json uses CRLF line endings; the generator writes LF; left unstamped (symlink target normalization skipped too) for validate-template's parity check to report\n",
+    });
+    expect(readlinkSync(join(root, "AGENTS.md"))).toBe("CLAUDE.md.jinja");
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+  });
+
   test("the positive control: the same answers with a stampable manifest write both halves", () => {
     const root = tree({
       ".github/.copier-answers.yml": ANSWERS,
@@ -722,13 +779,10 @@ describe("the hook as copier runs it", () => {
 
   test.each(UNREACHED_SHAPES)(
     "entries the rewrite cannot reach (%s): the argument-free re-stamp warns and stamps the rest; --commit refuses whole",
-    (_reason, unreachable, unreached) => {
-      // The argument-free mode is the sync's final re-stamp over a delivered
-      // tree, where warn-and-continue leaves the parity check to report the
-      // unstamped entries in the PR. Under --commit the same manifest is a
-      // preflight refusal: the render's provenance stamp never rides a
-      // partial stamp, and nothing is written. Neither diagnostic may echo
-      // the sentinel key.
+    (_reason, unreachable, problem) => {
+      // The sync's final re-stamp warns and leaves the parity check to report the unstamped
+      // entries; a render's provenance stamp never rides a partial stamp. Neither diagnostic
+      // may echo the sentinel key.
       const manifest = manifestText([
         SELF,
         ...unreachable,
@@ -744,7 +798,7 @@ describe("the hook as copier runs it", () => {
       const root = tree(files);
       const plain = run(root, []);
       expect(plain.exitCode).toBe(0);
-      expect(plain.stderr).toContain(`has ${unreached} files entr`);
+      expect(plain.stderr).toContain(problem);
       expect(plain.stderr).not.toContain("SECRET");
       expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
         manifestText([
@@ -756,7 +810,7 @@ describe("the hook as copier runs it", () => {
       const render = tree(files);
       const refused = run(render, ["--commit", SHA, "--answers", ".github/.copier-answers.yml"]);
       expect(refused.exitCode).not.toBe(0);
-      expect(refused.stderr).toContain(`has ${unreached} files entr`);
+      expect(refused.stderr).toContain(problem);
       expect(refused.stderr).toContain("nothing was written");
       expect(refused.stderr).not.toContain("SECRET");
       expect(readFileSync(join(render, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
@@ -779,26 +833,6 @@ describe("the hook as copier runs it", () => {
     expect(recordedCommit(root)).toBe("31beeca");
   });
 });
-
-// The two layouts the line-by-line rewrite cannot reach, each valid JSON the
-// shared parser accepts: entries joined on one line (the greedy layout reads
-// both as one body) and an entry spread over several lines. Keys carry a
-// hostile sentinel: manifest keys are target-repo paths, so no diagnostic
-// may echo them.
-const UNREACHED_SHAPES: [string, string[], number][] = [
-  [
-    "two entries joined on one line",
-    [
-      `    "SECRET-private/a.md": {"class": "managed", "hash": null}, "b.md": {"class": "managed", "hash": null}`,
-    ],
-    2,
-  ],
-  [
-    "an entry spread over several lines",
-    [`    "SECRET-private/a.md": {\n      "class": "managed", "hash": null\n    }`],
-    1,
-  ],
-];
 
 describe("stampManifestText", () => {
   const SELF = '".github/repo-platform-manifest.json"';
@@ -825,13 +859,11 @@ describe("stampManifestText", () => {
       const expected = manifestText([selfLine("null", expectedCommit)]);
       expect(stampManifestText(text, root)).toEqual({
         out: expected,
-        problem: null,
-        unreachedEntries: 0,
+        status: "stamped",
       });
       expect(stampManifestText(expected, root)).toEqual({
         out: expected,
-        problem: null,
-        unreachedEntries: 0,
+        status: "stamped",
       });
     },
   );
@@ -871,8 +903,7 @@ describe("stampManifestText", () => {
         ci: `"${sha256("managed content\n")}"`,
         self: "null",
       }),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
   });
 
@@ -883,13 +914,11 @@ describe("stampManifestText", () => {
     const once = entry(sha256("new content\n"));
     expect(stampManifestText(entry("0".repeat(64)), root)).toEqual({
       out: once,
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
     expect(stampManifestText(once, root)).toEqual({
       out: once,
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
   });
 
@@ -1025,18 +1054,15 @@ describe("stampManifestText", () => {
     ]);
     expect(stampManifestText(text("before"), root, named)).toEqual({
       out: text("after"),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
     expect(stampManifestText(text("after"), root, named)).toEqual({
       out: text("after"),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
     expect(stampManifestText(text("after"), root)).toEqual({
       out: text("after"),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
     expect(parseManifestFiles(text("after")).problem).toBeNull();
   });
@@ -1048,8 +1074,7 @@ describe("stampManifestText", () => {
       stampManifestText(line('{"class": "managed", "hash": null, "withheld": true}'), root),
     ).toEqual({
       out: line(`{"class": "managed", "hash": "${sha256("added\n")}"}`),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
   });
 
@@ -1064,8 +1089,7 @@ describe("stampManifestText", () => {
     const text = entries(`"${"a".repeat(64)}"`, `"${"c".repeat(64)}"`);
     expect(stampManifestText(text, root)).toEqual({
       out: entries("null", "null"),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
   });
 
@@ -1089,8 +1113,7 @@ describe("stampManifestText", () => {
     // gone) and the stamp lands on it.
     expect(stampManifestText(text, root)).toEqual({
       out: manifestText([`    "ci.yml": {"class": "managed", "hash": "${sha256("content\n")}"}`]),
-      problem: null,
-      unreachedEntries: 0,
+      status: "stamped",
     });
   });
 
@@ -1125,8 +1148,23 @@ describe("stampManifestText", () => {
     // the warn-and-exit-0 contract into a hard failure.
     ["a top-level JSON null", "null", NO_FILES],
   ];
-  test.each(rejected)("%s returns the text unchanged with a problem", (_reason, text, problem) => {
-    expect(stampManifestText(text, tree({}))).toEqual({ out: text, problem, unreachedEntries: 0 });
+  test.each(rejected)("%s is rejected with a problem", (_reason, text, problem) => {
+    expect(stampManifestText(text, tree({}))).toEqual({ status: "rejected", problem });
+  });
+
+  test("a CRLF manifest is rejected by name, not misread as unreached entries", () => {
+    // The manifest is LF by contract; a CR on every line would leave every entry unreached and
+    // the diagnosis would name the wrong fault. The LF twin is the control.
+    const root = tree({ "ci.yml": "content\n" });
+    const lf = manifestText([`    "ci.yml": {"class": "managed", "hash": null}`]);
+    expect(stampManifestText(lf.replace(/\n/g, "\r\n"), root)).toEqual({
+      status: "rejected",
+      problem: "uses CRLF line endings; the generator writes LF",
+    });
+    expect(stampManifestText(lf, root)).toEqual({
+      status: "stamped",
+      out: manifestText([`    "ci.yml": {"class": "managed", "hash": "${sha256("content\n")}"}`]),
+    });
   });
 
   test("a duplicated entry line for one path is a soft, value-free problem, never a throw", () => {
@@ -1146,35 +1184,85 @@ describe("stampManifestText", () => {
       `    ${key}: {"class": "managed", "hash": null}`,
       `    ${key}: {"class": "starter"}`,
     ]);
-    let result: { out: string; problem: string | null; unreachedEntries: number } | undefined;
+    let result: StampResult | undefined;
     expect(() => {
       result = stampManifestText(text, root);
     }).not.toThrow();
-    expect(result?.problem).toContain("binds a key more than once");
-    expect(result?.problem).not.toContain("SECRET");
-    expect(result?.problem).not.toContain("\n");
-    // The untouched text is emitted (out === text), so main() warns and
-    // exits 0 rather than aborting the render.
-    expect(result?.out).toBe(text);
+    if (result?.status !== "rejected") {
+      throw new Error(`expected a rejection, got ${JSON.stringify(result)}`);
+    }
+    expect(result.problem).toContain("binds a key more than once");
+    expect(result.problem).not.toContain("SECRET");
+    expect(result.problem).not.toContain("\n");
   });
   test.each(UNREACHED_SHAPES)(
-    "entries the line rewrite cannot reach ride through unchanged and counted, never a throw: %s",
-    (_reason, unreachable, unreachedEntries) => {
+    "entries the line rewrite cannot reach ride through unchanged, the rest stamps, and the result is partial: %s",
+    (_reason, unreachable, problem) => {
       // Both shapes are valid JSON with distinct keys, so the shared parser
       // accepts the text, yet the one-line layout never rewrites them (the
       // joined pair reads as one body no JSON.parse takes). A throw here
       // would abort copier's after-hook; the lines ride through unchanged,
-      // every other line stamps, and the count lets main() warn.
+      // every other line stamps, and the partial arm makes main() warn.
       const root = tree({ "a.md": "a\n", "b.md": "b\n", "c.md": "c\n" });
       const text = manifestText([...unreachable, `    "c.md": {"class": "managed", "hash": null}`]);
       expect(stampManifestText(text, root)).toEqual({
-        out: manifestText([
+        status: "partial",
+        partialOut: manifestText([
           ...unreachable,
           `    "c.md": {"class": "managed", "hash": "${sha256("c\n")}"}`,
         ]),
-        problem: null,
-        unreachedEntries,
+        problem,
       });
+    },
+  );
+
+  // The walk is scoped to the files object's own lines: a line spelled exactly like an entry is
+  // neither stamped nor counted as reaching the real (multi-line) entry when it sits anywhere else.
+  const oneLine = '"a.md": {"class": "managed", "hash": null}';
+  const spread = '"a.md": {\n      "class": "managed", "hash": null\n    }';
+  const stampedLine = `"a.md": {"class": "managed", "hash": "${sha256("a\n")}"}`;
+  const filesObject = (entry: string) => `  "files": {\n    ${entry}\n  }`;
+  const sibling = (decoy: string) => `  "decoy": {\n    ${decoy}\n  }`;
+  const nested = (decoy: string) =>
+    `"a.md": {\n      "class": "managed", "hash": null,\n      ${decoy}\n    }`;
+  const wrap = (...objects: string[]) => `{\n${objects.join(",\n")}\n}\n`;
+  const scoped: { where: string; decoyed: string; control: [string, string] | null }[] = [
+    {
+      where: "in a sibling object before files",
+      decoyed: wrap(sibling(oneLine), filesObject(spread)),
+      control: [
+        wrap(sibling(spread), filesObject(oneLine)),
+        wrap(sibling(spread), filesObject(stampedLine)),
+      ],
+    },
+    {
+      where: "in a sibling object after files",
+      decoyed: wrap(filesObject(spread), sibling(oneLine)),
+      control: [
+        wrap(filesObject(oneLine), sibling(spread)),
+        wrap(filesObject(stampedLine), sibling(spread)),
+      ],
+    },
+    {
+      where: "nested inside the multi-line entry itself",
+      decoyed: wrap(filesObject(nested(oneLine))),
+      control: null,
+    },
+  ];
+  test.each(scoped)(
+    "a decoy entry line $where is neither stamped nor counted as reaching the entry",
+    ({ decoyed, control }) => {
+      const root = tree({ "a.md": "a\n" });
+      expect(stampManifestText(decoyed, root)).toEqual({
+        status: "partial",
+        partialOut: decoyed,
+        problem:
+          "has 1 files entry not on a one-object line of its own, which the stamper cannot rewrite",
+      });
+      // The control: the same line as a direct child of files is reached and stamped.
+      if (control !== null) {
+        expect(stampManifestText(control[0], root)).toEqual({ status: "stamped", out: control[1] });
+      }
     },
   );
 });
@@ -1291,8 +1379,10 @@ describe("parseManifestFiles validation", () => {
       expect(parsed.problem).toContain("not an object with a string class");
       expect(parsed.files).toBeNull();
     }
-    const stamped = stampManifestText(manifestOf('    "a.md": null'), "/nonexistent");
-    expect(stamped.problem).toContain("not an object with a string class");
+    expect(stampManifestText(manifestOf('    "a.md": null'), "/nonexistent")).toEqual({
+      status: "rejected",
+      problem: expect.stringContaining("not an object with a string class"),
+    });
   });
 
   test("a path literally named files or $comment is not double-counted against the structural line", () => {

@@ -167,6 +167,14 @@ export function normalizeAnswers(text: string, fullSha: string): string {
   });
 }
 
+/** The manifest as the stamper restamps it against `root`. The stamper reports corruption and
+ *  unreachable entries soft (its sync-side contract); in a fresh render both are template bugs. */
+function honestlyStamped(manifest: string, root: string): string {
+  const stamped = stampManifestText(manifest, root);
+  if (stamped.status !== "stamped") throw new Error(`${MANIFEST_NAME} ${stamped.problem}`);
+  return stamped.out;
+}
+
 /** Normalize a rendered tree in place: rewrite the `_commit` answer to the
  *  sentinel, then re-run the manifest stamp hook against the result. The
  *  hook ran inside copier, hashing the answers file and stamping the
@@ -190,19 +198,12 @@ export function normalizeRenderedTree(root: string, scratchSha: string): void {
   } catch {
     manifest = null; // a render without a manifest has nothing to re-stamp
   }
-  if (manifest !== null) {
-    // The stamper reports corruption soft (its sync-side contract); in a
-    // fresh render both corruption and a dishonest stamp are template
-    // bugs, so fail loudly here.
-    const { out, problem } = stampManifestText(manifest, root);
-    if (problem !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
-    if (out !== manifest) {
-      throw new Error(
-        `${MANIFEST_NAME} is not honestly stamped: re-stamping it against the ` +
-          "rendered tree changed it, so the render's stamp hook wrote a wrong " +
-          "provenance or hash - normalizing would silently heal that to the sentinel",
-      );
-    }
+  if (manifest !== null && honestlyStamped(manifest, root) !== manifest) {
+    throw new Error(
+      `${MANIFEST_NAME} is not honestly stamped: re-stamping it against the ` +
+        "rendered tree changed it, so the render's stamp hook wrote a wrong " +
+        "provenance or hash - normalizing would silently heal that to the sentinel",
+    );
   }
   const answersPath = join(root, ANSWERS_NAME);
   let answers: string | null;
@@ -217,9 +218,8 @@ export function normalizeRenderedTree(root: string, scratchSha: string): void {
     if (normalized !== answers) writeFileSync(answersPath, Buffer.from(normalized, "latin1"));
   }
   if (manifest === null) return;
-  // Same text as the gate, so `problem` cannot reappear; only the answers
-  // hash and the commit slot move, recomputed from the normalized file.
-  const { out } = stampManifestText(manifest, root);
+  // Only the answers hash and the commit slot move, recomputed from the normalized file.
+  const out = honestlyStamped(manifest, root);
   if (out !== manifest) writeFileSync(manifestPath, out);
 }
 

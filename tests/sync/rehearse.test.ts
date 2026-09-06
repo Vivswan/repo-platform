@@ -197,6 +197,15 @@ describe("manifestStatus", () => {
     expect(manifestStatus(root)).toBe("stamped");
   });
 
+  test("a manifest with an entry the stamp cannot reach reports stale, even when nothing would move", () => {
+    // The one-line entry is already honest; the multi-line entry is a partial stamp, which the
+    // rehearsal must not report as stamped.
+    const content = "hello\n";
+    const manifest = `{\n  "files": {\n    "README.md": {"class": "managed", "hash": "${sha256(content)}"},\n    "spread.md": {\n      "class": "managed", "hash": null\n    }\n  }\n}\n`;
+    const root = tree(manifest, { "README.md": content, "spread.md": "spread\n" });
+    expect(manifestStatus(root)).toBe("stale");
+  });
+
   test("a manifest the stamp would still rewrite reports stale", () => {
     const root = tree(manifestText("null"), { "README.md": "hello\n" });
     expect(manifestStatus(root)).toBe("stale");

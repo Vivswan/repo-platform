@@ -318,9 +318,9 @@ export function validationErrorLines(output: string): string[] {
   return kept;
 }
 
-/** Whether the target tree's ownership manifest is honestly stamped:
- * "stale" means stampManifestText would still rewrite it (a hash or the
- * provenance commit disagrees with the tree on disk). */
+/** Whether the target tree's ownership manifest is honestly stamped: "stale" means the stamp
+ *  disagrees with the tree on disk - stampManifestText would rewrite it, or cannot reach every
+ *  entry. */
 export function manifestStatus(root: string): ManifestStatus {
   let text: string;
   try {
@@ -328,9 +328,10 @@ export function manifestStatus(root: string): ManifestStatus {
   } catch {
     return "missing";
   }
-  const { out, problem } = stampManifestText(text, root);
-  if (problem !== null) return "unparseable";
-  return out === text ? "stamped" : "stale";
+  const stamped = stampManifestText(text, root);
+  if (stamped.status === "rejected") return "unparseable";
+  if (stamped.status === "partial") return "stale";
+  return stamped.out === text ? "stamped" : "stale";
 }
 
 // Warns when repos.yml would never sync this repo (production's full

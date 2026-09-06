@@ -236,12 +236,9 @@ describe("commit_push failure diagnostics", () => {
   });
 });
 
-// A public render of the base plus release-please, complete enough for
-// validate-template: every roster path with its managed header or marker
-// pair, the single-call ci.yml gate, and a manifest stamped the way the
-// workflow's stamping step leaves it before commit_push runs. Split files
-// carry nothing outside their marker pair, so every hash is the sha256 of
-// the whole file.
+// A public base + release-please render complete enough for validate-template, stamped the way
+// the workflow's stamping step leaves it. Split files carry nothing outside their marker pair,
+// so every hash is the sha256 of the whole file.
 const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
@@ -310,47 +307,90 @@ const manifestOf = (entries: Record<string, string>) =>
     .join(",\n")}\n  }\n}\n`;
 
 describe("commit_push Workflows-scope withhold reconciliation", () => {
-  test("a withheld ADDED workflow is removed, its entry restamped hash-null with the marker, and the pushed tree validates", () => {
-    // The manifest must describe the tree that is pushed: the added
-    // workflow the token could not create is gone, so its stamped hash
-    // gives way to null plus the marker validate-template reads as the one
-    // legitimate listed-but-missing state, every other entry keeps its
-    // on-disk hash, and the post-withhold re-validation of that tree
-    // passes with the withheld advisory as its only finding. The validator
-    // checkout the workflow places at validator/ is this repository.
-    const work = fixtures.dir("work-");
-    const targetDir = join(work, "target");
-    for (const [rel, { content }] of Object.entries(RENDER)) {
-      mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
-      writeFileSync(join(targetDir, rel), content);
-    }
-    writeFileSync(join(targetDir, MANIFEST_NAME), manifestOf(RENDER_ENTRIES));
-    symlinkSync(REPO_ROOT, join(work, "validator"));
-    const result = runCommitPush("withhold-added", "false", {}, work);
-    expect({
-      exitCode: result.exitCode,
-      withheldFileExists: existsSync(join(targetDir, WITHHELD_WORKFLOW)),
-      manifest: readFileSync(join(targetDir, MANIFEST_NAME), "utf-8"),
-      outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
-      withheld: readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8"),
-    }).toEqual({
-      exitCode: 0,
-      withheldFileExists: false,
-      manifest: manifestOf({
-        ...RENDER_ENTRIES,
-        [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
-      }),
-      outputs: "pushed=true\nvalidation=ok\n",
-      withheld: `${WITHHELD_WORKFLOW}\n`,
-    });
-    const diagnostics = result.stdout
-      .split("\n")
-      .filter((line) => /^(advisory|error): /.test(line));
-    expect(diagnostics).toEqual([
-      `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`,
-    ]);
-    expect(result.stdout).toContain("Validation passed.");
-  });
+  const WITHHELD_WARNING =
+    "::warning::o/r: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured.";
+  const WITHHELD_ADVISORY = `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`;
+  test.each([
+    {
+      layout: "one line",
+      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
+      crlf: false,
+      warnings: [WITHHELD_WARNING],
+      validation: "ok",
+      diagnostics: [WITHHELD_ADVISORY],
+    },
+    {
+      // The stamper refuses a CRLF manifest by name and writes nothing, so the pushed tree's parity
+      // check sees the withheld workflow as a deleted managed file: validation fails, loudly.
+      layout: "one line, CRLF endings",
+      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
+      crlf: true,
+      warnings: [
+        `::warning::o/r: ${MANIFEST_NAME} uses CRLF line endings; the generator writes LF; left unstamped for validate-template's parity check to report`,
+        WITHHELD_WARNING,
+      ],
+      validation: "failed",
+      diagnostics: [
+        `error: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)`,
+      ],
+    },
+    {
+      // The stamper cannot reach a spread entry: the restamp is partial, still written (the
+      // withheld marker must land), and the sync log says so.
+      layout: "spread over lines",
+      crlf: false,
+      validation: "ok",
+      diagnostics: [WITHHELD_ADVISORY],
+      selfEntry: `{\n      "class": "managed", "hash": null, "commit": "${COMMIT}"\n    }`,
+      warnings: [
+        `::warning::o/r: ${MANIFEST_NAME} has 1 files entry not on a one-object line of its own, which the stamper cannot rewrite; validate-template's parity check reports the unstamped entries`,
+        WITHHELD_WARNING,
+      ],
+    },
+  ])(
+    "a withheld ADDED workflow is removed and the manifest restamped to describe the pushed tree (self entry $layout)",
+    ({ selfEntry, crlf, warnings, validation, diagnostics }) => {
+      // The manifest must describe the tree that is pushed: where the stamper reaches the withheld
+      // entry, it goes hash-null with the marker and the re-validation passes with the withheld
+      // advisory alone; each row pins that run's whole outcome. validator/ is this repository.
+      const entries = { ...RENDER_ENTRIES, [MANIFEST_NAME]: selfEntry };
+      const work = fixtures.dir("work-");
+      const targetDir = join(work, "target");
+      for (const [rel, { content }] of Object.entries(RENDER)) {
+        mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
+        writeFileSync(join(targetDir, rel), content);
+      }
+      const written = crlf ? manifestOf(entries).replace(/\n/g, "\r\n") : manifestOf(entries);
+      writeFileSync(join(targetDir, MANIFEST_NAME), written);
+      symlinkSync(REPO_ROOT, join(work, "validator"));
+      const result = runCommitPush("withhold-added", "false", {}, work);
+      expect({
+        exitCode: result.exitCode,
+        withheldFileExists: existsSync(join(targetDir, WITHHELD_WORKFLOW)),
+        manifest: readFileSync(join(targetDir, MANIFEST_NAME), "utf-8"),
+        outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
+        withheld: readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8"),
+        warnings: result.stdout.split("\n").filter((line) => line.startsWith("::warning::")),
+      }).toEqual({
+        exitCode: 0,
+        withheldFileExists: false,
+        manifest: crlf
+          ? written
+          : manifestOf({
+              ...entries,
+              [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
+            }),
+        outputs: `pushed=true\nvalidation=${validation}\n`,
+        withheld: `${WITHHELD_WORKFLOW}\n`,
+        warnings,
+      });
+      expect(
+        (result.stdout + result.stderr)
+          .split("\n")
+          .filter((line) => /^(advisory|error): /.test(line)),
+      ).toEqual(diagnostics);
+    },
+  );
 
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
