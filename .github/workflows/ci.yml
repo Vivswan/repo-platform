@@ -654,8 +654,8 @@ jobs:
           SECOND_READY: ${{ steps.second.outputs.ready }}
           SECOND_INSTALLED: ${{ steps.second.outputs.installed }}
           SECOND_VERSION: ${{ steps.second.outputs.version }}
-        # The runner's own bun (the setup-bun step above): the first call's
-        # path may hold the second call's binary by now.
+        # Whichever bun is current by now (the second call overwrote the
+        # shared install path); the judge reads recorded outputs only.
         run: bun .github/scripts/ci/bun_setup_smoke.ts judge
 
   # THE gate: this job's own check run (named all-green, created by the
