@@ -9,5 +9,10 @@
     "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["scripts/**/*.ts", ".github/scripts/**/*.ts", "actions/shared/**/*.ts"]
+  "include": [
+    "scripts/**/*.ts",
+    ".github/scripts/**/*.ts",
+    "actions/shared/**/*.ts",
+    "tests/actions/**/*.ts"
+  ]
 }

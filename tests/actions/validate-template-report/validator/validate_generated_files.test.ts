@@ -1192,30 +1192,23 @@ describe("ownership-manifest byte parity", () => {
       path: ".github/workflows/release.yml",
       registration: RELEASE_PLEASE,
       entry: '{"class": "managed", "hash": null}',
-      verdict: { exitCode: 1, stream: "stderr", text: DELETED },
     },
     {
       reason: "a stamped entry with no file is a deleted managed file",
       path: "docs/handbook.md",
       registration: BASELINE[".repo-platform.yml"],
       entry: `{"class": "managed", "hash": "${"a".repeat(64)}"}`,
-      verdict: { exitCode: 1, stream: "stderr", text: DELETED },
     },
-  ])("a listed file missing from the repo: $reason", ({ path, registration, entry, verdict }) => {
+  ])("a listed file missing from the repo: $reason", ({ path, registration, entry }) => {
     const result = runValidator({
       ".repo-platform.yml": registration,
       [MANIFEST]: manifestOf({ ...stampedBaseline(), [path]: entry }),
     });
-    const other = verdict.stream === "stdout" ? result.stderr : result.stdout;
-    expect(result.exitCode).toBe(verdict.exitCode);
-    expect(result[verdict.stream]).toContain(
-      `${path}: listed as managed in ${MANIFEST} ${verdict.text}`,
-    );
-    expect(other).not.toContain(path);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`${path}: listed as managed in ${MANIFEST} ${DELETED}`);
+    expect(result.stdout).not.toContain(path);
     // One verdict per path: the count is of findings naming the path.
-    expect(result[verdict.stream].split("\n").filter((line) => line.includes(path))).toHaveLength(
-      1,
-    );
+    expect(result.stderr.split("\n").filter((line) => line.includes(path))).toHaveLength(1);
   });
 
   test("an unlisted roster path is an error even when its file is absent too", () => {

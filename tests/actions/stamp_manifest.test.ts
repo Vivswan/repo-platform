@@ -22,6 +22,7 @@ import {
 import {
   describeRewritten,
   entryHash,
+  type HookArgs,
   hookArgs,
   normalizeFromText,
   normalizeSymlinkTargets,
@@ -270,7 +271,7 @@ describe("provenanceSlotProblem", () => {
 describe("hookArgs", () => {
   const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
   const ANS = ".github/.copier-answers.yml";
-  test.each([
+  test.each<{ reason?: string; argv: string[]; expected: HookArgs }>([
     { argv: [], expected: { root: null, commit: null, answers: null } },
     { argv: ["--root", "/x"], expected: { root: "/x", commit: null, answers: null } },
     {
@@ -290,7 +291,7 @@ describe("hookArgs", () => {
     expect(hookArgs(argv)).toEqual(expected);
   });
 
-  test.each([
+  test.each<{ reason?: string; argv: string[]; message: string; posixOnly?: boolean }>([
     { argv: ["--commit"], message: "usage:" },
     { argv: ["--root"], message: "usage:" },
     { argv: ["--other", SHA], message: "usage:" },
