@@ -36,10 +36,13 @@ REPO_ROOT="$(pwd)"
 # failures and Ctrl-C. A SIGKILLed run leaves EVERYTHING behind - the
 # directory, its worktree admin entry, and its tags (SIGKILL skips EXIT
 # traps, and the prune below only drops admin entries whose directories
-# are already gone) - so sweep by hand:
-#   git tag -l 'ci-build-*/*'          # stray tag namespaces
-#   git branch --list 'ci-build-*'     # stray build branches
-#   git worktree list                  # stray worktree admin entries
+# are already gone). The namespace records its owner in its own annotated
+# `<namespace>/run` tag (pid, host, start time, fixture dir), which is how
+# the sweeper tells a dead run's leftovers from a live run next door:
+#   bun .github/scripts/ci/sweep_harness_namespaces.ts            # plan
+#   bun .github/scripts/ci/sweep_harness_namespaces.ts --execute  # act
+# NEVER delete another namespace by hand: its token says nothing about
+# who owns it, and a wrong guess kills a live run mid-flight.
 TMP_ROOT="${TMPDIR:-/tmp}"
 # Normalized to an absolute path: the harness cd's between the repo and
 # its fixtures, so a relative "$RUN_DIR/..." (cleanup rm included) would
@@ -61,6 +64,7 @@ case "$TMP_ROOT_ABS/" in
 esac
 RUN_DIR="$(cd "$(mktemp -d "${TMP_ROOT_ABS%/}/upgrade-path.XXXXXX")" && pwd)"
 REF_NS="ci-build-${RUN_DIR##*.}"
+RUN_TAG="$REF_NS/run"
 OLD_TAG="$REF_NS/old"
 NEW_TAG="$REF_NS/new"
 SPLIT_TAG="$REF_NS/split"
@@ -74,14 +78,22 @@ OLD_TREE="$RUN_DIR/old-tree"
 NEXT_TREE="$RUN_DIR/next"
 
 # Armed immediately after the namespace exists, so nothing between here and
-# the first fixture can leak it.
+# the first fixture can leak it. The owner record goes last: a cleanup that
+# dies halfway leaves a namespace the sweeper can still attribute.
 cleanup() {
   git -C "$REPO_ROOT" worktree remove --force "$WT" 2>/dev/null || true
   git -C "$REPO_ROOT" branch -q -D "$REF_NS" 2>/dev/null || true
   git -C "$REPO_ROOT" tag -d "$OLD_TAG" "$NEW_TAG" "$SPLIT_TAG" "$PROBE1_TAG" "$PROBE2_TAG" 2>/dev/null || true
   rm -rf "$RUN_DIR"
+  git -C "$REPO_ROOT" tag -d "$RUN_TAG" 2>/dev/null || true
 }
 trap cleanup EXIT
+
+# The owner record, the namespace's FIRST ref: sweep_harness_namespaces.ts
+# deletes a namespace only when this pid is dead on this host, and a run
+# killed before writing it shows up there as unowned.
+git -C "$REPO_ROOT" -c user.name=ci -c user.email=ci@localhost tag -a "$RUN_TAG" HEAD \
+  -m "pid=$$ host=$(hostname) started=$(date -u +%Y-%m-%dT%H:%M:%SZ) dir=$RUN_DIR"
 
 # The fleet LICENSE template carries its Required Notice and its
 # local-section marker as jinja variables; comparisons against rendered
@@ -138,8 +150,8 @@ select_modules() {
 mkdir -p "$WORK"
 # Safe under concurrency: this only drops admin entries whose working tree
 # directory is already GONE - it cannot touch a live run's, and it does
-# NOT collect after a SIGKILLed run (the directory survives; see the
-# manual sweep recipe in the header).
+# NOT collect after a SIGKILLed run (the directory survives; the
+# sweeper in the header attributes and collects the refs).
 git worktree prune
 
 bun install --frozen-lockfile
