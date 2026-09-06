@@ -4946,7 +4946,10 @@ const rules: Rule[] = [
           typecheckRuns: (typecheckJob.steps as Record<string, unknown>[])
             .map((step) => String(step.run ?? ""))
             .join("\n"),
-          tsconfigDirs: [".", ...actionDirsCarrying("tsconfig.json")],
+          tsconfigDirs: [
+            ...(existsSync(join(REPO_ROOT, "tsconfig.json")) ? ["."] : []),
+            ...actionDirsCarrying("tsconfig.json"),
+          ],
         }),
         ...scratchScopedScriptMismatches(scripts, SCRATCH_SCOPED_SCRIPTS),
       ];
