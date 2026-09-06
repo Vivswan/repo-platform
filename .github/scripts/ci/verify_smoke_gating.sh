@@ -141,12 +141,12 @@ fleet_ci="$REPO_ROOT/.github/workflows/fleet-ci.yml"
 # so the findings comment is already posted when the gate goes red.
 present "actions/validate-template-report@build" "$fleet_ci"
 present "steps.template.outputs.integrity != 'success'" "$fleet_ci"
-# yamllint is a composite action; both billing shapes call the same pin
-# exactly once each - the merged base-checks step and the fan-out job (the
-# pip install and the strict flag are the action's own suite's to police).
+# yamllint is a composite action; the one base-checks job calls its pin
+# exactly once (the pip install and the strict flag are the action's own
+# suite's to police).
 yamllint_pins="$(grep -cF -- "repo-platform/actions/yamllint@build" "$fleet_ci" || true)"
-if [ "$yamllint_pins" -ne 2 ]; then
-  echo "::error::gating check failed: expected exactly 2 'repo-platform/actions/yamllint@build' pins in $fleet_ci (the merged base-checks step and the fan-out job) but found $yamllint_pins. Fix fleet-ci.yml (or this expectation in verify_smoke_gating.sh)."
+if [ "$yamllint_pins" -ne 1 ]; then
+  echo "::error::gating check failed: expected exactly 1 'repo-platform/actions/yamllint@build' pin in $fleet_ci (the base-checks step) but found $yamllint_pins. Fix fleet-ci.yml (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 
@@ -359,8 +359,8 @@ fi
 
 # Base community files: the fleet LICENSE ships to every render unless the
 # repo opts out via the custom-license module; the other three are
-# public-only. The dependency-review and base-check jobs themselves live in
-# fleet-ci, conditioned on the private input this render passes.
+# public-only. The dependency-review job itself lives in fleet-ci,
+# conditioned on the private input this render passes.
 if has custom-license; then test ! -e "$SMOKE/LICENSE.md"; else test -f "$SMOKE/LICENSE.md"; fi
 # SECURITY.md is visibility-independent (private collaborators need the
 # reporting route too); the contributor-facing files stay public-only.

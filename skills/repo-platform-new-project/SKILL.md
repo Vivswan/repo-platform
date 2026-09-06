@@ -135,9 +135,7 @@ The fleet and module settings layers (shared defaults, every label the module se
 
 ### 8. What runs on PRs
 
-CI gates on the `all-green` check (required once step 7's ruleset is applied - the sole required check the fleet override carries; the pr-title module requires its own `pr-title` check through its settings layer): the managed ci.yml's `all-green` job needs the `checks` and `ci` callers and fails unless each result is success or skipped, with at least one success. The gate jobs themselves run centrally through repo-platform's fleet-ci.yml (typography, commit-names, actionlint, gitleaks, yamllint, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos) next to your checks.yml jobs. `validate-template` runs there too and BLOCKS on integrity (managed content changed outside a sync); its freshness report never blocks.
-
-On private repositories the five base checks run as one combined `base-checks` job (billing: tiny jobs round up to a minute each).
+CI gates on the `all-green` check (required once step 7's ruleset is applied - the sole required check the fleet override carries; the pr-title module requires its own `pr-title` check through its settings layer): the managed ci.yml's `all-green` job needs the `checks` and `ci` callers and fails unless each result is success or skipped, with at least one success. The gate jobs themselves run centrally through repo-platform's fleet-ci.yml (the `base-checks` job: typography, file-size, commit-names, actionlint, gitleaks, yamllint as steps that all run and a judge step that names every failed one; then release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos) next to your checks.yml jobs. `validate-template` runs there too and BLOCKS on integrity (managed content changed outside a sync); its freshness report never blocks.
 
 ## Owner actions (need repository-settings access)
 
@@ -150,7 +148,7 @@ Collect these for the human with admin rights:
 
 ## Private repositories
 
-- Base checks merge into one `base-checks` job; no CodeQL or dependency-review jobs; CONTRIBUTING.md is not rendered.
+- No CodeQL or dependency-review jobs; CONTRIBUTING.md is not rendered.
 - Fleet run logs are public, so a wildcard-discovered private repo appears only as a name hint (`hidden-server` -> `h**-s**r`) and its details (paths, module lists, conflict content) stay out of public logs; the full detail lands in the repo's own sync PRs and report issues.
 - Naming a private repo in repos.yml publishes the name (details stay hidden); wildcard discovery keeps it hinted.
 

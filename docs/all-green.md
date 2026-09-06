@@ -26,7 +26,7 @@ The judgment, whole: every needed result must be `success` or `skipped` (a modul
 ## What gates what
 
 - A managed repository's ci.yml carries three gating jobs: `checks` (calls the repo-owned checks.yml), `ci` (calls [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the module selection), and `all-green` needing both - plus the gate-downstream `post-green` caller ([after the gate](#after-the-gate)), which gates nothing. The membership rule: what gates a managed repository is being a job in fleet-ci.yml or checks.yml - a caller job's result aggregates every job of the workflow it calls, so a failure anywhere inside fails the gate.
-- Inside fleet-ci.yml, module- and visibility-conditioned jobs skip via job-level `if:` when they do not apply; a skipped job leaves the called run green. The base checks there are `typography`, `file-size` ([new-repo.md](new-repo.md#file-size-caps)), `commit-names`, `actionlint`, `yamllint`, and `gitleaks` (one `base-checks` job on private repositories), beside `validate-template` and the module jobs. Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself.
+- Inside fleet-ci.yml, module- and visibility-conditioned jobs skip via job-level `if:` when they do not apply; a skipped job leaves the called run green. The base checks there (`typography`, `file-size` ([new-repo.md](new-repo.md#file-size-caps)), `commit-names`, `actionlint`, `yamllint`, and `gitleaks`) are the steps of one `base-checks` job for every visibility: each step runs `if: always()` so one failure never hides another, and the last step fails the job naming every failed check in the log and step summary. It sits beside `validate-template` and the module jobs. Repo-platform's own ci.yml has no callers to hide behind: its gating jobs are the needs list itself.
 - A repo-owned advisory check opts out with `continue-on-error: true` on its job in checks.yml (the retired verdict's `info-*` naming opt-out died with it).
 
 ## The rosters (how a deleted gate stays loud)
@@ -36,7 +36,7 @@ The gate judges only what its `needs` list names, so a job deleted from ci.yml A
 | Rule | What it pins |
 | --- | --- |
 | `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and `toJSON(needs)` wiring. |
-| `fleet-ci-roster` | fleet-ci.yml's job set, both directions - deleting `codeql` there would drop the gate for every managed repository at once. |
+| `fleet-ci-roster` | fleet-ci.yml's job set, both directions - deleting `codeql` there would drop the gate for every managed repository at once - and no job-level `continue-on-error` (a softened fleet job would read green to every caller's gate; `file-size` softens its own step inside `base-checks`). |
 | `fleet-ci-render-roster` | The rendered ci.yml's shape at [the source](https://github.com/Vivswan/repo-platform/blob/main/templates/base/.github/workflows/ci.yml.jinja): exactly the `checks`/`ci`/`all-green`/`post-green` jobs, the gate's exact lines, the post-green caller's condition block, judged-sha pass, `contents: read` ceiling, and absence of a lane, and the release leg's condition block (gate AND hook), judged-sha pass, and concurrency lane. |
 | `all-green-name` | The check NAME, pinned once as data: the ruleset's required context (Actions-pinned by `integration_id`), the `all-green` job id at both sources, `all_green.ts`'s CHECK_NAME, and the sentence this page opens with. |
 
