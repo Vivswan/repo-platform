@@ -2713,6 +2713,7 @@ export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mi
 export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
   test: "bun scripts/run_tests.ts",
   "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
+  "docs:check": "bun scripts/docs_check.ts",
 };
 
 /** Mismatch per pinned script whose live command differs (a missing script
