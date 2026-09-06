@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
@@ -213,31 +213,59 @@ describe("rebuildBranchTree", () => {
     REBUILD_TEST_TIMEOUT_MS,
   );
 
-  test("a step past REBUILD_STEP_TIMEOUT_MS throws the deadline instead of hanging", () => {
-    // The knob is read at call time, so setting it here reaches the
-    // helper in-process; 1 ms sits below any real fork+exec, so the
-    // FIRST step (git worktree add) is the one that expires - and the
-    // thrown message must NAME it, pinning step()'s own bound: without
-    // that pin an unbounded step() would still satisfy a bare
-    // "timed out" match via stepCapture's write-tree deadline at the
-    // end. Without the bound, a wedged install runs unbounded under
-    // wait_for_build's 15-minute headroom and dies as a runner-level
-    // job kill instead of degrading to the warn path.
-    process.env.REBUILD_STEP_TIMEOUT_MS = "1";
-    try {
-      expect(() =>
-        rebuildBranchTree({
-          sourceSha,
-          srcDir: join(scratch, "work-slow", "src"),
-          treeDir: join(scratch, "work-slow", "tree"),
-        }),
-      ).toThrow(/timed out after 1ms: git worktree add/);
-    } finally {
-      delete process.env.REBUILD_STEP_TIMEOUT_MS;
-      // The SIGKILLed worktree add may have half-registered its worktree.
-      git("worktree", "prune");
-    }
-  });
+  test(
+    "a step past REBUILD_STEP_TIMEOUT_MS throws the deadline instead of hanging",
+    () => {
+      // The knob is read at call time, so setting it here reaches the
+      // helper in-process. The thrown message must NAME the expiring step,
+      // pinning step()'s own bound: without that pin an unbounded step()
+      // would still satisfy a bare "timed out" match via stepCapture's
+      // write-tree deadline at the end. Without the bound, a wedged install
+      // runs unbounded under wait_for_build's 15-minute headroom and dies
+      // as a runner-level job kill instead of degrading to the warn path.
+      //
+      // The step that expires is a PATH stub, never real git: a SIGKILL
+      // landing between git's gitdir and commondir writes leaves a LOCKED
+      // admin entry with an empty commondir, which prune keeps and which
+      // kills every later `worktree add` in the checkout ("failed to read
+      // .git/worktrees/src/commondir") - measured once in CI as the hostile
+      // test below dying. The marker proves the stub started before the
+      // deadline, and the worktree listing must be the main worktree alone
+      // before and after (a non-empty reading, so an unobservable admin
+      // path cannot pass as "no residue").
+      const bin = mkdtempSync(join(tmpdir(), "rebuild-slow-git-"));
+      const invoked = join(bin, "invoked");
+      writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\n: > "${invoked}"\nexec sleep 30\n`, {
+        mode: 0o755,
+      });
+      const worktrees = () =>
+        git("worktree", "list", "--porcelain")
+          .split("\n")
+          .filter((line) => line.startsWith("worktree "))
+          .map((line) => line.slice("worktree ".length));
+      const mainOnly = [realpathSync(scratch)];
+      expect(worktrees()).toEqual(mainOnly);
+      const savedPath = process.env.PATH;
+      process.env.PATH = `${bin}:${savedPath}`;
+      process.env.REBUILD_STEP_TIMEOUT_MS = "2000";
+      try {
+        expect(() =>
+          rebuildBranchTree({
+            sourceSha,
+            srcDir: join(scratch, "work-slow", "src"),
+            treeDir: join(scratch, "work-slow", "tree"),
+          }),
+        ).toThrow(/timed out after 2000ms: git worktree add/);
+      } finally {
+        process.env.PATH = savedPath;
+        delete process.env.REBUILD_STEP_TIMEOUT_MS;
+      }
+      expect(existsSync(invoked)).toBe(true);
+      expect(worktrees()).toEqual(mainOnly);
+      rmSync(bin, { recursive: true, force: true });
+    },
+    REBUILD_TEST_TIMEOUT_MS,
+  );
 
   test("a malformed REBUILD_STEP_TIMEOUT_MS fails loud instead of disabling the bound", () => {
     // Number("") is 0 and a spawnSync timeout of 0 means unbounded, so
