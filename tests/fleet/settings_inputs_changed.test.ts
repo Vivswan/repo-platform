@@ -429,16 +429,7 @@ describe("main", () => {
     // A depth-1 checkout lacks the push base; diffing against a missing
     // commit must fail loudly rather than degrade either way.
     const shallow = join(root, "shallow");
-    const clone = boundedSpawnSync([
-      "git",
-      "clone",
-      "-q",
-      "--depth",
-      "1",
-      `file://${source}`,
-      shallow,
-    ]);
-    if (clone.exitCode !== 0) throw new Error(`clone failed: ${clone.stderr}`);
+    git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
     const result = run(shallow, mergeCommit, renameCommit);
     expect(result.exitCode).toBe(1);
     expect(result.output).toBe("");

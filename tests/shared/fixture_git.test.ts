@@ -1,7 +1,5 @@
-// GIT_TRACE=1 names every child git spawns, so the maintenance spawn
-// itself is the reading, not its racy effect on the object store. The
-// control runs under git's defaults (empty global and system config), not
-// the developer's own, which could already disable maintenance.
+// GIT_TRACE=1 names every child git spawns, so the spawn itself is the reading;
+// the control runs under git's defaults, not the developer's config.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";

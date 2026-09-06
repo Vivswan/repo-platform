@@ -1,9 +1,6 @@
-// git for test fixtures, run under fixture.gitconfig as the global config:
-// no detached `maintenance run --auto` (or pre-2.45 `gc --auto`) on either
-// side of a local push or after a commit, so a fixture's next command
-// never races a repack of the loose objects it is reading. The carrier is
-// GIT_CONFIG_GLOBAL because the push client strips GIT_CONFIG_PARAMETERS
-// (`-c`) and GIT_CONFIG_COUNT from receive-pack's environment.
+// Fixture git under fixture.gitconfig: no detached auto maintenance racing
+// the next command's read of loose objects. GIT_CONFIG_GLOBAL is the carrier
+// because the push client strips `-c` and GIT_CONFIG_COUNT from receive-pack.
 
 import { join } from "node:path";
 import { boundedSpawnSync } from "./bounded_spawn";
