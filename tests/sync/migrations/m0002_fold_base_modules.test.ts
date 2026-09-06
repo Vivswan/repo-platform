@@ -360,6 +360,37 @@ describe("m0002_fold_base_modules", () => {
     expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
   });
 
+  test("the registration's bytes outside the spliced items ride verbatim: 0xFF in a comment and in a kept item's comment", () => {
+    // A utf-8 read would turn each 0xFF into U+FFFD (EF BF BD) on the write.
+    const before = Buffer.concat([
+      Buffer.from("# ", "utf-8"),
+      Buffer.from([0xff]),
+      Buffer.from(" keep\nmodules:\n  - agents\n  - uv # ", "utf-8"),
+      Buffer.from([0xff]),
+      Buffer.from(" item\n  - settings-sync\nmirrors: []\n", "utf-8"),
+    ]);
+    const after = Buffer.concat([
+      Buffer.from("# ", "utf-8"),
+      Buffer.from([0xff]),
+      Buffer.from(" keep\nmodules:\n  - uv # ", "utf-8"),
+      Buffer.from([0xff]),
+      Buffer.from(" item\nmirrors: []\n", "utf-8"),
+    ]);
+    const dir = repo({ [MANIFEST]: manifestOf() });
+    writeFileSync(join(dir, REGISTRATION), before);
+    git(dir, "add", "-A");
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "latin1 registration");
+    expect(apply(dir)).toEqual({
+      kind: "verdict",
+      verdict: {
+        kind: "dropped",
+        note: { text: NOTE("`agents`, `settings-sync`"), review: false },
+      },
+    });
+    expect(Buffer.compare(readFileSync(join(dir, REGISTRATION)), after)).toBe(0);
+    expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
+  });
+
   test("repository bytes ride the fold verbatim: a non-UTF-8 byte and no trailing newline", () => {
     // A utf-8 read would turn 0xFF into U+FFFD (EF BF BD) and the write would
     // store that; the fold must carry the repository's exact bytes.

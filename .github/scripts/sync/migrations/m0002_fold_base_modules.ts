@@ -370,7 +370,11 @@ export default {
           "then re-run the sync.",
       };
     }
-    const text = readFileSync(path, "utf-8");
+    // latin1 in and out: one code unit per byte, so every byte outside the
+    // spliced items is written back verbatim (utf-8 would fold 0xFF onto
+    // U+FFFD); the splice's markers are ASCII, and the parse is compared
+    // with itself only.
+    const text = readFileSync(path).toString("latin1");
     const declared = declaredModules(text);
     const listKind =
       declared === null
@@ -392,7 +396,7 @@ export default {
     ) {
       return { kind: "error", message: HAND_EDIT };
     }
-    writeFileSync(path, rewritten);
+    writeFileSync(path, Buffer.from(rewritten, "latin1"));
     const added = git(target.dir, "add", "--", REGISTRATION);
     if (added.exitCode !== 0) {
       const lines = added.stderr.split("\n").filter((line) => line.trim() !== "");
