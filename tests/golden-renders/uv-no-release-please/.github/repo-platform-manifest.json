@@ -28,6 +28,6 @@
     "AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "9dd5ecd83932dc878cf0520c86abe9583213eed88d0b103f2801991c838d6365"},
     "CLAUDE.md": {"class": "managed", "hash": "a54ff182c7e8acf56acfd6e4b9c3ff41e2c41a31c9b211b2deb9df75d9a478f9"},
     "CONTRIBUTING.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "9b9c271a190bcf64b6be1feef9466dd81e976a1edcf3fd996c1d50e5c416781b"},
-    "LICENSE.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "80508c708b5873e08288a7888ed987674af16ed087ee7e349d98e57def3a274b"}
+    "LICENSE.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "0e0021c02bd052ae62b6c7632725dc38e703cec53fa6102fbc4e513ece827295"}
   }
 }
