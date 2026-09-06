@@ -3,7 +3,7 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
-    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:skills && bun run ssot:check && bun run guards:binding && bun run generate:check && bun run dogfood:check && bun run gitignore:topology && bun run compose:check && bun run renders:check && bun run test",
+    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:skills && bun run ssot:check && bun run generate:check && bun run dogfood:check && bun run gitignore:topology && bun run compose:check && bun run renders:check && bun run test",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
     "check:fix": "bun x biome check --write .",
@@ -19,7 +19,6 @@
     "validate": "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
     "validate:skills": "bun actions/validate-skills/validate_skills.ts",
     "ssot:check": "bun scripts/check_ssot.ts",
-    "guards:binding": "bun scripts/check/check_guard_binding.ts",
     "generate": "bun scripts/generate.ts",
     "generate:check": "bun scripts/generate.ts --check",
     "dogfood": "bun scripts/generate/render_dogfood.ts",

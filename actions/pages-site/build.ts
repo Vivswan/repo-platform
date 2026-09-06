@@ -291,8 +291,8 @@ function buildCommandTier(cfg: Config, tier: Tier): { dist: string; buildDir: st
 /** Dead-link strictness per tier: current content (a HEAD tier) must FAIL
  *  on a dead internal link - that failure is the docs PR check's value and
  *  the deploy's last line of defense - while historical tags build lenient
- *  because history cannot be fixed. Guard-registered: unarming this to
- *  always-lenient would ship silently rotten current docs on a green run. */
+ *  because history cannot be fixed. Stubbing this to always-lenient would
+ *  ship silently rotten current docs on a green run. */
 export function tierStrictLinks(tier: Tier): boolean {
   return tier.ref === "HEAD";
 }

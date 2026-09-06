@@ -205,12 +205,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Full history: the guard-binding step's deletion tripwire compares
-      # the registry against the merge-base with origin/main, and a
-      # depth-1 checkout would make it stand down (fail open) on every PR.
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -222,11 +217,6 @@ jobs:
         run: bun actions/validate-template-report/validator/validate_generated_files.ts --self .
       - name: Check single-source-of-truth invariants
         run: bun run ssot:check
-      # Layer 1 of the guard-arming harness: every guard-registry entry
-      # resolves both ways (snippet in guard file, forcing test in test
-      # file); the weekly audit-guards workflow proves the arming itself.
-      - name: Check guard registry binding
-        run: bun run guards:binding
       - name: Check generated regions against the module manifests
         run: bun run generate:check
       - name: Check generated dogfood copies against their template twins

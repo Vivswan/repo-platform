@@ -1705,8 +1705,8 @@ ${extra}      shell: ${shell}
   });
 
   test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup", () => {
-    // The live-file forcing test the guard registry names: its mutation
-    // hands check-typography's shared step the CALLER's pin, red here.
+    // The live-file forcing test: handing check-typography's shared step
+    // the CALLER's pin goes red here.
     const files = actionManifestFiles();
     const setups = files.filter((file) => actionSetsUpBun(readFileSync(file, "utf-8")));
     expect(setups.length).toBeGreaterThan(0);
@@ -2108,8 +2108,8 @@ jobs:
   });
 
   test("the repo gate's needs roster is ARMED: every ALL_GREEN_ROSTER job is needed", () => {
-    // The live-file forcing test the guard registry names: dropping a
-    // needs entry from the real ci.yml goes red here.
+    // The live-file forcing test: dropping a needs entry from the real
+    // ci.yml goes red here.
     expect(
       allGreenGateMismatches(
         parseYaml(readFileSync(".github/workflows/ci.yml", "utf-8")) as Record<string, unknown>,
@@ -4420,10 +4420,9 @@ describe("fleetCiRenderMismatches", () => {
     expect(() => fleetCiRenderMismatches("name: CI\n", leg, releaseWf)).toThrow("anchor lost");
   });
 
-  // The live-file forcing test the guard registry's fleet-ci render
-  // entries name: the exact structural judgment the ssot rule runs on the
-  // REAL sources, so the arming audit's mutation of any pinned link goes
-  // red here.
+  // The live-file forcing test: the exact structural judgment the ssot
+  // rule runs on the REAL sources, so breaking any pinned link goes red
+  // here.
   const liveMismatches = () =>
     fleetCiRenderMismatches(
       readFileSync("templates/base/.github/workflows/ci.yml.jinja", "utf-8"),
@@ -4609,10 +4608,9 @@ describe("prTitleWorkflowMismatches", () => {
     expect(empty.some((m) => m.file.includes("templates/pr-title/settings.yml"))).toBe(true);
   });
 
-  // The live-file forcing test the guard registry's pr-title-* entries
-  // name: the exact judgment the pr-title-workflow rule runs on the REAL
-  // sources, so the audit's mutation of any of the three files goes red
-  // here.
+  // The live-file forcing test: the exact judgment the pr-title-workflow
+  // rule runs on the REAL sources, so breaking any of the three files
+  // goes red here.
   const livePrTitle = () =>
     prTitleWorkflowMismatches(
       readFileSync("templates/pr-title/.github/workflows/pr-title.yml.jinja", "utf-8"),

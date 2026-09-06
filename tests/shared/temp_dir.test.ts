@@ -13,8 +13,8 @@ import { tempDirs } from "./temp_dir";
 const helper = join(import.meta.dir, "temp_dir.ts");
 const temp = tempDirs();
 // Every probe and every child's TMPDIR sits under this root, which the
-// file removes ITSELF: the arming audit unarms the helper's removal, and
-// the leak that proves it must not reach the real temp directory.
+// file removes ITSELF: a stubbed-out helper removal leaks its fixture,
+// and that leak must not reach the real temp directory.
 const root = temp.dir("temp-dir-test-");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 

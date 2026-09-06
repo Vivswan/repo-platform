@@ -373,8 +373,7 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
     if (grammar === null) {
       // Reachable on purpose (the manifest text is untrusted): the typed
       // dispatch below cannot fall through, so unknown grammars must be
-      // refused HERE, before any carry could guess. Registered in
-      // scripts/check/guard_registry.ts (split-entries-unknown-grammar-refusal).
+      // refused HERE, before any carry could guess.
       throw new Error(
         `${where}: split entry for ${path} declares ${
           "grammar" in shaped ? `unknown grammar ${JSON.stringify(shaped.grammar)}` : "no grammar"

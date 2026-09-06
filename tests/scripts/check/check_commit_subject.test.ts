@@ -2,10 +2,9 @@
 // motivating failure (2026-08-30): `docs(all-green,build-provenance): ...`
 // - a comma in the scope - reached main and went red there, because the
 // pre-commit gates run before the message exists and nothing local ever
-// judged the subject. Two registered guards bind here
-// (scripts/check/guard_registry.ts: commit-subject-refusal,
-// commit-subject-hook-wiring); the weekly arming audit unarms each in a
-// scratch clone and requires its named test red.
+// judged the subject. Two guards bind here: the subject refusal and the
+// hook wiring; each has a forcing test below that goes red when the
+// guard is stubbed out.
 //
 // The equivalence table runs BOTH real consumers as subprocesses - the
 // hook script on a message file, the CI validator on a synthetic push
