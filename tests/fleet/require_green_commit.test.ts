@@ -1,15 +1,20 @@
 // Unit tests for the settings apply's green gate: the bounded wait a
-// push-triggered run does for its own commit's all-green verdict, the
-// hard, fail-closed refusals around it, and the trigger split - push and
-// dispatch stay tip-gated while the scheduled heal falls back to the
-// newest green commit behind a red tip. The gh probe, the clock, the
-// sleep, and the walk are injected so nothing here touches the network or
-// actually waits (waitForGreen zeroes the predicate's internal poll -
-// this loop owns all waiting).
+// dispatched run does for the tip's all-green verdict, the hard,
+// fail-closed refusals around it, and the trigger split - dispatch stays
+// tip-gated, the scheduled heal falls back to the newest green commit
+// behind a red tip, and a CALLED run (post-green's leg) reads its own
+// judged commit through the predicate's bounded poll, the publisher's. The
+// gh probe, the clock, the sleep, and the walk are injected so nothing here
+// touches the network or actually waits (waitForGreen zeroes the
+// predicate's internal poll - this loop owns all waiting).
 
 import { describe, expect, test } from "bun:test";
 import type { GreenWalkOutcome } from "../../.github/scripts/fleet/newest_green_commit";
-import { decideGreenCommit, waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
+import {
+  decideCalledCommit,
+  decideGreenCommit,
+  waitForGreen,
+} from "../../.github/scripts/fleet/require_green_commit";
 import type { GhRunner } from "../../.github/scripts/shared/all_green.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 
@@ -67,9 +72,9 @@ describe("waitForGreen", () => {
   });
 
   test("an in-progress verdict is waited out to a green one", () => {
-    // The push-triggered settings run races its own commit's CI run AND
-    // the verdict workflow behind it, so the first probes land before a
-    // completed verdict; the gate polls instead of failing.
+    // A dispatched settings run can race the tip's CI run, so the first
+    // probes land before a completed verdict; the gate polls instead of
+    // failing.
     const { gh, calls } = ghAnswering(
       [{ status: "in_progress", conclusion: null }],
       [{ status: "in_progress", conclusion: null }],
@@ -243,6 +248,95 @@ describe("decideGreenCommit", () => {
       expect(decision.refusal).toContain("no green commit within 50 commits");
       expect(decision.refusal).toContain("stays halted");
     }
+  });
+});
+
+describe("decideCalledCommit", () => {
+  const OTHER = "00000000000000000000000000000000000000cc";
+
+  test("the run's own green commit passes on ONE probe, no sleep", () => {
+    const { gh, calls } = ghAnswering([{}]);
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 60_000, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
+    expect(decision).toEqual({ sha: SHA, fallback: false });
+    expect(calls()).toBe(1);
+    expect(sleeps).toEqual([]);
+  });
+
+  test("a check still in progress on the first read and green on the second passes", () => {
+    // The Checks API can report the gate job's just-completed check run as
+    // in progress for a moment after that job released this leg: the read
+    // polls through it instead of refusing a green commit.
+    const { gh, calls } = ghAnswering([{ status: "in_progress", conclusion: null }], [{}]);
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 60_000, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
+    expect(decision).toEqual({ sha: SHA, fallback: false });
+    expect(calls()).toBe(2);
+    expect(sleeps).toEqual([5]);
+  });
+
+  // Past the bound the poll fails CLOSED on every non-green shape. A red
+  // conclusion waits the bound out too (the predicate polls for a fresh
+  // success because a re-judged sha's verdict can trail a stale one), so
+  // the refusal names the conclusion at the bound, not on the first read.
+  test.each([
+    {
+      reason: "a red verdict refuses at the bound",
+      page: [{ conclusion: "failure" }],
+      verdict: "its all-green verdict concluded 'failure'",
+    },
+    {
+      reason: "a verdict still in progress past the bound refuses",
+      page: [{ status: "in_progress", conclusion: null }],
+      verdict: "its all-green verdict is still 'in_progress' after 0s",
+    },
+    {
+      reason: "no verdict at all past the bound refuses (the call arrived from somewhere else)",
+      page: [],
+      verdict:
+        "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; " +
+        "re-run the sha's CI run (the all-green job posts the check) if one should exist",
+    },
+  ])("$reason", ({ page, verdict }) => {
+    const { gh, calls } = ghAnswering(page);
+    const sleeps: number[] = [];
+    const decision = decideCalledCommit("o/r", SHA, SHA, {
+      gh,
+      wait: { deadlineMs: 0, sleepMs: 5, sleep: (ms) => sleeps.push(ms) },
+    });
+    expect(decision).toEqual({
+      refusal:
+        `refusing the called settings apply: commit ${SHA.slice(0, 12)} is not green - ${verdict}. ` +
+        "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +
+        "still missing or pending after the wait means the call arrived from somewhere else.",
+    });
+    expect(calls()).toBe(1);
+    expect(sleeps).toEqual([]);
+  });
+
+  test.each([
+    {
+      reason: "a sha input that is not this run's commit",
+      sourceSha: OTHER,
+      refusal: `the sha input ${OTHER.slice(0, 12)} is not this run's own commit ${SHA.slice(0, 12)}`,
+    },
+    {
+      reason: "a truncated sha input",
+      sourceSha: SHA.slice(0, 12),
+      refusal: "SOURCE_SHA is not a full commit sha",
+    },
+  ])("$reason is refused before any probe", ({ sourceSha, refusal }) => {
+    const { gh, calls } = ghAnswering([{}]);
+    expect(decideCalledCommit("o/r", SHA, sourceSha, { gh })).toEqual({
+      refusal: expect.stringContaining(refusal),
+    });
+    expect(calls()).toBe(0);
   });
 });
 

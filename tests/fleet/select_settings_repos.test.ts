@@ -399,7 +399,10 @@ describe("select_settings_repos.ts", () => {
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
       const r = run("dispatch-miss", { env: { GITHUB_EVENT_PATH: eventFile } });
       expect(r.exitCode).not.toBe(0);
-      expect(r.stdout + r.stderr).toContain("matches no settings target");
+      expect(r.stdout).toContain(
+        "::error::1 of 1 scoped repos matched no managed repository (values withheld",
+      );
+      expect(r.output).not.toContain("targets=");
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-servr");
       }
@@ -523,14 +526,89 @@ describe("select_settings_repos.ts", () => {
   );
 
   test(
-    "a comma list is rejected: one repo per settings dispatch, value withheld",
+    "a comma list scopes the heal to every listed target, the redacted one by its hint",
     () => {
-      const r = run("list", { env: { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-server" } });
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain("::error::the settings sync takes one repo per dispatch");
-      for (const channel of [r.stdout, r.stderr, r.output]) {
+      // The called path's scope (post-green's settings-fleet leg after a
+      // [fleet-sync: a, b] sync) arrives as ONLY_REPO - public text off a
+      // main commit - and selects exactly those targets.
+      const r = run("list", { env: { ONLY_REPO: "Vivswan/steady, vivswan/hidden-server" } });
+      expect(r.exitCode).toBe(0);
+      // steady is an explicit managed persona absent from discovery:
+      // fail-closed private, self-disclosed by its repos.yml entry.
+      expect(targetsOf(r)).toEqual([
+        {
+          repo: "Vivswan/steady",
+          name: "steady",
+          redact_name: false,
+          hide_details: true,
+          verify: "",
+        },
+        {
+          repo: "h**-s**r",
+          name: "h**-s**r",
+          redact_name: true,
+          hide_details: true,
+          verify: expect.stringMatching(/^[0-9a-f]{32}$/),
+        },
+      ]);
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    '"all" is the whole fleet, byte-identical to no scope at all',
+    () => {
+      const r = run("all", { env: { ONLY_REPO: "all" } });
+      expect(r.exitCode).toBe(0);
+      expect(targetsOf(r)).toEqual(targetsOf(main));
+      expect(r.summary).toBe(main.summary);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a list with one unknown entry fails the whole run, counting rather than naming",
+    () => {
+      const r = run("list-miss", { env: { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-servr" } });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain(
+        "::error::1 of 2 scoped repos matched no managed repository (values withheld",
+      );
+      expect(r.output).not.toContain("targets=");
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel).not.toContain("hidden-servr");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a scope of known repos that decline the module selects nothing, green, with the notice",
+    () => {
+      // A synced repo need not manage its settings here: the settings
+      // apply that follows a fleet sync must not go red for it.
+      const r = run("list-declined", { env: { ONLY_REPO: "Vivswan/nomodule" } });
+      expect(r.exitCode).toBe(0);
+      expect(targetsOf(r)).toEqual([]);
+      expect(r.stdout).toContain(
+        "::notice::Vivswan/nomodule: skipped - its .repo-platform.yml does not select the settings-sync module",
+      );
+      expect(r.stdout).toContain("settings targets: (none)");
+      expect(r.stdout).not.toContain("::error::");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "an empty scope entry is refused before discovery, so it can neither widen nor narrow the scope",
+    () => {
+      const r = run("list-empty", { env: { ONLY_REPO: "Vivswan/steady,,Vivswan/flaky" } });
+      expect(r.exitCode).toBe(1);
+      expect(r.stdout).toContain("::error::the settings scope has an empty entry");
+      expect(r.output).not.toContain("targets=");
     },
     TEST_TIMEOUT_MS,
   );

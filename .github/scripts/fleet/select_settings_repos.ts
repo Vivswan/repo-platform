@@ -24,9 +24,11 @@
 //
 // Env: PAT, GH_TOKEN, GITHUB_RUN_ID, GITHUB_REPOSITORY, OWNER,
 // RUNNER_TEMP, GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives a
-// copy of every warning; GITHUB_EVENT_PATH supplies the single-repo
-// dispatch input (a non-empty ONLY_REPO env overrides it - the test
-// harness and local runs use that).
+// copy of every warning; GITHUB_EVENT_PATH supplies the dispatch scope
+// input (a non-empty ONLY_REPO env overrides it - post-green.yml's called
+// run passes its scope that way, and so do the test harness and local
+// runs). The scope grammar is the sync's: owner/name slugs (a bare name
+// takes the fleet owner), a comma-separated list of them, or "all".
 
 import { appendFileSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
@@ -52,13 +54,14 @@ const owner = requireEnv("OWNER");
 const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
-// lives with readDispatchRepo. One repo per dispatch here: the settings
-// heal has no list-scoped caller, and a comma would otherwise select
-// nothing while looking like a typo.
-const onlyRepo = readDispatchRepo(owner);
-if (onlyRepo.includes(",")) {
+// lives with readDispatchRepo. "all" is the explicit whole-fleet scope,
+// the same selection as no scope; a list is validated against the
+// discovered fleet once the rows are known (below).
+const scopeInput = readDispatchRepo(owner);
+const scope = scopeInput === "" || scopeInput === "all" ? null : scopeInput.split(",");
+if (scope?.includes("")) {
   console.log(
-    "::error::the settings sync takes one repo per dispatch (value withheld - it may name private repos); dispatch once per repository or leave repo empty for the whole fleet",
+    "::error::the settings scope has an empty entry: pass owner/name slugs separated by commas, with no stray or trailing comma",
   );
   process.exit(1);
 }
@@ -210,9 +213,30 @@ const enriched = parseEnriched(
   "select_settings_repos: enriched rows",
 );
 
+// Every scope entry must name a repo the fleet knows - a selected row or
+// the operator repo itself - or the whole run fails: a partial match
+// would silently narrow the scope, and a typo would heal nothing while
+// looking green. Counts only: an operator-typed entry may be a private
+// slug and this print is publicly readable. A known repo the probes
+// then DROP (not enrolled, not adopted, module not selected) is a
+// routine notice, so a called scope may legitimately select nothing.
+if (scope !== null) {
+  const known = new Set([
+    ...enriched.rows.map((row) => row.repo.toLowerCase()),
+    selfRepo.toLowerCase(),
+  ]);
+  const missing = scope.filter((entry) => !known.has(entry)).length;
+  if (missing > 0) {
+    console.log(
+      `::error::${missing} of ${scope.length} scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)`,
+    );
+    process.exit(1);
+  }
+}
+
 const targets: EnrichedRow[] = [];
 for (const row of enriched.rows) {
-  if (onlyRepo !== "" && row.repo.toLowerCase() !== onlyRepo) continue;
+  if (scope !== null && !scope.includes(row.repo.toLowerCase())) continue;
   const { repo, display } = row;
   // The operator repo rides in as the matrix builder's --self row (it is
   // not adopted, so the opt-in probe would drop it here).
@@ -238,9 +262,9 @@ const excluded = parseJson(
   readFileSync(join(runnerTemp, "excluded.json"), "utf-8"),
   "select_settings_repos: excluded list",
 ) as string[];
-// A single-repo dispatch is a scoped heal; the fleet-wide exclusion
-// reminders belong to the full runs.
-const sweepable = onlyRepo === "" ? excluded : [];
+// A scoped run is a scoped heal; the fleet-wide exclusion reminders
+// belong to the full runs.
+const sweepable = scope === null ? excluded : [];
 for (const repo of sweepable) {
   const probeResult = captureNetwork([
     "gh",
@@ -291,7 +315,7 @@ const matrix = capture([
   join(runnerTemp, "settings_targets.json"),
   "--self",
   selfRepo,
-  ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
+  ...(scope === null ? [] : ["--only", scope.join(",")]),
 ]);
 writeSync(2, matrix.stderr);
 if (matrix.exitCode !== 0) {
@@ -307,14 +331,6 @@ setOutput("targets", targetsJson);
 const parsed = parseJson(targetsJson, "select_settings_repos: settings matrix") as {
   repo: string;
 }[];
-if (onlyRepo !== "" && parsed.length === 0) {
-  // The input is echoed nowhere: the dispatcher typed it, and it may be
-  // a private slug this public log must not print.
-  console.log(
-    "::error::the repo input matches no settings target (matching ignores case): it must be an enrolled, adopted repo whose .repo-platform.yml selects the settings-sync module (or this repository itself), and a repos.yml exclude pauses this heal for it",
-  );
-  process.exit(1);
-}
 console.log(
   `settings targets: ${parsed.length === 0 ? "(none)" : parsed.map((t) => t.repo).join(", ")}`,
 );

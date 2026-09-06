@@ -233,6 +233,13 @@ describe("readDispatchRepo", () => {
       expected: "other/shared-private",
     },
     {
+      reason: 'the literal "all" is the whole-fleet scope, never a bare repo name to prefix',
+      onlyRepo: "All",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "all",
+    },
+    {
       reason:
         "a comma list is trimmed and owner-prefixed per entry; empties survive for the registry to reject",
       onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",

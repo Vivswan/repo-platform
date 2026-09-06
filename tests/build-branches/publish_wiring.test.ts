@@ -27,7 +27,7 @@ interface Job {
   with?: Record<string, string>;
   secrets?: Record<string, string>;
   outputs?: Record<string, string>;
-  steps?: { run?: string; env?: unknown }[];
+  steps?: { run?: string; uses?: string; with?: Record<string, unknown>; env?: unknown }[];
 }
 
 describe("post-green publish wiring", () => {
@@ -42,6 +42,13 @@ describe("post-green publish wiring", () => {
     // it from context could be handed the wrong commit by a future
     // caller), with the pending-ref promotion keyed off the same input.
     expect(ciYml).toContain("sha: ${{ github.sha }}");
+    // The push base rides the same explicit-input discipline: declared on
+    // the call, passed by the caller, never read off context inside a
+    // leg (post-green.yml's header).
+    expect(ciYml).toContain("before: ${{ github.event.before }}");
+    const postGreenOn = (parseYaml(postGreen) as { on: { workflow_call: { inputs: object } } }).on;
+    expect(Object.keys(postGreenOn.workflow_call.inputs)).toEqual(["sha", "before"]);
+    expect(postGreen).not.toContain("github.event.before");
     expect(postGreen).toContain("SOURCE_SHA: ${{ inputs.sha }}");
     expect(postGreen).toContain("PREBUILT_REF: refs/heads/build-pending/${{ inputs.sha }}");
     // The retired workflow_run machinery must stay gone from ci.yml.
@@ -89,7 +96,13 @@ describe("post-green publish wiring", () => {
     // pinned here - adding a leg fails this test until the new job's
     // verification story is written down and the roster updated.
     const jobs = doc.jobs as Record<string, Job>;
-    expect(Object.keys(jobs)).toEqual(["publish-build", "read-directives", "sync-fleet"]);
+    expect(Object.keys(jobs)).toEqual([
+      "publish-build",
+      "read-directives",
+      "sync-fleet",
+      "settings-inputs",
+      "settings-fleet",
+    ]);
     // publish-build verifies green via publish.ts (its allGreenFailure
     // gate), fed the judged sha input.
     const publishStep = (jobs["publish-build"].steps ?? []).find((step) =>
@@ -130,6 +143,80 @@ describe("post-green publish wiring", () => {
     expect(syncFleet.secrets).toEqual({
       REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
+    // settings-inputs mutates nothing: it diffs the whole push (the
+    // payload's previous tip to the explicit judged sha) over full
+    // history - a shallow checkout would lack the base, which the script
+    // refuses rather than degrading either way.
+    const inputsCheckout = (jobs["settings-inputs"].steps ?? []).find((step) =>
+      (step.uses ?? "").startsWith("actions/checkout@"),
+    );
+    expect(inputsCheckout?.with).toEqual({ ref: "${{ inputs.sha }}", "fetch-depth": 0 });
+    const inputsStep = (jobs["settings-inputs"].steps ?? []).find((step) =>
+      (step.run ?? "").includes("fleet/settings_inputs_changed.ts"),
+    );
+    if (inputsStep === undefined) {
+      throw new Error("settings-inputs has no settings_inputs_changed.ts step");
+    }
+    expect(inputsStep.env).toEqual({
+      SOURCE_SHA: "${{ inputs.sha }}",
+      BEFORE_SHA: "${{ inputs.before }}",
+    });
+    expect(jobs["settings-inputs"].outputs).toEqual({
+      changed: "${{ steps.inputs.outputs.changed }}",
+    });
+    // settings-fleet's own verification is the called workflow's gate
+    // (require_green_commit.ts's called path: the run's own commit, the
+    // shared bounded all-green poll). Its wiring: ordered behind the sync it follows, run
+    // when the merge touched a settings input OR the sync ran (red legs
+    // included - a skipped sync alone must not fire it), the diff job's
+    // success guarding only the inputs-changed branch (a red diff must
+    // not block a completed sync's scoped apply), the scope widening to
+    // every target on an input change, holding the settings lane, fed the
+    // judged sha and the PAT.
+    const settingsFleet = jobs["settings-fleet"];
+    expect(settingsFleet.needs).toEqual(["settings-inputs", "read-directives", "sync-fleet"]);
+    expect(settingsFleet.if).toBe(
+      "!cancelled() && ((needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true') || needs.sync-fleet.result == 'success' || needs.sync-fleet.result == 'failure')",
+    );
+    expect(settingsFleet.concurrency).toEqual({
+      group: "settings-repos",
+      "cancel-in-progress": false,
+    });
+    expect(settingsFleet.uses).toBe("./.github/workflows/settings-repos.yml");
+    expect(settingsFleet.with).toEqual({
+      repos:
+        "${{ needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true' && 'all' || needs.read-directives.outputs.repos }}",
+      sha: "${{ inputs.sha }}",
+    });
+    expect(settingsFleet.secrets).toEqual({
+      REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+    });
+  });
+
+  test("the called settings apply never waits on the lane its caller holds, and has no push way in", () => {
+    // The mirror of the sync's contract: settings-fleet holds the
+    // settings-repos lane by its literal name, so settings-repos.yml's
+    // group resolves to a per-run one on a called run (keyed on the
+    // call-only sha input) while cron and dispatch keep the lane. The
+    // retired push trigger and its paths list must stay gone - the diff
+    // decision lives in settings_inputs_changed.ts now.
+    const settingsRepos = read(".github/workflows/settings-repos.yml");
+    const doc = parseYaml(settingsRepos) as {
+      on: Record<string, { inputs?: Record<string, unknown>; secrets?: Record<string, unknown> }>;
+      concurrency: { group: string; "cancel-in-progress": boolean };
+    };
+    expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
+    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
+    expect(Object.keys(doc.on.workflow_call.secrets ?? {})).toEqual(["REPO_PLATFORM_TOKEN"]);
+    expect(doc.concurrency).toEqual({
+      group:
+        "${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}",
+      "cancel-in-progress": false,
+    });
+    expect(settingsRepos).not.toContain("paths:");
+    expect(settingsRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
+    expect(settingsRepos).not.toContain("ONLY_REPO: ${{ inputs.repo }}");
+    expect(settingsRepos).toContain("SOURCE_SHA: ${{ inputs.sha }}");
   });
 
   test("the called sync never waits on the lane its caller holds", () => {
@@ -195,7 +282,7 @@ describe("post-green publish wiring", () => {
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos"]);
+    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos", "settings-repos"]);
   });
 
   test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {

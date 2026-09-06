@@ -38,6 +38,15 @@ on:
           here acts on.
         required: true
         type: string
+      before:
+        description: >-
+          The push payload's `before` (all zeros for a branch-creating
+          push): the settings-inputs leg's FALLBACK base, used only when
+          no build branch exists yet or its every stamp is sha itself
+          (the first publish, landed by this run). Explicit like sha, and
+          verified an ancestor of it.
+        required: true
+        type: string
     secrets:
       REPO_PLATFORM_TOKEN:
         description: >-
@@ -169,6 +178,67 @@ jobs:
     uses: ./.github/workflows/sync-repos.yml
     with:
       repos: ${{ needs.read-directives.outputs.repos }}
+      sha: ${{ inputs.sha }}
+    secrets:
+      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+
+  # Did the settings inputs change since the fleet last saw main? Diffs
+  # the build tip's stamped source (the last green main that completed
+  # post-green) to the judged commit - fleet/settings_inputs_changed.ts
+  # owns the path list and the fallbacks; docs/all-green.md the reasoning.
+  # Reads only, so state-shaped trivially.
+  settings-inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.inputs.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent
+
+      - name: Diff for settings inputs since the last published green main
+        id: inputs
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+          BEFORE_SHA: ${{ inputs.before }}
+        run: bun .github/scripts/fleet/settings_inputs_changed.ts
+
+  # The fleet-wide settings apply, called once per run for either reason:
+  # an input changed (every target) or the sync above ran (its scope). The
+  # diff job's success guards only the first branch and the scope
+  # widening, so a red diff never blocks or widens a completed sync's
+  # apply. State-shaped: the called run gates on this commit's own verdict
+  # and applies per target under a moved-head recheck; a swallowed run
+  # leaves a repo one apply behind, which the nightly heal repairs. Holds
+  # the settings-repos lane; the called run takes a per-run group (the
+  # deadlock law above). Reasoning: docs/all-green.md.
+  settings-fleet:
+    needs: [settings-inputs, read-directives, sync-fleet]
+    if: >-
+      !cancelled() &&
+      ((needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true') ||
+      needs.sync-fleet.result == 'success' || needs.sync-fleet.result == 'failure')
+    concurrency:
+      group: settings-repos
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      checks: read
+    uses: ./.github/workflows/settings-repos.yml
+    with:
+      repos: ${{ needs.settings-inputs.result == 'success' && needs.settings-inputs.outputs.changed == 'true' && 'all' || needs.read-directives.outputs.repos }}
       sha: ${{ inputs.sha }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
