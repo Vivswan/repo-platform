@@ -56,8 +56,8 @@ export function checkManifestShape(ctx: Context): Finding[] {
   }
   const files = ctx.manifest.files;
   const findings: Finding[] = [];
-  // No emitter writes a field outside the vocabulary, so one is a hand edit
-  // or a retired sync's leftover; the next stamp drops it.
+  // No emitter writes a field outside the vocabulary, so one is a hand
+  // edit; the next stamp drops it.
   for (const { path, fields } of unknownEntryFields(files)) {
     findings.push(
       error(

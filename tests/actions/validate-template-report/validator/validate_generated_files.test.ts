@@ -6,6 +6,7 @@ import {
   type BaseOwnedFile,
   MODULE_OWNERSHIP,
 } from "../../../../actions/validate-template-report/validator/ownership.ts";
+import { RETIRED_SHAPE_TOKENS } from "../../../../scripts/check_ssot.ts";
 import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 
@@ -61,17 +62,18 @@ const BASELINE: Record<string, string> = {
     "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
     "jobs:",
-    "  typography:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - run: echo ok",
+    "  checks:",
+    "    uses: ./.github/workflows/checks.yml",
+    "  ci:",
+    "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
     "  all-green:",
+    "    needs: [checks, ci]",
     "    if: always()",
-    "    needs: [typography]",
     "    runs-on: ubuntu-latest",
     "    steps:",
-    "      - run: |",
-    '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+    "      - uses: Vivswan/repo-platform/actions/all-green@build",
+    "        with:",
+    "          needs: ${{ toJSON(needs) }}",
     "",
   ].join("\n"),
 };
@@ -472,107 +474,7 @@ describe("multi-document YAML", () => {
   });
 });
 
-describe("base checks shape", () => {
-  // private: true in the answers also silences the dependency-review
-  // advisory, like a real private render's answers do; github_username pins
-  // the owner the fleet's composite actions must come from.
-  const PRIVATE_ANSWERS = ANSWERS("private: true\n");
-
-  /** A private merged render: base-checks carries the base checks as
-   *  guarded steps, and all-green gates on it (unless `needs` says
-   *  otherwise). */
-  const mergedCi = (steps: string[], needs = "[base-checks]") =>
-    [
-      "# This file is managed by Vivswan/repo-platform.",
-      "name: CI",
-      "jobs:",
-      "  base-checks:",
-      "    runs-on: ubuntu-latest",
-      "    steps:",
-      "      - uses: actions/checkout@v7",
-      ...steps,
-      "  all-green:",
-      "    if: always()",
-      `    needs: ${needs}`,
-      "    runs-on: ubuntu-latest",
-      "    steps:",
-      "      - run: |",
-      '          if [ "$RESULT" != "success" ]; then exit 1; fi',
-      "",
-    ].join("\n");
-
-  const MERGED_STEPS = [
-    "      - uses: Vivswan/repo-platform/actions/check-typography@main",
-    "        if: '!cancelled()'",
-    "      - uses: Vivswan/repo-platform/actions/validate-commit-names@main",
-    "        if: '!cancelled()'",
-    "      - uses: raven-actions/actionlint@v2",
-    "        if: '!cancelled()'",
-    "      - uses: Vivswan/repo-platform/actions/yamllint@main",
-    "        if: '!cancelled()'",
-    "      - uses: gitleaks/gitleaks-action@v3",
-    "        if: '!cancelled()'",
-  ];
-
-  test("a full private merged ci.yml passes with no advisories", () => {
-    const { exitCode, stdout, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).not.toContain("consider adding");
-  });
-
-  test("each check missing from the merged job gets its own advisory", () => {
-    // Steps 0-3: check-typography and validate-commit-names only.
-    const { exitCode, stdout, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS.slice(0, 4)),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("base-checks is missing the actionlint check");
-    expect(stdout).toContain("base-checks is missing the yamllint check");
-    expect(stdout).toContain("base-checks is missing the gitleaks check");
-    expect(stdout).not.toContain("missing the commit-names check");
-  });
-
-  // One predicate decides the merged typography step: a uses matcher
-  // anchored to the pinned owner's full action identity, AND the step must
-  // be unconditional. Each row substitutes the first step of MERGED_STEPS.
-  test.each([
-    {
-      reason: "the step is disabled by if: false",
-      stepLines: [
-        "      - uses: Vivswan/repo-platform/actions/check-typography@main",
-        "        if: false",
-      ],
-    },
-    {
-      reason: "a look-alike action name",
-      stepLines: ["      - uses: Vivswan/repo-platform/actions/check-typography-disabled@main"],
-    },
-    {
-      reason: "check-typography from another repository of the pinned owner",
-      stepLines: ["      - uses: Vivswan/repo/actions/check-typography@v1"],
-    },
-    {
-      reason: "check-typography from another owner",
-      stepLines: ["      - uses: attacker/repo-platform/actions/check-typography@v1"],
-    },
-  ])(
-    "a merged ci.yml lacking an owned, unconditional check-typography step fails: $reason",
-    ({ stepLines }) => {
-      const { exitCode, stderr } = runValidator({
-        ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-        ".github/workflows/ci.yml": mergedCi([...stepLines, ...MERGED_STEPS.slice(2)]),
-      });
-      expect(exitCode).toBe(1);
-      expect(stderr).toContain("no unconditional check-typography step");
-    },
-  );
-
+describe("the render's owner and provenance answers", () => {
   test.each([
     {
       reason: "the key is absent",
@@ -635,147 +537,24 @@ describe("base checks shape", () => {
       ".github/.copier-answers.yml":
         `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\n` +
         'github_username: "Vivswan"\nprivate: true\n',
-      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
   });
 
   test("self mode accepts any well-formed owner without answers to pin from", () => {
-    const steps = [
-      "      - uses: SomeFork/repo-platform/actions/check-typography@main",
-      "        if: '!cancelled()'",
-      ...MERGED_STEPS.slice(2),
-    ];
     const { exitCode, stderr } = runValidator(
       {
         ".github/.copier-answers.yml": "_commit: abc\n_src_path: /tmp/src\n",
-        ".github/workflows/ci.yml": mergedCi(steps),
+        ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"].replace(
+          "Vivswan/repo-platform/actions/all-green@build",
+          "SomeFork/repo-platform/actions/all-green@build",
+        ),
       },
       ["--self"],
     );
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-  });
-
-  test("the wrapped expression form of the guard counts as unconditional", () => {
-    const steps = [
-      ...MERGED_STEPS.slice(0, MERGED_STEPS.length - 1),
-      "        if: ${{ !cancelled() }}",
-    ];
-    const { exitCode, stdout, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).not.toContain("missing the gitleaks check");
-  });
-
-  test("look-alike or disabled marker steps still draw their advisories", () => {
-    const steps = [
-      ...MERGED_STEPS.slice(0, 4),
-      "      - uses: raven-actions/actionlint-disabled@v2",
-      "        if: '!cancelled()'",
-      // The retired inline shape: a leftover run line is not the fleet's
-      // yamllint action and must draw the advisory.
-      "      - name: Lint YAML",
-      "        if: '!cancelled()'",
-      "        run: yamllint -s .",
-      "      - uses: gitleaks/gitleaks-action@v3",
-      "        if: false",
-    ];
-    const { exitCode, stdout, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("base-checks is missing the actionlint check");
-    expect(stdout).toContain("base-checks is missing the gitleaks check");
-    expect(stdout).toContain("base-checks is missing the yamllint check");
-  });
-
-  test("yamllint from another owner does not satisfy the merged yamllint check", () => {
-    const steps = [
-      ...MERGED_STEPS.slice(0, 6),
-      "      - uses: attacker/repo-platform/actions/yamllint@v1",
-      "        if: '!cancelled()'",
-      ...MERGED_STEPS.slice(8),
-    ];
-    const { exitCode, stdout, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("base-checks is missing the yamllint check");
-    expect(stdout).not.toContain("missing the actionlint check");
-  });
-
-  test("base-checks outside all-green's needs fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS, "[]"),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("all-green `needs:` is missing job(s): base-checks");
-  });
-
-  test("a rendered job absent from all-green's needs fails (the composer guards' backstop)", () => {
-    // The composer's gate_jobs parity and preamble guards catch honest
-    // mistakes at compose time but deliberately not obfuscated jinja; this
-    // check, run by smoke-generate on every push, is the render-side
-    // backstop they name: any job that ends up in a rendered ci.yml
-    // without gating the merge is an error here.
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": [
-        "# This file is managed by Vivswan/repo-platform.",
-        "name: CI",
-        "jobs:",
-        "  typography:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: echo ok",
-        "  release-freshness:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: echo rendered but undeclared",
-        "  all-green:",
-        "    if: always()",
-        "    needs: [typography]",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: |",
-        '          if [ "$RESULT" != "success" ]; then exit 1; fi',
-        "",
-      ].join("\n"),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("all-green `needs:` is missing job(s): release-freshness");
-  });
-
-  test("a ci.yml with neither a typography job nor a merged shape fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": [
-        "name: CI",
-        "jobs:",
-        "  lint:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: echo ok",
-        "  all-green:",
-        "    if: always()",
-        "    needs: [lint]",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: |",
-        '          if [ "$RESULT" != "success" ]; then exit 1; fi',
-        "",
-      ].join("\n"),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no `typography` job");
   });
 });
 
@@ -866,7 +645,7 @@ describe("the single-call gate shape", () => {
   };
   test.each([
     {
-      reason: "a bare run step",
+      reason: "a step that judges nothing (checkout alone)",
       ci: gateCi(
         [],
         [
@@ -875,7 +654,7 @@ describe("the single-call gate shape", () => {
           "    if: always()",
           "    runs-on: ubuntu-latest",
           "    steps:",
-          "      - run: echo unjudged",
+          "      - uses: actions/checkout@v7",
         ],
       ),
     },
@@ -915,6 +694,43 @@ describe("the single-call gate shape", () => {
       expect(stderr).toContain("no judgment step");
     },
   );
+
+  test("an inline run: script in the gate's place is the judgment error, naming that shape", () => {
+    const { exitCode, stderr } = runValidator({
+      ".github/workflows/ci.yml": gateCi(
+        [],
+        [
+          "  all-green:",
+          "    needs: [checks, ci]",
+          "    if: always()",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - run: |",
+          '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+        ],
+      ),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ci.yml: the all-green job has no judgment step");
+    expect(stderr).toContain("an inline `run:` script or a disabled action step judges nothing");
+    expect(stderr).toContain("run a template sync to restore the managed ci.yml");
+  });
+
+  test("a rendered job absent from all-green's needs fails (the composer guards' backstop)", () => {
+    // The composer's gate_jobs parity and preamble guards catch honest
+    // mistakes at compose time but deliberately not obfuscated jinja; this
+    // check, run by smoke-generate on every push, is the render-side
+    // backstop they name: any job that ends up in a rendered ci.yml
+    // without gating the merge is an error here.
+    const { exitCode, stderr } = runValidator({
+      ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"].replace(
+        "  all-green:\n",
+        "  release-freshness:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo rendered but undeclared\n  all-green:\n",
+      ),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("all-green `needs:` is missing job(s): release-freshness");
+  });
 
   test("a caller job missing from the gate's needs fails", () => {
     const unneeded = GATE_CI.replace("needs: [checks, ci]", "needs: [checks]");
@@ -1014,45 +830,6 @@ describe("gitignored paths in self mode", () => {
     );
     expect(exitCode).toBe(1);
     expect(stderr).toContain("vendor/generated.yml: does not parse as YAML");
-  });
-});
-
-describe("one license file", () => {
-  test("LICENSE.md alone passes (fleet repos)", () => {
-    const { exitCode, stderr } = runValidator({
-      "LICENSE.md": `${B}\n# License\n${E}\n`,
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-  });
-
-  test("LICENSE alone passes with a rename advisory (custom-license repos)", () => {
-    // The custom-license module is what lets a render skip the fleet
-    // LICENSE.md, so it is the one selection where a lone LICENSE is a
-    // complete render.
-    const { exitCode, stdout, stderr } = runValidator(
-      {
-        LICENSE: "MIT License\n",
-        ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
-          "modules: [uv]",
-          "modules: [uv, custom-license]",
-        ),
-      },
-      [],
-      { omit: ["LICENSE.md"] },
-    );
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: LICENSE: the fleet convention is LICENSE.md");
-  });
-
-  test("both spellings together fail", () => {
-    const { exitCode, stderr } = runValidator({
-      LICENSE: "MIT License\n",
-      "LICENSE.md": "# License\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("LICENSE and LICENSE.md both exist");
   });
 });
 
@@ -1265,13 +1042,6 @@ describe("ownership self-declarations", () => {
     const privateRender = runValidator({
       ...coc,
       ".github/.copier-answers.yml": `${BASELINE[".github/.copier-answers.yml"]}private: true\n`,
-      ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"]
-        .replace("  typography:", "  base-checks:")
-        .replace("needs: [typography]", "needs: [base-checks]")
-        .replace(
-          "      - run: echo ok",
-          "      - uses: Vivswan/repo-platform/actions/check-typography@main",
-        ),
     });
     expect(privateRender.stderr).toBe("");
     expect(privateRender.exitCode).toBe(0);
@@ -1442,8 +1212,7 @@ describe("ownership-manifest byte parity", () => {
       `${path}: listed as managed in ${MANIFEST} ${verdict.text}`,
     );
     expect(other).not.toContain(path);
-    // One verdict per path: the BASELINE ci.yml's legacy-shape advisories
-    // ride along on stdout, so the count is of findings naming the path.
+    // One verdict per path: the count is of findings naming the path.
     expect(result[verdict.stream].split("\n").filter((line) => line.includes(path))).toHaveLength(
       1,
     );
@@ -1687,8 +1456,8 @@ describe("ownership-manifest byte parity", () => {
       body: `${HB}\n# Security\n${HE}\ntail\n`,
     },
     {
-      reason: "a RETIRED grammar (tail-marker) on the declared pair",
-      entry: splitEntry("tail-marker", B, E, sha(`${B}\n# Security\n${E}\n`)),
+      reason: "an unknown grammar (prefix) on the declared pair",
+      entry: splitEntry("prefix", B, E, sha(`${B}\n# Security\n${E}\n`)),
       body: `${B}\n# Security\n${E}\ntail\n`,
     },
   ])(
@@ -1733,20 +1502,18 @@ describe("ownership-manifest byte parity", () => {
   });
 
   // An uncovered path, so the structural loop's grammar check is probed
-  // alone. A grammar this validator does not read - one that never existed
-  // or a RETIRED one from an older-vintage manifest (a repo not yet synced
-  // past the one-grammar change) - is refused loudly and never read by
-  // guess, mirroring the sync's own vintage refusals.
+  // alone. A grammar this validator does not read is refused loudly and
+  // never read by guess, mirroring the sync's own refusal.
   test.each([
     {
-      reason: "a grammar that never existed (prefix)",
+      reason: "a grammar carrying the managed-region fields",
       grammar: "prefix",
       entryFields: `"begin": "# b", "end": "# e"`,
       body: "# b\n# e\n",
     },
     {
-      reason: "the RETIRED tail-marker grammar with its own fields",
-      grammar: "tail-marker",
+      reason: "a grammar carrying its own fields",
+      grammar: "ribbon",
       entryFields: `"marker": "# m", "managed": "above"`,
       body: "# m\n",
     },
@@ -1767,7 +1534,30 @@ describe("ownership-manifest byte parity", () => {
       expect(stderr).toContain(
         `declares split grammar ${JSON.stringify(grammar)}, which this validator does not read`,
       );
-      expect(stderr).toContain("run a template sync to restamp it");
+      expect(stderr).toContain("run a template sync to restamp the manifest");
+    },
+  );
+
+  // The retired tokens' one home is RETIRED_SHAPE_TOKENS (the no-retired-shapes rule); every
+  // token that ever rode the manifest, planted on an uncovered path, draws exactly one error
+  // naming the entry and the token, through the generic checks alone.
+  test.each(
+    RETIRED_SHAPE_TOKENS.flatMap((shape) =>
+      shape.manifestEntry === undefined
+        ? []
+        : [[shape.name, shape.manifestEntry, shape.re] as const],
+    ),
+  )(
+    "a manifest entry spelling %s is an error naming the entry and the token",
+    (_name, entry, re) => {
+      const { exitCode, stderr } = runValidator({
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), "docs/notes.md": entry }),
+        "docs/notes.md": "# b\n# e\n",
+      });
+      expect(exitCode).toBe(1);
+      const naming = stderr.split("\n").filter((line) => line.includes("entry 'docs/notes.md'"));
+      expect(naming).toHaveLength(1);
+      expect(naming[0]).toMatch(re);
     },
   );
 
@@ -1862,22 +1652,6 @@ describe("ownership-manifest byte parity", () => {
         `updates restamp on that sync`,
     ]);
     expect(stdout).not.toContain(path);
-  });
-
-  test("a legacy mergeable entry is an error naming the retirement", () => {
-    // Old renders' manifests still class settings.yml mergeable; the class
-    // is retired (the file is a starter now), and a manifest claiming it
-    // predates that sync - the error says the next sync re-renders it.
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "mergeable"}',
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      ".github/settings.yml": "repository:\n  has_issues: true\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('has class "mergeable", which is retired');
   });
 
   test("a settings.yml starter entry passes: the file is repo-owned", () => {

@@ -4648,59 +4648,86 @@ export interface RetiredShape {
   readonly re: RegExp;
   /** Text that trips the pattern, for the rule's own control. */
   readonly sample: string;
+  /** What moved the fleet off the shape: the rung, or the census that stood in for one. */
+  readonly retiredBy: string;
+  /** A manifest entry body spelling the token, for the validator's control that such an entry
+   *  draws an error naming the entry and the token; absent for tokens that never rode the
+   *  manifest. */
+  readonly manifestEntry?: string;
 }
 
-const bounded = (token: string): RetiredShape => ({
+const bounded = (token: string, retiredBy: string, manifestEntry?: string): RetiredShape => ({
   name: token,
   re: new RegExp(
     `(?<![A-Za-z0-9_-])${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_-])`,
   ),
   sample: token,
+  retiredBy,
+  ...(manifestEntry === undefined ? {} : { manifestEntry }),
 });
 
-/** Identifying tokens of shapes the sync once tolerated and no longer
- *  does: the retired split grammars and their manifest fields and marker
- *  vocabulary, the retired ownership class (as a class value, so a gh
- *  `--json mergeable` field stays legal), and the retired one-shot
- *  transition script. The sync carries no compatibility code outside the
- *  migration ladder (docs/migrations.md), so none of these may appear in
- *  the sync's code, tests, harness, or workflows. A tripwire for the
- *  audited shapes, not a proof of the policy: a new tolerance needs a
- *  new entry. */
+const splitEntry = (grammar: string, extraField?: string): string =>
+  `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": "# b", "end": "# e"` +
+  `${extraField === undefined ? "" : `, ${JSON.stringify(extraField)}: "# x"`}, "hash": null}`;
+
+const ONE_GRAMMAR =
+  "the collapse of the two split grammars into managed-region; no rung: the one-shot conversion had crossed every repository (census)";
+const SECURITY_RUNG = "m0001_security_policy_to_github, the rung that replaced the one-shot script";
+const SETTINGS_STARTER =
+  "settings.yml becoming a starter with its baseline computed centrally; no rung: every render restamps the manifest";
+const LICENSE_CENSUS =
+  "the fleet LICENSE.md rename; no rung: every managed repository carried LICENSE.md (census)";
+const ALL_GREEN_INVERSION =
+  "the all-green inversion: the gate became the all-green action's verdict check run; no rung: copier re-renders ci.yml (census: every render on the single-call shape)";
+
+/** Identifying tokens of retired shapes, one line each with what retired it (docs/migrations.md).
+ *  A tripwire for the audited shapes, not a proof of the policy: a new tolerance needs a new line;
+ *  the class token matches a class VALUE only, so a gh `--json mergeable` field stays legal. */
 export const RETIRED_SHAPE_TOKENS: readonly RetiredShape[] = [
-  ...[
-    "tail-marker",
-    "bounded-region",
-    "repo-platform:local-section",
-    "REPOSITORY LOCAL",
-    "managed_end",
-    "local_begin",
-    "local_end",
-    "pre-grammar",
-    "relocate_security_policy",
-    "security-move.md",
-  ].map(bounded),
+  bounded("tail-marker", ONE_GRAMMAR, splitEntry("tail-marker")),
+  bounded("bounded-region", ONE_GRAMMAR, splitEntry("bounded-region")),
+  bounded("repo-platform:local-section", ONE_GRAMMAR),
+  bounded("REPOSITORY LOCAL", ONE_GRAMMAR),
+  bounded("managed_end", ONE_GRAMMAR, splitEntry("managed-region", "managed_end")),
+  bounded("local_begin", ONE_GRAMMAR, splitEntry("managed-region", "local_begin")),
+  bounded("local_end", ONE_GRAMMAR, splitEntry("managed-region", "local_end")),
+  bounded("pre-grammar", ONE_GRAMMAR),
+  bounded("relocate_security_policy", SECURITY_RUNG),
+  bounded("security-move.md", SECURITY_RUNG),
   {
     name: "the mergeable ownership class",
     re: /\bclass\b[^\n]{0,8}?["']mergeable["']/,
     sample: 'class: "mergeable"',
+    retiredBy: SETTINGS_STARTER,
+    manifestEntry: '{"class": "mergeable"}',
   },
   {
     name: "the two license spellings",
     re: /["'`]LICENSE["'`]\s*,\s*["'`]LICENSE\.md["'`]/,
     sample: '"LICENSE", "LICENSE.md"',
+    retiredBy: LICENSE_CENSUS,
   },
+  bounded("All jobs green", ALL_GREEN_INVERSION),
+  bounded("judgesInline", ALL_GREEN_INVERSION),
 ];
 
-/** Where the no-retired-shapes rule looks: every workflow script zone
- *  and every workflow, plus the sync's tests and the shared test
- *  fixtures - minus the ladder directory and its tests, the one place a
- *  retired shape may be named (a rung exists to move a repository off
- *  it). actions/ and scripts/ are outside the sync and outside this scan. */
+/** The no-retired-shapes scan set. Exempt: the ladder and its tests (a rung exists to name the
+ *  shape it moves repositories off), the token list's own file, and its planted controls. */
 export const RETIRED_SHAPE_SCAN = {
-  dirs: [".github/scripts", ".github/workflows", "tests/sync", "tests/shared"],
-  exempt: [MIGRATIONS_DIR_REL, MIGRATIONS_TESTS_REL],
+  dirs: [".github/scripts", ".github/workflows", "actions", "scripts", "templates", "tests"],
+  files: ["copier.yml"],
+  exempt: [
+    MIGRATIONS_DIR_REL,
+    MIGRATIONS_TESTS_REL,
+    "scripts/check_ssot.ts",
+    "tests/scripts/migration_ladder_rule.test.ts",
+  ],
 };
+
+/** Whether `rel` is an exempt path or lies under an exempt directory. */
+export function retiredShapeExempt(rel: string): boolean {
+  return RETIRED_SHAPE_SCAN.exempt.some((entry) => rel === entry || rel.startsWith(`${entry}/`));
+}
 
 /** The first retired-shape occurrence on each line that carries one
  *  (file:line, the matched text). */
@@ -4714,7 +4741,7 @@ export function retiredShapeMismatches(files: Record<string, string>): Mismatch[
         mismatches.push({
           file: `${rel}:${index + 1}`,
           expected:
-            "no identifying token of a retired shape outside the migration ladder (the sync carries no compatibility code; a transition is a rung)",
+            "no identifying token of a retired shape outside the migration ladder (no compatibility code outside the ladder; a transition is a rung)",
           got: match[0],
         });
         break;
@@ -4737,13 +4764,14 @@ export function rungSources(): Record<string, string> {
 
 /** The no-retired-shapes scan set as repo-relative path -> text. */
 export function retiredShapeScanFiles(): Record<string, string> {
-  const paths = RETIRED_SHAPE_SCAN.dirs
-    .flatMap((dir) =>
+  const paths = [
+    ...RETIRED_SHAPE_SCAN.files,
+    ...RETIRED_SHAPE_SCAN.dirs.flatMap((dir) =>
       walkFiles(dir)
         .filter((entry) => !entry.symlink)
         .map((entry) => entry.path),
-    )
-    .filter((rel) => !RETIRED_SHAPE_SCAN.exempt.some((prefix) => rel.startsWith(`${prefix}/`)));
+    ),
+  ].filter((rel) => !retiredShapeExempt(rel));
   return Object.fromEntries(paths.map((rel) => [rel, read(rel)]));
 }
 
@@ -4950,11 +4978,10 @@ const rules: Rule[] = [
   },
 
   {
-    // The sync carries no compatibility code outside the migration
-    // ladder: the identifying tokens of the shapes it once tolerated
-    // (RETIRED_SHAPE_TOKENS) appear nowhere in its code, tests, harness,
-    // or workflows. actions/ and scripts/ are outside the sync and outside
-    // this scan; the validator refuses unknown grammars generically.
+    // No compatibility code outside the migration ladder: the identifying
+    // tokens of the shapes the platform once tolerated (RETIRED_SHAPE_TOKENS)
+    // appear nowhere in the sync, the actions, the scripts, the template
+    // sources, or their tests.
     name: "no-retired-shapes",
     run: () => retiredShapeMismatches(retiredShapeScanFiles()),
   },

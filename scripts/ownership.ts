@@ -2,14 +2,11 @@
 // The single owner of template-file OWNERSHIP truth: how each file the
 // template lands in a generated repository relates to sync.
 //
-// Three classes (the ownership manifest's vocabulary; a fourth,
-// "mergeable" - baseline kept current by three-way merge - was retired
-// when settings.yml, its only member, became a starter):
+// Three classes (the ownership manifest's vocabulary):
 // - managed: sync overwrites the whole file; local edits are replaced.
 // - split: sync owns the BEGIN/END-bounded managed region; the repository
 //   owns everything outside it, above and below (the one grammar,
-//   managed-region - the tail-marker and four-marker bounded-region
-//   grammars were retired into it).
+//   managed-region).
 // - starter: rendered once, repo-owned from then on (_skip_if_exists).
 //
 // Ownership is DECLARED as data, never inferred from file text:
@@ -72,23 +69,6 @@ export const REGION_MARKER_LINES = new Set([
   HASH_REGION_MARKERS.end,
   HTML_REGION_MARKERS.begin,
   HTML_REGION_MARKERS.end,
-]);
-
-/** Marker spellings of the RETIRED split grammars (tail-marker's
- *  local-section line and the four-marker bounded-region shape's LOCAL
- *  pair). No code splits at these anymore, so a template source carrying
- *  one ships a dead promise line readers would still believe - and keeping
- *  the scan armed is what stops the retired grammar from quietly growing
- *  back. Fleet repositories may still carry these spellings as ordinary
- *  repo-owned content (the retired one-time conversion stripped the
- *  platform-authored ones; anything left is the repository's and rides
- *  through every carry byte-identical); only TEMPLATE sources are scanned
- *  here. */
-export const RETIRED_MARKER_LINES = new Set([
-  "# repo-platform:local-section",
-  "<!-- repo-platform:local-section -->",
-  "# BEGIN REPOSITORY LOCAL",
-  "# END REPOSITORY LOCAL",
 ]);
 
 /** A module's settings layers, next to its module.yml (docs/settings.md).
@@ -563,20 +543,6 @@ export function declarationTextErrors(
   declaredMarkers: readonly string[],
   where: string,
 ): string[] {
-  // A RETIRED grammar's marker spelling is refused in every template
-  // source, whatever the declared class: no code splits at those lines
-  // anymore, so shipping one plants a dead ownership promise readers
-  // would still believe - and the scan is what keeps the retired grammars
-  // from quietly growing back.
-  for (const retired of RETIRED_MARKER_LINES) {
-    if (source.includes(retired)) {
-      return [
-        `${where}: carries the retired split marker '${retired}' - the tail-marker ` +
-          "and LOCAL-region grammars were retired into managed-region (repo-owned " +
-          "content lives outside the BEGIN/END managed region now); drop the line",
-      ];
-    }
-  }
   // The foreign-marker rule runs FIRST and for every declaration, so the
   // split arm below states only what is true of its OWN markers. The
   // roster unions the SHIPPED marker constants with the texts derived

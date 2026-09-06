@@ -81,7 +81,7 @@ A rung is code the sync runs from the build branch, the same channel copier's st
 2. Add its unit test at `tests/sync/migrations/mNNNN_<slug>.test.ts`: import the rung as the default import from `../../../.github/scripts/sync/migrations/mNNNN_<slug>.ts`, assign it to the runner's `Rung` type, and reach it from an enabled `test()` imported from `bun:test`. The fixtures in `tests/shared/migration_fixtures.ts` build scratch checkouts and build histories.
 3. Add its case to [upgrade_path_test.sh](https://github.com/Vivswan/repo-platform/blob/main/.github/scripts/ci/upgrade_path_test.sh): remove the rung file from the synthetic old build, plant the pre-transition state, and assert the postcondition after the ladder runs.
 4. Add its line to the list below and a PR-body note describing the transition.
-5. `bun run check`: `migration-ladder` pins the filename grammar, the id literal, the bound test, the harness case, and the docs line; `migrations-self-contained` pins the imports; `no-retired-shapes` keeps the sync free of compatibility code for the shape the rung moves repositories off.
+5. `bun run check`: `migration-ladder` pins the filename grammar, the id literal, the bound test, the harness case, and the docs line; `migrations-self-contained` pins the imports; `no-retired-shapes` keeps the sync, the actions, the scripts, the template sources, and their tests free of the shape the rung moves repositories off (`RETIRED_SHAPE_TOKENS` lists the tokens, one line each with what retired it; the ladder is the one exempt place).
 
 ## Rungs on the ladder
 
