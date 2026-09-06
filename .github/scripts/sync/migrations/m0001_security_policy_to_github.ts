@@ -1,20 +1,6 @@
-// SECURITY.md leaves the repository root for .github/SECURITY.md, where
-// the template renders it. The file is a split (repository-owned content
-// outside the managed region), so it is `git mv`ed ahead of copier and the
-// runner commits the staged rename: the split-file rebuild then finds the
-// previous copy at the new path (HEAD's manifest does not declare it yet -
-// the ownership-flip fallback), while a plain rename would have
-// retired-file cleanup delete the tail. CODE_OF_CONDUCT.md is not moved:
-// it has no repository-owned half, and moving it ahead of copier would
-// strand the copy on a public->private flip, where the new render carries
-// it at neither path.
-//
-// Single owner of the file's location: BOTH paths or a non-file is the
-// error arm; NEITHER is fine (the update renders it fresh).
-//
-// Self-contained on purpose: this file runs from whichever build commit
-// carries it (docs/migrations.md), so it imports node builtins only and
-// restates the few lines it needs.
+// Moves a root SECURITY.md to .github/SECURITY.md with `git mv` ahead of
+// copier, so the split-file rebuild finds the repository-owned tail at the
+// new path. Self-contained: node builtins only (docs/migrations.md).
 
 import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";

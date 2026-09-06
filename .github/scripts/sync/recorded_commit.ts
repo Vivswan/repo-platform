@@ -1,9 +1,6 @@
-// The one judgment of a target's recorded `_commit`, shared by the sync
-// and the rehearsal: git resolves ANY revspec, so a hand-edited
-// `origin/build` would name the delivered tip and every rung would read as
-// crossed (docs/migrations.md has the rejection table). Only build history
-// is a usable base: the ladder walks first-parent build commits from it,
-// and copier's three-way merge needs the same tree.
+// The one judgment of a target's recorded `_commit` (sync and rehearsal):
+// a full sha in build history only, never a revspec git would resolve to
+// today's tip. docs/migrations.md has the rejection table.
 
 import { capture } from "../shared/proc.ts";
 

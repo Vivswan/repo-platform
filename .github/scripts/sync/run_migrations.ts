@@ -1,19 +1,10 @@
 #!/usr/bin/env bun
-// Runs the migration ladder's pending rungs before copier updates the
-// target (docs/migrations.md). A rung is a self-contained file at
-// migrations/mNNNN_<slug>.ts on the build branch and is its own marker:
-// pending = every rung file present in any build commit in (old, new]
-// that old's tree lacks, in filename order, each loaded from the NEWEST
-// build commit that carries it - so a rung pruned from main after a
-// repository fell behind still runs, from history. No usable base (OLD_SHA
-// "") runs every rung on the delivered tree; each rung is idempotent.
-//
-// The runner owns the git side: it requires a clean checkout, commits
-// what a rung staged as the sync identity after each verdict, and stops
-// at the first error arm. Env: TARGET_DIR (default target), TARGET_DISPLAY,
-// PLATFORM_DIR (default "."), OLD_SHA ("" = no base), TARGET_REF, RUNNER_TEMP.
+// The migration ladder's runner (docs/migrations.md): walks the build
+// commits in (OLD_SHA, TARGET_REF] and runs each new rung from the newest
+// commit carrying it. Env: TARGET_DIR, TARGET_DISPLAY, PLATFORM_DIR, OLD_SHA
+// ("" = no base), TARGET_REF, RUNNER_TEMP.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
@@ -362,17 +353,36 @@ export function applyPending(run: LadderRun): RunOutcome {
   // The delivered ref as a full sha: the rehearsal hands over a tag name,
   // and the scratch paths and the target's view both want the object id.
   const newSha = git(run.platformDir, ["rev-parse", "--verify", `${run.newSha}^{commit}`]).trim();
-  const pending = fetchRungs(
-    run.platformDir,
-    pendingRungs(run.platformDir, run.oldSha, newSha),
-    join(run.runnerTemp, MIGRATIONS_DIR),
-  );
-  const outcome = runRungs({ dir: run.targetDir, oldSha: run.oldSha, newSha }, pending, loadRung, {
-    hidden: run.hidden,
-    ignoredBefore: new Set(ignoredPaths(run.targetDir)),
-  });
-  writeReports(run.runnerTemp, outcome);
-  return outcome;
+  const scratch = join(run.runnerTemp, MIGRATIONS_DIR);
+  try {
+    const pending = fetchRungs(
+      run.platformDir,
+      pendingRungs(run.platformDir, run.oldSha, newSha),
+      scratch,
+    );
+    const outcome = runRungs(
+      { dir: run.targetDir, oldSha: run.oldSha, newSha },
+      pending,
+      loadRung,
+      {
+        hidden: run.hidden,
+        ignoredBefore: new Set(ignoredPaths(run.targetDir)),
+      },
+    );
+    writeReports(run.runnerTemp, outcome);
+    return outcome;
+  } finally {
+    // The fetched sources are this run's own scratch, removed on every
+    // path; a failed removal is reported, never allowed to replace the
+    // run's own outcome or error.
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch (err) {
+      console.log(
+        `::warning::could not remove the ladder's scratch ${scratch}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 function main(): number {

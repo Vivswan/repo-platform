@@ -390,6 +390,29 @@ describe("applyPending and the CLI", () => {
     expect(existsSync(join(target, ".github/m0002_b.txt"))).toBe(false);
   });
 
+  test("the fetched rung sources are removed after a run, on the verdict and error paths alike", () => {
+    const dir = chain();
+    const ok = runLadder(dir, repo({}), "old");
+    expect(ok.exitCode).toBe(0);
+    expect(ok.stdout).toContain("migration m0002_b -> planted (committed)");
+    expect(existsSync(join(ok.temp, "migrations"))).toBe(false);
+    const refusing = platform([
+      { tag: "old", rungs: {} },
+      {
+        tag: "new",
+        rungs: {
+          "m0001_a.ts": rungSource("m0001_a", {
+            body: '    return { kind: "error", message: "refused" };',
+          }),
+        },
+      },
+    ]);
+    const failed = runLadder(refusing, repo({}), "old");
+    expect(failed.exitCode).not.toBe(0);
+    expect(failed.stdout).toContain("::error::Vivswan/demo: migration m0001_a: refused");
+    expect(existsSync(join(failed.temp, "migrations"))).toBe(false);
+  });
+
   test("THE history run: a pruned rung runs from the commit that last carried it, committed and reported", () => {
     const dir = chain();
     const target = repo({});
