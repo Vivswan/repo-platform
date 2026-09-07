@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { RETIRED_SHAPE_TOKENS } from "../../../../../scripts/check_ssot.ts";
+import { RETIRED_SHAPE_TOKENS } from "../../../../../scripts/check/ssot/migration_ladder.ts";
 import { boundedSpawnSync } from "../../../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../../../shared/temp_dir.ts";
 import {

@@ -2,9 +2,10 @@
 // region's body between its hand-placed BEGIN/END markers: line-comment
 // markers on lines of their own, markdown markers inline.
 
-/** The marker grammar's kind tokens. check_ssot.ts's stripGeneratedRegions
- *  builds its matcher from these, so renaming the marker text here cannot
- *  leave that stripper silently matching nothing. */
+/** The marker grammar's kind tokens. The ssot checker's stripGeneratedRegions
+ *  (scripts/check/ssot/comparison.ts) builds its matcher from these, so
+ *  renaming the marker text here cannot leave that stripper silently
+ *  matching nothing. */
 export const MARKER_TOKENS = { begin: "BEGIN GENERATED:", end: "END GENERATED:" } as const;
 
 /** What the BEGIN marker tells editors to edit instead of the region; most

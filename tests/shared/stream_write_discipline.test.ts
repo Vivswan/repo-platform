@@ -6,21 +6,25 @@
 // class kept surfacing one landing at a time; this guard makes the next
 // one loud at authoring time instead of silent at truncation time.
 //
-// ONE scanner on purpose: this suite drives check_ssot.ts's own
-// asyncStreamWriteMismatches (AST-read call sites, so strings and
+// ONE scanner on purpose: this suite drives the ssot checker's own
+// asyncStreamWriteMismatches (scripts/check/ssot/process_discipline.ts;
+// AST-read call sites, so strings and
 // comments never fire) over the same three roots its stream-write-sync
 // rule scans, instead of keeping a second implementation whose semantics
 // could silently diverge (the two guards previously carried same-named
 // stripComments locals with removal semantics; timeout_log_lines.test.ts
 // reads the shared parser for the same reason). The scanner's own
 // fixture controls - fire shapes, the allowlist mechanism, stale entries
-// - live in tests/scripts/check_ssot.test.ts; what this suite adds is the
+// - live in tests/scripts/check_ssot/process_discipline.test.ts; what this suite adds is the
 // bun-test-side enforcement plus the reach control below.
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { asyncStreamWriteMismatches, NATURAL_EXIT_WRITE_FILES } from "../../scripts/check_ssot.ts";
+import {
+  asyncStreamWriteMismatches,
+  NATURAL_EXIT_WRITE_FILES,
+} from "../../scripts/check/ssot/process_discipline.ts";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 

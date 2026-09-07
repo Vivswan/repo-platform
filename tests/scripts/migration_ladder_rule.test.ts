@@ -1,4 +1,4 @@
-// The migration ladder's three ssot rules (scripts/check_ssot.ts), each
+// The migration ladder's three ssot rules (scripts/check/ssot/migration_ladder.ts), each
 // over its model: a consistent synthetic ladder yields nothing, each
 // defect yields exactly the mismatches naming it (file, expected, got),
 // and the live repository holds every invariant.
@@ -25,7 +25,7 @@ import {
   rungTestShortfall,
   rungTestSpecifier,
   selfContainedMismatches,
-} from "../../scripts/check_ssot.ts";
+} from "../../scripts/check/ssot/migration_ladder.ts";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 
@@ -671,7 +671,10 @@ describe("the live repository", () => {
       expect(paths).toContain(covered);
     }
     // The token list and its planted controls are the two files allowed to spell the tokens.
-    for (const own of ["scripts/check_ssot.ts", "tests/scripts/migration_ladder_rule.test.ts"]) {
+    for (const own of [
+      "scripts/check/ssot/migration_ladder.ts",
+      "tests/scripts/migration_ladder_rule.test.ts",
+    ]) {
       expect(paths).not.toContain(own);
     }
     expect(paths.some((rel) => rel.startsWith(`${MIGRATIONS_DIR_REL}/`))).toBe(false);
