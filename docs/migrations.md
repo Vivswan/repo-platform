@@ -9,7 +9,7 @@ A one-shot fleet transition (a rendered file moving, a repo-owned file needing a
 | How does a sync decide which rungs to run, and from where? | `pendingRungs` in [sync/run_migrations.ts](../.github/scripts/sync/run_migrations.ts) |
 | How do rungs reach the build branch? | `copyMigrations` in [build-branches/branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) |
 | Which recorded `_commit` is a usable base? | [sync/recorded_commit.ts](../.github/scripts/sync/recorded_commit.ts) |
-| What keeps the pieces from drifting? | the `migration-ladder`, `migrations-self-contained`, and `no-retired-shapes` rules in [scripts/check_ssot.ts](../scripts/check_ssot.ts) |
+| What keeps the pieces from drifting? | the `migration-ladder`, `migrations-self-contained`, and `no-retired-shapes` rules in [scripts/check/ssot/migration_ladder.ts](../scripts/check/ssot/migration_ladder.ts) |
 
 ## One rung, one file
 

@@ -31,7 +31,7 @@ The judgment, whole: every needed result must be `success` or `skipped` (a modul
 
 ## The rosters (how a deleted gate stays loud)
 
-The gate judges only what its `needs` list names, so a job deleted from ci.yml AND from the needs list would stop gating silently. Authored rosters in [scripts/check_ssot.ts](../scripts/check_ssot.ts) close that at authoring time:
+The gate judges only what its `needs` list names, so a job deleted from ci.yml AND from the needs list would stop gating silently. Authored rosters in [scripts/check/ssot/all_green.ts](../scripts/check/ssot/all_green.ts) close that at authoring time:
 
 | Rule | What it pins |
 | --- | --- |

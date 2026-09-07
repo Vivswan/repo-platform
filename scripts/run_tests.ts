@@ -67,10 +67,11 @@ async function main(argv: string[]): Promise<number> {
   for (const signal of FORWARDED_SIGNALS) process.on(signal, () => child?.kill(signal));
   const scratch = mkdtempSync(join(tmpdir(), "repo-platform-tests-"));
   try {
-    // Async on purpose (ASYNC_SPAWN_FILES in check_ssot.ts): a synchronous
-    // spawn would hold the signal until the child exited on its own.
-    // Inherited stdio, so there is no pipe to drain and no hang to bound
-    // beyond the child's own life.
+    // Async on purpose (ASYNC_SPAWN_FILES in
+    // scripts/check/ssot/process_discipline.ts): a synchronous spawn would
+    // hold the signal until the child exited on its own. Inherited stdio,
+    // so there is no pipe to drain and no hang to bound beyond the child's
+    // own life.
     child = Bun.spawn(["bun", "test", ...args], {
       cwd: REPO_ROOT,
       env: { ...process.env, TMPDIR: scratch },

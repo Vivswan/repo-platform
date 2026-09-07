@@ -33,6 +33,6 @@ repo-platform is a Copier template plus reusable GitHub Actions workflows and co
 ## Conventions
 
 - PR titles and commit subjects are Conventional Commits, squash-merged. repo-platform runs no release pipeline of its own.
-- `all-green` is the required check: ci.yml's own job, judged through actions/all-green (docs/all-green.md). A new gating job goes in `ALL_GREEN_ROSTER` in scripts/check_ssot.ts AND the all-green job's needs list.
+- `all-green` is the required check: ci.yml's own job, judged through actions/all-green (docs/all-green.md). A new gating job goes in `ALL_GREEN_ROSTER` in scripts/check/ssot/all_green.ts AND the all-green job's needs list.
 - Plain ASCII punctuation (check-typography), and markdown prose is never hard-wrapped: one source line per paragraph or list item (`bun run wrap:check`).
 <!-- END REPO-PLATFORM MANAGED -->

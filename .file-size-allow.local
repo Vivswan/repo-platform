@@ -5,5 +5,3 @@
 # exemption, a split that would break an external contract, a file that
 # predates the cap and names the PR its split waits on); an entry whose
 # file is back under every cap fails the check as stale.
-scripts/check_ssot.ts # predates the cap: 51 ssot rules in one file; splits per rule group once PRs #76, #84 and #86, which rewrite it, have landed
-tests/scripts/check_ssot.test.ts # predates the cap: the rule suite of check_ssot.ts; splits with it

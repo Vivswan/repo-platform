@@ -648,7 +648,7 @@ jobs:
 
   # THE gate: this job's own check run (named all-green, created by the
   # GitHub Actions app) is the ruleset's required check. `needs` must list
-  # every gating job above - check_ssot.ts's ALL_GREEN_ROSTER is that list's
+  # every gating job above - ALL_GREEN_ROSTER (scripts/check/ssot/all_green.ts) is that list's
   # authored twin, compared both ways, so adding or retiring a gate is loud.
   # `if: always()` because the judgment must run over failures; the shared
   # action fails unless every result is success or skipped with at least
