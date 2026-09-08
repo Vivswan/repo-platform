@@ -54,11 +54,11 @@ const GOAL_READ = [
 ].join("\n");
 
 const GOAL_READ_ROWS: CuratedRow[] = [
-  { label: "Create a new managed repository", href: "new-repo.md", note: null },
+  { label: "Create a new managed repository", href: "new-repo.md", note: "New repo" },
   {
     label: "Understand the pr-title required check",
     href: "settings.md#the-pr-title-ruleset",
-    note: null,
+    note: "Settings: the pr-title ruleset",
   },
 ];
 
@@ -110,7 +110,7 @@ describe("landingTableRule", () => {
     const src = '| Goal | Read |\n|---|---|\n| Say "hi" & <b>bye</b> | [Page](p.md) |\n';
     expect(withRule.render(src, { ...LANDING })).toBe(
       '<FleetLauncher rows="[{&quot;label&quot;:&quot;Say \\&quot;hi\\&quot; &amp; bye&quot;,' +
-        '&quot;href&quot;:&quot;p.md&quot;,&quot;note&quot;:null}]"></FleetLauncher>\n',
+        '&quot;href&quot;:&quot;p.md&quot;,&quot;note&quot;:&quot;Page&quot;}]"></FleetLauncher>\n',
     );
   });
 
@@ -204,9 +204,20 @@ describe("landingTableRule", () => {
       [{ label: "New repo", href: "new-repo.md", note: "Start here" }],
     ],
     [
+      "a two-column table notes each row by its link text, unless the label already is it",
+      "| Goal | Read |\n|---|---|\n| Create a repo | [New repo](new-repo.md) |\n| New repo | [New repo](new-repo.md) |\n| New Repo | [New repo](new-repo.md) |\n| | [New repo](new-repo.md) |\n| Empty link | [](empty.md) |\n",
+      [
+        { label: "Create a repo", href: "new-repo.md", note: "New repo" },
+        { label: "New repo", href: "new-repo.md", note: null },
+        { label: "New Repo", href: "new-repo.md", note: "New repo" },
+        { label: "New repo", href: "new-repo.md", note: null },
+        { label: "Empty link", href: "empty.md", note: null },
+      ],
+    ],
+    [
       "a <br> reads as a space and other inline html is dropped",
       "| Goal | Read |\n|---|---|\n| Use<br>Docker<br/>with<BR />`compose`, <kbd>Ctrl</kbd>+C | [Docker](docker.md) |\n",
-      [{ label: "Use Docker with compose, Ctrl+C", href: "docker.md", note: null }],
+      [{ label: "Use Docker with compose, Ctrl+C", href: "docker.md", note: "Docker" }],
     ],
     [
       "a single-column table labels rows by their link text",
@@ -224,7 +235,7 @@ describe("landingTableRule", () => {
     [
       "emphasis is dropped from labels and runs of spaces collapse",
       "| Goal | Read |\n|---|---|\n| **Ship** a *release*   now | [Release](new-repo.md#release) |\n",
-      [{ label: "Ship a release now", href: "new-repo.md#release", note: null }],
+      [{ label: "Ship a release now", href: "new-repo.md#release", note: "Release" }],
     ],
   ];
   test.each(shapes)("%s", (_name, src, rows) => {
@@ -318,7 +329,7 @@ describe("landingTableRule under VitePress's renderer", () => {
       '<div class="tip custom-block"><p class="custom-block-title">Tip</p>\n' +
         '<table tabindex="0">\n<thead>\n<tr>\n<th>Read</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n' +
         '<td><a href="./aside.html">Aside</a></td>\n</tr>\n</tbody>\n</table>\n</div>\n' +
-        launcherTag([{ label: "Publish", href: "./pages.html", note: null }]),
+        launcherTag([{ label: "Publish", href: "./pages.html", note: "Pages" }]),
     );
   });
 
