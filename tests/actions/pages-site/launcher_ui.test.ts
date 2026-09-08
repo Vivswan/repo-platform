@@ -8,7 +8,7 @@ import type {
 import {
   clampHighlight,
   decodeEntities,
-  flatItems,
+  flatRows,
   foldLabel,
   groupRows,
   type HotkeyIntent,
@@ -17,6 +17,7 @@ import {
   type KeyIntent,
   type KeyState,
   keyIntent,
+  type LauncherRow,
   modifierLabel,
   moveHighlight,
   shownGroups,
@@ -80,15 +81,34 @@ describe("groupRows", () => {
   });
 });
 
-describe("shownGroups and flatItems", () => {
-  test("a folded group shows only its kept rows until unfolded; the flat list follows", () => {
+describe("shownGroups and flatRows", () => {
+  const link = (item: LauncherItem): LauncherRow => ({ kind: "link", item });
+  const fold = (group: LauncherGroup, open: boolean): LauncherRow => ({
+    kind: "fold",
+    group,
+    open,
+  });
+
+  test("a folded group shows its kept rows and its fold row until unfolded; the flat list follows", () => {
     const closed = shownGroups([NEW_REPO, API, LONG_PAGE], new Set());
     expect(closed.map((entry) => entry.open)).toEqual([true, false, false]);
-    expect(flatItems(closed)).toEqual([...NEW_REPO.items, LONG_PAGE.items[0]]);
+    expect(flatRows(closed)).toEqual([
+      ...NEW_REPO.items.map(link),
+      fold(API, false),
+      link(LONG_PAGE.items[0]),
+      fold(LONG_PAGE, false),
+    ]);
 
     const opened = shownGroups([NEW_REPO, API, LONG_PAGE], new Set(["dir:api", LONG_PAGE.key]));
     expect(opened.map((entry) => entry.open)).toEqual([true, true, true]);
-    expect(flatItems(opened)).toEqual([...NEW_REPO.items, ...API.items, ...LONG_PAGE.items]);
+    expect(flatRows(opened)).toEqual([
+      ...NEW_REPO.items.map(link),
+      fold(API, true),
+      ...API.items.map(link),
+      link(LONG_PAGE.items[0]),
+      fold(LONG_PAGE, true),
+      ...LONG_PAGE.items.slice(1).map(link),
+    ]);
   });
 });
 
@@ -283,54 +303,89 @@ describe("the rendered list", () => {
     page("/repo/guide/intro.html", "Intro", "guide", 1),
   ];
 
-  /** The list's rows and fold buttons in document order: `<row index> <href>`
-   *  for a row, `fold: <label>` for a fold button. */
+  /** The listbox's options in document order, each with its row index:
+   *  `<index> <href>` for a link, `<index> fold: <label>` for a fold row.
+   *  The pattern pins the option contract: the option IS the anchor or the
+   *  fold element, unselected, and a link is out of the Tab order. */
   function outline(html: string): string[] {
-    const ROW_RE =
-      /<li class="fleet-launcher-row"[^>]*id="v-\d+-row-(\d+)"[^>]*><a class="fleet-launcher-link" href="([^"]*)"|<button type="button" class="fleet-launcher-fold-button"[^>]*>([^<]*)</g;
-    return [...html.matchAll(ROW_RE)].map(([, index, href, fold]) =>
-      fold === undefined ? `${index} ${href}` : `fold: ${fold}`,
+    const OPTION_RE =
+      /<a class="fleet-launcher-link" role="option" id="v-\d+-row-(\d+)" aria-selected="false" tabindex="-1" href="([^"]*)"|<div class="fleet-launcher-fold" role="option" id="v-\d+-row-(\d+)" aria-selected="false">([^<]*)</g;
+    return [...html.matchAll(OPTION_RE)].map(([, index, href, foldIndex, fold]) =>
+      fold === undefined ? `${index} ${href}` : `${foldIndex} fold: ${fold}`,
     );
   }
 
-  test("a folded page group keeps its page row before the fold, a folded dir group hides everything behind it, and the row indexes follow document order", async () => {
-    // Under bun the bare `vitepress` specifier resolves to the node entry,
-    // which has no useData (Vite aliases the client one), and the data
-    // loader runs only inside a VitePress build. Virtual modules stand in
-    // for both; the node entry, which the markdown-rule tests import by
-    // path, is untouched.
-    const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
-    Bun.plugin({
-      name: "launcher-ssr-stubs",
-      setup(build) {
-        build.module("vitepress", () => ({
-          exports: { useData: () => ({ localeIndex: vue.ref("root") }) },
-          loader: "object",
-        }));
-        build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
-          exports: { data: pages },
-          loader: "object",
-        }));
-      },
-    });
-    const { renderToString } = await import(
-      resolve(ACTION_DIR, "node_modules/vue/server-renderer/index.mjs")
-    );
-    const { default: FleetLauncher } = await import(
-      resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")
-    );
+  /** Each group's aria-expanded in document order: absent on a group with
+   *  nothing to fold. */
+  function groupStates(html: string): (string | null)[] {
+    const GROUP_RE =
+      /<div class="fleet-launcher-group" role="group" aria-labelledby="v-\d+-group-\d+"( aria-expanded="(true|false)")?>/g;
+    return [...html.matchAll(GROUP_RE)].map(([, , expanded]) => expanded ?? null);
+  }
 
+  // Under bun the bare `vitepress` specifier resolves to the node entry,
+  // which has no useData (Vite aliases the client one), and the data
+  // loader runs only inside a VitePress build. Virtual modules stand in
+  // for both, registered once (bun caches them): the stub's locale is a
+  // shared ref each render sets. The node entry, which the markdown-rule
+  // tests import by path, is untouched.
+  let stage: Promise<(rows: string, locale: string) => Promise<string>> | undefined;
+  function render(rows: string, locale: string): Promise<string> {
+    stage ??= (async () => {
+      const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
+      const localeIndex = vue.ref("root");
+      Bun.plugin({
+        name: "launcher-ssr-stubs",
+        setup(build) {
+          build.module("vitepress", () => ({
+            exports: { useData: () => ({ localeIndex }) },
+            loader: "object",
+          }));
+          build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
+            exports: { data: pages },
+            loader: "object",
+          }));
+        },
+      });
+      const { renderToString } = await import(
+        resolve(ACTION_DIR, "node_modules/vue/server-renderer/index.mjs")
+      );
+      const { default: FleetLauncher } = await import(
+        resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")
+      );
+      return (rows: string, locale: string) => {
+        localeIndex.value = locale;
+        return renderToString(vue.createSSRApp(FleetLauncher, { rows, mode: "panel" }));
+      };
+    })();
+    return stage.then((run) => run(rows, locale));
+  }
+
+  test("fold rows follow a page group's page row and replace a dir group's rows; indexes and group fold states follow document order", async () => {
     const rows = JSON.stringify([{ label: "Set things up", href: "./setup.html", note: null }]);
-    const html = await renderToString(vue.createSSRApp(FleetLauncher, { rows, mode: "panel" }));
+    const html = await render(rows, "root");
 
     expect(outline(html)).toEqual([
       "0 /repo/setup.html",
       "1 /repo/setup.html#part-0",
       "2 /repo/long.html",
-      "fold: Show 9 headings on Long",
-      "fold: Show 9 pages in api/",
-      "3 /repo/guide/intro.html",
-      "4 /repo/guide/intro.html#part-0",
+      "3 fold: Show 9 headings on Long",
+      "4 fold: Show 9 pages in api/",
+      "5 /repo/guide/intro.html",
+      "6 /repo/guide/intro.html#part-0",
     ]);
+    expect(groupStates(html)).toEqual([null, "false", "false", null]);
+    // Every option is one element: no list or button markup for assistive
+    // tech to demote to presentation or to find inside the listbox.
+    expect(html).not.toMatch(/<(li|ol|ul|button)\b/);
+    expect(html.match(/role="option"/g)).toHaveLength(7);
+    expect(html).toContain('role="combobox" aria-expanded="true"');
+  });
+
+  test("a locale with no pages renders an empty listbox and the field says so", async () => {
+    const html = await render("[]", "zh-cn");
+    expect(outline(html)).toEqual([]);
+    expect(groupStates(html)).toEqual([]);
+    expect(html).toContain('role="combobox" aria-expanded="false"');
   });
 });
