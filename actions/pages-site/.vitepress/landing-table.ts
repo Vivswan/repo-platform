@@ -1,34 +1,48 @@
-// The landing-table markdown rule: on a landing page (the index.md at a
-// locale root, which is what a README.md there serves as), the first table
-// whose body has a column of bare links (the fleet's "I want to..." table)
-// becomes the launcher component, fed the rows as JSON. A core rule on
-// tokens: the table's cells are rendered inline first, so VitePress's link
-// rule still normalizes every href and records it for the dead-link check,
-// and only then does the html_block replace the table's token range. Cell
-// text comes from inline-text.ts's stamp, so inlineTextRule must be
-// installed on the same renderer.
+// The landing-table markdown rule: on a landing page (the page a locale
+// root serves at its own URL, whether spelled README.md or index.md), the
+// first top-level table whose body has a column of bare links (the fleet's
+// "I want to..." table) becomes the launcher component, fed the rows as
+// JSON. A core rule on tokens: the table's cells are rendered inline first,
+// so VitePress's link rule still normalizes every href and records it for
+// the dead-link check, and only then does the html_block replace the
+// table's token range. Cell text comes from inline-text.ts's stamp, so
+// inlineTextRule must be installed on the same renderer.
+//
+// The landing test goes through the route the rewrite map gives the env's
+// relativePath, because VitePress renders a landing under both spellings:
+// the page build passes the post-rewrite index.md, the local-search
+// indexer the source README.md. Judging the route makes the two passes
+// agree, so the launcher rows' text is in neither pass's output and the
+// search index never holds the table (its target pages are indexed by
+// their own titles and headings).
 
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
-import { isLocaleDir } from "./derive.ts";
+import { isLocaleDir, routeOf } from "./derive.ts";
 import { plainTextOf } from "./inline-text.ts";
 import type { CuratedRow } from "./theme/launcher-model.ts";
 
-const LOCALE_INDEX_RE = /^(?:([^/]+)\/)?index\.md$/;
+const LOCALE_ROOT_ROUTE_RE = /^\/(?:([^/]+)\/)?$/;
 
-/** Whether a post-rewrite relative path is a locale root's landing page. */
-export function isLandingPath(relativePath: string): boolean {
-  const match = LOCALE_INDEX_RE.exec(relativePath);
+/** Whether a source-relative path (either side of the rewrite map) serves
+ *  at a locale root's own URL. */
+export function isLandingPath(relativePath: string, rewrites: Record<string, string>): boolean {
+  const match = LOCALE_ROOT_ROUTE_RE.exec(routeOf(relativePath, rewrites));
   return match !== null && (match[1] === undefined || isLocaleDir(match[1]));
 }
 
-export function landingTableRule(md: MarkdownRenderer): void {
+/** `rewrites` is the site's README-to-index map (derive.ts's
+ *  deriveRewrites over the docs tree), the same one config.mts hands
+ *  VitePress. */
+export function landingTableRule(md: MarkdownRenderer, rewrites: Record<string, string>): void {
   md.core.ruler.push("landing_table", (state) => {
     const relativePath = (state.env as { relativePath?: unknown }).relativePath;
-    if (typeof relativePath !== "string" || !isLandingPath(relativePath)) return;
+    if (typeof relativePath !== "string" || !isLandingPath(relativePath, rewrites)) return;
     const tokens = state.tokens;
     for (let start = 0; start < tokens.length; start += 1) {
-      if (tokens[start].type !== "table_open") continue;
+      // Only a top-level table: one inside a container, quote, or list item
+      // is an aside, not the page's goal table.
+      if (tokens[start].type !== "table_open" || tokens[start].level !== 0) continue;
       const end = tokens.findIndex((token, index) => index > start && token.type === "table_close");
       if (end === -1) return;
       const rows = curatedRowsFromTable(tokens, start, end, () => {

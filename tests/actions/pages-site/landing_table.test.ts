@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import {
+  alertTitlesRule,
+  CUSTOM_BLOCK_LABELS,
+} from "../../../actions/pages-site/.vitepress/custom-blocks.ts";
 import { inlineTextRule } from "../../../actions/pages-site/.vitepress/inline-text.ts";
 import {
+  isLandingPath,
   landingTableRule,
   launcherTag,
 } from "../../../actions/pages-site/.vitepress/landing-table.ts";
@@ -22,11 +27,15 @@ const MarkdownIt = createRequire(join(ACTION_DIR, "package.json"))("markdown-it"
   html: boolean;
 }) => Md;
 
+/** A docs tree indexed by READMEs at the root and in ja/, with a guide/
+ *  directory that carries both spellings (its README keeps its own route). */
+const REWRITES = { "README.md": "index.md", "ja/README.md": "ja/index.md" };
+
 function renderers(): { plain: Md; withRule: Md } {
   const plain = new MarkdownIt({ html: true });
   const withRule = new MarkdownIt({ html: true });
   inlineTextRule(withRule);
-  landingTableRule(withRule);
+  landingTableRule(withRule, REWRITES);
   return { plain, withRule };
 }
 
@@ -53,6 +62,28 @@ const GOAL_READ_ROWS: CuratedRow[] = [
   },
 ];
 
+describe("isLandingPath", () => {
+  const cases: [string, boolean][] = [
+    ["index.md", true],
+    ["README.md", true],
+    ["ja/index.md", true],
+    ["ja/README.md", true],
+    ["guide.md", false],
+    ["guide/index.md", false],
+    ["guide/README.md", false],
+    ["api/index.md", false],
+    ["ja/guide.md", false],
+  ];
+  test.each(cases)("%s under the fixture rewrites is landing: %p", (path, landing) => {
+    expect(isLandingPath(path, REWRITES)).toBe(landing);
+  });
+
+  test("a README beside a real index.md serves its own route and is no landing", () => {
+    expect(isLandingPath("README.md", {})).toBe(false);
+    expect(isLandingPath("index.md", {})).toBe(true);
+  });
+});
+
 describe("landingTableRule", () => {
   test("replaces the landing page's link-column table with the launcher tag", () => {
     const { withRule } = renderers();
@@ -61,9 +92,16 @@ describe("landingTableRule", () => {
     );
   });
 
+  test("the source README.md spelling renders the same launcher as the rewritten index.md", () => {
+    const { withRule } = renderers();
+    expect(withRule.render(GOAL_READ, { relativePath: "README.md" })).toBe(
+      withRule.render(GOAL_READ, { ...LANDING }),
+    );
+  });
+
   test("refuses a renderer without the inline-text stamp", () => {
     const md = new MarkdownIt({ html: true });
-    landingTableRule(md);
+    landingTableRule(md, REWRITES);
     expect(() => md.render(GOAL_READ, { ...LANDING })).toThrow("inlineTextRule is not installed");
   });
 
@@ -90,12 +128,23 @@ describe("landingTableRule", () => {
     ["a landing table on a non-landing page", GOAL_READ, { relativePath: "guide.md" }],
     ["a landing table on a subdirectory index", GOAL_READ, { relativePath: "guide/index.md" }],
     [
+      "a landing table on a README that keeps its own route beside an index.md",
+      GOAL_READ,
+      { relativePath: "guide/README.md" },
+    ],
+    [
       "a landing table on a non-locale top-level index",
       GOAL_READ,
       { relativePath: "api/index.md" },
     ],
     ["a landing table rendered without a relativePath", GOAL_READ, {}],
     ["a table with only a header row", "| Goal | Read |\n|---|---|\n", LANDING],
+    ["a link table quoted", "> | Read |\n> |---|\n> | [x](x.md) |\n", LANDING],
+    [
+      "a link table inside a list item",
+      "- item\n\n  | Read |\n  |---|\n  | [x](x.md) |\n",
+      LANDING,
+    ],
   ];
   test.each(untouched)("leaves %s as markdown-it renders it", (_name, src, env) => {
     const { plain, withRule } = renderers();
@@ -109,6 +158,14 @@ describe("landingTableRule", () => {
     const src = `${flags}\n${GOAL_READ}\n${second}`;
     expect(withRule.render(src, { relativePath: "ja/index.md" })).toBe(
       `${plain.render(flags)}<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n${plain.render(second)}`,
+    );
+  });
+
+  test("a nested link table above the goal table is skipped, and the goal table fires", () => {
+    const { plain, withRule } = renderers();
+    const nested = "- See also\n\n  | Read |\n  |---|\n  | [Aside](aside.md) |\n";
+    expect(withRule.render(`${nested}\n${GOAL_READ}`, { ...LANDING })).toBe(
+      `${plain.render(nested)}<h2>I want to...</h2>\n${launcherTag(GOAL_READ_ROWS)}<p>after</p>\n`,
     );
   });
 
@@ -172,10 +229,12 @@ async function vitepressRenderer(): Promise<Md> {
     {
       highlight: () => "",
       headers: { level: [2, 3] },
+      container: CUSTOM_BLOCK_LABELS,
       config(md: Md) {
         inlineTextRule(md);
-        landingTableRule(md);
+        landingTableRule(md, REWRITES);
         headersRule(md);
+        alertTitlesRule(md);
       },
     },
     "/repo/",
@@ -222,6 +281,29 @@ describe("landingTableRule under VitePress's renderer", () => {
     ]);
   });
 
+  test("a link table inside a tip container stays a table and the goal table below it fires", async () => {
+    const md = await vitepressRenderer();
+    const src = [
+      "::: tip",
+      "| Read |",
+      "|---|",
+      "| [Aside](aside.md) |",
+      ":::",
+      "",
+      "| Goal | Read |",
+      "|---|---|",
+      "| Publish | [Pages](pages.md) |",
+      "",
+    ].join("\n");
+    const env = { relativePath: "README.md", path: "/site/README.md", cleanUrls: false };
+    expect(md.render(src, env)).toBe(
+      '<div class="tip custom-block"><p class="custom-block-title">Tip</p>\n' +
+        '<table tabindex="0">\n<thead>\n<tr>\n<th>Read</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n' +
+        '<td><a href="./aside.html">Aside</a></td>\n</tr>\n</tbody>\n</table>\n</div>\n' +
+        launcherTag([{ label: "Publish", href: "./pages.html", note: null }]),
+    );
+  });
+
   test("a render stamps the launcher's headings with the page's real anchors", async () => {
     const md = await vitepressRenderer();
     const src = [
@@ -259,5 +341,50 @@ describe("landingTableRule under VitePress's renderer", () => {
 
   test("renderedHeaders refuses an env no render stamped", () => {
     expect(() => renderedHeaders({})).toThrow("headersRule is not installed");
+  });
+});
+
+describe("alertTitlesRule under VitePress's renderer", () => {
+  test("GitHub-style alerts take the container labels; an author's own title stays unless it spells the default", async () => {
+    const md = await vitepressRenderer();
+    const src = [
+      "> [!NOTE]",
+      "> a",
+      "",
+      "> [!TIP]",
+      "> b",
+      "",
+      "> [!IMPORTANT]",
+      "> c",
+      "",
+      "> [!WARNING]",
+      "> d",
+      "",
+      "> [!CAUTION]",
+      "> e",
+      "",
+      "> [!WARNING] Mind the gap",
+      "> f",
+      "",
+      "> [!WARNING] WARNING",
+      "> g",
+      "",
+      "::: warning",
+      "h",
+      ":::",
+      "",
+    ].join("\n");
+    const alert = (type: string, title: string, body: string) =>
+      `<div class="${type} custom-block github-alert"><p class="custom-block-title">${title}</p>\n<p>${body}</p>\n</div>\n`;
+    expect(md.render(src, { relativePath: "page.md", path: "/site/page.md" })).toBe(
+      alert("note", "Note", "a") +
+        alert("tip", "Tip", "b") +
+        alert("important", "Important", "c") +
+        alert("warning", "Warning", "d") +
+        alert("caution", "Caution", "e") +
+        alert("warning", "Mind the gap", "f") +
+        alert("warning", "Warning", "g") +
+        '<div class="warning custom-block"><p class="custom-block-title">Warning</p>\n<p>h</p>\n</div>\n',
+    );
   });
 });

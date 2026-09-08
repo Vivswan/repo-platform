@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createMarkdownRenderer, type MarkdownEnv, type SiteConfig } from "vitepress";
+import type { MarkdownEnv, SiteConfig } from "vitepress";
 import { pageTitle, walkMarkdown } from "../derive.ts";
 import type { PageIndexEntry } from "./launcher-model.ts";
 import { buildPageIndex, type HeadersEnv, renderedHeaders } from "./page-index.ts";
@@ -23,6 +23,10 @@ export default {
     if (!config) throw new Error("pages.data.ts loads only inside a vitepress build");
     const { srcDir } = config;
     const cleanUrls = config.cleanUrls ?? false;
+    // Vite bundles a data loader as CommonJS (the build root carries no
+    // package.json declaring ESM), where a static import of vitepress
+    // becomes a require() of an ESM-only package; a dynamic import stays.
+    const { createMarkdownRenderer } = await import("vitepress");
     const md = await createMarkdownRenderer(
       srcDir,
       config.markdown,

@@ -10,6 +10,7 @@ import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
 import { deriveRewrites, detectLocales, routeOf } from "../derive.ts";
 import { plainTextOf } from "../inline-text.ts";
+import { isLandingPath } from "../landing-table.ts";
 import type { PageHeader, PageIndexEntry } from "./launcher-model.ts";
 
 export interface HeadersEnv {
@@ -44,8 +45,6 @@ export interface PageReads {
    *  renderer's env needs. */
   headers(file: string, relativePath: string): PageHeader[];
 }
-
-const LANDING_RE = /(^|\/)index\.md$/;
 
 /** The URL a page serves at, the way VitePress writes links to it: the
  *  site base plus its route, `.html` on non-directory routes unless
@@ -95,7 +94,7 @@ export function buildPageIndex(files: string[], site: SiteUrls, read: PageReads)
       locale,
       headers: read.headers(file, relativePath),
     };
-    return { entry, landing: dir === "" && LANDING_RE.test(relativePath) };
+    return { entry, landing: isLandingPath(file, rewrites) };
   });
   return [...rows.filter((row) => row.landing), ...rows.filter((row) => !row.landing)].map(
     (row) => row.entry,
