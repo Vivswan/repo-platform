@@ -577,12 +577,14 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
   };
 }
 
-/** The managed document as YAML bytes, with a header naming the generator
- *  so a stray scratch file self-identifies. */
+/** The header naming the generator, so a stray scratch file self-identifies. */
+const MANAGED_YAML_HEADER =
+  "# Managed settings baseline, computed by repo-platform's\n" +
+  "# .github/scripts/fleet/render_managed_settings.ts - scratch output, never committed.\n";
+
+/** The managed document as YAML bytes, headed by MANAGED_YAML_HEADER. */
 export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]): string {
-  return `# Managed settings baseline, computed by repo-platform's\n# .github/scripts/fleet/render_managed_settings.ts - scratch output, never committed.\n${stringifyYaml(
-    managedSettings(facts, manifests),
-  )}`;
+  return MANAGED_YAML_HEADER + stringifyYaml(managedSettings(facts, manifests));
 }
 
 /** The skip a target earns by leaving management between the plan job's

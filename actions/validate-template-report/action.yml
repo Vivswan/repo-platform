@@ -171,7 +171,8 @@ runs:
         echo "integrity=failure" >> "$GITHUB_OUTPUT"
         echo "report=findings" >> "$GITHUB_OUTPUT"
         echo "::error::$reason"
-        printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' "$reason" "$RUN_URL" | tee "$COMMENT_FILE" >> "$GITHUB_STEP_SUMMARY"
+        printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' \
+          "$reason" "$RUN_URL" | tee "$COMMENT_FILE" >> "$GITHUB_STEP_SUMMARY"
 
     # The comment is a convenience sink: the summary carries the same body,
     # so a token without pull-requests write (a fork or Dependabot PR) must

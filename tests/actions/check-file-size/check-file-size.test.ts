@@ -229,11 +229,11 @@ describe("judgeFile line width", () => {
     [
       "a breakable line over the warn cap only",
       "source",
-      `${wide(200)}\n`,
-      [["warn", 1, 200, 150]],
+      `${wide(232)}\n`,
+      [["warn", 1, 232, WARN.width]],
     ],
-    ["a line at the warn cap", "source", `${wide(WARN.width)}\n`, []],
-    ["a CRLF line at the warn cap", "source", `${wide(WARN.width)}\r\n`, []],
+    ["a line at the warn cap", "source", `${"a".repeat(WARN.width - 2)} b\n`, []],
+    ["a CRLF line at the warn cap", "source", `${"a".repeat(WARN.width - 2)} b\r\n`, []],
     ["a single unbreakable token over the hard cap", "source", `${"u".repeat(300)}\n`, []],
     ["an indented single token over the hard cap", "source", `    ${"u".repeat(300)}\n`, []],
     [
@@ -258,9 +258,9 @@ describe("judgeFile line width", () => {
     [
       "a line over the warn cap with one wide token among others still warns",
       "shell",
-      `echo ${"u".repeat(160)} ${"v".repeat(30)}
+      `echo ${"u".repeat(190)} ${"v".repeat(30)}
 `,
-      [["warn", 1, 196, 150]],
+      [["warn", 1, 226, WARN.width]],
     ],
     [
       "a wide line inside a generated region, then the same line outside it",
@@ -272,30 +272,30 @@ describe("judgeFile line width", () => {
     [
       "width counts code points, not bytes",
       "source",
-      `${wide(200).replace(/a/g, "é")}\n`,
-      [["warn", 1, 200, 150]],
+      `${wide(232).replace(/a/g, "é")}\n`,
+      [["warn", 1, 232, WARN.width]],
     ],
     [
       "a warn-wide line that is one assigned string literal",
       "source",
-      `const x = "${"a ".repeat(100)}";\n`,
+      `const x = "${"a ".repeat(115)}";\n`,
       [],
     ],
     [
       "a warn-wide line that is one returned literal",
       "source",
-      `  return '${"a ".repeat(100)}';\n`,
+      `  return '${"a ".repeat(115)}';\n`,
       [],
     ],
     [
       "a warn-wide keyed literal with a trailing comma",
       "source",
-      `  key: \`${"a ".repeat(100)}\`,\n`,
+      `  key: \`${"a ".repeat(115)}\`,\n`,
       [],
     ],
-    ["a warn-wide bash assignment", "shell", `msg="${"a ".repeat(100)}"\n`, []],
-    ["a warn-wide concatenation piece", "source", `  "${"a ".repeat(100)}" +\n`, []],
-    ["a warn-wide regex literal", "test", `const re = /${"a ".repeat(100)}/i;\n`, []],
+    ["a warn-wide bash assignment", "shell", `msg="${"a ".repeat(115)}"\n`, []],
+    ["a warn-wide concatenation piece", "source", `  "${"a ".repeat(115)}" +\n`, []],
+    ["a warn-wide regex literal", "test", `const re = /${"a ".repeat(115)}/i;\n`, []],
     [
       "a hard-wide assigned literal is still a hard finding",
       "source",
@@ -305,10 +305,10 @@ describe("judgeFile line width", () => {
     [
       "a warn-wide literal beside other code (control)",
       "source",
-      `  foo("${"a ".repeat(100)}", bar);\n`,
-      [["warn", 1, 215, 150]],
+      `  foo("${"a ".repeat(115)}", bar);\n`,
+      [["warn", 1, 245, WARN.width]],
     ],
-    ["a warn-wide python raw literal", "source", `pattern = r"${"a ".repeat(100)}"\n`, []],
+    ["a warn-wide python raw literal", "source", `pattern = r"${"a ".repeat(115)}"\n`, []],
     [
       "both markers on one line fence that line alone",
       "source",
@@ -333,9 +333,10 @@ describe("isLiteralLine", () => {
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
-  // Each line is warn-wide (150 < width < 256) and breakable; a literal
-  // line yields no finding, anything else the whole warn width finding.
-  const F = "a ".repeat(90).trim();
+  // Each line is warn-wide (WARN.width < width <= HARD.width) and
+  // breakable; a literal line yields no finding, anything else the whole
+  // warn width finding.
+  const F = "a ".repeat(110).trim();
   test.each<[string, string, boolean]>([
     ["a typed exported declaration", `export const x: Readonly<T[]> = "${F}";`, true],
     ["a template with a trailing comma", `let x = \`${F}\`,`, true],
@@ -553,7 +554,7 @@ describe("the CLI", () => {
       "| File | Size | Tier | Cap |",
       "| --- | --- | --- | --- |",
       `| \`src/big.ts\` | ${hardLines} lines | hard | ${HARD.lines.source} |`,
-      "| `src/warm.sh:1` | 199 chars | warn | 150 |",
+      `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
       "",
       `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
       "",
@@ -565,7 +566,7 @@ describe("the CLI", () => {
     "",
     "| File | Size | Tier | Cap |",
     "| --- | --- | --- | --- |",
-    "| `src/warm.sh:1` | 199 chars | warn | 150 |",
+    `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
     "",
     `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     "",
@@ -609,11 +610,11 @@ describe("the CLI", () => {
 
   test("findings: exit 1, ::error:: lines, the table as comment body, summary, and report=findings", () => {
     const hardLines = HARD.lines.source + 1;
-    const wide = `${"a ".repeat(100).trim()}\n`;
+    const wide = `${"a ".repeat(120).trim()}\n`;
     const root = checkout({ "src/big.ts": lines(hardLines), "src/warm.sh": wide });
     expect(run(root)).toEqual({
       exitCode: 1,
-      stdout: ["::warning::src/warm.sh:1: 199 chars (cap 150)"],
+      stdout: [`::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`],
       stderr: [
         `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
         `1 finding(s). Split the file, wrap the line, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
@@ -625,11 +626,11 @@ describe("the CLI", () => {
   });
 
   test("warnings only: exit 0 with the same three sinks", () => {
-    const root = checkout({ "src/warm.sh": `${"a ".repeat(100).trim()}\n` });
+    const root = checkout({ "src/warm.sh": `${"a ".repeat(120).trim()}\n` });
     expect(run(root)).toEqual({
       exitCode: 0,
       stdout: [
-        "::warning::src/warm.sh:1: 199 chars (cap 150)",
+        `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
         "File size check passed (1 warning(s), 0 managed file(s) skipped).",
       ],
       stderr: [""],

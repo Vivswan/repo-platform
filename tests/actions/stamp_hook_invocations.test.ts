@@ -23,7 +23,7 @@ const hasCopier = Bun.which("copier") !== null;
 const COPIER_TIMEOUT_MS = 270_000;
 
 describe.skipIf(!hasCopier)("stamp hook invocations per render (real copier)", () => {
-  test("copy, update, recopy, and update --skip-tasks each stamp the destination exactly once with the render's full sha; another answers file is refused", () => {
+  test("copy, update, recopy, and update --skip-tasks each stamp exactly once with the full sha; another answers file is refused", () => {
     const base = temp.dir("stamp-hook-invocations-");
     const log = join(base, "hook.log");
     const tree = join(base, "bt");

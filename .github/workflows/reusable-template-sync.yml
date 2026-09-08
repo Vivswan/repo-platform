@@ -267,7 +267,8 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "retired-file cleanup" -- \
             bun .github/scripts/sync/retired_cleanup.ts
           if [ "$HIDE_DETAILS" = "true" ] && [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
-            echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
+            count="$(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ')"
+            echo "removed ${count} retired file(s) (paths hidden: private repository; listed in the PR body)"
           fi
 
       # settings.yml and custom-license files are repo-owned wherever they
@@ -431,9 +432,12 @@ jobs:
             where="the 'Validate the updated tree' step log"
           fi
           if [ -n "$PR_URL" ]; then
-            echo "::error::the update was pushed but validation of the resulting tree failed (details in ${where}). Fix the tree in ${PR_URL} before merging."
+            echo "::error::the update was pushed but validation of the resulting tree failed (details in ${where})." \
+              "Fix the tree in ${PR_URL} before merging."
           else
-            echo "::error::the update produced no changes to deliver, yet validation failed, so ${TARGET_DISPLAY}'s default branch itself does not validate (details in ${where}). Fix the tree on its default branch, then re-run the sync."
+            echo "::error::the update produced no changes to deliver, yet validation failed," \
+              "so ${TARGET_DISPLAY}'s default branch itself does not validate (details in ${where})." \
+              "Fix the tree on its default branch, then re-run the sync."
           fi
           exit 1
 

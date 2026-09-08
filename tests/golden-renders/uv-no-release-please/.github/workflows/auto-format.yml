@@ -68,8 +68,9 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: repo-platform/auto-format
-          message: |
-            Pushed a formatting commit with the default workflow token, which starts no workflows, so checks will not re-run on the new head. Close and reopen this PR to re-run them.
+          message: >
+            Pushed a formatting commit with the default workflow token, which starts no workflows,
+            so checks will not re-run on the new head. Close and reopen this PR to re-run them.
       # The label is a one-shot request: remove it even when a step failed,
       # so a broken run cannot loop.
       - name: Remove the fix-lint label

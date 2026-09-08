@@ -446,10 +446,12 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   for (const id of pathRefs) {
     const target = steps.find((step) => step.id === id);
     if (target !== undefined && emitsPath(target)) continue;
+    const reason =
+      target === undefined ? `no step with id '${id}'` : `step '${id}' sets no path output`;
     mismatches.push({
       file,
       expected: `steps.${id}.outputs.path naming a step of this action that sets a path output (the bun setup, or a run step writing path= to GITHUB_OUTPUT)`,
-      got: `${target === undefined ? `no step with id '${id}'` : `step '${id}' sets no path output`} - the reference is empty at run time and the step it binds runs nothing`,
+      got: `${reason} - the reference is empty at run time and the step it binds runs nothing`,
     });
   }
   for (const { step, line } of bareBunLines) {

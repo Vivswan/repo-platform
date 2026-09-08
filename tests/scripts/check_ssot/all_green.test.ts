@@ -14,7 +14,7 @@ import {
 import { templateCarries } from "../../../scripts/lib/ts_extract.ts";
 
 describe("the all-green name pins", () => {
-  test("declaredCheckName reads only the real exported declaration - comment, string, nested, and concatenation spoofs all throw or are skipped", () => {
+  test("declaredCheckName reads only the real exported declaration - every spoof shape throws anchor-lost", () => {
     const active = 'export const CHECK_NAME = "all-green";';
     expect(declaredCheckName(`${active}\n`)).toBe("all-green");
     // None of these carries a top-level exported string-literal

@@ -156,7 +156,11 @@ export function allGreenFailure(
     ]);
     if (probe.exitCode !== 0) {
       const detail = lastLine(probe.stderr + probe.stdout);
-      return `reading its ${CHECK_NAME} check runs failed (${detail === "" ? `exit ${probe.exitCode}` : detail}) - an API failure, not proof the commit is red, but the gate fails closed`;
+      const reason = detail === "" ? `exit ${probe.exitCode}` : detail;
+      return (
+        `reading its ${CHECK_NAME} check runs failed (${reason}) - ` +
+        "an API failure, not proof the commit is red, but the gate fails closed"
+      );
     }
     const checks = parseJsonWith(
       checkRunsSchema,
@@ -178,7 +182,8 @@ export function allGreenFailure(
         return `its ${CHECK_NAME} verdict concluded '${completed.conclusion}'`;
       }
       return checks.length === 0
-        ? `no ${CHECK_NAME} verdict check exists there (waited ${Math.round(deadlineMs / 1000)}s) - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist`
+        ? `no ${CHECK_NAME} verdict check exists there (waited ${Math.round(deadlineMs / 1000)}s)` +
+            " - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist"
         : `its ${CHECK_NAME} verdict is still '${checks[0].status}' after ${Math.round(deadlineMs / 1000)}s`;
     }
     sleep(Math.min(sleepMs, remaining));

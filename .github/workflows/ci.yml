@@ -589,7 +589,9 @@ jobs:
         run: bun .github/scripts/ci/rehearse_fleet_gate.ts
       - name: Note the tokenless skip
         if: env.HAS_FLEET_PAT != 'true'
-        run: echo "::notice::rehearse-fleet skipped - this event's secrets carry no REPO_PLATFORM_TOKEN (a Dependabot-triggered run); the post-merge push run rehearses the same tree."
+        run: |
+          echo "::notice::rehearse-fleet skipped - this event's secrets carry no REPO_PLATFORM_TOKEN (a Dependabot-triggered run);"\
+            "the post-merge push run rehearses the same tree."
 
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the

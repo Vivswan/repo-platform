@@ -28,8 +28,19 @@ const REPO = "o/r";
 // verdict JSON greens every source, keeping the behavioral focus on the
 // publish decision (the gate's own truth table lives in
 // tests/shared/all_green.test.ts).
+const ghVerdict = JSON.stringify({
+  check_runs: [
+    {
+      name: "all-green",
+      status: "completed",
+      conclusion: "success",
+      external_id: "workflow_run",
+      app: { slug: "github-actions" },
+    },
+  ],
+});
 const ghStub = `#!/usr/bin/env bash
-printf '%s' '{"check_runs":[{"name":"all-green","status":"completed","conclusion":"success","external_id":"workflow_run","app":{"slug":"github-actions"}}]}'
+printf '%s' '${ghVerdict}'
 `;
 
 /** The source commit's builder: publish.ts runs the SOURCE's own

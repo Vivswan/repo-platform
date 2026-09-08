@@ -229,7 +229,8 @@ describe("preflightArgs", () => {
     );
   });
 
-  test("keeps extra, repeated, and drifted flags visible in the normalized args (labelPreflightJobMismatches proves the allowlist rejects them)", () => {
+  test("keeps extra, repeated, and drifted flags visible in the normalized args", () => {
+    // labelPreflightJobMismatches proves the allowlist rejects them.
     expect(preflightArgs("bun s/fleet/label_preflight.ts --merged x --sections issues")).toBe(
       "--merged x --sections issues",
     );

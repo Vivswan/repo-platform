@@ -55,7 +55,8 @@ recovery_rungs="$(git -C "$GITHUB_WORKSPACE" ls-tree --name-only "$NEW_TAG" migr
   || fail "could not list the new build tree's rung files on the recovery leg"
 recovery_ran="$(sed -nE 's/^.*: migration (m[0-9]{4}_[a-z0-9_]+) -> .*$/\1/p' <<<"$recovery_out")"
 [ "$recovery_ran" = "$recovery_rungs" ] \
-  || fail "the ladder did not run exactly the new tree's rungs once each, in order, on the recovery leg (ran: $(tr '\n' ' ' <<<"$recovery_ran"); rungs: $(tr '\n' ' ' <<<"$recovery_rungs"))"
+  || fail "the ladder did not run exactly the new tree's rungs once each, in order, on the recovery leg"\
+    "(ran: $(tr '\n' ' ' <<<"$recovery_ran"); rungs: $(tr '\n' ' ' <<<"$recovery_rungs"))"
 [ "$(git rev-parse HEAD)" = "$recovery_head" ] \
   || fail "the ladder committed on the recovery leg although every rung was already crossed"
 assert_clean_tree . "the ladder modified the tree on the recovery leg although every rung was already crossed"
@@ -78,7 +79,8 @@ grep -qF "# local checks note" .github/workflows/checks.yml \
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
 cmp -s "$WORK/registration-before-recopy.yml" .repo-platform.yml \
-  || fail "recovery rewrote the repo-owned .repo-platform.yml (_skip_if_exists must hold under recopy --overwrite, or the mirrors declaration is silently lost)"
+  || fail "recovery rewrote the repo-owned .repo-platform.yml (_skip_if_exists must hold under recopy --overwrite,"\
+    "or the mirrors declaration is silently lost)"
 [ "$(cat LICENSE.md)" = "Repo-owned custom license" ] \
   || fail "recovery touched the repo-owned LICENSE.md (custom-license de-renders it; recopy deletes nothing)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \

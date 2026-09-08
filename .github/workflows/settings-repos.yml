@@ -302,12 +302,14 @@ jobs:
           steps.freshness.outputs.moved == 'true'
         run: |
           if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it carries no .repo-platform.yml at the revision this run read (it left management), so its settings are not managed here any more."
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it carries no .repo-platform.yml at the revision this run read"\
+              "(it left management), so its settings are not managed here any more."
           elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
             echo "::notice::settings apply skipped for ${{ matrix.repo }}: it has no .github/settings.yml yet, so there is nothing to layer"\
               "over the fleet defaults. The settings starter seeds the file on its next template sync."
           else
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings,"\
+              "so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
           fi
 
       # Referenced-label invariant, FAIL-CLOSED side: the apply's

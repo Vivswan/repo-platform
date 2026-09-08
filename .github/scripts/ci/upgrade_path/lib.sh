@@ -17,7 +17,8 @@ rendered_fleet_license() {
       # head picks the first MATCH (-m1 would only limit matched lines);
       # || true absorbs both a no-match grep and head's early-exit SIGPIPE.
       leftover="$(printf '%s\n' "$rendered" | grep -oE '\{\{[^}]*\}\}|\{%[^}]*%\}' | head -n 1 || true)"
-      fail "rendered_fleet_license left an unrendered template expression (${leftover:-an unclosed jinja delimiter}); teach this oracle the substitution for it"
+      fail "rendered_fleet_license left an unrendered template expression (${leftover:-an unclosed jinja delimiter});" \
+        "teach this oracle the substitution for it"
       ;;
   esac
   printf '%s\n' "$rendered"

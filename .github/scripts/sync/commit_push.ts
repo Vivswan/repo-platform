@@ -64,7 +64,8 @@ function failureShape(result: { exitCode: number; timedOut: boolean }, stderr: s
  * stream, which is exactly what the capture holds. */
 function diagnosticsChannel(): string {
   return hideDetails()
-    ? "git's output is hidden from this log (private repository); the redacted error output is delivered to the target's failure-report issue (docs/private-repos.md)."
+    ? "git's output is hidden from this log (private repository); " +
+        "the redacted error output is delivered to the target's failure-report issue (docs/private-repos.md)."
     : "git's output is in the log above.";
 }
 
