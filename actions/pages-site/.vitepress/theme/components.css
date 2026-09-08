@@ -71,6 +71,15 @@ a:focus-visible {
   color: var(--vp-c-text-1);
   border-radius: var(--fleet-radius-md);
 }
+/* The link is the whole 60px column; the ring sits on the brand's pill. */
+.VPNavBar .VPNavBarTitle .title:focus-visible {
+  outline: none;
+}
+.VPNavBar .VPNavBarTitle .title:focus-visible .nav-bar-title-text {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+  border-radius: var(--fleet-radius-md);
+}
 
 .VPNavBar .content-body {
   gap: 6px;
@@ -78,14 +87,19 @@ a:focus-visible {
 
 /* Carbon parks the appearance switch in the "..." flyout between 768px and
  * 1279px, where the trigger is 20px wide and a touch needs two taps (hover
- * opens, click toggles back). The bar has room for the switch from 768px
- * up, so it sits inline and the flyout stays only for what else it holds
- * (translations, social links). */
+ * opens, click toggles back), and below 768px in the hamburger's screen,
+ * two taps again. The bar has room for the switch at every width, so it
+ * sits inline; the flyout and the screen keep only what else they hold
+ * (nav items, translations, social links), and the hamburger goes with a
+ * screen that would be empty. */
+.VPNav .VPNavBar .content-body > .appearance {
+  display: flex;
+  align-items: center;
+}
+.VPNav .VPNavScreen .VPNavScreenAppearance {
+  display: none;
+}
 @media (min-width: 768px) {
-  .VPNav .VPNavBar .content-body > .appearance {
-    display: flex;
-    align-items: center;
-  }
   .VPNav .VPNavBar .content-body > .VPNavBarExtra .group:has(.item.appearance) {
     display: none;
   }
@@ -93,6 +107,15 @@ a:focus-visible {
     .VPNavBar
     .content-body
     > .VPNavBarExtra:not(:has(.translations)):not(:has(.social-links)) {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .VPNav
+    .VPNavBar:not(
+      :has(.VPNavBarMenu > :not(.visually-hidden), .VPNavBarTranslations, .VPNavBarSocialLinks)
+    )
+    .hamburger {
     display: none;
   }
 }
@@ -280,10 +303,24 @@ a:focus-visible {
 /* Carbon keeps its 230px drawer cap on every viewport while padding the
  * content by the full token, so the list ran narrower than its column; and
  * it pins the sidebar to the viewport's edge while the article moves into
- * the frame, so a wide viewport opened a band between the two. */
-.Layout .VPSidebar {
+ * the frame, so a wide viewport opened a band between the two. The drawer
+ * casts one shadow in both modes (carbon gives dark a shadow and light
+ * none, and its dark rule also outranks its own desktop reset, so the
+ * desktop sidebar cast it too); :root lifts these above that dark rule. */
+:root .Layout .VPSidebar {
   left: var(--fleet-gutter);
   max-width: var(--vp-sidebar-width);
+  box-shadow: var(--vp-shadow-3);
+}
+@media (min-width: 768px) {
+  :root .Layout .VPSidebar {
+    box-shadow: none;
+  }
+}
+/* Carbon focuses the opened drawer so its list is next in tab order; the
+ * drawer itself is a region, and its edge is the shadow, not a ring. */
+:root .Layout .VPSidebar:focus-visible {
+  outline: none;
 }
 
 .VPSidebar .nav {
@@ -326,6 +363,7 @@ a:focus-visible {
   font-weight: 400;
   color: var(--vp-c-text-2);
   text-wrap: balance;
+  transition: color var(--fleet-transition);
 }
 .VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .text,
 .VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .link > .text {
@@ -349,6 +387,19 @@ a:focus-visible {
 }
 .VPSidebar .nav .group .VPSidebarItem .caret {
   color: var(--vp-c-text-3);
+  transition: color var(--fleet-transition);
+}
+/* The row is the one box for every state: the hover tint, the active band
+ * and the focus ring, at the row's radius (the link inside is narrower and
+ * carbon's ring sat on it). A group head is itself the focusable row. */
+.VPSidebar .nav .group .VPSidebarItem .link:focus-visible {
+  outline: none;
+}
+.VPSidebar .nav .group .VPSidebarItem .item:focus-visible,
+.VPSidebar .nav .group .VPSidebarItem .item:has(> .link:focus-visible) {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+  border-radius: var(--fleet-radius-md);
 }
 /* Children step in under their group head; a headless group (a docs
  * tree's root files) sits flush, with no rule down its edge. */
@@ -439,6 +490,22 @@ a:focus-visible {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+/* While a copy reports its result (page-actions.ts stamps the attribute),
+ * the label comes back beside the glyph. */
+.VPDoc .content-top .VPLlmsPageActions .trigger[data-feedback] {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px 0 8px;
+  color: var(--vp-c-text-1);
+}
+.VPDoc .content-top .VPLlmsPageActions .trigger[data-feedback] .trigger-label {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  font-size: 13px;
+  font-weight: 500;
 }
 .VPDoc .content-top .VPLlmsPageActions .trigger-caret {
   display: none;
@@ -1199,7 +1266,9 @@ a:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .fleet-facts,
   .vp-doc a,
-  .VPSidebar .nav .group .VPSidebarItem .item {
+  .VPSidebar .nav .group .VPSidebarItem .item,
+  .VPSidebar .nav .group .VPSidebarItem .text,
+  .VPSidebar .nav .group .VPSidebarItem .caret {
     transition: none;
   }
 }

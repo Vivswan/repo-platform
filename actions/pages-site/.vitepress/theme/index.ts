@@ -15,6 +15,7 @@ import "./launcher.css";
 import FactsPanel from "./facts-panel.ts";
 import FleetLauncher from "./launcher.ts";
 import NavLauncher from "./nav-launcher.ts";
+import PageActionsFeedback from "./page-actions.ts";
 import Provenance from "./provenance.ts";
 import VersionSwitcher from "./version-switcher.ts";
 
@@ -26,6 +27,7 @@ export default {
       "nav-bar-content-menu-after": () => h(VersionSwitcher),
       "aside-top": () => h(FactsPanel),
       "doc-after": () => h(Provenance),
+      "layout-bottom": () => h(PageActionsFeedback),
     }),
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);
