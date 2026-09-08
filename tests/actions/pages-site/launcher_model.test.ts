@@ -309,7 +309,16 @@ describe("resolveHref", () => {
       "/repo/",
       { key: "/repo/", href: "/repo/#quick-triage", suffix: "#quick-triage" },
     ],
-    ["%E6%96%B0.md", "/repo/", { key: "/repo/新", href: "/repo/新.md", suffix: "" }],
+    ["%E6%96%B0.md", "/repo/", { key: "/repo/新", href: "/repo/%E6%96%B0.md", suffix: "" }],
+    [
+      "download.zip?q=a%2526b#x%20y",
+      "/repo/",
+      {
+        key: "/repo/download.zip",
+        href: "/repo/download.zip?q=a%2526b#x%20y",
+        suffix: "?q=a%2526b#x%20y",
+      },
+    ],
     [
       "settings.md#設定",
       "/repo/",

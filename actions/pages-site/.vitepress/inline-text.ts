@@ -5,12 +5,13 @@
 // can decode it). The landing-table rule and the page index read the
 // stamp, so a label, a note, and a heading title all spell text one way:
 // entities and escapes decoded, code spans literal, emoji as their glyph,
-// images as their alt text, markup dropped.
+// images as their alt text, a <br> a space, markup dropped.
 
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
 
 const STAMP = "plainText";
+const BR_RE = /^<br\s*\/?>$/i;
 
 export function inlineTextRule(md: MarkdownRenderer): void {
   md.core.ruler.before("text_join", "inline_text", (state) => {
@@ -48,6 +49,9 @@ function textOf(children: Token[]): string {
       case "softbreak":
       case "hardbreak":
         parts.push(" ");
+        break;
+      case "html_inline":
+        if (BR_RE.test(child.content)) parts.push(" ");
         break;
     }
   }

@@ -191,6 +191,24 @@ describe("landingTableRule", () => {
       ],
     ],
     [
+      "a four-column table joins every cell after the label into the note",
+      "| Goal | Read | Module | Owner |\n|---|---|---|---|\n| Publish | [Pages](pages.md) | pages | Platform |\n| Eject | [Eject](eject.md) | | Platform |\n",
+      [
+        { label: "Publish", href: "pages.md", note: "pages, Platform" },
+        { label: "Eject", href: "eject.md", note: "Platform" },
+      ],
+    ],
+    [
+      "an empty label cell falls back to the link text",
+      "| Goal | Read | Note |\n|---|---|---|\n| | [New repo](new-repo.md) | Start here |\n",
+      [{ label: "New repo", href: "new-repo.md", note: "Start here" }],
+    ],
+    [
+      "a <br> reads as a space and other inline html is dropped",
+      "| Goal | Read |\n|---|---|\n| Use<br>Docker<br/>with<BR />`compose`, <kbd>Ctrl</kbd>+C | [Docker](docker.md) |\n",
+      [{ label: "Use Docker with compose, Ctrl+C", href: "docker.md", note: null }],
+    ],
+    [
       "a single-column table labels rows by their link text",
       "| Read |\n|---|\n| [New repo](new-repo.md) |\n| [`config.mts`](config.md) |\n",
       [
