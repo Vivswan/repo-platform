@@ -5,10 +5,12 @@
     "": {
       "name": "pages-site",
       "dependencies": {
+        "@fontsource-variable/jetbrains-mono": "^5.3.0",
+        "@fontsource-variable/wix-madefor-display": "^5.3.0",
+        "@fontsource-variable/wix-madefor-text": "^5.3.0",
         "linkinator": "^8.1.0",
         "vitepress": "1.6.4",
         "vitepress-carbon": "1.6.0",
-        "vitepress-plugin-llms": "^1.7.4",
         "vue": "^3.5.13",
       },
       "devDependencies": {
@@ -120,6 +122,12 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.21.5", "", { "os": "win32", "cpu": "ia32" }, "sha512-SWXFF1CL2RVNMaVs+BBClwtfZSvDgtL//G/smwAc5oVK/UPu2Gu9tIaRgFmYFFKrmg3SyAjSrElf0TiJ1v8fYA=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.21.5", "", { "os": "win32", "cpu": "x64" }, "sha512-tQd/1efJuzPC6rCFwEvLtci/xNFcTZknmXs98FYDfGE4wP9ClFV98nyKrzJKVPMhdDnjzLhdUyMX4PsQAPjwIw=="],
+
+    "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.3.0", "", {}, "sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw=="],
+
+    "@fontsource-variable/wix-madefor-display": ["@fontsource-variable/wix-madefor-display@5.3.0", "", {}, "sha512-Qjo4/iJ7cIhm2cb6X4x5vgv5w5KxXrer2yVwEV6nEARm3roRYQ+AcYgf9S91nX/d52wLbjjv58jlBGzR0a8D0A=="],
+
+    "@fontsource-variable/wix-madefor-text": ["@fontsource-variable/wix-madefor-text@5.3.0", "", {}, "sha512-p5zs3NakLybEkOyWMXROb6P9kAyIzsRJXgommBy0QC5RaFTb+Te2OdWikitQ+6KGBPMvACLUEIXgPOBQMK5NUg=="],
 
     "@iconify-json/simple-icons": ["@iconify-json/simple-icons@1.2.94", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-l8UWzVxKaqZd9ABsE/M/9p6NyGkQnmCnOoZyhQmjlXCtY5PuL2rcWxOFk2l9pk7ux3ERMPkTLE4jl6kQpTkwxA=="],
 

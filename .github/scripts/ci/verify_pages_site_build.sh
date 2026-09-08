@@ -120,6 +120,18 @@ done
 grep -qrF -- "Mona-Sans" "$site/latest/assets" ||
   fail "the bundled Mona Sans is missing from the built CSS - the import filter stripped more than remote @imports"
 
+# The fleet skin's own components: the facts card on the landing page
+# (its repository row and the version row marked as the one being read,
+# not just the card's shell) and the provenance line naming each tier's
+# ref (main for the HEAD tier, the tag for a tag tier).
+present "fleet-facts" "$site/latest/index.html"
+present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
+present 'aria-current="page">latest</a>' "$site/latest/index.html"
+present 'aria-current="page">v0.2.0</a>' "$site/v0.2.0/index.html"
+present "fleet-provenance" "$site/latest/index.html"
+present "Built from main" "$site/latest/index.html"
+present "Built from v0.2.0" "$site/v0.2.0/index.html"
+
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
 # the tagged tier and the HEAD tier alike.
@@ -289,4 +301,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "import filter, llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"
+  "import filter, facts card, provenance line, llms.txt, strict mode both arms, legacy-tag skip both arms," \
+  "calibration gate"

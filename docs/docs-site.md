@@ -45,8 +45,10 @@ Both modules selected render ONE Pages deployment (`pages.yml`): the repo's own 
 - Local full-text search and per-page "Edit this page" links (default-branch tiers only, where an edit can still change the content).
 - `llms.txt` and `llms-full.txt` per tier (the [llms.txt](https://llmstxt.org) convention), covering every locale.
 - The version dropdown in the nav, fed from the same tag set as `versions.json`.
+- The project facts card on the landing page: name, description, repository link, homepage and topics when set, toolchain versions, the served docs versions, and the license, read from the repository itself at build time.
+- A provenance line under every page naming the ref and commit the tier was built from (linking to that commit) and the markdown file the page rendered from.
 
 ## Caveats
 
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans - selecting the module is the opt-in to that, per repo.
-- The theme is a deliberate placeholder today: the real design drops into [actions/pages-site/.vitepress/theme/](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what.
+- The theme is one for the whole fleet (dark by default with a light variant, and one accent hue per repository derived from its name), owned by [actions/pages-site/.vitepress/theme/](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what. Nothing is configured per repository: the build reads the facts card's content from the repository itself (passed to the theme as `DOCS_SITE_FACTS`, read as `themeConfig.docsSiteFacts`), marks the landing page with the `fleetLanding` frontmatter flag, writes the repository's hue as `data-fleet-hue` on the page's `<html>`, and strips the base theme's remote font imports at build time (a PostCSS filter), so a site never loads a font from a third party.

@@ -1,28 +1,258 @@
 /*
- * THE FLEET TOKEN LAYER over vitepress-carbon. Carbon is token-based (its
- * design system lives in --vp-* custom properties; the authoritative list
- * is packages/theme/src/theme/styles/vars.css in
- * github.com/brenoepics/vitepress-carbon), so the fleet's visual identity
- * is expressed here as token overrides - see README.md in this directory
- * for the replacement contract. The block below is a deliberate
- * placeholder: carbon's own monochrome stands until the user's palette
- * lands.
+ * The fleet token layer over vitepress-carbon. Carbon's design system is
+ * its --vp-* custom properties (the authoritative list is
+ * packages/theme/src/theme/styles/vars.css in
+ * github.com/brenoepics/vitepress-carbon); this file sets their values and
+ * adds the fleet's own --fleet-* tokens. Component rules live in
+ * components.css. Dark is the default (carbon's baseConfig sets the
+ * initial appearance); light is a full variant with the same grounds
+ * lifted.
+ *
+ * The one accent is the repository's hue: config.mts sets
+ * <html data-fleet-hue="0..5"> at build time, and the six pairs below
+ * (amber, sky, sage, rose, violet, teal) are the only place a hue value is
+ * written. Everything that carries color reads --fleet-hue, --fleet-hue-band
+ * (tinted background) or --fleet-hue-soft (selection, underline).
  */
 
 :root {
-  /* Brand accent example - set carbon tokens here to override them:
-  --vp-c-brand-1: #3451b2;
-  --vp-c-brand-2: #3a5ccc;
-  --vp-c-brand-3: #5672cd;
-  */
+  --vp-font-family-base: "Wix Madefor Text Variable", "Segoe UI", system-ui, sans-serif;
+  --vp-font-family-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --fleet-font-display: "Wix Madefor Display Variable", var(--vp-font-family-base);
+
+  --fleet-radius-lg: 12px;
+  --fleet-radius-md: 8px;
+  --fleet-radius-sm: 5px;
+  --fleet-transition: 180ms cubic-bezier(0.2, 0, 0, 1);
+  --fleet-measure: 68ch;
+
+  --vp-nav-height: 60px;
+  --vp-sidebar-width: 268px;
+  --vp-doc-content-max-width: 760px;
+  --vp-doc-aside-width: 240px;
+  --vp-layout-max-width: 1440px;
 }
 
-.docs-site-version-switcher {
-  margin-left: 16px;
-  padding: 2px 8px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
-  background-color: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-1);
-  font-size: 13px;
+/* Light: paper grounds, ink text, the hue's deep variant. */
+:root {
+  --fleet-hue: #8a5a0a;
+  --fleet-hue-band: rgba(138, 90, 10, 0.11);
+  --fleet-hue-soft: rgba(138, 90, 10, 0.28);
+
+  --vp-c-bg: #f3f4f6;
+  --vp-c-bg-alt: #f3f4f6;
+  --vp-c-bg-dark: #f3f4f6;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #ffffff;
+  --vp-c-bg-soft-2: #eaecf0;
+  --vp-c-bg-code: #eaecf0;
+  --fleet-field-bg: #ffffff;
+  --fleet-scroll: rgba(20, 24, 32, 0.18);
+
+  --vp-c-divider: rgba(20, 24, 32, 0.1);
+  --vp-c-border: rgba(20, 24, 32, 0.18);
+  --vp-c-gutter: rgba(20, 24, 32, 0.1);
+
+  --vp-c-text-1: #1c1f26;
+  --vp-c-text-2: #585f6c;
+  --vp-c-text-3: #737b89;
+  --vp-c-text-dark: #1c1f26;
+  --vp-color-fg-default: #1c1f26;
+  --vp-color-fg-muted: #585f6c;
+  --vp-color-fg-subtle: #737b89;
+
+  --color-action-list-item-default-hover-bg: rgba(20, 24, 32, 0.06);
+  --color-action-list-item-default-active-bg: rgba(20, 24, 32, 0.1);
+  --color-action-list-item-default-selected-bg: rgba(20, 24, 32, 0.04);
+  --color-action-list-item-default-active-border: transparent;
+
+  --vp-shadow-3: 0 12px 32px rgba(20, 24, 32, 0.1), 0 2px 6px rgba(20, 24, 32, 0.06);
+  --vp-shadow-4: 0 24px 60px rgba(20, 24, 32, 0.12), 0 2px 8px rgba(20, 24, 32, 0.06);
+}
+
+/* Dark: night grounds, chalk text, the hue's light variant. */
+.dark {
+  --fleet-hue: #d9a866;
+  --fleet-hue-band: rgba(217, 168, 102, 0.15);
+  --fleet-hue-soft: rgba(217, 168, 102, 0.32);
+
+  --vp-c-bg: #16181d;
+  --vp-c-bg-alt: #16181d;
+  --vp-c-bg-dark: #16181d;
+  --vp-c-bg-elv: #1e2128;
+  --vp-c-bg-soft: #1e2128;
+  --vp-c-bg-soft-2: #262a32;
+  --vp-c-bg-code: #23262e;
+  --fleet-field-bg: #1b1e24;
+  --fleet-scroll: rgba(255, 255, 255, 0.14);
+
+  --vp-c-divider: rgba(255, 255, 255, 0.09);
+  --vp-c-border: rgba(255, 255, 255, 0.16);
+  --vp-c-gutter: rgba(255, 255, 255, 0.09);
+
+  --vp-c-text-1: #e7e9ee;
+  --vp-c-text-2: #a5acb8;
+  --vp-c-text-3: #80889a;
+  --vp-c-text-dark: #e7e9ee;
+  --vp-color-fg-default: #e7e9ee;
+  --vp-color-fg-muted: #a5acb8;
+  --vp-color-fg-subtle: #80889a;
+
+  --color-action-list-item-default-hover-bg: rgba(255, 255, 255, 0.06);
+  --color-action-list-item-default-active-bg: rgba(255, 255, 255, 0.1);
+  --color-action-list-item-default-selected-bg: rgba(255, 255, 255, 0.04);
+  --color-action-list-item-default-active-border: transparent;
+
+  --vp-shadow-3: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --vp-shadow-4: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* The hue set. Slot 0 is amber, declared above as the default. */
+html[data-fleet-hue="1"] {
+  --fleet-hue: #1f5f9e;
+  --fleet-hue-band: rgba(31, 95, 158, 0.11);
+  --fleet-hue-soft: rgba(31, 95, 158, 0.28);
+}
+html.dark[data-fleet-hue="1"] {
+  --fleet-hue: #7fb2e5;
+  --fleet-hue-band: rgba(127, 178, 229, 0.16);
+  --fleet-hue-soft: rgba(127, 178, 229, 0.34);
+}
+html[data-fleet-hue="2"] {
+  --fleet-hue: #2f6b3a;
+  --fleet-hue-band: rgba(47, 107, 58, 0.11);
+  --fleet-hue-soft: rgba(47, 107, 58, 0.28);
+}
+html.dark[data-fleet-hue="2"] {
+  --fleet-hue: #8fbf8a;
+  --fleet-hue-band: rgba(143, 191, 138, 0.16);
+  --fleet-hue-soft: rgba(143, 191, 138, 0.34);
+}
+html[data-fleet-hue="3"] {
+  --fleet-hue: #a3384f;
+  --fleet-hue-band: rgba(163, 56, 79, 0.11);
+  --fleet-hue-soft: rgba(163, 56, 79, 0.28);
+}
+html.dark[data-fleet-hue="3"] {
+  --fleet-hue: #e08c9a;
+  --fleet-hue-band: rgba(224, 140, 154, 0.16);
+  --fleet-hue-soft: rgba(224, 140, 154, 0.34);
+}
+html[data-fleet-hue="4"] {
+  --fleet-hue: #5e46a3;
+  --fleet-hue-band: rgba(94, 70, 163, 0.11);
+  --fleet-hue-soft: rgba(94, 70, 163, 0.28);
+}
+html.dark[data-fleet-hue="4"] {
+  --fleet-hue: #b39ddb;
+  --fleet-hue-band: rgba(179, 157, 219, 0.16);
+  --fleet-hue-soft: rgba(179, 157, 219, 0.34);
+}
+html[data-fleet-hue="5"] {
+  --fleet-hue: #1b6b67;
+  --fleet-hue-band: rgba(27, 107, 103, 0.11);
+  --fleet-hue-soft: rgba(27, 107, 103, 0.28);
+}
+html.dark[data-fleet-hue="5"] {
+  --fleet-hue: #6fc2bd;
+  --fleet-hue-band: rgba(111, 194, 189, 0.16);
+  --fleet-hue-soft: rgba(111, 194, 189, 0.34);
+}
+
+/*
+ * Functional tokens read the hue and the grounds, so they hold in both
+ * modes and every hue. Declared on :root AND .dark because carbon's own
+ * .dark block sets several of them (brand-1, brand-2) directly.
+ */
+:root,
+.dark {
+  --vp-c-brand-1: var(--fleet-hue);
+  --vp-c-brand-2: var(--fleet-hue);
+  --vp-c-brand-3: var(--fleet-hue);
+  --vp-c-brand-soft: var(--fleet-hue-band);
+
+  --vp-c-default-1: var(--vp-c-bg-soft-2);
+  --vp-c-default-2: var(--vp-c-bg-soft-2);
+  --vp-c-default-3: var(--vp-c-bg-soft);
+  --vp-c-default-soft: var(--vp-c-bg-soft-2);
+
+  --vp-c-tip-1: var(--fleet-hue);
+  --vp-c-tip-soft: var(--fleet-hue-band);
+  --vp-c-important-soft: var(--fleet-hue-band);
+  --vp-c-warning-1: var(--vp-c-text-1);
+  --vp-c-warning-soft: var(--vp-c-bg-soft-2);
+  --vp-c-danger-1: var(--vp-c-text-1);
+  --vp-c-danger-soft: var(--vp-c-bg-soft-2);
+  --vp-c-caution-soft: var(--vp-c-bg-soft-2);
+  --vp-c-success-1: var(--vp-c-text-1);
+  --vp-c-success-soft: var(--vp-c-bg-soft-2);
+
+  /* carbon's custom-block.css reads these GitHub names for the title color */
+  --color-note: var(--fleet-hue);
+  --color-tip: var(--fleet-hue);
+  --color-warning: var(--vp-c-text-1);
+  --color-caution: var(--vp-c-text-1);
+  --color-important: var(--fleet-hue);
+
+  --vp-code-font-size: 15px;
+  --vp-code-line-height: 1.65;
+  --vp-code-color: var(--vp-c-text-1);
+  --vp-code-link-color: var(--fleet-hue);
+  --vp-code-link-hover-color: var(--fleet-hue);
+  --vp-code-bg: var(--vp-c-bg-code);
+  --vp-code-block-color: var(--vp-c-text-1);
+  --vp-code-block-bg: var(--vp-c-bg-code);
+  --vp-code-block-divider-color: var(--vp-c-divider);
+  --vp-code-lang-color: var(--vp-c-text-3);
+  --vp-code-line-highlight-color: var(--fleet-hue-band);
+  --vp-code-line-number-color: var(--vp-c-text-3);
+  --vp-code-copy-code-border-color: var(--vp-c-border);
+  --vp-code-copy-code-bg: var(--vp-c-bg-soft);
+  --vp-code-copy-code-hover-border-color: var(--fleet-hue);
+  --vp-code-copy-code-hover-bg: var(--vp-c-bg-soft-2);
+  --vp-code-copy-code-active-text: var(--vp-c-text-1);
+  --vp-code-tab-active-bar-color: var(--fleet-hue);
+
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: var(--vp-c-bg);
+  --vp-button-brand-bg: var(--fleet-hue);
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: var(--vp-c-bg);
+  --vp-button-brand-hover-bg: var(--fleet-hue);
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-active-text: var(--vp-c-bg);
+  --vp-button-brand-active-bg: var(--fleet-hue);
+  --vp-button-alt-border: var(--vp-c-border);
+  --vp-button-alt-text: var(--vp-c-text-1);
+  --vp-button-alt-bg: var(--vp-c-bg-soft);
+  --vp-button-alt-hover-border: var(--fleet-hue);
+  --vp-button-alt-hover-text: var(--vp-c-text-1);
+  --vp-button-alt-hover-bg: var(--vp-c-bg-soft);
+  --vp-button-alt-active-border: var(--fleet-hue);
+  --vp-button-alt-active-text: var(--vp-c-text-1);
+  --vp-button-alt-active-bg: var(--vp-c-bg-soft-2);
+  --mktg-accent-primary: var(--fleet-hue);
+
+  --vp-badge-tip-text: var(--fleet-hue);
+  --vp-badge-tip-bg: var(--fleet-hue-band);
+  --vp-badge-warning-text: var(--vp-c-text-1);
+  --vp-badge-warning-bg: var(--vp-c-bg-soft-2);
+  --vp-badge-danger-text: var(--vp-c-text-1);
+  --vp-badge-danger-bg: var(--vp-c-bg-soft-2);
+  --vp-nav-screen-bg-color: var(--vp-c-bg);
+  --vp-local-nav-bg-color: var(--vp-c-bg);
+  --vp-backdrop-bg-color: rgba(0, 0, 0, 0.45);
+
+  --vp-home-hero-name-color: var(--fleet-hue);
+  --vp-home-card-border-hover-color: var(--fleet-hue);
+  --vp-home-card-icon-bg: var(--fleet-hue-band);
+  --vp-home-card-icon-color: var(--fleet-hue);
+
+  --vp-local-search-bg: var(--vp-c-bg-soft);
+  --vp-local-search-result-bg: var(--vp-c-bg-soft);
+  --vp-local-search-result-border: var(--vp-c-border);
+  --vp-local-search-result-selected-bg: var(--fleet-hue-band);
+  --vp-local-search-result-selected-border: var(--fleet-hue);
+  --vp-local-search-highlight-bg: transparent;
+  --vp-local-search-highlight-text: var(--fleet-hue);
 }
