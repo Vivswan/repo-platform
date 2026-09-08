@@ -19,15 +19,34 @@ interface FactsTheme {
 
 type Cell = string | VNode | (string | VNode)[];
 
-function row(label: Cell, value: Cell, sub = false): VNode {
-  return h("tr", { class: sub ? "fleet-facts-sub" : undefined }, [
-    h("th", { scope: "row" }, label),
-    h("td", value),
+/** One label-value pair of a section's definition list. */
+function row(label: Cell, value: Cell): VNode {
+  return h("div", { class: "fleet-facts-row" }, [h("dt", label), h("dd", value)]);
+}
+
+/** A counted group: the label with its count, then the items as a nested
+ *  list INSIDE the value cell, so the one markup lays out both ways: as
+ *  indented rows under the count in the aside (components.css places the
+ *  nested lists on the card's shared label column), and as one inline run
+ *  next to the label when the card sits in flow. */
+function group(label: string, items: [Cell, Cell][]): VNode {
+  return h("div", { class: "fleet-facts-row fleet-facts-group" }, [
+    h("dt", label),
+    h("dd", [
+      h("span", { class: "fleet-facts-count" }, String(items.length)),
+      h(
+        "dl",
+        { class: "fleet-facts-items" },
+        items.map(([name, value]) =>
+          h("div", { class: "fleet-facts-item" }, [h("dt", name), h("dd", value)]),
+        ),
+      ),
+    ]),
   ]);
 }
 
 function section(rows: VNode[]): VNode {
-  return h("div", { class: "fleet-facts-section" }, [h("table", [h("tbody", rows)])]);
+  return h("dl", { class: "fleet-facts-section" }, rows);
 }
 
 /** The scheme and a trailing slash carry nothing on a card whose value
@@ -51,6 +70,18 @@ function slashBreakable(text: string): VNode[] {
     );
     return index === parts.length - 1 ? [segment] : [segment, h("wbr")];
   });
+}
+
+/** Topics as a list of chips: each chip is a flex item, so a hyphenated
+ *  topic moves to the next line whole instead of breaking at its hyphen.
+ *  The explicit role keeps the list a list where `list-style: none`
+ *  drops the native semantics (Safari). */
+function topicChips(topics: string[]): VNode {
+  return h(
+    "ul",
+    { class: "fleet-facts-topics", role: "list" },
+    topics.map((topic) => h("li", { class: "fleet-facts-topic" }, topic)),
+  );
 }
 
 function note(text: string): VNode {
@@ -83,15 +114,17 @@ export default defineComponent({
           ),
         );
       }
-      if (facts.topics.length > 0) about.push(row("Topics", facts.topics.join(", ")));
+      if (facts.topics.length > 0) about.push(row("Topics", topicChips(facts.topics)));
 
       const sections: VNode[] = [section(about)];
 
       if (facts.toolchains.length > 0) {
         sections.push(
           section([
-            row("Toolchain", String(facts.toolchains.length)),
-            ...facts.toolchains.map((tool) => row(tool.name, tool.version, true)),
+            group(
+              "Toolchain",
+              facts.toolchains.map((tool) => [tool.name, tool.version]),
+            ),
           ]),
         );
       }
@@ -101,17 +134,16 @@ export default defineComponent({
         const current = theme.value.docsSiteCurrent ?? "";
         sections.push(
           section([
-            row("Versions", String(versions.length)),
-            ...versions.map(({ label, link }) =>
-              row(
+            group(
+              "Versions",
+              versions.map(({ label, link }) => [
                 h(
                   "a",
                   { href: link, "aria-current": label === current ? "true" : undefined },
                   label,
                 ),
                 label === current ? note("reading") : "",
-                true,
-              ),
+              ]),
             ),
           ]),
         );
@@ -131,7 +163,7 @@ export default defineComponent({
           ? null
           : h("p", { class: "fleet-facts-description" }, facts.description),
         h("hr", { class: "fleet-facts-rule" }),
-        ...sections,
+        h("div", { class: "fleet-facts-body" }, sections),
       ]);
     };
   },
