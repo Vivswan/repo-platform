@@ -27,10 +27,19 @@
   --fleet-measure: 68ch;
 
   --vp-nav-height: 60px;
-  --vp-sidebar-width: 268px;
+  --vp-sidebar-width: 320px;
   --vp-doc-content-max-width: 760px;
   --vp-doc-aside-width: 240px;
   --vp-layout-max-width: 1440px;
+}
+
+/* Below carbon's aside breakpoint the sidebar shares the width with the
+ * article alone, and a 320px column would leave a 768px viewport a 37ch
+ * article; the doc column keeps 70ch from 1440px up either way. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  :root {
+    --vp-sidebar-width: 280px;
+  }
 }
 
 /* Light: paper grounds, ink text, the hue's deep variant. */

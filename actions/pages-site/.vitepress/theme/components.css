@@ -229,9 +229,22 @@ a:focus-visible {
 /* Carbon's per-level rules (.VPSidebarItem.level-N.is-active > .item .link >
  * .text and kin) reach seven class-levels once scoped, so every rule here
  * carries the .nav .group ancestors to sit above them. */
+
+/* Carbon keeps its 230px drawer cap on every viewport while padding the
+ * content by the full token, so the list ran narrower than its column. */
+.Layout .VPSidebar {
+  max-width: var(--vp-sidebar-width);
+}
+
 .VPSidebar .nav {
-  padding: 16px 12px 40px 16px;
+  padding: 16px 16px 40px 24px;
   border-right: 1px solid var(--vp-c-divider);
+}
+
+/* Carbon sizes the group at `sidebar - 48px` regardless of the nav's own
+ * padding, which clipped the rows' right end. */
+.VPSidebar .nav .group {
+  width: auto;
 }
 
 .VPSidebar .nav .group + .group {
@@ -244,9 +257,11 @@ a:focus-visible {
   padding-bottom: 2px;
 }
 
+/* A one-line row is 40px tall (3 + 6 + 21.75 + 6 + 3): the hit area holds
+ * while the type sits denser than carbon's. */
 .VPSidebar .nav .group .VPSidebarItem .item {
   border-radius: var(--fleet-radius-md);
-  padding: 4px 8px 4px 12px;
+  padding: 3px 8px 3px 10px;
   transition:
     background-color var(--fleet-transition),
     color var(--fleet-transition);
@@ -255,11 +270,12 @@ a:focus-visible {
   display: none;
 }
 .VPSidebar .nav .group .VPSidebarItem .text {
-  padding: 5px 0;
-  font-size: 15.5px;
-  line-height: 1.5;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1.45;
   font-weight: 400;
   color: var(--vp-c-text-2);
+  text-wrap: balance;
 }
 .VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .text,
 .VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .link > .text {
@@ -284,13 +300,15 @@ a:focus-visible {
 .VPSidebar .nav .group .VPSidebarItem .caret {
   color: var(--vp-c-text-3);
 }
+/* Children step in under their group head; a headless group (a docs
+ * tree's root files) sits flush, with no rule down its edge. */
 .VPSidebar .nav .group .VPSidebarItem .items {
-  border-left: 1px solid var(--vp-c-divider);
-  padding-left: 8px;
-  margin: 2px 0 6px 12px;
+  border-left: 0;
+  padding-left: 0;
+  margin: 2px 0 6px;
 }
-.VPSidebar .nav .group .VPSidebarItem .items .text {
-  font-size: 14.5px;
+.VPSidebar .nav .group .VPSidebarItem .item + .items {
+  margin-left: 12px;
 }
 
 /* ---------- doc column ---------- */

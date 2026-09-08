@@ -265,6 +265,27 @@
   min-width: 0;
 }
 
+/* In carbon's nav the title column sits left of the flex row that holds
+ * the field, so in-flow centering lands right of the viewport's center.
+ * The field needs the full-width nav bar as its containing block, which
+ * means carbon's positioned content wrappers go static. The width backs
+ * off symmetrically from the title column (the sidebar's width) so the
+ * field never reaches the title. */
+@media (min-width: 960px) {
+  .VPNav .VPNavBar.has-sidebar .content,
+  .VPNav .VPNavBar .content .content-body {
+    position: static;
+  }
+  .VPNavBar .fleet-launcher-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(520px, calc(100% - 2 * (var(--vp-sidebar-width) + 16px)));
+    margin: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+
 /* ---------- the dialog ---------- */
 
 .fleet-launcher-dialog {
