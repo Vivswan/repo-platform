@@ -4,7 +4,7 @@ Selecting the `pages` module gives a repository a managed `pages.yml` workflow t
 
 | URL | Built from | Content changes when |
 |---|---|---|
-| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: the default branch head, the same content as `latest/`) | a new version tag exists (every deploy while none serve) |
+| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: the default branch head, the same content as `latest/`) | a new version tag exists, or the pipeline or theme changes (every deploy rebuilds it; while none serve it follows the default branch head, so every deploy) |
 | `.../<repo>/latest/` | the default branch head | every deploy |
 | `.../<repo>/vX.Y.Z/` | that tag, one directory per served tag | the pipeline or theme changes (every deploy rebuilds all tiers; the source tag itself is immutable) |
 | `.../<repo>/versions.json` | the version index (machine-readable) | the served tag set changes |
