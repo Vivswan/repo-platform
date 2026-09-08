@@ -8,6 +8,8 @@
 //   DOCS_SITE_BASE          URL base path for this tier
 //   DOCS_SITE_VERSIONS      JSON [{label, link}] for the version dropdown
 //   DOCS_SITE_CURRENT       this tier's version label
+//   DOCS_SITE_FACTS         JSON ProjectFacts (facts.ts) for the theme's
+//                           facts card, provenance line, and per-repo hue
 //   DOCS_SITE_EDIT_PATTERN  editLink pattern (set only where editing the
 //                           source can change THIS content: latest tiers)
 //   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead
@@ -18,18 +20,19 @@
 import { defineConfigWithTheme } from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
-// lists); the deep import is the path its own demo documents.
+// lists, the llms.txt plugin); the deep import is the path its own demo
+// documents.
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
-import llmstxt from "vitepress-plugin-llms";
+import type { ProjectFacts } from "../facts.ts";
 import { deriveRewrites, deriveSidebar, detectLocales, walkMarkdown } from "./derive.ts";
 
-/** Carbon's theme config plus the fleet keys the version switcher reads;
- *  the same names version-switcher.ts consumes. Optional, so carbon's own
- *  baseConfig (typed against plain ThemeConfig) stays assignable in
- *  `extends`. */
+/** Carbon's theme config plus the fleet keys the version switcher and the
+ *  facts surfaces read. Optional, so carbon's own baseConfig (typed
+ *  against plain ThemeConfig) stays assignable in `extends`. */
 interface FleetThemeConfig extends ThemeConfig {
   docsSiteVersions?: { label: string; link: string }[];
   docsSiteCurrent?: string;
+  docsSiteFacts?: ProjectFacts;
 }
 
 function required(name: string): string {
@@ -46,6 +49,9 @@ const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
   link: string;
 }[];
+const facts = process.env.DOCS_SITE_FACTS
+  ? (JSON.parse(process.env.DOCS_SITE_FACTS) as ProjectFacts)
+  : undefined;
 
 // Locales by convention alone: docs/<lang>[-<region>]/ mirroring the root
 // structure IS a locale (derive.ts owns the detection rule); the root tree
@@ -87,7 +93,36 @@ export default defineConfigWithTheme<FleetThemeConfig>({
   // tree (never a git checkout - see buildVitepressTier), so git-derived
   // timestamps do not exist by construction.
   vite: {
-    plugins: [llmstxt()],
+    css: {
+      postcss: {
+        plugins: [
+          {
+            // Carbon's utils.css imports Google Fonts and cdnfonts; postcss-import
+            // hoists remote @imports untouched, so without this every page of
+            // every fleet site would call two third-party hosts on load. The
+            // bundled Mona Sans is a local url(), not an @import, and stays.
+            postcssPlugin: "fleet-drop-remote-imports",
+            AtRule: {
+              import(rule) {
+                if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
+              },
+            },
+          },
+        ],
+      },
+    },
+  },
+  // Landing pages (README.md, rewritten to index.md at any depth) are the
+  // site's front matter, not an article: the theme lays them out from the
+  // flag and they carry no outline.
+  transformPageData(pageData) {
+    if (!/(^|\/)index\.md$/.test(pageData.relativePath)) return;
+    return { frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false } };
+  },
+  transformHtml(code) {
+    return facts === undefined
+      ? code
+      : code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
   },
   themeConfig: {
     nav: [],
@@ -99,5 +134,6 @@ export default defineConfigWithTheme<FleetThemeConfig>({
       : {}),
     docsSiteVersions: versions,
     docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
+    ...(facts === undefined ? {} : { docsSiteFacts: facts }),
   },
 });

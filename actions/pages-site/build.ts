@@ -33,6 +33,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { collectFacts } from "./facts.ts";
 import {
   assemblyOrder,
   judgeCommandTag,
@@ -175,6 +176,7 @@ interface Config {
   origin: string;
   rootBase: string;
   editPattern: string;
+  defaultBranch: string;
 }
 
 function readConfig(): Config {
@@ -211,6 +213,7 @@ function readConfig(): Config {
     repository,
     origin,
     rootBase,
+    defaultBranch,
     editPattern: `${env("GITHUB_SERVER_URL", "https://github.com")}/${repository}/edit/${defaultBranch}/${docsDir}/:path`,
   };
 }
@@ -313,7 +316,9 @@ export function tierStrictLinks(tier: Tier): boolean {
  *  tree, materialized into the build root (HEAD tiers copy the workspace
  *  tree, tag tiers extract straight into the root). Dead-link strictness
  *  is DERIVED here from the tier - the one owner - so a strict-HEAD build
- *  and a lenient-tag build are the only representable states. */
+ *  and a lenient-tag build are the only representable states.
+ *  Project facts (facts.ts) read the tier's OWN ref, so a tagged version
+ *  shows the toolchains and license that tag carried. */
 function buildVitepressTier(
   cfg: Config,
   tier: Tier,
@@ -356,6 +361,13 @@ function buildVitepressTier(
   // ever installs anything.
   symlinkSync(join(ACTION_DIR, "node_modules"), join(root, "node_modules"));
   const strictLinks = tierStrictLinks(tier);
+  const sha = capture(["git", "-C", cfg.workspace, "rev-parse", `${tier.ref}^{commit}`]).trim();
+  const facts = collectFacts((path) => treeFile(cfg, tier.ref, path), {
+    repository: cfg.repository,
+    defaultBranch: cfg.defaultBranch,
+    ref: tier.ref,
+    sha,
+  });
   run(["bun", join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root], {
     env: {
       DOCS_SITE_SRC: srcDir,
@@ -365,6 +377,7 @@ function buildVitepressTier(
       DOCS_SITE_CURRENT: tier.version,
       DOCS_SITE_EDIT_PATTERN: fromWorkspace ? cfg.editPattern : "",
       DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
+      DOCS_SITE_FACTS: JSON.stringify(facts),
     },
   });
   return {

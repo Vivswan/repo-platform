@@ -99,6 +99,7 @@ present "VPNavBarTranslations" "$site/latest/index.html"
 # because vitepress-carbon is pinned EXACT in the action's package.json -
 # a carbon bump that moves its brand token should update this pin note.
 present "docs-site-version-switcher" "$site/latest/index.html"
+present 'data-fleet-hue="' "$site/latest/index.html"
 grep -qrF -- "58a6ff" "$site/latest/assets" || fail "carbon's brand token is missing from the built CSS - the base theme did not apply"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
@@ -269,5 +270,5 @@ site="$TEMP_REAL/pages-site/_site"
 present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
-echo "pages-site build check passed: tiers, locales, switcher, carbon skin, llms.txt," \
+echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, llms.txt," \
   "strict mode both arms, legacy-tag skip both arms, calibration gate"

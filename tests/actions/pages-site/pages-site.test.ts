@@ -32,6 +32,7 @@ import {
   versionTags,
 } from "../../../actions/pages-site/lib.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -551,6 +552,26 @@ describe("strict check build", () => {
       mkdirSync(join(root, "runner-temp"));
       writeFileSync(join(docs, "README.md"), "# Home\n\nSee [page](page.md).\n");
       writeFileSync(join(docs, "page.md"), `# Page\n\n${body}\n`);
+      // A checkout, as under the action: the tier's provenance and facts
+      // read git at HEAD.
+      fixtureGit(join(root, "ws"), ["init", "-q", "-b", "main"]);
+      fixtureGit(join(root, "ws"), [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@localhost",
+        "add",
+        "-A",
+      ]);
+      fixtureGit(join(root, "ws"), [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@localhost",
+        "commit",
+        "-qm",
+        "docs",
+      ]);
       const result = boundedSpawnSync([process.execPath, join(ACTION_DIR, "build.ts")], {
         env: {
           ...process.env,
