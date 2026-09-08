@@ -17,12 +17,20 @@
 # links are checked after the deploy and findings ride the fleet's
 # tracking-issue stream (fuzz-issue@build) under that label.
 # Callers own `concurrency: pages`; this workflow does not declare one.
+# The commit built: the sha input when the caller passes one (the managed
+# pages.yml hands over the commit ci.yml's all-green gate judged), else a
+# push builds its own commit and every other event the default branch head.
 
 name: Reusable Pages
 
 on:
   workflow_call:
     inputs:
+      sha:
+        description: The commit to build ("" = a push builds github.sha, any other event the default branch head)
+        required: false
+        type: string
+        default: ""
       mounts:
         description: 'JSON mount list for the pages-site action: [{"path", "source": command|vitepress, "versioned"}]'
         required: true
@@ -116,12 +124,13 @@ jobs:
 
       # One full checkout serves every tier: the action reads version tags
       # and per-ref trees from history (git archive), which needs
-      # fetch-depth 0. A push builds its own commit; schedule and dispatch
+      # fetch-depth 0. The caller's sha input wins (the judged commit);
+      # without one a push builds its own commit and schedule and dispatch
       # pin to the default branch head.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'push' && github.sha || github.event.repository.default_branch }}
+          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}
 
       # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
       # a hypothetical bunx) cannot false-positive a plain contains().

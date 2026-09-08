@@ -111,6 +111,387 @@ export function duplicateJobKeys(block: string[]): string[] {
   return [...seen.entries()].filter(([, count]) => count > 1).map(([path]) => path);
 }
 
+/** YAML's alternate key spellings parse identically but evade the
+ *  bare-key line censuses: quoted (`"push":`), explicit-key (`? push`),
+ *  anchored, tagged, alias, and explicit-value lines, and `key :` with
+ *  whitespace before the colon. Nothing in the pinned files legitimately
+ *  opens a line with any of those, so they are refused as an alphabet. */
+function keySpellingMismatches(line: string, file: string): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  if (/^\s*["'?&!*:]/.test(line)) {
+    mismatches.push({
+      file,
+      expected:
+        "no quoted, explicit-key, anchored, tagged, alias, or explicit-value lines (every YAML spelling beyond bare keys evades the censuses)",
+      got: line.trim(),
+    });
+  }
+  if (SPACED_KEY.test(line)) {
+    mismatches.push({
+      file,
+      expected:
+        "no whitespace before a mapping colon at any depth (`key :` parses as `key:` but evades every key census)",
+      got: line.trim(),
+    });
+  }
+  return mismatches;
+}
+
+/** The anchors ci.yml's jobs region may carry: the fleet-ci call's
+ *  with-block data anchor and one anchor per gate-downstream module leg
+ *  (each leg's fragment is pinned by spliceLegMismatches). */
+export const LEG_ANCHORS = [
+  "{# compose:codeql-languages #}",
+  "{# compose:all-green-pages #}",
+  "{# compose:all-green-release #}",
+];
+
+/** A gate-downstream leg a module splices into ci.yml through its
+ *  anchor: exactly one caller job, released only by the spelled-out green
+ *  results of its upstream jobs on a push to main, holding its own lane,
+ *  calling a repo-local workflow with the judged sha under an
+ *  additive-closed permissions ceiling. The pages and release-please
+ *  modules each ship one; this is the shape they share. */
+export interface SpliceLeg {
+  legRel: string;
+  jobId: string;
+  /** The jobs the leg needs, in needs-list order; each is also a
+   *  spelled-out gate clause. */
+  upstream: string[];
+  /** Why the needs list is exactly `upstream`. */
+  needsWhy: string;
+  lane: string;
+  laneWhy: string;
+  uses: string;
+  usesWhy: string;
+  permissions: string[];
+  /** Why `secrets: inherit` rides the leg; null bans the line - a leg
+   *  whose called workflow reads no secrets passes none. */
+  secretsWhy: string | null;
+}
+
+/** One spliced leg's fragment against its SpliceLeg model: jinja-minimal
+ *  text (inline {% raw %} pairs only - a multi-line comment or an if-tag
+ *  could hide a pinned line while rendering without it; the composer
+ *  supplies the module gate around the whole fragment), one job, one
+ *  needs line, one if:, the gate block, and each load-bearing line
+ *  exactly once (YAML's last duplicate wins silently, so a compliant copy
+ *  next to a gutted one must be loud). */
+export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[] {
+  const { legRel, jobId } = leg;
+  const mismatches: Mismatch[] = [];
+  for (const [index, line] of legText.split("\n").entries()) {
+    if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
+      mismatches.push({
+        file: `${legRel}:${index + 1}`,
+        expected:
+          "raw/endraw paired on one line (inline expression wrapping only - a multiline raw block smuggles text past the jinja ban)",
+        got: line.trim(),
+      });
+      continue;
+    }
+    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
+    if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
+      mismatches.push({
+        file: `${legRel}:${index + 1}`,
+        expected:
+          "no jinja tags or comments in the fragment beyond {% raw %} pairs (the composer supplies the module gate; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
+        got: line.trim(),
+      });
+    }
+    // An expression outside raw is jinja to copier: it renders mangled
+    // or empty instead of reaching GitHub.
+    if (line.includes("${{") && !line.includes("{% raw %}")) {
+      mismatches.push({
+        file: `${legRel}:${index + 1}`,
+        expected: "every ${{ }} expression wrapped in {% raw %} (jinja eats a bare one)",
+        got: line.trim(),
+      });
+    }
+    mismatches.push(...keySpellingMismatches(line, legRel));
+    // Every job-indent line must be a bare key.
+    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:$/.test(line)) {
+      mismatches.push({
+        file: legRel,
+        expected:
+          "every job-indent line spelled as a bare `key:` with nothing after it (an inline flow mapping carries if:/needs: keys the line censuses cannot see; any other spelling is a job the census cannot see)",
+        got: line.trim(),
+      });
+    }
+  }
+  const legJobs = [...legText.matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map((match) => match[1]);
+  if (legJobs.length === 0) {
+    throw new Error(`${legRel}: no job id - anchor lost`);
+  }
+  // Exactly ONE job, by design: with a second job in the fragment, a
+  // decoy could carry the pinned lines while the real job lost them.
+  if (canonical(legJobs) !== canonical([jobId])) {
+    mismatches.push({
+      file: legRel,
+      expected: `exactly one spliced job, '${jobId}' (a decoy second job could carry the pinned lines while the ${jobId} job lost them)`,
+      got: legJobs.join(", "),
+    });
+  }
+  const legLines = legText.split("\n");
+  for (const key of duplicateJobKeys(jobBlock(legLines, jobId))) {
+    mismatches.push({
+      file: `${legRel} job '${jobId}'`,
+      expected: `the key '${key}' once (YAML's last duplicate wins silently, shadowing the pinned value)`,
+      got: "a duplicate key",
+    });
+  }
+  const needsLine = `    needs: [${leg.upstream.join(", ")}]`;
+  const legNeedsLines = legLines.filter((line) => /^ {4}needs:/.test(line));
+  if (canonical(legNeedsLines) !== canonical([needsLine])) {
+    mismatches.push({
+      file: legRel,
+      expected: `exactly one needs: line, ${JSON.stringify(needsLine)} (a rival needs key silently wins in YAML; ${leg.needsWhy})`,
+      got: legNeedsLines.join(" | ") || "no needs lines",
+    });
+  }
+  if (/^\s+(strategy|continue-on-error):/m.test(legText)) {
+    mismatches.push({
+      file: legRel,
+      expected: `no strategy: or continue-on-error: in the ${jobId} leg`,
+      got: "a banned key",
+    });
+  }
+  // One if: only - YAML lets a duplicate key win silently, so a second
+  // condition could shadow the pinned block below.
+  const ifCount = legLines.filter((line) => /^ {4}if:/.test(line)).length;
+  if (ifCount !== 1) {
+    mismatches.push({
+      file: legRel,
+      expected: "exactly one job-level if: (a duplicate key could shadow the gate condition)",
+      got: `${ifCount} if: lines`,
+    });
+  }
+  // The gate condition: released only by green upstream results on a
+  // push to main.
+  pinDownstreamGate(
+    legText,
+    downstreamGateBlock(leg.upstream),
+    legRel,
+    `the ${jobId} job`,
+    mismatches,
+  );
+  const legPins: [string, string][] = [
+    [needsLine, `the ${jobId} leg runs downstream of ${leg.upstream.join(" and ")}, nothing else`],
+    ["    concurrency:", `${jobId} runs serialize in their own lane; an unserialized pair races`],
+    [`      group: ${leg.lane}`, leg.laneWhy],
+    [
+      "      cancel-in-progress: false",
+      "a cancelled half-finished run leaves its shared state wedged",
+    ],
+    [`    uses: ${leg.uses}`, leg.usesWhy],
+    [
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+      "the JUDGED commit, explicit - same-run today, and the explicit pass is what keeps a future caller honest",
+    ],
+  ];
+  if (leg.secretsWhy !== null) legPins.push(["    secrets: inherit", leg.secretsWhy]);
+  for (const [line, why] of legPins) {
+    const count = legLines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: legRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
+  if (leg.secretsWhy === null) {
+    for (const line of legLines.filter((candidate) => /^ {4}secrets:/.test(candidate))) {
+      mismatches.push({
+        file: legRel,
+        expected: `no secrets: on the ${jobId} leg (the called workflow reads none; passing them widens what a called run can reach)`,
+        got: line.trim(),
+      });
+    }
+  }
+  // The permissions ceiling, additive-closed: the pins prove the needed
+  // grants present, this census refuses extras riding to every
+  // selecting repository silently.
+  const permissionsAt = legLines.indexOf("    permissions:");
+  if (permissionsAt === -1) {
+    mismatches.push({
+      file: legRel,
+      expected: `a job-level permissions: ceiling for the called ${jobId} workflow`,
+      got: "missing",
+    });
+  } else {
+    mismatches.push(
+      ...setMismatch(
+        `${legRel} ${jobId} permissions ceiling`,
+        leg.permissions,
+        permissionGrants(legLines, permissionsAt),
+      ),
+    );
+  }
+  return mismatches;
+}
+
+/** The pages module's gate-downstream leg and its two called halves: the
+ *  fragment (spliceLegMismatches' model), the managed pages.yml it calls
+ *  (called with the judged sha, NO push trigger - the deploy's only way
+ *  onto main is downstream of the gate - the nightly and dispatch kept,
+ *  the lane keyed per run on a call, the sha passed on), and
+ *  reusable-pages.yml's sha input feeding its checkout. The source pins
+ *  are line censuses over jinja, so the RENDERED shape is judged too, as
+ *  parsed YAML of the all-modules golden (real copier output, drift-checked
+ *  by the golden-renders gate): the trigger set and the sha plumbing hold
+ *  whatever spelling or tag the source used to get there. Pure over the
+ *  texts for the suite's forcing cases. */
+export function pagesLegMismatches(
+  pagesLegText: string,
+  pagesWorkflowText: string,
+  reusablePagesText: string,
+  rendered: { pagesText: string; ciText: string },
+): Mismatch[] {
+  const pagesRel = "templates/pages/.github/workflows/pages.yml.jinja";
+  const reusableRel = ".github/workflows/reusable-pages.yml";
+  const mismatches = spliceLegMismatches(pagesLegText, {
+    legRel: "templates/pages/fragments/all-green-pages.jinja",
+    jobId: "pages",
+    upstream: ["all-green"],
+    needsWhy:
+      "the deploy waits on the gate alone - an edge to the repo-owned hook or the release leg would let a red one hold the site back",
+    lane: "pages",
+    laneWhy:
+      "the lane every deploy holds (pages.yml takes it at workflow level on its nightly and dispatch runs and keys a called run per run, so the call never waits on its caller's lane)",
+    uses: "./.github/workflows/pages.yml",
+    usesWhy:
+      "the leg calls the managed pages.yml by local path, where the deploy's inputs live once",
+    permissions: ["contents: read", "pages: write", "id-token: write", "issues: write"],
+    secretsWhy: null,
+  });
+  const lines = pagesWorkflowText.split("\n");
+  const pins: [string, string][] = [
+    [
+      "  schedule:",
+      "the nightly rebuild stays (tags created without a push and pipeline updates land there)",
+    ],
+    ["  workflow_dispatch:", "the manual rebuild stays"],
+    [
+      "  group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}",
+      "the pages lane on nightly and dispatch runs, a per-run group on a call (ci.yml's pages job holds the lane; a called workflow waiting on it self-deadlocks)",
+    ],
+    [
+      "      sha: {% raw %}${{ inputs.sha }}{% endraw %}",
+      "the judged commit rides on to reusable-pages, whose checkout builds it",
+    ],
+  ];
+  for (const [line, why] of pins) {
+    const count = lines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: pagesRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
+  const callBlock = ["on:", "  workflow_call:", "    inputs:", "      sha:"].join("\n");
+  if (pagesWorkflowText.split(callBlock).length !== 2) {
+    mismatches.push({
+      file: pagesRel,
+      expected: `the verbatim block starting ${JSON.stringify("on:")} exactly once (the workflow_call must declare the sha input the leg passes - an undeclared input fails the call outright, fleet-wide)`,
+      got: "missing, reshaped, or duplicated",
+    });
+  }
+  // The trigger ban reads bare lines, so the alternate spellings that
+  // would smuggle a `"push":` past it are refused file-wide first.
+  for (const line of lines) mismatches.push(...keySpellingMismatches(line, pagesRel));
+  for (const trigger of ["push", "pull_request"]) {
+    if (lines.some((line) => new RegExp(`^ {2}${trigger}:`).test(line))) {
+      mismatches.push({
+        file: pagesRel,
+        expected: `no ${trigger}: trigger (a deploy on ${trigger} bypasses the all-green gate; the deploy's way onto main is ci.yml's pages leg)`,
+        got: `a ${trigger}: trigger`,
+      });
+    }
+  }
+  // reusable-pages.yml's half, parsed (the file is plain YAML): the sha
+  // input declared, and the checkout reading it first.
+  const reusable = asRecord(parseYaml(reusablePagesText), reusableRel);
+  const call = asRecord(
+    asRecord(reusable.on ?? {}, `${reusableRel} on`).workflow_call ?? {},
+    `${reusableRel} workflow_call`,
+  );
+  if (!("sha" in asRecord(call.inputs ?? {}, `${reusableRel} inputs`))) {
+    mismatches.push({
+      file: reusableRel,
+      expected:
+        "a workflow_call input named sha (pages.yml passes it; an undeclared input fails every deploy outright)",
+      got: "no such input",
+    });
+  }
+  const jobs = asRecord(reusable.jobs ?? {}, `${reusableRel} jobs`);
+  const steps = (asRecord(jobs.deploy ?? {}, `${reusableRel} deploy`).steps ?? []) as Record<
+    string,
+    unknown
+  >[];
+  const checkout = steps.find((step) => String(step.uses ?? "").startsWith("actions/checkout@"));
+  if (checkout === undefined) throw new Error(`${reusableRel}: no checkout step - anchor lost`);
+  const ref = String(asRecord(checkout.with ?? {}, `${reusableRel} checkout with`).ref ?? "");
+  if (!ref.startsWith("${{ inputs.sha || ")) {
+    mismatches.push({
+      file: reusableRel,
+      expected:
+        "the deploy checkout's ref starting `${{ inputs.sha || ` (the caller's judged commit wins; a checkout ignoring it builds a commit the gate never judged)",
+      got: ref || "no ref",
+    });
+  }
+  // The rendered shape, parsed.
+  const goldenRel = "tests/golden-renders/all-modules/.github/workflows";
+  const renderedPages = asRecord(parseYaml(rendered.pagesText), `${goldenRel}/pages.yml`);
+  const triggers = asRecord(renderedPages.on ?? {}, `${goldenRel}/pages.yml on`);
+  mismatches.push(
+    ...setMismatch(
+      `${goldenRel}/pages.yml triggers (the rendered deploy runs only as ci.yml's called leg, nightly, and by hand - any other trigger deploys off an unjudged commit)`,
+      ["workflow_call", "schedule", "workflow_dispatch"],
+      Object.keys(triggers),
+    ),
+  );
+  const deployWith = asRecord(
+    asRecord(
+      asRecord(renderedPages.jobs ?? {}, `${goldenRel}/pages.yml jobs`).deploy ?? {},
+      "deploy",
+    ).with ?? {},
+    `${goldenRel}/pages.yml deploy with`,
+  );
+  if (deployWith.sha !== "${{ inputs.sha }}") {
+    mismatches.push({
+      file: `${goldenRel}/pages.yml`,
+      expected: "the rendered deploy passing sha: ${{ inputs.sha }} on to reusable-pages",
+      got: canonical(deployWith.sha ?? null),
+    });
+  }
+  const renderedCi = asRecord(parseYaml(rendered.ciText), `${goldenRel}/ci.yml`);
+  const pagesJob = asRecord(
+    asRecord(renderedCi.jobs ?? {}, `${goldenRel}/ci.yml jobs`).pages ?? {},
+    `${goldenRel}/ci.yml pages`,
+  );
+  const renderedLeg = {
+    needs: pagesJob.needs ?? null,
+    uses: pagesJob.uses ?? null,
+    sha: asRecord(pagesJob.with ?? {}, `${goldenRel}/ci.yml pages with`).sha ?? null,
+  };
+  const expectedLeg = {
+    needs: ["all-green"],
+    uses: "./.github/workflows/pages.yml",
+    sha: "${{ github.sha }}",
+  };
+  if (canonical(renderedLeg) !== canonical(expectedLeg)) {
+    mismatches.push({
+      file: `${goldenRel}/ci.yml job 'pages'`,
+      expected: `the rendered leg needing the gate alone, calling pages.yml by local path with the judged sha: ${canonical(expectedLeg)}`,
+      got: canonical(renderedLeg),
+    });
+  }
+  return mismatches;
+}
+
 /** The fleet gate's render shape at the jinja SOURCE, pinned as exact
  *  lines against a maintainer's accidental omission (the rendered shape is
  *  asserted by verify_smoke_gating.sh); docs/all-green.md has the model. */
@@ -134,8 +515,8 @@ export function fleetCiRenderMismatches(
       expected:
         "exactly the 'checks' and 'ci' caller jobs, the 'all-green' gate, and the " +
         "gate-downstream 'post-green' hook caller (every fleet gate lives inside the two calls; " +
-        "the release leg splices through its anchor, and a job added here would gate every repo " +
-        "with no roster to make it loud)",
+        "the pages and release legs splice through their anchors, and a job added here would " +
+        "gate every repo with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }
@@ -224,16 +605,13 @@ export function fleetCiRenderMismatches(
     }
     // The job census reads the template's own text, so a fragment anchor
     // after jobs: could splice a job the census never sees; only the
-    // with-block data anchor and the release leg's anchor may stand.
-    if (
-      line.startsWith("{# compose:") &&
-      line !== "{# compose:codeql-languages #}" &&
-      line !== "{# compose:all-green-release #}"
-    ) {
+    // with-block data anchor and the two gate-downstream leg anchors may
+    // stand (each leg's shape is pinned at its own fragment below).
+    if (line.startsWith("{# compose:") && !LEG_ANCHORS.includes(line)) {
       mismatches.push({
         file: ciRel,
         expected:
-          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor and the all-green-release leg anchor (a spliced job would evade the job census; module jobs live in fleet-ci)",
+          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor and the all-green-pages and all-green-release leg anchors (a spliced job would evade the job census; module jobs live in fleet-ci)",
         got: line.trim(),
       });
     }
@@ -300,6 +678,11 @@ export function fleetCiRenderMismatches(
       "post-green",
     ],
     [
+      "{# compose:all-green-pages #}",
+      "the pages leg's anchor (splices the gate-downstream Pages deploy caller on selecting repos)",
+      null,
+    ],
+    [
       "{# compose:all-green-release #}",
       "the release-please leg's anchor (splices the gate-downstream release job on selecting repos)",
       null,
@@ -346,190 +729,29 @@ export function fleetCiRenderMismatches(
       ),
     );
   }
-  // The release leg is jinja-minimal by design: inline {% raw %} pairs
-  // wrap the judged-sha expression, and everything else is banned -
-  // a multi-line {# ... #} or an if-tag could otherwise hide a pinned
-  // line while rendering without it (the composer supplies the module
-  // gate around the whole fragment).
-  for (const [index, line] of releaseLegText.split("\n").entries()) {
-    if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
-      mismatches.push({
-        file: `${legRel}:${index + 1}`,
-        expected:
-          "raw/endraw paired on one line (inline expression wrapping only - a multiline raw block smuggles text past the jinja ban)",
-        got: line.trim(),
-      });
-      continue;
-    }
-    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
-    if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
-      mismatches.push({
-        file: `${legRel}:${index + 1}`,
-        expected:
-          "no jinja tags or comments in the fragment beyond {% raw %} pairs (the composer supplies the module gate; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
-        got: line.trim(),
-      });
-    }
-    // An expression outside raw is jinja to copier: it renders mangled
-    // or empty instead of reaching GitHub.
-    if (line.includes("${{") && !line.includes("{% raw %}")) {
-      mismatches.push({
-        file: `${legRel}:${index + 1}`,
-        expected: "every ${{ }} expression wrapped in {% raw %} (jinja eats a bare one)",
-        got: line.trim(),
-      });
-    }
-    // YAML's alternate key spellings parse identically but evade the
-    // bare-key censuses (quoted, explicit-key, anchored, tagged, alias,
-    // explicit-value); every job-indent line must be a bare key.
-    if (/^\s*["'?&!*:]/.test(line)) {
-      mismatches.push({
-        file: legRel,
-        expected:
-          "no quoted, explicit-key, anchored, tagged, alias, or explicit-value lines (every YAML spelling beyond bare keys evades the censuses)",
-        got: line.trim(),
-      });
-    }
-    if (SPACED_KEY.test(line)) {
-      mismatches.push({
-        file: legRel,
-        expected:
-          "no whitespace before a mapping colon at any depth (`key :` parses as `key:` but evades every key census)",
-        got: line.trim(),
-      });
-    }
-    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:$/.test(line)) {
-      mismatches.push({
-        file: legRel,
-        expected:
-          "every job-indent line spelled as a bare `key:` with nothing after it (an inline flow mapping carries if:/needs: keys the line censuses cannot see; any other spelling is a job the census cannot see)",
-        got: line.trim(),
-      });
-    }
-  }
-  const legJobs = [...releaseLegText.matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
-    (match) => match[1],
+  mismatches.push(
+    ...spliceLegMismatches(releaseLegText, {
+      legRel,
+      jobId: "release",
+      upstream: ["all-green", "post-green"],
+      needsWhy: "dropping post-green mints the tag before the repo's own post-green work landed",
+      lane: "post-green-release",
+      laneWhy:
+        "the caller's lane, deliberately no group the called release.yml takes (sharing self-deadlocks)",
+      uses: "./.github/workflows/release.yml",
+      usesWhy: "the leg calls the managed release pipeline by local path",
+      permissions: [
+        "contents: write",
+        "pull-requests: write",
+        "packages: write",
+        "id-token: write",
+        "attestations: write",
+        "issues: read",
+        "vulnerability-alerts: read",
+      ],
+      secretsWhy: "publish steps need the repo's secrets",
+    }),
   );
-  if (legJobs.length === 0) {
-    throw new Error(`${legRel}: no job id - anchor lost`);
-  }
-  // Exactly ONE job, by design: with a second job in the fragment, a
-  // decoy could carry the pinned lines while the release job lost them.
-  if (canonical(legJobs) !== canonical(["release"])) {
-    mismatches.push({
-      file: legRel,
-      expected:
-        "exactly one spliced job, 'release' (a decoy second job could carry the pinned lines while the release job lost them)",
-      got: legJobs.join(", "),
-    });
-  }
-  for (const key of duplicateJobKeys(jobBlock(releaseLegText.split("\n"), "release"))) {
-    mismatches.push({
-      file: `${legRel} job 'release'`,
-      expected: `the key '${key}' once (YAML's last duplicate wins silently, shadowing the pinned value)`,
-      got: "a duplicate key",
-    });
-  }
-  const legNeedsLines = releaseLegText.split("\n").filter((line) => /^ {4}needs:/.test(line));
-  if (canonical(legNeedsLines) !== canonical(["    needs: [all-green, post-green]"])) {
-    mismatches.push({
-      file: legRel,
-      expected:
-        'exactly one needs: line, "    needs: [all-green, post-green]" (a rival needs key silently wins in YAML; dropping post-green mints the tag before the repo\'s own post-green work landed)',
-      got: legNeedsLines.join(" | ") || "no needs lines",
-    });
-  }
-  if (/^\s+(strategy|continue-on-error):/m.test(releaseLegText)) {
-    mismatches.push({
-      file: legRel,
-      expected: "no strategy: or continue-on-error: in the release leg",
-      got: "a banned key",
-    });
-  }
-  // One if: only - YAML lets a duplicate key win silently, so a second
-  // condition could shadow the pinned block below.
-  const ifCount = releaseLegText.split("\n").filter((line) => /^ {4}if:/.test(line)).length;
-  if (ifCount !== 1) {
-    mismatches.push({
-      file: legRel,
-      expected: "exactly one job-level if: (a duplicate key could shadow the gate condition)",
-      got: `${ifCount} if: lines`,
-    });
-  }
-  // The gate condition: released only by a green all-green AND a green
-  // post-green hook on a push to main.
-  pinDownstreamGate(
-    releaseLegText,
-    downstreamGateBlock(["all-green", "post-green"]),
-    legRel,
-    "the release job",
-    mismatches,
-  );
-  // The per-line pins: each exactly once (YAML's last duplicate wins
-  // silently, so a compliant copy next to a gutted one must be loud).
-  const legPins: [string, string][] = [
-    [
-      "    needs: [all-green, post-green]",
-      "the release leg runs downstream of the gate and the repo-owned hook, nothing else",
-    ],
-    [
-      "    concurrency:",
-      "releases serialize in their own lane; an unserialized pair can double-publish",
-    ],
-    [
-      "      group: post-green-release",
-      "the caller's lane, deliberately no group the called release.yml takes (sharing self-deadlocks)",
-    ],
-    ["      cancel-in-progress: false", "a cancelled half-finished release is a wedged draft"],
-    [
-      "    uses: ./.github/workflows/release.yml",
-      "the leg calls the managed release pipeline by local path",
-    ],
-    [
-      "      sha: {% raw %}${{ github.sha }}{% endraw %}",
-      "the JUDGED commit, explicit - same-run today, and the explicit pass is what keeps a future caller honest",
-    ],
-    ["    secrets: inherit", "publish steps need the repo's secrets"],
-  ];
-  const legLines = releaseLegText.split("\n");
-  for (const [line, why] of legPins) {
-    const count = legLines.filter((candidate) => candidate === line).length;
-    if (count !== 1) {
-      mismatches.push({
-        file: legRel,
-        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
-        got: count === 0 ? "missing" : `${count} occurrences`,
-      });
-    }
-  }
-
-  // The permissions ceiling, additive-closed: the pins prove the needed
-  // grants present, this census refuses extras riding to every
-  // release-selecting repository silently.
-  const permissionsAt = legLines.indexOf("    permissions:");
-  if (permissionsAt === -1) {
-    mismatches.push({
-      file: legRel,
-      expected: "a job-level permissions: ceiling for the called release pipeline",
-      got: "missing",
-    });
-  } else {
-    mismatches.push(
-      ...setMismatch(
-        `${legRel} release permissions ceiling`,
-        [
-          "contents: write",
-          "pull-requests: write",
-          "packages: write",
-          "id-token: write",
-          "attestations: write",
-          "issues: read",
-          "vulnerability-alerts: read",
-        ],
-        permissionGrants(legLines, permissionsAt),
-      ),
-    );
-  }
   // The called release.yml's half of the judged-sha pass, pinned as two
   // ADJACENT blocks (the file is jinja-heavy, so no YAML parse): the sha
   // input declared under workflow_call, and the head-gate step whose
@@ -806,13 +1028,31 @@ export const fleetCiRenderRules: Rule[] = [
     // carries exactly the two caller jobs, the pinned all-green gate, and
     // the gate-downstream post-green hook caller, and the release leg
     // splicing after them must need both with the judged sha passed
-    // through.
+    // through (the pages leg splicing beside it: the pages-leg rule).
     name: "fleet-ci-render-roster",
     run: () =>
       fleetCiRenderMismatches(
         read("templates/base/.github/workflows/ci.yml.jinja"),
         read("templates/release-please/fragments/all-green-release.jinja"),
         read("templates/release-please/.github/workflows/release.yml.jinja"),
+      ),
+  },
+  {
+    // The pages module's gate-downstream deploy leg at its three sources
+    // and in the rendered golden (pagesLegMismatches has the model): the
+    // spliced caller's shape, the called pages.yml with no push trigger
+    // and the sha handed on, reusable-pages.yml's checkout reading it, and
+    // the parsed render agreeing.
+    name: "pages-leg",
+    run: () =>
+      pagesLegMismatches(
+        read("templates/pages/fragments/all-green-pages.jinja"),
+        read("templates/pages/.github/workflows/pages.yml.jinja"),
+        read(".github/workflows/reusable-pages.yml"),
+        {
+          pagesText: read("tests/golden-renders/all-modules/.github/workflows/pages.yml"),
+          ciText: read("tests/golden-renders/all-modules/.github/workflows/ci.yml"),
+        },
       ),
   },
   {

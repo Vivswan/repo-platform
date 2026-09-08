@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   duplicateJobKeys,
   fleetCiRenderMismatches,
+  pagesLegMismatches,
   prTitleWorkflowMismatches,
 } from "../../../scripts/check/ssot/fleet_ci_render.ts";
 
@@ -35,6 +36,7 @@ describe("fleetCiRenderMismatches", () => {
     "    with:",
     "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     "    secrets: inherit",
+    "{# compose:all-green-pages #}",
     "{# compose:all-green-release #}",
     "",
   ].join("\n");
@@ -357,13 +359,24 @@ describe("fleetCiRenderMismatches", () => {
     expect(found.some((m) => m.expected.includes("no fragment anchor"))).toBe(true);
   });
 
-  test("the codeql-languages data anchor and the release leg's anchor stay exempt from the anchor ban", () => {
+  test("the codeql-languages data anchor and the two leg anchors stay exempt from the anchor ban", () => {
     const found = fleetCiRenderMismatches(
       `${ciTemplate}{# compose:codeql-languages #}\n`,
       leg,
       releaseWf,
     );
     expect(found.filter((m) => m.expected.includes("no fragment anchor"))).toEqual([]);
+  });
+
+  test("dropping the pages leg's anchor goes red - selecting repos would render no deploy at all", () => {
+    const found = fleetCiRenderMismatches(
+      ciTemplate.replace("{# compose:all-green-pages #}\n", ""),
+      leg,
+      releaseWf,
+    );
+    expect(
+      found.some((m) => m.expected.includes(JSON.stringify("{# compose:all-green-pages #}"))),
+    ).toBe(true);
   });
 
   test("leading-quote and explicit-key lines are refused in the template and the leg - both parse identically but evade the censuses", () => {
@@ -714,6 +727,277 @@ describe("fleetCiRenderMismatches", () => {
 
   test("the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates", () => {
     expect(liveMismatches()).toEqual([]);
+  });
+});
+
+describe("pagesLegMismatches", () => {
+  const leg = [
+    "",
+    "  pages:",
+    "    needs: [all-green]",
+    "    if: >-",
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+    "    concurrency:",
+    "      group: pages",
+    "      cancel-in-progress: false",
+    "    permissions:",
+    "      contents: read",
+    "      pages: write",
+    "      id-token: write",
+    "      issues: write",
+    "    uses: ./.github/workflows/pages.yml",
+    "    with:",
+    "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+  ].join("\n");
+  const pagesWf = [
+    "name: Pages",
+    "",
+    "on:",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: true",
+    "        type: string",
+    "  schedule:",
+    '    - cron: "23 4 * * *"',
+    "  workflow_dispatch:",
+    "",
+    "concurrency:",
+    "  group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}",
+    "  cancel-in-progress: false",
+    "",
+    "jobs:",
+    "  deploy:",
+    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@build",
+    "    with:",
+    "      sha: {% raw %}${{ inputs.sha }}{% endraw %}",
+    "      setup: {{ pages_setup }}",
+    "",
+  ].join("\n");
+  const reusable = [
+    "on:",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: false",
+    "        type: string",
+    '        default: ""',
+    "jobs:",
+    "  deploy:",
+    "    steps:",
+    "      - uses: actions/checkout@v7",
+    "        with:",
+    "          fetch-depth: 0",
+    "          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}",
+    "",
+  ].join("\n");
+
+  const renderedPages = [
+    "on:",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: true",
+    "  schedule:",
+    '    - cron: "23 4 * * *"',
+    "  workflow_dispatch:",
+    "jobs:",
+    "  deploy:",
+    "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@build",
+    "    with:",
+    "      sha: ${{ inputs.sha }}",
+    "",
+  ].join("\n");
+  const renderedCi = [
+    "jobs:",
+    "  all-green:",
+    "    needs: [checks, ci]",
+    "  pages:",
+    "    needs: [all-green]",
+    "    uses: ./.github/workflows/pages.yml",
+    "    with:",
+    "      sha: ${{ github.sha }}",
+    "",
+  ].join("\n");
+  const rendered = { pagesText: renderedPages, ciText: renderedCi };
+  const judge = (
+    legText = leg,
+    pagesText = pagesWf,
+    reusableText = reusable,
+    renderedTexts = rendered,
+  ) => pagesLegMismatches(legText, pagesText, reusableText, renderedTexts);
+
+  test("the canonical sources and render pass clean", () => {
+    expect(judge()).toEqual([]);
+  });
+
+  test("the RENDERED pages.yml is judged as parsed YAML - a push trigger reaching the render through any source spelling or jinja tag goes red", () => {
+    for (const trigger of [
+      "push:\n    branches: [main]",
+      '"push":\n    branches: [main]',
+      "pull_request:",
+    ]) {
+      const found = judge(leg, pagesWf, reusable, {
+        ...rendered,
+        pagesText: renderedPages.replace("  schedule:", `  ${trigger}\n  schedule:`),
+      });
+      expect(found.some((m) => m.file.includes("pages.yml triggers"))).toBe(true);
+    }
+    const unpassed = judge(leg, pagesWf, reusable, {
+      ...rendered,
+      pagesText: renderedPages.replace("      sha: ${{ inputs.sha }}\n", ""),
+    });
+    expect(unpassed.some((m) => m.expected.includes("the rendered deploy passing sha"))).toBe(true);
+  });
+
+  test("the RENDERED ci.yml pages leg is judged as parsed YAML - a missing job, a hook edge, or an unpassed sha goes red", () => {
+    for (const ciText of [
+      renderedCi.replace(/ {2}pages:[\s\S]*$/, ""),
+      renderedCi.replace("    needs: [all-green]", "    needs: [all-green, post-green]"),
+      renderedCi.replace("      sha: ${{ github.sha }}\n", ""),
+    ]) {
+      const found = judge(leg, pagesWf, reusable, { ...rendered, ciText });
+      expect(found.some((m) => m.file.includes("ci.yml job 'pages'"))).toBe(true);
+    }
+  });
+
+  test("a push: trigger back on pages.yml goes red - a push deploy bypasses the all-green gate", () => {
+    const found = judge(
+      leg,
+      pagesWf.replace("  schedule:", "  push:\n    branches: [main]\n  schedule:"),
+      reusable,
+    );
+    expect(found.some((m) => m.expected.includes("no push: trigger"))).toBe(true);
+    const pr = judge(leg, pagesWf.replace("  schedule:", "  pull_request:\n  schedule:"), reusable);
+    expect(pr.some((m) => m.expected.includes("no pull_request: trigger"))).toBe(true);
+  });
+
+  test('a push trigger in any alternate YAML spelling goes red too - `"push":`, `? push`, and `push :` all parse as the trigger', () => {
+    for (const [spelling, expected] of [
+      ['  "push":', "no quoted, explicit-key"],
+      ["  ? push", "no quoted, explicit-key"],
+      ["  push :", "no whitespace before a mapping colon"],
+    ]) {
+      const found = judge(
+        leg,
+        pagesWf.replace("  schedule:", `${spelling}\n    branches: [main]\n  schedule:`),
+        reusable,
+      );
+      expect(found.some((m) => m.expected.includes(expected))).toBe(true);
+    }
+  });
+
+  test("an edge to the hook or the release leg goes red - a red one would hold the site back", () => {
+    for (const needs of ["    needs: [all-green, post-green]", "    needs: [all-green, release]"]) {
+      const found = judge(leg.replace("    needs: [all-green]", needs), pagesWf, reusable);
+      expect(found.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    }
+  });
+
+  test("secrets: on the pages leg goes red - the called deploy reads none", () => {
+    const found = judge(`${leg}\n    secrets: inherit`, pagesWf, reusable);
+    expect(found.some((m) => m.expected.includes("no secrets: on the pages leg"))).toBe(true);
+  });
+
+  test("dropping any gate clause or the judged-sha pass from the leg goes red", () => {
+    for (const clause of [
+      "      needs.all-green.result == 'success' &&\n",
+      "      github.event_name == 'push' &&\n",
+      "      github.ref == 'refs/heads/main'",
+    ]) {
+      const found = judge(leg.replace(clause, ""), pagesWf, reusable);
+      expect(found.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+    }
+    const unpassed = judge(
+      leg.replace("      sha: {% raw %}${{ github.sha }}{% endraw %}", ""),
+      pagesWf,
+      reusable,
+    );
+    expect(unpassed.some((m) => m.expected.includes("the JUDGED commit, explicit"))).toBe(true);
+  });
+
+  test("the pages permissions ceiling is pinned both ways", () => {
+    const missing = judge(leg.replace("      pages: write\n", ""), pagesWf, reusable);
+    expect(missing.some((m) => m.file.includes("pages permissions ceiling"))).toBe(true);
+    const added = judge(
+      leg.replace("      issues: write", "      issues: write\n      contents: write"),
+      pagesWf,
+      reusable,
+    );
+    expect(added.some((m) => m.file.includes("pages permissions ceiling"))).toBe(true);
+  });
+
+  test("pages.yml must declare the sha input, key its lane per called run, and hand the sha on", () => {
+    const undeclared = judge(
+      leg,
+      pagesWf.replace(
+        "  workflow_call:\n    inputs:\n      sha:\n        required: true\n        type: string\n",
+        "  workflow_call:\n",
+      ),
+      reusable,
+    );
+    expect(undeclared.some((m) => m.expected.includes("declare the sha input"))).toBe(true);
+    const plainLane = judge(leg, pagesWf.replace(/ {2}group: .*\n/, "  group: pages\n"), reusable);
+    expect(plainLane.some((m) => m.expected.includes("pages-called-"))).toBe(true);
+    const unpassed = judge(
+      leg,
+      pagesWf.replace("      sha: {% raw %}${{ inputs.sha }}{% endraw %}\n", ""),
+      reusable,
+    );
+    expect(unpassed.some((m) => m.expected.includes("rides on to reusable-pages"))).toBe(true);
+    const nightlyGone = judge(leg, pagesWf.replace("  workflow_dispatch:\n", ""), reusable);
+    expect(nightlyGone.some((m) => m.expected.includes("the manual rebuild stays"))).toBe(true);
+  });
+
+  test("reusable-pages.yml must declare the sha input and check it out first", () => {
+    const undeclared = judge(
+      leg,
+      pagesWf,
+      reusable.replace(
+        '      sha:\n        required: false\n        type: string\n        default: ""\n',
+        "      other:\n        type: string\n",
+      ),
+    );
+    expect(undeclared.some((m) => m.expected.includes("a workflow_call input named sha"))).toBe(
+      true,
+    );
+    const ignored = judge(
+      leg,
+      pagesWf,
+      reusable.replace(/ {10}ref: .*\n/, "          ref: ${{ github.sha }}\n"),
+    );
+    expect(ignored.some((m) => m.expected.includes("the deploy checkout's ref starting"))).toBe(
+      true,
+    );
+    expect(() =>
+      judge(
+        leg,
+        pagesWf,
+        "on:\n  workflow_call:\n    inputs:\n      sha: {}\njobs:\n  deploy:\n    steps: []\n",
+      ),
+    ).toThrow("anchor lost");
+  });
+
+  test("the pages leg is ARMED: every link the pages-leg rule pins holds on the live sources", () => {
+    expect(
+      pagesLegMismatches(
+        readFileSync("templates/pages/fragments/all-green-pages.jinja", "utf-8"),
+        readFileSync("templates/pages/.github/workflows/pages.yml.jinja", "utf-8"),
+        readFileSync(".github/workflows/reusable-pages.yml", "utf-8"),
+        {
+          pagesText: readFileSync(
+            "tests/golden-renders/all-modules/.github/workflows/pages.yml",
+            "utf-8",
+          ),
+          ciText: readFileSync(
+            "tests/golden-renders/all-modules/.github/workflows/ci.yml",
+            "utf-8",
+          ),
+        },
+      ),
+    ).toEqual([]);
   });
 });
 
