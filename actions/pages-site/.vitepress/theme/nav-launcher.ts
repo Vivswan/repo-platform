@@ -62,6 +62,7 @@ export default defineComponent({
   setup() {
     const opened = ref(false);
     const dialog = shallowRef<HTMLDialogElement | null>(null);
+    const button = shallowRef<HTMLButtonElement | null>(null);
     const modifier = ref<"Cmd" | "Ctrl">("Cmd");
 
     async function show(): Promise<void> {
@@ -81,10 +82,14 @@ export default defineComponent({
       aim(element.querySelector<HTMLInputElement>(DIALOG_FIELD));
     }
 
+    // Focus goes back to the button on every close, not only the ones the
+    // browser restores itself: opened by the shortcut, the dialog had taken
+    // focus from the body, and Escape or the backdrop would leave it there.
     function close(): void {
       const element = dialog.value;
       if (element?.open) element.close();
       opened.value = false;
+      button.value?.focus();
     }
 
     function onKeydown(event: KeyboardEvent): void {
@@ -118,6 +123,7 @@ export default defineComponent({
         h(
           "button",
           {
+            ref: button,
             type: "button",
             class: "fleet-launcher-button",
             "aria-label": "Search the docs",

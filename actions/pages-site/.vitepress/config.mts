@@ -19,6 +19,8 @@
 //                           (that failure is the docs PR check's value),
 //                           but history cannot be fixed
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfigWithTheme } from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
@@ -58,6 +60,14 @@ const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   link: string;
 }[];
 const facts = JSON.parse(required("DOCS_SITE_FACTS")) as ProjectFacts;
+const title = process.env.DOCS_SITE_TITLE || "Documentation";
+const base = process.env.DOCS_SITE_BASE || "/";
+// An icon link only for an icon the docs tree ships (VitePress serves
+// public/ at the base): a link to a missing file would be a 404 on every
+// page, while no link lets the browser fall back to the site's favicon.ico.
+const icon = ["favicon.svg", "favicon.ico"].find((name) =>
+  existsSync(join(srcDir, "public", name)),
+);
 
 // Locales by convention alone: docs/<lang>[-<region>]/ mirroring the root
 // structure IS a locale (derive.ts owns the detection rule); the root tree
@@ -89,8 +99,10 @@ for (const dir of localeDirs) {
 
 export default defineConfigWithTheme<FleetThemeConfig>({
   extends: baseConfig,
-  title: process.env.DOCS_SITE_TITLE || "Documentation",
-  base: process.env.DOCS_SITE_BASE || "/",
+  title,
+  description: facts.description ?? title,
+  head: icon === undefined ? [] : [["link", { rel: "icon", href: `${base}${icon}` }]],
+  base,
   srcDir,
   locales,
   rewrites,

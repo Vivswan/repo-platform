@@ -116,6 +116,11 @@ present "VPNavBarTranslations" "$site/latest/index.html"
 # a carbon bump that moves its brand token should update this pin note.
 present "docs-site-version-switcher" "$site/latest/index.html"
 present 'data-fleet-hue="' "$site/latest/index.html"
+# The head: the description falls back to the site title (the fixture has
+# no settings.yml description), and a docs tree without public/favicon.*
+# gets no icon link (an invented one would 404 on every page).
+present '<meta name="description" content="Fixture Docs">' "$site/latest/index.html"
+absent 'rel="icon"' "$site/latest/index.html"
 # Per-tier facts: vitepress inlines the site data as an escaped JSON string,
 # hence the backslashes. Anchored on the provenance key because the version
 # dropdown lists every tier's label in every page.
@@ -188,8 +193,9 @@ grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
 # the tagged tier and the HEAD tier alike.
-mkdir -p "$WORK2/site/manual"
+mkdir -p "$WORK2/site/manual/public"
 printf '# Nested\n\nnested landing page\n' > "$WORK2/site/manual/README.md"
+printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$WORK2/site/manual/public/favicon.svg"
 git -C "$WORK2" init -q -b main
 git -C "$WORK2" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK2" -c user.name=fixture -c user.email=f@localhost commit -qm "nested docs"
@@ -201,6 +207,9 @@ env GITHUB_WORKSPACE="$WORK2" GITHUB_REPOSITORY=fixture-owner/nested-repo \
 present "nested landing page" "$TEMP_REAL/pages-site/_site/index.html"
 present "nested landing page" "$TEMP_REAL/pages-site/_site/latest/index.html"
 present "Source: site/manual/README.md" "$TEMP_REAL/pages-site/_site/latest/index.html"
+# The shipped favicon is linked at the tier's own base, and served there.
+present 'rel="icon" href="/nested-repo/latest/favicon.svg"' "$TEMP_REAL/pages-site/_site/latest/index.html"
+test -f "$TEMP_REAL/pages-site/_site/latest/favicon.svg" || fail "the shipped favicon.svg did not reach the latest tier"
 
 # CHECK mode: green on clean docs, red on a dead internal link.
 env GITHUB_WORKSPACE="$WORK" GITHUB_REPOSITORY=fixture-owner/fixture-repo \

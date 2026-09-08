@@ -421,13 +421,16 @@ describe("the input modality behind the field's focus ring", () => {
     querySelector(): Node | null;
   }
   const descendants = (node: Node): Node[] => [node, ...node.children.flatMap(descendants)];
+  let focused: Node | null = null;
   const element = (tag: string): Node => ({
     tag,
     props: {},
     children: [],
     parent: null,
     open: false,
-    focus() {},
+    focus() {
+      focused = this;
+    },
     select() {},
     scrollIntoView() {},
     showModal() {
@@ -459,7 +462,7 @@ describe("the input modality behind the field's focus ring", () => {
   // The modality is wiring: the shortcut owner's capturing listener stops
   // the key that mounts the dialog, and the dialog mounts after it, so no
   // pure helper can pin that the ring still follows it.
-  test("the shortcut that opens the dialog counts as keyboard input; a pointer clears it; unmount drops the listeners", async () => {
+  test("the shortcut that opens the dialog counts as keyboard input and closing it returns focus to the button; a pointer clears the flag; unmount drops the listeners", async () => {
     const { vue } = await stubbed();
     const { default: NavLauncher } = await import(
       resolve(ACTION_DIR, ".vitepress/theme/nav-launcher.ts")
@@ -515,15 +518,23 @@ describe("the input modality behind the field's focus ring", () => {
       win.dispatchEvent(keydown("/"));
       await vue.nextTick();
       await vue.nextTick();
-      expect([section()?.parent?.open, keyboard()]).toEqual([true, ""]);
+      const dialog = section()?.parent as Node;
+      expect([dialog.open, keyboard(), focused?.tag]).toEqual([true, "", "input"]);
 
+      // The modality checks run while the dialog is still mounted: with
+      // the section gone, keyboard() is undefined whatever the flag says.
       win.dispatchEvent(new Event("pointerdown"));
       await vue.nextTick();
-      expect(keyboard()).toBeUndefined();
+      expect([section() !== undefined, keyboard()]).toEqual([true, undefined]);
 
       win.dispatchEvent(keydown("k", { metaKey: true }));
       await vue.nextTick();
       expect(keyboard()).toBe("");
+
+      // Escape's native cancel lands here as the dialog's close event.
+      (dialog.props.onClose as () => void)();
+      await vue.nextTick();
+      expect([section(), focused?.props.class]).toEqual([undefined, "fleet-launcher-button"]);
 
       expect(listeners.size).toBe(2);
       app.unmount();
