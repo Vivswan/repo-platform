@@ -11,8 +11,9 @@
 //   otherwise   read MOUNTS, build every mount's tiers, lay out _site, and
 //               emit the site-dir output for upload.
 // Both modes need a committed git checkout at GITHUB_WORKSPACE: each tier's
-// project facts (copier answers, toolchain pins, LICENSE.md) and its commit
-// are read from the ref's tree with git, never from the working files.
+// project facts (settings.yml, copier answers, toolchain pins, LICENSE.md)
+// and its commit are read from the ref's tree with git, never from the
+// working files.
 //
 // Builds run against materialized trees (hermetic - no cross-tier
 // node_modules or dist bleed): command tiers extract the whole ref with
@@ -176,6 +177,9 @@ interface Config {
   maxVersions: number;
   customDomain: string;
   repository: string;
+  /** GITHUB_SERVER_URL without a trailing slash: every link the build
+   *  emits (edit links, project facts) joins onto it. */
+  serverUrl: string;
   origin: string;
   rootBase: string;
   editPattern: string;
@@ -197,6 +201,7 @@ function readConfig(): Config {
   const docsDir = env("DOCS_DIR", "docs");
   validateRelPath(docsDir, "the docs directory");
   const defaultBranch = env("DEFAULT_BRANCH", "main");
+  const serverUrl = env("GITHUB_SERVER_URL", "https://github.com").replace(/\/+$/, "");
   // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
   // build two spellings of one directory, and path-keyed route resolution
   // inside vitepress falls apart on the mismatch.
@@ -214,10 +219,11 @@ function readConfig(): Config {
     maxVersions: Number(maxVersionsRaw),
     customDomain,
     repository,
+    serverUrl,
     origin,
     rootBase,
     defaultBranch,
-    editPattern: `${env("GITHUB_SERVER_URL", "https://github.com")}/${repository}/edit/${defaultBranch}/${docsDir}/:path`,
+    editPattern: `${serverUrl}/${repository}/edit/${defaultBranch}/${docsDir}/:path`,
   };
 }
 
@@ -370,6 +376,7 @@ function buildVitepressTier(
     defaultBranch: cfg.defaultBranch,
     ref: tier.ref,
     sha,
+    serverUrl: cfg.serverUrl,
   });
   run(["bun", join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root], {
     env: {

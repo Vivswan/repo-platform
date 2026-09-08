@@ -16,6 +16,7 @@ const HEAD_INPUT = {
   defaultBranch: "main",
   ref: "HEAD",
   sha: "0123456789abcdef0123456789abcdef01234567",
+  serverUrl: "https://github.com",
 };
 
 const EMPTY_FACTS: ProjectFacts = {
@@ -52,6 +53,16 @@ const OPERATOR_ANSWERS = [
   "private: false",
   "modules:",
   "  - bun",
+  "",
+].join("\n");
+
+const SETTINGS = [
+  "---",
+  "repository:",
+  "  description: Edited after the first render",
+  "  homepage: docs.example.test",
+  "  topics: settings, first",
+  "  private: false",
   "",
 ].join("\n");
 
@@ -109,6 +120,81 @@ describe("collectFacts", () => {
     ).toEqual(EMPTY_FACTS);
   });
 
+  test.each<[string, string, Record<string, string>, Partial<ProjectFacts>]>([
+    [
+      "settings.yml wins over the answers seed",
+      SETTINGS,
+      { ".github/.copier-answers.yml": COPIER_ANSWERS },
+      {
+        description: "Edited after the first render",
+        homepage: "https://docs.example.test",
+        topics: ["settings", "first"],
+      },
+    ],
+    [
+      "a declared-empty settings key means empty, not the answers' value",
+      "repository:\n  description: Only this\n  homepage: ''\n  topics: ''\n",
+      { ".github/.copier-answers.yml": COPIER_ANSWERS },
+      { description: "Only this", homepage: null, topics: [] },
+    ],
+    [
+      "keys the settings block lacks come from the answers",
+      "repository:\n  private: true\n  topics: settings\n",
+      { ".github/.copier-answers.yml": COPIER_ANSWERS },
+      {
+        description: "A fixture repository",
+        homepage: "https://example.test/docs",
+        topics: ["settings"],
+      },
+    ],
+    [
+      "a YAML-list topics value, as the settings apply accepts",
+      "repository:\n  topics: [bun, ' docs ', '', 7]\n",
+      {},
+      { topics: ["bun", "docs"] },
+    ],
+    [
+      "a malformed settings.yml falls back to the answers",
+      "repository: [",
+      { ".github/.copier-answers.yml": COPIER_ANSWERS },
+      {
+        description: "A fixture repository",
+        homepage: "https://example.test/docs",
+        topics: ["bun", "docs", "tooling"],
+      },
+    ],
+    [
+      "a settings.yml without a repository block falls back to the answers",
+      "labels:\n  - name: docs\n",
+      { ".repo-platform-answers.yml": OPERATOR_ANSWERS },
+      { description: "The operator's own answers" },
+    ],
+    [
+      "settings.yml alone, without any answers file",
+      SETTINGS,
+      {},
+      {
+        description: "Edited after the first render",
+        homepage: "https://docs.example.test",
+        topics: ["settings", "first"],
+      },
+    ],
+  ])("reads identity with %s", (_case, settings, answers, identity) => {
+    const tree = treeOf({ ".github/settings.yml": settings, ...answers });
+    expect(collectFacts(tree, HEAD_INPUT)).toEqual({ ...EMPTY_FACTS, ...identity });
+  });
+
+  test.each<[string, string, string]>([
+    ["the default server", "https://github.com", "https://github.com"],
+    ["an enterprise server", "https://ghe.example.test", "https://ghe.example.test"],
+  ])("builds every link from %s", (_case, serverUrl, base) => {
+    const facts = collectFacts(treeOf({}), { ...HEAD_INPUT, serverUrl });
+    expect([facts.repoUrl, facts.provenance.url]).toEqual([
+      `${base}/fixture-owner/fixture-repo`,
+      `${base}/fixture-owner/fixture-repo/commit/${HEAD_INPUT.sha}`,
+    ]);
+  });
+
   test("labels provenance by the default branch for HEAD and by the tag otherwise", () => {
     const tagged = {
       ...HEAD_INPUT,
@@ -144,10 +230,22 @@ describe("collectFacts", () => {
     ["a bare host", "example.com", "https://example.com"],
     ["a host with a path", "docs.example.com/guide", "https://docs.example.com/guide"],
     ["a slash before the first dot", "docs/example.com", null],
+    ["a bare email", "hello@example.com", null],
+    [
+      "a host with a query holding an email",
+      "example.com?email=hello@example.com",
+      "https://example.com?email=hello@example.com",
+    ],
+    ["a host with a port and path", "example.com:8080/docs", "https://example.com:8080/docs"],
+    ["localhost with a port", "localhost:3000", "https://localhost:3000"],
     ["a word", "homepage", null],
     ["words", "see the docs", null],
     ["an unknown scheme", "ftp://example.com", null],
     ["a scheme without slashes", "mailto:hello@example.com", null],
+    ["a scheme alone", "https://", null],
+    ["an http scheme alone", "http://", null],
+    ["a URL with a space in the host", "https://exa mple.com", null],
+    ["a URL with a path", "https://example.com/docs", "https://example.com/docs"],
     ["blank", "  ", null],
   ])("normalizes the homepage answer %s", (_case, raw, homepage) => {
     const answers = `description: ''\nhomepage: ${JSON.stringify(raw)}\ntopics: ''\n`;
@@ -214,6 +312,11 @@ describe("collectFacts", () => {
       "Private Use License",
     ],
     [
+      "a custom heading directly over a body whose next paragraph starts with a known name",
+      "# Private Use License\nCustom terms\n\nMIT License permissions do not apply.\n",
+      "Private Use License",
+    ],
+    [
       "no heading and a known name only in the body",
       "Custom terms.\n\nUnlike the MIT License, this grants nothing.\n",
       "See LICENSE.md",
@@ -235,7 +338,16 @@ describe("collectFacts", () => {
       "Mozilla Public License Version 2.0\n==================================\n",
       "MPL-2.0",
     ],
-    ["CC0", "CC0 1.0 Universal\n\nStatement of Purpose\n", "CC0"],
+    [
+      "GitHub's CC0 form, titled under a publisher banner",
+      "Creative Commons Legal Code\n\nCC0 1.0 Universal\n\n    CREATIVE COMMONS CORPORATION IS NOT A LAW FIRM\n",
+      "CC0",
+    ],
+    [
+      "a banner over a known name in the body only",
+      "Legal Code\n\nTerms of the MIT License\n",
+      "See LICENSE.md",
+    ],
     ["no heading and no known name", "All rights reserved. Ask before use.\n", "See LICENSE.md"],
     ["a known name past the head", `${"\n".repeat(30)}MIT License\n`, "See LICENSE.md"],
   ])("names the license from %s", (_case, text, name) => {

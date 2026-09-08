@@ -4,6 +4,12 @@
 // toolchains and license). An absent or malformed file degrades to null or
 // [] instead of failing the build; a failed git read inside the reader still
 // throws, because a broken checkout is a build fault, not a missing fact.
+//
+// Identity (description, homepage, topics) comes from .github/settings.yml's
+// repository block first: the copier answers only seed that file, and the
+// repository edits its identity there afterwards (the file is repo-owned
+// after its first render). The answers files fill in only the keys the
+// settings file lacks, or everything when it is absent or malformed.
 
 export interface ProjectFacts {
   /** owner/name */
@@ -29,10 +35,16 @@ export interface FactsInput {
   defaultBranch: string;
   ref: string;
   sha: string;
+  /** The GitHub server the repository lives on, e.g. https://github.com. */
+  serverUrl: string;
 }
+
+type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
 /** The file's content at the tier's ref, or null when absent. */
 export type FactsReader = (path: string) => string | null;
+
+const SETTINGS_FILE = ".github/settings.yml";
 
 /** The copier answers file a managed repository carries, then
  *  repo-platform's own equivalent (the operator renders no copier
@@ -97,49 +109,88 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-/** The homepage answer has no URL validator: a bare host gets https://,
- *  anything that is neither a URL nor a host reads as no homepage. */
-function homepageUrl(value: unknown): string | null {
-  const text = nonEmptyString(value);
-  if (text === null) return null;
-  if (/^https?:\/\//i.test(text)) return text;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return null;
-  return /^[^\s/]+\.[^\s]*$/.test(text) ? `https://${text}` : null;
-}
-
-/** Copier stores the topics answer as one comma-separated string. */
-function splitTopics(value: unknown): string[] {
-  if (typeof value !== "string") return [];
-  return value
-    .split(",")
-    .map((topic) => topic.trim())
-    .filter((topic) => topic !== "");
-}
-
-function parseAnswers(text: string): Record<string, unknown> | null {
+/** The text when it parses as an http(s) URL with a host, else null. */
+function httpUrl(text: string): string | null {
   try {
-    const parsed: unknown = Bun.YAML.parse(text);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return new URL(text).hostname === "" ? null : text;
   } catch {
     return null;
   }
 }
 
-function readAnswers(read: FactsReader): Pick<ProjectFacts, "description" | "homepage" | "topics"> {
+/** A dotted host or a host:port, then an optional path, query, or
+ *  fragment: what a homepage typed without its scheme looks like. A bare
+ *  word, an email, and a scheme (letters, a colon, then non-digits) are
+ *  not hosts. */
+function looksLikeHost(text: string): boolean {
+  const authority = /^([^\s/?#@:]+)(?::(\d+))?(?:[/?#]\S*)?$/.exec(text);
+  return authority !== null && (authority[1].includes(".") || authority[2] !== undefined);
+}
+
+/** The homepage answer has no URL validator: a bare host gets https://,
+ *  anything that is neither a URL nor a host reads as no homepage. */
+function homepageUrl(value: unknown): string | null {
+  const text = nonEmptyString(value);
+  if (text === null) return null;
+  if (/^https?:\/\//i.test(text)) return httpUrl(text);
+  return looksLikeHost(text) ? httpUrl(`https://${text}`) : null;
+}
+
+/** Copier stores the topics answer as one comma-separated string; the
+ *  settings file also accepts a YAML list, like the settings apply does. */
+function splitTopics(value: unknown): string[] {
+  const entries = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  return entries
+    .filter((topic): topic is string => typeof topic === "string")
+    .map((topic) => topic.trim())
+    .filter((topic) => topic !== "");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function parseYamlRecord(text: string): Record<string, unknown> | null {
+  try {
+    return asRecord(Bun.YAML.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+/** The settings file's repository block, or null when the file is absent,
+ *  malformed, or carries no such block (older tags predate it). */
+function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null {
+  const text = read(SETTINGS_FILE);
+  if (text === null) return null;
+  const settings = parseYamlRecord(text);
+  return settings === null ? null : asRecord(settings.repository);
+}
+
+function readAnswers(read: FactsReader): Record<string, unknown> {
   for (const path of ANSWERS_FILES) {
     const text = read(path);
     if (text === null) continue;
-    const answers = parseAnswers(text);
-    if (answers === null) continue;
-    return {
-      description: nonEmptyString(answers.description),
-      homepage: homepageUrl(answers.homepage),
-      topics: splitTopics(answers.topics),
-    };
+    const answers = parseYamlRecord(text);
+    if (answers !== null) return answers;
   }
-  return { description: null, homepage: null, topics: [] };
+  return {};
+}
+
+/** Each key from the settings block when it declares the key at all (an
+ *  empty value there means empty, not "ask the answers"), else from the
+ *  answers. */
+function readIdentity(read: FactsReader): Identity {
+  const settings = readSettingsIdentity(read) ?? {};
+  const answers = readAnswers(read);
+  const pick = (key: string) => (key in settings ? settings[key] : answers[key]);
+  return {
+    description: nonEmptyString(pick("description")),
+    homepage: homepageUrl(pick("homepage")),
+    topics: splitTopics(pick("topics")),
+  };
 }
 
 /** The first markdown heading, ATX (any level) or setext. */
@@ -152,15 +203,19 @@ function firstHeading(lines: string[]): string | null {
   return null;
 }
 
-/** The first non-empty lines up to a blank one, joined: the title block
- *  of a plain-text license (Apache and the GPL center theirs over two
- *  lines). */
-function openingParagraph(lines: string[]): string | null {
-  const trimmed = lines.map((line) => line.trim());
-  const start = trimmed.findIndex((line) => line !== "");
-  if (start === -1) return null;
-  const end = trimmed.indexOf("", start);
-  return trimmed.slice(start, end === -1 ? undefined : end).join(" ");
+/** The head's paragraphs: runs of non-empty trimmed lines. */
+function paragraphs(lines: string[]): string[][] {
+  const result: string[][] = [];
+  let current: string[] = [];
+  for (const line of lines.map((entry) => entry.trim())) {
+    if (line !== "") {
+      current.push(line);
+    } else if (current.length > 0) {
+      result.push(current);
+      current = [];
+    }
+  }
+  return current.length > 0 ? [...result, current] : result;
 }
 
 function knownLicense(title: string): string | null {
@@ -168,11 +223,19 @@ function knownLicense(title: string): string | null {
   return KNOWN_LICENSES.find(([pattern]) => pattern.test(bare))?.[1] ?? null;
 }
 
+/** A markdown heading is authoritative: canonicalized when it starts
+ *  with a known name, kept verbatim otherwise ("# Not the MIT License"
+ *  stays a custom license whatever the body says). Plain text names the
+ *  license in its opening paragraph (Apache and the GPL center theirs
+ *  over two lines) or, under a publisher banner, at the start of the
+ *  next one (GitHub's CC0 opens "Creative Commons Legal Code"). */
 function licenseName(text: string): string {
   const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
   const heading = firstHeading(lines);
-  const title = heading ?? openingParagraph(lines);
-  return (title === null ? null : knownLicense(title)) ?? heading ?? LICENSE_FALLBACK;
+  if (heading !== null) return knownLicense(heading) ?? heading;
+  const [opening, next] = paragraphs(lines);
+  const candidates = [opening?.join(" "), next?.[0]].filter((entry) => entry !== undefined);
+  return candidates.map(knownLicense).find((name) => name !== null) ?? LICENSE_FALLBACK;
 }
 
 function readLicense(read: FactsReader): ProjectFacts["license"] {
@@ -191,12 +254,12 @@ export function hueOf(name: string): number {
 
 export function collectFacts(read: FactsReader, input: FactsInput): ProjectFacts {
   const name = input.repository.split("/")[1];
-  const repoUrl = `https://github.com/${input.repository}`;
+  const repoUrl = `${input.serverUrl}/${input.repository}`;
   return {
     repository: input.repository,
     repoUrl,
     name,
-    ...readAnswers(read),
+    ...readIdentity(read),
     toolchains: TOOLCHAIN_FILES.flatMap((toolchain) => {
       const text = read(toolchain.path);
       const version = text === null ? null : toolchain.version(text);
