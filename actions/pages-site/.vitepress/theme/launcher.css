@@ -227,7 +227,9 @@
 }
 
 /* Inside the prose column (the landing panel) the .vp-doc rules for lists,
- * links, and paragraphs would restyle the launcher; these put them back. */
+ * links, and paragraphs would restyle the launcher; these put them back.
+ * `.vp-doc a` outranks `.fleet-launcher-link`, so every property it sets
+ * (color, weight, decoration, transition) is restated here. */
 .vp-doc .fleet-launcher ol,
 .vp-doc .fleet-launcher ul {
   list-style: none;
@@ -251,6 +253,7 @@
   color: var(--vp-c-text-1);
   font-weight: 400;
   text-decoration: none;
+  transition: background-color var(--fleet-transition);
 }
 .vp-doc .fleet-launcher p {
   margin: 0;
@@ -370,6 +373,8 @@
   }
   .fleet-launcher-field,
   .fleet-launcher-link,
+  .vp-doc .fleet-launcher a,
+  .vp-doc .fleet-launcher a:hover,
   .fleet-launcher-target,
   .fleet-launcher-fold-button,
   .VPNavBar .fleet-launcher-button {
