@@ -138,6 +138,25 @@ describe("collectFacts", () => {
     });
   });
 
+  test.each<[string, string, string | null]>([
+    ["a full URL", "https://example.test/docs/", "https://example.test/docs/"],
+    ["an http URL", "http://example.test", "http://example.test"],
+    ["a bare host", "example.com", "https://example.com"],
+    ["a host with a path", "docs.example.com/guide", "https://docs.example.com/guide"],
+    ["a slash before the first dot", "docs/example.com", null],
+    ["a word", "homepage", null],
+    ["words", "see the docs", null],
+    ["an unknown scheme", "ftp://example.com", null],
+    ["a scheme without slashes", "mailto:hello@example.com", null],
+    ["blank", "  ", null],
+  ])("normalizes the homepage answer %s", (_case, raw, homepage) => {
+    const answers = `description: ''\nhomepage: ${JSON.stringify(raw)}\ntopics: ''\n`;
+    expect(collectFacts(treeOf({ ".github/.copier-answers.yml": answers }), HEAD_INPUT)).toEqual({
+      ...EMPTY_FACTS,
+      homepage,
+    });
+  });
+
   test.each<[string, string, ProjectFacts["toolchains"]]>([
     [
       "a stable channel",

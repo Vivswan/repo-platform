@@ -97,6 +97,16 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+/** The homepage answer has no URL validator: a bare host gets https://,
+ *  anything that is neither a URL nor a host reads as no homepage. */
+function homepageUrl(value: unknown): string | null {
+  const text = nonEmptyString(value);
+  if (text === null) return null;
+  if (/^https?:\/\//i.test(text)) return text;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return null;
+  return /^[^\s/]+\.[^\s]*$/.test(text) ? `https://${text}` : null;
+}
+
 /** Copier stores the topics answer as one comma-separated string. */
 function splitTopics(value: unknown): string[] {
   if (typeof value !== "string") return [];
@@ -125,7 +135,7 @@ function readAnswers(read: FactsReader): Pick<ProjectFacts, "description" | "hom
     if (answers === null) continue;
     return {
       description: nonEmptyString(answers.description),
-      homepage: nonEmptyString(answers.homepage),
+      homepage: homepageUrl(answers.homepage),
       topics: splitTopics(answers.topics),
     };
   }
