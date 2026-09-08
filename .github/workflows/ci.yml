@@ -335,7 +335,7 @@ jobs:
             modules: "[bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, fuzzer, nightly, custom-license]"
             private: "false"
             expect_in_pages: |
-              setup: bun,node,deno,uv
+              setup: bun,node,deno,uv,rust
               bun install --frozen-lockfile
               bun run build
           - name: bun-typical

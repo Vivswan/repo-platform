@@ -43,7 +43,7 @@ jobs:
       mounts: '[{"path": "/", "source": "command", "versioned": false}, {"path": "/docs/", "source": "vitepress", "versioned": true}]'
       site_title: "Golden Render"
       link_rot_label: "docs-link-rot"
-      setup: bun,node,deno,uv
+      setup: bun,node,deno,uv,rust
       install_command: "bun install --frozen-lockfile"
       build_command: "bun run build"
       dist_dir: "dist"
