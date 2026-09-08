@@ -10,7 +10,10 @@ import { VPCarbon } from "vitepress-carbon";
 import { h } from "vue";
 import "./custom.css";
 import "./components.css";
+import "./launcher.css";
 import FactsPanel from "./facts-panel.ts";
+import FleetLauncher from "./launcher.ts";
+import NavLauncher from "./nav-launcher.ts";
 import Provenance from "./provenance.ts";
 import VersionSwitcher from "./version-switcher.ts";
 
@@ -18,12 +21,14 @@ export default {
   ...VPCarbon,
   Layout: () =>
     h(VPCarbon.Layout!, null, {
+      "nav-bar-content-before": () => h(NavLauncher),
       "nav-bar-content-menu-after": () => h(VersionSwitcher),
       "aside-top": () => h(FactsPanel),
       "doc-after": () => h(Provenance),
     }),
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);
+    ctx.app.component("FleetLauncher", FleetLauncher);
     // Vue's production SSR renderer catches a page's render error, logs
     // it, and emits the page with an EMPTY body (a literal `{{ x.y }}` in
     // markdown is compiled as an interpolation and blows up there), so

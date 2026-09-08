@@ -120,16 +120,20 @@ describe("the page index under the action's build topology", () => {
     expect(includes).toContain('<h2 id="install"');
     expect(includes).toContain('<h2 id="install-1"');
     // The landing rule fires on the README landing in the page build
-    // (post-rewrite path) and in the search index (pre-rewrite path)
-    // alike, so the curated label is in neither output; the heading and
-    // the guide's prose (a MiniSearch term in the index) are the controls
-    // that both were built at all.
+    // (post-rewrite path): the table is gone and the curated label renders
+    // only as a launcher row. In the search index (pre-rewrite path) the
+    // label is absent, since the rule fired there too; the heading and the
+    // guide's prose (a MiniSearch term in the index) are the controls that
+    // both were built at all.
     const landing = readFileSync(join(dist, "index.html"), "utf-8");
     expect(landing).toContain("I want to...");
-    expect(landing).not.toContain("Frobnicate");
+    expect(landing).not.toMatch(/<td>\s*Frobnicate/);
+    expect(landing).toContain('class="fleet-launcher-label">Frobnicate the widgets<');
     const chunks = join(dist, "assets", "chunks");
+    // One chunk per locale (`@localSearchIndex<locale>.<hash>.js`); the
+    // locale-to-loader map is its own `@localSearchIndex.<hash>.js` chunk.
     const searchIndexes = readdirSync(chunks)
-      .filter((name) => name.startsWith("@localSearchIndex"))
+      .filter((name) => /^@localSearchIndex[^.]+\./.test(name))
       .map((name) => readFileSync(join(chunks, name), "utf-8").toLowerCase());
     expect(searchIndexes).toHaveLength(1);
     expect(searchIndexes[0]).toContain('["steps",');
