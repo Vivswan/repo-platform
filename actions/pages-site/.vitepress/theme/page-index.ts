@@ -34,6 +34,26 @@ export function renderedHeaders(env: HeadersEnv): PageHeader[] {
   return env.launcherHeaders;
 }
 
+/** VitePress's `<!-- @include: file -->` directive, by its opening shape. */
+const INCLUDE_DIRECTIVE = /<!--\s*@include:/;
+
+/** The launcher's headers of a page's source rendered through `md`. A
+ *  source that uses the include directive gets NONE: the directive expands
+ *  only inside VitePress's page transform, so a bare render numbers its
+ *  anchors without the included headings (a page's own `## Install` below
+ *  an included `## Install` serves as #install-1 while the bare render
+ *  says #install). A missing row costs a shortcut; a shifted anchor
+ *  misdirects, and full-text search still reaches those headings. */
+export function sourceHeaders(
+  md: Pick<MarkdownRenderer, "render">,
+  source: string,
+  env: HeadersEnv,
+): PageHeader[] {
+  if (INCLUDE_DIRECTIVE.test(source)) return [];
+  md.render(source, env);
+  return renderedHeaders(env);
+}
+
 export interface SiteUrls {
   base: string;
   cleanUrls: boolean;
