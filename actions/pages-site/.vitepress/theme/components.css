@@ -499,11 +499,16 @@ a:focus-visible {
   border-radius: var(--fleet-radius-md);
 }
 
-/* Tables: hairline rows, no vertical rules, no zebra, tabular numerals.
- * Full width from 768px up, replacing carbon's scrolling block, so every
- * cell may break an unbroken value (a long path in inline code) anywhere:
- * it wraps inside its cell instead of pushing the table past the doc
- * column into the aside. */
+/* Tables replace carbon's scrolling block with a full-width table, so
+ * cell sizing must hold two shapes: a short inline-code token beside prose
+ * columns stays whole, and one very long unbroken token wraps inside its
+ * cell instead of pushing the table under the facts card. max-width caps
+ * what each cell contributes to auto layout (about 37 monospace characters
+ * of inline code) and break-word wraps only a token past that cap.
+ * overflow-wrap: anywhere fails the first shape: it feeds break
+ * opportunities into min-content, and prose columns then starve a code
+ * column down to a few glyphs. The bound is per cell, so a row of several
+ * capped columns can still exceed the doc column. */
 .vp-doc table {
   margin: 8px 0 1.5em;
   font-size: 16px;
@@ -528,7 +533,8 @@ a:focus-visible {
   padding: 12px 14px;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  max-width: 22em;
+  overflow-wrap: break-word;
 }
 .vp-doc th {
   font-size: 13.5px;

@@ -19,8 +19,10 @@
 # landing page (repository link, the tier's own version row marked current
 # and noted as the one being read), the provenance line (the tier's ref and
 # the page's source file), llms.txt, the strict CHECK mode both passing on
-# clean docs and failing on a dead link, the nested docs-dir build, and the
-# deploy command's legacy-tag skip (both arms) and HEAD calibration gate.
+# clean docs and failing on a dead link, the deploy's per-tier strictness
+# (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
+# the deploy), the nested docs-dir build, and the deploy command's
+# legacy-tag skip (both arms) and HEAD calibration gate.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
