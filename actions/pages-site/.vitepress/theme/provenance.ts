@@ -16,9 +16,10 @@ export default defineComponent({
       const facts = theme.value.docsSiteFacts;
       if (facts === undefined) return null;
       const { label, sha, url } = facts.provenance;
+      const source = `${facts.docsDir}/${page.value.filePath}`;
       return h("div", { class: "fleet-provenance" }, [
         h("a", { href: url }, `Built from ${label} at ${sha.slice(0, 7)}`),
-        h("span", `Source: ${page.value.filePath}`),
+        h("span", `Source: ${source}`),
       ]);
     };
   },

@@ -13,6 +13,7 @@ const treeOf =
 
 const HEAD_INPUT = {
   repository: "fixture-owner/fixture-repo",
+  docsDir: "docs",
   defaultBranch: "main",
   ref: "HEAD",
   sha: "0123456789abcdef0123456789abcdef01234567",
@@ -28,6 +29,7 @@ const EMPTY_FACTS: ProjectFacts = {
   topics: [],
   toolchains: [],
   license: null,
+  docsDir: "docs",
   provenance: {
     label: "main",
     sha: HEAD_INPUT.sha,
@@ -193,6 +195,11 @@ describe("collectFacts", () => {
       `${base}/fixture-owner/fixture-repo`,
       `${base}/fixture-owner/fixture-repo/commit/${HEAD_INPUT.sha}`,
     ]);
+  });
+
+  test("carries the docs directory verbatim so the theme can prefix page paths", () => {
+    const nested = collectFacts(treeOf({}), { ...HEAD_INPUT, docsDir: "site/manual" });
+    expect(nested).toEqual({ ...EMPTY_FACTS, docsDir: "site/manual" });
   });
 
   test("labels provenance by the default branch for HEAD and by the tag otherwise", () => {

@@ -80,7 +80,7 @@ export default defineComponent({
               row(
                 h(
                   "a",
-                  { href: link, "aria-current": label === current ? "page" : undefined },
+                  { href: link, "aria-current": label === current ? "true" : undefined },
                   label,
                 ),
                 label === current ? note("reading") : "",

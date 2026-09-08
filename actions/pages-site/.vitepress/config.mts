@@ -97,15 +97,22 @@ export default defineConfigWithTheme<FleetThemeConfig>({
       postcss: {
         plugins: [
           {
-            // Carbon's utils.css imports Google Fonts and cdnfonts; postcss-import
-            // hoists remote @imports untouched, so without this every page of
-            // every fleet site would call two third-party hosts on load. The
-            // bundled Mona Sans is a local url(), not an @import, and stays.
-            postcssPlugin: "fleet-drop-remote-imports",
-            AtRule: {
-              import(rule) {
+            // Carbon's utils.css imports Google Fonts and cdnfonts (two third-party
+            // calls per page load) and declares its bundled Mona Sans, which nothing
+            // selects once custom.css sets the families yet carbon's transformHead
+            // preloads (137 KB per page) for as long as the @font-face survives.
+            // A Once hook, not AtRule visitors: vite emits url() assets from
+            // its own Once hook, and PostCSS runs every Once before any visitor.
+            postcssPlugin: "fleet-drop-carbon-fonts",
+            Once(root) {
+              root.walkAtRules("import", (rule) => {
                 if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
-              },
+              });
+              root.walkAtRules("font-face", (rule) => {
+                rule.walkDecls("font-family", (decl) => {
+                  if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
+                });
+              });
             },
           },
         ],

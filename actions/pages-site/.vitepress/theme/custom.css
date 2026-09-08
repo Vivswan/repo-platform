@@ -55,11 +55,12 @@
 
   --vp-c-text-1: #1c1f26;
   --vp-c-text-2: #585f6c;
-  --vp-c-text-3: #737b89;
+  /* text-3 is small type on every ground down to bg-code: it must clear 4.5:1 there */
+  --vp-c-text-3: #626a78;
   --vp-c-text-dark: #1c1f26;
   --vp-color-fg-default: #1c1f26;
   --vp-color-fg-muted: #585f6c;
-  --vp-color-fg-subtle: #737b89;
+  --vp-color-fg-subtle: #626a78;
 
   --color-action-list-item-default-hover-bg: rgba(20, 24, 32, 0.06);
   --color-action-list-item-default-active-bg: rgba(20, 24, 32, 0.1);
@@ -92,11 +93,11 @@
 
   --vp-c-text-1: #e7e9ee;
   --vp-c-text-2: #a5acb8;
-  --vp-c-text-3: #80889a;
+  --vp-c-text-3: #8c94a6;
   --vp-c-text-dark: #e7e9ee;
   --vp-color-fg-default: #e7e9ee;
   --vp-color-fg-muted: #a5acb8;
-  --vp-color-fg-subtle: #80889a;
+  --vp-color-fg-subtle: #8c94a6;
 
   --color-action-list-item-default-hover-bg: rgba(255, 255, 255, 0.06);
   --color-action-list-item-default-active-bg: rgba(255, 255, 255, 0.1);
