@@ -19,7 +19,7 @@
 # preload) while the theme's own fonts stay, the facts card rendered on
 # the landing page (repository link, the tier's own version row marked current
 # and noted as the one being read), the provenance line (the tier's ref and
-# the page's source file), llms.txt, the strict CHECK mode both passing on
+# the page's source file), the table scroll wrapper, llms.txt, the strict CHECK mode both passing on
 # clean docs and failing on a dead link, the deploy's per-tier strictness
 # (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
 # the deploy), the nested docs-dir build, and the deploy command's
@@ -57,7 +57,7 @@ absent() { if grep -qF -- "$1" "$2"; then fail "'$1' should not be in $2"; fi; }
 # but not v0.1.0 - per-version locale detection).
 mkdir -p "$WORK/docs/guide"
 printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n' > "$WORK/docs/README.md"
-printf '# Setup\n\nInstall things.\n' > "$WORK/docs/setup.md"
+printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n' > "$WORK/docs/setup.md"
 printf '# Guide\n\nThe guide index, version one.\n' > "$WORK/docs/guide/README.md"
 git -C "$WORK" init -q -b main
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
@@ -150,6 +150,12 @@ present "fleet-provenance" "$site/latest/index.html"
 present "Built from main" "$site/latest/index.html"
 present "Source: docs/README.md" "$site/latest/index.html"
 present "Built from v0.2.0" "$site/v0.2.0/index.html"
+# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts),
+# and the built CSS carries the rule that makes the wrapper scroll.
+present '<div class="vp-table"><table tabindex="0">' "$site/latest/setup.html"
+present '</table></div>' "$site/latest/setup.html"
+grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" ||
+  fail "the table wrapper's overflow rule is missing from the built CSS"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
@@ -321,5 +327,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "font filter, facts card, provenance line, llms.txt, strict mode both arms, legacy-tag skip both arms," \
+  "font filter, facts card, provenance line, table wrapper, llms.txt, strict mode both arms, legacy-tag skip both arms," \
   "calibration gate"

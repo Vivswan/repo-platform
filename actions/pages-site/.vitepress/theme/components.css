@@ -508,7 +508,17 @@ a:focus-visible {
  * overflow-wrap: anywhere fails the first shape: it feeds break
  * opportunities into min-content, and prose columns then starve a code
  * column down to a few glyphs. The bound is per cell, so a row of several
- * capped columns can still exceed the doc column. */
+ * capped columns can still exceed the doc column, so table-wrap.ts wraps
+ * every top-level table in .vp-table, which scrolls that overflow inside
+ * the column. The launcher panel mounts in place of a landing table and
+ * must never be clipped by the wrapper. */
+.vp-doc .vp-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.vp-doc .vp-table:has(> .fleet-launcher) {
+  overflow: visible;
+}
 .vp-doc table {
   margin: 8px 0 1.5em;
   font-size: 16px;

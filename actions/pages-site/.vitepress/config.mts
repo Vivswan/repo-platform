@@ -27,6 +27,7 @@ import type { ThemeConfig } from "vitepress-carbon";
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
 import { deriveRewrites, deriveSidebar, detectLocales, walkMarkdown } from "./derive.ts";
+import { tableWrapRule } from "./table-wrap.ts";
 
 /** Carbon's theme config plus the fleet keys the version switcher and the
  *  facts surfaces read. Optional, so carbon's own baseConfig (typed
@@ -122,6 +123,9 @@ export default defineConfigWithTheme<FleetThemeConfig>({
   // VitePress defaults the custom-block titles to uppercase (TIP, WARNING);
   // the fleet theme reads them in sentence case.
   markdown: {
+    preConfig(md) {
+      tableWrapRule(md);
+    },
     container: {
       infoLabel: "Info",
       noteLabel: "Note",
