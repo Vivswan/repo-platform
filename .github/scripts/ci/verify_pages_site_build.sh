@@ -167,6 +167,11 @@ grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" |
 present 'class="fleet-launcher fleet-launcher-mode-panel"' "$site/latest/index.html"
 present 'fleet-launcher-label">Set things up<' "$site/latest/index.html"
 present 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
+# The guide/ directory: its launcher group is titled from the folder name,
+# capitalized, and its page row's note is the page's site path.
+grep -qE -- 'fleet-launcher-group-title"[^>]*>Guide<' "$site/latest/index.html" ||
+  fail "the guide/ launcher group is not titled 'Guide' - the directory title lost its capital"
+present 'fleet-launcher-target">guide<' "$site/latest/index.html"
 present 'class="fleet-launcher-button"' "$site/latest/setup.html"
 grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
   fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"

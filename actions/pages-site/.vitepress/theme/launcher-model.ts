@@ -3,6 +3,8 @@
 // them by a query. Browser-safe by construction (no node imports): the
 // theme's client bundle imports it, and so does the data loader's mapping.
 
+import { dirTitle } from "../dir-title.ts";
+
 /** One row of the landing page's "I want to..." table, emitted by the
  *  landing-table markdown rule: the href is what VitePress's link rule left
  *  in the rendered page (`./new-repo.html#anchor`, `/base/abs.html`, or an
@@ -102,8 +104,14 @@ function landingUrlOf(pages: PageIndexEntry[]): string {
   return first.slice(0, first.lastIndexOf("/") + 1);
 }
 
-function humanize(dir: string): string {
-  return dir.replace(/[-_]/g, " ");
+/** A page row's note: where the page lives, as its URL relative to the site
+ *  base without the `.html` or a directory index's trailing slash
+ *  (`guide/setup`, `guide`), the way a heading row's note names its page. */
+function pagePath(url: string, base: string): string {
+  return url
+    .slice(base.length)
+    .replace(/\.html$/, "")
+    .replace(/\/$/, "");
 }
 
 /** The launcher groups for one locale, in display order: curated rows
@@ -120,6 +128,7 @@ export function buildGroups(
 ): LauncherGroup[] {
   const localePages = pages.filter((page) => page.locale === locale);
   const landingUrl = landingUrlOf(localePages);
+  const base = landingUrlOf(pages.filter((page) => page.locale === "root"));
   const byKey = new Map(localePages.map((page) => [pageKey(page.url), page]));
   const groups = new Map<string, LauncherGroup>();
   const seen = new Set<string>();
@@ -156,16 +165,21 @@ export function buildGroups(
       });
     }
   };
+  const pageRow = (target: LauncherGroup, page: PageIndexEntry): void => {
+    add(target, {
+      label: page.title,
+      href: page.url,
+      note: pagePath(page.url, base),
+      source: "page",
+    });
+    headings(target, page);
+  };
   const rest = localePages.filter((page) => page.url !== landingUrl);
   for (const page of rest.filter((page) => page.dir === "" || groups.has(page.url))) {
-    const target = group(page.url, page.title, "page");
-    add(target, { label: page.title, href: page.url, note: null, source: "page" });
-    headings(target, page);
+    pageRow(group(page.url, page.title, "page"), page);
   }
   for (const page of rest.filter((page) => page.dir !== "" && !groups.has(page.url))) {
-    const target = group(`dir:${page.dir}`, humanize(page.dir), "dir");
-    add(target, { label: page.title, href: page.url, note: null, source: "page" });
-    headings(target, page);
+    pageRow(group(`dir:${page.dir}`, dirTitle(page.dir), "dir"), page);
   }
 
   return [...groups.values()].map((entry) => ({

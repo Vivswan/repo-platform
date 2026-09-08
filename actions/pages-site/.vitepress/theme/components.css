@@ -319,6 +319,30 @@ a:focus-visible {
   background-color: var(--vp-c-bg-soft);
   color: var(--vp-c-text-1);
 }
+/* A page without a title renders no breadcrumb; its wrapper would still
+ * hold a 36px blank strip. */
+.VPDoc .content-top .content-file:not(:has(.content-box-item)) {
+  display: none;
+}
+/* Below carbon's 640px breadcrumb breakpoint the bar holds only the two
+ * controls: they share the width instead of huddling at the right edge. */
+@media (max-width: 639px) {
+  .VPDoc .content-top .content-box-item.no-hover {
+    flex: 1;
+  }
+  .VPDoc .content-top .content-box-item.no-hover > .VPLlmsPageActions,
+  .VPDoc .content-top .content-box-item.no-hover > .VPLlmsPageActions .trigger,
+  .VPDoc .content-top .edit-link-button {
+    width: 100%;
+    justify-content: center;
+  }
+  /* The dropdown is the LEFT control now; carbon anchors its 220px menu to
+   * the trigger's right edge, which would put it past the viewport's left. */
+  .VPDoc .content-top .VPLlmsPageActions .menu {
+    left: 0;
+    right: auto;
+  }
+}
 
 .VPDoc .aside .aside-content {
   border-left: 1px solid var(--vp-c-divider);
@@ -684,8 +708,9 @@ a:focus-visible {
 
 /* A landing page is one whose aside holds the facts card. Its aside is
  * wider (the card's width), static (the card never chases the text), and
- * present below carbon's 1280px aside breakpoint, in flow after the
- * content, so narrow viewports keep the card. */
+ * present below carbon's 1280px aside breakpoint, in flow BEFORE the
+ * content, so a narrow viewport reads the card first, the way a
+ * repository's About card leads its README on a phone. */
 .VPDoc:has(.fleet-facts) {
   --vp-doc-aside-width: 352px;
 }
@@ -720,11 +745,12 @@ a:focus-visible {
   }
   .VPDoc.has-aside:has(.fleet-facts) .aside {
     flex: none;
+    order: 0;
     width: 100%;
     max-width: 460px;
   }
   .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
-    padding: 24px 0 0;
+    padding: 24px 0 12px;
   }
 }
 
@@ -824,6 +850,10 @@ a:focus-visible {
   font-variant-numeric: tabular-nums;
   color: var(--vp-c-text-1);
   padding-left: 12px;
+  /* anywhere, not break-word: the card has one value column, so the only
+   * thing min-content decides is whether an unbroken value (a long
+   * repository name) pushes the table past the card; where a value breaks
+   * is the same under both (a hyphen is a break point either way) */
   overflow-wrap: anywhere;
 }
 /* Sub-rows: the body face, the secondary ink, indented. */
