@@ -162,17 +162,31 @@ absent "sleep " "$wf/ci.yml"
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then
   test -f "$wf/pages.yml"
-  # The deploy pipeline's shape: push + the nightly rebuild (theme and
-  # tag propagation) + dispatch, never pull_request (deploys are not
-  # checks), and the caller grants the called workflow's ceiling (issues
-  # write is the link-rot job's).
-  present_line "  push:" "$wf/pages.yml"
+  # The deploy pipeline's shape: called by ci.yml's pages leg with the
+  # judged commit (never push - a push deploy would bypass the all-green
+  # gate) + the nightly rebuild (theme and tag propagation) + dispatch,
+  # never pull_request (deploys are not checks); a called run keys its
+  # lane per run, and the caller grants the called workflow's ceiling
+  # (issues write is the link-rot job's).
+  present_line "  workflow_call:" "$wf/pages.yml"
+  present_line "      sha:" "$wf/pages.yml"
+  present_line '      sha: ${{ inputs.sha }}' "$wf/pages.yml"
+  present "pages-called-" "$wf/pages.yml"
+  absent_line "  push:" "$wf/pages.yml"
   present_line '    - cron: "23 4 * * *"' "$wf/pages.yml"
   present_line "  workflow_dispatch:" "$wf/pages.yml"
   present_line "      issues: write" "$wf/pages.yml"
   absent "pull_request" "$wf/pages.yml"
+  # The leg in ci.yml: downstream of the gate alone (a red hook or
+  # release never holds the site back), calling pages.yml by local path
+  # under the pages lane.
+  present_line "  pages:" "$wf/ci.yml"
+  present_line "    uses: ./.github/workflows/pages.yml" "$wf/ci.yml"
+  present_line "      group: pages" "$wf/ci.yml"
 else
   test ! -e "$wf/pages.yml"
+  absent_line "  pages:" "$wf/ci.yml"
+  absent "workflows/pages.yml" "$wf/ci.yml"
 fi
 
 # docs-site: the managed docs workflow always carries the strict PR check

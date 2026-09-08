@@ -11,11 +11,11 @@ Selecting the `pages` module gives a repository a managed `pages.yml` workflow t
 
 Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build of the newest served tag).
 
-The workflow deploys on every push to the default branch, nightly (04:23 UTC), and on manual dispatch. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
+The deploy runs three ways. On every push to the default branch it rides the managed ci.yml's run downstream of the `all-green` gate: a `pages` job calls pages.yml with the judged commit, so a red main never reaches the site ([all-green.md](all-green.md#after-the-gate)). The nightly rebuild (04:23 UTC) and a manual dispatch build the default branch head. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
 ## Pages enablement
 
-Nothing to do: the pages module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. No `github-pages` environment tag rule is needed anymore - deploys never run on tag refs.
+Nothing to do: the pages module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. The `github-pages` environment needs no protection rule: deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" until the next run cancels it. The fleet settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
 
 ## Module parameters (copier questions)
 
