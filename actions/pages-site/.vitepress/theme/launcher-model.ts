@@ -66,9 +66,10 @@ export interface ResolvedHref {
   /** The page key the href names, null for an external href. */
   key: string | null;
   /** The href as the browser should follow it: absolute site path plus
-   *  query and hash for an internal link, the original for an external. */
+   *  the query and hash as written for an internal link, the original for
+   *  an external. */
   href: string;
-  /** The query and hash to carry onto a matched page's URL. */
+  /** The query and hash as written, to carry onto a matched page's URL. */
   suffix: string;
 }
 
@@ -76,20 +77,21 @@ export interface ResolvedHref {
  *  (a scheme or `//`) pass through unresolved. */
 export function resolveHref(href: string, landingUrl: string): ResolvedHref {
   if (SCHEME_RE.test(href)) return { key: null, href, suffix: "" };
-  const url = new URL(href, `http://launcher.invalid${landingUrl}`);
-  const pathname = decoded(url.pathname);
-  const suffix = decoded(`${url.search}${url.hash}`);
-  return { key: pageKey(pathname), href: `${pathname}${suffix}`, suffix };
+  const { pathname } = new URL(href, `http://launcher.invalid${landingUrl}`);
+  const at = href.search(/[?#]/);
+  const suffix = at === -1 ? "" : href.slice(at);
+  return { key: pageKey(decodedPath(pathname)), href: `${pathname}${suffix}`, suffix };
 }
 
-/** The URL part as the page index and the headers plugin spell it (the URL
- *  class percent-encodes non-ASCII). Malformed escapes stay as written:
- *  they then only match a page spelled the same way. */
-function decoded(part: string): string {
+/** The path as the page index spells it (the URL class percent-encodes
+ *  non-ASCII); for the identity key only, so the navigable href keeps the
+ *  author's escapes (`%2526` stays `%2526`). A malformed escape stays as
+ *  written and then only matches a page spelled the same way. */
+function decodedPath(pathname: string): string {
   try {
-    return decodeURI(part);
+    return decodeURI(pathname);
   } catch {
-    return part;
+    return pathname;
   }
 }
 

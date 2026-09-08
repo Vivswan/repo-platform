@@ -82,8 +82,8 @@ function escapeAttribute(value: string): string {
 /** The curated rows of the table spanning `tokens[start]` (table_open) to
  *  `tokens[end]` (table_close), or null when no body column holds exactly
  *  one link in every row. Per row: href from that column, label from the
- *  first other cell, note from the next cell after that (null when absent
- *  or empty); a single-column table labels each row with its link text.
+ *  first other cell (the link text when that cell is empty or absent), note
+ *  from every remaining cell joined by ", " (null when they are all empty).
  *  `beforeRead` runs once the table qualifies and before any href or text
  *  is read (the rule renders the table's cells there, so a renderer's link
  *  rule has rewritten the hrefs this returns). */
@@ -105,9 +105,17 @@ export function curatedRowsFromTable(
   if (!hrefs.every((href): href is string => href !== null)) return null;
   return rows.map((row, index) => {
     const others = row.filter((_, column) => column !== linkColumn);
-    const label = plainTextOf(others.length > 0 ? others[0] : row[linkColumn]);
-    const note = others.length > 1 ? plainTextOf(others[1]) : "";
-    return { label, href: hrefs[index], note: note === "" ? null : note };
+    const label = others.length > 0 ? plainTextOf(others[0]) : "";
+    const note = others
+      .slice(1)
+      .map(plainTextOf)
+      .filter((text) => text !== "")
+      .join(", ");
+    return {
+      label: label === "" ? plainTextOf(row[linkColumn]) : label,
+      href: hrefs[index],
+      note: note === "" ? null : note,
+    };
   });
 }
 
