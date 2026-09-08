@@ -45,7 +45,7 @@ Asked only when the module is selected.
 
 | Question | Meaning | Default |
 |---|---|---|
-| `pages_setup` | Toolchain(s) on the build runner (comma-separated bun/node/deno/uv, or none) | selected toolchain modules, else `none` |
+| `pages_setup` | Toolchain(s) on the build runner (comma-separated bun/node/deno/uv/rust, or none) | selected toolchain modules, else `none` |
 | `pages_install_command` | Install step before each build (empty skips) | per toolchain, e.g. `bun install --frozen-lockfile` |
 | `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`, `PAGES_TIER` are exported (docs/pages.md) | per toolchain, e.g. `bun run build` |
 | `pages_dist_dir` | Build output directory (plain relative path) | `dist` |

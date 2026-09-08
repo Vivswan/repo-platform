@@ -10,7 +10,7 @@ One version per toolchain, fleet-wide. Each pin lives in the module manifest (`t
 | `node` | `.node-version` | 24.19.0 |
 | `deno` | `.dvmrc` | 2.9.5 |<!-- END GENERATED: toolchain-pins -->
 
-Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup at all (its module.yml deliberately has no `toolchain` key), so rust version selection stays repository-owned.
+Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI (its module.yml deliberately has no `toolchain` key), so rust version selection stays repository-owned; the Pages build runner installs stable as the rustup default, and a `rust-toolchain.toml` in the tree still wins there.
 
 ## How the pin reaches repositories
 

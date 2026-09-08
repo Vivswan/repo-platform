@@ -14,3 +14,11 @@ gitignore_sources:
   - Rust.gitignore
 lockfiles:
   - 'Cargo\.lock'
+# The Pages defaults for a rust-selecting repo: mdBook is the Rust
+# ecosystem's site builder. Defaults only - the pages_* copier answers take
+# any command (docs/pages.md). The install pins +stable: it runs inside
+# the extracted tree, where a repo's own rust-toolchain.toml would select
+# a toolchain that may predate mdBook's rust-version and fail the install.
+pages:
+  install: cargo +stable install mdbook --locked
+  build: mdbook build -d dist
