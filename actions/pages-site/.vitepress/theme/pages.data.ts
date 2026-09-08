@@ -3,12 +3,15 @@
 // for its headings, mapped by page-index.ts, and inlined into the client
 // bundle as `data`. Runs only inside a vitepress process, like any data
 // loader. Pages render from their source as written, and VitePress expands
-// `<!-- @include -->` only in its page transform, so a page that uses the
-// directive lists NO heading rows (page-index.ts's sourceHeaders): the
-// unexpanded source would shift or collide the anchors after the include,
-// and full-text search still reaches those headings.
+// `<!-- @include -->` only in its page transform, so a page with a directive
+// VitePress would expand (one naming a readable file, resolved the way its
+// processIncludes does) lists NO heading rows (page-index.ts's
+// sourceHeaders): the unexpanded source would shift or collide the anchors
+// after the include, and full-text search still reaches those headings. A
+// directive whose file VitePress cannot read (missing, a directory, a path
+// through a file) stays literal there too, so it changes nothing here.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { MarkdownEnv, SiteConfig } from "vitepress";
 import { pageTitle, walkMarkdown } from "../derive.ts";
@@ -16,6 +19,16 @@ import type { PageIndexEntry } from "./launcher-model.ts";
 import { buildPageIndex, type HeadersEnv, sourceHeaders } from "./page-index.ts";
 
 declare const data: PageIndexEntry[];
+
+/** The read VitePress attempts, as a question: false for whatever makes
+ *  it fail (a missing entry, a directory, a path through a file). */
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
 
 export { data };
 
@@ -46,7 +59,12 @@ export default {
             relativePath,
             cleanUrls,
           };
-          return sourceHeaders(md, readFileSync(join(srcDir, file), "utf-8"), env);
+          const sourcePath = join(srcDir, file);
+          return sourceHeaders(md, readFileSync(sourcePath, "utf-8"), env, {
+            file: sourcePath,
+            srcDir,
+            isFile: isRegularFile,
+          });
         },
       },
     );

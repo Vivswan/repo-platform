@@ -19,8 +19,14 @@
 # preload) while the theme's own fonts stay, the facts card rendered on
 # the landing page (repository link, the tier's own version row marked current
 # and noted as the one being read), the provenance line (the tier's ref and
-# the page's source file), the table scroll wrapper, llms.txt, the strict CHECK mode both passing on
-# clean docs and failing on a dead link, the deploy's per-tier strictness
+# the page's source file), the table scroll wrapper, the search launcher
+# (the landing page's link table rendered as the panel, its curated row
+# label and the fixture's h2 as a heading row label, the guide/ group
+# titled "Guide" from its folder name, the page row's note being the page's
+# site path, the nav button on a non-landing page, and the fixture's h2
+# anchor in the page index inlined into the client bundle), llms.txt, the
+# strict CHECK mode both passing on clean docs and failing on a dead link,
+# the deploy's per-tier strictness
 # (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
 # the deploy), the nested docs-dir build, and the deploy command's
 # legacy-tag skip (both arms) and HEAD calibration gate.

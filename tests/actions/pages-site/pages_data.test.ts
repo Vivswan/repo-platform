@@ -54,6 +54,31 @@ describe("the page index under the action's build topology", () => {
       join(docs, "includes.md"),
       "# Includes\n\n<!--@include: ./guide/README.md-->\n\n## Install!\n\nOwn steps.\n",
     );
+    // The same directive shape quoted in a code span names no file that
+    // exists, so VitePress leaves it literal and the page keeps its rows.
+    writeFileSync(
+      join(docs, "mentions.md"),
+      "# Mentions\n\nUse `<!-- @include: ./missing.md -->` to include.\n\n## Install!\n\nOwn steps.\n",
+    );
+    // Directives VitePress cannot read and so leaves literal: a directory
+    // (EISDIR) and a path through a file (ENOTDIR). An existence test would
+    // drop the rows for the first; a stat without a catch would throw on
+    // the second.
+    writeFileSync(
+      join(docs, "unreadable.md"),
+      [
+        "# Unreadable",
+        "",
+        "<!-- @include: ./guide -->",
+        "",
+        "<!-- @include: ./guide/README.md/part.md -->",
+        "",
+        "## Install!",
+        "",
+        "Own steps.",
+        "",
+      ].join("\n"),
+    );
     writeFileSync(
       join(docs, "probe.md"),
       [
@@ -114,11 +139,33 @@ describe("the page index under the action's build topology", () => {
         ],
       },
       { url: "/includes.html", title: "Includes", dir: "", locale: "root", headers: [] },
+      {
+        url: "/mentions.html",
+        title: "Mentions",
+        dir: "",
+        locale: "root",
+        headers: [{ title: "Install!", anchor: "install", level: 2 }],
+      },
       { url: "/probe.html", title: "Probe", dir: "", locale: "root", headers: [] },
+      {
+        url: "/unreadable.html",
+        title: "Unreadable",
+        dir: "",
+        locale: "root",
+        headers: [{ title: "Install!", anchor: "install", level: 2 }],
+      },
     ]);
     const includes = readFileSync(join(dist, "includes.html"), "utf-8");
     expect(includes).toContain('<h2 id="install"');
     expect(includes).toContain('<h2 id="install-1"');
+    const mentions = readFileSync(join(dist, "mentions.html"), "utf-8");
+    expect(mentions).toContain("<code>&lt;!-- @include: ./missing.md --&gt;</code>");
+    expect(mentions).toContain('<h2 id="install"');
+    // Nothing expanded: the page's own h2 keeps the bare anchor (Vue drops
+    // the literal comment from the built HTML, so the anchor is the probe).
+    const unreadable = readFileSync(join(dist, "unreadable.html"), "utf-8");
+    expect(unreadable).toContain('<h2 id="install"');
+    expect(unreadable).not.toContain('id="install-1"');
     // The landing rule fires on the README landing in the page build
     // (post-rewrite path): the table is gone and the curated label renders
     // only as a launcher row. In the search index (pre-rewrite path) the
