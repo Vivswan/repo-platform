@@ -4,7 +4,7 @@
 // so the test suite loads this without a VitePress process and launcher.ts
 // and nav-launcher.ts stay renderers.
 
-import type { LauncherGroup, LauncherItem } from "./launcher-model.ts";
+import { type LauncherGroup, type LauncherItem, splitRows } from "./launcher-model.ts";
 
 /** A group as the list shows it: `open` is false only for a folded group
  *  the reader has not unfolded, whose foldable rows stay behind its fold
@@ -18,21 +18,14 @@ export function shownGroups(groups: LauncherGroup[], unfolded: ReadonlySet<strin
   return groups.map((group) => ({ group, open: !group.folded || unfolded.has(group.key) }));
 }
 
-/** A group's rows split around its fold row, each side in display order:
- *  `kept` rows show whatever the fold state, `foldable` rows only while the
- *  group is open. A `dir` fold hides its pages (headings ride along); a
- *  page fold hides the headings and keeps the page's own link reachable.
- *  An unfolded group keeps everything. */
+/** A group's rows around its fold row (the model's split), or everything
+ *  kept for a group that never folded. */
 export function groupRows(group: LauncherGroup): {
   kept: LauncherItem[];
   foldable: LauncherItem[];
 } {
   if (!group.folded) return { kept: group.items, foldable: [] };
-  if (group.kind === "dir") return { kept: [], foldable: group.items };
-  return {
-    kept: group.items.filter((item) => item.source !== "heading"),
-    foldable: group.items.filter((item) => item.source === "heading"),
-  };
+  return splitRows(group.kind, group.items);
 }
 
 /** One option of the list: a link to a page or heading, or a folded
