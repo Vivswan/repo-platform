@@ -84,6 +84,8 @@ function escapeAttribute(value: string): string {
  *  one link in every row. Per row: href from that column, label from the
  *  first other cell (the link text when that cell is empty or absent), note
  *  from every remaining cell joined by ", " (null when they are all empty).
+ *  A row with no remaining cell takes the link text as its note, unless
+ *  the label already spells it (then null, so nothing shows twice).
  *  `beforeRead` runs once the table qualifies and before any href or text
  *  is read (the rule renders the table's cells there, so a renderer's link
  *  rule has rewritten the hrefs this returns). */
@@ -105,18 +107,26 @@ export function curatedRowsFromTable(
   if (!hrefs.every((href): href is string => href !== null)) return null;
   return rows.map((row, index) => {
     const others = row.filter((_, column) => column !== linkColumn);
-    const label = others.length > 0 ? plainTextOf(others[0]) : "";
-    const note = others
-      .slice(1)
-      .map(plainTextOf)
-      .filter((text) => text !== "")
-      .join(", ");
-    return {
-      label: label === "" ? plainTextOf(row[linkColumn]) : label,
-      href: hrefs[index],
-      note: note === "" ? null : note,
-    };
+    const linkText = plainTextOf(row[linkColumn]);
+    const cellLabel = others.length > 0 ? plainTextOf(others[0]) : "";
+    const label = cellLabel === "" ? linkText : cellLabel;
+    return { label, href: hrefs[index], note: noteOf(others.slice(1), label, linkText) };
   });
+}
+
+/** `cells` are the row's cells after the label; with none, the link text
+ *  stands in unless the label already is it. */
+function noteOf(cells: Token[], label: string, linkText: string): string | null {
+  const note =
+    cells.length > 0
+      ? cells
+          .map(plainTextOf)
+          .filter((text) => text !== "")
+          .join(", ")
+      : label === linkText
+        ? ""
+        : linkText;
+  return note === "" ? null : note;
 }
 
 /** Each body row as its cells' inline tokens. */
