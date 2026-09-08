@@ -1,8 +1,9 @@
-// The per-tier project facts the theme renders. Pure by construction: every repository file arrives
-// through the injected reader (build.ts hands it treeFile at the tier's
-// own ref, so a tagged version shows that tag's toolchains and license),
-// and a missing or unparseable file degrades to null or [] instead of
-// failing the build - facts decorate a site, they never gate it.
+// The per-tier project facts the theme renders. Pure by construction: every
+// repository file arrives through the injected reader (build.ts hands it
+// treeFile at the tier's own ref, so a tagged version shows that tag's
+// toolchains and license). An absent or malformed file degrades to null or
+// [] instead of failing the build; a failed git read inside the reader still
+// throws, because a broken checkout is a build fault, not a missing fact.
 
 export interface ProjectFacts {
   /** owner/name */

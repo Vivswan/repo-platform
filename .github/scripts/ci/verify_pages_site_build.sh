@@ -11,10 +11,12 @@
 #
 # Asserts, on the assembled artifact: the versioned tier layout, content
 # isolation between tiers, the locale build with carbon's translations
-# menu, the version switcher, a carbon token in the built CSS (the base
-# theme actually applied, not a silent default-theme fallback), llms.txt,
-# and the strict CHECK mode both passing on clean docs and failing on a
-# dead link.
+# menu, the version switcher, the per-repo hue attribute on <html>, the
+# per-tier project facts (each tier's provenance names its OWN ref), a
+# carbon token in the built CSS (the base theme actually applied, not a
+# silent default-theme fallback) with carbon's remote font @imports
+# dropped and the bundled Mona Sans kept, llms.txt, and the strict CHECK
+# mode both passing on clean docs and failing on a dead link.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
@@ -100,7 +102,23 @@ present "VPNavBarTranslations" "$site/latest/index.html"
 # a carbon bump that moves its brand token should update this pin note.
 present "docs-site-version-switcher" "$site/latest/index.html"
 present 'data-fleet-hue="' "$site/latest/index.html"
+# Per-tier facts: vitepress inlines the site data as an escaped JSON string,
+# hence the backslashes. Anchored on the provenance key because the version
+# dropdown lists every tier's label in every page.
+present '\"provenance\":{\"label\":\"main\"' "$site/latest/index.html"
+present '\"provenance\":{\"label\":\"v0.1.0\"' "$site/v0.1.0/index.html"
+absent '\"provenance\":{\"label\":\"main\"' "$site/v0.1.0/index.html"
 grep -qrF -- "58a6ff" "$site/latest/assets" || fail "carbon's brand token is missing from the built CSS - the base theme did not apply"
+# The import filter: carbon's remote font @imports are dropped from the
+# built CSS, while the bundled Mona Sans (a local url()) is the positive
+# control that the filter did not strip fonts wholesale.
+for host in fonts.googleapis.com fonts.cdnfonts.com; do
+  if grep -qrF -- "$host" "$site/latest/assets"; then
+    fail "'$host' should not be in the built CSS - the remote @import filter did not apply"
+  fi
+done
+grep -qrF -- "Mona-Sans" "$site/latest/assets" ||
+  fail "the bundled Mona Sans is missing from the built CSS - the import filter stripped more than remote @imports"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
@@ -270,5 +288,5 @@ site="$TEMP_REAL/pages-site/_site"
 present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
-echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, llms.txt," \
-  "strict mode both arms, legacy-tag skip both arms, calibration gate"
+echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
+  "import filter, llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

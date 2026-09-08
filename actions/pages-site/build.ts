@@ -10,6 +10,9 @@
 //               links fatal), and stop - the docs PR check. No artifact.
 //   otherwise   read MOUNTS, build every mount's tiers, lay out _site, and
 //               emit the site-dir output for upload.
+// Both modes need a committed git checkout at GITHUB_WORKSPACE: each tier's
+// project facts (copier answers, toolchain pins, LICENSE.md) and its commit
+// are read from the ref's tree with git, never from the working files.
 //
 // Builds run against materialized trees (hermetic - no cross-tier
 // node_modules or dist bleed): command tiers extract the whole ref with

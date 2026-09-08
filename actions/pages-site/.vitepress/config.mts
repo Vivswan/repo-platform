@@ -1,7 +1,8 @@
 // The central VitePress config every fleet docs site builds with. The
-// caller repository contributes ONLY the markdown tree; everything here is
-// driven by the environment the pages-site action sets per tier (build.ts
-// owns that contract):
+// caller repository contributes its markdown tree plus the repo-level facts
+// (copier answers, toolchain pins, LICENSE.md) the action reads from the
+// tier's git tree; everything here is driven by the environment the
+// pages-site action sets per tier (build.ts owns that contract):
 //
 //   DOCS_SITE_SRC           the docs tree to render (required)
 //   DOCS_SITE_TITLE         site title
@@ -10,6 +11,7 @@
 //   DOCS_SITE_CURRENT       this tier's version label
 //   DOCS_SITE_FACTS         JSON ProjectFacts (facts.ts) for the theme's
 //                           facts card, provenance line, and per-repo hue
+//                           (required)
 //   DOCS_SITE_EDIT_PATTERN  editLink pattern (set only where editing the
 //                           source can change THIS content: latest tiers)
 //   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead
@@ -49,9 +51,7 @@ const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
   link: string;
 }[];
-const facts = process.env.DOCS_SITE_FACTS
-  ? (JSON.parse(process.env.DOCS_SITE_FACTS) as ProjectFacts)
-  : undefined;
+const facts = JSON.parse(required("DOCS_SITE_FACTS")) as ProjectFacts;
 
 // Locales by convention alone: docs/<lang>[-<region>]/ mirroring the root
 // structure IS a locale (derive.ts owns the detection rule); the root tree
@@ -112,6 +112,20 @@ export default defineConfigWithTheme<FleetThemeConfig>({
       },
     },
   },
+  // VitePress defaults the custom-block titles to uppercase (TIP, WARNING);
+  // the fleet theme reads them in sentence case.
+  markdown: {
+    container: {
+      infoLabel: "Info",
+      noteLabel: "Note",
+      tipLabel: "Tip",
+      warningLabel: "Warning",
+      dangerLabel: "Danger",
+      detailsLabel: "Details",
+      importantLabel: "Important",
+      cautionLabel: "Caution",
+    },
+  },
   // Landing pages (README.md, rewritten to index.md at any depth) are the
   // site's front matter, not an article: the theme lays them out from the
   // flag and they carry no outline.
@@ -120,9 +134,7 @@ export default defineConfigWithTheme<FleetThemeConfig>({
     return { frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false } };
   },
   transformHtml(code) {
-    return facts === undefined
-      ? code
-      : code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
+    return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
   },
   themeConfig: {
     nav: [],
@@ -134,6 +146,6 @@ export default defineConfigWithTheme<FleetThemeConfig>({
       : {}),
     docsSiteVersions: versions,
     docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
-    ...(facts === undefined ? {} : { docsSiteFacts: facts }),
+    docsSiteFacts: facts,
   },
 });
