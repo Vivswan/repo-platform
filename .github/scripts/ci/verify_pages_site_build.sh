@@ -159,7 +159,10 @@ printf '{"name": "cmd-fixture", "scripts": {"test": "true"}}\n' > "$CMD_WORK/pac
 git -C "$CMD_WORK" init -q -b main
 commit_cmd "$CMD_WORK" "before the site existed"
 git -C "$CMD_WORK" tag v1.0.0
-printf '{"name": "cmd-fixture", "scripts": {"build:site": "mkdir -p dist && echo SCRIPT-ERA > dist/index.html"}}\n' > "$CMD_WORK/package.json"
+# The fixture builds echo the tier contract into the page, so the layout
+# below asserts what each build was told, not only what it produced.
+# shellcheck disable=SC2016  # $PAGES_TIER stays literal: the fixture script expands it at build time
+printf '{"name": "cmd-fixture", "scripts": {"build:site": "mkdir -p dist && echo SCRIPT-ERA tier=$PAGES_TIER > dist/index.html"}}\n' > "$CMD_WORK/package.json"
 commit_cmd "$CMD_WORK" "add the site build"
 git -C "$CMD_WORK" tag v1.1.0
 # A tag whose package.json is a SYMLINK: bun follows it at build time, so
@@ -174,7 +177,8 @@ ln -s "$link_target" "$CMD_WORK/package.json"
 commit_cmd "$CMD_WORK" "symlinked package.json"
 git -C "$CMD_WORK" tag v1.1.1
 rm "$CMD_WORK/package.json" "$CMD_WORK/$link_target"
-printf '{"name": "cmd-fixture", "scripts": {"build:site": "mkdir -p dist && echo HEAD-ERA > dist/index.html"}}\n' > "$CMD_WORK/package.json"
+# shellcheck disable=SC2016  # as above
+printf '{"name": "cmd-fixture", "scripts": {"build:site": "mkdir -p dist && echo HEAD-ERA tier=$PAGES_TIER > dist/index.html"}}\n' > "$CMD_WORK/package.json"
 commit_cmd "$CMD_WORK" "head-only build output"
 
 cmd_log="$CMD_WORK/deploy.log"
@@ -186,10 +190,10 @@ env GITHUB_WORKSPACE="$CMD_WORK" GITHUB_REPOSITORY=fixture-owner/cmd-repo \
 site="$TEMP_REAL/pages-site/_site"
 present "::notice::site version v1.0.0 skipped" "$cmd_log"
 test ! -e "$site/v1.0.0" || fail "the pre-script tag v1.0.0 landed in the site instead of skipping"
-present "SCRIPT-ERA" "$site/v1.1.0/index.html"
+present "SCRIPT-ERA tier=tag" "$site/v1.1.0/index.html"
 present "LINK-ERA" "$site/v1.1.1/index.html"
 present "LINK-ERA" "$site/index.html"
-present "HEAD-ERA" "$site/latest/index.html"
+present "HEAD-ERA tier=latest" "$site/latest/index.html"
 absent "HEAD-ERA" "$site/index.html"
 present '"label": "v1.1.1"' "$site/versions.json"
 present '"label": "v1.1.0"' "$site/versions.json"
@@ -209,22 +213,25 @@ if env GITHUB_WORKSPACE="$CMD_WORK" GITHUB_REPOSITORY=fixture-owner/cmd-repo \
   fail "the deploy went green over a tag whose declared build script fails - the skip must stay structural"
 fi
 
-# Every tag pre-script: the root falls back to the redirect-to-latest
-# layout instead of failing, versions.json carries latest alone.
+# Every tag pre-script: the root is a second build of HEAD instead of a
+# redirect stub (the root is the one copy a site indexes, so it must be a
+# real page), versions.json carries latest alone.
 printf '{"name": "allskip-fixture"}\n' > "$CMD_ALLSKIP/package.json"
 git -C "$CMD_ALLSKIP" init -q -b main
 commit_cmd "$CMD_ALLSKIP" "before the site existed"
 git -C "$CMD_ALLSKIP" tag v0.9.0
-printf '{"name": "allskip-fixture", "scripts": {"build:site": "mkdir -p dist && echo ALLSKIP-HEAD > dist/index.html"}}\n' > "$CMD_ALLSKIP/package.json"
+# shellcheck disable=SC2016  # as above
+printf '{"name": "allskip-fixture", "scripts": {"build:site": "mkdir -p dist && echo ALLSKIP-HEAD tier=$PAGES_TIER > dist/index.html"}}\n' > "$CMD_ALLSKIP/package.json"
 commit_cmd "$CMD_ALLSKIP" "add the site build"
 env GITHUB_WORKSPACE="$CMD_ALLSKIP" GITHUB_REPOSITORY=fixture-owner/allskip-repo \
   RUNNER_TEMP="$TEMP" GITHUB_OUTPUT="" \
   MOUNTS='[{"path": "/", "source": "command", "versioned": true}]' \
   BUILD_COMMAND='bun run build:site' \
-  bun "$BUILD_TS" >/dev/null 2>&1 || fail "the deploy failed when every tag pre-dates the build script (root must redirect to latest)"
+  bun "$BUILD_TS" > "$CMD_ALLSKIP/deploy.log" 2>&1 || { cat "$CMD_ALLSKIP/deploy.log"; fail "the deploy failed when every tag pre-dates the build script (root must build HEAD)"; }
 site="$TEMP_REAL/pages-site/_site"
-present "url=./latest/" "$site/index.html"
-present "ALLSKIP-HEAD" "$site/latest/index.html"
+present "::notice::no version tags to serve" "$CMD_ALLSKIP/deploy.log"
+present "ALLSKIP-HEAD tier=root" "$site/index.html"
+present "ALLSKIP-HEAD tier=latest" "$site/latest/index.html"
 present '"label": "latest"' "$site/versions.json"
 absent '"label": "v0.9.0"' "$site/versions.json"
 

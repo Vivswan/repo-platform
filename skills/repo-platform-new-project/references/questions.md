@@ -47,10 +47,10 @@ Asked only when the module is selected.
 |---|---|---|
 | `pages_setup` | Toolchain(s) on the build runner (comma-separated bun/node/deno/uv, or none) | selected toolchain modules, else `none` |
 | `pages_install_command` | Install step before each build (empty skips) | per toolchain, e.g. `bun install --frozen-lockfile` |
-| `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION` are exported | per toolchain, e.g. `bun run build` |
+| `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`, `PAGES_TIER` are exported (docs/pages.md) | per toolchain, e.g. `bun run build` |
 | `pages_dist_dir` | Build output directory (plain relative path) | `dist` |
 
-The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (a redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). Pages is enabled by the module's settings layer on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
+The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (the default branch head while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). Pages is enabled by the module's settings layer on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions.
 
 ### docs-site
 

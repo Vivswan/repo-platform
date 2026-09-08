@@ -41,7 +41,6 @@ import {
   parseCommandProbe,
   parseMounts,
   planMount,
-  redirectHtml,
   reservedRootEntries,
   type Tier,
   urlBase,
@@ -116,8 +115,7 @@ function listTree(cfg: Config, ref: string): string[] {
     .filter((line) => line !== "");
 }
 
-/** A generated file the layout owns (versions.json, the redirect page,
- *  CNAME): never an overwrite - existing content at its path is a mount
+/** A generated file the layout owns (versions.json, CNAME): never an overwrite - existing content at its path is a mount
  *  or build output claiming the same URL. */
 function writeExclusive(path: string, content: string, what: string): void {
   if (existsSync(path)) {
@@ -252,6 +250,22 @@ function assertTierIndex(dist: string, what: string): string {
   return dist;
 }
 
+/** The PAGES_* build contract (docs/pages.md) one command tier's install
+ *  and build commands run under. PAGES_TIER names the tier's place in the
+ *  layout: the root is the one copy a site indexes, and a root built from
+ *  HEAD reads the same as latest/ in PAGES_VERSION. */
+export function commandTierEnv(
+  cfg: Pick<Config, "rootBase" | "origin">,
+  tier: Tier,
+): Record<string, string> {
+  return {
+    PAGES_BASE_PATH: urlBase(cfg.rootBase, tier.rel),
+    PAGES_ORIGIN: cfg.origin,
+    PAGES_VERSION: tier.version,
+    PAGES_TIER: tier.kind,
+  };
+}
+
 /** One command-mount build: the caller's install/build commands in an
  *  extracted tree, under the tier's PAGES_* contract. */
 function buildCommandTier(cfg: Config, tier: Tier): { dist: string; buildDir: string } {
@@ -261,9 +275,7 @@ function buildCommandTier(cfg: Config, tier: Tier): { dist: string; buildDir: st
   // nothing; the check below must only ever see this run's output.
   rmSync(join(tree, cfg.distDir), { recursive: true, force: true });
   const tierEnv = {
-    PAGES_BASE_PATH: urlBase(cfg.rootBase, tier.rel),
-    PAGES_ORIGIN: cfg.origin,
-    PAGES_VERSION: tier.version,
+    ...commandTierEnv(cfg, tier),
     // The caller's pre-action PATH: the action's pinned bun governs only
     // action-owned code, never the caller's own build toolchain.
     ...(cfg.callerPath === "" ? {} : { PATH: cfg.callerPath }),
@@ -459,11 +471,11 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
     : mount.source === "vitepress"
       ? eligibleDocsTags(cfg, kept)
       : eligibleCommandTags(cfg, kept);
-  const plan = planMount(mount, tags);
+  const tiers = planMount(mount, tags);
   const links = mount.versioned ? versionLinks(cfg.rootBase, mount, tags) : [];
   const mountRoot = join(cfg.site, mountRel(mount.path));
   const reserved = reservedRootEntries(tags);
-  for (const tier of plan.tiers) {
+  for (const tier of tiers) {
     console.log(`building ${mount.source} tier '${tier.rel || "/"}' from ${tier.ref}`);
     const { dist, buildDir } =
       mount.source === "command"
@@ -485,14 +497,9 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
       `${JSON.stringify({ versions: versionsIndex(tags) }, null, 2)}\n`,
       `mount '${mount.path}' versions.json`,
     );
-    if (plan.redirectToLatest) {
-      writeExclusive(
-        join(mountRoot, "index.html"),
-        redirectHtml("./latest/"),
-        `mount '${mount.path}' redirect page`,
-      );
+    if (tags.length === 0) {
       console.log(
-        `::notice::no version tags to serve: ${mount.path} redirects to ${mount.path}latest/`,
+        `::notice::no version tags to serve: ${mount.path} is built from the default branch head, like ${mount.path}latest/`,
       );
     }
   }
@@ -526,8 +533,9 @@ function main(): void {
     validateRelPath(cfg.distDir, "the dist directory");
   }
   // The control for the tag read below: a shallow checkout reads as "no
-  // version tags" and would silently ship the redirect layout, so the
-  // absence of tags is only believed from a full clone.
+  // version tags" and would silently serve HEAD at the root with every
+  // version dropped, so the absence of tags is only believed from a full
+  // clone.
   if (
     capture(["git", "-C", cfg.workspace, "rev-parse", "--is-shallow-repository"]).trim() !== "false"
   ) {

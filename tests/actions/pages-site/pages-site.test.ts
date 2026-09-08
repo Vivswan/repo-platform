@@ -12,6 +12,7 @@ import {
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import {
   assertCentralTheme,
+  commandTierEnv,
   copyInto,
   tierStrictLinks,
 } from "../../../actions/pages-site/build.ts";
@@ -22,7 +23,6 @@ import {
   parseCommandProbe,
   parseMounts,
   planMount,
-  redirectHtml,
   reservedRootEntries,
   type ScriptProbe,
   urlBase,
@@ -104,17 +104,13 @@ describe("planMount", () => {
   const docs = { path: "/docs/", source: "vitepress", versioned: true } as const;
 
   test("unversioned: one HEAD build at the mount root", () => {
-    const plan = planMount({ path: "/", source: "command", versioned: false }, ["v1.0.0"]);
-    expect(plan).toEqual({
-      tiers: [{ kind: "single", ref: "HEAD", version: "", rel: "" }],
-      redirectToLatest: false,
-    });
+    expect(planMount({ path: "/", source: "command", versioned: false }, ["v1.0.0"])).toEqual([
+      { kind: "single", ref: "HEAD", version: "", rel: "" },
+    ]);
   });
 
   test("versioned with tags: latest, each tag, then the root from the newest", () => {
-    const plan = planMount(docs, ["v2.0.0", "v1.0.0"]);
-    expect(plan.redirectToLatest).toBe(false);
-    expect(plan.tiers).toEqual([
+    expect(planMount(docs, ["v2.0.0", "v1.0.0"])).toEqual([
       { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
       { kind: "tag", ref: "v2.0.0", version: "v2.0.0", rel: "docs/v2.0.0/" },
       { kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "docs/v1.0.0/" },
@@ -122,12 +118,65 @@ describe("planMount", () => {
     ]);
   });
 
-  test("versioned without tags: latest only, root redirects", () => {
-    const plan = planMount(docs, []);
-    expect(plan.tiers).toEqual([
+  test("versioned without tags: latest, then the root as a SECOND build of HEAD - never a redirect stub", () => {
+    expect(planMount(docs, [])).toEqual([
       { kind: "latest", ref: "HEAD", version: "latest", rel: "docs/latest/" },
+      { kind: "root", ref: "HEAD", version: "latest", rel: "docs/" },
     ]);
-    expect(plan.redirectToLatest).toBe(true);
+  });
+});
+
+describe("commandTierEnv", () => {
+  const cfg = { rootBase: "/r/", origin: "https://o.github.io" };
+  const versioned = { path: "/", source: "command", versioned: true } as const;
+
+  test("every tier of a versioned mount with a served tag carries its place in the layout", () => {
+    expect(planMount(versioned, ["v2.0.0"]).map((tier) => commandTierEnv(cfg, tier))).toEqual([
+      {
+        PAGES_BASE_PATH: "/r/latest/",
+        PAGES_ORIGIN: "https://o.github.io",
+        PAGES_VERSION: "latest",
+        PAGES_TIER: "latest",
+      },
+      {
+        PAGES_BASE_PATH: "/r/v2.0.0/",
+        PAGES_ORIGIN: "https://o.github.io",
+        PAGES_VERSION: "v2.0.0",
+        PAGES_TIER: "tag",
+      },
+      {
+        PAGES_BASE_PATH: "/r/",
+        PAGES_ORIGIN: "https://o.github.io",
+        PAGES_VERSION: "v2.0.0",
+        PAGES_TIER: "root",
+      },
+    ]);
+  });
+
+  test("no served tag: the root build of HEAD reads as latest in PAGES_VERSION, and only PAGES_TIER tells it apart", () => {
+    const [latest, root] = planMount(versioned, []).map((tier) => commandTierEnv(cfg, tier));
+    expect(latest).toEqual({
+      PAGES_BASE_PATH: "/r/latest/",
+      PAGES_ORIGIN: "https://o.github.io",
+      PAGES_VERSION: "latest",
+      PAGES_TIER: "latest",
+    });
+    expect(root).toEqual({
+      PAGES_BASE_PATH: "/r/",
+      PAGES_ORIGIN: "https://o.github.io",
+      PAGES_VERSION: "latest",
+      PAGES_TIER: "root",
+    });
+  });
+
+  test("an unversioned mount is one single tier with an empty version", () => {
+    const [single] = planMount({ ...versioned, versioned: false }, ["v2.0.0"]);
+    expect(commandTierEnv(cfg, single)).toEqual({
+      PAGES_BASE_PATH: "/r/",
+      PAGES_ORIGIN: "https://o.github.io",
+      PAGES_VERSION: "",
+      PAGES_TIER: "single",
+    });
   });
 });
 
@@ -155,24 +204,6 @@ describe("layout helpers", () => {
   test("urlBase joins the Pages root base and the tier path", () => {
     expect(urlBase("/repo/", "docs/latest/")).toBe("/repo/docs/latest/");
     expect(urlBase("/", "")).toBe("/");
-  });
-
-  test("the redirect page targets latest relatively", () => {
-    expect(redirectHtml("./latest/")).toBe(
-      [
-        "<!DOCTYPE html>",
-        '<html lang="en">',
-        "<head>",
-        '<meta charset="utf-8">',
-        '<meta http-equiv="refresh" content="0; url=./latest/">',
-        '<link rel="canonical" href="./latest/">',
-        "<title>Redirecting</title>",
-        "</head>",
-        '<body><p>Redirecting to <a href="./latest/">./latest/</a>.</p></body>',
-        "</html>",
-        "",
-      ].join("\n"),
-    );
   });
 
   test("validateRelPath refuses traversal in any spelling", () => {

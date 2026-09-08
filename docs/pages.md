@@ -4,12 +4,12 @@ Selecting the `pages` module gives a repository a managed `pages.yml` workflow t
 
 | URL | Built from | Content changes when |
 |---|---|---|
-| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: a redirect to `latest/`) | a new version tag exists |
+| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: the default branch head, the same content as `latest/`) | a new version tag exists, or the pipeline or theme changes (every deploy rebuilds it; while none serve it follows the default branch head, so every deploy) |
 | `.../<repo>/latest/` | the default branch head | every deploy |
 | `.../<repo>/vX.Y.Z/` | that tag, one directory per served tag | the pipeline or theme changes (every deploy rebuilds all tiers; the source tag itself is immutable) |
 | `.../<repo>/versions.json` | the version index (machine-readable) | the served tag set changes |
 
-Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build of the newest served tag).
+Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build: the newest served tag, or the default branch head while none serve).
 
 The deploy runs three ways. On every push to the default branch it rides the managed ci.yml's run downstream of the `all-green` gate: a `pages` job calls pages.yml with the judged commit, so a red main never reaches the site ([all-green.md](all-green.md#after-the-gate)). The nightly rebuild (04:23 UTC) and a manual dispatch build the default branch head. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
@@ -30,11 +30,12 @@ The retired `pages_production` and `pages_staging` answers have no replacement: 
 
 ## The build contract
 
-The build command runs once per tier with three environment variables exported; map them onto whatever your tool expects:
+The build command runs once per tier with four environment variables exported; map them onto whatever your tool expects:
 
 - `PAGES_BASE_PATH`: the base path this tier is served under (`/<repo>/`, `/<repo>/latest/`, `/<repo>/vX.Y.Z/`, or the `/`-rooted equivalents with a custom domain)
 - `PAGES_ORIGIN`: the absolute origin (`https://<owner>.github.io` or `https://<domain>`), for sitemaps/canonical/og URLs
-- `PAGES_VERSION`: what this tier is - `latest`, the tag (`vX.Y.Z`, also for the root tier, which builds the newest served tag), or empty for an unversioned mount (see the composed layout below)
+- `PAGES_VERSION`: the content's version - `latest`, the tag (`vX.Y.Z`, also for the root tier, which builds the newest served tag), `latest` again for a root built while no tag serves, or empty for an unversioned mount (see the composed layout below)
+- `PAGES_TIER`: the tier's place in the layout - `root` (the mount root), `latest`, `tag` (one `vX.Y.Z/` directory), or `single` (an unversioned mount's one build). The root is always a real page and the one copy to index: a site that avoids duplicate indexing marks every tier other than `root` and `single` `noindex`, and `PAGES_TIER` is what tells a root built from the default branch head apart from `latest/` (both read `latest` in `PAGES_VERSION`).
 
 Examples:
 

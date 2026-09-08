@@ -4,10 +4,11 @@
 #   <mount><tag>/ from each served version tag (vX.Y.Z, newest
 #   vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot build is
 #   skipped with a notice), and the mount root serves the newest served
-#   version - or redirects to latest/ while none serve.
+#   version - or the default branch head again while none serve.
 #   An unversioned mount is one build of the default branch head.
-# Command mounts run the caller's build with PAGES_BASE_PATH, PAGES_ORIGIN,
-# and PAGES_VERSION exported; vitepress mounts render the caller's docs tree
+# Command mounts run the caller's build under the PAGES_* contract
+# (docs/pages.md: base path, origin, version, and the tier's place in the
+# layout); vitepress mounts render the caller's docs tree
 # under the central fleet theme (repo-platform's docs/pages.md and
 # docs/docs-site.md).
 # A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN repo
@@ -46,7 +47,7 @@ on:
         type: string
         default: ""
       build_command:
-        description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION are exported
+        description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION/PAGES_TIER are exported (docs/pages.md)
         required: false
         type: string
         default: ""
