@@ -774,7 +774,9 @@ a:focus-visible {
 
 /* The landing's prose keeps the reading measure while its wide blocks
  * (tables, code) use the full column. VitePress wraps the rendered
- * markdown in one div inside .vp-doc. */
+ * markdown in one div inside .vp-doc. The intro runs at 18px, where the
+ * measure (68ch, 783px) is wider than the 740px doc column, so the column
+ * is what caps it: 64ch, inside the 45 to 75ch reading range. */
 .VPDoc:has(.fleet-facts) .vp-doc > div > p,
 .VPDoc:has(.fleet-facts) .vp-doc > div > ul,
 .VPDoc:has(.fleet-facts) .vp-doc > div > ol,
@@ -783,6 +785,12 @@ a:focus-visible {
 }
 .VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
   font-size: 18px;
+}
+/* The intro's own bottom margin (1.25em, 22.5px) plus 28px of air before
+ * the first section head; adjacent siblings here, so the two margins
+ * collapse into this one. */
+.VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p + h2 {
+  margin-top: 50px;
 }
 
 /* ---------- the project facts card ---------- */
