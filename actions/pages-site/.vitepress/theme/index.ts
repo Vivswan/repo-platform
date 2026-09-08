@@ -1,19 +1,26 @@
-// The fleet docs theme entry: vitepress-carbon as the base skin (GitHub's
-// monochrome, token-based - the user's palette overrides its tokens in
-// custom.css) with the version switcher mounted in the nav bar. The
-// replacement contract for each file is in README.md next to this one.
+// The fleet docs theme entry: vitepress-carbon as the base skin, with the
+// theme-owned components mounted in its layout slots. README.md next to
+// this file holds the replacement contract for each file.
 
+import "@fontsource-variable/wix-madefor-text";
+import "@fontsource-variable/wix-madefor-display";
+import "@fontsource-variable/jetbrains-mono";
 import { inBrowser, type Theme } from "vitepress";
 import { VPCarbon } from "vitepress-carbon";
 import { h } from "vue";
 import "./custom.css";
+import "./components.css";
+import FactsPanel from "./facts-panel.ts";
+import Provenance from "./provenance.ts";
 import VersionSwitcher from "./version-switcher.ts";
 
 export default {
   ...VPCarbon,
   Layout: () =>
     h(VPCarbon.Layout!, null, {
-      "nav-bar-content-after": () => h(VersionSwitcher),
+      "nav-bar-content-menu-after": () => h(VersionSwitcher),
+      "aside-top": () => h(FactsPanel),
+      "doc-after": () => h(Provenance),
     }),
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);

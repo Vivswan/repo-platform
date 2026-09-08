@@ -22,6 +22,9 @@ export interface ProjectFacts {
   topics: string[];
   toolchains: { name: string; version: string }[];
   license: { name: string; path: string } | null;
+  /** The docs tree the pages render from, repo-relative: the prefix that
+   *  turns a page.filePath into its repository path. */
+  docsDir: string;
   /** Which commit this tier was built from: the default branch for HEAD
    *  tiers, the tag for tag tiers, and the commit it resolved to. */
   provenance: { label: string; sha: string; url: string };
@@ -32,6 +35,7 @@ export interface ProjectFacts {
 
 export interface FactsInput {
   repository: string;
+  docsDir: string;
   defaultBranch: string;
   ref: string;
   sha: string;
@@ -266,6 +270,7 @@ export function collectFacts(read: FactsReader, input: FactsInput): ProjectFacts
       return version === null ? [] : [{ name: toolchain.name, version }];
     }),
     license: readLicense(read),
+    docsDir: input.docsDir,
     provenance: {
       label: input.ref === "HEAD" ? input.defaultBranch : input.ref,
       sha: input.sha,

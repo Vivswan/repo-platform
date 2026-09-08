@@ -1,0 +1,894 @@
+/*
+ * Component rules over vitepress-carbon: everything that is not a token
+ * value. Selectors are prefixed with carbon's block classes (.VPNavBar,
+ * .VPSidebar, .vp-doc, ...) so they outrank carbon's scoped styles, whose
+ * [data-v-*] attribute adds one class-level of specificity to each rule.
+ * Reading rules that never move: running prose at line-height 1.65 or
+ * more (compact rows in tables, the facts card and the provenance line sit
+ * between 1.45 and 1.6), left-aligned text, emphasis by weight never by
+ * italics, sentence-case labels.
+ */
+
+/* ---------- base ---------- */
+
+html {
+  scroll-padding-top: calc(var(--vp-nav-height) + 24px);
+}
+
+body {
+  font-size: 17px;
+  line-height: 1.7;
+  text-align: left;
+}
+
+::selection {
+  background: var(--fleet-hue-soft);
+  color: var(--vp-c-text-1);
+}
+
+:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+  border-radius: var(--fleet-radius-sm);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fleet-scroll) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--fleet-scroll);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- nav bar ---------- */
+
+.VPNav .VPNavBar {
+  box-shadow: inset 0 -1px var(--vp-c-divider);
+  color: var(--vp-c-text-1);
+}
+
+.VPNav .VPNavBar .divider-line,
+.VPNav .VPNavBar.has-local-nav .divider-line,
+.VPNav .VPNavBar:not(.top) .divider-line {
+  background-color: transparent;
+}
+
+.VPNavBar .VPNavBarTitle .title .nav-bar-title-text {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--vp-c-text-1);
+  border-radius: var(--fleet-radius-md);
+}
+
+.VPNavBar .content-body {
+  gap: 6px;
+}
+
+/* No hairline dividers between the nav tools. */
+.VPNav .VPNavBar .content-body > .translations::before,
+.VPNav .VPNavBar .content-body > .appearance::before,
+.VPNav .VPNavBar .content-body > .social-links::before {
+  content: none;
+}
+
+.VPNavBar .VPFlyout {
+  border-color: transparent;
+  border-radius: var(--fleet-radius-md);
+  color: var(--vp-c-text-2);
+  font-size: 15px;
+}
+.VPNavBar .VPFlyout .button,
+.VPNavBar .VPFlyout .text {
+  color: var(--vp-c-text-2);
+  font-size: 15px;
+}
+.VPNavBar .VPFlyout .option-icon,
+.VPNavBar .VPFlyout .text-icon,
+.VPNavBar .VPFlyout .icon {
+  fill: var(--vp-c-text-2);
+}
+.VPNavBar .VPFlyout:hover {
+  background-color: var(--color-action-list-item-default-hover-bg);
+}
+.VPNavBar .VPFlyout:hover .button,
+.VPNavBar .VPFlyout:hover .text {
+  color: var(--vp-c-text-1);
+}
+
+.VPFlyout .VPMenu {
+  border-radius: var(--fleet-radius-md);
+  padding: 6px;
+  box-shadow: var(--vp-shadow-4);
+}
+.VPMenu .VPMenuLink .link {
+  border-radius: var(--fleet-radius-sm);
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.VPMenu .VPMenuLink .link.active {
+  background-color: transparent;
+  color: var(--fleet-hue);
+  font-weight: 600;
+}
+.VPMenu .items .title {
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+  padding: 4px 12px 2px;
+  line-height: 1.5;
+}
+
+.VPNavBar .DocSearch-Button {
+  border-radius: var(--fleet-radius-md);
+  border-color: var(--vp-c-border);
+  background: var(--fleet-field-bg);
+  height: 40px;
+  padding: 0 12px;
+  color: var(--vp-c-text-3);
+}
+.VPNavBar .DocSearch-Button:hover {
+  border-color: var(--fleet-hue);
+  background: var(--fleet-field-bg);
+}
+.VPNavBar .DocSearch-Button .DocSearch-Search-Icon,
+.VPNavBar .DocSearch-Button .DocSearch-Button-Placeholder {
+  color: var(--vp-c-text-3);
+  font-size: 15px;
+  font-weight: 400;
+}
+.VPNavBar .DocSearch-Button .DocSearch-Button-Key {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  color: var(--vp-c-text-2);
+  background: var(--vp-c-bg-soft-2);
+  border-color: var(--vp-c-border);
+  border-radius: var(--fleet-radius-sm);
+  border-right: 1px solid var(--vp-c-border);
+  padding: 0 6px;
+  margin: 0 0 0 4px;
+  height: 22px;
+  line-height: 20px;
+}
+.VPNavBar .DocSearch-Button .DocSearch-Button-Key + .DocSearch-Button-Key {
+  border-left: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-sm);
+  padding: 0 6px;
+}
+
+.VPNavBar .VPSwitch.VPSwitchAppearance {
+  border-color: var(--vp-c-border);
+  background-color: var(--vp-c-bg-soft-2);
+}
+.VPNavBar .VPSwitch.VPSwitchAppearance .check {
+  background-color: var(--vp-c-bg-soft);
+  box-shadow: var(--vp-shadow-1);
+}
+
+/* The version select: a nav tool with the flyouts' material. The chevron
+ * is a data URI, so the stroke is written per mode instead of reading a
+ * token. */
+.VPNavBar .docs-site-version-switcher {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 40px;
+  margin: 0;
+  padding: 0 28px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--fleet-radius-md);
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737b89' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  color: var(--vp-c-text-1);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background-color var(--fleet-transition);
+}
+.dark .VPNavBar .docs-site-version-switcher {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2380889a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+.VPNavBar .docs-site-version-switcher:hover {
+  background-color: var(--color-action-list-item-default-hover-bg);
+}
+.VPNavBar .docs-site-version-switcher:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 0;
+}
+.VPNavBar .docs-site-version-switcher option {
+  background: var(--vp-c-bg-elv);
+  color: var(--vp-c-text-1);
+}
+
+/* ---------- local nav (narrow viewports) ---------- */
+
+.VPLocalNav {
+  border-bottom-color: var(--vp-c-divider);
+}
+.VPLocalNav .menu {
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+}
+
+/* ---------- sidebar ---------- */
+
+/* Carbon's per-level rules (.VPSidebarItem.level-N.is-active > .item .link >
+ * .text and kin) reach seven class-levels once scoped, so every rule here
+ * carries the .nav .group ancestors to sit above them. */
+.VPSidebar .nav {
+  padding: 16px 12px 40px 16px;
+  border-right: 1px solid var(--vp-c-divider);
+}
+
+.VPSidebar .nav .group + .group {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.VPSidebar .nav .group .VPSidebarItem.level-0,
+.VPSidebar .nav .group .VPSidebarItem.collapsed.level-0 {
+  padding-bottom: 2px;
+}
+
+.VPSidebar .nav .group .VPSidebarItem .item {
+  border-radius: var(--fleet-radius-md);
+  padding: 4px 8px 4px 12px;
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.VPSidebar .nav .group .VPSidebarItem .indicator {
+  display: none;
+}
+.VPSidebar .nav .group .VPSidebarItem .text {
+  padding: 5px 0;
+  font-size: 15.5px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--vp-c-text-2);
+}
+.VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .text,
+.VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .link > .text {
+  font-weight: 500;
+}
+.VPSidebar .nav .group .VPSidebarItem .item:hover {
+  background-color: var(--color-action-list-item-default-hover-bg);
+}
+.VPSidebar .nav .group .VPSidebarItem .item:hover .text {
+  color: var(--vp-c-text-1);
+}
+.VPSidebar .nav .group .VPSidebarItem.is-link > .item > .link:hover .text {
+  text-decoration: none;
+}
+.VPSidebar .nav .group .VPSidebarItem.is-active > .item {
+  background-color: var(--fleet-hue-band);
+}
+.VPSidebar .nav .group .VPSidebarItem.is-active.is-link > .item > .link > .text {
+  color: var(--fleet-hue);
+  font-weight: 600;
+}
+.VPSidebar .nav .group .VPSidebarItem .caret {
+  color: var(--vp-c-text-3);
+}
+.VPSidebar .nav .group .VPSidebarItem .items {
+  border-left: 1px solid var(--vp-c-divider);
+  padding-left: 8px;
+  margin: 2px 0 6px 12px;
+}
+.VPSidebar .nav .group .VPSidebarItem .items .text {
+  font-size: 14.5px;
+}
+
+/* ---------- doc column ---------- */
+
+.VPDoc .content-top {
+  border-bottom-color: var(--vp-c-divider);
+  background-color: transparent;
+}
+.VPDoc .content-top .content-box-item {
+  border-radius: var(--fleet-radius-md);
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+}
+.VPDoc .content-top .content-box-text {
+  font-weight: 500;
+}
+.VPDoc .content-top .edit-link-button {
+  border-radius: var(--fleet-radius-md);
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  min-height: 36px;
+}
+.VPDoc .content-top .edit-link-button:hover {
+  border-color: var(--fleet-hue);
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+}
+
+.VPDoc .aside .aside-content {
+  border-left: 1px solid var(--vp-c-divider);
+}
+
+@media (min-width: 768px) {
+  .VPDoc .content .main {
+    padding-bottom: 0;
+  }
+}
+
+.VPDocAside .VPAsideContent .outline-title {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+  margin: 0 0 8px 10px;
+}
+.VPDocAside .VPDocOutlineItem.root {
+  border-left-color: var(--vp-c-divider);
+  max-height: none;
+  overflow: visible;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item {
+  /* the active marker (::after) positions against this row, not the li
+   * that also holds the nested headings */
+  position: relative;
+  border-radius: 0;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+}
+.VPDocAside .VPDocOutlineItem .nested .vp-outline-item {
+  padding-left: 22px;
+}
+.VPDocAside .VPDocOutlineItem .outline-link {
+  font-size: 14.5px;
+  line-height: 1.5;
+  white-space: normal;
+  color: var(--vp-c-text-2);
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item:hover {
+  background-color: transparent;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item:hover .outline-link {
+  color: var(--vp-c-text-1);
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .vp-outline-item {
+  background-color: transparent;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .vp-outline-item::after {
+  left: -13px;
+  top: 8px;
+  height: calc(100% - 16px);
+  border-radius: 1px;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .outline-link {
+  color: var(--fleet-hue);
+  font-weight: 600;
+}
+
+/* ---------- prose ---------- */
+
+.vp-doc {
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.vp-doc h1,
+.vp-doc h2 {
+  font-family: var(--fleet-font-display);
+}
+
+.vp-doc h1 {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  margin: 0 0 24px;
+}
+
+.vp-doc h2 {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 64px 0 18px;
+  padding-top: 24px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc h3 {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+  margin: 32px 0 12px;
+}
+
+.vp-doc h4 {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 24px 0 8px;
+}
+
+.vp-doc h1 .header-anchor,
+.vp-doc h2 .header-anchor,
+.vp-doc h3 .header-anchor,
+.vp-doc h4 .header-anchor {
+  color: var(--vp-c-text-3);
+}
+
+.vp-doc p {
+  margin: 0 0 1.25em;
+  line-height: 1.7;
+}
+
+.vp-doc ul,
+.vp-doc ol {
+  margin: 0 0 1.25em;
+  padding-left: 1.4em;
+}
+.vp-doc li + li {
+  margin-top: 0.6em;
+}
+.vp-doc li::marker {
+  color: var(--vp-c-text-3);
+}
+
+.vp-doc strong,
+.vp-doc b {
+  font-weight: 600;
+}
+.vp-doc em,
+.vp-doc i {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.vp-doc a {
+  font-weight: 400;
+  color: var(--fleet-hue);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--fleet-hue-soft);
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color var(--fleet-transition);
+}
+.vp-doc a:hover {
+  color: var(--fleet-hue);
+  text-decoration-color: var(--fleet-hue);
+}
+
+.vp-doc blockquote {
+  margin: 0 0 1.25em;
+  padding: 14px 18px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-left: 1px solid var(--fleet-hue);
+  border-radius: var(--fleet-radius-md);
+}
+.vp-doc blockquote > p {
+  margin: 0;
+  font-size: 17px;
+  color: var(--vp-c-text-2);
+}
+.vp-doc blockquote > p + p {
+  margin-top: 1em;
+}
+
+.vp-doc hr {
+  margin: 32px 0;
+  border-top-color: var(--vp-c-divider);
+}
+
+.vp-doc img {
+  border-radius: var(--fleet-radius-md);
+}
+
+/* Tables replace carbon's scrolling block with a full-width table, so
+ * cell sizing must hold two shapes: a short inline-code token beside prose
+ * columns stays whole, and one very long unbroken token wraps inside its
+ * cell instead of pushing the table under the facts card. max-width caps
+ * what each cell contributes to auto layout (about 37 monospace characters
+ * of inline code) and break-word wraps only a token past that cap.
+ * overflow-wrap: anywhere fails the first shape: it feeds break
+ * opportunities into min-content, and prose columns then starve a code
+ * column down to a few glyphs. The bound is per cell, so a row of several
+ * capped columns can still exceed the doc column, so table-wrap.ts wraps
+ * every top-level table in .vp-table, which scrolls that overflow inside
+ * the column. The launcher panel mounts in place of a landing table and
+ * must never be clipped by the wrapper. */
+.vp-doc .vp-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.vp-doc .vp-table:has(> .fleet-launcher) {
+  overflow: visible;
+}
+.vp-doc table {
+  margin: 8px 0 1.5em;
+  font-size: 16px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+@media (min-width: 768px) {
+  .vp-doc table {
+    display: table;
+    width: 100%;
+  }
+}
+.vp-doc tr,
+.vp-doc tr:nth-child(2n) {
+  background-color: transparent;
+  border-top: 0;
+}
+.vp-doc th,
+.vp-doc td {
+  border: 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+  max-width: 22em;
+  overflow-wrap: break-word;
+}
+.vp-doc th {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+  background-color: transparent;
+  padding-bottom: 8px;
+}
+.vp-doc td {
+  font-size: 16px;
+}
+
+/* Code: inline spans in the ink, blocks as bordered panels. */
+.vp-doc :not(pre) > code {
+  border-radius: var(--fleet-radius-sm);
+  padding: 0.1em 0.4em;
+  font-size: 0.88em;
+}
+.vp-doc :not(pre, h1, h2, h3, h4, h5, h6) > code {
+  font-size: 0.88em;
+}
+.vp-doc a > code {
+  color: var(--fleet-hue);
+}
+
+.vp-doc div[class*="language-"],
+.vp-block {
+  border: 1px solid var(--vp-c-divider);
+  margin: 0 0 1.25em;
+}
+@media (min-width: 640px) {
+  .vp-doc div[class*="language-"],
+  .vp-block {
+    border-radius: var(--fleet-radius-md);
+    margin: 0 0 1.25em;
+  }
+}
+.vp-doc [class*="language-"] > button.copy {
+  border-radius: var(--fleet-radius-sm);
+}
+.vp-doc [class*="language-"] > span.lang {
+  font-family: var(--vp-font-family-mono);
+  top: 6px;
+  right: 12px;
+}
+.vp-doc .vp-code-group .tabs {
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+/* Custom blocks (::: tip, warning, ...): one panel material, the kind
+ * named by its title text, the hue on the left rule. */
+.vp-doc .custom-block {
+  margin: 0 0 1.25em;
+  padding: 14px 18px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-left: 2px solid var(--fleet-hue);
+  border-radius: var(--fleet-radius-md);
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--vp-c-text-1);
+}
+.vp-doc .custom-block .custom-block-title {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--vp-c-text-1);
+  margin-bottom: 6px;
+}
+.vp-doc .custom-block p {
+  margin: 6px 0;
+  line-height: 1.65;
+}
+.vp-doc .custom-block.details {
+  padding: 12px 18px;
+}
+.vp-doc .custom-block.details summary {
+  margin: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Footer pager. */
+.VPDocFooter .prev-next {
+  border-top-color: var(--vp-c-divider);
+}
+.VPDocFooter .pager-link {
+  border-color: var(--vp-c-divider);
+  border-radius: var(--fleet-radius-md);
+  padding: 14px 16px;
+}
+.VPDocFooter .pager-link:hover {
+  border-color: var(--fleet-hue);
+  background-color: var(--vp-c-bg-soft);
+}
+.VPDocFooter .pager-link .desc {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+}
+.VPDocFooter .pager-link .title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.VPDocFooter .pager-link:hover .title {
+  color: var(--vp-c-text-1);
+}
+
+/* ---------- the provenance line ---------- */
+
+.fleet-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 8px 0 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--vp-c-text-3);
+}
+.fleet-provenance a {
+  color: var(--vp-c-text-3);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--vp-c-border);
+  text-underline-offset: 0.2em;
+}
+.fleet-provenance a:hover {
+  color: var(--vp-c-text-1);
+  text-decoration-color: var(--vp-c-text-1);
+}
+
+/* ---------- the landing page ---------- */
+
+/* A landing page is one whose aside holds the facts card. Its aside is
+ * wider (the card's width), static (the card never chases the text), and
+ * present below carbon's 1280px aside breakpoint, in flow after the
+ * content, so narrow viewports keep the card. */
+.VPDoc:has(.fleet-facts) {
+  --vp-doc-aside-width: 352px;
+}
+.VPDoc.has-aside:has(.fleet-facts) .aside {
+  display: block;
+  order: 2;
+}
+.VPDoc.has-aside:has(.fleet-facts) .aside .aside-container {
+  position: static;
+  padding-top: 0;
+  height: auto;
+  width: auto;
+  overflow: visible;
+}
+.VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
+  min-height: 0;
+  border-left: 0;
+  padding: 0 0 32px;
+}
+@media (min-width: 1280px) {
+  .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
+    /* level with the h1: content-top (49px) plus main's top padding (32px) */
+    padding-top: 81px;
+  }
+}
+@media (max-width: 1279px) {
+  .VPDoc.has-aside:has(.fleet-facts) .container {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .VPDoc.has-aside:has(.fleet-facts) .aside {
+    flex: none;
+    width: 100%;
+    max-width: 460px;
+  }
+  .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
+    padding: 24px 0 0;
+  }
+}
+
+/* The landing's prose keeps the reading measure while its wide blocks
+ * (tables, code) use the full column. VitePress wraps the rendered
+ * markdown in one div inside .vp-doc. */
+.VPDoc:has(.fleet-facts) .vp-doc > div > p,
+.VPDoc:has(.fleet-facts) .vp-doc > div > ul,
+.VPDoc:has(.fleet-facts) .vp-doc > div > ol,
+.VPDoc:has(.fleet-facts) .vp-doc > div > blockquote {
+  max-width: var(--fleet-measure);
+}
+.VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
+  font-size: 18px;
+}
+
+/* ---------- the project facts card ---------- */
+
+.fleet-facts {
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-lg);
+  box-shadow: var(--vp-shadow-4);
+  padding: 20px 20px 18px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--vp-c-text-1);
+  text-align: left;
+}
+
+.fleet-facts .fleet-facts-title {
+  font-family: var(--fleet-font-display);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--vp-c-text-1);
+}
+
+.fleet-facts .fleet-facts-description {
+  margin: 8px 0 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+}
+
+/* The title rule: the hue's one appearance inside the card besides the
+ * repository link. */
+.fleet-facts .fleet-facts-rule {
+  border: 0;
+  border-top: 2px solid var(--fleet-hue);
+  margin: 16px 0 2px;
+}
+
+/* Section breaks are a hairline plus air: hierarchy by spacing, not by
+ * thickness. */
+.fleet-facts .fleet-facts-section + .fleet-facts-section {
+  border-top: 1px solid var(--vp-c-divider);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.fleet-facts table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 15px;
+  display: table;
+}
+.fleet-facts th,
+.fleet-facts td {
+  padding: 11px 0;
+  line-height: 1.45;
+  border: 0;
+  vertical-align: top;
+  background: transparent;
+}
+.fleet-facts tr + tr th,
+.fleet-facts tr + tr td {
+  border-top: 1px solid var(--vp-c-divider);
+}
+.fleet-facts th {
+  font-family: var(--fleet-font-display);
+  font-weight: 600;
+  text-align: left;
+  color: var(--vp-c-text-1);
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 12px;
+}
+.fleet-facts td {
+  text-align: right;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--vp-c-text-1);
+  padding-left: 12px;
+  overflow-wrap: anywhere;
+}
+/* Sub-rows: the body face, the secondary ink, indented. */
+.fleet-facts tr.fleet-facts-sub th {
+  font-family: var(--vp-font-family-base);
+  font-weight: 400;
+  color: var(--vp-c-text-2);
+  padding-left: 18px;
+}
+.fleet-facts .fleet-facts-note {
+  color: var(--vp-c-text-3);
+  font-size: 13.5px;
+}
+
+.fleet-facts a {
+  color: var(--vp-c-text-1);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--vp-c-border);
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color var(--fleet-transition);
+}
+.fleet-facts a:hover {
+  text-decoration-color: var(--vp-c-text-1);
+}
+.fleet-facts a.fleet-facts-repository {
+  color: var(--fleet-hue);
+  font-weight: 600;
+  text-decoration-color: var(--fleet-hue-soft);
+}
+.fleet-facts a.fleet-facts-repository:hover {
+  text-decoration-color: var(--fleet-hue);
+}
+
+/* ---------- narrow viewports ---------- */
+
+@media (max-width: 767px) {
+  body {
+    font-size: 16px;
+  }
+  .vp-doc {
+    font-size: 16px;
+  }
+  .vp-doc h1 {
+    font-size: 31px;
+  }
+  .vp-doc h2 {
+    font-size: 23px;
+    margin-top: 48px;
+  }
+  .VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
+    font-size: 17px;
+  }
+  .fleet-facts {
+    padding: 18px 18px 16px;
+  }
+  .VPNavBar .VPNavBarTitle .title .nav-bar-title-text {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleet-facts,
+  .vp-doc a,
+  .VPSidebar .nav .group .VPSidebarItem .item {
+    transition: none;
+  }
+}

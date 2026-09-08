@@ -373,6 +373,7 @@ function buildVitepressTier(
   const sha = capture(["git", "-C", cfg.workspace, "rev-parse", `${tier.ref}^{commit}`]).trim();
   const facts = collectFacts((path) => treeFile(cfg, tier.ref, path), {
     repository: cfg.repository,
+    docsDir: cfg.docsDir,
     defaultBranch: cfg.defaultBranch,
     ref: tier.ref,
     sha,

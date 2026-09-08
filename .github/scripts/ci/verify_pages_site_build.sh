@@ -15,8 +15,15 @@
 # per-tier project facts (each tier's provenance names its OWN ref), a
 # carbon token in the built CSS (the base theme actually applied, not a
 # silent default-theme fallback) with carbon's remote font @imports
-# dropped and the bundled Mona Sans kept, llms.txt, and the strict CHECK
-# mode both passing on clean docs and failing on a dead link.
+# dropped and its unused Mona Sans gone (no @font-face, no asset, no
+# preload) while the theme's own fonts stay, the facts card rendered on
+# the landing page (repository link, the tier's own version row marked current
+# and noted as the one being read), the provenance line (the tier's ref and
+# the page's source file), the table scroll wrapper, llms.txt, the strict CHECK mode both passing on
+# clean docs and failing on a dead link, the deploy's per-tier strictness
+# (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
+# the deploy), the nested docs-dir build, and the deploy command's
+# legacy-tag skip (both arms) and HEAD calibration gate.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
@@ -50,7 +57,7 @@ absent() { if grep -qF -- "$1" "$2"; then fail "'$1' should not be in $2"; fi; }
 # but not v0.1.0 - per-version locale detection).
 mkdir -p "$WORK/docs/guide"
 printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n' > "$WORK/docs/README.md"
-printf '# Setup\n\nInstall things.\n' > "$WORK/docs/setup.md"
+printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n' > "$WORK/docs/setup.md"
 printf '# Guide\n\nThe guide index, version one.\n' > "$WORK/docs/guide/README.md"
 git -C "$WORK" init -q -b main
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
@@ -109,16 +116,46 @@ present '\"provenance\":{\"label\":\"main\"' "$site/latest/index.html"
 present '\"provenance\":{\"label\":\"v0.1.0\"' "$site/v0.1.0/index.html"
 absent '\"provenance\":{\"label\":\"main\"' "$site/v0.1.0/index.html"
 grep -qrF -- "58a6ff" "$site/latest/assets" || fail "carbon's brand token is missing from the built CSS - the base theme did not apply"
-# The import filter: carbon's remote font @imports are dropped from the
-# built CSS, while the bundled Mona Sans (a local url()) is the positive
-# control that the filter did not strip fonts wholesale.
+# The font filter: carbon's remote font @imports and its unused Mona Sans
+# @font-face are dropped from the built CSS (so vite emits neither the woff2
+# nor carbon's preload link for it), while the theme's own fontsource
+# assets are the positive control that the filter did not strip fonts
+# wholesale.
 for host in fonts.googleapis.com fonts.cdnfonts.com; do
   if grep -qrF -- "$host" "$site/latest/assets"; then
     fail "'$host' should not be in the built CSS - the remote @import filter did not apply"
   fi
 done
-grep -qrF -- "Mona-Sans" "$site/latest/assets" ||
-  fail "the bundled Mona Sans is missing from the built CSS - the import filter stripped more than remote @imports"
+if grep -qrF -- "Mona-Sans" "$site/latest/assets"; then
+  fail "Mona-Sans should not be in the built CSS - the unused @font-face filter did not apply"
+fi
+for asset in "$site"/latest/assets/Mona-Sans*; do
+  test -e "$asset" && fail "the unused Mona Sans woff2 still ships in the assets: $asset"
+done
+absent 'as="font"' "$site/latest/index.html"
+grep -qrF -- "wix-madefor-text-latin-wght-normal" "$site/latest/assets" ||
+  fail "the theme's Wix Madefor Text font is missing from the built CSS - the font filter stripped more than carbon's"
+
+# The fleet skin's own components: the facts card on the landing page
+# (its repository row, and the version row marked as the one being read
+# both by aria-current and by the visible note, not just the card's shell)
+# and the provenance line naming each tier's ref (main for the HEAD tier,
+# the tag for a tag tier) and the page's source file.
+present "fleet-facts" "$site/latest/index.html"
+present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
+present 'aria-current="true">latest</a>' "$site/latest/index.html"
+present 'fleet-facts-note">reading' "$site/latest/index.html"
+present 'aria-current="true">v0.2.0</a>' "$site/v0.2.0/index.html"
+present "fleet-provenance" "$site/latest/index.html"
+present "Built from main" "$site/latest/index.html"
+present "Source: docs/README.md" "$site/latest/index.html"
+present "Built from v0.2.0" "$site/v0.2.0/index.html"
+# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts),
+# and the built CSS carries the rule that makes the wrapper scroll.
+present '<div class="vp-table"><table tabindex="0">' "$site/latest/setup.html"
+present '</table></div>' "$site/latest/setup.html"
+grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" ||
+  fail "the table wrapper's overflow rule is missing from the built CSS"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
@@ -135,6 +172,7 @@ env GITHUB_WORKSPACE="$WORK2" GITHUB_REPOSITORY=fixture-owner/nested-repo \
   bun "$BUILD_TS" >/dev/null || fail "the versioned build failed with a nested docs-dir (site/manual)"
 present "nested landing page" "$TEMP_REAL/pages-site/_site/index.html"
 present "nested landing page" "$TEMP_REAL/pages-site/_site/latest/index.html"
+present "Source: site/manual/README.md" "$TEMP_REAL/pages-site/_site/latest/index.html"
 
 # CHECK mode: green on clean docs, red on a dead internal link.
 env GITHUB_WORKSPACE="$WORK" GITHUB_REPOSITORY=fixture-owner/fixture-repo \
@@ -289,4 +327,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "import filter, llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"
+  "font filter, facts card, provenance line, table wrapper, llms.txt, strict mode both arms, legacy-tag skip both arms," \
+  "calibration gate"

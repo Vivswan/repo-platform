@@ -15,6 +15,7 @@ Standalone, deploys run on pushes touching `docs/**`, nightly (04:41 UTC), and o
 
 - Plain `.md` only - no MDX, no per-repo Vue components, no repo-local `.vitepress/` (the build REFUSES one: it could never apply, since the theme is central). Rich widgets arrive as theme-provided markdown containers for every repo at once.
 - Double curly braces are Vue interpolation syntax, compiled even inside an inline code span (fenced code blocks are exempt): the build fails on them instead of shipping a blank page, so wrap literal ones in `<span v-pre>` or a `::: v-pre` container.
+- Tables need no width tricks: a top-level table wider than the doc column scrolls horizontally inside the column instead of clipping at the viewport (one nested in a quote, list, or container gets no scroll wrapper).
 - `docs/README.md` is the site's landing page; each directory's `README.md` is its index. The sidebar and nav derive from the file tree - there is nothing to configure.
 - Links must resolve INSIDE `docs/` (or be absolute URLs). A link to `../README.md` works on GitHub but is dead on the site, and dead internal links fail the build - that failure is the point, see the PR check below.
 - Translations: put them in `docs/<lang>/` (a two-letter ISO 639-1 code, optionally with a region: `zh-cn/`, `zh-tw/`, `ja/`) mirroring the root structure. Detected directories become locales with the language switcher in the nav; the root tree is the default (English) locale, and a tagged version serves its own translations.
@@ -45,8 +46,10 @@ Both modules selected render ONE Pages deployment (`pages.yml`): the repo's own 
 - Local full-text search and per-page "Edit this page" links (default-branch tiers only, where an edit can still change the content).
 - `llms.txt` and `llms-full.txt` per tier (the [llms.txt](https://llmstxt.org) convention), covering every locale.
 - The version dropdown in the nav, fed from the same tag set as `versions.json`.
+- The project facts card on the landing page: name, description, repository link, homepage and topics when set, toolchain versions, the served docs versions, and the license, read from the repository itself at build time.
+- A provenance line under every page naming the ref and commit the tier was built from (linking to that commit) and the markdown file the page rendered from.
 
 ## Caveats
 
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans - selecting the module is the opt-in to that, per repo.
-- The theme is a deliberate placeholder today: the real design drops into [actions/pages-site/.vitepress/theme/](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what.
+- The theme is one for the whole fleet (dark by default with a light variant, and one accent hue per repository derived from its name), owned by [actions/pages-site/.vitepress/theme/](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what. Nothing is configured per repository: the build reads the facts card's content from the repository itself (passed to the theme as `DOCS_SITE_FACTS`, read as `themeConfig.docsSiteFacts`), marks the landing page with the `fleetLanding` frontmatter flag, writes the repository's hue as `data-fleet-hue` on the page's `<html>`, and strips the base theme's remote font imports at build time (a PostCSS filter), so a site never loads a font from a third party.
