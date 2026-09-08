@@ -182,6 +182,23 @@ describe("collectFacts", () => {
       "Private Use License",
     ],
     ["a heading over a known license", "# MIT License\n\nCopyright (c) 2026\n", "MIT"],
+    ["a The-prefixed heading", "# The MIT License (MIT)\n\nCopyright (c) 2026\n", "MIT"],
+    ["an Apache 2.0 heading", "# Apache License 2.0\n\nTERMS AND CONDITIONS\n", "Apache-2.0"],
+    [
+      "a heading that only mentions a known name",
+      "# Not the MIT License\n\nCustom terms\n",
+      "Not the MIT License",
+    ],
+    [
+      "a custom heading over a body that mentions a known name",
+      "# Private Use License\n\nUnlike the MIT License, this grants nothing.\n",
+      "Private Use License",
+    ],
+    [
+      "no heading and a known name only in the body",
+      "Custom terms.\n\nUnlike the MIT License, this grants nothing.\n",
+      "See LICENSE.md",
+    ],
     ["plain-text MIT", "MIT License\n\nCopyright (c) 2026 Someone\n", "MIT"],
     [
       "Apache's centered header",

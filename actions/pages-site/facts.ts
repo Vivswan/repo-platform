@@ -43,20 +43,20 @@ const LICENSE_FILE = "LICENSE.md";
 const LICENSE_HEAD_LINES = 20;
 const LICENSE_FALLBACK = "See LICENSE.md";
 
-/** Known licenses by the wording their standard texts open with; the
- *  first match over the file's head wins, so the canonical short name
- *  shows whether the file uses a heading or plain text. */
+/** Known licenses by the wording their standard texts open with, anchored
+ *  so only a title that starts with the name canonicalizes: "Not the MIT
+ *  License" and a body line mentioning MIT keep a custom license's name. */
 const KNOWN_LICENSES: [RegExp, string][] = [
-  [/\bMIT License\b/i, "MIT"],
-  [/\bApache License,?\s+Version 2\.0\b/i, "Apache-2.0"],
-  [/\bBSD 2-Clause\b/i, "BSD-2-Clause"],
-  [/\bBSD 3-Clause\b/i, "BSD-3-Clause"],
-  [/\bGNU GENERAL PUBLIC LICENSE\s+Version 3\b/i, "GPL-3.0"],
-  [/\bGNU LESSER GENERAL PUBLIC LICENSE\b/i, "LGPL"],
-  [/\bMozilla Public License,?\s+(?:Version\s+)?2\.0\b/i, "MPL-2.0"],
-  [/\bISC License\b/i, "ISC"],
-  [/\bUnlicense\b/i, "Unlicense"],
-  [/\bCC0\b/, "CC0"],
+  [/^MIT License\b/i, "MIT"],
+  [/^Apache License,?\s+(?:Version\s+)?2\.0\b/i, "Apache-2.0"],
+  [/^BSD 2-Clause\b/i, "BSD-2-Clause"],
+  [/^BSD 3-Clause\b/i, "BSD-3-Clause"],
+  [/^GNU GENERAL PUBLIC LICENSE\s+Version 3\b/i, "GPL-3.0"],
+  [/^GNU LESSER GENERAL PUBLIC LICENSE\b/i, "LGPL"],
+  [/^Mozilla Public License,?\s+(?:Version\s+)?2\.0\b/i, "MPL-2.0"],
+  [/^ISC License\b/i, "ISC"],
+  [/^Unlicense\b/i, "Unlicense"],
+  [/^CC0\b/, "CC0"],
 ];
 
 const TOOLCHAIN_FILES: { name: string; path: string; version: (text: string) => string | null }[] =
@@ -142,13 +142,27 @@ function firstHeading(lines: string[]): string | null {
   return null;
 }
 
+/** The first non-empty lines up to a blank one, joined: the title block
+ *  of a plain-text license (Apache and the GPL center theirs over two
+ *  lines). */
+function openingParagraph(lines: string[]): string | null {
+  const trimmed = lines.map((line) => line.trim());
+  const start = trimmed.findIndex((line) => line !== "");
+  if (start === -1) return null;
+  const end = trimmed.indexOf("", start);
+  return trimmed.slice(start, end === -1 ? undefined : end).join(" ");
+}
+
+function knownLicense(title: string): string | null {
+  const bare = title.replace(/^the\s+/i, "");
+  return KNOWN_LICENSES.find(([pattern]) => pattern.test(bare))?.[1] ?? null;
+}
+
 function licenseName(text: string): string {
   const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
-  const head = lines.join("\n");
-  for (const [pattern, name] of KNOWN_LICENSES) {
-    if (pattern.test(head)) return name;
-  }
-  return firstHeading(lines) ?? LICENSE_FALLBACK;
+  const heading = firstHeading(lines);
+  const title = heading ?? openingParagraph(lines);
+  return (title === null ? null : knownLicense(title)) ?? heading ?? LICENSE_FALLBACK;
 }
 
 function readLicense(read: FactsReader): ProjectFacts["license"] {
