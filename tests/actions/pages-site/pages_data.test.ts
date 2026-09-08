@@ -47,6 +47,13 @@ describe("the page index under the action's build topology", () => {
       join(docs, "guide", "README.md"),
       "# Guide\n\n## Install\n\nSteps.\n\n### From source\n\nMore.\n",
     );
+    // The included guide's `## Install` precedes the page's own `## Install!`,
+    // so the page transform serves the latter as #install-1 while a bare
+    // render of the source would say #install.
+    writeFileSync(
+      join(docs, "includes.md"),
+      "# Includes\n\n<!--@include: ./guide/README.md-->\n\n## Install!\n\nOwn steps.\n",
+    );
     writeFileSync(
       join(docs, "probe.md"),
       [
@@ -106,8 +113,12 @@ describe("the page index under the action's build topology", () => {
           { title: "From source", anchor: "from-source", level: 3 },
         ],
       },
+      { url: "/includes.html", title: "Includes", dir: "", locale: "root", headers: [] },
       { url: "/probe.html", title: "Probe", dir: "", locale: "root", headers: [] },
     ]);
+    const includes = readFileSync(join(dist, "includes.html"), "utf-8");
+    expect(includes).toContain('<h2 id="install"');
+    expect(includes).toContain('<h2 id="install-1"');
     // The landing rule fires on the README landing in the page build
     // (post-rewrite path) and in the search index (pre-rewrite path)
     // alike, so the curated label is in neither output; the heading and
