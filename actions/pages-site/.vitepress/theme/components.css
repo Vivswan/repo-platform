@@ -3,8 +3,10 @@
  * value. Selectors are prefixed with carbon's block classes (.VPNavBar,
  * .VPSidebar, .vp-doc, ...) so they outrank carbon's scoped styles, whose
  * [data-v-*] attribute adds one class-level of specificity to each rule.
- * Reading rules that never move: line-height 1.65 or more, left-aligned
- * text, emphasis by weight never by italics, sentence-case labels.
+ * Reading rules that never move: running prose at line-height 1.65 or
+ * more (compact rows in tables, the facts card and the provenance line sit
+ * between 1.45 and 1.6), left-aligned text, emphasis by weight never by
+ * italics, sentence-case labels.
  */
 
 /* ---------- base ---------- */
@@ -498,14 +500,14 @@ a:focus-visible {
 }
 
 /* Tables: hairline rows, no vertical rules, no zebra, tabular numerals.
- * Full width from 768px up. The first column keeps its natural width
- * (break-word leaves column sizing alone); the other columns may break a
- * long unbroken value anywhere, so it wraps inside the cell instead of
- * pushing the table past the column. */
+ * Full width from 768px up, replacing carbon's scrolling block, so every
+ * cell may break an unbroken value (a long path in inline code) anywhere:
+ * it wraps inside its cell instead of pushing the table past the doc
+ * column into the aside. */
 .vp-doc table {
   margin: 8px 0 1.5em;
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 @media (min-width: 768px) {
@@ -526,6 +528,7 @@ a:focus-visible {
   padding: 12px 14px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .vp-doc th {
   font-size: 13.5px;
@@ -536,10 +539,6 @@ a:focus-visible {
 }
 .vp-doc td {
   font-size: 16px;
-  overflow-wrap: break-word;
-}
-.vp-doc td:not(:first-child) {
-  overflow-wrap: anywhere;
 }
 
 /* Code: inline spans in the ink, blocks as bordered panels. */
@@ -755,7 +754,7 @@ a:focus-visible {
 .fleet-facts .fleet-facts-description {
   margin: 8px 0 0;
   font-size: 14.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--vp-c-text-2);
 }
 

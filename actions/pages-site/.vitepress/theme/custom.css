@@ -171,15 +171,10 @@ html.dark[data-fleet-hue="5"] {
   --vp-c-brand-3: var(--fleet-hue);
   --vp-c-brand-soft: var(--fleet-hue-band);
 
-  --vp-c-default-1: var(--vp-c-bg-soft-2);
-  --vp-c-default-2: var(--vp-c-bg-soft-2);
-  --vp-c-default-3: var(--vp-c-bg-soft);
   --vp-c-default-soft: var(--vp-c-bg-soft-2);
 
-  --vp-c-tip-1: var(--fleet-hue);
   --vp-c-tip-soft: var(--fleet-hue-band);
   --vp-c-important-soft: var(--fleet-hue-band);
-  --vp-c-warning-1: var(--vp-c-text-1);
   --vp-c-warning-soft: var(--vp-c-bg-soft-2);
   --vp-c-danger-1: var(--vp-c-text-1);
   --vp-c-danger-soft: var(--vp-c-bg-soft-2);

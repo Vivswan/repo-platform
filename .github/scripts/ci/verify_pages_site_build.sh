@@ -15,8 +15,12 @@
 # per-tier project facts (each tier's provenance names its OWN ref), a
 # carbon token in the built CSS (the base theme actually applied, not a
 # silent default-theme fallback) with carbon's remote font @imports
-# dropped and the bundled Mona Sans kept, llms.txt, and the strict CHECK
-# mode both passing on clean docs and failing on a dead link.
+# dropped and the bundled Mona Sans kept, the facts card rendered on the
+# landing page (repository link, the tier's own version row marked current
+# and noted as the one being read), the provenance line (the tier's ref and
+# the page's source file), llms.txt, the strict CHECK mode both passing on
+# clean docs and failing on a dead link, the nested docs-dir build, and the
+# deploy command's legacy-tag skip (both arms) and HEAD calibration gate.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
@@ -121,15 +125,18 @@ grep -qrF -- "Mona-Sans" "$site/latest/assets" ||
   fail "the bundled Mona Sans is missing from the built CSS - the import filter stripped more than remote @imports"
 
 # The fleet skin's own components: the facts card on the landing page
-# (its repository row and the version row marked as the one being read,
-# not just the card's shell) and the provenance line naming each tier's
-# ref (main for the HEAD tier, the tag for a tag tier).
+# (its repository row, and the version row marked as the one being read
+# both by aria-current and by the visible note, not just the card's shell)
+# and the provenance line naming each tier's ref (main for the HEAD tier,
+# the tag for a tag tier) and the page's source file.
 present "fleet-facts" "$site/latest/index.html"
 present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
 present 'aria-current="page">latest</a>' "$site/latest/index.html"
+present 'fleet-facts-note">reading' "$site/latest/index.html"
 present 'aria-current="page">v0.2.0</a>' "$site/v0.2.0/index.html"
 present "fleet-provenance" "$site/latest/index.html"
 present "Built from main" "$site/latest/index.html"
+present "Source: README.md" "$site/latest/index.html"
 present "Built from v0.2.0" "$site/v0.2.0/index.html"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
