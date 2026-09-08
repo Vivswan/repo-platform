@@ -99,19 +99,24 @@ jobs:
         env:
           SETUP: ${{ inputs.setup }}
         run: |
+          # $* joins the message pieces with a space even inside the IFS=',' loop.
+          fail() { local IFS=' '; echo "::error::$* Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1; }
           case "$SETUP" in
             ''|*[!a-z,]*|,*|*,|*,,*)
-              echo "::error::invalid setup input '$SETUP': it must be a comma-separated list of bun/node/deno/uv/rust, or none (no spaces or empty tokens). Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+              fail "invalid setup input '$SETUP': it must be a comma-separated list of bun/node/deno/uv/rust, or none" \
+                "(no spaces or empty tokens)." ;;
           esac
           seen=,
           IFS=','
           for tool in $SETUP; do
             case "$tool" in
               bun|node|deno|uv|rust|none) ;;
-              *) echo "::error::invalid setup token '$tool': setup selects the build toolchain(s) and each token must be bun, node, deno, uv, rust, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+              *)
+                fail "invalid setup token '$tool': setup selects the build toolchain(s)" \
+                  "and each token must be bun, node, deno, uv, rust, or none." ;;
             esac
             case "$seen" in
-              *",$tool,"*) echo "::error::duplicate setup token '$tool'. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+              *",$tool,"*) fail "duplicate setup token '$tool'." ;;
             esac
             seen="$seen$tool,"
           done
@@ -119,7 +124,7 @@ jobs:
           case ",$SETUP," in
             *,none,*)
               if [ "$SETUP" != "none" ]; then
-                echo "::error::setup 'none' cannot be combined with toolchain tokens. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1
+                fail "setup 'none' cannot be combined with toolchain tokens."
               fi ;;
           esac
 

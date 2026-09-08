@@ -90,9 +90,10 @@ describe("buildFragment", () => {
     );
   });
 
-  test("a shared chunk is one inline guard block negating the earlier owner's actual gate: exact bytes, a true guard renders the unguarded bytes, a false guard renders nothing", () => {
+  test("a shared chunk is one exact inline guard block: true renders the unguarded bytes, false nothing", () => {
     // The whole chunk is pinned, not just its opening tag: a stray
     // newline or a lost endif inside the block would survive a prefix check.
+    // The guard negates the earlier owner's gate.
     const guarded = buildFragment(SECTIONS, nodePlan.parts, GATES);
     expect(guarded).toBe(
       `{% if not ('bun' in modules) %}\n${SECTIONS["Node.gitignore"]}{% endif %}`,

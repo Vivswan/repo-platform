@@ -123,7 +123,8 @@ jobs:
           REPO_SET: ${{ inputs.repo != '' }}
         run: |
           if [ "$REPO_SET" != "true" ]; then
-            echo "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository, or repo=all to fan the recovery out across every managed repo."
+            echo "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository,"\
+              "or repo=all to fan the recovery out across every managed repo."
             exit 1
           fi
 

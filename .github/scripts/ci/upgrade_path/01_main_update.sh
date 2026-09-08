@@ -161,13 +161,15 @@ RUNNER_TEMP="$WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_mig
 assert_clean_tree "$PROJECT" "the migration ladder left the tree dirty (copier update refuses a dirty tree)"
 # One commit per pending rung, in ladder order, each as the sync identity:
 # m0001's pure rename, then m0002's declaration rewrite.
+sync_identity="repo-platform-sync <repo-platform-sync@users.noreply.github.com>"
 [ "$(git -C "$PROJECT" rev-list --count "${control_head}..HEAD")" = "2" ] \
   || fail "the ladder did not add exactly two commits for the two pending rungs"
-[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0001_security_policy_to_github" ] \
-  || fail "the first rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)"
+[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)" = "$sync_identity chore: run migration m0001_security_policy_to_github" ] \
+  || fail "the first rung's commit is not the sync identity's 'chore: run migration' commit:" \
+    "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s' HEAD~1)"
 [ "$(git -C "$PROJECT" log -1 --name-status --format= HEAD~1)" = "$(printf 'R100\tSECURITY.md\t.github/SECURITY.md')" ] \
   || fail "the first rung's commit is not a pure rename of SECURITY.md"
-[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration m0002_fold_base_modules" ] \
+[ "$(git -C "$PROJECT" log -1 --format='%an <%ae> %s')" = "$sync_identity chore: run migration m0002_fold_base_modules" ] \
   || fail "the second rung's commit is not the sync identity's 'chore: run migration' commit: $(git -C "$PROJECT" log -1 --format='%an <%ae> %s')"
 [ "$(git -C "$PROJECT" log -1 --name-status --format=)" = "$(printf 'M\t.repo-platform.yml')" ] \
   || fail "the second rung's commit is not a plain edit of .repo-platform.yml"
@@ -335,7 +337,11 @@ for m in agents auto-assign settings-sync; do
 done
 # The recorded `modules` block itself (the items under that key, quotes
 # stripped, in copier's choice order), not any list in the file.
-recorded_modules="$(awk '/^modules:/ { on = 1; next } on && /^- / { sub(/^- /, ""); sub(/^["\x27]/, ""); sub(/["\x27]$/, ""); print; next } on { exit }' .github/.copier-answers.yml | tr '\n' ' ')"
+recorded_modules="$(awk '
+  /^modules:/ { on = 1; next }
+  on && /^- / { sub(/^- /, ""); sub(/^["\x27]/, ""); sub(/["\x27]$/, ""); print; next }
+  on { exit }
+' .github/.copier-answers.yml | tr '\n' ' ')"
 [ "$recorded_modules" = "uv release-please issue-templates pr-title custom-license " ] \
   || fail "the recorded modules list is not exactly the five surviving modules in choice order: ${recorded_modules}"
 { grep -qE "^homepage: ''$" .github/.copier-answers.yml && grep -qE "^topics: ''$" .github/.copier-answers.yml; } \
@@ -486,6 +492,7 @@ test -f .github/repo-platform-manifest.json || fail "the ownership manifest is m
   || fail "the manifest's own hash entry must stay null (self-hash is circular)"
 # Provenance rides the self entry: the stamper writes the render's recorded
 # _commit, which is what lets the validator tell skew from deletion.
-[ "$(mf ".github/repo-platform-manifest.json" commit)" = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
+[ "$(mf ".github/repo-platform-manifest.json" commit)" \
+  = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
   || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept, folded modules dropped from the declaration"

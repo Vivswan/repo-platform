@@ -833,7 +833,7 @@ describe("pagesLegMismatches", () => {
     expect(judge()).toEqual([]);
   });
 
-  test("the RENDERED pages.yml is judged as parsed YAML - a push trigger reaching the render through any source spelling or jinja tag goes red", () => {
+  test("the RENDERED pages.yml is judged as parsed YAML - a push trigger reaching the render through any spelling or jinja tag goes red", () => {
     for (const trigger of [
       "push:\n    branches: [main]",
       '"push":\n    branches: [main]',

@@ -70,7 +70,8 @@ grep -qF "migration $PROBE_ID -> planted (committed)" <<<"$walk_out" \
 test -f "$WALK/.github/harness-probe.txt" || fail "the probe rung left no trace in the fixture"
 [ "$(cat "$WALK/.github/harness-probe.txt")" = "$(printf '%s\n%s' "$NEW_SHA_RESOLVED" "$P2_SHA")" ] \
   || fail "the probe rung saw shas other than the recorded build and the delivered build"
-[ "$(git -C "$WALK" log -1 --format='%an <%ae> %s')" = "repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration $PROBE_ID" ] \
+walk_expected_commit="repo-platform-sync <repo-platform-sync@users.noreply.github.com> chore: run migration $PROBE_ID"
+[ "$(git -C "$WALK" log -1 --format='%an <%ae> %s')" = "$walk_expected_commit" ] \
   || fail "the probe rung's change was not committed as the sync identity's 'chore: run migration' commit"
 assert_clean_tree "$WALK" "the history walk left the tree dirty"
 grep -qF "HARNESS PROBE ran" "$WALK_WORK/migrations.md" \

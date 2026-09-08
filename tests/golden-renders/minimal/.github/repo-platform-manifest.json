@@ -14,7 +14,7 @@
     ".github/instructions/review.instructions.md": {"class": "managed", "hash": "99e4094da93b42ca5af100e817ec5111fffa2b2035dbc693217f189d08a57c32"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
     ".github/settings.yml": {"class": "starter"},
-    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "92de7440b9ffb5a708760f8d4bdff0f42b61fa5d0b96d50dff5b8e9a44f9641f"},
+    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "124f1ba526667d01b455ced947ae3265e8901bdc0ddd7d644b95c89dc0a810a7"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "0a81eafe1058417250ca955723b2d6277da01e103772c0519cffe96ff600e292"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},

@@ -620,7 +620,7 @@ describe("toolchain pins", () => {
   const OWN_SETUP =
     "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ inputs.pin }}\n";
 
-  test("bunPinnedActionDirs finds the actions calling bun-setup (nested ones included, commented uses excused); the shared action, an inline setup-bun, and manifest-free directories never count", () => {
+  test("bunPinnedActionDirs lists the bun-setup callers (nested too); commented uses, own setup-bun, and manifest-free dirs never count", () => {
     const dir = temp.dir("action-pins-");
     mkdirSync(join(dir, "typo"));
     writeFileSync(join(dir, "typo", "action.yml"), SHARED);

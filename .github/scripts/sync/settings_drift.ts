@@ -201,7 +201,8 @@ function main(args: string[]): void {
     fail(
       errors.map((error) =>
         hideDetails
-          ? `${display}: a recorded answer is malformed, so drift cannot be detected (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`
+          ? `${display}: a recorded answer is malformed, so drift cannot be detected ` +
+            "(detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md."
           : `${repo}: ${error}`,
       ),
     );

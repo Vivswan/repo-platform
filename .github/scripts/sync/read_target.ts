@@ -26,7 +26,8 @@ if (proc.exitCode !== 0) {
   error(
     proc.timedOut
       ? `cannot read ${display}: the repository read timed out (proc.ts hang bound); re-run the sync`
-      : `cannot read ${display}: the REPO_PLATFORM_TOKEN cannot access it. Grant the PAT access to ${display} (repository access list) with Contents and Pull requests read/write, then re-run.`,
+      : `cannot read ${display}: the REPO_PLATFORM_TOKEN cannot access it. ` +
+          `Grant the PAT access to ${display} (repository access list) with Contents and Pull requests read/write, then re-run.`,
   );
   process.exit(1);
 }

@@ -41,7 +41,8 @@ present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' 
   "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for"\
   "modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
-absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES"\
+  "private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES"\
   "private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 # Every `deno fmt` in a rendered file must carry --prose-wrap preserve: the
@@ -146,7 +147,8 @@ present "steps.template.outputs.integrity != 'success'" "$fleet_ci"
 # suite's to police).
 yamllint_pins="$(grep -cF -- "repo-platform/actions/yamllint@build" "$fleet_ci" || true)"
 if [ "$yamllint_pins" -ne 1 ]; then
-  echo "::error::gating check failed: expected exactly 1 'repo-platform/actions/yamllint@build' pin in $fleet_ci (the base-checks step) but found $yamllint_pins. Fix fleet-ci.yml (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::gating check failed: expected exactly 1 'repo-platform/actions/yamllint@build' pin in $fleet_ci (the base-checks step) but found"\
+    "$yamllint_pins. Fix fleet-ci.yml (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 
@@ -411,14 +413,14 @@ if has rust; then present "## Rust " "$SMOKE/.gitignore"; else absent "## Rust "
 
 # dependabot ecosystems follow the toolchain modules; every entry carries a
 # commit-message prefix so dependabot PR titles are Conventional Commits.
-present 'package-ecosystem: "github-actions"' "$SMOKE/.github/dependabot.yml"
-present 'prefix: "ci"' "$SMOKE/.github/dependabot.yml"
-if has bun; then present 'package-ecosystem: "bun"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "bun"' "$SMOKE/.github/dependabot.yml"; fi
-if has node; then present 'package-ecosystem: "npm"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "npm"' "$SMOKE/.github/dependabot.yml"; fi
-if has deno; then present 'package-ecosystem: "deno"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "deno"' "$SMOKE/.github/dependabot.yml"; fi
-if has uv; then present 'package-ecosystem: "uv"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "uv"' "$SMOKE/.github/dependabot.yml"; fi
-if has rust; then present 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; fi
-if has_any_toolchain; then present 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; else absent 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; fi
+dependabot="$SMOKE/.github/dependabot.yml"
+present 'package-ecosystem: "github-actions"' "$dependabot"
+present 'prefix: "ci"' "$dependabot"
+for pair in bun:bun node:npm deno:deno uv:uv rust:cargo; do
+  ecosystem="package-ecosystem: \"${pair#*:}\""
+  if has "${pair%:*}"; then present "$ecosystem" "$dependabot"; else absent "$ecosystem" "$dependabot"; fi
+done
+if has_any_toolchain; then present 'prefix: "build"' "$dependabot"; else absent 'prefix: "build"' "$dependabot"; fi
 
 # AGENTS.md plus the three agent-file symlinks are base content: every
 # render carries them (the symlinks prove copier preserves links).
@@ -433,7 +435,9 @@ if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absen
 # The pinned-toolchain modules also emit their dotfile line (the dotfile
 # itself carries no header, so this is the only place an agent learns
 # it is managed); asserted exactly, like the command bullet.
-pinned_by_sync() { printf -- '- `%s` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$1"; }
+pinned_by_sync() {
+  printf -- '- `%s` is managed by sync; pin another version in a repo-owned workflow'"'"'s version input, not in the dotfile.' "$1"
+}
 if has bun; then
   present_line '- bun: `bun install`, `bun test`, `bun run <script>` (scripts in `package.json`)' "$SMOKE/AGENTS.md"
   present_line "$(pinned_by_sync .bun-version)" "$SMOKE/AGENTS.md"
@@ -446,8 +450,12 @@ if has deno; then
   present_line '- Deno: `deno install`, `deno test`, `deno task <task>` (tasks, imports, and lint/format settings in `deno.json`)' "$SMOKE/AGENTS.md"
   present_line "$(pinned_by_sync .dvmrc)" "$SMOKE/AGENTS.md"
 else absent '`deno install`' "$SMOKE/AGENTS.md"; absent '.dvmrc' "$SMOKE/AGENTS.md"; fi
-if has uv; then present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"; else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
-if has rust; then present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"; else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
+if has uv; then
+  present_line '- Python with uv: `uv sync`, `uv run <command>` (metadata and dependencies in `pyproject.toml`)' "$SMOKE/AGENTS.md"
+else absent '`uv sync`' "$SMOKE/AGENTS.md"; fi
+if has rust; then
+  present_line '- Rust with cargo: `cargo build`, `cargo test`, `cargo clippy` (crate layout and dependencies in `Cargo.toml`)' "$SMOKE/AGENTS.md"
+else absent '`cargo build`' "$SMOKE/AGENTS.md"; fi
 # Merge policy, the ruleset requiring all-green, and the settings bullet
 # (edit .github/settings.yml, never the UI) are managed for every render.
 present "PRs are squash-merged, so the PR title becomes the commit subject." "$SMOKE/AGENTS.md"
@@ -729,7 +737,8 @@ print("null" if value is None else value)' "$manifest" "$1" "$2"
 expect_class() { # <path> <expected class, or "absent">
   got="$(mf "$1" class)"
   if [ "$got" != "$2" ]; then
-    echo "::error::manifest check failed: expected class '$2' for '$1' in $manifest but got '$got' for modules=$MODULES private=$PRIVATE. Fix the manifest emission in scripts/compose/manifest.ts (or this expectation in verify_smoke_gating.sh)."
+    echo "::error::manifest check failed: expected class '$2' for '$1' in $manifest but got '$got' for modules=$MODULES private=$PRIVATE."\
+      "Fix the manifest emission in scripts/compose/manifest.ts (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 }
@@ -806,7 +815,8 @@ if [ "$(mf .github/SECURITY.md hash)" != "$want_security" ]; then
   exit 1
 fi
 if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
-  echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for"\
+    "modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 # Provenance: the self entry's commit must equal the _commit the stamp

@@ -93,7 +93,9 @@ ban_expect clean 'count="$(jq length <<<"$x")"'
 ban_expect clean 'if ! parsed="$(jq -ce . <<<"$x")"; then'
 offenders="$(banned_substitutions "$WORK/judge.sh")"
 if [ -n "$offenders" ]; then
-  fail "command substitution outside a plain assignment (errexit-exempt there, so a crashed probe reads as empty and the guard falls open): $offenders"
+  why="command substitution outside a plain assignment (errexit-exempt there,"
+  why+=" so a crashed probe reads as empty and the guard falls open)"
+  fail "$why: $offenders"
 fi
 
 # --- The scenario runner ----------------------------------------------------

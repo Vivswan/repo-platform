@@ -305,7 +305,7 @@ describe("assembleBranchTree", () => {
     }
   });
 
-  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships inside the report action's one package", () => {
+  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, the validator inside the report action", () => {
     const actions = actionDirNames(REPO_ROOT);
     const manifestFree = actions.filter(
       (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),

@@ -76,11 +76,13 @@ grep -qF "AGENT FILES FOLDED" "$ARR_WORK/migrations-review.md" \
 {
   printf '# House rules\n\narrival-local agents note\n'
   printf '\n## Folded from .github/copilot-instructions.md\n\n'
-  printf 'This repository carried its own `.github/copilot-instructions.md` before the agent files became managed symlinks to `AGENTS.md`; its content follows verbatim. Reconcile it into the sections above.\n\n'
+  printf 'This repository carried its own `.github/copilot-instructions.md` before the agent files became managed symlinks to `AGENTS.md`; '
+  printf 'its content follows verbatim. Reconcile it into the sections above.\n\n'
   printf '# Our own Copilot rules\n\narrival-local copilot line\n'
 } > "$ARR_WORK/agents-before.md"
 cmp -s "$ARR_WORK/agents-before.md" "$ARR/AGENTS.md" \
-  || fail "the fold rung's AGENTS.md is not the repository's own file plus the folded alias block: $(diff "$ARR_WORK/agents-before.md" "$ARR/AGENTS.md")"
+  || fail "the fold rung's AGENTS.md is not the repository's own file plus the folded alias block:"\
+    "$(diff "$ARR_WORK/agents-before.md" "$ARR/AGENTS.md")"
 cmp -s "$ARR_WORK/registration-before.yml" "$ARR/.repo-platform.yml" \
   || fail "the fold rung rewrote a .repo-platform.yml naming none of the three"
 MODULES="$(select_modules \

@@ -28,9 +28,15 @@ export const HARD: Caps = {
   lines: { source: 2000, test: 3200, workflow: 1000, shell: 1000, markdown: 1300 },
   width: 256,
 };
-/** The annotating tier: 60% of the hard caps. */
+/** The annotating tier's share of each hard LINE cap. */
+const WARN_RATIO = 0.8;
+/** The annotating tier: line caps derived from HARD so the two can never
+ *  disagree; the width cap stays well under the hard one, since a long
+ *  shell or yaml string is what it exists to catch. */
 export const WARN: Caps = {
-  lines: { source: 1200, test: 1900, workflow: 600, shell: 600, markdown: 780 },
+  lines: Object.fromEntries(
+    Object.entries(HARD.lines).map(([kind, cap]) => [kind, Math.round(cap * WARN_RATIO)]),
+  ) as Caps["lines"],
   width: 150,
 };
 /** Prose (markdown) has no width cap: the fleet writes one source line per
