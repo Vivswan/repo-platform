@@ -74,6 +74,12 @@ export function shortcutKeys(modifier: string): VNode {
   ]);
 }
 
+/** Whether the reader's last input was a key: the field's focus ring
+ *  follows this, not :focus-visible, which Chromium matches on an input
+ *  for programmatic focus too (the landing autofocus would ring on load).
+ *  Written by the shortcut owner, nav-launcher.ts, which sees every key. */
+export const keyboardInput = ref(false);
+
 const indexes = new Map<string, Promise<MiniSearch<TextHit> | null>>();
 
 /** The locale's full-text index, loaded on first use and shared by every
@@ -327,6 +333,7 @@ export default defineComponent({
         {
           class: ["fleet-launcher", `fleet-launcher-mode-${props.mode}`],
           "aria-label": "Search the docs",
+          "data-keyboard": keyboardInput.value ? "" : undefined,
         },
         [
           h("div", { class: "fleet-launcher-field" }, [

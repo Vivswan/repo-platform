@@ -1,13 +1,15 @@
 /*
  * The search launcher: the landing page's panel, the nav's field-shaped
  * button, and the dialog the button opens. Material and metrics come from
- * the tokens in custom.css; the hue appears on the highlighted row and
- * the focused field (each a tint or icon plus a 2px inset ring, so
- * neither state rests on color alone) and on focus rings only. Reading
- * rules hold: 17px-class text, emphasis by weight, left-aligned rows,
- * line-height 1.6 on every row that can wrap (labels, notes, group heads,
- * the fold row, the empty state) and 1.5 on the single-line controls (the
- * input, the keycaps, the nav button).
+ * the tokens in custom.css; the hue appears on the highlighted row (a tint
+ * plus a 2px inset ring, so the state never rests on color alone), on the
+ * focused field (the icon; the ring joins it only while the reader is on
+ * the keyboard) and on focus rings only. Reading rules hold: 17px-class
+ * text, emphasis by weight, left-aligned rows, line-height 1.6 on every
+ * row that can wrap (labels, notes, group heads, the fold row, the empty
+ * state) and 1.5 on the single-line controls (the input, the keycaps, the
+ * nav button). Hover-only rules sit under `@media (hover: hover)`: on a
+ * touch screen a tap would otherwise leave them stuck on.
  * Carbon's own search button is retired here: the launcher owns the
  * shortcut, and keeping `search: local` in the config only ships the
  * index the launcher's full-text fallback loads.
@@ -67,9 +69,13 @@
   transition: color var(--fleet-transition);
 }
 /* The input's own outline is off; the field wrapper hosts the focus ring
- * so the whole 64px field lights up, not a box inside it. */
-.fleet-launcher-field:has(.fleet-launcher-input:focus-visible) {
+ * so the whole 64px field lights up, not a box inside it. Focus tints the
+ * icon; the ring follows data-keyboard (launcher.ts says why), never
+ * :focus-visible. */
+.fleet-launcher-field:has(.fleet-launcher-input:focus) {
   color: var(--fleet-hue);
+}
+.fleet-launcher[data-keyboard] .fleet-launcher-field:has(.fleet-launcher-input:focus) {
   outline: 2px solid var(--fleet-hue);
   outline-offset: -2px;
 }
@@ -127,10 +133,6 @@
 .fleet-launcher-list:empty {
   padding: 0;
 }
-.fleet-launcher-dialog .fleet-launcher-list {
-  max-height: min(60vh, 560px);
-  overflow-y: auto;
-}
 .fleet-launcher-group-title {
   padding: 16px 20px 6px;
   font-size: 13px;
@@ -142,9 +144,12 @@
   padding: 0 8px;
 }
 
+/* The label takes the row; the target sits at its own width, capped at
+ * 40% of the row so a long heading path (the full-text fallback) wraps
+ * instead of squeezing the label. */
 .fleet-launcher-link {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 36%);
+  grid-template-columns: minmax(0, 1fr) fit-content(40%);
   gap: 16px;
   align-items: baseline;
   min-height: 46px;
@@ -156,11 +161,9 @@
   line-height: 1.6;
   transition: background-color var(--fleet-transition);
 }
-.fleet-launcher-link:hover {
-  background: var(--vp-c-bg-soft-2);
-}
 .fleet-launcher-label {
   font-size: 16.5px;
+  text-wrap: pretty;
 }
 .fleet-launcher-target {
   font-size: 14.5px;
@@ -188,10 +191,6 @@
   transition:
     background-color var(--fleet-transition),
     color var(--fleet-transition);
-}
-.fleet-launcher-fold:hover {
-  background: var(--vp-c-bg-soft-2);
-  color: var(--vp-c-text-1);
 }
 
 .fleet-launcher-empty {
@@ -250,9 +249,6 @@
     border-color var(--fleet-transition),
     box-shadow var(--fleet-transition);
 }
-.VPNavBar .fleet-launcher-button:hover {
-  border-color: var(--fleet-hue);
-}
 .VPNavBar .fleet-launcher-button:focus-visible {
   outline: 2px solid var(--fleet-hue);
   outline-offset: 2px;
@@ -263,6 +259,27 @@
 .VPNavBar .fleet-launcher-button .fleet-launcher-button-text {
   flex: 1;
   min-width: 0;
+}
+/* One search field on screen at a time: the button hides while its dialog
+ * is open (the dialog's own field replaces it) and is back, and focusable
+ * again, the moment the dialog closes and focus returns to it. */
+.VPNavBar:has(.fleet-launcher-dialog[open]) .fleet-launcher-button {
+  visibility: hidden;
+}
+
+@media (hover: hover) {
+  .fleet-launcher-link:hover,
+  .fleet-launcher-fold:hover,
+  .fleet-launcher-close:hover {
+    background: var(--vp-c-bg-soft-2);
+  }
+  .fleet-launcher-fold:hover,
+  .fleet-launcher-close:hover {
+    color: var(--vp-c-text-1);
+  }
+  .VPNavBar .fleet-launcher-button:hover {
+    border-color: var(--fleet-hue);
+  }
 }
 
 /* In carbon's nav the title column sits left of the flex row that holds
@@ -288,11 +305,14 @@
 
 /* ---------- the dialog ---------- */
 
+/* A flex column, so the list takes what the field and the status line
+ * leave, in dynamic viewport units: on a phone the browser toolbar
+ * would otherwise cover the list's last rows. */
 .fleet-launcher-dialog {
   width: min(720px, 90vw);
   max-width: none;
-  max-height: none;
-  margin: 10vh auto auto;
+  max-height: min(80dvh, 624px);
+  margin: 10dvh auto auto;
   padding: 0;
   border: 1px solid var(--vp-c-border);
   border-radius: var(--fleet-radius-lg);
@@ -305,7 +325,55 @@
   background: var(--vp-backdrop-bg-color);
 }
 .fleet-launcher-dialog[open] {
+  display: flex;
+  flex-direction: column;
   animation: fleet-launcher-rise 180ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+.fleet-launcher-dialog .fleet-launcher {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.fleet-launcher-dialog .fleet-launcher-field {
+  flex: none;
+  /* room for the close button seated over the field's right end */
+  padding-right: 64px;
+}
+.fleet-launcher-dialog .fleet-launcher-keys {
+  display: none;
+}
+.fleet-launcher-dialog .fleet-launcher-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.fleet-launcher-dialog .fleet-launcher-empty {
+  flex: none;
+}
+/* A 44px tap target, centered on the 64px field. */
+.fleet-launcher-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fleet-radius-md);
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.fleet-launcher-close:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
 }
 
 /* ---------- narrow viewports ---------- */
@@ -321,6 +389,11 @@
   }
   .fleet-launcher-field .fleet-launcher-keys {
     display: none;
+  }
+  /* 14px is the floor for text that carries information on a phone; the
+   * keycaps stay 12px because they are hidden here. */
+  .fleet-launcher-group-title {
+    font-size: 14px;
   }
   .fleet-launcher-link {
     grid-template-columns: 1fr;
@@ -347,10 +420,15 @@
     display: none;
   }
   .fleet-launcher-dialog {
-    margin-top: 6vh;
+    max-height: 88dvh;
+    margin-top: 6dvh;
   }
-  .fleet-launcher-dialog .fleet-launcher-list {
-    max-height: calc(100vh - 6vh - 56px - 32px);
+  .fleet-launcher-dialog .fleet-launcher-field {
+    padding-right: 56px;
+  }
+  .fleet-launcher-close {
+    top: 6px;
+    right: 6px;
   }
 }
 
@@ -365,6 +443,7 @@
   .vp-doc .fleet-launcher a:hover,
   .fleet-launcher-target,
   .fleet-launcher-fold,
+  .fleet-launcher-close,
   .VPNavBar .fleet-launcher-button {
     transition: none;
   }

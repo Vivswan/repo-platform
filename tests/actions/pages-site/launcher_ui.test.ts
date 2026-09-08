@@ -33,6 +33,40 @@ const item = (
   note: string | null = null,
 ): LauncherItem => ({ label, href, note, source });
 
+const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
+
+// Under bun the bare `vitepress` specifier resolves to the node entry,
+// which has no useData (Vite aliases the client one), and the data
+// loader runs only inside a VitePress build. Virtual modules stand in
+// for both, registered once (bun caches them): the stub's locale is a
+// shared ref each render sets, its page index the list each test sets.
+// The node entry, which the markdown-rule tests import by path, is
+// untouched.
+const pages: PageIndexEntry[] = [];
+async function loadStubs() {
+  const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
+  const localeIndex = vue.ref("root");
+  Bun.plugin({
+    name: "launcher-ssr-stubs",
+    setup(build) {
+      build.module("vitepress", () => ({
+        exports: { useData: () => ({ localeIndex }) },
+        loader: "object",
+      }));
+      build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
+        exports: { data: pages },
+        loader: "object",
+      }));
+    },
+  });
+  return { vue, localeIndex };
+}
+let stubs: ReturnType<typeof loadStubs> | undefined;
+function stubbed(): ReturnType<typeof loadStubs> {
+  stubs ??= loadStubs();
+  return stubs;
+}
+
 const NEW_REPO: LauncherGroup = {
   key: "/repo/new-repo.html",
   title: "New repo",
@@ -279,7 +313,6 @@ describe("modifierLabel", () => {
 });
 
 describe("the rendered list", () => {
-  const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
   const headers = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       title: `Part ${index}`,
@@ -293,7 +326,7 @@ describe("the rendered list", () => {
     locale: "root",
     headers: headers(headerCount),
   });
-  const pages: PageIndexEntry[] = [
+  pages.push(
     page("/repo/", "Home", ""),
     page("/repo/setup.html", "Setup", "", 1),
     page("/repo/long.html", "Long", "", 9),
@@ -301,7 +334,7 @@ describe("the rendered list", () => {
       page(`/repo/api/p${index}.html`, `P${index}`, "api"),
     ),
     page("/repo/guide/intro.html", "Intro", "guide", 1),
-  ];
+  );
 
   /** The listbox's options in document order, each with its row index:
    *  `<index> <href>` for a link, `<index> fold: <label>` for a fold row.
@@ -323,30 +356,10 @@ describe("the rendered list", () => {
     return [...html.matchAll(GROUP_RE)].map(([, , expanded]) => expanded ?? null);
   }
 
-  // Under bun the bare `vitepress` specifier resolves to the node entry,
-  // which has no useData (Vite aliases the client one), and the data
-  // loader runs only inside a VitePress build. Virtual modules stand in
-  // for both, registered once (bun caches them): the stub's locale is a
-  // shared ref each render sets. The node entry, which the markdown-rule
-  // tests import by path, is untouched.
   let stage: Promise<(rows: string, locale: string) => Promise<string>> | undefined;
   function render(rows: string, locale: string): Promise<string> {
     stage ??= (async () => {
-      const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
-      const localeIndex = vue.ref("root");
-      Bun.plugin({
-        name: "launcher-ssr-stubs",
-        setup(build) {
-          build.module("vitepress", () => ({
-            exports: { useData: () => ({ localeIndex }) },
-            loader: "object",
-          }));
-          build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
-            exports: { data: pages },
-            loader: "object",
-          }));
-        },
-      });
+      const { vue, localeIndex } = await stubbed();
       const { renderToString } = await import(
         resolve(ACTION_DIR, "node_modules/vue/server-renderer/index.mjs")
       );
@@ -387,5 +400,136 @@ describe("the rendered list", () => {
     expect(outline(html)).toEqual([]);
     expect(groupStates(html)).toEqual([]);
     expect(html).toContain('role="combobox" aria-expanded="false"');
+  });
+});
+
+describe("the input modality behind the field's focus ring", () => {
+  /** A DOM-less element for Vue's custom renderer: enough surface for the
+   *  nav launcher (focus, the dialog's showModal, one querySelector that
+   *  finds the input) and for the launcher's mount. */
+  interface Node {
+    tag: string;
+    props: Record<string, unknown>;
+    children: Node[];
+    parent: Node | null;
+    open: boolean;
+    focus(): void;
+    select(): void;
+    scrollIntoView(): void;
+    showModal(): void;
+    close(): void;
+    querySelector(): Node | null;
+  }
+  const descendants = (node: Node): Node[] => [node, ...node.children.flatMap(descendants)];
+  const element = (tag: string): Node => ({
+    tag,
+    props: {},
+    children: [],
+    parent: null,
+    open: false,
+    focus() {},
+    select() {},
+    scrollIntoView() {},
+    showModal() {
+      this.open = true;
+    },
+    close() {
+      this.open = false;
+    },
+    querySelector() {
+      return descendants(this).find((node) => node.tag === "input") ?? null;
+    },
+  });
+  const detach = (node: Node): void => {
+    if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1);
+    node.parent = null;
+  };
+
+  const keydown = (key: string, held: Partial<KeyState> = {}): Event =>
+    Object.assign(new Event("keydown", { cancelable: true }), {
+      key,
+      isComposing: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      ...held,
+    });
+
+  // The modality is wiring: the shortcut owner's capturing listener stops
+  // the key that mounts the dialog, and the dialog mounts after it, so no
+  // pure helper can pin that the ring still follows it.
+  test("the shortcut that opens the dialog counts as keyboard input; a pointer clears it; unmount drops the listeners", async () => {
+    const { vue } = await stubbed();
+    const { default: NavLauncher } = await import(
+      resolve(ACTION_DIR, ".vitepress/theme/nav-launcher.ts")
+    );
+    const renderer = vue.createRenderer({
+      createElement: element,
+      createText: () => element("#text"),
+      createComment: () => element("#comment"),
+      setText() {},
+      setElementText() {},
+      patchProp(node: Node, key: string, _old: unknown, value: unknown) {
+        node.props[key] = value;
+      },
+      insert(node: Node, parent: Node, before: Node | null) {
+        detach(node);
+        node.parent = parent;
+        const at = before ? parent.children.indexOf(before) : -1;
+        if (at < 0) parent.children.push(node);
+        else parent.children.splice(at, 0, node);
+      },
+      remove: detach,
+      parentNode: (node: Node) => node.parent,
+      nextSibling: (node: Node) =>
+        node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
+    });
+
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const win = new EventTarget();
+    const add = win.addEventListener.bind(win);
+    const drop = win.removeEventListener.bind(win);
+    win.addEventListener = (type, fn, options) => {
+      if (fn) listeners.add(fn);
+      add(type, fn, options);
+    };
+    win.removeEventListener = (type, fn, options) => {
+      if (fn) listeners.delete(fn);
+      drop(type, fn, options);
+    };
+    const globals = {
+      window: win,
+      document: { querySelector: () => null },
+      location: { search: "" },
+    };
+    Object.assign(globalThis, globals);
+    try {
+      const host = element("root");
+      const app = renderer.createApp({ render: () => vue.h(NavLauncher) });
+      app.mount(host);
+      const section = () => descendants(host).find((node) => node.tag === "section");
+      const keyboard = () => section()?.props["data-keyboard"];
+
+      win.dispatchEvent(new Event("pointerdown"));
+      win.dispatchEvent(keydown("/"));
+      await vue.nextTick();
+      await vue.nextTick();
+      expect([section()?.parent?.open, keyboard()]).toEqual([true, ""]);
+
+      win.dispatchEvent(new Event("pointerdown"));
+      await vue.nextTick();
+      expect(keyboard()).toBeUndefined();
+
+      win.dispatchEvent(keydown("k", { metaKey: true }));
+      await vue.nextTick();
+      expect(keyboard()).toBe("");
+
+      expect(listeners.size).toBe(2);
+      app.unmount();
+      expect(listeners.size).toBe(0);
+    } finally {
+      for (const name of Object.keys(globals)) delete (globalThis as Record<string, unknown>)[name];
+    }
   });
 });
