@@ -4,7 +4,7 @@ Selecting the `docs-site` module publishes a repository's `docs/` markdown as a 
 
 | URL | Built from |
 |---|---|
-| `https://<owner>.github.io/<repo>/` | the newest served version tag's docs (none served - no tags yet, or every tag lacks a docs tree: the default branch's docs, the same content as `latest/`) |
+| `https://<owner>.github.io/<repo>/` | the newest served version tag's docs (none served - no tags yet, or every tag skipped: the default branch's docs, the same content as `latest/`) |
 | `.../<repo>/latest/` | the default branch's docs |
 | `.../<repo>/vX.Y.Z/` | that tag's docs, one directory per kept tag |
 | `.../<repo>/versions.json` | the version index the theme's dropdown is fed from |
