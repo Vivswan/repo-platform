@@ -143,7 +143,7 @@ grep -qrF -- "wix-madefor-text-latin-wght-normal" "$site/latest/assets" ||
 # and the provenance line naming each tier's ref (main for the HEAD tier,
 # the tag for a tag tier) and the page's source file.
 present "fleet-facts" "$site/latest/index.html"
-present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
+present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"><span class="fleet-facts-segment">fixture-owner/</span><wbr><span class="fleet-facts-segment">fixture-repo</span><' "$site/latest/index.html"
 present 'aria-current="true">latest</a>' "$site/latest/index.html"
 present 'fleet-facts-note">reading' "$site/latest/index.html"
 present 'aria-current="true">v0.2.0</a>' "$site/v0.2.0/index.html"

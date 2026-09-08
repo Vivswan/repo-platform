@@ -856,6 +856,16 @@ a:focus-visible {
    * is the same under both (a hyphen is a break point either way) */
   overflow-wrap: anywhere;
 }
+/* A path segment (facts-panel.ts splits repository and homepage at their
+ * slashes) wraps as a unit: the line breaks between segments, and inside
+ * one only when it is wider than the column alone. text-decoration does
+ * not reach into an inline block, so the link's underline is inherited. */
+.fleet-facts .fleet-facts-segment {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-decoration: inherit;
+}
 /* Sub-rows: the body face, the secondary ink, indented. */
 .fleet-facts tr.fleet-facts-sub th {
   font-family: var(--vp-font-family-base);
