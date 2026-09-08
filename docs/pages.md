@@ -22,7 +22,7 @@ Nothing to do: the pages module's settings layer enables Pages with Actions-work
 | Question | Meaning | Default |
 |---|---|---|
 | `pages_setup` | <!-- BEGIN GENERATED: pages-setup-meaning (scripts/generate.ts - edit module.yml manifests, not this block) -->Toolchain(s) installed on the build runner (comma-separated `bun`/`node`/`deno`/`uv`/`rust`, or `none`)<!-- END GENERATED: pages-setup-meaning --> | <!-- BEGIN GENERATED: pages-setup-default (scripts/generate.ts - edit module.yml manifests, not this block) -->every selected toolchain module joined with commas (e.g. `bun,node,deno,uv,rust`), else `none`<!-- END GENERATED: pages-setup-default --> |
-| `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `npm ci` / `deno ci` / `uv sync` / `cargo install mdbook --locked` / empty<!-- END GENERATED: pages-install-default --> |
+| `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `npm ci` / `deno ci` / `uv sync` / `cargo +stable install mdbook --locked` / empty<!-- END GENERATED: pages-install-default --> |
 | `pages_build_command` | The build; must not be empty | <!-- BEGIN GENERATED: pages-build-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun run build` / `npm run build` / `deno task build` / `uv run mkdocs build --site-dir dist` / `mdbook build -d dist`<!-- END GENERATED: pages-build-default --> |
 | `pages_dist_dir` | Build output directory | `dist` |
 
