@@ -3,6 +3,8 @@
 // the page. It reads the same build-time facts as the facts card and
 // renders nothing without them. Mounted in the doc-after slot rather than
 // carbon's doc footer, which only exists when an edit link or a pager does.
+// A labelled <section> (a region landmark), not a <footer>: carbon's own
+// doc footer beside it is one, and a page may carry only one contentinfo.
 
 import { useData } from "vitepress";
 import { defineComponent, h } from "vue";
@@ -17,7 +19,7 @@ export default defineComponent({
       if (facts === undefined) return null;
       const { label, sha, url } = facts.provenance;
       const source = `${facts.docsDir}/${page.value.filePath}`;
-      return h("div", { class: "fleet-provenance" }, [
+      return h("section", { class: "fleet-provenance", "aria-label": "Page provenance" }, [
         h("a", { href: url }, `Built from ${label} at ${sha.slice(0, 7)}`),
         h("span", `Source: ${source}`),
       ]);
