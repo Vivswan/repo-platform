@@ -9,8 +9,9 @@
 //                           tag, and the mount root a SECOND build of the
 //                           newest tag (base = the mount root, so deep links
 //                           at the root resolve)
-//   versioned, no tags   -> <mount>latest/ from HEAD, the mount root a
-//                           redirect page to latest/
+//   versioned, no tags   -> <mount>latest/ from HEAD, and the mount root a
+//                           SECOND build of HEAD (the root is always a real
+//                           page: the one copy a site indexes)
 // Every versioned mount root also carries versions.json, the machine-readable
 // version index the theme's dropdown is fed from at build time.
 
@@ -34,7 +35,8 @@ export interface Tier {
   ref: string;
   /** The version identity handed to the build (PAGES_VERSION /
    *  DOCS_SITE_CURRENT): "" for an unversioned mount, "latest", or the
-   *  tag - the root tier carries the newest tag's identity. */
+   *  tag - the root tier carries the newest served tag's identity, or
+   *  "latest" while none serve. */
   version: string;
   /** Artifact path relative to the site root, "" or "<dir>/.../": where
    *  this tier's build output lands inside _site. */
@@ -331,34 +333,28 @@ export function judgeCommandTag(
   };
 }
 
-export interface MountPlan {
-  tiers: Tier[];
-  /** True when the mount root needs the redirect page to latest/ (versioned,
-   *  no tags to serve at the root). */
-  redirectToLatest: boolean;
-}
-
 /** The tiers a mount builds, given the version tags it serves (newest
  *  first). Order matters: the root tier comes last, so assembly can check
- *  its top-level entries against the tier directories already in place. */
-export function planMount(mount: Mount, tags: string[]): MountPlan {
+ *  its top-level entries against the tier directories already in place.
+ *  A versioned root is always a real build - the newest served tag, or
+ *  HEAD while none serve - never a redirect: the root is the one copy a
+ *  site indexes, and a redirect stub there leaves it nothing to index. */
+export function planMount(mount: Mount, tags: string[]): Tier[] {
   const prefix = mountRel(mount.path);
-  if (!mount.versioned) {
-    return {
-      tiers: [{ kind: "single", ref: "HEAD", version: "", rel: prefix }],
-      redirectToLatest: false,
-    };
-  }
+  if (!mount.versioned) return [{ kind: "single", ref: "HEAD", version: "", rel: prefix }];
   const tiers: Tier[] = [
     { kind: "latest", ref: "HEAD", version: "latest", rel: `${prefix}latest/` },
   ];
   for (const tag of tags) {
     tiers.push({ kind: "tag", ref: tag, version: tag, rel: `${prefix}${tag}/` });
   }
-  if (tags.length > 0) {
-    tiers.push({ kind: "root", ref: tags[0], version: tags[0], rel: prefix });
-  }
-  return { tiers, redirectToLatest: tags.length === 0 };
+  const newest = tags[0];
+  tiers.push(
+    newest === undefined
+      ? { kind: "root", ref: "HEAD", version: "latest", rel: prefix }
+      : { kind: "root", ref: newest, version: newest, rel: prefix },
+  );
+  return tiers;
 }
 
 /** Top-level entry names a versioned mount root reserves for the layout
@@ -408,23 +404,4 @@ export function urlBase(rootBase: string, rel: string): string {
  *  instead of silently mixing two sources under one prefix. */
 export function assemblyOrder(mounts: Mount[]): Mount[] {
   return [...mounts].sort((a, b) => b.path.split("/").length - a.path.split("/").length);
-}
-
-/** The static redirect page a versioned mount root serves while no version
- *  tags exist. Relative target, so it works under any mount prefix, any
- *  repository name, and any custom domain. */
-export function redirectHtml(target: string): string {
-  return [
-    "<!DOCTYPE html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    `<meta http-equiv="refresh" content="0; url=${target}">`,
-    `<link rel="canonical" href="${target}">`,
-    "<title>Redirecting</title>",
-    "</head>",
-    `<body><p>Redirecting to <a href="${target}">${target}</a>.</p></body>`,
-    "</html>",
-    "",
-  ].join("\n");
 }

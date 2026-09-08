@@ -5,7 +5,7 @@ description: >-
   /latest/ from HEAD, one directory per served tag (a tag that structurally
   cannot build - docs tree missing, build script undeclared - is skipped
   with a notice), and the mount root serving the newest served version (or
-  redirecting to latest/ while none serve). A
+  a second build of HEAD while none serve). A
   mount's content comes from the bundled VitePress build over the caller's
   docs tree (source vitepress; the config and theme live in this action, the
   caller carries only markdown) or from the caller's own build command
@@ -39,7 +39,7 @@ inputs:
     required: false
     default: ""
   build-command:
-    description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION are exported
+    description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION/PAGES_TIER are exported (docs/pages.md)
     required: false
     default: ""
   dist-dir:

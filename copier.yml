@@ -206,7 +206,7 @@ pages_install_command:
 
 pages_build_command:
   type: str
-  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_VERSION are exported
+  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_VERSION, PAGES_TIER are exported (docs/pages.md)
   # BEGIN GENERATED: pages-build-command (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ 'bun run build' if 'bun' in pages_setup.split(',') else ('npm run build' if 'node' in pages_setup.split(',') else ('deno task build' if 'deno' in pages_setup.split(',') else ('uv run mkdocs build --site-dir dist' if 'uv' in pages_setup.split(',') else ''))) }}"
   # END GENERATED: pages-build-command

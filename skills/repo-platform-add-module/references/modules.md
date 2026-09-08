@@ -21,8 +21,8 @@ Repository settings are managed for every repo with a `.repo-platform.yml`: the 
 
 ## pages
 
-- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest served `vX.Y.Z` tag (redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (`PAGES_MAX_VERSIONS` repo variable, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's `docs/pages.md`).
-- Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`): repo-platform's `docs/pages.md`.
+- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest served `vX.Y.Z` tag (the default branch head while none serve), `/latest/` = main, one directory per served tag (`PAGES_MAX_VERSIONS` repo variable, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's `docs/pages.md`).
+- Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`, `PAGES_TIER`): repo-platform's `docs/pages.md`.
 - Companion step: the module's settings layer enables Pages on the next fleet settings apply; only a deploy before that apply needs the manual toggle (Settings -> Pages -> Source: GitHub Actions).
 - With `docs-site` also selected, the website turns unversioned at `/` and the docs mount versioned at `/<docs_site_path>/`, all in this one workflow.
 - Removal: the caller leaves the render and is deleted; the live Pages site and settings stay until you turn Pages off in the repo.
