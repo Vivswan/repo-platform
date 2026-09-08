@@ -1,12 +1,13 @@
 /*
  * The search launcher: the landing page's panel, the nav's field-shaped
  * button, and the dialog the button opens. Material and metrics come from
- * the tokens in custom.css; the hue appears on the highlighted row, the
- * focused field, and focus rings only. Reading rules hold: 17px-class
- * text, emphasis by weight, left-aligned rows, line-height 1.6 on every
- * row that can wrap (labels, notes, group heads, the fold button, the
- * empty state) and 1.5 on the single-line controls (the input, the
- * keycaps, the nav button).
+ * the tokens in custom.css; the hue appears on the highlighted row and
+ * the focused field (each a tint or icon plus a 2px inset ring, so
+ * neither state rests on color alone) and on focus rings only. Reading
+ * rules hold: 17px-class text, emphasis by weight, left-aligned rows,
+ * line-height 1.6 on every row that can wrap (labels, notes, group heads,
+ * the fold row, the empty state) and 1.5 on the single-line controls (the
+ * input, the keycaps, the nav button).
  * Carbon's own search button is retired here: the launcher owns the
  * shortcut, and keeping `search: local` in the config only ships the
  * index the launcher's full-text fallback loads.
@@ -59,11 +60,18 @@
   height: 64px;
   padding: 0 16px 0 20px;
   border-bottom: 1px solid var(--vp-c-divider);
+  /* the panel and the dialog clip the field's top corners at this radius;
+   * the focus ring below follows it instead of being cut */
+  border-radius: var(--fleet-radius-lg) var(--fleet-radius-lg) 0 0;
   color: var(--vp-c-text-3);
   transition: color var(--fleet-transition);
 }
-.fleet-launcher-field:focus-within {
+/* The input's own outline is off; the field wrapper hosts the focus ring
+ * so the whole 64px field lights up, not a box inside it. */
+.fleet-launcher-field:has(.fleet-launcher-input:focus-visible) {
   color: var(--fleet-hue);
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
 }
 .fleet-launcher-field .fleet-launcher-icon {
   flex: none;
@@ -114,8 +122,6 @@
 /* ---------- the grouped list ---------- */
 
 .fleet-launcher-list {
-  list-style: none;
-  margin: 0;
   padding: 6px 0 8px;
 }
 .fleet-launcher-list:empty {
@@ -125,10 +131,6 @@
   max-height: min(60vh, 560px);
   overflow-y: auto;
 }
-.fleet-launcher-group {
-  margin: 0;
-  padding: 0;
-}
 .fleet-launcher-group-title {
   padding: 16px 20px 6px;
   font-size: 13px;
@@ -137,14 +139,7 @@
   color: var(--vp-c-text-3);
 }
 .fleet-launcher-rows {
-  list-style: none;
-  margin: 0;
   padding: 0 8px;
-}
-.fleet-launcher-row,
-.fleet-launcher-fold {
-  margin: 0;
-  padding: 0;
 }
 
 .fleet-launcher-link {
@@ -164,10 +159,6 @@
 .fleet-launcher-link:hover {
   background: var(--vp-c-bg-soft-2);
 }
-.fleet-launcher-link:focus-visible {
-  outline: 2px solid var(--fleet-hue);
-  outline-offset: -2px;
-}
 .fleet-launcher-label {
   font-size: 16.5px;
 }
@@ -184,27 +175,21 @@
   font-weight: 700;
 }
 
-.fleet-launcher-fold-button {
+.fleet-launcher-fold {
   display: flex;
   align-items: center;
-  width: 100%;
   min-height: 44px;
-  margin: 0;
   padding: 8px 12px;
-  border: 0;
   border-radius: var(--fleet-radius-md);
-  background: transparent;
   color: var(--vp-c-text-2);
-  font: inherit;
   font-size: 15px;
   line-height: 1.6;
-  text-align: left;
   cursor: pointer;
   transition:
     background-color var(--fleet-transition),
     color var(--fleet-transition);
 }
-.fleet-launcher-fold-button:hover {
+.fleet-launcher-fold:hover {
   background: var(--vp-c-bg-soft-2);
   color: var(--vp-c-text-1);
 }
@@ -226,28 +211,10 @@
   font-weight: 600;
 }
 
-/* Inside the prose column (the landing panel) the .vp-doc rules for lists,
- * links, and paragraphs would restyle the launcher; these put them back.
+/* Inside the prose column (the landing panel) the .vp-doc rules for links
+ * and paragraphs would restyle the launcher; these put them back.
  * `.vp-doc a` outranks `.fleet-launcher-link`, so every property it sets
  * (color, weight, decoration, transition) is restated here. */
-.vp-doc .fleet-launcher ol,
-.vp-doc .fleet-launcher ul {
-  list-style: none;
-  margin: 0;
-}
-.vp-doc .fleet-launcher .fleet-launcher-list {
-  padding: 6px 0 8px;
-}
-.vp-doc .fleet-launcher .fleet-launcher-list:empty {
-  padding: 0;
-}
-.vp-doc .fleet-launcher .fleet-launcher-rows {
-  padding: 0 8px;
-}
-.vp-doc .fleet-launcher li,
-.vp-doc .fleet-launcher li + li {
-  margin: 0;
-}
 .vp-doc .fleet-launcher a,
 .vp-doc .fleet-launcher a:hover {
   color: var(--vp-c-text-1);
@@ -266,7 +233,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(100%, 320px);
+  width: min(100%, 520px);
   height: 40px;
   margin: 0 auto;
   padding: 0 12px;
@@ -376,7 +343,7 @@
   .vp-doc .fleet-launcher a,
   .vp-doc .fleet-launcher a:hover,
   .fleet-launcher-target,
-  .fleet-launcher-fold-button,
+  .fleet-launcher-fold,
   .VPNavBar .fleet-launcher-button {
     transition: none;
   }
@@ -385,11 +352,15 @@
 /* ---------- the highlighted row ---------- */
 
 /* Last, so the hue wins over every metric rule above, the narrow-viewport
- * ones included. */
-.fleet-launcher-row[aria-selected="true"] .fleet-launcher-link {
+ * ones included. The tint alone reads under 1.4:1 against the row; the
+ * inset ring is the indicator that clears 3:1. */
+.fleet-launcher-link[aria-selected="true"],
+.fleet-launcher-fold[aria-selected="true"] {
   background: var(--fleet-hue-band);
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
 }
-.fleet-launcher-row[aria-selected="true"] .fleet-launcher-target {
+.fleet-launcher-link[aria-selected="true"] .fleet-launcher-target {
   color: var(--fleet-hue);
 }
 

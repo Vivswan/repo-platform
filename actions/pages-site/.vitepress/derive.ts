@@ -6,6 +6,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { dirTitle } from "./dir-title.ts";
 
 /** ISO 639-1 primary language subtags: the locale-directory convention
  *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary
@@ -143,7 +144,7 @@ function sidebarLevel(
     .map((file) => ({ text: title(file), link: routeOf(file, rewrites) }));
   for (const dir of dirs) {
     items.push({
-      text: dir.replace(/[-_]/g, " "),
+      text: dirTitle(dir),
       collapsed: false,
       items: sidebarLevel(`${prefix}${dir}/`, files, rewrites, title),
     });

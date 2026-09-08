@@ -143,7 +143,7 @@ grep -qrF -- "wix-madefor-text-latin-wght-normal" "$site/latest/assets" ||
 # and the provenance line naming each tier's ref (main for the HEAD tier,
 # the tag for a tag tier) and the page's source file.
 present "fleet-facts" "$site/latest/index.html"
-present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
+present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"><span class="fleet-facts-segment">fixture-owner/</span><wbr><span class="fleet-facts-segment">fixture-repo</span><' "$site/latest/index.html"
 present 'aria-current="true">latest</a>' "$site/latest/index.html"
 present 'fleet-facts-note">reading' "$site/latest/index.html"
 present 'aria-current="true">v0.2.0</a>' "$site/v0.2.0/index.html"
@@ -167,6 +167,11 @@ grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" |
 present 'class="fleet-launcher fleet-launcher-mode-panel"' "$site/latest/index.html"
 present 'fleet-launcher-label">Set things up<' "$site/latest/index.html"
 present 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
+# The guide/ directory: its launcher group is titled from the folder name,
+# capitalized, and its page row's note is the page's site path.
+grep -qE -- 'fleet-launcher-group-title"[^>]*>Guide<' "$site/latest/index.html" ||
+  fail "the guide/ launcher group is not titled 'Guide' - the directory title lost its capital"
+present 'fleet-launcher-target">guide<' "$site/latest/index.html"
 present 'class="fleet-launcher-button"' "$site/latest/setup.html"
 grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
   fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"

@@ -42,6 +42,7 @@ const PAGES: PageIndexEntry[] = [
     h("The pr-title ruleset", "the-pr-title-ruleset"),
   ]),
   page("/repo/ja/new-repo.html", "新しいリポジトリ", "", "ja", [h("テンプレート", "template")]),
+  page("/repo/api/", "API", "api", "root"),
 ];
 
 const CURATED: CuratedRow[] = [
@@ -94,7 +95,7 @@ const ROOT_GROUPS: LauncherGroup[] = [
         note: "Settings",
         source: "curated",
       },
-      { label: "Settings", href: "/repo/settings.html", note: null, source: "page" },
+      { label: "Settings", href: "/repo/settings.html", note: "settings", source: "page" },
     ],
   },
   {
@@ -123,7 +124,7 @@ const ROOT_GROUPS: LauncherGroup[] = [
         note: null,
         source: "curated",
       },
-      { label: "API alpha", href: "/repo/api/alpha.html", note: null, source: "page" },
+      { label: "API alpha", href: "/repo/api/alpha.html", note: "api/alpha", source: "page" },
       {
         label: "alpha usage",
         href: "/repo/api/alpha.html#usage",
@@ -138,7 +139,7 @@ const ROOT_GROUPS: LauncherGroup[] = [
     kind: "page",
     folded: false,
     items: [
-      { label: "All-green", href: "/repo/all-green.html", note: null, source: "page" },
+      { label: "All-green", href: "/repo/all-green.html", note: "all-green", source: "page" },
       {
         label: "Quick triage",
         href: "/repo/all-green.html#quick-triage",
@@ -149,29 +150,37 @@ const ROOT_GROUPS: LauncherGroup[] = [
   },
   {
     key: "dir:api",
-    title: "api",
+    title: "Api",
     kind: "dir",
     folded: false,
-    items: ["beta", "gamma"].flatMap((name) => [
-      { label: `API ${name}`, href: `/repo/api/${name}.html`, note: null, source: "page" },
-      {
-        label: `${name} usage`,
-        href: `/repo/api/${name}.html#usage`,
-        note: `API ${name}`,
-        source: "heading",
-      },
-      {
-        label: `${name} limits`,
-        href: `/repo/api/${name}.html#limits`,
-        note: `API ${name}`,
-        source: "heading",
-      },
-    ]),
+    items: [
+      ...["beta", "gamma"].flatMap((name) => [
+        {
+          label: `API ${name}`,
+          href: `/repo/api/${name}.html`,
+          note: `api/${name}`,
+          source: "page" as const,
+        },
+        {
+          label: `${name} usage`,
+          href: `/repo/api/${name}.html#usage`,
+          note: `API ${name}`,
+          source: "heading" as const,
+        },
+        {
+          label: `${name} limits`,
+          href: `/repo/api/${name}.html#limits`,
+          note: `API ${name}`,
+          source: "heading" as const,
+        },
+      ]),
+      { label: "API", href: "/repo/api/", note: "api", source: "page" },
+    ],
   },
 ];
 
 describe("buildGroups", () => {
-  test("curated rows lead in table order, then root pages, then directory groups", () => {
+  test("curated rows lead in table order, then root pages, then directory groups; a page row's note is its site path, a heading row's its page", () => {
     expect(buildGroups(CURATED, PAGES, "root")).toEqual(ROOT_GROUPS);
   });
 
@@ -180,11 +189,16 @@ describe("buildGroups", () => {
     expect(groups).toEqual([
       {
         key: "dir:api",
-        title: "api",
+        title: "Api",
         kind: "dir",
         folded: true,
         items: ["alpha", "beta", "gamma"].flatMap((name) => [
-          { label: `API ${name}`, href: `/repo/api/${name}.html`, note: null, source: "page" },
+          {
+            label: `API ${name}`,
+            href: `/repo/api/${name}.html`,
+            note: `api/${name}`,
+            source: "page",
+          },
           {
             label: `${name} usage`,
             href: `/repo/api/${name}.html#usage`,
@@ -202,7 +216,7 @@ describe("buildGroups", () => {
     ]);
   });
 
-  test("a locale sees only its pages and resolves hrefs against its own landing", () => {
+  test("a locale sees only its pages and resolves hrefs against its own landing; its page notes keep the locale prefix", () => {
     const curated: CuratedRow[] = [{ label: "新規", href: "new-repo.md#template", note: null }];
     expect(buildGroups(curated, PAGES, "ja")).toEqual([
       {
@@ -212,7 +226,12 @@ describe("buildGroups", () => {
         folded: false,
         items: [
           { label: "新規", href: "/repo/ja/new-repo.html#template", note: null, source: "curated" },
-          { label: "新しいリポジトリ", href: "/repo/ja/new-repo.html", note: null, source: "page" },
+          {
+            label: "新しいリポジトリ",
+            href: "/repo/ja/new-repo.html",
+            note: "ja/new-repo",
+            source: "page",
+          },
         ],
       },
     ]);
@@ -236,7 +255,7 @@ describe("buildGroups", () => {
             note: null,
             source: "curated",
           },
-          { label: "New repo", href: "/repo/new-repo.html", note: null, source: "page" },
+          { label: "New repo", href: "/repo/new-repo.html", note: "new-repo", source: "page" },
           {
             label: "The template check",
             href: "/repo/new-repo.html#the-template-check",
@@ -350,7 +369,7 @@ describe("filterGroups", () => {
     expect(filterGroups(folded, "API gamma lim")).toEqual([
       {
         key: "dir:api",
-        title: "api",
+        title: "Api",
         kind: "dir",
         folded: false,
         items: [

@@ -10,6 +10,7 @@ import {
   routeOf,
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
+import { dirTitle } from "../../../actions/pages-site/.vitepress/dir-title.ts";
 import {
   assertCentralTheme,
   commandTierEnv,
@@ -262,6 +263,8 @@ describe("derive", () => {
     mkdirSync(join(dir, "guide"));
     writeFileSync(join(dir, "guide", "README.md"), "# Guide\n");
     writeFileSync(join(dir, "guide", "deep-dive.md"), "no heading here\n");
+    mkdirSync(join(dir, "api-reference"));
+    writeFileSync(join(dir, "api-reference", "errors.md"), "# error codes\n");
     mkdirSync(join(dir, ".vitepress"));
     writeFileSync(join(dir, ".vitepress", "stray.md"), "# hidden\n");
     return dir;
@@ -270,6 +273,7 @@ describe("derive", () => {
   test("walkMarkdown lists markdown only, skipping dot directories", () => {
     expect(walkMarkdown(fixture())).toEqual([
       "README.md",
+      "api-reference/errors.md",
       "guide/README.md",
       "guide/deep-dive.md",
       "setup.md",
@@ -288,13 +292,18 @@ describe("derive", () => {
     expect(pageTitle(dir, "guide/deep-dive.md")).toBe("deep dive");
   });
 
-  test("the sidebar mirrors the tree: landing first, one group per directory", () => {
+  test("the sidebar mirrors the tree: landing first, one group per directory titled from its folder name, pages titled as their h1 wrote them", () => {
     const dir = fixture();
     expect(deriveSidebar(dir, walkMarkdown(dir))).toEqual([
       { text: "Home", link: "/" },
       { text: "Getting started", link: "/setup" },
       {
-        text: "guide",
+        text: "Api Reference",
+        collapsed: false,
+        items: [{ text: "error codes", link: "/api-reference/errors" }],
+      },
+      {
+        text: "Guide",
         collapsed: false,
         items: [
           { text: "Guide", link: "/guide/" },
@@ -319,6 +328,16 @@ describe("derive", () => {
     expect(routeOf("search-index.md", rewrites)).toBe("/search-index");
   });
 
+  test.each([
+    ["guide", "Guide"],
+    ["api-reference", "Api Reference"],
+    ["release_notes", "Release Notes"],
+    ["v2", "V2"],
+    ["guide/getting-started", "Guide/Getting Started"],
+  ])("a directory named %s is titled %s", (dir, title) => {
+    expect(dirTitle(dir)).toBe(title);
+  });
+
   test("locale directories follow the convention: real language tags only", () => {
     for (const tag of ["zh-cn", "zh-tw", "ja", "de", "pt-br"]) {
       expect(isLocaleDir(tag)).toBe(true);
@@ -341,7 +360,7 @@ describe("derive", () => {
     expect(items).toEqual([
       { text: "zh-cn/README.md", link: "/zh-cn/" },
       {
-        text: "guide",
+        text: "Guide",
         collapsed: false,
         items: [{ text: "zh-cn/guide/intro.md", link: "/zh-cn/guide/intro" }],
       },

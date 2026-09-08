@@ -35,15 +35,25 @@ export function groupRows(group: LauncherGroup): {
   };
 }
 
-/** The rows a group shows now, in display order. */
-export function visibleItems({ group, open }: ShownGroup): LauncherItem[] {
+/** One option of the list: a link to a page or heading, or a folded
+ *  group's fold row, which toggles that group's foldable rows. */
+export type LauncherRow =
+  | { kind: "link"; item: LauncherItem }
+  | { kind: "fold"; group: LauncherGroup; open: boolean };
+
+/** The options a group shows now, in display order: its kept rows, its
+ *  fold row when it has one, then its foldable rows while it is open. */
+export function visibleRows({ group, open }: ShownGroup): LauncherRow[] {
   const { kept, foldable } = groupRows(group);
-  return open ? [...kept, ...foldable] : kept;
+  const rows: LauncherRow[] = kept.map((item) => ({ kind: "link", item }));
+  if (group.folded) rows.push({ kind: "fold", group, open });
+  if (open) for (const item of foldable) rows.push({ kind: "link", item });
+  return rows;
 }
 
-/** The rows the arrow keys walk, in display order. */
-export function flatItems(shown: ShownGroup[]): LauncherItem[] {
-  return shown.flatMap(visibleItems);
+/** The options the arrow keys walk, in display order. */
+export function flatRows(shown: ShownGroup[]): LauncherRow[] {
+  return shown.flatMap(visibleRows);
 }
 
 /** The fold row's text: what a `dir` group hides is its pages (headings
