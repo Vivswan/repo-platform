@@ -1,0 +1,371 @@
+/*
+ * The search launcher: the landing page's panel, the nav's field-shaped
+ * button, and the dialog the button opens. Material and metrics come from
+ * the tokens in custom.css; the hue appears on the highlighted row and
+ * the focused field (each a tint or icon plus a 2px inset ring, so
+ * neither state rests on color alone) and on focus rings only. Reading
+ * rules hold: 17px-class text, emphasis by weight, left-aligned rows,
+ * line-height 1.6 on every row that can wrap (labels, notes, group heads,
+ * the fold row, the empty state) and 1.5 on the single-line controls (the
+ * input, the keycaps, the nav button).
+ * Carbon's own search button is retired here: the launcher owns the
+ * shortcut, and keeping `search: local` in the config only ships the
+ * index the launcher's full-text fallback loads.
+ */
+
+.VPNavBar .VPNavBarSearch {
+  display: none;
+}
+
+/* ---------- the panel and the dialog body ---------- */
+
+.fleet-launcher {
+  position: relative;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-lg);
+  box-shadow: var(--vp-shadow-4);
+  overflow: hidden;
+  color: var(--vp-c-text-1);
+  font-size: 17px;
+  line-height: 1.6;
+  text-align: left;
+  /* the dialog mounts under carbon's nav bar, which sets nowrap */
+  white-space: normal;
+}
+.fleet-launcher-mode-panel {
+  margin: 20px 0 32px;
+  animation: fleet-launcher-rise 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes fleet-launcher-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fleet-launcher-dialog .fleet-launcher {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.fleet-launcher-field {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 64px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--vp-c-divider);
+  /* the panel and the dialog clip the field's top corners at this radius;
+   * the focus ring below follows it instead of being cut */
+  border-radius: var(--fleet-radius-lg) var(--fleet-radius-lg) 0 0;
+  color: var(--vp-c-text-3);
+  transition: color var(--fleet-transition);
+}
+/* The input's own outline is off; the field wrapper hosts the focus ring
+ * so the whole 64px field lights up, not a box inside it. */
+.fleet-launcher-field:has(.fleet-launcher-input:focus-visible) {
+  color: var(--fleet-hue);
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
+}
+.fleet-launcher-field .fleet-launcher-icon {
+  flex: none;
+}
+.fleet-launcher-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vp-c-text-1);
+  font: inherit;
+  font-size: 21px;
+  line-height: 1.5;
+  outline: none;
+  caret-color: var(--fleet-hue);
+}
+.fleet-launcher-input::placeholder {
+  color: var(--vp-c-text-3);
+}
+.fleet-launcher-input::-webkit-search-cancel-button,
+.fleet-launcher-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.fleet-launcher-keys {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+.fleet-launcher-keys kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 0.45em;
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--vp-c-text-2);
+  background: var(--vp-c-bg-soft-2);
+  border: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-sm);
+}
+
+/* ---------- the grouped list ---------- */
+
+.fleet-launcher-list {
+  padding: 6px 0 8px;
+}
+.fleet-launcher-list:empty {
+  padding: 0;
+}
+.fleet-launcher-dialog .fleet-launcher-list {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+}
+.fleet-launcher-group-title {
+  padding: 16px 20px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--vp-c-text-3);
+}
+.fleet-launcher-rows {
+  padding: 0 8px;
+}
+
+.fleet-launcher-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 36%);
+  gap: 16px;
+  align-items: baseline;
+  min-height: 46px;
+  padding: 10px 12px;
+  border-radius: var(--fleet-radius-md);
+  color: var(--vp-c-text-1);
+  font-weight: 400;
+  text-decoration: none;
+  line-height: 1.6;
+  transition: background-color var(--fleet-transition);
+}
+.fleet-launcher-link:hover {
+  background: var(--vp-c-bg-soft-2);
+}
+.fleet-launcher-label {
+  font-size: 16.5px;
+}
+.fleet-launcher-target {
+  font-size: 14.5px;
+  color: var(--vp-c-text-2);
+  text-align: right;
+  overflow-wrap: anywhere;
+  transition: color var(--fleet-transition);
+}
+.fleet-launcher mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+}
+
+.fleet-launcher-fold {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--fleet-radius-md);
+  color: var(--vp-c-text-2);
+  font-size: 15px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.fleet-launcher-fold:hover {
+  background: var(--vp-c-bg-soft-2);
+  color: var(--vp-c-text-1);
+}
+
+.fleet-launcher-empty {
+  margin: 0;
+  padding: 20px 20px 22px;
+  color: var(--vp-c-text-2);
+  font-size: 16px;
+  line-height: 1.6;
+}
+/* Stays in the accessibility tree while empty, so its first message is a
+ * change inside a live region, not a region appearing already filled. */
+.fleet-launcher-empty:empty {
+  padding: 0;
+}
+.fleet-launcher-empty b {
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+}
+
+/* Inside the prose column (the landing panel) the .vp-doc rules for links
+ * and paragraphs would restyle the launcher; these put them back.
+ * `.vp-doc a` outranks `.fleet-launcher-link`, so every property it sets
+ * (color, weight, decoration, transition) is restated here. */
+.vp-doc .fleet-launcher a,
+.vp-doc .fleet-launcher a:hover {
+  color: var(--vp-c-text-1);
+  font-weight: 400;
+  text-decoration: none;
+  transition: background-color var(--fleet-transition);
+}
+.vp-doc .fleet-launcher p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ---------- the nav button ---------- */
+
+.VPNavBar .fleet-launcher-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 520px);
+  height: 40px;
+  margin: 0 auto;
+  padding: 0 12px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-md);
+  background: var(--fleet-field-bg);
+  color: var(--vp-c-text-3);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--fleet-transition),
+    box-shadow var(--fleet-transition);
+}
+.VPNavBar .fleet-launcher-button:hover {
+  border-color: var(--fleet-hue);
+}
+.VPNavBar .fleet-launcher-button:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+}
+.VPNavBar .fleet-launcher-button .fleet-launcher-icon {
+  flex: none;
+}
+.VPNavBar .fleet-launcher-button .fleet-launcher-button-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- the dialog ---------- */
+
+.fleet-launcher-dialog {
+  width: min(720px, 90vw);
+  max-width: none;
+  max-height: none;
+  margin: 10vh auto auto;
+  padding: 0;
+  border: 1px solid var(--vp-c-border);
+  border-radius: var(--fleet-radius-lg);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  box-shadow: var(--vp-shadow-4);
+  overflow: hidden;
+}
+.fleet-launcher-dialog::backdrop {
+  background: var(--vp-backdrop-bg-color);
+}
+.fleet-launcher-dialog[open] {
+  animation: fleet-launcher-rise 180ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* ---------- narrow viewports ---------- */
+
+@media (max-width: 767px) {
+  .fleet-launcher-field {
+    height: 56px;
+    gap: 10px;
+    padding: 0 12px 0 14px;
+  }
+  .fleet-launcher-input {
+    font-size: 18px;
+  }
+  .fleet-launcher-field .fleet-launcher-keys {
+    display: none;
+  }
+  .fleet-launcher-link {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    align-items: start;
+  }
+  .fleet-launcher-label {
+    font-size: 16px;
+  }
+  .fleet-launcher-target {
+    font-size: 14px;
+    text-align: left;
+  }
+  .VPNavBar .fleet-launcher-button {
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--vp-c-text-2);
+  }
+  .VPNavBar .fleet-launcher-button .fleet-launcher-button-text,
+  .VPNavBar .fleet-launcher-button .fleet-launcher-keys {
+    display: none;
+  }
+  .fleet-launcher-dialog {
+    margin-top: 6vh;
+  }
+  .fleet-launcher-dialog .fleet-launcher-list {
+    max-height: calc(100vh - 6vh - 56px - 32px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleet-launcher-mode-panel,
+  .fleet-launcher-dialog[open] {
+    animation: none;
+  }
+  .fleet-launcher-field,
+  .fleet-launcher-link,
+  .vp-doc .fleet-launcher a,
+  .vp-doc .fleet-launcher a:hover,
+  .fleet-launcher-target,
+  .fleet-launcher-fold,
+  .VPNavBar .fleet-launcher-button {
+    transition: none;
+  }
+}
+
+/* ---------- the highlighted row ---------- */
+
+/* Last, so the hue wins over every metric rule above, the narrow-viewport
+ * ones included. The tint alone reads under 1.4:1 against the row; the
+ * inset ring is the indicator that clears 3:1. */
+.fleet-launcher-link[aria-selected="true"],
+.fleet-launcher-fold[aria-selected="true"] {
+  background: var(--fleet-hue-band);
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
+}
+.fleet-launcher-link[aria-selected="true"] .fleet-launcher-target {
+  color: var(--fleet-hue);
+}
+
+/* A page with the panel on it (a landing page with a curated table) has
+ * its search in the page; the nav entry would be a second one. */
+body:has(.fleet-launcher-mode-panel) .VPNavBar .fleet-launcher-button {
+  display: none;
+}

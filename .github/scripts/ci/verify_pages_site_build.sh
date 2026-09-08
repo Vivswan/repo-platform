@@ -56,8 +56,9 @@ absent() { if grep -qF -- "$1" "$2"; then fail "'$1' should not be in $2"; fi; }
 # tree added after v0.1.0 (so the locale must appear in latest and v0.2.0
 # but not v0.1.0 - per-version locale detection).
 mkdir -p "$WORK/docs/guide"
-printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n' > "$WORK/docs/README.md"
-printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n' > "$WORK/docs/setup.md"
+printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n' > "$WORK/docs/README.md"
+printf '| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n' >> "$WORK/docs/README.md"
+printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n## Install steps\n\nOne, then two.\n' > "$WORK/docs/setup.md"
 printf '# Guide\n\nThe guide index, version one.\n' > "$WORK/docs/guide/README.md"
 git -C "$WORK" init -q -b main
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
@@ -142,7 +143,7 @@ grep -qrF -- "wix-madefor-text-latin-wght-normal" "$site/latest/assets" ||
 # and the provenance line naming each tier's ref (main for the HEAD tier,
 # the tag for a tag tier) and the page's source file.
 present "fleet-facts" "$site/latest/index.html"
-present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"' "$site/latest/index.html"
+present 'fleet-facts-repository" href="https://github.com/fixture-owner/fixture-repo"><span class="fleet-facts-segment">fixture-owner/</span><wbr><span class="fleet-facts-segment">fixture-repo</span><' "$site/latest/index.html"
 present 'aria-current="true">latest</a>' "$site/latest/index.html"
 present 'fleet-facts-note">reading' "$site/latest/index.html"
 present 'aria-current="true">v0.2.0</a>' "$site/v0.2.0/index.html"
@@ -156,6 +157,24 @@ present '<div class="vp-table"><table tabindex="0">' "$site/latest/setup.html"
 present '</table></div>' "$site/latest/setup.html"
 grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" ||
   fail "the table wrapper's overflow rule is missing from the built CSS"
+
+# The search launcher: the landing page's link table became the panel
+# (rendered server-side with its curated row AND the fixture's h2 as a
+# heading row under the same page group), every other page carries the
+# nav button, and the page index the launcher lists is inlined into the
+# client bundle as JSON - the h2 as an index header entry (not the page's
+# own id="..." markup) is the proof that the index carries headings.
+present 'class="fleet-launcher fleet-launcher-mode-panel"' "$site/latest/index.html"
+present 'fleet-launcher-label">Set things up<' "$site/latest/index.html"
+present 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
+# The guide/ directory: its launcher group is titled from the folder name,
+# capitalized, and its page row's note is the page's site path.
+grep -qE -- 'fleet-launcher-group-title"[^>]*>Guide<' "$site/latest/index.html" ||
+  fail "the guide/ launcher group is not titled 'Guide' - the directory title lost its capital"
+present 'fleet-launcher-target">guide<' "$site/latest/index.html"
+present 'class="fleet-launcher-button"' "$site/latest/setup.html"
+grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
+  fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
@@ -327,5 +346,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "font filter, facts card, provenance line, table wrapper, llms.txt, strict mode both arms, legacy-tag skip both arms," \
-  "calibration gate"
+  "font filter, facts card, provenance line, table wrapper, launcher panel with heading rows and page index," \
+  "llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

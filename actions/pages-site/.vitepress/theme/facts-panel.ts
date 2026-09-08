@@ -36,6 +36,23 @@ function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
+/** A path-like value (`owner/repo`, `host/path`) as one segment per slash,
+ *  each an inline block (components.css) with a `<wbr>` between them: a
+ *  value too wide for the column splits at a slash, and only a segment too
+ *  wide on its own breaks inside a word. A bare `<wbr>` is not enough: a
+ *  hyphen later in the value is the break the line breaker prefers. */
+function slashBreakable(text: string): VNode[] {
+  const parts = text.split("/");
+  return parts.flatMap((part, index) => {
+    const segment = h(
+      "span",
+      { class: "fleet-facts-segment" },
+      index === parts.length - 1 ? part : `${part}/`,
+    );
+    return index === parts.length - 1 ? [segment] : [segment, h("wbr")];
+  });
+}
+
 function note(text: string): VNode {
   return h("span", { class: "fleet-facts-note" }, text);
 }
@@ -51,11 +68,20 @@ export default defineComponent({
       const about: VNode[] = [
         row(
           "Repository",
-          h("a", { class: "fleet-facts-repository", href: facts.repoUrl }, facts.repository),
+          h(
+            "a",
+            { class: "fleet-facts-repository", href: facts.repoUrl },
+            slashBreakable(facts.repository),
+          ),
         ),
       ];
       if (facts.homepage !== null) {
-        about.push(row("Homepage", h("a", { href: facts.homepage }, shortUrl(facts.homepage))));
+        about.push(
+          row(
+            "Homepage",
+            h("a", { href: facts.homepage }, slashBreakable(shortUrl(facts.homepage))),
+          ),
+        );
       }
       if (facts.topics.length > 0) about.push(row("Topics", facts.topics.join(", ")));
 
@@ -96,8 +122,11 @@ export default defineComponent({
         sections.push(section([row("License", h("a", { href }, facts.license.name))]));
       }
 
+      // The aside-top slot renders before the page h1 in document order, so
+      // the card's title is a labelled region's name, not a heading that
+      // would sit above the h1 in the outline.
       return h("aside", { class: "fleet-facts", "aria-labelledby": "fleet-facts-title" }, [
-        h("h2", { class: "fleet-facts-title", id: "fleet-facts-title" }, facts.name),
+        h("p", { class: "fleet-facts-title", id: "fleet-facts-title" }, facts.name),
         facts.description === null
           ? null
           : h("p", { class: "fleet-facts-description" }, facts.description),

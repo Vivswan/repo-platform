@@ -26,8 +26,12 @@ import type { ThemeConfig } from "vitepress-carbon";
 // documents.
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
+import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, deriveSidebar, detectLocales, walkMarkdown } from "./derive.ts";
+import { inlineTextRule } from "./inline-text.ts";
+import { landingTableRule } from "./landing-table.ts";
 import { tableWrapRule } from "./table-wrap.ts";
+import { headersRule } from "./theme/page-index.ts";
 
 /** Carbon's theme config plus the fleet keys the version switcher and the
  *  facts surfaces read. Optional, so carbon's own baseConfig (typed
@@ -48,6 +52,7 @@ function required(name: string): string {
 
 const srcDir = required("DOCS_SITE_SRC");
 const files = walkMarkdown(srcDir);
+const rewrites = deriveRewrites(files);
 const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
   link: string;
@@ -88,7 +93,7 @@ export default defineConfigWithTheme<FleetThemeConfig>({
   base: process.env.DOCS_SITE_BASE || "/",
   srcDir,
   locales,
-  rewrites: deriveRewrites(files),
+  rewrites,
   ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
   // No lastUpdated: every tier builds from a materialized copy of the docs
   // tree (never a git checkout - see buildVitepressTier), so git-derived
@@ -120,22 +125,17 @@ export default defineConfigWithTheme<FleetThemeConfig>({
       },
     },
   },
-  // VitePress defaults the custom-block titles to uppercase (TIP, WARNING);
-  // the fleet theme reads them in sentence case.
   markdown: {
     preConfig(md) {
       tableWrapRule(md);
     },
-    container: {
-      infoLabel: "Info",
-      noteLabel: "Note",
-      tipLabel: "Tip",
-      warningLabel: "Warning",
-      dangerLabel: "Danger",
-      detailsLabel: "Details",
-      importantLabel: "Important",
-      cautionLabel: "Caution",
+    config(md) {
+      inlineTextRule(md);
+      landingTableRule(md, rewrites);
+      headersRule(md);
+      alertTitlesRule(md);
     },
+    container: CUSTOM_BLOCK_LABELS,
   },
   // Landing pages (README.md, rewritten to index.md at any depth) are the
   // site's front matter, not an article: the theme lays them out from the
