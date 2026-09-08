@@ -159,13 +159,14 @@ grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" |
   fail "the table wrapper's overflow rule is missing from the built CSS"
 
 # The search launcher: the landing page's link table became the panel
-# (rendered server-side with its curated row), every other page carries
-# the nav button, and the page index the launcher lists is inlined into
-# the client bundle as JSON - the fixture's h2 as an index header entry
-# (not the page's own id="..." markup) is the proof that headings, not
-# just pages, made it in.
+# (rendered server-side with its curated row AND the fixture's h2 as a
+# heading row under the same page group), every other page carries the
+# nav button, and the page index the launcher lists is inlined into the
+# client bundle as JSON - the h2 as an index header entry (not the page's
+# own id="..." markup) is the proof that the index carries headings.
 present 'class="fleet-launcher fleet-launcher-mode-panel"' "$site/latest/index.html"
 present 'fleet-launcher-label">Set things up<' "$site/latest/index.html"
+present 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
 present 'class="fleet-launcher-button"' "$site/latest/setup.html"
 grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
   fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"
@@ -340,5 +341,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "font filter, facts card, provenance line, table wrapper, launcher panel and page index, llms.txt," \
-  "strict mode both arms, legacy-tag skip both arms, calibration gate"
+  "font filter, facts card, provenance line, table wrapper, launcher panel with heading rows and page index," \
+  "llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

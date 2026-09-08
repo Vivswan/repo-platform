@@ -4,13 +4,14 @@
 // a curated table keeps its search. Owns the keyboard shortcut everywhere
 // (Cmd K, Ctrl K, and `/` outside a field): a capturing window listener
 // that stops carbon's own search hotkeys and then focuses the panel when
-// there is one, else opens the dialog.
+// there is one, else opens (or refocuses) the dialog.
 
 import { defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import FleetLauncher, { searchIcon, shortcutKeys } from "./launcher.ts";
-import { modifierLabel } from "./launcher-view.ts";
+import { hotkeyIntent, modifierLabel } from "./launcher-view.ts";
 
 const PANEL_FIELD = ".fleet-launcher-mode-panel .fleet-launcher-input";
+const DIALOG_FIELD = ".fleet-launcher-dialog .fleet-launcher-input";
 
 function isEditing(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
@@ -18,11 +19,12 @@ function isEditing(event: KeyboardEvent): boolean {
   return target.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName);
 }
 
-function isLauncherHotkey(event: KeyboardEvent): boolean {
-  if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) return true;
-  // Any `/` outside a field, modifiers included: carbon's own slash handler
-  // takes exactly that set, and it must never see one.
-  return event.key === "/" && !isEditing(event);
+/** The shortcut's landing: the field takes focus with its text selected,
+ *  so a repeat press from a result row types over the old query. */
+function aim(field: HTMLInputElement | null): void {
+  if (field === null) return;
+  field.focus();
+  field.select();
 }
 
 export default defineComponent({
@@ -35,15 +37,18 @@ export default defineComponent({
     async function show(): Promise<void> {
       const panel = document.querySelector<HTMLInputElement>(PANEL_FIELD);
       if (panel !== null) {
-        panel.focus();
-        panel.select();
+        aim(panel);
         panel.scrollIntoView({ block: "center" });
         return;
       }
-      opened.value = true;
-      await nextTick();
+      if (!opened.value) {
+        opened.value = true;
+        await nextTick();
+      }
       const element = dialog.value;
-      if (element !== null && !element.open) element.showModal();
+      if (element === null) return;
+      if (!element.open) element.showModal();
+      aim(element.querySelector<HTMLInputElement>(DIALOG_FIELD));
     }
 
     function close(): void {
@@ -53,9 +58,11 @@ export default defineComponent({
     }
 
     function onHotkey(event: KeyboardEvent): void {
-      if (!isLauncherHotkey(event)) return;
-      event.preventDefault();
+      const intent = hotkeyIntent(event, isEditing(event));
+      if (intent === null) return;
       event.stopImmediatePropagation();
+      if (intent === "swallow") return;
+      event.preventDefault();
       void show();
     }
 

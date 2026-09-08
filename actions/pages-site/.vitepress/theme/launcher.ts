@@ -33,6 +33,7 @@ import {
   clampHighlight,
   flatItems,
   foldLabel,
+  groupRows,
   initialHighlight,
   keyIntent,
   modifierLabel,
@@ -157,15 +158,18 @@ export default defineComponent({
     });
     const items = computed(() => flatItems(shown.value));
 
-    watch(query, async (current) => {
+    // The locale is a source too: the nav's launcher outlives a route
+    // change, and hits found in one locale's index do not belong under
+    // another locale's groups, not even while the new index loads.
+    watch([query, localeIndex], async ([current, locale]) => {
       const needsText = tokens.value.length > 0 && structured.value.length === 0;
-      if (!needsText) textHits.value = null;
+      textHits.value = null;
       searching.value = needsText;
       highlight.value = initialHighlight(current, items.value.length);
       if (!needsText) return;
-      const index = await loadIndex(localeIndex.value);
-      // A newer query owns the state by now; its own run settles it.
-      if (query.value !== current) return;
+      const index = await loadIndex(locale);
+      // A newer query or locale owns the state by now; its own run settles it.
+      if (query.value !== current || localeIndex.value !== locale) return;
       textHits.value = index ? textMatchGroup(index.search(current) as unknown as TextHit[]) : null;
       searching.value = false;
       highlight.value = initialHighlight(current, items.value.length);
@@ -211,8 +215,6 @@ export default defineComponent({
           if (query.value === "") return;
           event.preventDefault();
           query.value = "";
-          return;
-        default:
       }
     }
 
@@ -282,7 +284,8 @@ export default defineComponent({
       let index = 0;
       const groupNodes = shown.value.map(({ group, open: isOpen }, groupIndex) => {
         const titleId = `${id}-group-${groupIndex}`;
-        const rows: VNode[] = [];
+        const { kept, foldable } = groupRows(group);
+        const rows: VNode[] = kept.map((item) => row(item, index++));
         if (group.folded) {
           rows.push(
             h(
@@ -301,7 +304,7 @@ export default defineComponent({
             ),
           );
         }
-        if (isOpen) for (const item of group.items) rows.push(row(item, index++));
+        if (isOpen) for (const item of foldable) rows.push(row(item, index++));
         return h(
           "li",
           { class: "fleet-launcher-group", role: "group", "aria-labelledby": titleId },

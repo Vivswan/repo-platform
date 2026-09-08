@@ -3,13 +3,16 @@
  * button, and the dialog the button opens. Material and metrics come from
  * the tokens in custom.css; the hue appears on the highlighted row, the
  * focused field, and focus rings only. Reading rules hold: 17px-class
- * text, line-height 1.5 or more, emphasis by weight, left-aligned rows.
+ * text, emphasis by weight, left-aligned rows, line-height 1.6 on every
+ * row that can wrap (labels, notes, group heads, the empty state) and 1.5
+ * on the single-line controls (the input, the keycaps, the fold button,
+ * the nav button).
  * Carbon's own search button is retired here: the launcher owns the
  * shortcut, and keeping `search: local` in the config only ships the
  * index the launcher's full-text fallback loads.
  */
 
-.VPNavBarSearch {
+.VPNavBar .VPNavBarSearch {
   display: none;
 }
 
@@ -100,7 +103,7 @@
   padding: 0 0.45em;
   font-family: var(--vp-font-family-mono);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
   text-align: center;
   color: var(--vp-c-text-2);
   background: var(--vp-c-bg-soft-2);
@@ -130,7 +133,7 @@
   padding: 16px 20px 6px;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--vp-c-text-3);
 }
 .fleet-launcher-rows {
@@ -155,7 +158,7 @@
   color: var(--vp-c-text-1);
   font-weight: 400;
   text-decoration: none;
-  line-height: 1.5;
+  line-height: 1.6;
   transition: background-color var(--fleet-transition);
 }
 .fleet-launcher-link:hover {

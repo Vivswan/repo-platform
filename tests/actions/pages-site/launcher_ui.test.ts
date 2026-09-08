@@ -1,15 +1,21 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import type {
   LauncherGroup,
   LauncherItem,
+  PageIndexEntry,
 } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import {
   clampHighlight,
   decodeEntities,
   flatItems,
   foldLabel,
+  groupRows,
+  type HotkeyIntent,
+  hotkeyIntent,
   initialHighlight,
   type KeyIntent,
+  type KeyState,
   keyIntent,
   modifierLabel,
   moveHighlight,
@@ -55,18 +61,34 @@ const LONG_PAGE: LauncherGroup = {
   items: [
     item("Settings", "/repo/settings.html", "page"),
     item("Layers", "/repo/settings.html#layers", "heading", "Settings"),
+    item("Overrides", "/repo/settings.html#overrides", "heading", "Settings"),
   ],
 };
 
-describe("shownGroups and flatItems", () => {
-  test("a folded group hides its items until unfolded; the flat list follows", () => {
-    const closed = shownGroups([NEW_REPO, API], new Set());
-    expect(closed.map((entry) => entry.open)).toEqual([true, false]);
-    expect(flatItems(closed)).toEqual(NEW_REPO.items);
+describe("groupRows", () => {
+  test.each<[string, LauncherGroup, LauncherItem[], LauncherItem[]]>([
+    ["an unfolded group keeps every row", NEW_REPO, NEW_REPO.items, []],
+    ["a dir fold hides its pages and their headings", API, [], API.items],
+    [
+      "a page fold keeps the page link and hides the headings",
+      LONG_PAGE,
+      [LONG_PAGE.items[0]],
+      LONG_PAGE.items.slice(1),
+    ],
+  ])("%s", (_, group, kept, foldable) => {
+    expect(groupRows(group)).toEqual({ kept, foldable });
+  });
+});
 
-    const opened = shownGroups([NEW_REPO, API], new Set(["dir:api"]));
-    expect(opened.map((entry) => entry.open)).toEqual([true, true]);
-    expect(flatItems(opened)).toEqual([...NEW_REPO.items, ...API.items]);
+describe("shownGroups and flatItems", () => {
+  test("a folded group shows only its kept rows until unfolded; the flat list follows", () => {
+    const closed = shownGroups([NEW_REPO, API, LONG_PAGE], new Set());
+    expect(closed.map((entry) => entry.open)).toEqual([true, false, false]);
+    expect(flatItems(closed)).toEqual([...NEW_REPO.items, LONG_PAGE.items[0]]);
+
+    const opened = shownGroups([NEW_REPO, API, LONG_PAGE], new Set(["dir:api", LONG_PAGE.key]));
+    expect(opened.map((entry) => entry.open)).toEqual([true, true, true]);
+    expect(flatItems(opened)).toEqual([...NEW_REPO.items, ...API.items, ...LONG_PAGE.items]);
   });
 });
 
@@ -75,12 +97,9 @@ describe("foldLabel", () => {
     [API, false, "Show 2 pages in api/"],
     [API, true, "Hide 2 pages in api/"],
     [{ ...API, items: API.items.slice(0, 2) }, false, "Show 1 page in api/"],
-    [LONG_PAGE, false, "Show 1 heading on Settings"],
-    [
-      { ...LONG_PAGE, items: [...LONG_PAGE.items, LONG_PAGE.items[1]] },
-      true,
-      "Hide 2 headings on Settings",
-    ],
+    [LONG_PAGE, false, "Show 2 headings on Settings"],
+    [LONG_PAGE, true, "Hide 2 headings on Settings"],
+    [{ ...LONG_PAGE, items: LONG_PAGE.items.slice(0, 2) }, false, "Show 1 heading on Settings"],
   ])("%#: %s", (group, open, label) => {
     expect(foldLabel(group, open)).toBe(label);
   });
@@ -181,19 +200,49 @@ describe("clampHighlight", () => {
   });
 });
 
+const key = (key: string, held: Partial<KeyState> = {}): KeyState => ({
+  key,
+  isComposing: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  ...held,
+});
+
 describe("keyIntent", () => {
-  test.each<[string, boolean, KeyIntent | null]>([
-    ["ArrowDown", false, "down"],
-    ["ArrowUp", false, "up"],
-    ["Enter", false, "open"],
-    ["Escape", false, "clear"],
-    ["Enter", true, null],
-    ["ArrowDown", true, null],
-    ["Home", false, null],
-    ["End", false, null],
-    ["a", false, null],
-  ])("%s (composing: %p) means %p", (key, isComposing, intent) => {
-    expect(keyIntent({ key, isComposing })).toBe(intent);
+  test.each<[KeyState, KeyIntent | null]>([
+    [key("ArrowDown"), "down"],
+    [key("ArrowUp"), "up"],
+    [key("Enter"), "open"],
+    [key("Escape"), "clear"],
+    [key("Enter", { isComposing: true }), null],
+    [key("ArrowDown", { isComposing: true }), null],
+    [key("ArrowUp", { shiftKey: true }), null],
+    [key("ArrowUp", { metaKey: true }), null],
+    [key("ArrowDown", { altKey: true }), null],
+    [key("ArrowDown", { ctrlKey: true }), null],
+    [key("Enter", { metaKey: true }), "open"],
+    [key("Home"), null],
+    [key("End"), null],
+    [key("a"), null],
+  ])("%j means %p", (event, intent) => {
+    expect(keyIntent(event)).toBe(intent);
+  });
+});
+
+describe("hotkeyIntent", () => {
+  test.each<[KeyState, boolean, HotkeyIntent | null]>([
+    [key("k", { metaKey: true }), false, "open"],
+    [key("K", { ctrlKey: true, shiftKey: true }), true, "open"],
+    [key("k", { ctrlKey: true, isComposing: true }), false, "swallow"],
+    [key("k"), false, null],
+    [key("k", { isComposing: true }), false, null],
+    [key("/"), false, "open"],
+    [key("/", { shiftKey: true, altKey: true }), false, "open"],
+    [key("/"), true, null],
+  ])("%j (editing: %p) asks %p", (event, editing, intent) => {
+    expect(hotkeyIntent(event, editing)).toBe(intent);
   });
 });
 
@@ -206,5 +255,82 @@ describe("modifierLabel", () => {
     ["", "Ctrl"],
   ])("%s shows %s", (platform, label) => {
     expect(modifierLabel(platform)).toBe(label);
+  });
+});
+
+describe("the rendered list", () => {
+  const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
+  const headers = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      title: `Part ${index}`,
+      anchor: `part-${index}`,
+      level: 2 as const,
+    }));
+  const page = (url: string, title: string, dir: string, headerCount = 0): PageIndexEntry => ({
+    url,
+    title,
+    dir,
+    locale: "root",
+    headers: headers(headerCount),
+  });
+  const pages: PageIndexEntry[] = [
+    page("/repo/", "Home", ""),
+    page("/repo/setup.html", "Setup", "", 1),
+    page("/repo/long.html", "Long", "", 9),
+    ...Array.from({ length: 9 }, (_, index) =>
+      page(`/repo/api/p${index}.html`, `P${index}`, "api"),
+    ),
+    page("/repo/guide/intro.html", "Intro", "guide", 1),
+  ];
+
+  /** The list's rows and fold buttons in document order: `<row index> <href>`
+   *  for a row, `fold: <label>` for a fold button. */
+  function outline(html: string): string[] {
+    const ROW_RE =
+      /<li class="fleet-launcher-row"[^>]*id="v-\d+-row-(\d+)"[^>]*><a class="fleet-launcher-link" href="([^"]*)"|<button type="button" class="fleet-launcher-fold-button"[^>]*>([^<]*)</g;
+    return [...html.matchAll(ROW_RE)].map(([, index, href, fold]) =>
+      fold === undefined ? `${index} ${href}` : `fold: ${fold}`,
+    );
+  }
+
+  test("a folded page group keeps its page row before the fold, a folded dir group hides everything behind it, and the row indexes follow document order", async () => {
+    // Under bun the bare `vitepress` specifier resolves to the node entry,
+    // which has no useData (Vite aliases the client one), and the data
+    // loader runs only inside a VitePress build. Virtual modules stand in
+    // for both; the node entry, which the markdown-rule tests import by
+    // path, is untouched.
+    const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
+    Bun.plugin({
+      name: "launcher-ssr-stubs",
+      setup(build) {
+        build.module("vitepress", () => ({
+          exports: { useData: () => ({ localeIndex: vue.ref("root") }) },
+          loader: "object",
+        }));
+        build.module(resolve(ACTION_DIR, ".vitepress/theme/pages.data.ts"), () => ({
+          exports: { data: pages },
+          loader: "object",
+        }));
+      },
+    });
+    const { renderToString } = await import(
+      resolve(ACTION_DIR, "node_modules/vue/server-renderer/index.mjs")
+    );
+    const { default: FleetLauncher } = await import(
+      resolve(ACTION_DIR, ".vitepress/theme/launcher.ts")
+    );
+
+    const rows = JSON.stringify([{ label: "Set things up", href: "./setup.html", note: null }]);
+    const html = await renderToString(vue.createSSRApp(FleetLauncher, { rows, mode: "panel" }));
+
+    expect(outline(html)).toEqual([
+      "0 /repo/setup.html",
+      "1 /repo/setup.html#part-0",
+      "2 /repo/long.html",
+      "fold: Show 9 headings on Long",
+      "fold: Show 9 pages in api/",
+      "3 /repo/guide/intro.html",
+      "4 /repo/guide/intro.html#part-0",
+    ]);
   });
 });

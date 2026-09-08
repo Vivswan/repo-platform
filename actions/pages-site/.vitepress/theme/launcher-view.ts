@@ -1,12 +1,14 @@
-// The launcher UI's pure helpers: which rows a fold state shows, how the
-// keyboard highlight moves, how full-text hits become a group, and the
-// modifier keycap. No vue or vitepress import, so the test suite loads
-// this without a VitePress process and launcher.ts stays a renderer.
+// The launcher UI's pure helpers: which rows a fold state shows, which
+// keys are the launcher's, how the keyboard highlight moves, how full-text
+// hits become a group, and the modifier keycap. No vue or vitepress import,
+// so the test suite loads this without a VitePress process and launcher.ts
+// and nav-launcher.ts stay renderers.
 
 import type { LauncherGroup, LauncherItem } from "./launcher-model.ts";
 
 /** A group as the list shows it: `open` is false only for a folded group
- *  the reader has not unfolded, whose items stay behind its fold row. */
+ *  the reader has not unfolded, whose foldable rows stay behind its fold
+ *  row. */
 export interface ShownGroup {
   group: LauncherGroup;
   open: boolean;
@@ -16,21 +18,44 @@ export function shownGroups(groups: LauncherGroup[], unfolded: ReadonlySet<strin
   return groups.map((group) => ({ group, open: !group.folded || unfolded.has(group.key) }));
 }
 
-/** The rows the arrow keys walk, in display order: every item of every
- *  open group. A folded group contributes nothing until it is unfolded. */
+/** A group's rows split around its fold row, each side in display order:
+ *  `kept` rows show whatever the fold state, `foldable` rows only while the
+ *  group is open. A `dir` fold hides its pages (headings ride along); a
+ *  page fold hides the headings and keeps the page's own link reachable.
+ *  An unfolded group keeps everything. */
+export function groupRows(group: LauncherGroup): {
+  kept: LauncherItem[];
+  foldable: LauncherItem[];
+} {
+  if (!group.folded) return { kept: group.items, foldable: [] };
+  if (group.kind === "dir") return { kept: [], foldable: group.items };
+  return {
+    kept: group.items.filter((item) => item.source !== "heading"),
+    foldable: group.items.filter((item) => item.source === "heading"),
+  };
+}
+
+/** The rows a group shows now, in display order. */
+export function visibleItems({ group, open }: ShownGroup): LauncherItem[] {
+  const { kept, foldable } = groupRows(group);
+  return open ? [...kept, ...foldable] : kept;
+}
+
+/** The rows the arrow keys walk, in display order. */
 export function flatItems(shown: ShownGroup[]): LauncherItem[] {
-  return shown.flatMap((entry) => (entry.open ? entry.group.items : []));
+  return shown.flatMap(visibleItems);
 }
 
 /** The fold row's text: what a `dir` group hides is its pages (headings
  *  ride along, uncounted); what a page group hides is its headings. */
 export function foldLabel(group: LauncherGroup, open: boolean): string {
   const verb = open ? "Hide" : "Show";
+  const { foldable } = groupRows(group);
   if (group.kind === "dir") {
-    const pages = group.items.filter((item) => item.source === "page").length;
+    const pages = foldable.filter((item) => item.source === "page").length;
     return `${verb} ${pages} ${pages === 1 ? "page" : "pages"} in ${group.key.slice("dir:".length)}/`;
   }
-  const headings = group.items.filter((item) => item.source === "heading").length;
+  const headings = foldable.length;
   return `${verb} ${headings} ${headings === 1 ? "heading" : "headings"} on ${group.title}`;
 }
 
@@ -52,16 +77,28 @@ export function clampHighlight(current: number, count: number): number {
 
 export type KeyIntent = "down" | "up" | "open" | "clear";
 
+/** The keyboard state the launcher's key tests read. */
+export interface KeyState {
+  key: string;
+  isComposing: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}
+
 /** What a keydown in the field asks of the list, or null for a key the
- *  field keeps (text editing, Home and End caret moves, and every key
- *  during IME composition, where Enter accepts the candidate). */
-export function keyIntent(event: { key: string; isComposing: boolean }): KeyIntent | null {
+ *  field keeps: text editing, Home and End caret moves, an arrow with any
+ *  modifier held (Shift+Arrow selects, Cmd+Arrow jumps the caret), and
+ *  every key during IME composition, where Enter accepts the candidate. */
+export function keyIntent(event: KeyState): KeyIntent | null {
   if (event.isComposing) return null;
+  const chord = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
   switch (event.key) {
     case "ArrowDown":
-      return "down";
+      return chord ? null : "down";
     case "ArrowUp":
-      return "up";
+      return chord ? null : "up";
     case "Enter":
       return "open";
     case "Escape":
@@ -69,6 +106,24 @@ export function keyIntent(event: { key: string; isComposing: boolean }): KeyInte
     default:
       return null;
   }
+}
+
+export type HotkeyIntent = "open" | "swallow";
+
+/** What a keydown anywhere on the page asks of the shortcut owner: "open"
+ *  for the launcher's shortcut (Cmd K, Ctrl K, and `/` outside a field;
+ *  `editing` says the target is one), "swallow" for the same keys during
+ *  IME composition, where Ctrl K converts the candidate: the launcher stays
+ *  shut and the key keeps its default action, but carbon's own hotkey
+ *  handler, which does not check composition, must still never see it.
+ *  The `/` set includes every modifier on purpose: carbon's slash handler
+ *  takes exactly that set. */
+export function hotkeyIntent(event: KeyState, editing: boolean): HotkeyIntent | null {
+  const launcherKey =
+    (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) ||
+    (event.key === "/" && !editing);
+  if (!launcherKey) return null;
+  return event.isComposing ? "swallow" : "open";
 }
 
 /** The highlight a query change lands on: the first row when a query has
