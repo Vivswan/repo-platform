@@ -4,9 +4,9 @@
  * the tokens in custom.css; the hue appears on the highlighted row, the
  * focused field, and focus rings only. Reading rules hold: 17px-class
  * text, emphasis by weight, left-aligned rows, line-height 1.6 on every
- * row that can wrap (labels, notes, group heads, the empty state) and 1.5
- * on the single-line controls (the input, the keycaps, the fold button,
- * the nav button).
+ * row that can wrap (labels, notes, group heads, the fold button, the
+ * empty state) and 1.5 on the single-line controls (the input, the
+ * keycaps, the nav button).
  * Carbon's own search button is retired here: the launcher owns the
  * shortcut, and keeping `search: local` in the config only ships the
  * index the launcher's full-text fallback loads.
@@ -197,7 +197,7 @@
   color: var(--vp-c-text-2);
   font: inherit;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.6;
   text-align: left;
   cursor: pointer;
   transition:
