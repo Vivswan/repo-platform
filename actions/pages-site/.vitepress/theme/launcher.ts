@@ -25,22 +25,22 @@ import {
   type CuratedRow,
   filterGroups,
   type LauncherGroup,
-  type LauncherItem,
   matchRanges,
   queryTokens,
 } from "./launcher-model.ts";
 import {
   clampHighlight,
-  flatItems,
+  flatRows,
   foldLabel,
-  groupRows,
   initialHighlight,
   keyIntent,
+  type LauncherRow,
   modifierLabel,
   moveHighlight,
   shownGroups,
   type TextHit,
   textMatchGroup,
+  visibleRows,
 } from "./launcher-view.ts";
 import { data } from "./pages.data.ts";
 
@@ -156,7 +156,7 @@ export default defineComponent({
       const fallback = structured.value.length === 0 ? textHits.value : null;
       return shownGroups(fallback ? [fallback] : structured.value, unfolded.value);
     });
-    const items = computed(() => flatItems(shown.value));
+    const rows = computed(() => flatRows(shown.value));
 
     // The locale is a source too: the nav's launcher outlives a route
     // change, and hits found in one locale's index do not belong under
@@ -165,14 +165,14 @@ export default defineComponent({
       const needsText = tokens.value.length > 0 && structured.value.length === 0;
       textHits.value = null;
       searching.value = needsText;
-      highlight.value = initialHighlight(current, items.value.length);
+      highlight.value = initialHighlight(current, rows.value.length);
       if (!needsText) return;
       const index = await loadIndex(locale);
       // A newer query or locale owns the state by now; its own run settles it.
       if (query.value !== current || localeIndex.value !== locale) return;
       textHits.value = index ? textMatchGroup(index.search(current) as unknown as TextHit[]) : null;
       searching.value = false;
-      highlight.value = initialHighlight(current, items.value.length);
+      highlight.value = initialHighlight(current, rows.value.length);
     });
 
     function setHighlight(index: number): void {
@@ -183,7 +183,7 @@ export default defineComponent({
     // Rows can leave the list (a group folds, a query narrows) while the
     // highlight still names one of them.
     watch(
-      () => items.value.length,
+      () => rows.value.length,
       (count) => {
         highlight.value = clampHighlight(highlight.value, count);
       },
@@ -192,7 +192,7 @@ export default defineComponent({
     function onKeydown(event: KeyboardEvent): void {
       const intent = keyIntent(event);
       if (intent === null) return;
-      const count = items.value.length;
+      const count = rows.value.length;
       switch (intent) {
         case "down":
         case "up":
@@ -200,12 +200,13 @@ export default defineComponent({
           setHighlight(moveHighlight(highlight.value, intent === "down" ? 1 : -1, count));
           return;
         case "open": {
-          // The row's own link is clicked, so keyboard and pointer take one
-          // path: VitePress's click handler routes pages, leaves assets and
-          // external hrefs to the browser, and the link's handler closes.
+          // The highlighted option is clicked, so keyboard and pointer take
+          // one path: a fold row toggles; a link goes through VitePress's
+          // click handler (pages routed, assets and external hrefs left to
+          // the browser) and its own handler closes.
           if (highlight.value < 0) return;
           event.preventDefault();
-          document.getElementById(rowId(highlight.value))?.querySelector("a")?.click();
+          document.getElementById(rowId(highlight.value))?.click();
           return;
         }
         case "clear":
@@ -243,82 +244,83 @@ export default defineComponent({
       }
     });
 
-    const row = (item: LauncherItem, index: number): VNode => {
-      const target = item.note;
+    // The listbox pattern: the field keeps focus, every option is the
+    // element itself (a link or the fold row) and is reached through
+    // aria-activedescendant, never through Tab. A press on an option
+    // would move focus off the field and stall the arrow keys, so its
+    // default is stopped; the click still fires.
+    const option = (row: LauncherRow, index: number): VNode => {
+      const shared = {
+        role: "option",
+        id: rowId(index),
+        "aria-selected": highlight.value === index ? "true" : "false",
+        onMousemove: () => {
+          if (highlight.value !== index) highlight.value = index;
+        },
+        onMousedown: (event: MouseEvent) => event.preventDefault(),
+      };
+      if (row.kind === "fold") {
+        return h(
+          "div",
+          {
+            class: "fleet-launcher-fold",
+            ...shared,
+            onClick: () => toggleFold(row.group.key),
+          },
+          foldLabel(row.group, row.open),
+        );
+      }
+      const { item } = row;
       return h(
-        "li",
+        "a",
         {
-          class: "fleet-launcher-row",
-          role: "option",
-          id: rowId(index),
-          "aria-selected": highlight.value === index ? "true" : "false",
-          onMousemove: () => {
-            if (highlight.value !== index) highlight.value = index;
+          class: "fleet-launcher-link",
+          ...shared,
+          tabindex: "-1",
+          href: item.href,
+          // VitePress's own capturing click handler routes internal
+          // links; this only lets the dialog go once the link is taken.
+          onClick: (event: MouseEvent) => {
+            if (plainClick(event)) emit("close");
           },
         },
-        h(
-          "a",
-          {
-            class: "fleet-launcher-link",
-            href: item.href,
-            onFocus: () => {
-              highlight.value = index;
-            },
-            // VitePress's own capturing click handler routes internal
-            // links; this only lets the dialog go once the link is taken.
-            onClick: (event: MouseEvent) => {
-              if (plainClick(event)) emit("close");
-            },
-          },
-          [
-            h("span", { class: "fleet-launcher-label" }, emphasized(item.label, tokens.value)),
-            target === null
-              ? null
-              : h("span", { class: "fleet-launcher-target" }, emphasized(target, tokens.value)),
-          ],
-        ),
+        [
+          h("span", { class: "fleet-launcher-label" }, emphasized(item.label, tokens.value)),
+          item.note === null
+            ? null
+            : h("span", { class: "fleet-launcher-target" }, emphasized(item.note, tokens.value)),
+        ],
       );
     };
 
     return () => {
       let index = 0;
-      const groupNodes = shown.value.map(({ group, open: isOpen }, groupIndex) => {
+      const groupNodes = shown.value.map((entry, groupIndex) => {
+        const { group, open: isOpen } = entry;
         const titleId = `${id}-group-${groupIndex}`;
-        const { kept, foldable } = groupRows(group);
-        const rows: VNode[] = kept.map((item) => row(item, index++));
-        if (group.folded) {
-          rows.push(
-            h(
-              "li",
-              { class: "fleet-launcher-fold", role: "presentation" },
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "fleet-launcher-fold-button",
-                  "aria-expanded": isOpen ? "true" : "false",
-                  onClick: () => toggleFold(group.key),
-                },
-                foldLabel(group, isOpen),
-              ),
-            ),
-          );
-        }
-        if (isOpen) for (const item of foldable) rows.push(row(item, index++));
         return h(
-          "li",
-          { class: "fleet-launcher-group", role: "group", "aria-labelledby": titleId },
+          "div",
+          {
+            class: "fleet-launcher-group",
+            role: "group",
+            "aria-labelledby": titleId,
+            "aria-expanded": group.folded ? (isOpen ? "true" : "false") : undefined,
+          },
           [
             h(
               "div",
               { class: "fleet-launcher-group-title", id: titleId },
               emphasized(group.title, tokens.value),
             ),
-            h("ul", { class: "fleet-launcher-rows", role: "presentation" }, rows),
+            h(
+              "div",
+              { class: "fleet-launcher-rows" },
+              visibleRows(entry).map((row) => option(row, index++)),
+            ),
           ],
         );
       });
-      const empty = tokens.value.length > 0 && items.value.length === 0 && !searching.value;
+      const empty = tokens.value.length > 0 && rows.value.length === 0 && !searching.value;
 
       return h(
         "section",
@@ -338,7 +340,7 @@ export default defineComponent({
               autocomplete: "off",
               spellcheck: "false",
               role: "combobox",
-              "aria-expanded": "true",
+              "aria-expanded": rows.value.length > 0 ? "true" : "false",
               "aria-controls": listId,
               "aria-autocomplete": "list",
               "aria-activedescendant": highlight.value >= 0 ? rowId(highlight.value) : undefined,
@@ -351,7 +353,7 @@ export default defineComponent({
             shortcutKeys(modifier.value),
           ]),
           h(
-            "ol",
+            "div",
             { class: "fleet-launcher-list", id: listId, role: "listbox", "aria-label": "Results" },
             groupNodes,
           ),
