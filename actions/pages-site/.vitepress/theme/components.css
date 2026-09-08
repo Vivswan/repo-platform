@@ -76,6 +76,53 @@ a:focus-visible {
   gap: 6px;
 }
 
+/* Carbon parks the appearance switch in the "..." flyout between 768px and
+ * 1279px, where the trigger is 20px wide and a touch needs two taps (hover
+ * opens, click toggles back). The bar has room for the switch from 768px
+ * up, so it sits inline and the flyout stays only for what else it holds
+ * (translations, social links). */
+@media (min-width: 768px) {
+  .VPNav .VPNavBar .content-body > .appearance {
+    display: flex;
+    align-items: center;
+  }
+  .VPNav .VPNavBar .content-body > .VPNavBarExtra .group:has(.item.appearance) {
+    display: none;
+  }
+  .VPNav
+    .VPNavBar
+    .content-body
+    > .VPNavBarExtra:not(:has(.translations)):not(:has(.social-links)) {
+    display: none;
+  }
+}
+/* The 40x22 switch keeps its look; the hit area grows to 44px (the
+ * insets count from its padding box, inside the 1px border). */
+.VPNav .VPSwitch::before {
+  content: "";
+  position: absolute;
+  inset: -12px -3px;
+}
+
+/* The title column is the sidebar's column, gutter included on a viewport
+ * wider than the frame, and the brand's glyph starts where the sidebar's
+ * labels do (their 34px, less the title link's 8px pill padding and 1px
+ * border). The container's first child only: VPNavBarTitle's own link is
+ * a second `.title` inside this one. */
+@media (min-width: 768px) {
+  .VPNav .VPNavBar.has-sidebar .container > .title:first-child {
+    padding-left: calc(var(--fleet-gutter) + 25px);
+    width: calc(var(--fleet-gutter) + var(--vp-sidebar-width));
+  }
+}
+/* On a viewport wider than the frame the controls sit on its right edge,
+ * level with the aside below them. */
+@media (min-width: 1440px) {
+  .VPNav .VPNavBar.has-sidebar .content {
+    padding-right: calc(var(--fleet-gutter) + 32px);
+  }
+}
+
 /* No hairline dividers between the nav tools. */
 .VPNav .VPNavBar .content-body > .translations::before,
 .VPNav .VPNavBar .content-body > .appearance::before,
@@ -231,8 +278,11 @@ a:focus-visible {
  * carries the .nav .group ancestors to sit above them. */
 
 /* Carbon keeps its 230px drawer cap on every viewport while padding the
- * content by the full token, so the list ran narrower than its column. */
+ * content by the full token, so the list ran narrower than its column; and
+ * it pins the sidebar to the viewport's edge while the article moves into
+ * the frame, so a wide viewport opened a band between the two. */
 .Layout .VPSidebar {
+  left: var(--fleet-gutter);
   max-width: var(--vp-sidebar-width);
 }
 
@@ -313,57 +363,107 @@ a:focus-visible {
 
 /* ---------- doc column ---------- */
 
+/* The row above the article: the breadcrumb at the left, the Markdown
+ * menu and the Edit link as two quiet icon buttons at the right. Its
+ * height is one token because the aside's top and the landing card's top
+ * are set level with the h1 below it. */
+.VPDoc {
+  --fleet-content-top-height: 45px;
+}
 .VPDoc .content-top {
+  height: var(--fleet-content-top-height);
+  padding: 0 0 12px;
   border-bottom-color: var(--vp-c-divider);
   background-color: transparent;
+}
+.VPDoc .content-top .content-file {
+  min-height: 0;
 }
 .VPDoc .content-top .content-box-item {
   border-radius: var(--fleet-radius-md);
   font-size: 14px;
   color: var(--vp-c-text-2);
 }
+/* The breadcrumb's glyph starts where the h1 does; the hover pill keeps
+ * its 8px each side by overhanging the column instead. */
+.VPDoc .content-top .content-file .content-box-item {
+  margin-left: -8px;
+}
 .VPDoc .content-top .content-box-text {
   font-weight: 500;
 }
-.VPDoc .content-top .edit-link-button {
-  border-radius: var(--fleet-radius-md);
-  background-color: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-2);
-  font-size: 14px;
-  min-height: 36px;
-}
-.VPDoc .content-top .edit-link-button:hover {
-  border-color: var(--fleet-hue);
-  background-color: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-1);
-}
 /* A page without a title renders no breadcrumb; its wrapper would still
- * hold a 36px blank strip. */
+ * hold a blank strip and the controls sit right-aligned regardless. */
 .VPDoc .content-top .content-file:not(:has(.content-box-item)) {
   display: none;
 }
-/* Below carbon's 640px breadcrumb breakpoint the bar holds only the two
- * controls: they share the width instead of huddling at the right edge. */
-@media (max-width: 639px) {
-  .VPDoc .content-top .content-box-item.no-hover {
-    flex: 1;
-  }
-  .VPDoc .content-top .content-box-item.no-hover > .VPLlmsPageActions,
-  .VPDoc .content-top .content-box-item.no-hover > .VPLlmsPageActions .trigger,
-  .VPDoc .content-top .edit-link-button {
-    width: 100%;
-    justify-content: center;
-  }
-  /* The dropdown is the LEFT control now; carbon anchors its 220px menu to
-   * the trigger's right edge, which would put it past the viewport's left. */
-  .VPDoc .content-top .VPLlmsPageActions .menu {
-    left: 0;
-    right: auto;
-  }
+
+.VPDoc .content-top .VPLlmsPageActions .trigger,
+.VPDoc .content-top .edit-link-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fleet-radius-sm);
+  background-color: transparent;
+  color: var(--vp-c-text-3);
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.VPDoc .content-top .VPLlmsPageActions .trigger:hover,
+.VPDoc .content-top .edit-link-button:hover {
+  background-color: var(--color-action-list-item-default-hover-bg);
+  color: var(--fleet-hue);
+}
+.VPDoc .content-top .VPLlmsPageActions .trigger-icon,
+.VPDoc .content-top .edit-link-button .content-box-icon {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  color: inherit;
+}
+/* The labels stay in the DOM as the controls' accessible names; only the
+ * decorative caret leaves. */
+.VPDoc .content-top .VPLlmsPageActions .trigger-label,
+.VPDoc .content-top .edit-link-button .edit-link-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.VPDoc .content-top .VPLlmsPageActions .trigger-caret {
+  display: none;
 }
 
+/* The outline's own rule runs down the headings; carbon's second rule on
+ * the aside's edge ran the viewport's height 25px beside it. Carbon's
+ * viewport-high minimum (for a sponsors spacer this theme has no use for)
+ * would, under the deeper top padding below, make a short outline scroll
+ * through blank space. */
 .VPDoc .aside .aside-content {
-  border-left: 1px solid var(--vp-c-divider);
+  border-left: 0;
+  min-height: 0;
+}
+/* The outline's top is level with the h1's: the article's top padding,
+ * the row above it, and the main's top padding. */
+.VPDoc .aside .aside-container {
+  padding-top: calc(
+    var(--vp-nav-height) +
+    var(--vp-layout-top-height, 0px) +
+    var(--vp-doc-top-height, 0px) +
+    32px +
+    var(--fleet-content-top-height) +
+    32px
+  );
 }
 
 @media (min-width: 768px) {
@@ -372,13 +472,15 @@ a:focus-visible {
   }
 }
 
+/* Flush with the link text below it: the list's 1px rule and 12px inset
+ * plus the row's 10px padding. */
 .VPDocAside .VPAsideContent .outline-title {
   text-transform: none;
   letter-spacing: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--vp-c-text-3);
-  margin: 0 0 8px 10px;
+  margin: 0 0 8px 23px;
 }
 .VPDocAside .VPDocOutlineItem.root {
   border-left-color: var(--vp-c-divider);
@@ -729,7 +831,9 @@ a:focus-visible {
  * present below carbon's 1280px aside breakpoint, in flow BEFORE the
  * content at the column's full width, so a narrow viewport reads the card
  * first, the way a repository's About card leads its README on a phone. */
-.VPDoc:has(.fleet-facts) {
+/* On the layout, not the doc: the nav's search field spans the reading
+ * column by this token too. */
+.Layout:has(.fleet-facts) {
   --vp-doc-aside-width: 352px;
 }
 .VPDoc.has-aside:has(.fleet-facts) .aside {
@@ -750,8 +854,8 @@ a:focus-visible {
 }
 @media (min-width: 1280px) {
   .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
-    /* level with the h1: content-top (49px) plus main's top padding (32px) */
-    padding-top: 81px;
+    /* level with the h1: the row above the article plus main's top padding */
+    padding-top: calc(var(--fleet-content-top-height) + 32px);
   }
 }
 @media (max-width: 1279px) {

@@ -42,6 +42,20 @@
   }
 }
 
+/* The margin each side of the 1440px frame on a wider viewport. Carbon
+ * offsets only the article by it (VPContent); components.css offsets the
+ * sidebar, the nav's title and controls, and the search field by the same
+ * value so the whole page reads as one centered frame. 100vw, not 100%,
+ * because that is what carbon's article formula uses. */
+:root {
+  --fleet-gutter: 0px;
+}
+@media (min-width: 1440px) {
+  :root {
+    --fleet-gutter: calc((100vw - var(--vp-layout-max-width)) / 2);
+  }
+}
+
 /* Light: paper grounds, ink text, the hue's deep variant. */
 :root {
   --fleet-hue: #8a5a0a;

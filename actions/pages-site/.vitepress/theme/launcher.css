@@ -302,6 +302,42 @@
     transform: translate(-50%, -50%);
   }
 }
+/* From carbon's aside breakpoint up the field spans the reading column:
+ * its edges are the article's edges, so it reads as that column's search.
+ * It is back in the nav's flex row for that: the row's right end is the
+ * controls, and a field that would reach them shrinks instead of
+ * overlapping (the auto right margin takes the slack when there is room,
+ * flex takes the field when there is not). The article's place is carbon's
+ * arithmetic (VPContent's frame padding, VPDoc's 24px, the content and
+ * aside centered in what is left) restated from the row's own width, which
+ * is that area less 16px; the nav is not a descendant of the layout it
+ * aligns to. */
+@media (min-width: 1280px) {
+  .VPNavBar.has-sidebar .fleet-launcher-button {
+    --fleet-reading-area: calc(100% + 16px);
+    --fleet-aside-span: calc(var(--vp-doc-aside-width) + 32px);
+    --fleet-reading-width: min(
+      var(--vp-doc-content-max-width),
+      calc(var(--fleet-reading-area) - var(--fleet-aside-span))
+    );
+    position: static;
+    flex: 0 1 auto;
+    width: var(--fleet-reading-width);
+    min-width: 0;
+    margin: 0 auto 0
+      calc(
+        (var(--fleet-reading-area) - var(--fleet-reading-width) - var(--fleet-aside-span)) /
+        2 -
+        8px
+      );
+    transform: none;
+  }
+  /* A page that drops its aside (frontmatter `aside: false`) centers the
+   * article alone in the column, and the field follows it. */
+  .Layout:has(.VPDoc:not(.has-aside)) .VPNavBar.has-sidebar .fleet-launcher-button {
+    --fleet-aside-span: 0px;
+  }
+}
 
 /* ---------- the dialog ---------- */
 
@@ -407,8 +443,11 @@
     font-size: 14px;
     text-align: left;
   }
+  /* Docked beside the hamburger, the same 48px column it has. */
   .VPNavBar .fleet-launcher-button {
-    width: 40px;
+    width: 48px;
+    height: 48px;
+    margin: 0;
     justify-content: center;
     padding: 0;
     border-color: transparent;
