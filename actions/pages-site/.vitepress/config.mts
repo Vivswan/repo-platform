@@ -27,7 +27,10 @@ import type { ThemeConfig } from "vitepress-carbon";
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
 import { deriveRewrites, deriveSidebar, detectLocales, walkMarkdown } from "./derive.ts";
+import { inlineTextRule } from "./inline-text.ts";
+import { landingTableRule } from "./landing-table.ts";
 import { tableWrapRule } from "./table-wrap.ts";
+import { headersRule } from "./theme/page-index.ts";
 
 /** Carbon's theme config plus the fleet keys the version switcher and the
  *  facts surfaces read. Optional, so carbon's own baseConfig (typed
@@ -125,6 +128,11 @@ export default defineConfigWithTheme<FleetThemeConfig>({
   markdown: {
     preConfig(md) {
       tableWrapRule(md);
+    },
+    config(md) {
+      inlineTextRule(md);
+      landingTableRule(md);
+      headersRule(md);
     },
     container: {
       infoLabel: "Info",
