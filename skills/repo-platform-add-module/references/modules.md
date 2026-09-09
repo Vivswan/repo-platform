@@ -31,7 +31,7 @@ Repository settings are managed for every repo with a `.repo-platform.yml`: the 
 
 - Managed: `docs-site.yml` - the repo's `docs/` markdown deployed as a versioned VitePress site under the CENTRAL fleet theme (the repo carries only markdown; theme and config live in repo-platform's `actions/pages-site`), plus a strict docs build check on every PR touching `docs/` (dead internal links fail there; never a required check).
 - Parameters: `docs_site_path` (URL mount when `pages` is also selected; default `docs`), `docs_site_label` (the nightly link-rot tracking stream's label; default `docs-link-rot`).
-- Conventions: `docs/README.md` is the landing page; sidebar and nav derive from the file tree; translations in `docs/<lang>/` (e.g. `zh-cn/`) become locales automatically; links must resolve inside `docs/` or be absolute URLs. Details: repo-platform's `docs/docs-site.md`.
+- Conventions: `docs/README.md` is the landing page; the sidebar and the search launcher derive from the file tree, each page's `title`/`order`/`group` frontmatter, and the landing's link table; translations in `docs/<lang>/` (e.g. `zh-cn/`) become locales automatically; links must resolve inside `docs/` or be absolute URLs. Details: repo-platform's `docs/docs-site.md`.
 - Companion step: same Pages enablement as the pages module, and make sure `docs/` exists with a `README.md` index - the deploy refuses an absent docs tree.
 - Removal: the managed workflow leaves the render and is deleted; the live Pages site stays until you turn Pages off.
 
