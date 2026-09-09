@@ -6,11 +6,41 @@ import { canonical, type Mismatch, setMismatch } from "./comparison.ts";
 import { asRecord, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
+/** Another module's leg this one runs AFTER when that module is selected:
+ *  a needs edge and a `!cancelled()` clause, both under that module's
+ *  jinja gate. The clause makes the edge an ORDER, not a gate: GitHub's
+ *  implied success() would skip the leg behind a failed or skipped
+ *  upstream, while the spelled-out gate clauses keep deciding. */
+export interface LegOrder {
+  job: string;
+  module: string;
+}
+
+/** The clause that makes an ordering edge an order: the status function
+ *  disarms GitHub's implied success() on the needs list. */
+const ORDER_CLAUSE = "      !cancelled() &&";
+
+/** The two spellings of a LegOrder's jinja gate: inline on the needs line
+ *  and whitespace-stripping around the ORDER_CLAUSE line. */
+function orderTags(after: LegOrder | null): string[] {
+  if (after === null) return [];
+  return [
+    `{% if '${after.module}' in modules %}`,
+    "{% endif %}",
+    `{%- if '${after.module}' in modules %}`,
+    "{%- endif %}",
+  ];
+}
+
 /** The folded job-level condition of a gate-downstream caller: green
- *  results of `upstream`, spelled out, on a push to main. */
-export function downstreamGateBlock(upstream: string[]): string {
+ *  results of `upstream`, spelled out, on a push to main, led by the
+ *  `after` ordering's gated `!cancelled()` clause when there is one. */
+export function downstreamGateBlock(upstream: string[], after: LegOrder | null = null): string {
   return [
     "    if: >-",
+    ...(after === null
+      ? []
+      : [`{%- if '${after.module}' in modules %}`, ORDER_CLAUSE, "{%- endif %}"]),
     ...upstream.map((job) => `      needs.${job}.result == 'success' &&`),
     "      github.event_name == 'push' &&",
     "      github.ref == 'refs/heads/main'",
@@ -34,6 +64,7 @@ function pinDownstreamGate(
       expected: `${what} carrying the verbatim gate block (${block
         .split("\n")
         .slice(1)
+        .filter((line) => !line.startsWith("{%"))
         .map((line) => line.trim().replace(/ &&$/, ""))
         .join(
           ", ",
@@ -160,6 +191,9 @@ export interface SpliceLeg {
   upstream: string[];
   /** Why the needs list is exactly `upstream`. */
   needsWhy: string;
+  /** The leg this one is ordered behind on repositories selecting that
+   *  module; null orders behind nothing. */
+  after: LegOrder | null;
   lane: string;
   laneWhy: string;
   uses: string;
@@ -171,15 +205,27 @@ export interface SpliceLeg {
 }
 
 /** One spliced leg's fragment against its SpliceLeg model: jinja-minimal
- *  text (inline {% raw %} pairs only - a multi-line comment or an if-tag
- *  could hide a pinned line while rendering without it; the composer
- *  supplies the module gate around the whole fragment), one job, one
- *  needs line, one if:, the gate block, and each load-bearing line
- *  exactly once (YAML's last duplicate wins silently, so a compliant copy
- *  next to a gutted one must be loud). */
+ *  text (inline {% raw %} pairs, plus the `after` ordering's gate tags
+ *  exactly once each where the needs and gate pins place them - any other
+ *  tag or comment could hide a pinned line while rendering without it;
+ *  the composer supplies the module gate around the whole fragment), one
+ *  job, one needs line, one if:, the gate block, and each load-bearing
+ *  line exactly once (YAML's last duplicate wins silently, so a compliant
+ *  copy next to a gutted one must be loud). */
 export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[] {
   const { legRel, jobId } = leg;
   const mismatches: Mismatch[] = [];
+  const allowedTags = orderTags(leg.after);
+  for (const tag of allowedTags) {
+    const count = legText.split(tag).length - 1;
+    if (count !== 1) {
+      mismatches.push({
+        file: legRel,
+        expected: `the ordering tag ${JSON.stringify(tag)} exactly once, on the needs line or around the !cancelled() clause (a tag anywhere else could hide a pinned line from repositories without '${leg.after?.module}')`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
   for (const [index, line] of legText.split("\n").entries()) {
     if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
       mismatches.push({
@@ -190,12 +236,13 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
       });
       continue;
     }
-    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
+    let stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
+    for (const tag of allowedTags) stripped = stripped.replace(tag, "");
     if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
       mismatches.push({
         file: `${legRel}:${index + 1}`,
         expected:
-          "no jinja tags or comments in the fragment beyond {% raw %} pairs (the composer supplies the module gate; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
+          "no jinja tags or comments in the fragment beyond {% raw %} pairs and the ordering gate (the composer supplies the module gate; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
         got: line.trim(),
       });
     }
@@ -208,7 +255,9 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
         got: line.trim(),
       });
     }
-    mismatches.push(...keySpellingMismatches(line, legRel));
+    // ORDER_CLAUSE opens with `!`, the tag indicator the alphabet refuses
+    // at line start; inside the pinned folded if: scalar it is content.
+    if (line !== ORDER_CLAUSE) mismatches.push(...keySpellingMismatches(line, legRel));
     // Every job-indent line must be a bare key.
     if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:$/.test(line)) {
       mismatches.push({
@@ -240,7 +289,11 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
       got: "a duplicate key",
     });
   }
-  const needsLine = `    needs: [${leg.upstream.join(", ")}]`;
+  const orderedNeed =
+    leg.after === null
+      ? ""
+      : `{% if '${leg.after.module}' in modules %}, ${leg.after.job}{% endif %}`;
+  const needsLine = `    needs: [${leg.upstream.join(", ")}${orderedNeed}]`;
   const legNeedsLines = legLines.filter((line) => /^ {4}needs:/.test(line));
   if (canonical(legNeedsLines) !== canonical([needsLine])) {
     mismatches.push({
@@ -270,13 +323,20 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
   // push to main.
   pinDownstreamGate(
     legText,
-    downstreamGateBlock(leg.upstream),
+    downstreamGateBlock(leg.upstream, leg.after),
     legRel,
     `the ${jobId} job`,
     mismatches,
   );
+  const ordering =
+    leg.after === null
+      ? ""
+      : `, ordered behind ${leg.after.job} where '${leg.after.module}' is selected`;
   const legPins: [string, string][] = [
-    [needsLine, `the ${jobId} leg runs downstream of ${leg.upstream.join(" and ")}, nothing else`],
+    [
+      needsLine,
+      `the ${jobId} leg runs downstream of ${leg.upstream.join(" and ")}${ordering}, nothing else`,
+    ],
     ["    concurrency:", `${jobId} runs serialize in their own lane; an unserialized pair races`],
     [`      group: ${leg.lane}`, leg.laneWhy],
     [
@@ -332,21 +392,18 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
 }
 
 /** The pages module's gate-downstream leg and its two called halves: the
- *  fragment (spliceLegMismatches' model), the managed pages.yml it calls
- *  (called with the judged sha, NO push trigger - the deploy's only way
- *  onto main is downstream of the gate - the nightly and dispatch kept,
- *  the lane keyed per run on a call, the sha passed on), and
- *  reusable-pages.yml's sha input feeding its checkout. The source pins
- *  are line censuses over jinja, so the RENDERED shape is judged too, as
- *  parsed YAML of the all-modules golden (real copier output, drift-checked
- *  by the golden-renders gate): the trigger set and the sha plumbing hold
- *  whatever spelling or tag the source used to get there. Pure over the
- *  texts for the suite's forcing cases. */
+ *  fragment (spliceLegMismatches' model, ordered behind the release leg
+ *  where release-please is selected), the managed pages.yml it calls
+ *  (judged sha in, NO push trigger, nightly and dispatch kept, lane keyed
+ *  per called run, sha handed on), and reusable-pages.yml's checkout
+ *  reading that sha. The source pins are line censuses over jinja, so the
+ *  RENDERED shape is judged too, as parsed YAML of the all-modules and
+ *  pages-no-release-please goldens: one per arm of the ordering gate. */
 export function pagesLegMismatches(
   pagesLegText: string,
   pagesWorkflowText: string,
   reusablePagesText: string,
-  rendered: { pagesText: string; ciText: string },
+  rendered: { pagesText: string; ciText: string; ciTextNoRelease: string },
 ): Mismatch[] {
   const pagesRel = "templates/pages/.github/workflows/pages.yml.jinja";
   const reusableRel = ".github/workflows/reusable-pages.yml";
@@ -355,7 +412,8 @@ export function pagesLegMismatches(
     jobId: "pages",
     upstream: ["all-green"],
     needsWhy:
-      "the deploy waits on the gate alone - an edge to the repo-owned hook or the release leg would let a red one hold the site back",
+      "the deploy waits on the gate, and on the release leg only as an order - an ungated edge to the hook or the release leg would let a red one hold the site back",
+    after: { job: "release", module: "release-please" },
     lane: "pages",
     laneWhy:
       "the lane every deploy holds (pages.yml takes it at workflow level on its nightly and dispatch runs and keys a called run per run, so the call never waits on its caller's lane)",
@@ -467,27 +525,45 @@ export function pagesLegMismatches(
       got: canonical(deployWith.sha ?? null),
     });
   }
-  const renderedCi = asRecord(parseYaml(rendered.ciText), `${goldenRel}/ci.yml`);
-  const pagesJob = asRecord(
-    asRecord(renderedCi.jobs ?? {}, `${goldenRel}/ci.yml jobs`).pages ?? {},
-    `${goldenRel}/ci.yml pages`,
-  );
-  const renderedLeg = {
-    needs: pagesJob.needs ?? null,
-    uses: pagesJob.uses ?? null,
-    sha: asRecord(pagesJob.with ?? {}, `${goldenRel}/ci.yml pages with`).sha ?? null,
-  };
-  const expectedLeg = {
-    needs: ["all-green"],
-    uses: "./.github/workflows/pages.yml",
-    sha: "${{ github.sha }}",
-  };
-  if (canonical(renderedLeg) !== canonical(expectedLeg)) {
-    mismatches.push({
-      file: `${goldenRel}/ci.yml job 'pages'`,
-      expected: `the rendered leg needing the gate alone, calling pages.yml by local path with the judged sha: ${canonical(expectedLeg)}`,
-      got: canonical(renderedLeg),
-    });
+  // Both arms of the ordering gate, as the folded if: GitHub reads.
+  const gateIf =
+    "needs.all-green.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'";
+  const arms: [string, string, { needs: string[]; if: string }][] = [
+    [
+      `${goldenRel}/ci.yml`,
+      rendered.ciText,
+      { needs: ["all-green", "release"], if: `!cancelled() && ${gateIf}` },
+    ],
+    [
+      "tests/golden-renders/pages-no-release-please/.github/workflows/ci.yml",
+      rendered.ciTextNoRelease,
+      { needs: ["all-green"], if: gateIf },
+    ],
+  ];
+  for (const [ciRel, ciText, arm] of arms) {
+    const renderedCi = asRecord(parseYaml(ciText), ciRel);
+    const pagesJob = asRecord(
+      asRecord(renderedCi.jobs ?? {}, `${ciRel} jobs`).pages ?? {},
+      `${ciRel} pages`,
+    );
+    const renderedLeg = {
+      needs: pagesJob.needs ?? null,
+      if: pagesJob.if ?? null,
+      uses: pagesJob.uses ?? null,
+      sha: asRecord(pagesJob.with ?? {}, `${ciRel} pages with`).sha ?? null,
+    };
+    const expectedLeg = {
+      ...arm,
+      uses: "./.github/workflows/pages.yml",
+      sha: "${{ github.sha }}",
+    };
+    if (canonical(renderedLeg) !== canonical(expectedLeg)) {
+      mismatches.push({
+        file: `${ciRel} job 'pages'`,
+        expected: `the rendered leg needing ${arm.needs.join(" and ")} under the gate condition, calling pages.yml by local path with the judged sha: ${canonical(expectedLeg)}`,
+        got: canonical(renderedLeg),
+      });
+    }
   }
   return mismatches;
 }
@@ -735,6 +811,7 @@ export function fleetCiRenderMismatches(
       jobId: "release",
       upstream: ["all-green", "post-green"],
       needsWhy: "dropping post-green mints the tag before the repo's own post-green work landed",
+      after: null,
       lane: "post-green-release",
       laneWhy:
         "the caller's lane, deliberately no group the called release.yml takes (sharing self-deadlocks)",
@@ -1039,10 +1116,11 @@ export const fleetCiRenderRules: Rule[] = [
   },
   {
     // The pages module's gate-downstream deploy leg at its three sources
-    // and in the rendered golden (pagesLegMismatches has the model): the
-    // spliced caller's shape, the called pages.yml with no push trigger
-    // and the sha handed on, reusable-pages.yml's checkout reading it, and
-    // the parsed render agreeing.
+    // and in the rendered goldens (pagesLegMismatches has the model): the
+    // spliced caller's shape, ordered behind the release leg where
+    // release-please is selected, the called pages.yml with no push
+    // trigger and the sha handed on, reusable-pages.yml's checkout reading
+    // it, and the parsed renders agreeing on both arms of the ordering.
     name: "pages-leg",
     run: () =>
       pagesLegMismatches(
@@ -1052,6 +1130,9 @@ export const fleetCiRenderRules: Rule[] = [
         {
           pagesText: read("tests/golden-renders/all-modules/.github/workflows/pages.yml"),
           ciText: read("tests/golden-renders/all-modules/.github/workflows/ci.yml"),
+          ciTextNoRelease: read(
+            "tests/golden-renders/pages-no-release-please/.github/workflows/ci.yml",
+          ),
         },
       ),
   },

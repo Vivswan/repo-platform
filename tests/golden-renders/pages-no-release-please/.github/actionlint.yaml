@@ -1,0 +1,11 @@
+# Repo-owned actionlint configuration. Generated once by
+# Vivswan/repo-platform and never overwritten by template
+# sync, so add this repository's own ignores freely.
+
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      # GITHUB_TOKEN has a vulnerability-alerts permission key (the
+      # release-health gate needs it) that actionlint does not know yet
+      # (rhysd/actionlint#666). Drop this once it does.
+      - 'unknown permission scope "vulnerability-alerts"'

@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { canonical } from "../../../scripts/check/ssot/comparison.ts";
 import {
   duplicateJobKeys,
   fleetCiRenderMismatches,
@@ -36,8 +37,8 @@ describe("fleetCiRenderMismatches", () => {
     "    with:",
     "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     "    secrets: inherit",
-    "{# compose:all-green-pages #}",
     "{# compose:all-green-release #}",
+    "{# compose:all-green-pages #}",
     "",
   ].join("\n");
   const leg = [
@@ -734,8 +735,11 @@ describe("pagesLegMismatches", () => {
   const leg = [
     "",
     "  pages:",
-    "    needs: [all-green]",
+    "    needs: [all-green{% if 'release-please' in modules %}, release{% endif %}]",
     "    if: >-",
+    "{%- if 'release-please' in modules %}",
+    "      !cancelled() &&",
+    "{%- endif %}",
     "      needs.all-green.result == 'success' &&",
     "      github.event_name == 'push' &&",
     "      github.ref == 'refs/heads/main'",
@@ -810,18 +814,43 @@ describe("pagesLegMismatches", () => {
     "      sha: ${{ inputs.sha }}",
     "",
   ].join("\n");
+  const gateIf = [
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+  ];
   const renderedCi = [
     "jobs:",
     "  all-green:",
     "    needs: [checks, ci]",
     "  pages:",
-    "    needs: [all-green]",
+    "    needs: [all-green, release]",
+    "    if: >-",
+    "      !cancelled() &&",
+    ...gateIf,
     "    uses: ./.github/workflows/pages.yml",
     "    with:",
     "      sha: ${{ github.sha }}",
     "",
   ].join("\n");
-  const rendered = { pagesText: renderedPages, ciText: renderedCi };
+  const renderedCiNoRelease = [
+    "jobs:",
+    "  all-green:",
+    "    needs: [checks, ci]",
+    "  pages:",
+    "    needs: [all-green]",
+    "    if: >-",
+    ...gateIf,
+    "    uses: ./.github/workflows/pages.yml",
+    "    with:",
+    "      sha: ${{ github.sha }}",
+    "",
+  ].join("\n");
+  const rendered = {
+    pagesText: renderedPages,
+    ciText: renderedCi,
+    ciTextNoRelease: renderedCiNoRelease,
+  };
   const judge = (
     legText = leg,
     pagesText = pagesWf,
@@ -852,14 +881,110 @@ describe("pagesLegMismatches", () => {
     expect(unpassed.some((m) => m.expected.includes("the rendered deploy passing sha"))).toBe(true);
   });
 
-  test("the RENDERED ci.yml pages leg is judged as parsed YAML - a missing job, a hook edge, or an unpassed sha goes red", () => {
-    for (const ciText of [
-      renderedCi.replace(/ {2}pages:[\s\S]*$/, ""),
-      renderedCi.replace("    needs: [all-green]", "    needs: [all-green, post-green]"),
-      renderedCi.replace("      sha: ${{ github.sha }}\n", ""),
-    ]) {
-      const found = judge(leg, pagesWf, reusable, { ...rendered, ciText });
-      expect(found.some((m) => m.file.includes("ci.yml job 'pages'"))).toBe(true);
+  test("the RENDERED pages leg is parsed YAML on both arms - a lost job, a hook edge, a lost or leaked ordering, or an unpassed sha goes red", () => {
+    // Each case is one rendered mutation and the whole mismatch it must
+    // produce: the one diagnostic, at that arm's golden, reporting the
+    // mutated leg (a second diagnostic or a wrong `got` fails the case).
+    const gateIf =
+      "needs.all-green.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'";
+    const uses = "./.github/workflows/pages.yml";
+    const sha = "${{ github.sha }}";
+    const ordered = {
+      file: "tests/golden-renders/all-modules/.github/workflows/ci.yml job 'pages'",
+      ...rendered,
+    };
+    const plain = {
+      file: "tests/golden-renders/pages-no-release-please/.github/workflows/ci.yml job 'pages'",
+      ...rendered,
+    };
+    const cases: [string, typeof ordered, Record<string, unknown>][] = [
+      [
+        "ordered arm: pages job lost",
+        { ...ordered, ciText: renderedCi.replace(/ {2}pages:[\s\S]*$/, "") },
+        { needs: null, if: null, uses: null, sha: null },
+      ],
+      [
+        "ordered arm: a hook edge in place of the release edge",
+        {
+          ...ordered,
+          ciText: renderedCi.replace(
+            "    needs: [all-green, release]",
+            "    needs: [all-green, post-green]",
+          ),
+        },
+        { needs: ["all-green", "post-green"], if: `!cancelled() && ${gateIf}`, uses, sha },
+      ],
+      [
+        "ordered arm: the release edge lost",
+        {
+          ...ordered,
+          ciText: renderedCi.replace("    needs: [all-green, release]", "    needs: [all-green]"),
+        },
+        { needs: ["all-green"], if: `!cancelled() && ${gateIf}`, uses, sha },
+      ],
+      [
+        "ordered arm: the !cancelled() clause lost (implied success() would gate on the release)",
+        { ...ordered, ciText: renderedCi.replace("      !cancelled() &&\n", "") },
+        { needs: ["all-green", "release"], if: gateIf, uses, sha },
+      ],
+      [
+        "ordered arm: a gate clause lost",
+        { ...ordered, ciText: renderedCi.replace("      github.event_name == 'push' &&\n", "") },
+        {
+          needs: ["all-green", "release"],
+          if: "!cancelled() && needs.all-green.result == 'success' && github.ref == 'refs/heads/main'",
+          uses,
+          sha,
+        },
+      ],
+      [
+        "ordered arm: the judged sha unpassed",
+        { ...ordered, ciText: renderedCi.replace("      sha: ${{ github.sha }}\n", "") },
+        { needs: ["all-green", "release"], if: `!cancelled() && ${gateIf}`, uses, sha: null },
+      ],
+      [
+        "plain arm: the release edge leaked past the ordering gate",
+        {
+          ...plain,
+          ciTextNoRelease: renderedCiNoRelease.replace(
+            "    needs: [all-green]",
+            "    needs: [all-green, release]",
+          ),
+        },
+        { needs: ["all-green", "release"], if: gateIf, uses, sha },
+      ],
+      [
+        "plain arm: the !cancelled() clause leaked past the ordering gate",
+        {
+          ...plain,
+          ciTextNoRelease: renderedCiNoRelease.replace(
+            "    if: >-\n",
+            "    if: >-\n      !cancelled() &&\n",
+          ),
+        },
+        { needs: ["all-green"], if: `!cancelled() && ${gateIf}`, uses, sha },
+      ],
+      [
+        "plain arm: a gate clause lost",
+        {
+          ...plain,
+          ciTextNoRelease: renderedCiNoRelease.replace(
+            "      github.ref == 'refs/heads/main'\n",
+            "",
+          ),
+        },
+        // The dangling && is what a dropped last clause leaves behind.
+        {
+          needs: ["all-green"],
+          if: "needs.all-green.result == 'success' && github.event_name == 'push' &&",
+          uses,
+          sha,
+        },
+      ],
+    ];
+    for (const [name, { file, ...texts }, got] of cases) {
+      const found = judge(leg, pagesWf, reusable, texts);
+      expect([name, found.map((m) => [m.file, m.got])]).toEqual([name, [[file, canonical(got)]]]);
     }
   });
 
@@ -889,11 +1014,63 @@ describe("pagesLegMismatches", () => {
     }
   });
 
-  test("an edge to the hook or the release leg goes red - a red one would hold the site back", () => {
+  const orderedNeeds =
+    "    needs: [all-green{% if 'release-please' in modules %}, release{% endif %}]";
+  const orderedClause =
+    "{%- if 'release-please' in modules %}\n      !cancelled() &&\n{%- endif %}\n";
+
+  test("an ungated edge to the hook or the release leg goes red - a red one would hold the site back", () => {
     for (const needs of ["    needs: [all-green, post-green]", "    needs: [all-green, release]"]) {
-      const found = judge(leg.replace("    needs: [all-green]", needs), pagesWf, reusable);
+      const found = judge(leg.replace(orderedNeeds, needs), pagesWf, reusable);
       expect(found.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
     }
+  });
+
+  test("the release ordering is pinned as one piece - losing the edge, the !cancelled() clause, or the gate around either goes red", () => {
+    // The edge without the clause: GitHub's implied success() would skip
+    // the deploy behind a failed or skipped release (the shape a repo
+    // with a red hook would see on every push).
+    const gated = judge(leg.replace(orderedClause, ""), pagesWf, reusable);
+    expect(gated.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+    expect(gated.some((m) => m.expected.includes("the ordering tag"))).toBe(true);
+    // The clause without the edge: a stray !cancelled() on a gate-only
+    // leg, and a needs line no longer the pinned one.
+    const edgeless = judge(leg.replace(orderedNeeds, "    needs: [all-green]"), pagesWf, reusable);
+    expect(edgeless.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    expect(edgeless.some((m) => m.expected.includes("the ordering tag"))).toBe(true);
+    // The edge ungated: every pages repo would need a release job.
+    const ungated = judge(
+      leg
+        .replace(orderedNeeds, "    needs: [all-green, release]")
+        .replace(orderedClause, "      !cancelled() &&\n"),
+      pagesWf,
+      reusable,
+    );
+    expect(ungated.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    expect(ungated.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+  });
+
+  test("an ordering tag anywhere else, or any other jinja tag, goes red - it could hide a pinned line from repos without release-please", () => {
+    const hidden = judge(
+      leg.replace(
+        "      group: pages\n",
+        "{%- if 'release-please' in modules %}\n      group: pages\n{%- endif %}\n",
+      ),
+      pagesWf,
+      reusable,
+    );
+    expect(
+      hidden.some((m) => m.expected.includes("the ordering tag") && m.got === "2 occurrences"),
+    ).toBe(true);
+    const otherModule = judge(
+      leg.replace(
+        "      group: pages\n",
+        "{%- if 'nightly' in modules %}\n      group: pages\n{%- endif %}\n",
+      ),
+      pagesWf,
+      reusable,
+    );
+    expect(otherModule.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
   });
 
   test("secrets: on the pages leg goes red - the called deploy reads none", () => {
@@ -993,6 +1170,10 @@ describe("pagesLegMismatches", () => {
           ),
           ciText: readFileSync(
             "tests/golden-renders/all-modules/.github/workflows/ci.yml",
+            "utf-8",
+          ),
+          ciTextNoRelease: readFileSync(
+            "tests/golden-renders/pages-no-release-please/.github/workflows/ci.yml",
             "utf-8",
           ),
         },

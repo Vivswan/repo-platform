@@ -19,6 +19,10 @@
 // - uv-no-release-please: modules=[uv] - the dotfiles shape that exposed
 //   the anchor blank-line bug (compose/splice.ts's collapse guard);
 //   its rendered .typography-allow must end with exactly one newline.
+// - pages-no-release-please: modules=[bun, pages] - the pages leg's
+//   plain arm: without release-please the ci.yml pages job must render
+//   the gate-only needs and condition (the pages-leg rule parses it; bun
+//   supplies the build command copier's pages validator requires).
 //
 // DETERMINISM CONTRACT: a golden changes if and only if rendered content
 // changes. Everything volatile is pinned at the source:
@@ -121,6 +125,7 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
     { name: "all-modules", modules: allModules },
     { name: "minimal", modules: [] },
     { name: "uv-no-release-please", modules: ["uv"] },
+    { name: "pages-no-release-please", modules: ["bun", "pages"] },
   ];
 }
 

@@ -45,6 +45,23 @@ absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$
   "private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES"\
   "private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+# A job's own lines in a workflow file, so a pin can be scoped to one job
+# (`needs: [all-green]` sits on several gate-downstream callers). The
+# presence pin is exact-line; the ban is a substring, so no respelling of
+# the banned text (quoted, an expression) slips past it.
+job_block() { awk -v job="  $1:" '$0 == job { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on { print }' "$2"; }
+present_in_job() { job_block "$1" "$3" | grep -qxF -- "$2" || { echo "::error::gating check failed: no line is exactly '$2' in the '$1' job of $3"\
+  "for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
+absent_in_job() { if job_block "$1" "$3" | grep -qF -- "$2"; then echo "::error::gating check failed: '$2' appears in the '$1' job of $3"\
+  "but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."\
+  ; exit 1; fi; }
+# The file minus one job's block and minus comment lines: a substring ban
+# on the expressions everywhere but the one job allowed to carry the text
+# (an absent job bans it file-wide; a comment naming it is not a gate).
+outside_job() { awk -v job="  $1:" '$0 == job { skip = 1; next } skip && /^  [A-Za-z0-9_-]+:/ { skip = 0 } !skip && !/^ *#/ { print }' "$2"; }
+absent_outside_job() { if outside_job "$1" "$3" | grep -qF -- "$2"; then echo "::error::gating check failed: '$2' appears outside the '$1' job of $3"\
+  "but modules=$MODULES private=$PRIVATE should not emit it there. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."\
+  ; exit 1; fi; }
 # Every `deno fmt` in a rendered file must carry --prose-wrap preserve: the
 # default hard-wraps markdown prose at 80 columns, and documents carry no
 # width limit. (Formatter drift into a new bare spelling fails here.)
@@ -81,8 +98,10 @@ present_line "      actions: read" "$wf/ci.yml"
 present_line "      issues: read" "$wf/ci.yml"
 present_line "      vulnerability-alerts: read" "$wf/ci.yml"
 # The base checks merged into fleet-ci; none of their wiring (or the old
-# aggregate job's) may render here any more.
-absent "!cancelled()" "$wf/ci.yml"
+# aggregate job's status-function gate, in any expression spelling) may
+# render here any more: the gate judges results itself. Only the pages
+# leg's release ORDER reads a status function; its pin is below.
+absent_outside_job pages "cancelled()" "$wf/ci.yml"
 absent "base-checks" "$wf/ci.yml"
 absent "check-typography" "$wf/ci.yml"
 
@@ -179,12 +198,21 @@ if has pages; then
   present_line "  workflow_dispatch:" "$wf/pages.yml"
   present_line "      issues: write" "$wf/pages.yml"
   absent "pull_request" "$wf/pages.yml"
-  # The leg in ci.yml: downstream of the gate alone (a red hook or
-  # release never holds the site back), calling pages.yml by local path
-  # under the pages lane.
+  # The leg in ci.yml: downstream of the gate, calling pages.yml by local
+  # path under the pages lane. With release-please it is ORDERED behind
+  # the release leg - the needs edge plus !cancelled(), so a red or
+  # skipped release still deploys; without it neither renders.
   present_line "  pages:" "$wf/ci.yml"
   present_line "    uses: ./.github/workflows/pages.yml" "$wf/ci.yml"
   present_line "      group: pages" "$wf/ci.yml"
+  if has release-please; then
+    present_in_job pages "    needs: [all-green, release]" "$wf/ci.yml"
+    present_in_job pages "      !cancelled() &&" "$wf/ci.yml"
+  else
+    present_in_job pages "    needs: [all-green]" "$wf/ci.yml"
+    absent_in_job pages "cancelled()" "$wf/ci.yml"
+    absent_in_job pages ", release]" "$wf/ci.yml"
+  fi
 else
   test ! -e "$wf/pages.yml"
   absent_line "  pages:" "$wf/ci.yml"
