@@ -20,27 +20,36 @@ export interface LegOrder {
  *  disarms GitHub's implied success() on the needs list. */
 const ORDER_CLAUSE = "      !cancelled() &&";
 
-/** The two spellings of a LegOrder's jinja gate: inline on the needs line
- *  and whitespace-stripping around the ORDER_CLAUSE line. */
-function orderTags(after: LegOrder | null): string[] {
+/** The spellings of a LegOrder's jinja gate: inline on the needs line, and
+ *  whitespace-stripping around the ORDER_CLAUSE line only while that
+ *  clause is gated (an unconditional order edge in `ordered` makes the
+ *  clause unconditional, so the block pair must be absent). */
+function orderTags(after: LegOrder | null, ordered: string[]): string[] {
   if (after === null) return [];
-  return [
-    `{% if '${after.module}' in modules %}`,
-    "{% endif %}",
-    `{%- if '${after.module}' in modules %}`,
-    "{%- endif %}",
-  ];
+  const inline = [`{% if '${after.module}' in modules %}`, "{% endif %}"];
+  if (ordered.length > 0) return inline;
+  return [...inline, `{%- if '${after.module}' in modules %}`, "{%- endif %}"];
 }
 
 /** The folded job-level condition of a gate-downstream caller: green
  *  results of `upstream`, spelled out, on a push to main, led by the
- *  `after` ordering's gated `!cancelled()` clause when there is one. */
-export function downstreamGateBlock(upstream: string[], after: LegOrder | null = null): string {
+ *  `!cancelled()` clause when the leg has order edges: unconditional when
+ *  `ordered` names always-present jobs, else under the `after` ordering's
+ *  jinja gate when there is one. */
+export function downstreamGateBlock(
+  upstream: string[],
+  after: LegOrder | null = null,
+  ordered: string[] = [],
+): string {
+  const orderClause =
+    ordered.length > 0
+      ? [ORDER_CLAUSE]
+      : after === null
+        ? []
+        : [`{%- if '${after.module}' in modules %}`, ORDER_CLAUSE, "{%- endif %}"];
   return [
     "    if: >-",
-    ...(after === null
-      ? []
-      : [`{%- if '${after.module}' in modules %}`, ORDER_CLAUSE, "{%- endif %}"]),
+    ...orderClause,
     ...upstream.map((job) => `      needs.${job}.result == 'success' &&`),
     "      github.event_name == 'push' &&",
     "      github.ref == 'refs/heads/main'",
@@ -174,6 +183,7 @@ function keySpellingMismatches(line: string, file: string): Mismatch[] {
 export const LEG_ANCHORS = [
   "{# compose:codeql-languages #}",
   "{# compose:all-green-pages #}",
+  "{# compose:all-green-docs-site #}",
   "{# compose:all-green-release #}",
 ];
 
@@ -181,16 +191,20 @@ export const LEG_ANCHORS = [
  *  anchor: exactly one caller job, released only by the spelled-out green
  *  results of its upstream jobs on a push to main, holding its own lane,
  *  calling a repo-local workflow with the judged sha under an
- *  additive-closed permissions ceiling. The pages and release-please
- *  modules each ship one; this is the shape they share. */
+ *  additive-closed permissions ceiling. The pages, docs-site, and
+ *  release-please modules each ship one; this is the shape they share. */
 export interface SpliceLeg {
   legRel: string;
   jobId: string;
   /** The jobs the leg needs, in needs-list order; each is also a
    *  spelled-out gate clause. */
   upstream: string[];
-  /** Why the needs list is exactly `upstream`. */
+  /** Why the needs list is exactly `upstream` plus the order edges. */
   needsWhy: string;
+  /** Always-present jobs the leg is ordered behind without gating on
+   *  them (needs edges after `upstream`, with an unconditional
+   *  `!cancelled()` clause so their red or skip never holds the leg). */
+  ordered: string[];
   /** The leg this one is ordered behind on repositories selecting that
    *  module; null orders behind nothing. */
   after: LegOrder | null;
@@ -215,7 +229,7 @@ export interface SpliceLeg {
 export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[] {
   const { legRel, jobId } = leg;
   const mismatches: Mismatch[] = [];
-  const allowedTags = orderTags(leg.after);
+  const allowedTags = orderTags(leg.after, leg.ordered);
   for (const tag of allowedTags) {
     const count = legText.split(tag).length - 1;
     if (count !== 1) {
@@ -293,7 +307,7 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
     leg.after === null
       ? ""
       : `{% if '${leg.after.module}' in modules %}, ${leg.after.job}{% endif %}`;
-  const needsLine = `    needs: [${leg.upstream.join(", ")}${orderedNeed}]`;
+  const needsLine = `    needs: [${[...leg.upstream, ...leg.ordered].join(", ")}${orderedNeed}]`;
   const legNeedsLines = legLines.filter((line) => /^ {4}needs:/.test(line));
   if (canonical(legNeedsLines) !== canonical([needsLine])) {
     mismatches.push({
@@ -323,15 +337,17 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
   // push to main.
   pinDownstreamGate(
     legText,
-    downstreamGateBlock(leg.upstream, leg.after),
+    downstreamGateBlock(leg.upstream, leg.after, leg.ordered),
     legRel,
     `the ${jobId} job`,
     mismatches,
   );
-  const ordering =
-    leg.after === null
-      ? ""
-      : `, ordered behind ${leg.after.job} where '${leg.after.module}' is selected`;
+  const ordering = [
+    ...(leg.ordered.length > 0 ? [`, ordered behind ${leg.ordered.join(" and ")}`] : []),
+    ...(leg.after === null
+      ? []
+      : [`, ordered behind ${leg.after.job} where '${leg.after.module}' is selected`]),
+  ].join("");
   const legPins: [string, string][] = [
     [
       needsLine,
@@ -413,6 +429,7 @@ export function pagesLegMismatches(
     upstream: ["all-green"],
     needsWhy:
       "the deploy waits on the gate, and on the release leg only as an order - an ungated edge to the hook or the release leg would let a red one hold the site back",
+    ordered: [],
     after: { job: "release", module: "release-please" },
     lane: "pages",
     laneWhy:
@@ -568,6 +585,226 @@ export function pagesLegMismatches(
   return mismatches;
 }
 
+/** A LegOrder's inline jinja (`{% if '<module>' in modules %}...{% endif %}`
+ *  on one line, or the `{%- ... %}` pair around a line) rendered for
+ *  `selected`; every other tag stays in the text for the jinja ban. */
+export function renderLegOrder(text: string, after: LegOrder, selected: boolean): string {
+  const inline = new RegExp(
+    `\\{% if '${after.module}' in modules %\\}([^\\n{]*)\\{% endif %\\}`,
+    "g",
+  );
+  const block = new RegExp(
+    `\\{%- if '${after.module}' in modules %\\}\\n([^\\n]*\\n)\\{%- endif %\\}\\n`,
+    "g",
+  );
+  return text
+    .replace(inline, (_, body: string) => (selected ? body : ""))
+    .replace(block, (_, body: string) => (selected ? body : ""));
+}
+
+/** The lines of a job block that pin its shape: comments and blank lines
+ *  dropped, `{% raw %}` pairs stripped, so a jinja source and a rendered
+ *  workflow compare. */
+function pinnedLines(lines: string[]): string[] {
+  return lines
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"))
+    .map((line) => line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", ""));
+}
+
+/** The docs-site module's gate-downstream leg: the fragment
+ *  (spliceLegMismatches' model, ORDERED behind the hook always and behind
+ *  the release leg where release-please is selected, under an
+ *  unconditional `!cancelled()`: a tag minted this run lands on this
+ *  deploy, a red or skipped hook or release never holds the site back),
+ *  the called docs-site.yml (the pull_request check kept, the
+ *  workflow_call with the sha input, the lane keyed per called run, the
+ *  sha handed on, NO push trigger), and the rendered shapes, parsed: the
+ *  docs-site-release-please golden carries the three-edge leg and the
+ *  callable workflow, the all-modules golden (pages too) carries neither -
+ *  the fragment condition in the module manifest collapses the leg there.
+ *  This repository dogfoods the standalone shape by hand in its own ci.yml
+ *  (not a rendered file): its docs-site job is held equal to the
+ *  fragment's release-free arm. */
+export function docsSiteLegMismatches(
+  legText: string,
+  docsSiteWorkflowText: string,
+  rendered: {
+    standalone: { ciText: string; docsSiteText: string };
+    composed: { ciText: string; docsSiteText: string };
+  },
+  ownCiText: string,
+): Mismatch[] {
+  const legRel = "templates/docs-site/fragments/all-green-docs-site.jinja";
+  const workflowRel = "templates/docs-site/.github/workflows/docs-site.yml.jinja";
+  const ownRel = ".github/workflows/ci.yml";
+  const after: LegOrder = { job: "release", module: "release-please" };
+  const mismatches = spliceLegMismatches(legText, {
+    legRel,
+    jobId: "docs-site",
+    upstream: ["all-green"],
+    needsWhy:
+      "the deploy waits on the gate, then on the hook and the release leg as ORDER edges only (a tag minted this run lands on this deploy; their red or skip never holds the site back)",
+    ordered: ["post-green"],
+    after,
+    lane: "pages",
+    laneWhy:
+      "the lane every deploy holds (docs-site.yml's deploy takes it on its nightly and dispatch runs and keys a called run per run, so the call never waits on its caller's lane)",
+    uses: "./.github/workflows/docs-site.yml",
+    usesWhy:
+      "the leg calls the managed docs-site.yml by local path, where the deploy's inputs live once",
+    permissions: ["contents: read", "pages: write", "id-token: write", "issues: write"],
+    secretsWhy: null,
+  });
+  // The called workflow's half, at the jinja source: the pull_request check
+  // stays, the call and the rebuilds render under the pages-free gate, the
+  // lane keys per called run, the sha rides on, and nothing deploys on push.
+  const lines = docsSiteWorkflowText.split("\n");
+  const pins: [string, string][] = [
+    ["  pull_request:", "the strict docs check on every PR touching docs/ stays"],
+    [
+      "  schedule:",
+      "the nightly rebuild stays (theme updates and tags created without a push land there)",
+    ],
+    ["  workflow_dispatch:", "the manual rebuild stays"],
+    [
+      "      group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}",
+      "the pages lane on nightly and dispatch runs, a per-run group on a call (ci.yml's docs-site job holds the lane; a called workflow waiting on it self-deadlocks)",
+    ],
+    [
+      "      sha: {% raw %}${{ inputs.sha }}{% endraw %}",
+      "the judged commit rides on to reusable-pages, whose checkout builds it",
+    ],
+  ];
+  for (const [line, why] of pins) {
+    const count = lines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: workflowRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
+  const callBlock = [
+    "{% if 'pages' not in modules %}  workflow_call:",
+    "    inputs:",
+    "      sha:",
+  ].join("\n");
+  if (docsSiteWorkflowText.split(callBlock).length !== 2) {
+    mismatches.push({
+      file: workflowRel,
+      expected: `the verbatim block starting ${JSON.stringify(callBlock.split("\n")[0])} exactly once (the workflow_call, under the pages-free gate, must declare the sha input the leg passes - an undeclared input fails the call outright, fleet-wide)`,
+      got: "missing, reshaped, or duplicated",
+    });
+  }
+  for (const line of lines) mismatches.push(...keySpellingMismatches(line, workflowRel));
+  if (lines.some((line) => /^ {2}push:/.test(line))) {
+    mismatches.push({
+      file: workflowRel,
+      expected:
+        "no push: trigger (a deploy on push bypasses the all-green gate and races the build publish; the deploy's way onto main is ci.yml's docs-site leg)",
+      got: "a push: trigger",
+    });
+  }
+  // The rendered shapes, parsed.
+  const goldenRel = (arm: "standalone" | "composed") =>
+    `tests/golden-renders/${arm === "standalone" ? "docs-site-release-please" : "all-modules"}/.github/workflows`;
+  const renderedDocsSite = (arm: "standalone" | "composed") => {
+    const doc = asRecord(parseYaml(rendered[arm].docsSiteText), `${goldenRel(arm)}/docs-site.yml`);
+    return {
+      triggers: Object.keys(asRecord(doc.on ?? {}, `${goldenRel(arm)}/docs-site.yml on`)),
+      jobs: asRecord(doc.jobs ?? {}, `${goldenRel(arm)}/docs-site.yml jobs`),
+    };
+  };
+  const standalone = renderedDocsSite("standalone");
+  mismatches.push(
+    ...setMismatch(
+      `${goldenRel("standalone")}/docs-site.yml triggers (the rendered deploy runs as ci.yml's called leg, nightly, and by hand, and the check on pull requests - any other trigger deploys off an unjudged commit)`,
+      ["pull_request", "workflow_call", "schedule", "workflow_dispatch"],
+      standalone.triggers,
+    ),
+  );
+  const deployWith = asRecord(
+    asRecord(standalone.jobs.deploy ?? {}, "deploy").with ?? {},
+    `${goldenRel("standalone")}/docs-site.yml deploy with`,
+  );
+  if (deployWith.sha !== "${{ inputs.sha }}") {
+    mismatches.push({
+      file: `${goldenRel("standalone")}/docs-site.yml`,
+      expected: "the rendered deploy passing sha: ${{ inputs.sha }} on to reusable-pages",
+      got: canonical(deployWith.sha ?? null),
+    });
+  }
+  const composed = renderedDocsSite("composed");
+  mismatches.push(
+    ...setMismatch(
+      `${goldenRel("composed")}/docs-site.yml triggers (with pages carrying the site, only the pull_request check renders)`,
+      ["pull_request"],
+      composed.triggers,
+    ),
+    ...setMismatch(
+      `${goldenRel("composed")}/docs-site.yml jobs (with pages carrying the site, only the check job renders)`,
+      ["check"],
+      Object.keys(composed.jobs),
+    ),
+  );
+  const renderedJob = (arm: "standalone" | "composed") =>
+    asRecord(
+      asRecord(parseYaml(rendered[arm].ciText), `${goldenRel(arm)}/ci.yml`).jobs ?? {},
+      `${goldenRel(arm)}/ci.yml jobs`,
+    )["docs-site"];
+  const standaloneJob = asRecord(renderedJob("standalone") ?? {}, "docs-site");
+  const renderedLeg = {
+    needs: standaloneJob.needs ?? null,
+    if: standaloneJob.if ?? null,
+    uses: standaloneJob.uses ?? null,
+    sha:
+      asRecord(standaloneJob.with ?? {}, `${goldenRel("standalone")}/ci.yml docs-site with`).sha ??
+      null,
+  };
+  const expectedLeg = {
+    needs: ["all-green", "post-green", "release"],
+    if: "!cancelled() && needs.all-green.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    uses: "./.github/workflows/docs-site.yml",
+    sha: "${{ github.sha }}",
+  };
+  if (canonical(renderedLeg) !== canonical(expectedLeg)) {
+    mismatches.push({
+      file: `${goldenRel("standalone")}/ci.yml job 'docs-site'`,
+      expected: `the rendered leg ordered behind the hook and the release leg, gated on the all-green result past a cancelled check, calling docs-site.yml by local path with the judged sha: ${canonical(expectedLeg)}`,
+      got: canonical(renderedLeg),
+    });
+  }
+  if (renderedJob("composed") !== undefined) {
+    mismatches.push({
+      file: `${goldenRel("composed")}/ci.yml`,
+      expected:
+        "no docs-site job (pages carries the site there; the fragment condition in templates/docs-site/module.yml collapses the leg)",
+      got: "a docs-site job",
+    });
+  }
+  // This repository's hand-written twin of the release-free arm.
+  const ownBlock = pinnedLines(jobBlock(ownCiText.split("\n"), "docs-site"));
+  const armBlock = pinnedLines(
+    jobBlock(renderLegOrder(legText, after, false).split("\n"), "docs-site"),
+  );
+  if (ownBlock.length === 0) {
+    mismatches.push({
+      file: ownRel,
+      expected:
+        "a docs-site job (this repository dogfoods the docs-site module; its ci.yml is hand-written, so the leg is carried by hand and held to the fragment here)",
+      got: "no such job",
+    });
+  } else if (canonical(ownBlock) !== canonical(armBlock)) {
+    mismatches.push({
+      file: `${ownRel} job 'docs-site'`,
+      expected: `the fragment's release-free arm, comments aside: ${canonical(armBlock)}`,
+      got: canonical(ownBlock),
+    });
+  }
+  return mismatches;
+}
+
 /** The fleet gate's render shape at the jinja SOURCE, pinned as exact
  *  lines against a maintainer's accidental omission (the rendered shape is
  *  asserted by verify_smoke_gating.sh); docs/all-green.md has the model. */
@@ -591,8 +828,8 @@ export function fleetCiRenderMismatches(
       expected:
         "exactly the 'checks' and 'ci' caller jobs, the 'all-green' gate, and the " +
         "gate-downstream 'post-green' hook caller (every fleet gate lives inside the two calls; " +
-        "the pages and release legs splice through their anchors, and a job added here would " +
-        "gate every repo with no roster to make it loud)",
+        "the pages, docs-site, and release legs splice through their anchors, and a job added " +
+        "here would gate every repo with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }
@@ -681,13 +918,13 @@ export function fleetCiRenderMismatches(
     }
     // The job census reads the template's own text, so a fragment anchor
     // after jobs: could splice a job the census never sees; only the
-    // with-block data anchor and the two gate-downstream leg anchors may
+    // with-block data anchor and the three gate-downstream leg anchors may
     // stand (each leg's shape is pinned at its own fragment below).
     if (line.startsWith("{# compose:") && !LEG_ANCHORS.includes(line)) {
       mismatches.push({
         file: ciRel,
         expected:
-          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor and the all-green-pages and all-green-release leg anchors (a spliced job would evade the job census; module jobs live in fleet-ci)",
+          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor and the all-green-pages, all-green-docs-site, and all-green-release leg anchors (a spliced job would evade the job census; module jobs live in fleet-ci)",
         got: line.trim(),
       });
     }
@@ -759,6 +996,11 @@ export function fleetCiRenderMismatches(
       null,
     ],
     [
+      "{# compose:all-green-docs-site #}",
+      "the docs-site leg's anchor (splices the gate-downstream docs deploy caller on repos selecting docs-site without pages)",
+      null,
+    ],
+    [
       "{# compose:all-green-release #}",
       "the release-please leg's anchor (splices the gate-downstream release job on selecting repos)",
       null,
@@ -811,6 +1053,7 @@ export function fleetCiRenderMismatches(
       jobId: "release",
       upstream: ["all-green", "post-green"],
       needsWhy: "dropping post-green mints the tag before the repo's own post-green work landed",
+      ordered: [],
       after: null,
       lane: "post-green-release",
       laneWhy:
@@ -1125,6 +1368,33 @@ export const fleetCiRenderRules: Rule[] = [
             "tests/golden-renders/pages-no-release-please/.github/workflows/ci.yml",
           ),
         },
+      ),
+  },
+  {
+    // The docs-site module's gate-downstream deploy leg at its sources and
+    // in the rendered goldens (docsSiteLegMismatches has the model): the
+    // spliced caller ordered behind the hook and the release leg, the
+    // called docs-site.yml with no push trigger and the sha handed on, the
+    // standalone and pages-composed renders, and this repository's
+    // hand-written twin.
+    name: "docs-site-leg",
+    run: () =>
+      docsSiteLegMismatches(
+        read("templates/docs-site/fragments/all-green-docs-site.jinja"),
+        read("templates/docs-site/.github/workflows/docs-site.yml.jinja"),
+        {
+          standalone: {
+            ciText: read("tests/golden-renders/docs-site-release-please/.github/workflows/ci.yml"),
+            docsSiteText: read(
+              "tests/golden-renders/docs-site-release-please/.github/workflows/docs-site.yml",
+            ),
+          },
+          composed: {
+            ciText: read("tests/golden-renders/all-modules/.github/workflows/ci.yml"),
+            docsSiteText: read("tests/golden-renders/all-modules/.github/workflows/docs-site.yml"),
+          },
+        },
+        read(".github/workflows/ci.yml"),
       ),
   },
   {

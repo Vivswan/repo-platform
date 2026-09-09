@@ -704,3 +704,28 @@ jobs:
       before: ${{ github.event.before }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+
+  # This repository's own docs site (the docs-site module, dogfooded): the
+  # module's leg verbatim, held to the fragment by the docs-site-leg ssot
+  # rule. Ordered behind post-green so the deploy runs after this run
+  # republished the build branch its pipeline consumes (@build), gated on
+  # the all-green result alone: !cancelled() keeps a red fleet leg from
+  # holding the site back.
+  docs-site:
+    needs: [all-green, post-green]
+    if: >-
+      !cancelled() &&
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/docs-site.yml
+    with:
+      sha: ${{ github.sha }}

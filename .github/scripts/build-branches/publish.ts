@@ -11,15 +11,13 @@
 // push as the compare-and-swap; only green main history is ever stamped.
 //
 // Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
-// SOURCE_SHA, GITHUB_OUTPUT (the `published` step output: whether this run
-// advanced the branch tip, which gates the redeploy of this repository's
-// own docs site in post-green.yml).
+// SOURCE_SHA.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { commitRunWrite, commitStampParse, commitStampWrite } from "../shared/commit_stamp.ts";
-import { env, fail, requireEnv, setOutput } from "../shared/gha.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
@@ -108,13 +106,12 @@ function hasActionManifest(dir: string): boolean {
 
 /** Composes the tree for `sourceSha` and, when it CHANGED (or the tip's
  * stamp needs recovery), chains a stamped commit onto the tip. Two skips
- * return false: stale (a newer publisher already delivered; newest-green
+ * return early: stale (a newer publisher already delivered; newest-green
  * wins, decided BEFORE the compose so a stale run costs nothing) and
  * no-change-with-healthy-stamp (the tip already IS this source's tree).
  * The seed arm (a missing branch) never hits the no-change skip: that skip
- * needs an existing tip, and the seed stages the whole tree. Returns
- * whether the tip ADVANCED. */
-function publish(sourceSha: string): boolean {
+ * needs an existing tip, and the seed stages the whole tree. */
+function publish(sourceSha: string): void {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   const scratch = scratchWorktrees();
   const branchExists = refExistsOnOrigin(`refs/heads/${BRANCH}`);
@@ -132,7 +129,7 @@ function publish(sourceSha: string): boolean {
     if (stale !== "") {
       console.log(`${BRANCH}: skipping publish - ${stale}`);
       console.log("::endgroup::");
-      return false;
+      return;
     }
   } else {
     must(["git", "worktree", "add", "--detach", scratch.out, sourceSha]);
@@ -197,7 +194,7 @@ function publish(sourceSha: string): boolean {
       `${BRANCH}: the composed tree matches the tip and its stamp is healthy; nothing to publish`,
     );
     console.log("::endgroup::");
-    return false;
+    return;
   }
   const note = staged
     ? branchExists
@@ -224,7 +221,6 @@ function publish(sourceSha: string): boolean {
   const short = mustCapture(["git", "-C", scratch.out, "rev-parse", "--short", "HEAD"]);
   console.log(`${BRANCH}: pushed ${short} (${note})`);
   console.log("::endgroup::");
-  return true;
 }
 
 // The commit to publish: the judged commit on the green path, the sha
@@ -255,7 +251,4 @@ if (notGreen !== null) {
     `refusing to publish the build branch: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branch only ships green main commits; get CI to a successful run on that commit, then re-run.`,
   );
 }
-// The one place the outcome is reported: the redeploy step in
-// post-green.yml reads this output, so a skipped publish never rebuilds
-// this repository's docs site for nothing.
-setOutput("published", publish(sourceSha) ? "true" : "false");
+publish(sourceSha);

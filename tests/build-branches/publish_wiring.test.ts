@@ -173,32 +173,6 @@ describe("post-green publish wiring", () => {
     }
   });
 
-  test("only an ADVANCED build tip redeploys this repository's docs site, with the PAT", () => {
-    // The race and the token choice: docs/all-green.md, "After the gate".
-    // The whole step is pinned as one shape, so a loosened condition, a
-    // swapped token, or a dropped step id fails here.
-    const steps = postGreenDoc.jobs["publish-build"].steps ?? [];
-    const publishAt = steps.findIndex((step) =>
-      (step.run ?? "").includes("build-branches/publish.ts"),
-    );
-    expect(steps[publishAt]?.id).toBe("publish");
-    expect(read(".github/scripts/build-branches/publish.ts")).toContain(
-      'setOutput("published", publish(sourceSha) ? "true" : "false")',
-    );
-    expect(steps[publishAt + 1]).toEqual({
-      name: "Redeploy this repository's docs site from the new build tip",
-      if: "steps.publish.outputs.published == 'true'",
-      env: { GH_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
-      run: 'gh workflow run docs-site.yml --ref main --repo "$GITHUB_REPOSITORY"',
-    });
-    // The dispatched workflow exists on main under that file name and
-    // accepts a dispatch (the rendered dogfood file, never hand-edited).
-    const docsSite = parseYaml(read(".github/workflows/docs-site.yml")) as {
-      on: Record<string, unknown>;
-    };
-    expect(Object.keys(docsSite.on)).toContain("workflow_dispatch");
-  });
-
   test("a dispatch runs the publish leg ALONE; the call runs every leg", () => {
     // Evaluated by GitHub's own rules on the parsed job graph (a
     // condition without a status function implies success() over the
@@ -418,11 +392,10 @@ describe("post-green publish wiring", () => {
       publish.indexOf("function publish("),
       publish.indexOf('const sourceSha = requireEnv("SOURCE_SHA")'),
     );
-    // The two skips return false and the push route alone returns true:
-    // the `published` output that gates the docs redeploy (below) is
-    // exactly "the tip advanced", never "nothing failed".
+    // The two skips return early; the push route runs to the end of the
+    // function, so no third return may appear.
     const returns = body.match(/return\b[^;]*;/g) ?? [];
-    expect(returns).toEqual(["return false;", "return false;", "return true;"]);
+    expect(returns).toEqual(["return;", "return;"]);
     const skipEnd = body.indexOf("const note =");
     expect(skipEnd).toBeGreaterThan(-1);
     const commitSegment = body.slice(skipEnd, body.indexOf('"push"'));
