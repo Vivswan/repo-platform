@@ -241,8 +241,11 @@ describe("driftWarnings", () => {
   // opt-in and lives in the PR body alone.
   const TAIL = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
 
-  const BRANCH_TAIL =
-    "the sync's comment on the branch's PR explains what merging does and how to revert.";
+  // Branch mode runs before open_pr.ts knows whether the branch has a PR,
+  // so the comment is promised only "when there is one" and the no-PR
+  // reader is told what the run leaves them.
+  const BRANCH_COMMENT =
+    "The sync's comment on the branch's open PR, when there is one, explains what merging does and how to revert; a branch without a PR receives no comment";
 
   test.each<{
     reason: string;
@@ -253,23 +256,28 @@ describe("driftWarnings", () => {
     expected: string[];
   }>([
     {
-      reason: "branch mode: no disarm is claimed and the comment is the home, values shown",
+      reason:
+        "branch mode: no disarm is claimed, the comment is conditional, the values are the record",
       repo: "Vivswan/demo",
       drifts: [{ field: "private", recorded: "false", live: "true" }],
       hideDetails: false,
       delivery: "branch",
       expected: [
-        `::warning::Vivswan/demo: private changed out of band: "false" -> "true". ${BRANCH_TAIL}`,
+        `::warning::Vivswan/demo: private changed out of band: "false" -> "true". ${BRANCH_COMMENT}, and this line is the run's record.`,
       ],
     },
     {
-      reason: "branch mode, hidden: the field alone, the comment as the home",
+      reason:
+        "branch mode, hidden: the field alone, and the no-PR reader is sent to the render commit's diff",
       repo: "h**-s**r",
       drifts: [{ field: "description", recorded: "secret", live: "other" }],
       hideDetails: true,
       delivery: "branch",
       expected: [
-        `::warning::h**-s**r: description changed out of band (values hidden: private repository; details in the sync's comment on the branch's PR). ${BRANCH_TAIL}`,
+        "::warning::h**-s**r: description changed out of band (values hidden: private repository). " +
+          "The sync's comment on the branch's open PR, when there is one, carries the values and " +
+          "explains what merging does and how to revert; a branch without a PR receives no comment, " +
+          "so read both values off the render commit's diff of .github/.copier-answers.yml.",
       ],
     },
     {

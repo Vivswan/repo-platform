@@ -50,7 +50,8 @@ const FLAGS = [
 const OPTIONAL_FLAGS = ["--display", "--hide-details", "--mode"] as const;
 
 /** Where the drift report lands: the sync PR's body, or (branch mode) a
- *  comment on the PR whose branch received the render. */
+ *  comment on the branch's PR when one exists (open_pr.ts looks it up
+ *  after this step ran; without a PR the report goes nowhere). */
 export type Delivery = "default" | "branch";
 
 export interface Drift {
@@ -164,21 +165,34 @@ export function driftWarnings(
   hideDetails = false,
   delivery: Delivery = "default",
 ): string[] {
-  const home = delivery === "branch" ? "the sync's comment on the branch's PR" : "the PR body";
-  const tail =
-    delivery === "branch"
-      ? `${home} explains what merging does and how to revert.`
-      : `Auto-merge is disabled; ${home} explains what merging does and how to revert.`;
-  return drifts.map((d) =>
-    hideDetails
-      ? `::warning::${escapeData(
-          `${repo}: ${d.field} changed out of band (values hidden: private repository; ` +
-            `details in ${home}). ${tail}`,
-        )}`
-      : `::warning::${escapeData(
-          `${repo}: ${d.field} changed out of band: ${show(d.recorded)} -> ${show(d.live)}. ${tail}`,
-        )}`,
-  );
+  const line = (d: Drift, detail: string, tail: string) =>
+    `::warning::${escapeData(`${repo}: ${d.field} changed out of band${detail}. ${tail}`)}`;
+  const values = (d: Drift) => `: ${show(d.recorded)} -> ${show(d.live)}`;
+  if (delivery === "branch") {
+    // Whether the branch has a PR is only known once open_pr.ts runs, so
+    // the comment is promised conditionally and the no-PR reader is told
+    // what this run leaves them: the values here, or (hidden) the render
+    // commit, whose answers-file hunk shows recorded -> live.
+    const comment =
+      "The sync's comment on the branch's open PR, when there is one, " +
+      `${hideDetails ? "carries the values and " : ""}explains what merging does and how to revert; ` +
+      "a branch without a PR receives no comment";
+    return hideDetails
+      ? drifts.map((d) =>
+          line(
+            d,
+            " (values hidden: private repository)",
+            `${comment}, so read both values off the render commit's diff of .github/.copier-answers.yml.`,
+          ),
+        )
+      : drifts.map((d) => line(d, values(d), `${comment}, and this line is the run's record.`));
+  }
+  const tail = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
+  return hideDetails
+    ? drifts.map((d) =>
+        line(d, " (values hidden: private repository; details in the PR body)", tail),
+      )
+    : drifts.map((d) => line(d, values(d), tail));
 }
 
 function main(args: string[]): void {
