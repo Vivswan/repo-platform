@@ -487,7 +487,7 @@ describe("judgeFile comment blocks", () => {
         };
 
   test("the caps: one warn-only tier per scope", () => {
-    expect(COMMENT_CAPS).toEqual({ block: 8, header: 20 });
+    expect(COMMENT_CAPS).toEqual({ block: 10, header: 25 });
   });
 
   // Every case names its file, since the comment syntax follows the extension.
@@ -726,8 +726,8 @@ describe("judgeFile comment blocks", () => {
     [
       "a marker after a closing delimiter and code is on a code line: not in the block",
       "f.ts",
-      `x();\n/*\n${" * a\n".repeat(8)}*/ y(); // ${COMMENT_MARKER}\n`,
-      [[2, 9, "block"]],
+      `x();\n/*\n${" * a\n".repeat(BLOCK)}*/ y(); // ${COMMENT_MARKER}\n`,
+      [[2, BLOCK + 1, "block"]],
     ],
     [
       "a marker before the closing delimiter on the closer line is in the block",
@@ -976,7 +976,7 @@ describe("the CLI", () => {
     "",
     "| File | Size | Tier | Cap |",
     "| --- | --- | --- | --- |",
-    "| `src/chatty.ts:1` | 30 comment lines (header) | warn | 20 |",
+    `| \`src/chatty.ts:1\` | 30 comment lines (header) | warn | ${COMMENT_CAPS.header} |`,
     `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
     "",
     `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
@@ -1044,7 +1044,7 @@ describe("the CLI", () => {
     expect(run(root)).toEqual({
       exitCode: 0,
       stdout: [
-        "::warning::src/chatty.ts:1: 30 comment lines (cap 20 for a header)",
+        `::warning::src/chatty.ts:1: 30 comment lines (cap ${COMMENT_CAPS.header} for a header)`,
         `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
         "File size check passed (2 warning(s), 0 managed file(s) skipped).",
       ],
@@ -1111,8 +1111,8 @@ describe("report", () => {
         tier: "warn",
         line: 12,
         measure: "comment",
-        value: 9,
-        cap: 8,
+        value: 11,
+        cap: 10,
         scope: "block",
       },
       {
@@ -1121,8 +1121,8 @@ describe("report", () => {
         tier: "warn",
         line: 1,
         measure: "comment",
-        value: 21,
-        cap: 20,
+        value: 26,
+        cap: 25,
         scope: "header",
       },
       { path: "e.sh", kind: "shell", tier: "warn", measure: "marker", line: 3 },
@@ -1144,8 +1144,8 @@ describe("report", () => {
         "| --- | --- | --- | --- |",
         "| `a.ts` | 2100 lines | hard | 2000 |",
         "| `b.sh:7` | 180 chars | warn | 150 |",
-        "| `c.ts:12` | 9 comment lines | warn | 8 |",
-        "| `d.ts:1` | 21 comment lines (header) | warn | 20 |",
+        "| `c.ts:12` | 11 comment lines | warn | 10 |",
+        "| `d.ts:1` | 26 comment lines (header) | warn | 25 |",
         "| `e.sh:3` | comment-cap: ignore without a reason | warn | - |",
         "",
         `### ${ALLOWLIST_FILE}`,

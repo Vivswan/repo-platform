@@ -46,7 +46,7 @@ export const WARN: Caps = {
 /** Maximum comment block length, in lines, by scope: one annotating tier,
  *  never a failure, so not derived from any hard cap. Fleet-wide, like every
  *  cap here: the fleet takes the action from `@build`. */
-export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 8, header: 20 };
+export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 10, header: 25 };
 /** The per-block exemption, on a comment line inside the block (a comment
  *  line directly above it is part of it); the reason after it is mandatory. */
 export const COMMENT_MARKER = "comment-cap: ignore";
@@ -489,7 +489,7 @@ export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
 }
 
 /** The one-line log form: `path: 3021 lines (cap 2000 for source)`,
- *  `path:412: 613 chars (cap 256)`, `path:1: 21 comment lines (cap 20 for a
+ *  `path:412: 613 chars (cap 256)`, `path:1: 26 comment lines (cap 25 for a
  *  header)`, or `path:7: comment-cap: ignore needs a reason`. */
 export function describe(finding: Finding): string {
   switch (finding.measure) {
