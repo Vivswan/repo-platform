@@ -9,8 +9,10 @@ import {
   fleetCiRenderMismatches,
   pagesLegMismatches,
   prTitleWorkflowMismatches,
-  renderLegOrder,
 } from "../../../scripts/check/ssot/fleet_ci_render.ts";
+import type { JinjaVars } from "../../../scripts/lib/jinja_subset.ts";
+
+const vars: JinjaVars = { username: "octo", slug: "repo", copyrightHolder: "Octo" };
 
 describe("fleetCiRenderMismatches", () => {
   const ciTemplate = [
@@ -1181,39 +1183,6 @@ describe("pagesLegMismatches", () => {
   });
 });
 
-describe("renderLegOrder", () => {
-  const after = { job: "release", module: "release-please" };
-
-  test("the inline needs tag and the block clause tags render per selection; other tags stay for the jinja ban", () => {
-    const text = [
-      "    needs: [all-green, post-green{% if 'release-please' in modules %}, release{% endif %}]",
-      "    if: >-",
-      "{%- if 'release-please' in modules %}",
-      "      !cancelled() &&",
-      "{%- endif %}",
-      "{% if 'pages' not in modules %}x{% endif %}",
-      "",
-    ].join("\n");
-    expect(renderLegOrder(text, after, true)).toBe(
-      [
-        "    needs: [all-green, post-green, release]",
-        "    if: >-",
-        "      !cancelled() &&",
-        "{% if 'pages' not in modules %}x{% endif %}",
-        "",
-      ].join("\n"),
-    );
-    expect(renderLegOrder(text, after, false)).toBe(
-      [
-        "    needs: [all-green, post-green]",
-        "    if: >-",
-        "{% if 'pages' not in modules %}x{% endif %}",
-        "",
-      ].join("\n"),
-    );
-  });
-});
-
 describe("docsSiteLegMismatches", () => {
   const orderedNeeds =
     "    needs: [all-green, post-green{% if 'release-please' in modules %}, release{% endif %}]";
@@ -1357,7 +1326,7 @@ describe("docsSiteLegMismatches", () => {
     workflowText = docsSiteWf,
     renderedTexts = rendered,
     ownCiText = ownCi,
-  ) => docsSiteLegMismatches(legText, workflowText, renderedTexts, ownCiText);
+  ) => docsSiteLegMismatches(legText, workflowText, renderedTexts, ownCiText, vars);
 
   test("the canonical sources, renders, and twin pass clean", () => {
     expect(judge()).toEqual([]);
@@ -1405,6 +1374,21 @@ describe("docsSiteLegMismatches", () => {
       const found = judge(`${leg}\n${spoof}`);
       expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
     }
+  });
+
+  test("a fragment the shared renderer cannot render reports that beside the missing-twin finding, not instead of it", () => {
+    const found = judge(
+      `${leg}\n{% if 'pages' not in modules %}\n  docs-site:\n{% endif %}\n`,
+      docsSiteWf,
+      rendered,
+      ownCi.replace(/ {2}# Dogfood\.[\s\S]*$/, ""),
+    );
+    expect(found.map((m) => m.expected.split(" (")[0])).toEqual(
+      expect.arrayContaining([
+        "a fragment the shared jinja subset renders with the release ordering as its only condition",
+        "a docs-site job",
+      ]),
+    );
   });
 
   test("secrets: on the leg and a widened or narrowed ceiling go red", () => {
@@ -1567,6 +1551,7 @@ describe("docsSiteLegMismatches", () => {
           },
         },
         readFileSync(".github/workflows/ci.yml", "utf-8"),
+        vars,
       ),
     ).toEqual([]);
   });

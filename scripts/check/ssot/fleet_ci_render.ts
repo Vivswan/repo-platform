@@ -2,8 +2,9 @@
 // module's natively-required check.
 
 import { parse as parseYaml } from "yaml";
+import { type JinjaVars, renderJinjaFile } from "../../lib/jinja_subset.ts";
 import { canonical, type Mismatch, setMismatch } from "./comparison.ts";
-import { asRecord, read } from "./inputs.ts";
+import { asRecord, jinjaVars, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** Another module's leg this one runs AFTER when that module is selected:
@@ -585,30 +586,10 @@ export function pagesLegMismatches(
   return mismatches;
 }
 
-/** A LegOrder's inline jinja (`{% if '<module>' in modules %}...{% endif %}`
- *  on one line, or the `{%- ... %}` pair around a line) rendered for
- *  `selected`; every other tag stays in the text for the jinja ban. */
-export function renderLegOrder(text: string, after: LegOrder, selected: boolean): string {
-  const inline = new RegExp(
-    `\\{% if '${after.module}' in modules %\\}([^\\n{]*)\\{% endif %\\}`,
-    "g",
-  );
-  const block = new RegExp(
-    `\\{%- if '${after.module}' in modules %\\}\\n([^\\n]*\\n)\\{%- endif %\\}\\n`,
-    "g",
-  );
-  return text
-    .replace(inline, (_, body: string) => (selected ? body : ""))
-    .replace(block, (_, body: string) => (selected ? body : ""));
-}
-
 /** The lines of a job block that pin its shape: comments and blank lines
- *  dropped, `{% raw %}` pairs stripped, so a jinja source and a rendered
- *  workflow compare. */
+ *  dropped. */
 function pinnedLines(lines: string[]): string[] {
-  return lines
-    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"))
-    .map((line) => line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", ""));
+  return lines.filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
 }
 
 /** The docs-site module's gate-downstream leg: the fragment
@@ -624,7 +605,7 @@ function pinnedLines(lines: string[]): string[] {
  *  the fragment condition in the module manifest collapses the leg there.
  *  This repository dogfoods the standalone shape by hand in its own ci.yml
  *  (not a rendered file): its docs-site job is held equal to the
- *  fragment's release-free arm. */
+ *  fragment's release-free arm, rendered with the shared jinja subset. */
 export function docsSiteLegMismatches(
   legText: string,
   docsSiteWorkflowText: string,
@@ -633,6 +614,7 @@ export function docsSiteLegMismatches(
     composed: { ciText: string; docsSiteText: string };
   },
   ownCiText: string,
+  vars: JinjaVars,
 ): Mismatch[] {
   const legRel = "templates/docs-site/fragments/all-green-docs-site.jinja";
   const workflowRel = "templates/docs-site/.github/workflows/docs-site.yml.jinja";
@@ -783,11 +765,22 @@ export function docsSiteLegMismatches(
       got: "a docs-site job",
     });
   }
-  // This repository's hand-written twin of the release-free arm.
+  // This repository's hand-written twin of the release-free arm. A tag
+  // beyond the ordering gate already failed the jinja ban above; the
+  // renderer throws on it, reported here rather than losing the findings.
+  let armBlock: string[] | null = null;
+  try {
+    const armText = renderJinjaFile(legText, vars, { [`'${after.module}' in modules`]: false });
+    armBlock = pinnedLines(jobBlock(armText.split("\n"), "docs-site"));
+  } catch (error) {
+    mismatches.push({
+      file: legRel,
+      expected:
+        "a fragment the shared jinja subset renders with the release ordering as its only condition",
+      got: error instanceof Error ? error.message : String(error),
+    });
+  }
   const ownBlock = pinnedLines(jobBlock(ownCiText.split("\n"), "docs-site"));
-  const armBlock = pinnedLines(
-    jobBlock(renderLegOrder(legText, after, false).split("\n"), "docs-site"),
-  );
   if (ownBlock.length === 0) {
     mismatches.push({
       file: ownRel,
@@ -795,7 +788,7 @@ export function docsSiteLegMismatches(
         "a docs-site job (this repository dogfoods the docs-site module; its ci.yml is hand-written, so the leg is carried by hand and held to the fragment here)",
       got: "no such job",
     });
-  } else if (canonical(ownBlock) !== canonical(armBlock)) {
+  } else if (armBlock !== null && canonical(ownBlock) !== canonical(armBlock)) {
     mismatches.push({
       file: `${ownRel} job 'docs-site'`,
       expected: `the fragment's release-free arm, comments aside: ${canonical(armBlock)}`,
@@ -1395,6 +1388,7 @@ export const fleetCiRenderRules: Rule[] = [
           },
         },
         read(".github/workflows/ci.yml"),
+        jinjaVars(),
       ),
   },
   {
