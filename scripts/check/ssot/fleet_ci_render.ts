@@ -396,10 +396,9 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
  *  where release-please is selected), the managed pages.yml it calls
  *  (judged sha passed on, NO push trigger, so the deploy's only way onto
  *  main is downstream of the gate; nightly and dispatch kept; the lane
- *  keyed per run on a call), and reusable-pages.yml's sha input feeding
- *  its checkout. The source pins are line censuses over jinja, so the
- *  RENDERED shape is judged too, as parsed YAML of the all-modules and
- *  pages-no-release-please goldens, one per arm of the ordering gate. */
+ *  keyed per run on a call), and reusable-pages.yml's sha input. Source
+ *  pins are line censuses over jinja, so the RENDERED shape is judged too:
+ *  the all-modules and pages-no-release-please goldens, one per arm. */
 export function pagesLegMismatches(
   pagesLegText: string,
   pagesWorkflowText: string,
