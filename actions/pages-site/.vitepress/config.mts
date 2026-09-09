@@ -85,8 +85,8 @@ const nativeName = (tag: string): string => {
 };
 
 const markdown: MarkdownOptions = {
-  // One highlighter theme whose colors are custom properties: custom.css
-  // owns the code palette per mode (--fleet-code-*), so token contrast is
+  // One highlighter theme whose colors are custom properties: the theme's
+  // tokens.ts owns the code palette per mode (--fleet-code-*), so token contrast is
   // a token value the contrast test can guard, not a hex baked into every
   // span. No italics: the fleet reads emphasis by weight. Normalized once
   // here because shiki normalizes a raw theme on every fence and mutates
@@ -160,7 +160,7 @@ export default async () => {
             {
               // Carbon's utils.css imports Google Fonts and cdnfonts (two third-party
               // calls per page load) and declares its bundled Mona Sans, which nothing
-              // selects once custom.css sets the families yet carbon's transformHead
+              // selects once tokens.css sets the families yet carbon's transformHead
               // preloads (137 KB per page) for as long as the @font-face survives.
               // A Once hook, not AtRule visitors: vite emits url() assets from
               // its own Once hook, and PostCSS runs every Once before any visitor.

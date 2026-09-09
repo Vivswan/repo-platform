@@ -1,0 +1,41 @@
+/* The provenance line (provenance.ts) under every page: a mono caption in
+ * the tertiary ink under its own hairline, which it drops after a pager so
+ * the footer ends in one ruled band, not three. */
+
+.fleet-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 8px 0 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--vp-c-text-3);
+}
+/* After a pager the line is the footer's last row, not a third ruled
+ * band under the two ruled cards. */
+.VPDocFooter:has(.prev-next) + .fleet-provenance {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+}
+.fleet-provenance a {
+  color: var(--vp-c-text-3);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--vp-c-border);
+  text-underline-offset: 0.2em;
+  &:hover {
+    color: var(--vp-c-text-1);
+    text-decoration-color: var(--vp-c-text-1);
+  }
+}
+
+@media (max-width: 767px) {
+  /* 14px is the floor for informational text on a phone. */
+  .fleet-provenance {
+    font-size: 14px;
+  }
+}

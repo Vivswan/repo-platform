@@ -1,0 +1,86 @@
+/* Tables over carbon: table-wrap.ts's wrapper is the horizontal scroller
+ * at every width, with an edge shadow toward the hidden side, so a wide
+ * table scrolls inside the doc column instead of wrapping cells into towers. */
+
+/* Carbon scrolls the table itself below 768px, which leaves the off-screen
+ * cells setting the row heights; the wrapper scrolls instead, at every
+ * width. What makes a table wider is its columns' natural widths: an
+ * inline-code token counts whole up to the inline-code cap, prose as its
+ * longest word. The scroll cue is an edge shadow only where content lies
+ * past it: two ground-colored layers scroll with the content and cover the
+ * fixed shadow layers at the ends. */
+
+.vp-doc .vp-table {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 8px 0 1.5em;
+  background:
+    linear-gradient(to right, var(--vp-c-bg) 50%, transparent) left / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--vp-c-bg) 50%, transparent) right / 40px 100% no-repeat local,
+    linear-gradient(to right, var(--fleet-scroll-shade), transparent) left / 16px 100% no-repeat
+    scroll,
+    linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
+    scroll;
+  scrollbar-color: var(--fleet-scroll-strong) transparent;
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll-strong);
+  }
+}
+
+.vp-doc {
+  table {
+    margin: 8px 0 1.5em;
+    font-size: 16px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+  }
+  /* A table nested in a quote or list has no wrapper (table-wrap.ts leaves
+   * it bare) and keeps carbon's own scrolling block. */
+  .vp-table > table {
+    display: table;
+    width: 100%;
+    margin: 0;
+  }
+  tr,
+  tr:nth-child(2n) {
+    background-color: transparent;
+    border-top: 0;
+    transition: none;
+  }
+  th,
+  td {
+    border: 0;
+    border-bottom: 1px solid var(--vp-c-divider);
+    padding: 12px 14px;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: break-word;
+  }
+  th {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--vp-c-text-3);
+    background-color: transparent;
+    padding-bottom: 8px;
+  }
+  td {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  /* A phone column cannot hold two readable prose columns: a table may
+   * spread to twice the column (the wrapper scrolls it) before its cells
+   * wrap, and up to there every column sits at its natural width. */
+  .vp-doc {
+    .vp-table > table {
+      width: max-content;
+      min-width: 100%;
+      max-width: 200%;
+    }
+    /* 14px is the floor for informational text on a phone. */
+    th {
+      font-size: 14px;
+    }
+  }
+}

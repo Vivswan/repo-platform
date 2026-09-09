@@ -1,0 +1,123 @@
+/* The sidebar over carbon: the width is the --vp-sidebar-width token (the
+ * drawer cap and the group width follow it), rows carry hover, active band
+ * and focus ring on one box, and nested lists indent only under a head. */
+
+/* Carbon's per-level rules (.VPSidebarItem.level-N.is-active > .item .link >
+ * .text and kin) reach seven class-levels once scoped, so every rule here
+ * carries the .nav .group ancestors to sit above them. */
+
+/* Carbon keeps its 230px drawer cap on every viewport while padding the
+ * content by the full token, so the list ran narrower than its column; and
+ * it pins the sidebar to the viewport's edge while the article moves into
+ * the frame, so a wide viewport opened a band between the two. The drawer
+ * casts one shadow in both modes (carbon gives dark a shadow and light
+ * none, and its dark rule also outranks its own desktop reset, so the
+ * desktop sidebar cast it too); :root lifts these above that dark rule. */
+:root .Layout .VPSidebar {
+  left: var(--fleet-gutter);
+  max-width: var(--vp-sidebar-width);
+  box-shadow: var(--vp-shadow-3);
+}
+@media (min-width: 768px) {
+  :root .Layout .VPSidebar {
+    box-shadow: none;
+  }
+}
+/* Carbon focuses the opened drawer so its list is next in tab order; the
+ * drawer itself is a region, and its edge is the shadow, not a ring. */
+:root .Layout .VPSidebar:focus-visible {
+  outline: none;
+}
+.VPSidebar .nav {
+  padding: 16px 16px 40px 24px;
+  border-right: 1px solid var(--vp-c-divider);
+
+  /* Carbon sizes the group at `sidebar - 48px` regardless of the nav's own
+   * padding, which clipped the rows' right end. */
+
+  .group {
+    width: auto;
+
+    & + .group {
+      border-top: 0;
+      padding-top: 4px;
+    }
+
+    .VPSidebarItem {
+      &.level-0,
+      &.collapsed.level-0 {
+        padding-bottom: 2px;
+      }
+
+      /* A one-line row is 40px tall (3 + 6 + 21.75 + 6 + 3): the hit area holds
+       * while the type sits denser than carbon's. */
+      .item {
+        border-radius: var(--fleet-radius-md);
+        padding: 3px 8px 3px 10px;
+        transition:
+          background-color var(--fleet-transition),
+          color var(--fleet-transition);
+      }
+      .indicator {
+        display: none;
+      }
+      .text {
+        padding: 6px 0;
+        font-size: 15px;
+        line-height: 1.45;
+        font-weight: 400;
+        color: var(--vp-c-text-2);
+        text-wrap: balance;
+        transition: color var(--fleet-transition);
+      }
+      /* A group head, collapsible (a directory) or plain (pages sharing a
+       * frontmatter group), is the one row without a link. */
+      &:not(.is-link) > .item > .text,
+      &.collapsible > .item > .link > .text {
+        font-weight: 500;
+      }
+      .item:hover {
+        background-color: var(--color-action-list-item-default-hover-bg);
+      }
+      .item:hover .text {
+        color: var(--vp-c-text-1);
+      }
+      &.is-link > .item > .link:hover .text {
+        text-decoration: none;
+      }
+      &.is-active > .item {
+        background-color: var(--fleet-hue-band);
+      }
+      &.is-active.is-link > .item > .link > .text {
+        color: var(--fleet-hue);
+        font-weight: 600;
+      }
+      .caret {
+        color: var(--vp-c-text-3);
+        transition: color var(--fleet-transition);
+      }
+      /* The row is the one box for every state: the hover tint, the active band
+       * and the focus ring, at the row's radius (the link inside is narrower and
+       * carbon's ring sat on it). A group head is itself the focusable row. */
+      .link:focus-visible {
+        outline: none;
+      }
+      .item:focus-visible,
+      .item:has(> .link:focus-visible) {
+        outline: 2px solid var(--fleet-hue);
+        outline-offset: 2px;
+        border-radius: var(--fleet-radius-md);
+      }
+      /* Children step in under their group head; a headless group (a docs
+       * tree's root files) sits flush, with no rule down its edge. */
+      .items {
+        border-left: 0;
+        padding-left: 0;
+        margin: 2px 0 6px;
+      }
+      .item + .items {
+        margin-left: 12px;
+      }
+    }
+  }
+}

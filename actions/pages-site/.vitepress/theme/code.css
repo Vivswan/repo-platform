@@ -1,0 +1,100 @@
+/* Code blocks over carbon: a bordered panel with a control row above the
+ * code (language label and copy button in the pre's top padding), the
+ * tables' edge shadows on overflow, and the focus ring drawn by the block. */
+
+/* The label and the button sit in the pre's top padding so the button
+ * never covers the first line; on touch screens (no hover to reveal it) it
+ * is always shown at a 36px target. The radius holds at every width: the
+ * block never reaches the viewport edge (the column keeps its side
+ * padding), so carbon's squared phone box reads as a fault, not a bleed. */
+.vp-doc div[class*="language-"],
+.vp-doc li div[class*="language-"],
+.vp-block {
+  /* the control row's height, shared by the pre and its line-number gutter */
+  --fleet-codeblock-top: 48px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--fleet-radius-md);
+  margin: 0 0 1.25em;
+}
+.vp-doc [class*="language-"] pre {
+  padding: var(--fleet-codeblock-top) 0 20px;
+  background:
+    linear-gradient(to right, var(--vp-c-bg-code) 50%, transparent) left / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--vp-c-bg-code) 50%, transparent) right / 40px 100% no-repeat local,
+    linear-gradient(to right, var(--fleet-scroll-shade), transparent) left / 16px 100% no-repeat
+    scroll,
+    linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
+    scroll;
+  scrollbar-color: var(--fleet-scroll-strong) transparent;
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll-strong);
+  }
+}
+.vp-doc {
+  .line-numbers-wrapper {
+    padding-top: var(--fleet-codeblock-top);
+  }
+  /* The pre is a scroll region in the tab order; its own ring would be
+   * clipped by the block's overflow, so the block draws it. */
+  [class*="language-"] pre:focus-visible {
+    outline: none;
+  }
+  div[class*="language-"]:has(> pre:focus-visible) {
+    outline: 2px solid var(--fleet-hue);
+    outline-offset: 2px;
+  }
+  [class*="language-"] > button.copy {
+    top: 8px;
+    right: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--fleet-radius-sm);
+    transition:
+      border-color var(--fleet-transition),
+      background-color var(--fleet-transition),
+      opacity var(--fleet-transition);
+    &:focus-visible {
+      opacity: 1;
+    }
+    &.copied,
+    &:hover.copied {
+      border-radius: 0 var(--fleet-radius-sm) var(--fleet-radius-sm) 0;
+    }
+    &.copied::before,
+    &:hover.copied::before {
+      height: 36px;
+      border-radius: var(--fleet-radius-sm) 0 0 var(--fleet-radius-sm);
+      font-size: 13px;
+    }
+  }
+}
+@media (hover: none) {
+  .vp-doc [class*="language-"] > button.copy {
+    opacity: 1;
+  }
+}
+.vp-doc [class*="language-"] {
+  & > span.lang {
+    top: 16px;
+    right: 54px;
+    font-family: var(--vp-font-family-mono);
+    font-size: 13px;
+    line-height: 20px;
+    transition: none;
+  }
+  /* carbon hides the label while the copy button shows; here they share the row */
+  &:hover > button.copy + span.lang,
+  & > button.copy:focus + span.lang {
+    opacity: 1;
+  }
+}
+.vp-doc .vp-code-group .tabs {
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+@media (max-width: 767px) {
+  /* 14px is the floor for informational text on a phone. */
+  .vp-doc [class*="language-"] > span.lang {
+    font-size: 14px;
+  }
+}

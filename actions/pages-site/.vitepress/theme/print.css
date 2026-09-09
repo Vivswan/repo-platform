@@ -1,0 +1,105 @@
+/* The print sheet: the article alone on paper. The chrome is gone, the
+ * palette is tokens.css's print values, the column spans the page, links
+ * print their address, and no code block or table splits across pages. */
+
+@media print {
+  .VPNav,
+  .VPLocalNav,
+  .VPSidebar,
+  .Layout .VPDoc.has-aside .aside,
+  .VPSkipLink,
+  .fleet-launcher,
+  .fleet-launcher-button,
+  .VPDoc .content-top,
+  .VPDocFooter,
+  .vp-doc [class*="language-"] > button.copy,
+  .vp-doc [class*="language-"] > span.lang {
+    display: none;
+  }
+  body {
+    background: #ffffff;
+    font-size: 12pt;
+  }
+  .Layout {
+    .VPContent.has-sidebar,
+    .VPDoc {
+      padding: 0;
+      margin: 0;
+    }
+    .VPDoc :is(.container, .content, .content-container) {
+      max-width: none;
+    }
+  }
+  /* The address replaces carbon's 11px masked icon box in the same
+   * ::after, so the box's mask and size go too, or the text is masked
+   * away one glyph per line. */
+  .vp-doc {
+    :is(a[href*="://"], a[target="_blank"]):not(.no-icon)::after {
+      content: " (" attr(href) ")";
+      display: inline;
+      width: auto;
+      height: auto;
+      margin: 0;
+      background: none;
+      -webkit-mask-image: none;
+      mask-image: none;
+      font-size: 0.85em;
+      color: var(--vp-c-text-3);
+      text-decoration: none;
+    }
+    div[class*="language-"],
+    .vp-table,
+    .custom-block,
+    blockquote {
+      break-inside: avoid;
+    }
+    .vp-table,
+    [class*="language-"] pre {
+      overflow: visible;
+      background: none;
+    }
+    div[class*="language-"] {
+      --fleet-codeblock-top: 20px;
+      overflow: visible;
+    }
+    /* A line wraps to the page instead of scrolling; a token wider than the
+     * page (one long identifier) breaks inside, and the code box gives up
+     * carbon's fit-content width, which would keep it as wide as that token
+     * and clip its tail at the column. */
+    [class*="language-"] code {
+      width: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    /* The gutter advances one fixed row per source line, so once a line
+     * wraps the numbers drift off their lines: the gutter goes, and its
+     * column with it. */
+    div[class*="language-"].line-numbers-mode {
+      padding-left: 0;
+    }
+    .line-numbers-wrapper {
+      display: none;
+    }
+    /* Nothing scrolls on paper: the table fits the page, and a cell's long
+     * value (a code token, whole on screen, or a bare unbroken word) wraps
+     * inside its column. */
+    .vp-table {
+      & > table {
+        width: 100%;
+        max-width: 100%;
+      }
+      :is(th, td) {
+        overflow-wrap: anywhere;
+        /* the inline-code rule's own break-word would outrank the inherited value */
+        code {
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+      }
+    }
+    h2,
+    h3 {
+      break-after: avoid;
+    }
+  }
+}

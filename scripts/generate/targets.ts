@@ -32,6 +32,7 @@ import {
   pagesSetupDefault,
   pagesSetupMeaning,
 } from "./pages.ts";
+import { THEME_TOKENS_CSS, themeTokensCss } from "./theme_tokens.ts";
 import {
   bunPinnedActionDirs,
   bunToolchainPin,
@@ -212,6 +213,11 @@ export function wholeFiles(
       () => moduleSchemaJson(),
       "its content does not match the zod schema in scripts/lib/module_manifests.ts " +
         "(a zod upgrade changing the emitted JSON Schema is the usual cause)",
+    ],
+    [
+      THEME_TOKENS_CSS,
+      () => themeTokensCss(),
+      "its content does not match the token data in actions/pages-site/.vitepress/theme/tokens.ts",
     ],
     ...toolchainPins(manifests).map((pin): [string, (inputs: RegionInputs) => string, string] => [
       `templates/${pin.module}/${pin.file}`,

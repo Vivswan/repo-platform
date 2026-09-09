@@ -1,0 +1,52 @@
+/* Page-wide rules over carbon: the body type, the hue on selection and
+ * focus rings, thin scrollbars in the scroll token. Everything else is a
+ * component's own file; the selectors here are the ones with no component. */
+
+html {
+  scroll-padding-top: calc(var(--vp-nav-height) + 24px);
+}
+
+body {
+  font-size: 17px;
+  line-height: 1.7;
+  text-align: left;
+}
+
+::selection {
+  background: var(--fleet-hue-soft);
+  color: var(--vp-c-text-1);
+}
+
+:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+}
+/* An inline link's ring sits inside the word spacing: at 2px it touches
+ * the neighbouring words. */
+.vp-doc a:focus-visible {
+  outline-offset: 1px;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fleet-scroll) transparent;
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll);
+    border-radius: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@media (max-width: 767px) {
+  body {
+    font-size: 16px;
+  }
+}

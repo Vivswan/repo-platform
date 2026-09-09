@@ -1,0 +1,84 @@
+/* The landing page's layout: the facts card's aside (wider and static,
+ * and below carbon's 1280px aside breakpoint in flow above the article)
+ * and the intro's reading measure and size. */
+
+/* A landing page is one whose aside holds the facts card. The card never
+ * chases the text, and below the breakpoint it sits BEFORE the content at
+ * the column's full width, so a narrow viewport reads the card first, the
+ * way a repository's About card leads its README on a phone. */
+/* On the layout, not the doc: the nav's search field spans the reading
+ * column by this token too. */
+.Layout:has(.fleet-facts) {
+  --vp-doc-aside-width: 352px;
+}
+.VPDoc.has-aside:has(.fleet-facts) .aside {
+  display: block;
+  order: 2;
+  .aside-container {
+    position: static;
+    padding-top: 0;
+    height: auto;
+    width: auto;
+    overflow: visible;
+  }
+  .aside-content {
+    min-height: 0;
+    border-left: 0;
+    padding: 0 0 32px;
+  }
+}
+@media (min-width: 1280px) {
+  .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
+    /* level with the h1: the row above the article plus main's top padding */
+    padding-top: calc(var(--fleet-content-top-height) + 32px);
+  }
+}
+@media (max-width: 1279px) {
+  .VPDoc.has-aside:has(.fleet-facts) {
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+    .aside {
+      flex: none;
+      order: 0;
+      width: 100%;
+      max-width: none;
+      .aside-content {
+        padding: 24px 0 12px;
+      }
+    }
+  }
+}
+
+/* The landing's prose keeps the reading measure while its wide blocks
+ * (tables, code) use the full column. VitePress wraps the rendered
+ * markdown in one div inside .vp-doc. The intro runs at 18px, where the
+ * measure (68ch, 783px) is wider than the 740px doc column, so the column
+ * is what caps it: 64ch, inside the 45 to 75ch reading range. */
+
+.VPDoc:has(.fleet-facts) .vp-doc > div {
+  & > p,
+  & > ul,
+  & > ol,
+  & > blockquote {
+    max-width: var(--fleet-measure);
+  }
+}
+.VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
+  font-size: 18px;
+  /* The intro's own bottom margin (1.25em, 22.5px) plus 28px of air before
+   * the first section head; adjacent siblings here, so the two margins
+   * collapse into this one. */
+  & + h2 {
+    margin-top: 50px;
+  }
+}
+
+@media (max-width: 767px) {
+  .VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
+    font-size: 17px;
+  }
+}

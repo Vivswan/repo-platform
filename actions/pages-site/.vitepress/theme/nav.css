@@ -1,0 +1,306 @@
+/* The nav bar and the local nav (narrow viewports) over carbon: the
+ * appearance switch inline at every width, the title column on the frame's
+ * edge, the version select, and the outline sheet's 44px controls. */
+
+.VPNav .VPNavBar {
+  box-shadow: inset 0 -1px var(--vp-c-divider);
+  color: var(--vp-c-text-1);
+
+  .divider-line,
+  &.has-local-nav .divider-line,
+  &:not(.top) .divider-line {
+    background-color: transparent;
+  }
+}
+
+.VPNavBar .VPNavBarTitle .title {
+  .nav-bar-title-text {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    color: var(--vp-c-text-1);
+    border-radius: var(--fleet-radius-md);
+  }
+  /* The link is the whole 60px column; the ring sits on the brand's pill. */
+  &:focus-visible {
+    outline: none;
+    .nav-bar-title-text {
+      outline: 2px solid var(--fleet-hue);
+      outline-offset: 2px;
+      border-radius: var(--fleet-radius-md);
+    }
+  }
+}
+
+.VPNavBar .content-body {
+  gap: 6px;
+}
+
+/* Carbon parks the appearance switch in the "..." flyout between 768px and
+ * 1279px, where the trigger is 20px wide and a touch needs two taps (hover
+ * opens, click toggles back), and below 768px in the hamburger's screen,
+ * two taps again. The bar has room for the switch at every width, so it
+ * sits inline; the flyout and the screen keep only what else they hold
+ * (nav items, translations, social links), and the hamburger goes with a
+ * screen that would be empty. */
+
+.VPNav {
+  .VPNavBar .content-body > .appearance {
+    display: flex;
+    align-items: center;
+  }
+  .VPNavScreen .VPNavScreenAppearance {
+    display: none;
+  }
+}
+@media (min-width: 768px) {
+  .VPNav .VPNavBar .content-body > .VPNavBarExtra .group:has(.item.appearance) {
+    display: none;
+  }
+  .VPNav
+    .VPNavBar
+    .content-body
+    > .VPNavBarExtra:not(:has(.translations)):not(:has(.social-links)) {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .VPNav
+    .VPNavBar:not(
+      :has(.VPNavBarMenu > :not(.visually-hidden), .VPNavBarTranslations, .VPNavBarSocialLinks)
+    )
+    .hamburger {
+    display: none;
+  }
+}
+/* The 40x22 switch keeps its look; the hit area grows to 44px (the
+ * insets count from its padding box, inside the 1px border). */
+.VPNav .VPSwitch::before {
+  content: "";
+  position: absolute;
+  inset: -12px -3px;
+}
+
+/* The title column is the sidebar's column, gutter included on a viewport
+ * wider than the frame, and the brand's glyph starts where the sidebar's
+ * labels do (their 34px, less the title link's 8px pill padding and 1px
+ * border). The container's first child only: VPNavBarTitle's own link is
+ * a second `.title` inside this one. */
+@media (min-width: 768px) {
+  .VPNav .VPNavBar.has-sidebar .container > .title:first-child {
+    padding-left: calc(var(--fleet-gutter) + 25px);
+    width: calc(var(--fleet-gutter) + var(--vp-sidebar-width));
+  }
+}
+/* On a viewport wider than the frame the controls sit on its right edge,
+ * level with the aside below them. */
+@media (min-width: 1440px) {
+  .VPNav .VPNavBar.has-sidebar .content {
+    padding-right: calc(var(--fleet-gutter) + 32px);
+  }
+}
+
+/* No hairline dividers between the nav tools. */
+.VPNav .VPNavBar .content-body > .translations::before,
+.VPNav .VPNavBar .content-body > .appearance::before,
+.VPNav .VPNavBar .content-body > .social-links::before {
+  content: none;
+}
+.VPNavBar .VPFlyout {
+  border-color: transparent;
+  border-radius: var(--fleet-radius-md);
+  color: var(--vp-c-text-2);
+  font-size: 15px;
+  .button,
+  .text {
+    color: var(--vp-c-text-2);
+    font-size: 15px;
+  }
+  .option-icon,
+  .text-icon,
+  .icon {
+    fill: var(--vp-c-text-2);
+  }
+  &:hover {
+    background-color: var(--color-action-list-item-default-hover-bg);
+    .button,
+    .text {
+      color: var(--vp-c-text-1);
+    }
+  }
+}
+
+.VPFlyout .VPMenu {
+  border-radius: var(--fleet-radius-md);
+  padding: 6px;
+  box-shadow: var(--vp-shadow-4);
+}
+
+.VPMenu .VPMenuLink .link {
+  border-radius: var(--fleet-radius-sm);
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.5;
+  &.active {
+    background-color: transparent;
+    color: var(--fleet-hue);
+    font-weight: 600;
+  }
+}
+.VPMenu .items .title {
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+  padding: 4px 12px 2px;
+  line-height: 1.5;
+}
+.VPNavBar .DocSearch-Button {
+  border-radius: var(--fleet-radius-md);
+  border-color: var(--vp-c-border);
+  background: var(--fleet-field-bg);
+  height: 40px;
+  padding: 0 12px;
+  color: var(--vp-c-text-3);
+  &:hover {
+    border-color: var(--fleet-hue);
+    background: var(--fleet-field-bg);
+  }
+  .DocSearch-Search-Icon,
+  .DocSearch-Button-Placeholder {
+    color: var(--vp-c-text-3);
+    font-size: 15px;
+    font-weight: 400;
+  }
+  .DocSearch-Button-Key {
+    font-family: var(--vp-font-family-mono);
+    font-size: 12px;
+    color: var(--vp-c-text-2);
+    background: var(--vp-c-bg-soft-2);
+    border-color: var(--vp-c-border);
+    border-radius: var(--fleet-radius-sm);
+    border-right: 1px solid var(--vp-c-border);
+    padding: 0 6px;
+    margin: 0 0 0 4px;
+    height: 22px;
+    line-height: 20px;
+    & + .DocSearch-Button-Key {
+      border-left: 1px solid var(--vp-c-border);
+      border-radius: var(--fleet-radius-sm);
+      padding: 0 6px;
+    }
+  }
+}
+.VPNavBar .VPSwitch.VPSwitchAppearance {
+  border-color: var(--vp-c-border);
+  background-color: var(--vp-c-bg-soft-2);
+  .check {
+    background-color: var(--vp-c-bg-soft);
+    box-shadow: var(--vp-shadow-1);
+  }
+}
+
+/* The version select: a nav tool with the flyouts' material. The chevron
+ * is a data URI, so the stroke is written per mode instead of reading a
+ * token. */
+.VPNavBar .docs-site-version-switcher {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 40px;
+  margin: 0;
+  padding: 0 28px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--fleet-radius-md);
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737b89' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  color: var(--vp-c-text-1);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background-color var(--fleet-transition);
+  &:hover {
+    background-color: var(--color-action-list-item-default-hover-bg);
+  }
+  /* biome-ignore lint/style/noDescendingSpecificity: biome ranks this nested rule against the title's &:focus-visible above; flattened, the two select different elements */
+  &:focus-visible {
+    outline: 2px solid var(--fleet-hue);
+    outline-offset: 0;
+  }
+  option {
+    background: var(--vp-c-bg-elv);
+    color: var(--vp-c-text-1);
+  }
+}
+.dark .VPNavBar .docs-site-version-switcher {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2380889a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+.VPLocalNav {
+  border-bottom-color: var(--vp-c-divider);
+  .menu {
+    font-size: 14px;
+    color: var(--vp-c-text-2);
+  }
+  /* The outline trigger is a 44px tap target; the container's vertical
+   * padding moves into the button so the bar keeps its height. */
+  .VPLocalNavOutlineDropdown {
+    padding: 2px 20px 1px;
+    button {
+      min-height: 44px;
+      margin: 0 -8px;
+      padding: 10px 8px;
+      border-radius: var(--fleet-radius-sm);
+      font-size: 14px;
+      line-height: 24px;
+      color: var(--vp-c-text-2);
+    }
+  }
+  /* A page without headings (a landing) beside a sidebar has nothing to
+   * list, and carbon's fallback there is a no-op "Return to top" at the top
+   * of the page. Without a sidebar the bar appears only once scrolled, where
+   * that button does something. */
+  &.empty.has-sidebar .VPLocalNavOutlineDropdown {
+    display: none;
+  }
+  /* The sheet: one opaque panel with a hairline under its header. Carbon
+   * draws that divider as a 1px grid gap over the gutter color, and the
+   * fleet's translucent gutter lets the page text bleed through it. */
+  .VPLocalNavOutlineDropdown {
+    .items {
+      gap: 0;
+      border-color: var(--vp-c-border);
+      border-radius: var(--fleet-radius-md);
+      background-color: var(--vp-c-bg-elv);
+      box-shadow: var(--vp-shadow-4);
+    }
+    .header {
+      background-color: transparent;
+      border-bottom: 1px solid var(--vp-c-divider);
+    }
+    .top-link {
+      padding: 0 20px;
+      line-height: 44px;
+      font-size: 14px;
+    }
+    .outline {
+      padding: 8px 8px 8px 0;
+      background-color: transparent;
+    }
+    .vp-outline-item {
+      min-height: 40px;
+      padding: 8px 12px;
+    }
+    .outline-link {
+      font-size: 14px;
+      line-height: 24px;
+      white-space: normal;
+    }
+  }
+}
+
+@media (max-width: 767px) {
+  .VPNavBar .VPNavBarTitle .title .nav-bar-title-text {
+    font-size: 16px;
+  }
+}

@@ -26,7 +26,7 @@ function row(label: Cell, value: Cell): VNode {
 
 /** A counted group: the label with its count, then the items as a nested
  *  list INSIDE the value cell, so the one markup lays out both ways: as
- *  indented rows under the count in the aside (components.css places the
+ *  indented rows under the count in the aside (facts.css places the
  *  nested lists on the card's shared label column), and as one inline run
  *  next to the label when the card sits in flow. */
 function group(label: string, items: [Cell, Cell][]): VNode {
@@ -56,7 +56,7 @@ function shortUrl(url: string): string {
 }
 
 /** A path-like value (`owner/repo`, `host/path`) as one segment per slash,
- *  each an inline block (components.css) with a `<wbr>` between them: a
+ *  each an inline block (facts.css) with a `<wbr>` between them: a
  *  value too wide for the column splits at a slash, and only a segment too
  *  wide on its own breaks inside a word. A bare `<wbr>` is not enough: a
  *  hyphen later in the value is the break the line breaker prefers. */

@@ -1,7 +1,7 @@
 /*
  * The search launcher: the landing page's panel, the nav's field-shaped
  * button, and the dialog the button opens. Material and metrics come from
- * the tokens in custom.css; the hue appears on the highlighted row (a tint
+ * the tokens in tokens.css; the hue appears on the highlighted row (a tint
  * plus a 2px inset ring, so the state never rests on color alone), on the
  * focused field (the icon; the ring joins it only while the reader is on
  * the keyboard) and on focus rings only. Reading rules hold: 17px-class
