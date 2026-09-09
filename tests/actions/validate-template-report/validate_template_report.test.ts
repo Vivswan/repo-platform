@@ -30,14 +30,6 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { recordedBuildSha } from "../../../actions/validate-template-report/src/aligned/build_sha";
-import {
-  ACTION_DIR,
-  actionOf,
-  BUN_VERSION_FILE,
-  TREE_DIR,
-  VALIDATOR_SCRIPT,
-} from "../../../actions/validate-template-report/src/aligned/tree";
 import {
   type ChildExit,
   capture,
@@ -45,7 +37,15 @@ import {
   failureDetail,
   run,
   succeeded,
-} from "../../../actions/validate-template-report/src/runtime";
+} from "../../../actions/shared/action_runtime";
+import { recordedBuildSha } from "../../../actions/shared/build_sha";
+import {
+  ACTION_DIR,
+  actionOf,
+  BUN_VERSION_FILE,
+  TREE_DIR,
+  VALIDATOR_SCRIPT,
+} from "../../../actions/validate-template-report/src/aligned/tree";
 import {
   classify,
   type Integrity,
@@ -754,7 +754,7 @@ describe("how a child ended", () => {
   });
 });
 
-// --- src/aligned/build_sha.ts ------------------------------------------------
+// --- actions/shared/build_sha.ts ---------------------------------------------
 
 describe("the recorded build sha", () => {
   // Read the way the stamp hook reads it (quoted or bare), then accepted

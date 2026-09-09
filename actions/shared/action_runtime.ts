@@ -1,8 +1,8 @@
-// The slice of the repository's shared helpers this composite action needs,
-// kept LOCAL on purpose: a composite action is published on the build
-// branch and runs from its own directory, so it can import from
-// actions/shared/ (the dependency-free zone shipped beside it) and from
-// nothing else in the repository tree.
+// The runtime slice the composite actions' bun scripts share: env reads,
+// workflow-command prints, and deadline-bearing subprocess runners. Lives
+// in the dependency-free zone because a composite action runs from its
+// own directory on the build branch, where nothing else of the repository
+// tree exists to import from.
 
 import { closeSync, openSync } from "node:fs";
 
@@ -29,8 +29,10 @@ export function warning(message: string): void {
   console.log(`::warning::${escapeData(message)}`);
 }
 
-export function error(message: string): void {
-  console.log(`::error::${escapeData(message)}`);
+/** An error annotation; `file` pins it to a path in the checkout. */
+export function error(message: string, file?: string): void {
+  const where = file === undefined ? "" : ` file=${escapeData(file)}`;
+  console.log(`::error${where}::${escapeData(message)}`);
 }
 
 /** How a child ended. The deadline wins over the exit code: a child that

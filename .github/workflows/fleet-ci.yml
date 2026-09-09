@@ -65,6 +65,27 @@ jobs:
           echo "::error::validate-template's integrity check failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
+  # A pull request that changes the module selection (or a recorded
+  # answer) must carry that selection's render: the action renders the
+  # template at the repository's recorded build commit and compares every
+  # managed file against the tree. Stale fails naming the files and the
+  # sync dispatch that pushes the render onto the PR branch (sync-repos.yml's
+  # branch input); a PR leaving both files alone is a fast no-op. PR events
+  # only: nothing else has a selection diff to judge.
+  module-render:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The PR's file listing (a private repository answers 403 without it).
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/module-render@build
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
   # The six base checks in one job for every visibility (a standalone job
   # bills a rounded-up minute per push); !cancelled() keeps later checks
   # running past a failure, and the judge last names every failed check.

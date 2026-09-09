@@ -296,6 +296,7 @@ export function allGreenGateMismatches(
  *  per-repo diff. The six base checks are STEPS of base-checks (shape test). */
 export const FLEET_CI_ROSTER = [
   "validate-template",
+  "module-render",
   "base-checks",
   "dependency-review",
   "codeql",

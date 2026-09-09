@@ -18,6 +18,7 @@ updates:
       - "/actions/check-typography"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
+      - "/actions/module-render"
       - "/actions/pages-site"
       - "/actions/release-health"
       - "/actions/validate-commit-names"
@@ -86,6 +87,19 @@ updates:
   # Dev-only manifest (@types/bun, typescript) for the fuzz-issue action.
   - package-ecosystem: "bun"
     directory: "/actions/fuzz-issue"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # The module-render action: its yaml runtime dependency plus its dev-only
+  # typing manifest. It commits bun.lock, so the bun ecosystem keeps both
+  # manifest and lockfile current.
+  - package-ecosystem: "bun"
+    directory: "/actions/module-render"
     schedule:
       interval: "monthly"
     cooldown:

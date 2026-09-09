@@ -24,6 +24,7 @@ describe("bunLockDirs", () => {
       "actions/check-file-size",
       "actions/check-typography",
       "actions/fuzz-issue",
+      "actions/module-render",
       "actions/pages-site",
       "actions/release-health",
       "actions/validate-commit-names",

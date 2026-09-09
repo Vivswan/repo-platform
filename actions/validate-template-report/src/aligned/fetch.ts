@@ -5,9 +5,17 @@
 
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { capture, download, env, error, failureDetail, requireEnv, succeeded } from "../runtime.ts";
+import {
+  capture,
+  download,
+  env,
+  error,
+  failureDetail,
+  requireEnv,
+  succeeded,
+} from "../../../shared/action_runtime.ts";
+import { admitBuildCommit, OPERATOR_REPO, recordedBuildSha } from "../../../shared/build_sha.ts";
 import { writeVerdict } from "../verdict.ts";
-import { OPERATOR_REPO, recordedBuildSha } from "./build_sha.ts";
 import { ACTION_DIR, actionOf, BUN_VERSION_FILE, treeOf, VALIDATOR_SCRIPT } from "./tree.ts";
 
 const NETWORK_TIMEOUT_MS = 60_000;
@@ -37,31 +45,11 @@ const recorded = recordedBuildSha(root);
 if ("refusal" in recorded) refuse(recorded.refusal);
 const { sha } = recorded;
 
-// The tarball endpoint serves any commit in the repository's network, and
-// the answers file is PR-editable, so only a commit the protected build
-// branch (no force-push, no deletion) already contains may run here: the
-// same trust every `@build` action ref already places in that branch.
-const compared = capture(
-  [
-    "gh",
-    "api",
-    `repos/${OPERATOR_REPO}/compare/${sha}...build`,
-    "--jq",
-    '"\\(.status) \\(.ahead_by)"',
-  ],
-  { timeoutMs: NETWORK_TIMEOUT_MS },
-);
-if (!succeeded(compared.exit)) {
-  refuse(
-    `could not confirm ${sha} is on ${OPERATOR_REPO}'s build branch: ${failureDetail(compared)}`,
-  );
-}
-const [status = "", aheadBy = ""] = compared.stdout.trim().split(" ");
-if (status !== "identical" && status !== "ahead") {
-  refuse(
-    `_commit ${sha} is not a published commit of ${OPERATOR_REPO}'s build branch (compare: ${status})`,
-  );
-}
+// Only a commit the protected build branch already contains may run here
+// (admitBuildCommit states the trust model).
+const admitted = admitBuildCommit(sha, NETWORK_TIMEOUT_MS);
+if ("refusal" in admitted) refuse(admitted.refusal);
+const { status, aheadBy } = admitted;
 
 // The vintage floor: `_commit` may move forward along the build branch,
 // never back to an older validator with fewer rules. The base ref's

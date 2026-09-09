@@ -66,6 +66,23 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "write" });
   });
 
+  test("module-render is a PR-only thin caller of the module-render action at @build", () => {
+    const job = fleetCi.jobs["module-render"];
+    // Job-level: a push has no selection diff to judge, and a skipped job
+    // stands down in the caller's all-green verdict.
+    expect(job?.if).toBe("github.event_name == 'pull_request'");
+    const steps = job?.steps ?? [];
+    expect(steps.map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/module-render@build"),
+    ]);
+    // The token lists the PR's files (pull-requests read: a private
+    // repository answers 403 without it) and compares against the build
+    // branch; the action fails its own step, so the job needs nothing more.
+    expect(steps[1]?.with).toEqual({ "github-token": "${{ secrets.GITHUB_TOKEN }}" });
+    expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "read" });
+  });
+
   // One unconditional job for every visibility. The check is its action:
   // a lost step drops the check fleet-wide; a step without `!cancelled()`
   // would be skipped by an earlier failure, hiding it.

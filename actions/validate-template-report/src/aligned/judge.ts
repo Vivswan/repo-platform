@@ -8,7 +8,15 @@
 // checkout.
 
 import { join, resolve } from "node:path";
-import { capture, env, error, failureDetail, requireEnv, run, succeeded } from "../runtime.ts";
+import {
+  capture,
+  env,
+  error,
+  failureDetail,
+  requireEnv,
+  run,
+  succeeded,
+} from "../../../shared/action_runtime.ts";
 import { classify, type Integrity, writeVerdict } from "../verdict.ts";
 import { actionOf, reportFilesOf, VALIDATOR_SCRIPT } from "./tree.ts";
 

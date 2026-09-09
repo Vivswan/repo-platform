@@ -1,0 +1,12 @@
+{
+  "name": "module-render",
+  "private": true,
+  "description": "Dependency manifest for the module-render action: yaml reads the registration and answers files the check judges; the shared zone it imports carries no dependencies.",
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
+  }
+}
