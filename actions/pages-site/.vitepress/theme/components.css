@@ -473,11 +473,9 @@ a:focus-visible {
 
 /* ---------- doc column ---------- */
 
-/* The row above the article: the Markdown menu and the Edit link as two
- * quiet icon buttons at the right, alone. Carbon's breadcrumb at the left
- * repeated the h1 below it, so it is gone. The row's height is one token
- * because the aside's top and the landing card's top are set level with
- * the h1 below it. */
+/* The row above the article: the Edit link alone (carbon's breadcrumb
+ * repeated the h1; its Markdown menu is off in ../config.mts). Its fixed
+ * height is the token the aside's and landing card's tops read. */
 .VPDoc {
   --fleet-content-top-height: 45px;
 }
@@ -491,7 +489,6 @@ a:focus-visible {
   display: none;
 }
 
-.VPDoc .content-top .VPLlmsPageActions .trigger,
 .VPDoc .content-top .edit-link-button {
   position: relative;
   display: inline-flex;
@@ -510,21 +507,17 @@ a:focus-visible {
     background-color var(--fleet-transition),
     color var(--fleet-transition);
 }
-.VPDoc .content-top .VPLlmsPageActions .trigger:hover,
 .VPDoc .content-top .edit-link-button:hover {
   background-color: var(--color-action-list-item-default-hover-bg);
   color: var(--fleet-hue);
 }
-.VPDoc .content-top .VPLlmsPageActions .trigger-icon,
 .VPDoc .content-top .edit-link-button .content-box-icon {
   width: 16px;
   height: 16px;
   margin: 0;
   color: inherit;
 }
-/* The labels stay in the DOM as the controls' accessible names; only the
- * decorative caret leaves. */
-.VPDoc .content-top .VPLlmsPageActions .trigger-label,
+/* The label stays in the DOM as the control's accessible name. */
 .VPDoc .content-top .edit-link-button .edit-link-text {
   position: absolute;
   width: 1px;
@@ -532,25 +525,6 @@ a:focus-visible {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-/* While a copy reports its result (page-actions.ts stamps the attribute),
- * the label comes back beside the glyph. */
-.VPDoc .content-top .VPLlmsPageActions .trigger[data-feedback] {
-  width: auto;
-  gap: 6px;
-  padding: 0 10px 0 8px;
-  color: var(--vp-c-text-1);
-}
-.VPDoc .content-top .VPLlmsPageActions .trigger[data-feedback] .trigger-label {
-  position: static;
-  width: auto;
-  height: auto;
-  clip-path: none;
-  font-size: 13px;
-  font-weight: 500;
-}
-.VPDoc .content-top .VPLlmsPageActions .trigger-caret {
-  display: none;
 }
 
 /* The outline's own rule runs down the headings; carbon's second rule on

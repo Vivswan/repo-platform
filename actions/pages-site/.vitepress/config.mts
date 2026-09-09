@@ -201,6 +201,10 @@ export default async () => {
       // carbon's default title is uppercase; the fleet reads sentence case
       notFound: { title: "Page not found", linkText: "Go to the front page" },
       docFooter: { prev: "Previous", next: "Next" },
+      // Carbon 1.6.0's Markdown menu prefixes the site base twice (route.path
+      // already carries it, then withBase()), so on every based fleet site its
+      // fetch 404s; llms.txt, from the same plugin, is unaffected and ships.
+      llms: { pageActions: false },
       ...(process.env.DOCS_SITE_EDIT_PATTERN
         ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
         : {}),
