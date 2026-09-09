@@ -1,5 +1,6 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2164  # strict mode is the entry's: set -e aborts the run on a failed cd
+# shellcheck disable=SC2016  # assertion strings carry literal backticks
 # shellcheck disable=SC2154  # NEW_TAG, PROJECT, WORK, and the resolved shas are the entry's and the main leg's
 # Leg of upgrade_path_test.sh, sourced in run order after the shared setup: it shares the harness's strict mode, variables, functions, and cwd.
 # --- Branch mode: a PR branch that changes the selection gets its render -----
@@ -22,6 +23,10 @@ fi
 sed -e 's/\]$/, "fuzzer"]/' .repo-platform.yml > .repo-platform.yml.tmp
 mv .repo-platform.yml.tmp .repo-platform.yml
 grep -qF '"fuzzer"' .repo-platform.yml || fail "could not add fuzzer to .repo-platform.yml on the branch"
+# The branch also carries a local trailing comment in the managed ci.yml:
+# copier's merge keeps it (the control below), so without the managed
+# delivery module-render would still read the rendered branch as stale.
+echo "# local ci note" >> .github/workflows/ci.yml
 git -c user.name=ci -c user.email=ci@localhost commit -qam "chore: select the fuzzer module"
 branch_base="$(git rev-parse HEAD)"
 
@@ -82,15 +87,27 @@ bun .github/scripts/sync/preserve_local_content.ts \
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$BRANCH_WORK/dropped-local-hunks.md" --root "$PROJECT" \
   --skip "$BRANCH_WORK/split-rebuilt-paths.txt"
+grep -qF "# local ci note" "$PROJECT/.github/workflows/ci.yml" \
+  || fail "copier's update dropped the local note from ci.yml on its own; the managed-delivery control is vacuous"
+RUNNER_TEMP="$BRANCH_WORK" SRC_PATH="$branch_src_path" OLD_SHA="$NEW_SHA_RESOLVED" \
+  bun .github/scripts/sync/reset_managed.ts
+cmp -s "$BRANCH_WORK/render-new/.github/workflows/ci.yml" "$PROJECT/.github/workflows/ci.yml" \
+  || fail "the managed delivery did not replace the branch's ci.yml with the clean render's bytes: $(diff "$BRANCH_WORK/render-new/.github/workflows/ci.yml" "$PROJECT/.github/workflows/ci.yml")"
+grep -qF -- '- `.github/workflows/ci.yml`' "$BRANCH_WORK/managed-replaced.md" \
+  || fail "the managed delivery's report does not name the branch's ci.yml: $(cat "$BRANCH_WORK/managed-replaced.md")"
 RUNNER_TEMP="$BRANCH_WORK" SRC_PATH="$branch_src_path" OLD_SHA="$NEW_SHA_RESOLVED" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$BRANCH_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$PROJECT"
 bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 
-# The render landed: the branch's tree carries what a fuzzer render adds
-# and the check now reads it FRESH; nothing touched the default branch.
+# The render landed: the branch's tree carries what a fuzzer render adds,
+# the local note is gone with it, and the check now reads it FRESH; nothing
+# touched the default branch.
 cd "$PROJECT"
+if grep -qF "# local ci note" .github/workflows/ci.yml; then
+  fail "the local note survived the branch render in the managed ci.yml"
+fi
 grep -qF -- '"fuzzer"' .github/workflows/ci.yml \
   || fail "the branch render did not add fuzzer to ci.yml's fleet-ci modules input"
 grep -qE -- '^- "?fuzzer"?$' .github/.copier-answers.yml \

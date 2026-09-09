@@ -579,6 +579,9 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       writeSync(2, resolution.stderr);
     }
     const { conflicts, malformed } = parseConflictReport(resolution.stdout);
+    // The workflow's managed delivery (reset_managed.ts): every managed file
+    // whole from the clean render, after the conflicts leg like production.
+    run(["bun", ".github/scripts/sync/reset_managed.ts"], { cwd: REPO_ROOT, env: legEnv });
 
     section("retired-file cleanup");
     writeFileSync(join(temp, "copier-old.yml"), gitShow(platformDir, `${oldSha}:copier.yml`));

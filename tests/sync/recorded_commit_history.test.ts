@@ -40,7 +40,7 @@ const CHECKOUTS: Record<string, Record<string, "full" | "shallow">> = {
   ".github/workflows/reusable-template-sync.yml": {
     "sync#0": "full", // repo-platform: origin/build for the recorded base and the ladder's walk
     "sync#5": "full", // the target: copier's own update base
-    "sync#25": "shallow", // the version-aligned validator, a single ref
+    "sync#26": "shallow", // the version-aligned validator, a single ref
   },
 };
 

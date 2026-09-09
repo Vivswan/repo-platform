@@ -52,6 +52,10 @@ test ! -e .github/SECURITY.md \
   || fail "the synthetic old fixture already carries .github/SECURITY.md"
 printf '\nScope note: upgrade-local security tail\n' >> SECURITY.md
 echo "# local checks note" >> .github/workflows/checks.yml
+# A MANAGED file with a local trailing comment: copier's three-way merge
+# keeps it (asserted below as the control), the managed delivery must
+# replace the whole file with the clean render's bytes.
+echo "# local ci note" >> .github/workflows/ci.yml
 echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
 # Adopting custom-license REPLACES the fleet license under the one-license
 # rule: the repo's own LICENSE.md takes the rendered fleet copy's place.
@@ -242,6 +246,21 @@ bun .github/scripts/sync/preserve_local_content.ts \
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT" \
   --skip "$WORK/split-rebuilt-paths.txt"
+# The managed delivery's CONTROL: copier's merge kept the local note in the
+# managed ci.yml, so the byte-equality below can only come from the leg.
+grep -qF "# local ci note" "$PROJECT/.github/workflows/ci.yml" \
+  || fail "copier's update dropped the local note from ci.yml on its own; the managed-delivery control is vacuous"
+RUNNER_TEMP="$WORK" SRC_PATH="$src_path" OLD_SHA="$OLD_SHA_RESOLVED" \
+  bun .github/scripts/sync/reset_managed.ts
+cmp -s "$WORK/render-new/.github/workflows/ci.yml" "$PROJECT/.github/workflows/ci.yml" \
+  || fail "the managed delivery did not replace ci.yml with the clean render's bytes: $(diff "$WORK/render-new/.github/workflows/ci.yml" "$PROJECT/.github/workflows/ci.yml")"
+grep -qF -- '- `.github/workflows/ci.yml`' "$WORK/managed-replaced.md" \
+  || fail "the managed delivery's PR-body report does not name ci.yml: $(cat "$WORK/managed-replaced.md")"
+# The manifest differs only in its stamp-derived hashes here, not in what
+# it declares, so the report must not list it.
+if grep -qF 'repo-platform-manifest.json' "$WORK/managed-replaced.md"; then
+  fail "the managed delivery's PR-body report lists the manifest although only its stamped hashes differed"
+fi
 # Current copier already deletes the de-rendered sentinel during update, so
 # without help the rm loop below would run over an empty set and pass even
 # if it were broken. Resurrect the file the way an older copier (or a merge

@@ -422,7 +422,8 @@ if (!needsReview) {
       "review, a tripped tail tripwire, failed validation, out-of-band " +
       "settings drift, a referenced-but-undeclared label, a refused mirror declaration, a " +
       "migration rung needing review, a recovery re-render, a forced-manual dispatch, a " +
-      "deleted split-class file whose repository-owned half leaves with it, or a new starter " +
-      "at a path this repository already owns).",
+      "deleted split-class file whose repository-owned half leaves with it, a new starter " +
+      "at a path this repository already owns, or a managed file whose local edit the clean " +
+      "render replaced).",
   );
 }

@@ -20,20 +20,13 @@
 // --note / --review default to RUNNER_TEMP/<MIRRORS_*_NAME>, the shared
 // section_files.ts constants open_pr.ts reads, so the pairs cannot drift.
 
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  type Stats,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import type { ManifestEntryShape } from "../../../actions/shared/manifest.ts";
 import { MANIFEST_NAME, parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
+import { absentError, lstatOrNull } from "../shared/fs_probe.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
@@ -149,24 +142,6 @@ function segmentMatcher(segment: string): RegExp | null {
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("[^/]*");
   return new RegExp(`^${pattern}$`);
-}
-
-/** Whether a filesystem error means "nothing at this path" (ENOENT, or a
- * file where a directory was expected - ENOTDIR). Anything else (EACCES,
- * EIO) is a broken runner, not an absent path, and rethrows: reading a
- * failure to look as "matched nothing" would silently stale a mirror. */
-function absentError(err: unknown): boolean {
-  const code = (err as { code?: string }).code;
-  return code === "ENOENT" || code === "ENOTDIR";
-}
-
-function lstatOrNull(path: string): Stats | null {
-  try {
-    return lstatSync(path) ?? null;
-  } catch (err) {
-    if (absentError(err)) return null;
-    throw err;
-  }
 }
 
 /** Concrete relative paths a target pattern resolves to under `root`,

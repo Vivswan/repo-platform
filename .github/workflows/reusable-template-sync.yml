@@ -263,6 +263,26 @@ jobs:
             echo "resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Managed files are delivered WHOLE from the clean render, the class's
+      # contract (docs/compose.md): copier's three-way merge keeps a local
+      # edit that merges cleanly (a trailing comment), the stamp would
+      # record it, and module-render would read the tree as stale on every
+      # run after. After the conflicts leg, so a conflicting edit still
+      # lands in the dropped-hunks section and holds the PR for review.
+      # Split files, starters, and retired files are untouched; the replaced
+      # paths land in the PR body and hold it for review. Recovery mode
+      # skips it: the recopy is itself a whole render.
+      - name: Deliver managed files from the clean render
+        if: inputs.recover != 'recopy'
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+            bun .github/scripts/sync/run_hidden.ts "managed delivery" -- \
+            bun .github/scripts/sync/reset_managed.ts
+          if [ "$HIDE_DETAILS" = "true" ] && [ -s "$RUNNER_TEMP/managed-replaced.md" ]; then
+            count="$(grep -c '^- ' "$RUNNER_TEMP/managed-replaced.md" | tr -d ' ')"
+            echo "replaced local edits in ${count} managed file(s) (paths hidden: private repository; listed in the PR body)"
+          fi
+
       # Deletion candidates come only from the diff of the two clean
       # renders minus both _skip_if_exists lists: paths never rendered
       # cannot appear. A retired path the repo repurposed IS deleted - the

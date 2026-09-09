@@ -48,6 +48,12 @@ export const MIRRORS_REVIEW_NAME = "mirrors-review.md";
  * callers, and the template's starter; forces the manual-review path. */
 export const NEW_STARTERS_REVIEW_NAME = "new-starters-review.md";
 
+/** reset_managed.ts's report: the managed files whose delivered copy
+ * differed from the clean render before the reset - local edits copier's
+ * merge kept that the reset replaced (the PR diff shows the lines). Forces
+ * the manual-review path, like the dropped conflict hunks. */
+export const MANAGED_REPLACED_NAME = "managed-replaced.md";
+
 /** One PR-body section fed by a report file. */
 export interface PrBodySection {
   /** The reusable-template-sync.yml env var carrying the file's path when a
@@ -162,6 +168,13 @@ export const PR_BODY_SECTIONS: readonly PrBodySection[] = [
     file: "carry-review.txt",
     title: "Carries that need a human (the carry summary names the files)",
     render: null,
+    forcesReview: true,
+  },
+  {
+    env: null,
+    file: MANAGED_REPLACED_NAME,
+    title: "Managed files whose local edits this update replaced with the clean render",
+    render: verbatim,
     forcesReview: true,
   },
   {

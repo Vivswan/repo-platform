@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { redactCommand } from "../../.github/scripts/shared/proc.ts";
 import {
+  MANAGED_REPLACED_NAME,
   MIGRATIONS_NAME,
   MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
@@ -267,6 +268,14 @@ describe("open_pr sections and auto-merge", () => {
       name: "CARRY_REVIEW_FILE",
       content: "AGENTS.md: managed-half edits reset\n",
       section: null,
+      forcesReview: true,
+    },
+    {
+      reason: "managed files replaced whole: a kept local edit vanished and needs a human",
+      where: "temp",
+      name: MANAGED_REPLACED_NAME,
+      content:
+        "> [!WARNING]\n> These managed files carried local edits\n\n- `.github/workflows/ci.yml`\n",
       forcesReview: true,
     },
     {
