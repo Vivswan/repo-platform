@@ -6,10 +6,70 @@
 import { describe, expect, test } from "bun:test";
 import {
   excludePatterns,
+  fragmentConditionErrors,
+  fragmentGateExpression,
   gitwildmatchLiteral,
   plainTemplatePath,
   templatePathErrors,
 } from "../../../scripts/compose/exclude";
+import { manifest } from "./fixtures";
+
+describe("fragment conditions", () => {
+  const docsSite = manifest("docs-site", [
+    "fragment_conditions:",
+    "  all-green-docs-site: \"'pages' not in modules\"",
+  ]);
+
+  test("a declared condition is AND-ed onto the module gate for that anchor only", () => {
+    expect(fragmentGateExpression("all-green-docs-site", "docs-site", docsSite)).toBe(
+      "('docs-site' in modules) and ('pages' not in modules)",
+    );
+    expect(fragmentGateExpression("other", "docs-site", docsSite)).toBe("'docs-site' in modules");
+    expect(fragmentConditionErrors("docs-site", docsSite, ["all-green-docs-site"], [])).toEqual([]);
+  });
+
+  test("an or-condition cannot widen past the module gate - the parentheses bind it", () => {
+    const widened = manifest("docs-site", [
+      "fragment_conditions:",
+      "  all-green-docs-site: \"'pages' not in modules or 'release-please' in modules\"",
+    ]);
+    expect(fragmentGateExpression("all-green-docs-site", "docs-site", widened)).toBe(
+      "('docs-site' in modules) and ('pages' not in modules or 'release-please' in modules)",
+    );
+  });
+
+  test("a condition naming no shipped fragment, or a fragment spliced without a gate, is an error", () => {
+    expect(fragmentConditionErrors("docs-site", docsSite, [], [])).toEqual([
+      "templates/docs-site/module.yml: fragment_conditions names 'all-green-docs-site' but the " +
+        "module ships no fragments/all-green-docs-site.jinja; add the fragment or drop the entry",
+    ]);
+    // The consumed and prepended fragments bypass the gate wrapper, so a
+    // condition there would pass validation and change nothing.
+    const bun = manifest("bun", ["fragment_conditions:", "  toolchain-setup: \"'x' in modules\""]);
+    const [error] = fragmentConditionErrors(
+      "bun",
+      bun,
+      ["toolchain-setup", "auto-format"],
+      ["agents-toolchain", "toolchain-setup"],
+    );
+    expect(error).toContain("names 'toolchain-setup', a fragment the composer never splices");
+    expect(
+      fragmentConditionErrors("docs-site", docsSite, ["all-green-docs-site"], ["toolchain-setup"]),
+    ).toEqual([]);
+  });
+
+  test("the manifest schema refuses a condition carrying jinja delimiters and a non-anchor key", () => {
+    expect(() =>
+      manifest("docs-site", [
+        "fragment_conditions:",
+        "  all-green-docs-site: \"'a' in modules %}\"",
+      ]),
+    ).toThrow("must not contain");
+    expect(() =>
+      manifest("docs-site", ["fragment_conditions:", "  Bad_Key: \"'a' in modules\""]),
+    ).toThrow("fragment_conditions.Bad_Key: Invalid key");
+  });
+});
 
 describe("plainTemplatePath", () => {
   test.each([

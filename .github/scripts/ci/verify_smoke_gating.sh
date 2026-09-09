@@ -55,11 +55,12 @@ present_in_job() { job_block "$1" "$3" | grep -qxF -- "$2" || { echo "::error::g
 absent_in_job() { if job_block "$1" "$3" | grep -qF -- "$2"; then echo "::error::gating check failed: '$2' appears in the '$1' job of $3"\
   "but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."\
   ; exit 1; fi; }
-# The file minus one job's block and minus comment lines: a substring ban
-# on the expressions everywhere but the one job allowed to carry the text
-# (an absent job bans it file-wide; a comment naming it is not a gate).
-outside_job() { awk -v job="  $1:" '$0 == job { skip = 1; next } skip && /^  [A-Za-z0-9_-]+:/ { skip = 0 } !skip && !/^ *#/ { print }' "$2"; }
-absent_outside_job() { if outside_job "$1" "$3" | grep -qF -- "$2"; then echo "::error::gating check failed: '$2' appears outside the '$1' job of $3"\
+# The file minus the named jobs' blocks (space-separated ids) and minus
+# comment lines: a substring ban on the expressions everywhere but the jobs
+# allowed to carry the text (an absent job bans it file-wide; a comment
+# naming it is not a gate).
+outside_jobs() { awk -v jobs=" $1 " 'match($0, /^  [A-Za-z0-9_-]+:$/) { skip = index(jobs, " " substr($0, 3, RLENGTH - 3) " ") > 0; if (skip) next } !skip && !/^ *#/ { print }' "$2"; }
+absent_outside_jobs() { if outside_jobs "$1" "$3" | grep -qF -- "$2"; then echo "::error::gating check failed: '$2' appears outside the '$1' job(s) of $3"\
   "but modules=$MODULES private=$PRIVATE should not emit it there. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."\
   ; exit 1; fi; }
 # Every `deno fmt` in a rendered file must carry --prose-wrap preserve: the
@@ -100,8 +101,8 @@ present_line "      vulnerability-alerts: read" "$wf/ci.yml"
 # The base checks merged into fleet-ci; none of their wiring (or the old
 # aggregate job's status-function gate, in any expression spelling) may
 # render here any more: the gate judges results itself. Only the pages
-# leg's release ORDER reads a status function; its pin is below.
-absent_outside_job pages "cancelled()" "$wf/ci.yml"
+# and docs-site legs' ORDER edges read a status function; their pins are below.
+absent_outside_jobs "pages docs-site" "cancelled()" "$wf/ci.yml"
 absent "base-checks" "$wf/ci.yml"
 absent "check-typography" "$wf/ci.yml"
 
@@ -220,19 +221,23 @@ else
 fi
 
 # docs-site: the managed docs workflow always carries the strict PR check
-# job (paths-filtered, never a required check); the deploy trigger and job
-# render only when pages does not carry the site. Composed with pages, the
-# docs ride pages.yml as the versioned vitepress mount and the website
-# mount turns unversioned. The rows take the copier defaults, so the
+# job (paths-filtered, never a required check); the deploy (its
+# workflow_call, nightly and dispatch triggers, and the deploy job) and
+# ci.yml's docs-site leg render only when pages does not carry the site.
+# Composed with pages, the docs ride pages.yml as the versioned vitepress
+# mount and the website mount turns unversioned. The rows take the copier defaults, so the
 # tracking label renders exactly docs-link-rot.
 if has docs-site; then
   test -f "$wf/docs-site.yml"
   present "actions/pages-site@build" "$wf/docs-site.yml"
   present 'check: "true"' "$wf/docs-site.yml"
   if has pages; then
-    # No deploy call at ANY ref: pages.yml owns the deployment here.
+    # No deploy call at ANY ref and no leg: pages.yml owns the deployment here.
     absent "reusable-pages.yml@" "$wf/docs-site.yml"
     absent "schedule:" "$wf/docs-site.yml"
+    absent "workflow_call" "$wf/docs-site.yml"
+    absent_line "  docs-site:" "$wf/ci.yml"
+    absent "workflows/docs-site.yml" "$wf/ci.yml"
     present '{"path": "/docs/", "source": "vitepress", "versioned": true}' "$wf/pages.yml"
     present '{"path": "/", "source": "command", "versioned": false}' "$wf/pages.yml"
     present_line '      link_rot_label: "docs-link-rot"' "$wf/pages.yml"
@@ -242,9 +247,31 @@ if has docs-site; then
     present_line '      link_rot_label: "docs-link-rot"' "$wf/docs-site.yml"
     present_line '    - cron: "41 4 * * *"' "$wf/docs-site.yml"
     present_line "      issues: write" "$wf/docs-site.yml"
+    # Called by ci.yml's docs-site leg with the judged commit, never on
+    # push (a push deploy would bypass the all-green gate); a called run
+    # keys its lane per run.
+    present_line "  workflow_call:" "$wf/docs-site.yml"
+    present_line '      sha: ${{ inputs.sha }}' "$wf/docs-site.yml"
+    present "pages-called-" "$wf/docs-site.yml"
+    absent_line "  push:" "$wf/docs-site.yml"
+    # The leg: ordered behind the hook always, and behind the release leg
+    # where it renders (the needs edges plus an unconditional
+    # !cancelled()), gated on the all-green result alone, under the pages
+    # lane.
+    present_line "  docs-site:" "$wf/ci.yml"
+    present_line "    uses: ./.github/workflows/docs-site.yml" "$wf/ci.yml"
+    present_in_job docs-site "      group: pages" "$wf/ci.yml"
+    present_in_job docs-site "      !cancelled() &&" "$wf/ci.yml"
+    if has release-please; then
+      present_in_job docs-site "    needs: [all-green, post-green, release]" "$wf/ci.yml"
+    else
+      present_in_job docs-site "    needs: [all-green, post-green]" "$wf/ci.yml"
+      absent_in_job docs-site ", release]" "$wf/ci.yml"
+    fi
   fi
 else
   test ! -e "$wf/docs-site.yml"
+  absent_line "  docs-site:" "$wf/ci.yml"
   if has pages; then
     absent "vitepress" "$wf/pages.yml"
     absent "link_rot_label" "$wf/pages.yml"

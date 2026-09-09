@@ -1,0 +1,141 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The gate jobs live in fleet-ci.yml@build: an edit there changes this
+# repository's CI with no PR here. Branch protection requires the
+# `all-green` job's own check run: it needs every gating job and fails
+# unless each result is success or skipped, with at least one success.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Repo-owned: edit checks.yml, not this file (no secrets; permissions
+  # cap at contents: read).
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  # This caller's permissions are the ceiling for every called job and
+  # must stay UNCONDITIONAL: GitHub validates skipped jobs' grants too.
+  ci:
+    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build
+    permissions:
+      contents: read
+      # validate-template posts its sticky findings comment.
+      pull-requests: write
+      # The ceiling for the CodeQL analysis calls.
+      security-events: write
+      actions: read
+      # The ceiling for release-health's issue and Dependabot-alert reads.
+      issues: read
+      vulnerability-alerts: read
+    with:
+      modules: '["docs-site", "release-please"]'
+      private: false
+      codeql-languages: '[]'
+      tracking-labels: "docs-link-rot"
+
+  # THE gate: this job's own check run (named all-green, created by the
+  # GitHub Actions app) is the ruleset's required check. It needs both
+  # caller jobs and fails unless each result is success or skipped, with
+  # at least one success - so a failed job anywhere in either called
+  # workflow blocks the merge.
+  all-green:
+    needs: [checks, ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: Vivswan/repo-platform/actions/all-green@build
+        with:
+          needs: ${{ toJSON(needs) }}
+
+  # Repo-owned: edit post-green.yml, not this file. Runs after the gate,
+  # before the release, on the judged commit; no job lane here (a caller
+  # holding a lane a called job takes deadlocks the call).
+  post-green:
+    needs: [all-green]
+    if: >-
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/post-green.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit
+
+  # Runs in the SAME workflow run as the judged commit, downstream of the
+  # gate AND the repo-owned post-green hook (so the repository's own
+  # green-gated work lands before the tag is minted), so github.sha IS
+  # the judged commit; release.yml's head gate still skips when main has
+  # moved on (the newer run releases).
+  release:
+    needs: [all-green, post-green]
+    # results are spelled out so the release never depends on GitHub's
+    # implied-success() rule; the event clauses keep PR, dispatch, and
+    # schedule runs from ever releasing.
+    if: >-
+      needs.all-green.result == 'success' &&
+      needs.post-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    # Deliberately a lane no group inside the called release.yml takes:
+    # this job HOLDS it while its called jobs run, so one name would
+    # deadlock.
+    concurrency:
+      group: post-green-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      attestations: write
+      issues: read
+      vulnerability-alerts: read
+    uses: ./.github/workflows/release.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit
+
+  # The docs deploy, in the SAME run as the gate (github.sha IS the judged
+  # commit): a red main never reaches the site. Ordered behind the
+  # repo-owned post-green hook and the release leg so the site picks up
+  # what they landed (a tag minted this run), and gated on the all-green
+  # result alone: !cancelled() keeps a red or skipped hook or release from
+  # holding the site back. docs-site.yml keeps the PR check, the nightly
+  # rebuild and the dispatch.
+  docs-site:
+    needs: [all-green, post-green, release]
+    if: >-
+      !cancelled() &&
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    # The lane every deploy holds: the called docs-site.yml keys a called
+    # run per run and holds this group only on its nightly and dispatch runs.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/docs-site.yml
+    with:
+      sha: ${{ github.sha }}

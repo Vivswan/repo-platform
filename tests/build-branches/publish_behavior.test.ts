@@ -125,7 +125,6 @@ interface Scenario {
 interface Fixture {
   work: string;
   env: Record<string, string | undefined>;
-  output: string;
   m1: string;
   m2: string;
   tip: string;
@@ -151,10 +150,6 @@ function prepareFixture(scenario: Scenario): Fixture {
   }
   const runnerTemp = scenario.runnerTemp ?? join(root, "runner-temp");
   mkdirSync(runnerTemp, { recursive: true });
-  // The step-output file the runner would hand the publish: the
-  // `published` output is asserted as part of every outcome.
-  const output = join(root, "github-output");
-  writeFileSync(output, "");
   const origin = join(root, "origin.git");
   fixtureGit(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
@@ -230,7 +225,6 @@ function prepareFixture(scenario: Scenario): Fixture {
   const sources = { m1, m2, side };
   return {
     work,
-    output,
     // The publisher runs git against these fixtures itself: same pins.
     env: {
       ...fixtureGitEnv(),
@@ -240,7 +234,6 @@ function prepareFixture(scenario: Scenario): Fixture {
       GITHUB_SERVER_URL: SERVER,
       RUN_URL: `${SERVER}/${REPO}/actions/runs/1`,
       GITHUB_REF: "refs/heads/main",
-      GITHUB_OUTPUT: output,
       SOURCE_SHA: sources[scenario.source ?? "m2"],
     },
     m1,
@@ -253,10 +246,8 @@ function prepareFixture(scenario: Scenario): Fixture {
   };
 }
 
-/** The publish's whole observable outcome: its exit, output, and the
- * step outputs it wrote (post-green.yml's redeploy step reads
- * `published`), plus accessors read at assertion time for the fixture
- * origin's build tip and the scratch residue - anything under the run's RUNNER_TEMP plus
+/** The publish's whole observable outcome: its exit and output, plus
+ * accessors read at assertion time for the fixture origin's build tip and the scratch residue - anything under the run's RUNNER_TEMP plus
  * any worktree still registered in the checkout beyond the checkout
  * itself (git lists registered worktrees by real path). The residue
  * must be empty once every publish sharing that RUNNER_TEMP has exited,
@@ -266,7 +257,6 @@ function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: s
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
-    stepOutputs: readFileSync(f.output, "utf8"),
     m1: f.m1,
     m2: f.m2,
     tip: f.tip,
@@ -382,7 +372,6 @@ const healthyStamp = ({ m1 }: { m1: string }) => stampOf(m1);
 function expectContentChangePublished(r: Outcome): void {
   expect(r.exitCode).toBe(0);
   expect(r.output).toContain("(content change)");
-  expect(r.stepOutputs).toBe("published=true\n");
   const newTip = r.originTip();
   expect(newTip).not.toBe(r.tip);
   expect(fixtureGit(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
@@ -421,7 +410,6 @@ describe("publish.ts behavior (real git)", () => {
     const r = runPublish({ tipTree: "same", tipMessage: healthyStamp });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("nothing to publish");
-    expect(r.stepOutputs).toBe("published=false\n");
     expect(r.originTip()).toBe(r.tip);
     expect(r.scratchLeftovers()).toEqual([]);
   });
@@ -438,7 +426,6 @@ describe("publish.ts behavior (real git)", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("stamp recovery");
-    expect(r.stepOutputs).toBe("published=true\n");
     const newTip = r.originTip();
     expect(newTip).not.toBe(r.tip);
     expect(fixtureGit(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
@@ -460,7 +447,6 @@ describe("publish.ts behavior (real git)", () => {
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("newest-green wins");
     expect(r.output).toContain(r.m2.slice(0, 12));
-    expect(r.stepOutputs).toBe("published=false\n");
     expect(r.originTip()).toBe(r.tip);
     expect(r.scratchLeftovers()).toEqual([]);
   });
@@ -482,7 +468,6 @@ describe("publish.ts behavior (real git)", () => {
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, source: "side" });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("is not a commit on main");
-    expect(r.stepOutputs).toBe("");
     expect(r.originTip()).toBe(r.tip);
     expect(r.scratchLeftovers()).toEqual([]);
   });
@@ -494,7 +479,6 @@ describe("publish.ts behavior (real git)", () => {
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, malformedTree: true });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("carries no actions/ subtree");
-    expect(r.stepOutputs).toBe("");
     expect(r.originTip()).toBe(r.tip);
     expect(r.scratchLeftovers()).toEqual([]);
   });

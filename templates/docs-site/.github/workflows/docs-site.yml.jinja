@@ -7,7 +7,10 @@
 # The check job builds docs/ strictly on every PR touching it (dead
 # internal links fail there instead of at deploy time); paths-filtered by
 # design, so it is never in the all-green roster and never a required
-# check.{% if 'pages' not in modules %} Pages is enabled by this module's settings layer on
+# check.{% if 'pages' not in modules %} Three ways to deploy: ci.yml's `docs-site` job calls this
+# workflow downstream of the all-green gate with the judged commit (a red
+# main never deploys), the nightly rebuild and a manual dispatch build the
+# default branch head. Pages is enabled by this module's settings layer on
 # the next fleet settings apply; a deploy before that needs repo
 # Settings -> Pages -> Source: GitHub Actions.{% endif %}{% if 'pages' in modules %} The deploy itself lives in
 # pages.yml: with the pages module selected, the website rides at / and
@@ -18,13 +21,15 @@ on:
   pull_request:
     paths:
       - docs/**
-{% if 'pages' not in modules %}  push:
-    branches: [main]
-    paths:
-      - docs/**
+{% if 'pages' not in modules %}  workflow_call:
+    inputs:
+      sha:
+        description: The green commit ci.yml's docs-site job judged - the commit this deploy builds.
+        required: true
+        type: string
   schedule:
     # Nightly rebuild: central theme updates and version tags created
-    # without a docs push propagate, and the external-link check runs
+    # without a push propagate, and the external-link check runs
     # (docs/docs-site.md).
     - cron: "41 4 * * *"
   workflow_dispatch:
@@ -46,11 +51,15 @@ jobs:
 {% if 'pages' not in modules %}
   deploy:
     if: github.event_name != 'pull_request'
+    # The nightly and dispatch runs hold the pages lane here; a called run
+    # takes a per-run group, since ci.yml's docs-site job already holds the
+    # lane and a called workflow must never wait on the lane its caller holds.
     concurrency:
-      group: pages
+      group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}
       cancel-in-progress: false
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@build
     with:
+      sha: {% raw %}${{ inputs.sha }}{% endraw %}
       mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
       site_title: {{ project_name | tojson }}
       link_rot_label: {{ docs_site_label | tojson }}

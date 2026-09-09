@@ -49,6 +49,7 @@ export const RULE_ROSTER = [
   "all-green-name",
   "fleet-ci-render-roster",
   "pages-leg",
+  "docs-site-leg",
   "pr-title-workflow",
   "dependabot-label-tuples",
   "settings-read-pin",

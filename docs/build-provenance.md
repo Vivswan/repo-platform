@@ -32,8 +32,8 @@ A template change merges to main as commit S. What happens, in order:
 | --- | --- | --- |
 | 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
 | 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
-| 3. Publish | post-green.yml's publish-build job | [publish.ts](../.github/scripts/build-branches/publish.ts) composes S's tree with S's own script (a worktree at S, its frozen dependencies, `branch_tree.ts`) and chains a stamped commit onto the branch tip. Its `published` step output says whether the tip advanced. |
-| 4. Redeploy this repository's docs | the same job, only when the tip advanced | Dispatches this repository's docs-site.yml on main, so the site built from `@build` never lags the theme the publish just shipped ([all-green.md](all-green.md#after-the-gate)). |
+| 3. Publish | post-green.yml's publish-build job | [publish.ts](../.github/scripts/build-branches/publish.ts) composes S's tree with S's own script (a worktree at S, its frozen dependencies, `branch_tree.ts`) and chains a stamped commit onto the branch tip. |
+| 4. Deploy this repository's docs | ci.yml's `docs-site` job, ordered behind post-green | The docs-site module's leg, carried by hand in this repository's ci.yml: calls docs-site.yml with `github.sha` after the publish, so the site built from `@build` ships the theme that publish landed ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()`: a red post-green never holds the site back, and its own failure shows as its own red job. |
 
 The source composed and stamped is always SOURCE_SHA - the judged run's own commit on the call, the operator's sha input on a dispatch - never a read of origin/main, which can already be a newer, even red, commit (publish.ts's header owns this discipline).
 

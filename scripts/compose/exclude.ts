@@ -165,3 +165,50 @@ export function excludePatterns(entries: ManifestEntry[]): string[] {
   }
   return patterns;
 }
+
+/** The gate a module's fragment for `anchor` renders under: the module gate
+ *  alone, or, when the manifest's fragment_conditions names the anchor, the
+ *  module gate AND that condition - narrowing by construction, so a
+ *  fragment can never render where its module does not. */
+export function fragmentGateExpression(
+  anchor: string,
+  module: string,
+  manifest: ModuleManifest,
+): string {
+  const gate = gateExpression(module, manifest);
+  const condition = manifest.fragment_conditions?.[anchor];
+  return condition === undefined ? gate : `(${gate}) and (${condition})`;
+}
+
+/** The manifest's fragment_conditions against the fragments the module
+ *  ships: every key must name a shipped fragment that the composer splices
+ *  under a gate. A stale key would be a condition nothing renders under;
+ *  a key naming one of `ungated` (a fragment a generator consumes or the
+ *  composer prepends, both spliced without wrapFragment) would be a
+ *  condition silently ignored. */
+export function fragmentConditionErrors(
+  module: string,
+  manifest: ModuleManifest,
+  shippedAnchors: Iterable<string>,
+  ungated: Iterable<string>,
+): string[] {
+  const shipped = new Set(shippedAnchors);
+  const bypassing = new Set(ungated);
+  const where = `templates/${module}/module.yml: fragment_conditions names`;
+  const errors: string[] = [];
+  for (const anchor of Object.keys(manifest.fragment_conditions ?? {})) {
+    if (!shipped.has(anchor)) {
+      errors.push(
+        `${where} '${anchor}' but the module ships no fragments/${anchor}${JINJA_SUFFIX}; ` +
+          "add the fragment or drop the entry",
+      );
+    } else if (bypassing.has(anchor)) {
+      errors.push(
+        `${where} '${anchor}', a fragment the composer never splices under a gate (a generator ` +
+          "consumes it or it is prepended to other fragments), so the condition would be ignored; " +
+          "drop the entry and gate the content inside the fragment",
+      );
+    }
+  }
+  return errors;
+}

@@ -268,28 +268,43 @@ export function allGreenGateMismatches(
   }
   for (const name of downstream) {
     const condition = String(asRecord(jobs[name] ?? {}, name).if ?? "");
-    // The clause must be present AND undefeatable: an || or a status
-    // function (always(), !cancelled()) can wave post-gate work through a
-    // red gate, and a chained comparison (== 'success' == false) inverts
-    // it - so the &&-split clauses must CONTAIN the exact clause, not a
-    // substring of one.
+    // The gate clause must be present AND undefeatable, so the condition
+    // is an &&-chain drawn from a closed alphabet: any clause outside it
+    // (an || arm, always()/failure(), a chained or parenthesized
+    // comparison such as `(true && <gate>) == false`) is refused whole.
+    // `!cancelled()` is the one status function in the alphabet: it only
+    // narrows, and a leg ordered behind a sibling it does not gate on
+    // needs it to run past that sibling's red or skip.
     const clauses = condition.split("&&").map((clause) => clause.trim());
     if (
-      !clauses.includes("needs.all-green.result == 'success'") ||
-      condition.includes("||") ||
-      condition.includes("!") ||
-      /\b(always|cancelled|failure)\s*\(/.test(condition)
+      !clauses.includes(DOWNSTREAM_GATE_CLAUSE) ||
+      clauses.some((clause) => !DOWNSTREAM_CLAUSES.has(clause))
     ) {
       mismatches.push({
         file: `${site.jobsFile} job '${name}'`,
         expected:
-          "a spelled-out needs.all-green.result == 'success' clause of its own, &&-only (an || arm, a status function, or a chained comparison could release post-gate work off a red gate)",
+          `an &&-chain of clauses from [${[...DOWNSTREAM_CLAUSES].join(", ")}] including ` +
+          `${DOWNSTREAM_GATE_CLAUSE} (any other clause - an || arm, another status function, ` +
+          "a chained or parenthesized comparison - could release post-gate work off a red gate)",
         got: condition === "" ? "no condition" : condition,
       });
     }
   }
   return mismatches;
 }
+
+/** The clause every downstream job's condition must carry. */
+export const DOWNSTREAM_GATE_CLAUSE = "needs.all-green.result == 'success'";
+
+/** Every clause a downstream job's `if:` may be composed of, joined by
+ *  `&&` only: the gate clause, the main-push scoping, and `!cancelled()`
+ *  for a leg with order edges. A new clause joins here deliberately. */
+export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
+  DOWNSTREAM_GATE_CLAUSE,
+  "!cancelled()",
+  "github.event_name == 'push'",
+  "github.ref == 'refs/heads/main'",
+]);
 
 /** Every gating job in fleet-ci.yml, by job id (ALL_GREEN_ROSTER's fleet
  *  counterpart): a job deleted there stops gating the whole fleet with no

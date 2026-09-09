@@ -236,14 +236,23 @@ jobs:
     );
   });
 
-  test("a downstream clause weakened by || or a status function goes red - substring presence is not enough", () => {
+  test("a downstream clause weakened by ||, a status function, or a clause outside the alphabet goes red - substring presence is not enough", () => {
     for (const weakened of [
       "needs.all-green.result == 'success' || always()",
       "always() && needs.all-green.result == 'success' && github.event_name == 'push'",
-      "needs.all-green.result == 'success' && !cancelled()",
+      "success() && needs.all-green.result == 'success' && github.event_name == 'push'",
+      // Only a WHOLE !cancelled() clause is allowed; a negation inside
+      // another clause is not.
+      "needs.all-green.result == 'success' && !failure()",
+      "needs.all-green.result == 'success' && !cancelled() || always()",
       // The chained comparison: actionlint-valid, and true exactly when
       // the gate FAILED - the exact-clause split is what catches it.
       "needs.all-green.result == 'success' == false && github.event_name == 'push'",
+      // The parenthesized inversion: the split still finds the gate clause
+      // inside it, so the closed alphabet is what refuses the fragments.
+      "!cancelled() && (true && needs.all-green.result == 'success' && true) == false",
+      // A clause outside the alphabet, however harmless it looks.
+      "needs.all-green.result == 'success' && github.actor != 'dependabot[bot]'",
     ]) {
       const found = allGreenGateMismatches(
         doc(
@@ -254,8 +263,22 @@ jobs:
         ),
         ["a", "b"],
       );
-      expect(found.some((m) => m.expected.includes("&&-only"))).toBe(true);
+      expect(found.some((m) => m.expected.includes("an &&-chain of clauses from"))).toBe(true);
     }
+  });
+
+  test("a whole !cancelled() clause beside the gate clause passes - it only narrows, and a leg ordered behind a sibling needs it", () => {
+    // The docs-site leg's shape: needs the hook as an order edge, gates
+    // on the all-green result alone; without !cancelled() GitHub's
+    // implied success() would skip it behind a red or skipped hook.
+    const ordered = [
+      valid.trimEnd(),
+      "  docs-site:",
+      "    needs: [all-green, post-green]",
+      "    if: \"!cancelled() && needs.all-green.result == 'success' && github.event_name == 'push'\"",
+      "",
+    ].join("\n");
+    expect(allGreenGateMismatches(doc(ordered), ["a", "b"])).toEqual([]);
   });
 
   test("a conditioned or softened gate step, and a matrixed gate, go red", () => {

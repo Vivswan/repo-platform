@@ -81,6 +81,7 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
     { name: "minimal", modules: [] },
     { name: "uv-no-release-please", modules: ["uv"] },
     { name: "pages-no-release-please", modules: ["bun", "pages"] },
+    { name: "docs-site-release-please", modules: ["docs-site", "release-please"] },
   ];
 }
 

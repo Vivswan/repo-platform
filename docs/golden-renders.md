@@ -22,6 +22,7 @@ CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fai
 | `minimal` | none (`modules=[]`) | The smallest selection copier.yml's validators allow: the unconditional base render alone. |
 | `uv-no-release-please` | `uv` | The dotfiles shape that exposed the compose anchor blank-line bug; its `.typography-allow` must end with exactly one newline (the composer's collapse guard). |
 | `pages-no-release-please` | `bun`, `pages` | The pages leg's plain arm: without release-please the rendered ci.yml `pages` job needs the gate alone under the gate condition, with no ordering edge (the `pages-leg` rule parses it; `all-modules` covers the ordered arm). bun supplies the build command copier's pages validator requires. |
+| `docs-site-release-please` | `docs-site`, `release-please` | The docs-site leg's three-edge arm (needs the gate, the hook, and the release leg) and the standalone docs-site.yml with its workflow_call; `all-modules` carries pages too, where the leg and that call render nothing. The `docs-site-leg` ssot rule reads both arms. |
 
 ## Determinism contract
 

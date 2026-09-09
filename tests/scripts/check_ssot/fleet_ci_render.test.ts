@@ -4,11 +4,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { canonical } from "../../../scripts/check/ssot/comparison.ts";
 import {
+  docsSiteLegMismatches,
   duplicateJobKeys,
   fleetCiRenderMismatches,
   pagesLegMismatches,
   prTitleWorkflowMismatches,
 } from "../../../scripts/check/ssot/fleet_ci_render.ts";
+import type { JinjaVars } from "../../../scripts/lib/jinja_subset.ts";
+
+const vars: JinjaVars = { username: "octo", slug: "repo", copyrightHolder: "Octo" };
 
 describe("fleetCiRenderMismatches", () => {
   const ciTemplate = [
@@ -39,6 +43,7 @@ describe("fleetCiRenderMismatches", () => {
     "    secrets: inherit",
     "{# compose:all-green-release #}",
     "{# compose:all-green-pages #}",
+    "{# compose:all-green-docs-site #}",
     "",
   ].join("\n");
   const leg = [
@@ -360,7 +365,7 @@ describe("fleetCiRenderMismatches", () => {
     expect(found.some((m) => m.expected.includes("no fragment anchor"))).toBe(true);
   });
 
-  test("the codeql-languages data anchor and the two leg anchors stay exempt from the anchor ban", () => {
+  test("the codeql-languages data anchor and the three leg anchors stay exempt from the anchor ban", () => {
     const found = fleetCiRenderMismatches(
       `${ciTemplate}{# compose:codeql-languages #}\n`,
       leg,
@@ -369,15 +374,11 @@ describe("fleetCiRenderMismatches", () => {
     expect(found.filter((m) => m.expected.includes("no fragment anchor"))).toEqual([]);
   });
 
-  test("dropping the pages leg's anchor goes red - selecting repos would render no deploy at all", () => {
-    const found = fleetCiRenderMismatches(
-      ciTemplate.replace("{# compose:all-green-pages #}\n", ""),
-      leg,
-      releaseWf,
-    );
-    expect(
-      found.some((m) => m.expected.includes(JSON.stringify("{# compose:all-green-pages #}"))),
-    ).toBe(true);
+  test("dropping the pages or docs-site leg's anchor goes red - selecting repos would render no deploy at all", () => {
+    for (const anchor of ["{# compose:all-green-pages #}", "{# compose:all-green-docs-site #}"]) {
+      const found = fleetCiRenderMismatches(ciTemplate.replace(`${anchor}\n`, ""), leg, releaseWf);
+      expect(found.some((m) => m.expected.includes(JSON.stringify(anchor)))).toBe(true);
+    }
   });
 
   test("leading-quote and explicit-key lines are refused in the template and the leg - both parse identically but evade the censuses", () => {
@@ -1177,6 +1178,380 @@ describe("pagesLegMismatches", () => {
             "utf-8",
           ),
         },
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("docsSiteLegMismatches", () => {
+  const orderedNeeds =
+    "    needs: [all-green, post-green{% if 'release-please' in modules %}, release{% endif %}]";
+  const leg = [
+    "",
+    "  docs-site:",
+    orderedNeeds,
+    "    if: >-",
+    "      !cancelled() &&",
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+    "    concurrency:",
+    "      group: pages",
+    "      cancel-in-progress: false",
+    "    permissions:",
+    "      contents: read",
+    "      pages: write",
+    "      id-token: write",
+    "      issues: write",
+    "    uses: ./.github/workflows/docs-site.yml",
+    "    with:",
+    "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+  ].join("\n");
+  const docsSiteWf = [
+    "name: Docs Site",
+    "",
+    "on:",
+    "  pull_request:",
+    "    paths:",
+    "      - docs/**",
+    "{% if 'pages' not in modules %}  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: true",
+    "        type: string",
+    "  schedule:",
+    '    - cron: "41 4 * * *"',
+    "  workflow_dispatch:",
+    "{% endif %}",
+    "jobs:",
+    "  check:",
+    "    if: github.event_name == 'pull_request'",
+    "{% if 'pages' not in modules %}",
+    "  deploy:",
+    "    if: github.event_name != 'pull_request'",
+    "    concurrency:",
+    "      group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}",
+    "      cancel-in-progress: false",
+    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@build",
+    "    with:",
+    "      sha: {% raw %}${{ inputs.sha }}{% endraw %}",
+    "{% endif %}",
+    "",
+  ].join("\n");
+  const gateIf = [
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
+  ];
+  const standaloneCi = [
+    "jobs:",
+    "  all-green:",
+    "    needs: [checks, ci]",
+    "  docs-site:",
+    "    needs: [all-green, post-green, release]",
+    "    if: >-",
+    "      !cancelled() &&",
+    ...gateIf,
+    "    uses: ./.github/workflows/docs-site.yml",
+    "    with:",
+    "      sha: ${{ github.sha }}",
+    "",
+  ].join("\n");
+  const standaloneDocsSite = [
+    "on:",
+    "  pull_request:",
+    "    paths:",
+    "      - docs/**",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: true",
+    "  schedule:",
+    '    - cron: "41 4 * * *"',
+    "  workflow_dispatch:",
+    "jobs:",
+    "  check:",
+    "    if: github.event_name == 'pull_request'",
+    "  deploy:",
+    "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@build",
+    "    with:",
+    "      sha: ${{ inputs.sha }}",
+    "",
+  ].join("\n");
+  const composedCi = ["jobs:", "  all-green:", "    needs: [checks, ci]", "  pages:", ""].join(
+    "\n",
+  );
+  const composedDocsSite = [
+    "on:",
+    "  pull_request:",
+    "    paths:",
+    "      - docs/**",
+    "jobs:",
+    "  check:",
+    "    if: github.event_name == 'pull_request'",
+    "",
+  ].join("\n");
+  // The hand-written twin: the release-free arm with a comment of its own.
+  const ownCi = [
+    "jobs:",
+    "  all-green:",
+    "    needs: [a]",
+    "  post-green:",
+    "    needs: [all-green]",
+    "  # Dogfood.",
+    "  docs-site:",
+    "    needs: [all-green, post-green]",
+    "    if: >-",
+    "      !cancelled() &&",
+    ...gateIf,
+    "    concurrency:",
+    "      group: pages",
+    "      cancel-in-progress: false",
+    "    permissions:",
+    "      contents: read",
+    "      pages: write",
+    "      id-token: write",
+    "      issues: write",
+    "    uses: ./.github/workflows/docs-site.yml",
+    "    with:",
+    "      sha: ${{ github.sha }}",
+    "",
+  ].join("\n");
+  const rendered = {
+    standalone: { ciText: standaloneCi, docsSiteText: standaloneDocsSite },
+    composed: { ciText: composedCi, docsSiteText: composedDocsSite },
+  };
+  const judge = (
+    legText = leg,
+    workflowText = docsSiteWf,
+    renderedTexts = rendered,
+    ownCiText = ownCi,
+  ) => docsSiteLegMismatches(legText, workflowText, renderedTexts, ownCiText, vars);
+
+  test("the canonical sources, renders, and twin pass clean", () => {
+    expect(judge()).toEqual([]);
+  });
+
+  test("the hook edge is unconditional and the release edge gated: dropping, ungating, or hardcoding either goes red", () => {
+    for (const needs of [
+      "    needs: [all-green{% if 'release-please' in modules %}, release{% endif %}]",
+      "    needs: [all-green, post-green, release]",
+      "    needs: [all-green{% if 'release-please' in modules %}, post-green, release{% endif %}]",
+      "    needs: [all-green, post-green]",
+    ]) {
+      const found = judge(leg.replace(orderedNeeds, needs));
+      expect(found.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    }
+  });
+
+  test("the order edges never become gate clauses, and the unconditional !cancelled() is never lost or gated", () => {
+    const gated = judge(
+      leg.replace(
+        "      needs.all-green.result == 'success' &&\n",
+        "      needs.all-green.result == 'success' &&\n      needs.post-green.result == 'success' &&\n",
+      ),
+    );
+    expect(gated.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+    const tolerant = judge(leg.replace("      !cancelled() &&\n", ""));
+    expect(tolerant.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+    expect(tolerant.filter((m) => m.expected.includes("no quoted, explicit-key"))).toEqual([]);
+    // The pages leg's shape (the clause under the release gate) is wrong
+    // here: the hook edge is unconditional, so the clause must be too.
+    const wrapped = judge(
+      leg.replace(
+        "      !cancelled() &&\n",
+        "{%- if 'release-please' in modules %}\n      !cancelled() &&\n{%- endif %}\n",
+      ),
+    );
+    expect(wrapped.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
+  });
+
+  test("a jinja tag beyond the release ordering and raw pairs goes red in the fragment", () => {
+    for (const spoof of [
+      "{% if 'pages' not in modules %}\n  docs-site:\n{% endif %}\n",
+      "{#\n    needs: [all-green]\n#}\n",
+    ]) {
+      const found = judge(`${leg}\n${spoof}`);
+      expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
+    }
+  });
+
+  test("a fragment the shared renderer cannot render reports that beside the missing-twin finding, not instead of it", () => {
+    const found = judge(
+      `${leg}\n{% if 'pages' not in modules %}\n  docs-site:\n{% endif %}\n`,
+      docsSiteWf,
+      rendered,
+      ownCi.replace(/ {2}# Dogfood\.[\s\S]*$/, ""),
+    );
+    expect(found.map((m) => m.expected.split(" (")[0])).toEqual(
+      expect.arrayContaining([
+        "a fragment the shared jinja subset renders with the release ordering as its only condition",
+        "a docs-site job",
+      ]),
+    );
+  });
+
+  test("secrets: on the leg and a widened or narrowed ceiling go red", () => {
+    expect(
+      judge(`${leg}\n    secrets: inherit`).some((m) =>
+        m.expected.includes("no secrets: on the docs-site leg"),
+      ),
+    ).toBe(true);
+    const missing = judge(leg.replace("      id-token: write\n", ""));
+    expect(missing.some((m) => m.file.includes("docs-site permissions ceiling"))).toBe(true);
+    const added = judge(
+      leg.replace("      issues: write", "      issues: write\n      contents: write"),
+    );
+    expect(added.some((m) => m.file.includes("docs-site permissions ceiling"))).toBe(true);
+  });
+
+  test("docs-site.yml: a push trigger back, a dropped call block, a plain lane, an unpassed sha, or a lost check goes red", () => {
+    const pushed = judge(
+      leg,
+      docsSiteWf.replace("  schedule:", "  push:\n    branches: [main]\n  schedule:"),
+    );
+    expect(pushed.some((m) => m.expected.includes("no push: trigger"))).toBe(true);
+    const quoted = judge(
+      leg,
+      docsSiteWf.replace("  schedule:", '  "push":\n    branches: [main]\n  schedule:'),
+    );
+    expect(quoted.some((m) => m.expected.includes("no quoted, explicit-key"))).toBe(true);
+    const uncallable = judge(
+      leg,
+      docsSiteWf.replace(
+        "{% if 'pages' not in modules %}  workflow_call:\n    inputs:\n      sha:\n        required: true\n        type: string\n",
+        "{% if 'pages' not in modules %}",
+      ),
+    );
+    expect(uncallable.some((m) => m.expected.includes("must declare the sha input"))).toBe(true);
+    const plainLane = judge(leg, docsSiteWf.replace(/ {6}group: .*\n/, "      group: pages\n"));
+    expect(plainLane.some((m) => m.expected.includes("pages-called-"))).toBe(true);
+    const unpassed = judge(
+      leg,
+      docsSiteWf.replace("      sha: {% raw %}${{ inputs.sha }}{% endraw %}\n", ""),
+    );
+    expect(unpassed.some((m) => m.expected.includes("rides on to reusable-pages"))).toBe(true);
+    const checkGone = judge(leg, docsSiteWf.replace("  pull_request:\n", "  pull_requests:\n"));
+    expect(checkGone.some((m) => m.expected.includes("the strict docs check"))).toBe(true);
+  });
+
+  test("the RENDERED standalone arm is judged as parsed YAML - a wrong needs list, a lost !cancelled(), a push trigger, or an unpassed sha goes red", () => {
+    const standaloneJob = "docs-site-release-please/.github/workflows/ci.yml job 'docs-site'";
+    const wrongNeeds = judge(leg, docsSiteWf, {
+      ...rendered,
+      standalone: {
+        ...rendered.standalone,
+        ciText: standaloneCi.replace("[all-green, post-green, release]", "[all-green, post-green]"),
+      },
+    });
+    expect(wrongNeeds.some((m) => m.file.includes(standaloneJob))).toBe(true);
+    const gateOnly = judge(leg, docsSiteWf, {
+      ...rendered,
+      standalone: {
+        ...rendered.standalone,
+        ciText: standaloneCi.replace("      !cancelled() &&\n", ""),
+      },
+    });
+    expect(gateOnly.some((m) => m.file.includes(standaloneJob))).toBe(true);
+    const pushed = judge(leg, docsSiteWf, {
+      ...rendered,
+      standalone: {
+        ...rendered.standalone,
+        docsSiteText: standaloneDocsSite.replace(
+          "  schedule:",
+          "  push:\n    branches: [main]\n  schedule:",
+        ),
+      },
+    });
+    expect(
+      pushed.some((m) =>
+        m.file.includes("docs-site-release-please/.github/workflows/docs-site.yml triggers"),
+      ),
+    ).toBe(true);
+    const unpassed = judge(leg, docsSiteWf, {
+      ...rendered,
+      standalone: {
+        ...rendered.standalone,
+        docsSiteText: standaloneDocsSite.replace("      sha: ${{ inputs.sha }}\n", ""),
+      },
+    });
+    expect(unpassed.some((m) => m.expected.includes("the rendered deploy passing sha"))).toBe(true);
+  });
+
+  test("the RENDERED composed arm must carry neither the leg nor the call", () => {
+    const legRendered = judge(leg, docsSiteWf, {
+      ...rendered,
+      composed: {
+        ...rendered.composed,
+        ciText: `${composedCi}  docs-site:\n    needs: [all-green]\n`,
+      },
+    });
+    expect(legRendered.some((m) => m.expected.includes("no docs-site job"))).toBe(true);
+    const callable = judge(leg, docsSiteWf, {
+      ...rendered,
+      composed: {
+        ...rendered.composed,
+        docsSiteText: composedDocsSite.replace(
+          "jobs:",
+          "  workflow_call:\njobs:\n  deploy:\n    uses: x",
+        ),
+      },
+    });
+    expect(
+      callable.some((m) => m.file.includes("all-modules/.github/workflows/docs-site.yml triggers")),
+    ).toBe(true);
+    expect(
+      callable.some((m) => m.file.includes("all-modules/.github/workflows/docs-site.yml jobs")),
+    ).toBe(true);
+  });
+
+  test("this repository's hand-written twin must equal the release-free arm, comments aside", () => {
+    const missing = judge(leg, docsSiteWf, rendered, ownCi.replace(/ {2}# Dogfood\.[\s\S]*$/, ""));
+    expect(
+      missing.some((m) => m.expected.includes("a docs-site job (this repository dogfoods")),
+    ).toBe(true);
+    const drifted = judge(leg, docsSiteWf, rendered, ownCi.replace("      pages: write\n", ""));
+    expect(drifted.some((m) => m.file === ".github/workflows/ci.yml job 'docs-site'")).toBe(true);
+    const releaseEdge = judge(
+      leg,
+      docsSiteWf,
+      rendered,
+      ownCi.replace(
+        "    needs: [all-green, post-green]",
+        "    needs: [all-green, post-green, release]",
+      ),
+    );
+    expect(releaseEdge.some((m) => m.file === ".github/workflows/ci.yml job 'docs-site'")).toBe(
+      true,
+    );
+    const commented = judge(
+      leg,
+      docsSiteWf,
+      rendered,
+      ownCi.replace("    concurrency:", "    # a lane comment\n    concurrency:"),
+    );
+    expect(commented).toEqual([]);
+  });
+
+  test("the docs-site leg is ARMED: every link the docs-site-leg rule pins holds on the live sources", () => {
+    const golden = (arm: string, file: string) =>
+      readFileSync(`tests/golden-renders/${arm}/.github/workflows/${file}`, "utf-8");
+    expect(
+      docsSiteLegMismatches(
+        readFileSync("templates/docs-site/fragments/all-green-docs-site.jinja", "utf-8"),
+        readFileSync("templates/docs-site/.github/workflows/docs-site.yml.jinja", "utf-8"),
+        {
+          standalone: {
+            ciText: golden("docs-site-release-please", "ci.yml"),
+            docsSiteText: golden("docs-site-release-please", "docs-site.yml"),
+          },
+          composed: {
+            ciText: golden("all-modules", "ci.yml"),
+            docsSiteText: golden("all-modules", "docs-site.yml"),
+          },
+        },
+        readFileSync(".github/workflows/ci.yml", "utf-8"),
+        vars,
       ),
     ).toEqual([]);
   });

@@ -127,6 +127,21 @@ const description = mdCellSafe(
   "the description",
 );
 
+// A gate expression is interpolated verbatim into the generated _exclude
+// patterns' `{% if not (<gate>) %}` conditions and into `not (<gate>)` guard
+// chains: { } % # would open or close a jinja delimiter around it. / and \
+// stay banned conservatively - no current gate needs them, and freeing one is
+// a one-line schema change if a gate ever does. Single quotes stay allowed -
+// membership gates like 'bun' in modules need them.
+const gateText = singleLine("the gate expression").refine(
+  (value) => !/[{}%#/\\]/.test(value),
+  {
+    message:
+      "the gate expression must not contain {, }, %, #, /, or \\ " +
+      "(it lands inside the generated _exclude conditions and not(...) guard chains)",
+  },
+);
+
 /** Exported for scripts/generate/targets.ts, which derives the editor-facing
  *  templates/module.schema.json from it. */
 export const manifestSchema = z.strictObject({
@@ -257,20 +272,14 @@ export const manifestSchema = z.strictObject({
       build: mdCellSafe(jinjaQuoted("the build command"), "the build command"),
     })
     .optional(),
-  // The gate expression is interpolated verbatim into the generated
-  // _exclude patterns' `{% if not (<gate>) %}` conditions and into
-  // `not (<gate>)` guard chains: { } % # would open or close a jinja
-  // delimiter around it. / and \ stay banned conservatively - no current
-  // gate needs them, and freeing one is a one-line schema change if a
-  // gate ever does. Single quotes stay allowed - membership gates like
-  // 'bun' in modules need them.
-  gate: singleLine("the gate expression")
-    .refine((value) => !/[{}%#/\\]/.test(value), {
-      message:
-        "the gate expression must not contain {, }, %, #, /, or \\ " +
-        "(it lands inside the generated _exclude conditions and not(...) guard chains)",
-    })
-    .optional(),
+  gate: gateText.optional(),
+  // Fragments rendering under a NARROWER condition than the module gate,
+  // keyed by anchor name: the composer AND-s the condition onto the module
+  // gate for that fragment (so it can never render where its module does
+  // not), and the anchor line collapses when it renders nothing
+  // (compose.ts's header). The composer errors on a key naming no shipped
+  // fragment. Same alphabet as `gate`: the text lands inside a jinja tag.
+  fragment_conditions: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be an anchor name"), gateText).optional(),
 });
 
 export type ModuleManifest = z.infer<typeof manifestSchema> & { module: string };
