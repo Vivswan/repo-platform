@@ -122,10 +122,10 @@ function decodedPath(pathname: string): string {
   }
 }
 
-/** A page's URL as a browser can follow it: the index spells a file's
- *  name as it is on disk, so a `#`, `?`, `%`, space or non-ASCII character
- *  in the name is escaped here, and only here, at the point of emitting a
- *  link. */
+/** A page's URL or route as a browser can follow it: the index and the
+ *  sidebar spell a file's name as it is on disk, so a `#`, `?`, `%`, space
+ *  or non-ASCII character in the name is escaped here, and only here, at
+ *  the point of emitting a link (the launcher's rows, the sidebar's). */
 export function navigable(url: string): string {
   return encodeURI(url).replace(/[#?]/g, (char) => (char === "#" ? "%23" : "%3F"));
 }

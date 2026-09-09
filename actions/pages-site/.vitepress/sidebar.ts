@@ -19,7 +19,7 @@ import {
 } from "./derive.ts";
 import { dirTitle } from "./dir-title.ts";
 import type { CuratedEnv } from "./landing-table.ts";
-import { pageKey, resolveHref } from "./theme/launcher-model.ts";
+import { navigable, pageKey, resolveHref } from "./theme/launcher-model.ts";
 import { expandsIncludes, pageUrl, type SiteUrls } from "./theme/page-index.ts";
 
 export interface SidebarItem {
@@ -143,7 +143,7 @@ function sidebarLevel(
   // group when the item before it is that group.
   for (const { file, meta, landing } of level.pages) {
     const text = landing && meta.title === siteTitle ? "Overview" : meta.title;
-    const row = { text, link: routeOf(file, context.rewrites) };
+    const row = { text, link: navigable(routeOf(file, context.rewrites)) };
     const previous = items[items.length - 1];
     if (meta.group === null) items.push(row);
     else if (previous?.items !== undefined && previous.text === meta.group)

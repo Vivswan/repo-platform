@@ -207,6 +207,33 @@ describe("deriveSidebar", () => {
     expect(deriveSidebar(files, pages, ROOT_SITE)[0]).toEqual({ text: "my-repo", link: "/" });
   });
 
+  // Every row kind (a plain page, a group member, a directory's landing and
+  // its child) is spelled the way the launcher spells the same page, so a
+  // `#` or `?` in a name never reads as a fragment or query.
+  test("a reserved character in a file or directory name is escaped in the link, at every row kind", () => {
+    const files = ["README.md", "hash#page.md", "query?page.md", "q?dir/README.md", "q?dir/e#f.md"];
+    const pages = source({
+      "README.md": plain("Home"),
+      "hash#page.md": plain("Hash"),
+      "query?page.md": ["Query", null, "Grouped"],
+      "q?dir/README.md": plain("Dir"),
+      "q?dir/e#f.md": plain("Both"),
+    });
+    expect(deriveSidebar(files, pages, ROOT_SITE)).toEqual([
+      { text: "Home", link: "/" },
+      { text: "Hash", link: "/hash%23page" },
+      { text: "Grouped", items: [{ text: "Query", link: "/query%3Fpage" }] },
+      {
+        text: "Q?dir",
+        collapsed: false,
+        items: [
+          { text: "Dir", link: "/q%3Fdir/" },
+          { text: "Both", link: "/q%3Fdir/e%23f" },
+        ],
+      },
+    ]);
+  });
+
   test("sidebarTrees splits the root from each locale, and sidebarOrder walks them in that order", () => {
     const files = ["README.md", "b.md", "a.md", "ja/README.md", "ja/z.md", "guide/x.md"];
     const pages = source(
