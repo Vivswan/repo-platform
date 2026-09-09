@@ -941,7 +941,7 @@ a:focus-visible {
 }
 
 /* Custom blocks (::: tip, warning, ...): one panel material, the kind
- * named by its title text and by its --color-<kind> token (custom.css) on
+ * named by its title text and by its --color-<kind> token (tokens.css) on
  * the 2px rule. Note, tip, important, info and details carry the hue with
  * the title in the ink; warning and caution (and the ::: danger container,
  * GitHub's CAUTION) color the title too, so a risk reads apart from a hint
@@ -1559,9 +1559,9 @@ a:focus-visible {
 
 /* The article alone, on paper: the chrome (nav, local nav, sidebar, aside,
  * launcher, skip link, code controls, pager) is gone, the grounds are paper
- * and the text ink whatever the screen mode was, the column spans the
- * page, external links print their address, and a code block or table is
- * not split across pages. */
+ * and the text ink whatever the screen mode was (the print palette is in
+ * tokens.css), the column spans the page, external links print their
+ * address, and a code block or table is not split across pages. */
 @media print {
   .VPNav,
   .VPLocalNav,
@@ -1577,41 +1577,6 @@ a:focus-visible {
   .vp-doc [class*="language-"] > button.copy,
   .vp-doc [class*="language-"] > span.lang {
     display: none;
-  }
-  /* html:root outranks custom.css's :root and .dark token blocks */
-  html:root,
-  html:root.dark {
-    --vp-c-bg: #ffffff;
-    --vp-c-bg-alt: #ffffff;
-    --vp-c-bg-elv: #ffffff;
-    --vp-c-bg-soft: #ffffff;
-    --vp-c-bg-soft-2: #f3f4f6;
-    --vp-c-bg-code: #f3f4f6;
-    --vp-c-divider: rgba(20, 24, 32, 0.2);
-    --vp-c-border: rgba(20, 24, 32, 0.3);
-    --vp-c-text-1: #000000;
-    --vp-c-text-2: #333840;
-    --vp-c-text-3: #4a505c;
-    /* the accents are ink on paper: a dark-mode hue or alert color printed
-     * from a dark screen would sit at 2:1 on white */
-    --fleet-hue: #1c1f26;
-    --fleet-hue-band: rgba(20, 24, 32, 0.1);
-    --fleet-hue-soft: rgba(20, 24, 32, 0.28);
-    --color-warning: #9a6700;
-    --color-caution: #d1242f;
-    --fleet-code-foreground: #000000;
-    --fleet-code-token-comment: #4a505c;
-    --fleet-code-token-string: #0b4a8b;
-    --fleet-code-token-string-expression: #0b4a8b;
-    --fleet-code-token-constant: #005cc5;
-    --fleet-code-token-keyword: #b8232f;
-    --fleet-code-token-function: #6639b6;
-    --fleet-code-token-parameter: #000000;
-    --fleet-code-token-punctuation: #333840;
-    --fleet-code-token-link: #0b4a8b;
-    --fleet-code-token-inserted: #1a6b2f;
-    --fleet-code-token-deleted: #b8232f;
-    --fleet-code-token-changed: #7a4f00;
   }
   body {
     background: #ffffff;

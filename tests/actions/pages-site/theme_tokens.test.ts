@@ -1,12 +1,13 @@
 // The theme's token layer is a set of --vp-* values carbon reads; a token
 // nobody reads is a customization point that cannot affect rendering. This
-// pins every declaration in the theme's CSS to at least one live var()
-// consumer: one in the theme's own files, or one in carbon's shipped theme
-// that the theme's own declarations do not outrank. Carbon's :root and
-// .dark token declarations lose to the theme's redeclaration of the same
-// property (custom.css loads after carbon at equal specificity), so
+// pins every token tokens.ts declares, and every custom property the
+// hand-written CSS declares, to at least one live var() consumer: one in
+// the theme's own files, or one in carbon's shipped theme that the theme's
+// own declarations do not outrank. Carbon's :root and .dark token
+// declarations lose to the theme's redeclaration of the same property
+// (tokens.css loads after carbon at equal specificity), so
 // `--vp-button-alt-bg: var(--vp-c-default-3)` in carbon's vars.css stops
-// reading --vp-c-default-3 once custom.css sets --vp-button-alt-bg itself;
+// reading --vp-c-default-3 once tokens.css sets --vp-button-alt-bg itself;
 // a scoped redeclaration such as carbon's `.result.selected { ... }` still
 // wins over :root and keeps reading. The code palette (--fleet-code-*) has
 // one more reader: the shiki css-variables theme config.mts installs, whose
@@ -15,11 +16,18 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  MODES,
+  modeValues,
+  tokenNames,
+} from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 
 const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
 const THEME = join(ACTION, ".vitepress/theme");
 const CONFIG = join(ACTION, ".vitepress/config.mts");
 const CARBON = join(ACTION, "node_modules/vitepress-carbon/dist");
+/** The rendering of tokens.ts; its declarations are the data's, not the file's. */
+const GENERATED_CSS = join(THEME, "tokens.css");
 // shiki is the action's dependency, not the root's.
 const { createCssVariablesTheme } = (await import(Bun.resolveSync("shiki", ACTION))) as {
   createCssVariablesTheme: (options: { variablePrefix: string }) => unknown;
@@ -88,19 +96,21 @@ function shikiReads(): { all: string[]; colored: string[] } {
   };
 }
 
-function themeDeclarations(themeFiles: string[]): Set<string> {
-  const declared = new Set<string>();
-  for (const file of themeFiles.filter((f) => f.endsWith(".css"))) {
+/** Every custom property the theme declares: the token layer's names from
+ *  tokens.ts, plus the component-scoped ones the hand-written CSS sets. */
+function themeDeclarations(): Set<string> {
+  const declared = new Set<string>(tokenNames());
+  for (const file of filesUnder(THEME, [".css"])) {
+    if (file === GENERATED_CSS) continue;
     for (const token of tokens(readFileSync(file, "utf-8"), DECLARATION)) declared.add(token);
   }
   return declared;
 }
 
 test("every custom property the theme declares has a live var() reader", () => {
-  const themeFiles = filesUnder(THEME, [".css", ".ts"]);
-  const declared = themeDeclarations(themeFiles);
+  const declared = themeDeclarations();
   const read = new Set<string>();
-  for (const file of themeFiles) {
+  for (const file of filesUnder(THEME, [".css", ".ts"])) {
     for (const token of tokens(readFileSync(file, "utf-8"), VAR_READ)) read.add(token);
   }
   for (const file of filesUnder(CARBON, [".css", ".vue", ".js"])) {
@@ -114,26 +124,12 @@ test("every custom property the theme declares has a live var() reader", () => {
   expect(unread).toEqual([]);
 });
 
-/** The properties declared under blocks whose whole selector is `selector`. */
-function modeDeclarations(css: string, selector: string): Set<string> {
-  const declared = new Set<string>();
-  for (const block of css.split("}")) {
-    const brace = block.lastIndexOf("{");
-    if (block.slice(0, brace).trim().split("\n").at(-1)?.trim() !== selector) continue;
-    for (const token of tokens(block.slice(brace + 1), DECLARATION)) declared.add(token);
-  }
-  return declared;
-}
-
 // The reverse: a color shiki can put on a span (a diff fence's inserted
 // and deleted lines, a link) with no declared value falls back to the
-// plain text ink, so every colored variable must be declared in each mode.
-test.each([
-  ["custom.css", ":root"],
-  ["custom.css", ".dark"],
-  ["components.css", "html:root.dark"],
-])("every token color the shiki theme emits is declared in %s under %s", (file, selector) => {
-  const declared = modeDeclarations(readFileSync(join(THEME, file), "utf-8"), selector);
+// plain text ink, so every colored variable must have a value in each mode,
+// the print sheet's included.
+test.each([...MODES])("every token color the shiki theme emits has a %s value", (mode) => {
+  const declared = new Set<string>(modeValues(mode).keys());
   const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
   expect(undeclared).toEqual([]);
 });
@@ -158,7 +154,7 @@ test("the override filter drops :root reads the theme outranks and keeps scoped 
   ].join("\n");
   expect(liveCarbonReads(synthetic, new Set(["--a"])).sort()).toEqual(["--v", "--w", "--y"]);
 
-  const declared = themeDeclarations(filesUnder(THEME, [".css"]));
+  const declared = themeDeclarations();
   const vars = readFileSync(join(CARBON, "theme/styles/vars.css"), "utf-8");
   expect(tokens(vars, VAR_READ)).toContain("--vp-c-default-3");
   expect(declared.has("--vp-button-alt-bg")).toBe(true);

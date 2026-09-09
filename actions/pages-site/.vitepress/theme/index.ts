@@ -9,7 +9,7 @@ import { inBrowser, type Theme } from "vitepress";
 import { VPCarbon } from "vitepress-carbon";
 import { h } from "vue";
 import type { ProjectFacts } from "../../facts.ts";
-import "./custom.css";
+import "./tokens.css";
 import "./components.css";
 import "./launcher.css";
 import FactsPanel from "./facts-panel.ts";
