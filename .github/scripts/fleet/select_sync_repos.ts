@@ -1,33 +1,24 @@
 #!/usr/bin/env bun
-// Selects the push-sync fan-out: the fleet is every discovered repo the
-// token can ACTUALLY push to (probed per repo - the PAT's grant is the
-// only membership fact) that has adopted the template. Invoked by
-// sync-repos.yml's plan job after the discovery step wrote
-// $RUNNER_TEMP/discovered.json ({repo, private} objects).
+// Selects the push-sync fan-out: every discovered repo the token can
+// ACTUALLY push to (probed per repo - the PAT's grant is the only
+// membership fact) that has adopted the template. Invoked by sync-repos.yml's
+// plan job after discovery wrote $RUNNER_TEMP/discovered.json.
 //
-// This job's log and the matrix it emits are publicly readable, so private
-// repos appear only by their redaction hint (redact.ts): notices print the
-// display, captured API error text is scrubbed of the slug, and a private
-// matrix row carries {repo: <hint>, verify} instead of the slug. No
-// ::add-mask:: here: the runner silently drops a job output containing a
-// masked substring, which would kill the matrix.
+// This job's log and matrix are publicly readable, so private repos appear
+// only by their redaction hint (redact.ts): a private matrix row carries
+// {repo: <hint>, verify} instead of the slug. No ::add-mask:: here: the
+// runner silently drops a job output containing a masked substring, which
+// would kill the matrix.
 //
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, OWNER (the fleet owner, named in the
-// unknown-slug refusal), RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
-// GITHUB_EVENT_PATH supplies the repo dispatch input (a non-empty
-// ONLY_REPO env overrides it - the test harness and local runs use that).
-//
-// Scope contract (sync_scope.ts owns the grammar): owner/name slugs, the
-// visibility tokens public/private, or the literal "all" - an explicit
-// whole-fleet scope (same selection as an empty repo, and never ambiguous:
-// real slugs are always owner/name). RECOVER=recopy requires a scope, because
-// a recovery re-render clobbers local edits in template-managed files and
-// must never fan out across the fleet by accident: an empty repo is
-// rejected, so a fat-fingered recover input on a plain dispatch cannot
-// flip every managed repo into manual-review re-render PRs. Only the repo
-// input's PRESENCE is judged - its value may be a private slug and this
-// log is publicly readable. sync-repos.yml fast-fails the same check
-// before checkout; the copy here is the tested backstop.
+// Scope (sync_scope.ts owns the grammar): owner/name slugs, public/private,
+// or the literal "all", an explicit whole-fleet scope (never ambiguous, since
+// real slugs are always owner/name). RECOVER=recopy requires a scope: a
+// recovery re-render clobbers local edits in template-managed files and must
+// never fan out across the fleet by accident, so an empty repo is rejected.
+// Only the input's PRESENCE is judged (its value may be a private slug and
+// this log is public); sync-repos.yml fast-fails the same check before
+// checkout, and the copy here is the tested backstop. Env: PAT, GH_TOKEN,
+// GITHUB_RUN_ID, OWNER, RUNNER_TEMP, GITHUB_OUTPUT, RECOVER, GITHUB_EVENT_PATH.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

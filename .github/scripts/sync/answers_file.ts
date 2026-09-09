@@ -19,14 +19,12 @@ export interface CopierAnswers {
    * hook records the full 40-hex sha, and recorded_commit.ts refuses any
    * other shape. */
   commit: string;
-  /** Every recorded answer, for field-specific consumers reading TYPED
-   * values (settings_drift's boolean private, rehearse's description).
-   * Parsed under the default YAML 1.2 schema, which agrees with copier's
-   * PyYAML on the values those consumers read (copier writes booleans as
-   * plain true/false and quotes 1.1-ambiguous strings when dumping) - but
-   * NOT on every scalar (plain 1e3 is 1000 here, a string to PyYAML), so
-   * these values must never be re-serialized into copier --data-file
-   * input; that path goes through dataFileYaml, which passes the
+  /** Every recorded answer, for consumers reading TYPED values
+   * (settings_drift's boolean private, rehearse's description). Parsed
+   * under the default YAML 1.2 schema, which agrees with copier's PyYAML
+   * on those values but NOT on every scalar (plain 1e3 is 1000 here, a
+   * string to PyYAML), so these must never be re-serialized into copier
+   * --data-file input; that path is dataFileYaml, which passes the
    * recorded scalars through verbatim. */
   fields: Record<string, unknown>;
 }
@@ -138,14 +136,12 @@ export function unrecordedSeeds(
 }
 
 /** A string as a PyYAML-safe YAML double-quoted scalar. JSON string
- * literals are a valid YAML double-quote subset (JSON.stringify emits only
- * escapes YAML also defines), EXCEPT that JSON leaves some characters raw
- * which YAML 1.1 treats specially: NEL/LS/PS are LINE BREAKS there (PyYAML
- * would fold them to spaces), and DEL, the other C1 controls, and the
- * U+FFFE/U+FFFF non-characters are outside YAML's printable set (PyYAML
- * rejects the file). Those are re-escaped as \\uXXXX, which PyYAML reads
- * back verbatim. Lone surrogates become escapes here too, but the escape
- * still DECODES to a value copier cannot render - the postcondition's
+ * literals are a valid YAML double-quote subset, EXCEPT that JSON leaves
+ * raw some characters YAML 1.1 treats specially: NEL/LS/PS are LINE BREAKS
+ * there (PyYAML folds them to spaces), and DEL, the other C1 controls, and
+ * U+FFFE/U+FFFF are outside YAML's printable set (PyYAML rejects the
+ * file). Those are re-escaped as \\uXXXX. Lone surrogates escape too, but
+ * still DECODE to a value copier cannot render; the postcondition's
  * decoded-scalar check refuses those. */
 function yamlDoubleQuoted(value: string): string {
   return JSON.stringify(value).replace(
@@ -162,44 +158,25 @@ function liveDataYaml({ modules, private: privateFlag, description }: LiveRender
   return `${moduleLines}private: ${privateFlag}\ndescription: ${yamlDoubleQuoted(description)}\n`;
 }
 
-// The emitter targets YAML 1.2, where NEL/DEL/C1 are printable non-breaks
-// - so a carried double-quoted scalar PyYAML wrote as \\x7F or \\u0085
-// re-emits as the RAW character, which PyYAML then rejects (C0/DEL/C1,
-// non-characters) or silently FOLDS to a space (raw NEL; raw LS/PS are
-// preserved by PyYAML 6, verified against 6.0.3, so they stay
-// carriable and refusing them would false-reject). No in-place
-// fix is context-safe (a raw byte inside a single-quoted or plain scalar
-// cannot take a backslash escape), so an assembled data file carrying any
-// such character - or a lone surrogate - is refused outright.
-// Copier-written answers never contain them in practice; refusing loudly
-// beats delivering renders that diverge from copier's own.
+// The emitter targets YAML 1.2, where NEL/DEL/C1 are printable, so a
+// double-quoted scalar PyYAML wrote as \\x7F or \\u0085 re-emits RAW, which
+// PyYAML then rejects (C0/DEL/C1, non-characters) or silently FOLDS to a
+// space (raw NEL; raw LS/PS survive PyYAML 6.0.3 and stay carriable). No
+// in-place fix is context-safe (a raw byte in a single-quoted or plain
+// scalar takes no escape), so such a character or a lone surrogate is
+// refused outright; copier-written answers never carry them.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters to refuse them is this rule's whole job
 const UNCARRIABLE_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ufffe\uffff]/;
 const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
-/** A copier --data-file built from the recorded answers, scalars passed
- * through VERBATIM: copier re-parses the data file with PyYAML (YAML 1.1),
- * so the invariant is byte-level, not value-level - a re-typed re-dump
- * would hand PyYAML different bytes than the answers file held (the yaml
- * package's default schema reads `project_name: 1e3` as 1000 and
- * `_commit: 1626e53` as 1.626e+56; even its yaml-1.1 mode floats 1e3,
- * which PyYAML keeps a string). Parsing the document under the failsafe
- * schema and re-emitting it preserves each scalar's source form (plain
- * stays plain, quoting style survives), so PyYAML parses the emission
- * exactly as it parses the answers file itself. Copier answer keys with a
- * leading underscore (copier's own metadata) are dropped whole; with
- * `live` set, the live-value keys are dropped too and re-emitted from the
- * live values in PyYAML-safe forms.
- *
- * The result is POSTCONDITION-checked before it is returned: re-parsed as
- * exactly one mapping document carrying each live key exactly once. The
- * answers file is target-controlled, and a shape this assembly cannot
- * carry (a document-end marker that would strand appended keys, an alias
- * whose anchor the filter dropped) must fail loudly here, never hand
- * copier a data file that parses differently than the answers did.
- *
- * Throws AnswersFileError for text this cannot shape; the message can
- * quote target file content - hide-details callers must not print it. */
+/** A copier --data-file from the recorded answers, scalars passed through
+ * VERBATIM: copier re-parses with PyYAML (YAML 1.1), so a re-typed re-dump
+ * would hand it different bytes (`1e3` becomes 1000, a short sha a float);
+ * the failsafe schema keeps each scalar's source form. Copier's underscore
+ * keys are dropped; with `live`, the live-value keys are re-emitted in
+ * PyYAML-safe forms. POSTCONDITION-checked (one mapping, each live key
+ * once): target-controlled answers fail loudly here, never reach copier
+ * parsing differently. Throws AnswersFileError (may quote target content). */
 export function dataFileYaml(text: string, live: LiveRenderData | null): string {
   // logLevel error for the same reason as commitOf.
   const doc = parseDocument(text, { schema: "failsafe", logLevel: "error" });

@@ -12,15 +12,13 @@ import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
 import { classifyEntry, type ScopeSource } from "./sync_scope.ts";
 
-/** Hard deadline for every fleet network subprocess (the gh api calls and
- * the curl push probe). Single calls answer in seconds; the slowest is
- * discoverWritableRepos' paginated user/repos listing, whose pages fetch
- * serially at one page per 100 repos, so two minutes covers the fleet
- * growing to several hundred repos with a wide margin. This is a
- * stalled-network backstop, not a latency budget: without it a hung
- * connection blocks the plan job until the runner's own job timeout, and
- * the plan job's timeout-minutes is sized from it. Well under rehearse's
- * 300s whole-copier-run deadline. */
+/** Hard deadline for every fleet network subprocess (gh api calls, the curl
+ * push probe): a stalled-network backstop, not a latency budget. Single
+ * calls answer in seconds; the slowest is discoverWritableRepos' paginated
+ * user/repos listing (serial, 100 repos per page), so two minutes covers
+ * the fleet growing to several hundred repos. Without it a hung connection
+ * blocks the plan job until the runner's job timeout, whose timeout-minutes
+ * is sized from this. Well under rehearse's 300s whole-copier-run deadline. */
 export const NETWORK_TIMEOUT_MS = 120_000;
 
 /** capture() with the fleet network deadline applied; `timeoutMs` is
@@ -108,17 +106,14 @@ const dispatchEvent = z.object({
   inputs: z.object({ repo: z.string().optional() }).nullish(),
 });
 
-/** The repo scope, case-folded (GitHub identity is case-insensitive, so
- * it must fold before any comparison): one slug, or a comma-separated
- * list, each entry trimmed. A non-empty ONLY_REPO env overrides the
- * event payload's dispatch input - post-green's called sync passes its
- * scope that way (public text off a main commit), and so do the test
- * harnesses and local runs. When `owner` is given, a bare name gets it
- * prefixed - except the scope tokens (all, public, private), which are
- * never repo names. The typed dispatch input may be a private slug, so IT
- * must never ride in as step env: the runner prints step env values into
- * the public log group; the event payload on the runner's disk is not
- * logged. */
+/** The repo scope, case-folded (GitHub identity is case-insensitive, so it
+ * must fold before any comparison): one slug or a comma-separated list. A
+ * non-empty ONLY_REPO env overrides the event payload's dispatch input
+ * (post-green's called sync, the harnesses, and local runs pass it that
+ * way). With `owner`, a bare name gets it prefixed, except the scope tokens
+ * (all, public, private). The typed dispatch input may be a private slug,
+ * so IT never rides in as step env: the runner prints step env into the
+ * public log group; the event payload on disk is not logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
   if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {

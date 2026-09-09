@@ -381,25 +381,22 @@ jobs:
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,
           # and AGENTS.md's Toolchain section must render the uv bullet
-          # alone (every other uv row pairs uv with bun). nightly
-          # rides along as the only fuzzer-free nightly render: stream
-          # independence means the fuzz starter must not render here, and
-          # with release-please the release-health call sites must pass
-          # exactly the nightly label (the single-stream nightly-only leg;
-          # rust-fuzzer covers the fuzzer-only mirror).
+          # alone. nightly rides along as the only fuzzer-free nightly
+          # render (stream independence: the fuzz starter must not render
+          # here), and with release-please the release-health call sites
+          # must pass exactly the nightly label (the single-stream
+          # nightly-only leg; rust-fuzzer covers the fuzzer-only mirror).
           - name: uv-typical
             modules: "[uv, nightly, release-please]"
             private: "false"
-          # rust + fuzzer must render cargo dependabot + the Rust gitignore and
-          # nothing toolchain-gated (no CodeQL block, no auto-format starter):
-          # rust is deliberately outside has_toolchain, and the fuzzer module
-          # adds nothing toolchain-gated, so the AGENTS.md Toolchain section
-          # is exercised with rust as the only toolchain module.
-          # Deliberately nightly-free: the fuzzer-present/nightly-absent leg
-          # (no nightly.yml renders) - uv-typical covers the mirror leg and
-          # the everything row the co-selection. release-please rides along
-          # so the release-health call sites pass exactly the fuzz label
-          # (the single-stream fuzzer-only leg).
+          # rust + fuzzer must render cargo dependabot + the Rust gitignore
+          # and nothing toolchain-gated (no CodeQL block, no auto-format
+          # starter): rust is deliberately outside has_toolchain, so the
+          # AGENTS.md Toolchain section is exercised with rust as the only
+          # toolchain module. Deliberately nightly-free (the fuzzer-present,
+          # nightly-absent leg; uv-typical covers the mirror); release-please
+          # rides along so the release-health call sites pass exactly the
+          # fuzz label (the single-stream fuzzer-only leg).
           - name: rust-fuzzer
             modules: "[rust, fuzzer, release-please]"
             private: "false"
@@ -546,20 +543,14 @@ jobs:
       - name: Build the fixture site and assert the artifact
         run: .github/scripts/ci/verify_pages_site_build.sh
 
-  # Dry-run sync against every fleet repo's REAL current state (render,
-  # splice, resolve, validate - no push, no PR, private repos hard-skipped
-  # by rehearse_fleet.ts's fail-closed visibility rule): the class of bug
-  # the synthetic rows above cannot see - a real repo's local edits, stale
-  # markers, recorded answers - goes red here instead of during a live
-  # sync run. Gate mode turns failed rehearsals and failed validations
-  # into ::error:: annotations naming repo, phase, and files, and fails
-  # the job (bun run rehearse:fleet is the local, report-only twin). The
-  # job stays unconditional (a job-level skip would stand this gate down
-  # in the all-green verdict); the steps skip when the
-  # fleet PAT is absent from the event's secrets (Dependabot-triggered
-  # runs get Dependabot secrets, not this repo's) - the push run after
-  # merge and the weekly schedule still rehearse every change. No fork
-  # exposure: solo repo.
+  # Dry-run sync against every fleet repo's REAL current state (no push, no
+  # PR, private repos hard-skipped by rehearse_fleet.ts's fail-closed
+  # visibility rule): the class of bug the synthetic rows above cannot see
+  # (a real repo's local edits, stale markers, recorded answers) goes red
+  # here instead of during a live sync. The job stays unconditional (a
+  # job-level skip would stand this gate down in the all-green verdict); the
+  # steps skip when the fleet PAT is absent from the event's secrets
+  # (Dependabot-triggered runs) - the push run after merge still rehearses.
   rehearse-fleet:
     runs-on: ubuntu-latest
     timeout-minutes: 30

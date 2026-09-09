@@ -1,40 +1,24 @@
 #!/usr/bin/env bun
-// Selects and merges settings LAYERS 1 to 4 for a repository (the full
-// six-layer model is docs/settings.md). No settings VALUES live here:
-// every layer is a plain settings-as-code document - the fleet baseline
-// and its visibility overlay under .github/, each selected module's own
-// settings.yml and visibility overlay next to its module.yml - and this
-// script only picks the ones a repo's facts select and merges them.
-// merge_settings_layers.ts owns the dialect and adds the repo's own
-// .github/settings.yml and the fleet override on top. No layer file is
-// ever synced into a client repo; the template renders the repo's own
-// settings.yml ONCE as a repo-owned identity starter.
-//
-// Consumers beyond the apply: scripts/generate/copier_questions.ts derives the
-// tracking-label validators' reserved-label roster from managedLabelNames,
-// and scripts/check_ssot.ts anchors its label/ruleset rules here.
-//
-// Inputs are repo facts: the module selection (the target repo's
-// .repo-platform.yml - every repository carrying one is a settings
-// target), effective visibility (private repositories reject the
-// public-only layers with a 422), and the
-// tracking-label answers recorded in .github/.copier-answers.yml (each stream
-// repo picks its own label name; the color/description tuples live in
-// the module manifests).
-//
-// CLI (settings-repos.yml, and the smoke gate's black-box assembly):
-//   bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
-//     --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
-//
-// By default the facts come from the target repository's default branch
-// via gh api (env: GH_TOKEN); visibility is the DECLARED
-// repository.private in its settings.yml, live-probed when undeclared.
-// --target-dir reads the facts from a local checkout (no network; the
-// smoke gate renders a bare copier output this way);
-// --operator-answers reads module selection and visibility from the
-// operator repository's recorded answers file - repo-platform is the one
-// fleet member with no .repo-platform.yml (it is not generated from the
-// template), and settings-repos.yml passes the flag for its self target.
+// Selects and merges settings LAYERS 1 to 4 for a repository (the six-layer
+// model: docs/settings.md). No settings VALUES live here: every layer is a
+// plain settings-as-code document (the fleet baseline and its visibility
+// overlay under .github/, each selected module's settings.yml and overlay
+// beside its module.yml), and this script only picks the ones a repo's
+// facts select and merges them; merge_settings_layers.ts owns the dialect
+// and adds the repo's own settings.yml and the fleet override on top. No
+// layer file is ever synced into a client repo. Facts: the module selection
+// (.repo-platform.yml - every repository carrying one is a settings
+// target), effective visibility (private repos reject the public-only
+// layers with a 422), and the tracking-label answers in
+// .github/.copier-answers.yml.
+// CLI: bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
+//   --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
+// By default the facts come from the target's default branch via gh api
+// (env: GH_TOKEN), visibility the DECLARED repository.private in its
+// settings.yml, live-probed when undeclared; --target-dir reads a local
+// checkout (the smoke gate); --operator-answers reads the operator repo's
+// recorded answers (repo-platform is the one fleet member with no
+// .repo-platform.yml, so settings-repos.yml passes it for the self target).
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -109,12 +93,11 @@ function moduleLayerPath(module: string, name: string): string {
   return join(REPO_ROOT, "templates", module, name);
 }
 
-/** The three fleet layer files, unconditional by design; a missing one is
- *  a hard error before any layer is read. The MODULE layer files carry no
- *  existence check here: which files a module ships is declared in its
- *  module.yml (settings_layers), and the manifest loader holds that
- *  declaration and the tree together in both directions on every load
- *  (assertSettingsLayerFiles), so a deleted-but-declared or
+/** The three fleet layer files, unconditional by design; a missing one is a
+ *  hard error before any layer is read. The MODULE layer files carry no
+ *  existence check here: the manifest loader holds each module.yml's
+ *  settings_layers declaration and the tree together in both directions on
+ *  every load (assertSettingsLayerFiles), so a deleted-but-declared or
  *  present-but-undeclared module layer never reaches this render. `exists`
  *  is injectable so a test can prove a deletion fails loudly without
  *  deleting anything. */
@@ -130,14 +113,13 @@ export function assertFleetLayerFiles(exists: (path: string) => boolean = exists
 }
 
 /** Every layer file a repository's facts select, LOW to HIGH: the fleet
- *  baseline, the fleet visibility overlay, each selected module's own
- *  layer, then each selected module's visibility overlay. Which module
- *  files exist is DECLARED (each manifest's settings_layers), never
- *  discovered: selecting by existence alone fails OPEN - a deleted layer
- *  file silently shrinks the stack, and the apply's delete-undeclared
- *  pass then removes its labels fleet-wide. The repo's own settings.yml
- *  and .github/settings-override.yml are layers 5 and 6, applied by
- *  merge_settings_layers.ts at apply time. */
+ *  baseline, the fleet visibility overlay, each selected module's own layer,
+ *  then each module's visibility overlay (the repo's settings.yml and the
+ *  override are layers 5 and 6, merged at apply time). Which module files
+ *  exist is DECLARED (each manifest's settings_layers), never discovered:
+ *  selecting by existence fails OPEN - a deleted layer file silently shrinks
+ *  the stack, and the apply's delete-undeclared pass then removes its labels
+ *  fleet-wide. */
 export function layerPaths(
   facts: RepoFacts,
   manifests: ModuleManifest[],
@@ -525,15 +507,14 @@ export function factsFromOperatorAnswers(
   };
 }
 
-/** Facts fetched from the target repository's default branch (gh api), or
- *  null when it carries no .repo-platform.yml at `ref`: the repository left
- *  management between the plan job's selection and this read, and the
- *  caller skips it. Visibility is the DECLARED repository.private in the repo's
- *  settings.yml when it is a boolean, the live probe otherwise: the apply
- *  flips visibility to the declared value (repository section first), so
- *  the baseline's visibility-gated blocks must match the POST-apply state
- *  - deriving them from live visibility would 422 the very apply that
- *  performs a deliberate flip. */
+/** Facts fetched from the target's default branch (gh api), or null when it
+ *  carries no .repo-platform.yml at `ref` (it left management between the
+ *  plan job's selection and this read; the caller skips it). Visibility is
+ *  the DECLARED repository.private in its settings.yml when boolean, else
+ *  the live probe: the apply flips visibility to the declared value first,
+ *  so the visibility-gated blocks must match the POST-apply state, and
+ *  deriving them from live visibility would 422 the very apply performing
+ *  a deliberate flip. */
 export function factsFromFetch(
   repo: string,
   manifests: ModuleManifest[],

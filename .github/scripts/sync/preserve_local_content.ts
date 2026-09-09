@@ -1,61 +1,20 @@
 #!/usr/bin/env bun
-// Rebuilds split-class files structurally, in one of two modes. In BOTH
-// modes the file list and each file's split markers come from an ownership
-// manifest's class "split" entries (.github/repo-platform-manifest.json) -
-// nothing here hardcodes marker lines or file names, so a future file with
-// different markers rides the same carry instead of silently degrading.
+// Rebuilds split-class files structurally: the fresh render's managed
+// region with the target's own repository-owned sides byte-for-byte around
+// it, so a merge never touches mixed-ownership content (the fleet-facing
+// rules - reset, appendix, review: docs/fleet-guidelines.md, "Split
+// files"). The file list and each file's markers come from an ownership
+// manifest's class "split" entries; nothing here hardcodes either.
 //
-// ONE grammar (managed-region): every split file is [optional repo-owned
-// content above] BEGIN marker line, managed content, END marker line,
-// [optional repo-owned content below]. The rebuild delivers the target's
-// own sides byte-for-byte around the fresh render's managed region. No
-// other shape is converted: head_manifest.ts refuses a manifest declaring
-// any other grammar loudly with recovery advice, and such a copy rides the
-// recovery appendix (manual review) whole.
-//
-// RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
-// after `copier update`, the merged result for every split-class file is
-// DISCARDED and the file is rebuilt structurally - the managed region from
-// the clean render at the new template ref, the repository-owned sides
-// byte-for-byte from the pre-update HEAD. The split entries come from the
-// new render's own manifest, so the rebuild can never miss a file the
-// template splits. The merge never touches mixed-ownership content: a
-// template retraction cannot eat a local side, and a local side cannot
-// resurrect retracted managed lines. The deliberate flip side: local
-// edits INSIDE the managed region no longer survive by merge luck - they
-// are RESET to the fresh render on every sync, loudly (a reset note in the
-// summary plus the needs-review flag). Edits are detected against the OLD
-// ref's clean render (--old-render-dir), so a routine template change to
-// the managed region does not read as a local edit.
-//
-// RECOPY MODE (no --render-dir; the recovery path): a recovery re-render
-// (recover=recopy) has no usable old ref, so there are no clean renders to
-// consume - the recopy result in the working tree IS the fresh render,
-// manifest included. The split entries come from that manifest, the
-// pre-recovery content from HEAD, and the same carry splices the
-// repository-owned content back over the re-render.
-//
-// Both modes share the same carry. All file content is handled as
-// latin1 text (one code unit per byte, the stamp_manifest.ts convention):
-// the repo-owned sides are promised byte-for-byte, and a utf-8 decode would
-// fold any non-UTF-8 byte onto U+FFFD - silent corruption. The markers are
-// ASCII, so matching is unaffected. Loud beats lossy: NO shape of
-// previous copy may lose content without a disposition in the summary -
-// when a previous copy cannot be trusted to split (its declared markers
-// are missing, duplicated - even as mid-line text - or reversed, or
-// HEAD's manifest exists but is unusable, so no declaration for it can be
-// read at all), the WHOLE previous copy is appended below the managed
-// region's END marker under a marked recovery-appendix comment, marker
-// text dash-joined so the validator's exactly-once rule holds, instead of
-// being dropped.
-//
-// The carried files land in --summary as markdown for the PR body; for a
-// hide-details target the log prints counts only (paths and dispositions
-// are target data). Carries that need human review - an appendix, reset
-// managed-region edits - are listed in the --needs-review flag file, which
-// open_pr.ts turns into the manual-review path; clean side-restores stay
-// auto-merge-eligible.
-//
+// Two modes share one carry. RENDER MODE (--render-dir, every normal
+// sync) DISCARDS copier's merged result for every split file and rebuilds
+// from the clean render at the new ref plus the pre-update HEAD; edits
+// inside the region are detected against the OLD ref's clean render
+// (--old-render-dir), so a routine template change is not a local edit.
+// RECOPY MODE (recovery) has no clean renders, so the recopy result in the
+// working tree IS the render and HEAD's sides are spliced back over it.
+// Content is handled as latin1 (the stamp_manifest.ts convention): the
+// sides are promised byte-for-byte, and utf-8 would fold onto U+FFFD.
 // Usage:
 //   bun preserve_local_content.ts --summary FILE [--root target]
 //     [--hide-details true|false] [--needs-review FILE]
@@ -105,16 +64,14 @@ function inertMarker(marker: string): string {
   return `${opener}-${marker.slice(opener.length)}`;
 }
 
-/** The keep-both fallback: render, then the previous copy below the
- * managed region's END marker (repository-owned space) under a marked
- * comment - with every occurrence of the entry's markers in the previous
- * copy neutralized (the fresh render's pair must stay the file's ONLY
- * marker occurrences, or the recovery output itself fails validation with
- * advice pointing away from the real cause). The comment spelling follows
- * the entry's marker syntax: an HTML comment for HTML-comment markers,
- * hash comments otherwise (.gitattributes, .editorconfig,
- * .github/CODEOWNERS - an HTML comment there would parse as file
- * content). */
+/** The keep-both fallback: render, then the previous copy below the managed
+ * region's END marker (repository-owned space) under a marked comment, with
+ * every occurrence of the entry's markers in the previous copy neutralized
+ * (the fresh render's pair must stay the file's ONLY marker occurrences, or
+ * the recovery output itself fails validation with misleading advice). The
+ * comment spelling follows the entry's marker syntax: an HTML comment for
+ * HTML-comment markers, hash comments otherwise (.gitattributes,
+ * .editorconfig, CODEOWNERS - an HTML comment there parses as content). */
 function withRegionAppendix(
   render: string,
   target: string,
@@ -183,23 +140,14 @@ export type RegionCarry =
     }
   | { kind: "appendix"; content: string };
 
-/** The managed-region carry: the fresh render's managed region, the
+/** The managed-region carry: the fresh render's managed region with the
  * previous copy's repository-owned sides byte-for-byte around it. The
- * previous copy is split by `headDecl` - its OWN manifest's declaration -
- * falling back to the new entry's markers only when HEAD's manifest is
- * usable and simply does not declare the path (an ownership flip).
- * "unusable" means HEAD's declarations exist but cannot be trusted (a
- * refused manifest - an unknown or missing grammar, damage - or a non-blob
- * at the manifest path): splitting such a copy by the NEW markers would be
- * a guess - a copy whose repo-owned content happens to carry
- * one clean marker pair would hand the bytes between them to the managed
- * discard - so the whole copy rides the appendix instead. Null means keep
- * the render with nothing to say: the previous copy never diverged
- * (delivered content would equal the render), or an unsplittable previous
- * copy is blank. Throws when the RENDER has no clean region - manifest and
- * render are generated together, so that is damage, and keeping the merged
- * result would hand the file back to the merge this rebuild exists to
- * discard. */
+ * previous copy is split by `headDecl`, its OWN manifest's declaration,
+ * falling back to the new entry's markers only for an ownership flip; an
+ * "unusable" HEAD manifest sends the whole copy to the appendix (splitting
+ * by the NEW markers would be a guess that could hand repo-owned bytes to
+ * the managed discard). Null: keep the render, nothing to say. Throws when
+ * the RENDER has no clean region - generated with the manifest, so damage. */
 export function carryManagedRegion(
   render: string,
   target: string,
@@ -299,16 +247,13 @@ export type SplitEntry = { [K in GrammarId]: { path: string } & SplitShapes[K] }
 const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 
 /** The per-grammar split-entry parsers, total over GrammarId BY TYPE: a
- * GRAMMAR table row with no parser here is a tsc error, never a runtime
+ * GRAMMAR row with no parser here is a tsc error, never a runtime
  * fallthrough. The parser re-checks what the manifest text claims (the
- * declaration schema upstream never emits a violation, but the text rides
- * through a checkout this script must not trust): every marker string must
- * be printable ASCII, open in a comment syntax the recovery appendix can
- * write (a hash or complete HTML comment), and the pair must be mutually
- * substring-free (the exactly-once counting and the appendix
- * neutralization count substrings). The wireFields column names the
- * fields, so the field list is stated once (the validator's manifest
- * check reads the same column). */
+ * schema upstream never emits a violation, but the text rides through a
+ * checkout this script must not trust): printable ASCII markers that open
+ * a comment syntax the recovery appendix can write (hash or complete HTML
+ * comment), mutually substring-free (the exactly-once count and appendix
+ * neutralization count substrings). wireFields states the field list once. */
 const SPLIT_PARSERS: {
   [K in GrammarId]: (
     where: string,
@@ -394,18 +339,14 @@ function requireHead(root: string): void {
   }
 }
 
-/** HEAD's split declarations for splitting HEAD's copies with HEAD's own
- * manifest. Two states:
- * - a Map when the manifest is usable (a path absent from it falls back to
- *   the new entry's markers - an ownership flip, with its own review
- *   machinery);
- * - "unusable" when HEAD's manifest cannot be trusted: absent (every
- *   managed repository carries one, so its absence is a target-state
- *   anomaly, never a reason to guess), a non-blob at the path, or
- *   headSplitEntries' loud refusal (an unknown or missing grammar,
- *   damage). Every previous copy then rides the appendix rather than a
- *   guessed split, and the tail tripwire independently reports the
- *   problem with its recovery advice. */
+/** HEAD's split declarations, for splitting HEAD's copies with HEAD's own
+ * manifest: a Map when the manifest is usable (a path absent from it falls
+ * back to the new entry's markers - an ownership flip, with its own review
+ * machinery), or "unusable" when it cannot be trusted: absent (every
+ * managed repository carries one, so absence is a target-state anomaly,
+ * never a reason to guess), a non-blob at the path, or headSplitEntries'
+ * refusal. Every previous copy then rides the appendix rather than a
+ * guessed split, and the tail tripwire reports the problem with advice. */
 type HeadDecls = Map<string, HeadSplit> | "unusable";
 
 function readHeadDecls(root: string): HeadDecls {
@@ -453,15 +394,12 @@ function nonBlobNote(object: HeadNonBlobKind): string {
 
 /** Land `content` as a REGULAR file at `rel` under `root`. writeFileSync
  * follows an existing symlink, so a split path a repo replaced with a link
- * would have its TARGET overwritten - possibly outside the checkout; the
- * rebuild owns the manifest path itself, so a symlink there is removed
- * first. The same traversal exists one level up: a symlinked ANCESTOR
- * directory (a repo committing `.github -> elsewhere`) would carry the
- * write outside the checkout with the final component looking clean, so
- * every ancestor is lstat'd and a link among them refuses loudly (the
- * rebuild does not own directories, so it never replaces one). latin1:
- * the content is byte-owned (see the header). A directory at the path is
- * left for writeFileSync to fail on loudly. */
+ * would have its TARGET overwritten, possibly outside the checkout; the
+ * rebuild owns the manifest path, so a symlink there is removed first. A
+ * symlinked ANCESTOR (a repo committing `.github -> elsewhere`) would carry
+ * the write outside too with a clean-looking final component, so every
+ * ancestor is lstat'd and a link among them refuses loudly (the rebuild
+ * owns no directories). latin1: byte-owned content (the header). */
 function writeRegularFile(root: string, rel: string, content: string): void {
   let ancestor = dirname(rel);
   for (; ancestor !== "." && ancestor !== "/"; ancestor = dirname(ancestor)) {
@@ -572,16 +510,13 @@ function rebuildSplitFile(
     appendixCarry = carried.appendixCarry;
     reviewReasons.push(...carried.reviewReasons);
     // Did the rebuild drop bytes from the previous managed content? Each
-    // copy is split by ITS OWN declaration - HEAD's copy and the OLD
-    // render by the previous commit's manifest declaration, the delivered
-    // copy by the new entry. Byte-equal parts mean nothing was dropped; a
-    // drop that equals the template update (HEAD's part == the old
-    // render's part) is routine and silent; a drop past that means local
-    // edits were reset (loud, manual review).
-    // A part that cannot be located on any side is UNVERIFIABLE, not
-    // clean - a mangled marker must not slip a content drop past review.
-    // An appendix carry skips all of this: it preserves the full previous
-    // copy below the render and is already manual.
+    // copy is split by ITS OWN declaration (HEAD's copy and the OLD render
+    // by the previous manifest, the delivered copy by the new entry).
+    // Byte-equal parts mean nothing dropped; a drop equal to the template
+    // update (HEAD's part == the old render's) is routine and silent; past
+    // that, local edits were reset (loud, manual review). A part missing on
+    // any side is UNVERIFIABLE, not clean (a mangled marker must not slip a
+    // drop past review). An appendix carry keeps the whole copy: skipped.
     if (!appendixCarry) {
       const entryDecl: HeadSplit = { path: rel, begin: entry.begin, end: entry.end };
       const previousDecl = typeof headDecl === "object" ? headDecl : entryDecl;

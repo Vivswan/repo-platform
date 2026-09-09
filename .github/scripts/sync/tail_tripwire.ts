@@ -1,44 +1,24 @@
 #!/usr/bin/env bun
 // Defense-in-depth tripwire on repository-owned content, run after the
 // manifest stamp and before validation: for every split entry in the
-// post-sync manifest, the repository-owned content of the working-tree
-// copy (outside the BEGIN/END managed region) must still contain every
-// non-blank line the repository-owned content held at the target's HEAD.
-// HEAD's copy is split with HEAD's OWN manifest declaration (git show
-// HEAD:.github/repo-platform-manifest.json), so a marker rename in the
-// update cannot mis-split the previous copy.
-// The manifest exists fleet-wide and stamps the one grammar
-// (managed-region), so there is no pre-manifest splitting fallback: a HEAD
-// manifest declaring a grammar this sync does not read (or none) is
-// REFUSED loudly by headSplitEntries - every split file goes unverifiable
-// (manual review) with the refusal's actionable recover=recopy message,
-// never split by a guessed grammar.
+// post-sync manifest, the repository-owned content of the working-tree copy
+// (outside the managed region) must still contain every non-blank line it
+// held at the target's HEAD. HEAD's copy is split with HEAD's OWN manifest
+// declaration, so a marker rename in the update cannot mis-split it; a HEAD
+// manifest declaring a grammar this sync does not read (or none) is REFUSED
+// and every split file goes unverifiable (manual review) with the
+// recover=recopy advice, never split by a guessed grammar.
 //
 // After preserve_local_content.ts's structural rebuild this should never
-// fire - that is the point: a trip means the rebuild (or a step after it)
-// dropped repository-owned bytes, i.e. a sync bug. A trip WARNS, never
-// fails the job: a blocked delivery would hide the very diff the reviewer
-// needs. The findings land in --report as a PR-body section; open_pr.ts
-// appends it and forces the manual-review path.
-//
-// Scope: only paths split in BOTH manifests are compared. A path absent
-// from HEAD has no previous content to lose; a path HEAD's manifest did
-// not class as split claimed no repository-owned content there (ownership
-// flips have their own review machinery). The line check is multiset
-// membership, not a positional diff: moved lines are not lost content.
-// All file content is read as latin1 (one code unit per byte, the
-// stamp_manifest.ts convention) - a utf-8 decode would fold non-UTF-8
-// bytes onto U+FFFD and could hide or invent a mismatch; the manifests
-// themselves are JSON and decode as utf-8 so their path keys compare
-// correctly.
-//
-// Usage:
-//   bun tail_tripwire.ts [--report FILE] [--root target]
-//     [--hide-details true|false]
-//
-// --report defaults to RUNNER_TEMP/<TAIL_SHRANK_NAME> - the shared
-// constant open_pr.ts reads the section from, so the workflow never names
-// the file and the pair cannot drift.
+// fire - that is the point: a trip means a sync bug dropped repository-owned
+// bytes. A trip WARNS, never fails the job (a blocked delivery would hide
+// the very diff the reviewer needs); the findings ride --report into a
+// PR-body section that forces manual review. Only paths split in BOTH
+// manifests are compared, by line multiset membership, not position: moved
+// lines are not lost content. File content is read as latin1 (the
+// stamp_manifest.ts convention): a utf-8 decode could hide or invent a
+// mismatch. Usage: bun tail_tripwire.ts [--report FILE] [--root target]
+// [--hide-details true|false]; --report defaults to RUNNER_TEMP/<TAIL_SHRANK_NAME>.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -185,17 +165,13 @@ function main(argv: string[]): number {
   const entries = splitEntries(readFileSync(manifestPath, "utf-8"), manifestPath);
 
   // HEAD's manifest, for splitting HEAD's copies with HEAD's own
-  // declarations. A missing or unusable one - an unknown-grammar
-  // manifest's loud refusal included - is a target-state
-  // anomaly, not this run's: every previously-present split file becomes
-  // unverifiable (manual review) instead of failing the job - going red
-  // here would block the very sync that could deliver the fix. The
-  // refusal's message rides into the finding's reason so the PR body
-  // names the fix (it can carry target paths, which is where such detail
-  // belongs - see docs/private-repos.md). A non-blob at the manifest path
-  // (a symlinked manifest, say) is as unusable as a damaged one: `git
-  // show` would answer with the link target or a tree listing, not
-  // manifest text, so only a blob is ever parsed.
+  // declarations. A missing or unusable one (an unknown-grammar refusal
+  // included) is a target-state anomaly, not this run's: every previously
+  // present split file becomes unverifiable (manual review) instead of
+  // failing the job, since red here would block the very sync that could
+  // deliver the fix. The refusal's message rides into the finding's reason
+  // (it can carry target paths, which belong in the PR body). A non-blob at
+  // the path is as unusable as damage, so only a blob is ever parsed.
   const headManifest = headEntry(root, MANIFEST_NAME);
   let headEntries: Map<string, HeadSplit> | null = null;
   let headManifestDetail = "";

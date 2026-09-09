@@ -1,25 +1,18 @@
 #!/usr/bin/env bun
 // Materializes the two clean template renders a sync run consumes, once,
-// in $RUNNER_TEMP: render-old (the template at the recorded pre-update
-// ref, with the answers recorded before this update) and render-new (the
-// target ref, with the live module/private/description data).
-// Invoked from the repo-platform checkout root by
-// reusable-template-sync.yml's "Materialize clean renders" step; the
-// split-file rebuild (preserve_local_content.ts --render-dir) consumes
-// render-new and render-old, retired-file cleanup (retired_cleanup.ts)
-// diffs the pair. One materialization guarantees every consumer sees the
-// same bytes the update rendered - same answers capture, same
-// render_data.ts plumbing.
+// in $RUNNER_TEMP: render-old (the recorded pre-update ref with the
+// answers recorded before this update) and render-new (the target ref
+// with the live module/private/description data). One materialization
+// guarantees every consumer (the split-file rebuild, retired-file cleanup)
+// sees the same bytes the update rendered.
 //
-// Idempotent WITHIN one RUNNER_TEMP: when both render directories already
-// exist the call is a no-op, so retired_cleanup.ts (and older callers like
-// rehearse.ts and ci/upgrade_path_test.sh legs written before this split)
-// can call ensureRenders unconditionally. Renders are built in scratch
-// directories and renamed into place once both succeeded, so a crash never
-// publishes a partial render; any leftover is deleted and rebuilt.
-// Callers own RUNNER_TEMP freshness: CI provides a per-job directory, the
-// harness and rehearse create fresh scratch dirs per run - a reused
-// directory would serve renders from whatever inputs built them.
+// Idempotent WITHIN one RUNNER_TEMP: with both render directories present
+// the call is a no-op, so consumers can call ensureRenders unconditionally.
+// Renders build in scratch directories and rename into place once both
+// succeeded, so a crash never publishes a partial render. Callers own
+// RUNNER_TEMP freshness (CI gives a per-job directory; the harness and
+// rehearse create fresh scratch dirs): a reused directory would serve
+// renders from whatever inputs built them.
 //
 // Env: OLD_SHA, TARGET_REF, MODULES, PRIVATE, DESCRIPTION, HOMEPAGE,
 // TOPICS, SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
@@ -74,13 +67,11 @@ export function ensureRenders(): CleanRenders {
   // The old render uses the answers recorded BEFORE this update: HEAD is
   // the last pre-copier commit (the _src_path normalization and any
   // migration rung committed ahead of copier; normalization changes only
-  // the underscore metadata render_data drops); captured even on the no-op
-  // path so consumers of answers-old.yml never depend on call order.
-  // Caveat: the renders are NOT re-captured on that path, so if HEAD ever
-  // moved between two calls in one RUNNER_TEMP, answers-old.yml could
-  // disagree with render-old. No sync step moves HEAD between the
-  // materialize and consume steps; if one ever did, the mismatch surfaces
-  // as retired-paths noise and validation failures - loud, not lossy.
+  // the underscore metadata render_data drops). Captured even on the no-op
+  // path so consumers never depend on call order; the renders are NOT
+  // re-captured there, so a HEAD move between two calls in one RUNNER_TEMP
+  // would skew answers-old.yml against render-old. No sync step moves HEAD
+  // between materialize and consume; if one did, retired-paths noise is loud.
   const answersOldText = run(["git", "-C", targetDir, "show", `HEAD:${ANSWERS_PATH}`], {
     stdout: "pipe",
   });

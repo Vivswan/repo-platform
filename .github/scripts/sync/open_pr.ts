@@ -45,15 +45,13 @@ function slurp(path: string): string {
   return readFileSync(path, "utf-8").replace(/\n$/, "");
 }
 
-// From resolve_refs.ts via file (not a step output: the value is
-// target-controlled and step outputs surface in env-group prints). This
-// body ships to the private repo, so the VALUE is fine here - but its
-// SIZE is not: resolve_refs bounds nothing (a long-but-valid revision
-// expression still resolves), and the base body sits outside the section
-// budget, so an unbounded value would inflate it until the reserved
-// validation excerpt no longer fits. Display-only, so clip it (bounded,
-// control bytes escaped - a NUL would kill gh's argv); the real value
-// stays in old_commit.txt for anything that consumes it.
+// From resolve_refs.ts via file, not a step output: the value is
+// target-controlled and step outputs surface in env-group prints. The body
+// ships to the private repo, so the VALUE is fine here but its SIZE is
+// not: resolve_refs bounds nothing, and the base body sits outside the
+// section budget, so an unbounded value would squeeze out the reserved
+// validation excerpt. Display-only, so clip it (control bytes escaped - a
+// NUL would kill gh's argv); old_commit.txt keeps the real value.
 const oldCommit = clip(slurp(join(runnerTemp, "old_commit.txt")));
 
 // TARGET_REF is the verified commit (pinned by resolve_refs.ts), so
@@ -277,19 +275,10 @@ function capBody(full: string): string {
 body = nulSafe(body);
 body = capBody(body);
 
-// Anything that needs human review - dropped local hunks, a split-file
-// carry that needs a human (appendix, reset managed-half edits, duplicate
-// markers), a tripped tail tripwire, failed
-// validation, a recovery re-render, a dispatch that forced manual review,
-// a deleted split-class file (its repository-owned half leaves with it),
-// a new starter at a path the repository already owns, out-of-band settings drift, a
-// referenced-but-undeclared label (the apply deletes undeclared labels,
-// so the reference breaks), a refused mirror declaration (its copies are
-// stale in this update), a migration rung whose verdict needs a human -
-// stays
-// manual; a clean update (clean side-restore carries included) arms
-// squash auto-merge below. The report-file reasons ride the roster
-// (forcesReview), so a new section cannot forget the review question.
+// Anything that needs human review (each condition below, plus every
+// report-file section whose roster entry sets forcesReview, so a new
+// section cannot forget the review question) stays manual; a clean update,
+// clean side-restore carries included, arms squash auto-merge below.
 const needsReview =
   validation === "failed" ||
   recover === "recopy" ||
@@ -297,17 +286,14 @@ const needsReview =
   sectionsForceReview ||
   nonEmpty(driftFile);
 
-// The PR-URL prints below reach the PUBLIC log even for a hidden target -
-// accepted by design. The URL carries the slug plus a PR number and no
-// target details, and the slug is the masker's job, not hideDetails': for
-// a private target, resolve_private_repo.ts registered the slug
-// (canonical and lowercase forms) with the runner's masker before
-// anything printed, so the URL renders as https://github.com/***/pull/N -
-// docs/private-repos.md names PR URLs as a masker-covered surface. The
-// mask is a point-in-time snapshot taken at the resolve step: a target
-// renamed mid-run surfaces here under its new canonical slug, which no
-// mask covers - the documented residual (a rename BEFORE resolve fails
-// closed there).
+// The PR-URL prints below reach the PUBLIC log even for a hidden target,
+// by design: the URL carries the slug plus a PR number and no target
+// details, and the slug is the masker's job, not hideDetails' - for a
+// private target resolve_private_repo.ts registered the slug (canonical
+// and lowercase) with the runner's masker before anything printed, so the
+// URL renders as https://github.com/***/pull/N (docs/private-repos.md).
+// The mask is a snapshot taken at resolve: a target renamed mid-run
+// surfaces under its new slug, the documented residual.
 const existing = mustCapture([
   "gh",
   "pr",

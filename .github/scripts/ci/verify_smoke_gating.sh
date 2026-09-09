@@ -497,10 +497,9 @@ present_line "$settings_line" "$SMOKE/AGENTS.md"
 # The module/visibility gating that used to render into settings.yml now
 # lives in the centrally ASSEMBLED baseline: invoke the assembly CLI as a
 # black box against the rendered repo's own recorded facts and assert its
-# output with hardcoded expectations here (this harness stays independent
-# - it greps the output, never imports the code). A failing assertion in
-# $managed_out means the assembly changed: fix
-# .github/settings-baseline.yml / the module manifests /
+# output with hardcoded expectations (this harness greps the output, never
+# imports the code). A failing assertion in $managed_out means the assembly
+# changed: fix .github/settings-baseline.yml, the module manifests, or
 # render_managed_settings.ts (or this expectation). The assembly needs the
 # repo root's dependencies, which the smoke job does not install.
 managed_out="$SMOKE_WORK/managed-settings.yml"

@@ -1,46 +1,21 @@
 #!/usr/bin/env bun
-// Proves the build branch tip is the build-branches workflow's own
-// output before the sync templates it into managed repos. Invoked by
-// sync/resolve_refs.ts after it parses the tip's source stamp. The
-// build-branches ruleset model cannot pin the ref to one workflow, so
-// the stamp lines below stay untrusted input.
+// Proves the build branch tip is the builder's own output before the sync
+// templates it into managed repos: the stamp lines in the commit message
+// are plain text anyone can write, and the ruleset model cannot pin the
+// ref to one workflow, so the tip's CONTENT is what gets anchored
+// (docs/build-provenance.md, "The provenance proof": the three checks, and
+// why the fourth, the Actions-API run proof, was retired). Invoked by
+// sync/resolve_refs.ts after it parses the tip's source stamp.
 //
-// The stamp lines in the commit message (see shared/commit_stamp.ts) are
-// plain text anyone can write. Checks, all hard failures:
-//
-//   1. The stamped source must be main history: publish.ts only ever stamps
-//      builds with main-history shas (origin/main), so anything else was
-//      not the builder.
-//   2. No rollback: no source stamped anywhere in the tip's ancestry may
-//      be strictly newer than the tip's own stamped source. The builder's
-//      sources only move forward and the branch is append-only, so a
-//      replayed OLD build fails here even though its tree rebuilds
-//      cleanly. (1 and 2 live in shared/stamp_checks.ts, shared with
-//      publish.ts's no-change skip guard.)
-//   3. Tree proof: rebuild the branch tree from the stamped source with
-//      that commit's own build script, exactly as publish.ts does, and
-//      require the rebuilt git tree hash to equal the tip's tree hash.
-//      branch_tree.ts output is fully deterministic (no timestamps or
-//      source shas in-tree), so a mismatch means the tip carries content
-//      the builder never produced from that source.
-//
-// The retired fourth leg - reading the stamped run from the Actions API
-// and proving it a green build-branches run whose publish step succeeded
-// - was defense in depth with no content it alone anchored: a tree that
-// rebuilds byte-identically from a main-history, non-rollback stamp IS
-// the builder's output of that source, and greenness is proven
-// independently (resolve_refs.ts runs the all-green gate on the stamped
-// source). What the leg really added was live-state trust - runs age out
-// and workflows get renamed, so a valid tip could wedge every sync on a
-// dead run id - the same pushable/perishable trust class the retired
-// refs/build-meta markers carried. What its removal genuinely costs:
-// actor provenance degrades from verified to advisory (the run: line is
-// now a human breadcrumb; a hand-pushed byte-identical tip is no longer
-// distinguishable - a forensics loss, never a content-injection gain).
+// Checks 1 (main history) and 2 (no rollback) are shared/stamp_checks.ts,
+// shared with publish.ts's skip guard. Check 3, owned here: rebuild the
+// tree from the stamped source with that commit's own build script, exactly
+// as publish.ts does, and require the rebuilt git tree hash to equal the
+// tip's; branch_tree.ts output is fully deterministic, so a mismatch means
+// content the builder never produced from that source.
 //
 // Env: TIP_SHA (the fetched branch tip), SOURCE_SHA (its parsed source
-// stamp), RUNNER_TEMP. No token: the checks are git plus a local
-// rebuild.
+// stamp), RUNNER_TEMP. No token: the checks are git plus a local rebuild.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";

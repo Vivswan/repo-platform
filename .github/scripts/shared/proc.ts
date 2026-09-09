@@ -1,26 +1,19 @@
 // Subprocess helpers shared by the workflow scripts. Commands are argv
 // arrays (never shell strings), so target-derived values cannot be
-// re-parsed as syntax.
+// re-parsed as syntax. Two bun >= 1.4.0 semantics the code cannot show:
 //
-// Every piped run carries a timeout, defaulted to DEFAULT_HANG_BOUND_MS,
-// because of a bun >= 1.4.0 semantic the code cannot otherwise show: a
-// piped Bun.spawnSync WITHOUT `timeout` returns at pipe EOF (all writer
-// fds closed), not at child exit, so a child that exits after leaving a
-// descendant holding the inherited pipe fds blocks the caller until that
-// descendant exits - potentially forever. WITH `timeout` set, spawnSync
-// returns at the deadline regardless of surviving pipe holders, so a
-// universal ceiling converts an unbounded silent hang into a loud,
-// bounded failure. As of 2026-08 this change is unreported upstream.
-//
-// Every spawn is handed `{ ...process.env, ...(options.env ?? {}) }`
-// EXPLICITLY, never bun's default environment: the default is a
-// snapshot taken at PROCESS START (bun 1.4.0, both directions - keys
-// added to process.env later are missing from the child, keys deleted
-// later are still present), which silently disarms any caller that
-// pins or scrubs process.env before spawning. The live spread restores
-// the semantics callers expect; an explicit per-call `env` entry still
-// wins, and an undefined-valued entry deletes the key for the child
-// (bun omits undefined values).
+// - Every piped run carries a timeout (default DEFAULT_HANG_BOUND_MS): a
+//   piped Bun.spawnSync WITHOUT `timeout` returns at pipe EOF, not at
+//   child exit, so a child that leaves a descendant holding the inherited
+//   pipe fds blocks the caller until that descendant exits. WITH a timeout
+//   it returns at the deadline regardless, turning an unbounded silent
+//   hang into a bounded loud failure. Unreported upstream as of 2026-08.
+// - Every spawn is handed `{ ...process.env, ...options.env }` EXPLICITLY:
+//   bun's default child environment is a snapshot taken at PROCESS START
+//   (later additions missing, later deletions still present), which
+//   silently disarms a caller that pins or scrubs process.env before
+//   spawning. A per-call entry still wins, and an undefined value deletes
+//   the key for the child.
 
 import { constants } from "node:os";
 

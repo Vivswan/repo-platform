@@ -1,43 +1,24 @@
 #!/usr/bin/env bun
-// Fleet-wide sync rehearsal: a read-only dry run of the template sync
-// across every managed repo. Enumerates the fleet with the same
-// owner-scoped discovery the sync's plan job runs, then rehearses each
-// PUBLIC repo the fleet token is enrolled in (production's push-probe skip
-// is mirrored, so a repo the sync would never touch cannot red the gate)
-// with rehearse.ts's core - quiet, workspace removed after each repo.
+// Fleet-wide sync rehearsal: a read-only dry run of the template sync over
+// every PUBLIC repo the fleet token is enrolled in (same owner-scoped
+// discovery as the sync's plan job; production's push-probe skip mirrored,
+// so a repo the sync would never touch cannot red the gate).
 //
-// PRIVATE REPOS ARE NEVER TOUCHED: visibility is established BEFORE any
-// git command aims at the repo (the discovery listing carries it), and
-// anything but a definitive `private: false` counts as private
-// (fail-closed, the same rule discovery.ts pins). A private repo prints
-// "<repo>  skipped (private)" and is neither cloned nor fetched. Public
-// repos inherit rehearse.ts's read-only guarantees: the clone's origin
-// URLs go unroutable before any leg runs, and nothing opens PRs or writes
-// to any remote.
-//
-// One summary line prints per repo as it completes, then a final
-// repo | status | detail table. Repos that have not adopted the template
-// report as "skipped (not adopted)" (production's selector skips them the
-// same way); an unusable recorded _commit (shape, ancestry, or ahead of
-// the build) reports as "recovery needed". A repo whose rehearsal throws
-// otherwise prints
-// "REHEARSAL FAILED: <reason>" - the reason names the failing pipeline
-// phase when a known leg script threw - and the loop CONTINUES; per-repo
-// failure is information, never an abort. EXIT CODE: 0 whenever the loop
-// completed, regardless of per-repo outcomes - this is a report, not a
-// gate; nonzero is reserved for enumeration failures (no trustworthy
-// fleet list means nothing ran).
+// PRIVATE REPOS ARE NEVER TOUCHED: visibility comes from the discovery
+// listing BEFORE any git command aims at the repo, and anything but a
+// definitive `private: false` counts as private (fail-closed, the rule
+// discovery.ts pins). Public repos inherit rehearse.ts's read-only
+// guarantees. Per-repo failure is information, never an abort: the loop
+// CONTINUES and prints the row. EXIT CODE 0 whenever the loop completed;
+// nonzero is reserved for enumeration failures (no trustworthy fleet list
+// means nothing ran).
 //
 // --gate (CI's rehearse-fleet job) turns the report into a gate: every
-// error-severity row (a failed rehearsal, a tree that failed validation)
-// becomes an ::error:: annotation naming the repo, the phase, and the
-// files, and the run exits 1. Recovery-needed rows only ::warning:: -
-// they are fleet-repo state an operator heals with recover=recopy, not
-// something a repo-platform PR causes or can fix, so they must not hold
-// unrelated merges hostage.
-//
-// Usage:
-//   bun .github/scripts/sync/rehearse_fleet.ts [--gate]
+// error-severity row becomes an ::error:: annotation naming repo, phase,
+// and files, and the run exits 1. Recovery-needed rows only ::warning::
+// (fleet-repo state an operator heals with recover=recopy, not something
+// a repo-platform PR causes or can fix, so they must not hold merges).
+// Usage: bun .github/scripts/sync/rehearse_fleet.ts [--gate]
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -276,16 +257,14 @@ export async function runPool<T, R>(
   return results;
 }
 
-/** The report loop, `deps.concurrency` repos in flight at once (per-repo
- * rehearsals are independent subprocesses; see main's FLEET_CONCURRENCY
- * note). The private check gates EVERY repo before the enrollment probe
- * and deps.rehearse (the only code path that clones) can run, and a
- * throwing rehearsal becomes a row, never an abort - one repo's failure
- * never suppresses another's row. Output stays DETERMINISTIC: rows land
- * by roster index and summary lines flush in roster order as the
- * contiguous prefix completes, whatever order the lanes finish in.
- * Private rows carry deps.display's name, so every output path (summary
- * lines, the table, gate annotations) inherits the redaction. */
+/** The report loop, `deps.concurrency` repos in flight at once (see main's
+ * FLEET_CONCURRENCY note). The private check gates EVERY repo before the
+ * enrollment probe and deps.rehearse (the only code path that clones) can
+ * run, and a throwing rehearsal becomes a row, never an abort. Output stays
+ * DETERMINISTIC: rows land by roster index and summary lines flush in
+ * roster order as the contiguous prefix completes, whatever order the lanes
+ * finish in. Private rows carry deps.display's name, so every output path
+ * inherits the redaction. */
 export async function rehearseFleet(slugs: string[], deps: FleetDeps): Promise<FleetRow[]> {
   const rows = new Array<FleetRow | undefined>(slugs.length);
   let flushed = 0;

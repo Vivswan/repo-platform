@@ -1,98 +1,24 @@
 #!/usr/bin/env bun
 // Materializes the target repository's declared mirror files after every
 // step that rewrites the tree and before the final manifest stamp, so each
-// mirror is a byte copy of the file THIS update delivers. The class it
-// kills: a repo that must carry byte-identical copies of a rendered file
-// at paths the template does not own (the skills repo's per-skill
-// LICENSE.md copies - a standalone skill install copies only the skill
-// folder, so every folder carries the license and its smoke test enforces
-// byte equality). The sync rewrites only the rendered source, so before
-// this step every template change to such a file re-broke the copies, and
-// the only fix was a hand commit on the generated branch that the next
-// resync overwrote.
+// mirror is a byte copy of the file THIS update delivers. The declaration
+// grammar, glob rules, refusals, and PR-body stance are the contract in
+// docs/new-repo.md, "Mirror copies of rendered files".
 //
-// THE DECLARATION lives in the repo's own .repo-platform.yml - the
-// registration file the sync already reads for module selection. The file
-// is a repo-owned STARTER (_skip_if_exists): rendered once when a repo
-// onboards, never rewritten by any sync leg - copy, update, and the
-// recovery recopy all skip an existing file - so the declaration (and
-// every other repo-added key) rides through every sync untouched:
-//
-//   mirrors:
-//     - source: LICENSE.md
-//       targets:
-//         - template/LICENSE.md
-//         - skills/*/LICENSE.md
-//
-// TARGET GLOBS: a single `*` matches within one path segment, resolved at
-// materialization time against the DELIVERED tree - non-final `*` segments
-// match existing directories, a final `*` segment matches existing regular
-// files, and a literal final segment is written into every matched
-// directory whether or not the file exists yet (a new skill folder gets
-// its copy with no declaration edit - the stale-list re-break is the exact
-// class this feature exists to end). `**` is refused: nothing in the
-// fleet needs recursive matching, and an unbounded walk over a
-// target-controlled pattern is risk with no customer.
-//
-// SAFETY - refusals are loud and hold the PR for review, never red and
-// never silent (a red would block the very PR a human fixes the
-// declaration in; the refused mirrors are merely stale, everything else
-// in the update is sound):
-//   - the source must be a file the render just wrote: listed in the
-//     ownership manifest as class managed or split, present as a regular
-//     file (repo-owned content does not move on sync, so mirroring it is
-//     the repository's own job);
-//   - no path may escape the repository (absolute, '.'/'..'/empty
-//     segments, backslashes, any .git segment) - the declaration is
-//     target content, and the check runs on the declared pattern (so the
-//     expansion never walks outside the root) AND on every concrete path
-//     the expansion produces (so a glob cannot land in .git/);
-//   - no target may itself be a manifest-listed path: the template is that
-//     path's writer, and a mirror over it would be a second writer whose
-//     winner depends on step order;
-//   - neither side may sit under .github/workflows/: workflow files are
-//     template-owned (managed renders or generated-once starters), so a
-//     mirror there would be a second writer over the template's paths;
-//   - no two sources may claim one target, and no planned target may be a
-//     path prefix of another (both sides of either conflict are refused -
-//     declaration order must never choose the winner);
-//   - a symlink at either side's path or among its ancestors is refused -
-//     following one would carry the read or the write outside the
-//     checkout.
-//
-// THE DECLARATION IS READ FROM THE TARGET'S HEAD, not the post-update
-// working tree: mirrors are repo-owned config, repos change them only
-// through commits, and the committed truth beats whatever intermediate
-// state the update legs leave. Historically HEAD also protected against
-// the recovery re-render (recover=recopy) rewriting the file from the
-// template, and a restore path patched the dropped key back into the
-// delivered file; the starter flip made both moot - no sync leg rewrites
-// an existing .repo-platform.yml anymore, and in the one case copier does
-// re-render it (the repo deleted the file at HEAD) there is no committed
-// declaration to restore either, so the restore path was removed as dead
-// weight rather than kept as an unreachable writer of a repo-owned file.
-//
-// MANIFEST STANCE: mirror targets get NO manifest entries - they are
-// repo-declared, not template-owned, and listing them would hand them to
-// the retirement/parity machinery that only the template's own files ride.
-// The validator ignores unlisted tree paths (a repo's own content), and
-// the tail tripwire iterates only manifest split entries, so mirrors are
-// invisible to both by construction; the manifest-listed-target refusal
-// above is what keeps that boundary honest from the other side.
-//
-// Every materialized write is listed in the PR body (the diff must explain
-// itself); the listing is informational and never forces review - the
-// declaration is repo-owned consent, and holding every LICENSE bump for
-// review would defeat the auto-heal this step exists for. Refusals land in
-// their own PR-body section, which DOES force the manual-review path.
-//
+// Invariants this file owns: refusals are loud and hold the PR for review,
+// never red and never silent (a red would block the very PR a human fixes
+// the declaration in, and the refused mirrors are merely stale); every
+// path check runs on the declared pattern AND on every concrete path the
+// expansion produces; the declaration is read from the target's HEAD, the
+// committed truth, never the mid-update working tree; mirror targets get
+// NO manifest entries, so the validator and the tail tripwire never see
+// them, and the manifest-listed-target refusal keeps that boundary honest
+// from the other side.
 // Usage:
 //   bun materialize_mirrors.ts [--root target] [--hide-details true|false]
 //     [--note FILE] [--review FILE]
-//
-// --note / --review default to RUNNER_TEMP/<MIRRORS_*_NAME> - the shared
-// section_files.ts constants open_pr.ts reads, so the workflow never names
-// the files and the pairs cannot drift.
+// --note / --review default to RUNNER_TEMP/<MIRRORS_*_NAME>, the shared
+// section_files.ts constants open_pr.ts reads, so the pairs cannot drift.
 
 import {
   existsSync,
@@ -182,13 +108,12 @@ export function readMirrors(
 
 /** Why `path` cannot be trusted as a mirror path, or null when it is a
  * clean repository-relative path. The declaration is target-repo content,
- * so this boundary is what keeps a mirror read or write inside the
- * checkout; planMirrors applies it to the declared pattern (so the glob
- * expansion never walks outside the root), again to every concrete path
- * the expansion produces (so a `*` cannot land in .git/), and
- * materializeWrites re-checks it at the write boundary. The name checks
- * compare case-folded: a case-insensitive checkout (macOS rehearsals)
- * resolves `.GIT` to `.git`. */
+ * so this boundary keeps a mirror read or write inside the checkout: it
+ * runs on the declared pattern (the expansion never walks outside the
+ * root), on every concrete path the expansion produces (a `*` cannot land
+ * in .git/), and again at the write boundary. Name checks compare
+ * case-folded: a case-insensitive checkout (macOS rehearsals) resolves
+ * `.GIT` to `.git`. */
 export function mirrorPathProblem(path: string): string | null {
   if (path.startsWith("/")) return "is absolute";
   if (path.includes("\\")) return "contains a backslash";
@@ -245,16 +170,13 @@ function lstatOrNull(path: string): Stats | null {
 }
 
 /** Concrete relative paths a target pattern resolves to under `root`,
- * sorted. Non-final `*` segments match existing non-symlink directories,
- * and a final `*` segment matches existing regular files only (a glob
- * cannot invent file names); a literal final segment lands in every
- * matched directory whether or not the file exists yet. EVERY symlink the
- * walk meets - a literal prefix, a glob-matched directory, a glob-matched
- * file - is reported in `symlinkedPrefixes` so the caller can refuse
+ * sorted. A final `*` matches existing regular files only (a glob cannot
+ * invent file names); a literal final segment lands in every matched
+ * directory whether or not the file exists yet. EVERY symlink the walk
+ * meets is reported in `symlinkedPrefixes` so the caller can refuse
  * loudly: following one could leave the checkout, and silently dropping
- * the match would ship a stale mirror with an empty explanation (the
- * silent-stale class this feature exists to kill). A pattern with no `*`
- * resolves to itself with no filesystem walk at all. */
+ * the match would ship a stale mirror with an empty explanation. A pattern
+ * with no `*` resolves to itself with no filesystem walk. */
 export function expandTargetPattern(
   root: string,
   pattern: string,
@@ -595,16 +517,13 @@ export function renderRefusals(refusals: string[]): string {
   ].join("\n");
 }
 
-/** Where the declaration text comes from - the target's HEAD, the
- * repo-owned truth: repos change mirrors only through commits, the
- * template contributes nothing to the key, and the committed copy beats
- * whatever intermediate state the update legs leave in the working tree
- * (the starter flip means no leg rewrites an existing file, but HEAD stays
- * the principled source rather than an incidental one). The working-tree
- * copy is used ONLY for a plain tree (local runs, fixtures - probed
- * explicitly, never inferred from a failed read); inside a git repository
- * a HEAD that cannot answer honestly (git failure, no committed copy, a
- * non-file at the path) REFUSES rather than falling back. */
+/** The declaration text: the target's HEAD, the repo-owned truth (repos
+ * change mirrors only through commits, and the committed copy beats any
+ * intermediate state the update legs leave in the working tree). The
+ * working-tree copy is used ONLY for a plain tree (local runs, fixtures),
+ * probed explicitly, never inferred from a failed read; inside a git
+ * repository a HEAD that cannot answer honestly (git failure, no committed
+ * copy, a non-file at the path) REFUSES rather than falling back. */
 export function declarationSource(root: string): { text: string | null; refusal: string | null } {
   // The probe's verdicts are discriminated, never inferred from a bare
   // nonzero exit: only git's definitive answers pick a path, and anything

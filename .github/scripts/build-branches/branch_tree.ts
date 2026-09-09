@@ -1,65 +1,24 @@
 #!/usr/bin/env bun
-// Assemble the `build` branch tree: the one generated delivery channel the
-// fleet consumes, for BOTH copier renders and `uses:` action refs.
+// Assembles the `build` branch tree: the one generated delivery channel the
+// fleet consumes, for BOTH copier renders and `uses:` action refs (layout
+// and extraction rules: docs/build-provenance.md, "Extraction safety").
+// copier.yml is a byte copy of this checkout's root file, the composed
+// `template/` carries plain filenames only, and each action ships its
+// sources plus dependency manifests, never node_modules: it installs at its
+// own action_path when it runs.
 //
-// Layout at the branch root:
-//
-// - copier.yml       (byte copy from this checkout's root; its generated
-//                     _exclude region carries the conditional-landing gates)
-// - template/        (composed from templates/ via compose/compose.ts's build -
-//                     PLAIN filenames only; build() refuses a tree whose
-//                     copier.yml excludes are stale)
-// - actions/         (the composite actions' sources + dependency manifests,
-//                     node_modules and build output excluded - each action
-//                     installs at its own action_path when it runs; the
-//                     actions/shared/ library zone ships with them,
-//                     dependency-free so the tarball stays install-free -
-//                     copier.yml's _tasks and _migrations run the manifest
-//                     stamping hook from actions/shared/stamp_manifest.ts,
-//                     the same relative path it has in this checkout)
-// - .github/workflows/ (the fleet-facing reusable workflows - the
-//                     FLEET_WORKFLOWS roster below - that rendered
-//                     workflows call `@build`; a reusable-workflow
-//                     `uses:` fetches the FILE at the named ref, so a build
-//                     branch without them 404s every fleet caller run)
-// - migrations/      (every migration-ladder rung file, verbatim from
-//                     .github/scripts/sync/migrations/: a rung is its own
-//                     marker, and the sync runs the rungs that appear in
-//                     build history after a target's recorded build -
-//                     docs/migrations.md)
-// - README.md        (static explainer)
-//
-// One branch serves both consumers because the whole tree is
-// extraction-safe: a `uses: <owner>/repo-platform/actions/<name>@build`
-// ref downloads the branch tarball, and extraction dies on
-// jinja-expression path segments - which the composed tree no longer
-// carries (tests/build-branches pins that invariant over the full tree).
-//
-// Content is fully deterministic - no timestamps or source SHAs in-tree, so
-// the append-only build branch only gains a commit when something real
-// changed (provenance lives in the build commit message instead). That
-// determinism is load-bearing for the sync's provenance tree proof
-// (verify_build_provenance.ts rebuilds this tree from the stamped source
-// and requires hash equality with the tip; measured: independent warm-
-// and cold-cache rebuilds hash identical trees, a one-line template edit
-// moves the hash) and for publish.ts's no-change skip (its header has the
-// publish model). Nothing
-// may RUN on the build branch even though it carries .github/workflows/:
-// copyFleetWorkflows refuses - by hard error, naming the file and trigger -
-// any shipped workflow whose triggers are not exactly workflow_call. The
-// branch is pushed with a PAT (GITHUB_TOKEN cannot push workflow files),
-// and PAT pushes CAN trigger workflows, but push/branch events execute the
-// pushed tree's OWN workflow files - and a workflow_call-only tree has
-// nothing to run. The invariant is pinned by construction here, not
-// carried by omitting .github/.
+// Invariants this file owns: content is fully deterministic (no timestamps
+// or source shas in-tree), which the sync's provenance tree proof and
+// publish.ts's no-change skip both depend on; nothing may RUN on the
+// branch, so copyFleetWorkflows hard-fails on any shipped workflow whose
+// triggers are not exactly workflow_call (PAT pushes can trigger workflows,
+// and push events execute the pushed tree's own files).
 //
 // Usage:
 //   bun .github/scripts/build-branches/branch_tree.ts --dest DIR
 //   bun .github/scripts/build-branches/branch_tree.ts --check
-//
-// --check assembles into a fresh per-run scratch directory and removes it
-// afterwards: it proves the tree assembles (`bun run compose:check`) and
-// keeps nothing, so concurrent checks never share a path.
+//     (assembles into a fresh per-run scratch directory and removes it, so
+//     concurrent checks never share a path)
 
 import {
   cpSync,

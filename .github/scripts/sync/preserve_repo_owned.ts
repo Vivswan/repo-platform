@@ -1,41 +1,24 @@
 #!/usr/bin/env bun
-// Preserves repo-owned files after an update.
+// Preserves repo-owned files after an update (reusable-template-sync.yml's
+// "Preserve repo-owned files" step and ci/upgrade_path_test.sh), and
+// reports deleted split-class files so open_pr.ts holds the PR (the block
+// at the end of this file).
 //
-// settings.yml is a repo-owned starter (_skip_if_exists) the sync never
-// deletes: the settings-repos run merges it over the managed baseline. A
-// recovery re-render can de-render it, so it is restored outright there.
-//
-// LICENSE.md leaves the render when a repo selects the custom-license
-// module;
+// settings.yml is a repo-owned starter the sync never deletes; a recovery
+// re-render can de-render it, so it is restored outright there. LICENSE.md
+// leaves the render when a repo selects the custom-license module, and
 // copier deletes the de-rendered file when it was unmodified, which would
-// leave the repo with no license at all, so it is restored from the base
-// commit. Unlike settings.yml it is NOT restored on recovery: without the
-// module LICENSE is fleet-managed and the recovery re-render's overwrite
-// is the correct outcome; with the module the recovery re-render does not
-// emit LICENSE (recopy deletes nothing), so the repo's own license
-// survives untouched.
-//
-// A committed LICENSE deletion in a repo still on the fleet license is the
-// remaining hole: copier honors the deletion (it re-applies the local
-// diff), retired cleanup never lists the path (LICENSE.md is in both
-// renders), and there is no HEAD copy to restore -
-// but the fleet license is mandatory without the custom-license module, so
-// it is re-seeded from the target build ref (which must be resolvable in
-// the cwd's git repository).
-//
-// Last, the removed-split-files hold: every path this update deletes whose
-// previous copy HEAD's manifest classes `split` (plus LICENSE.md
-// pointwise) is reported to open_pr.ts, which keeps the PR on
-// the manual-review path with the leaving repository-owned content named
-// in the body - see the block at the end of this file.
-//
-// Invoked by reusable-template-sync.yml's "Preserve repo-owned files" step
-// and by ci/upgrade_path_test.sh.
-//
-// Env: RECOVER; TARGET_DIR (default target); TARGET_REF and MODULES (for
-// the fleet-license re-seed); RUNNER_TEMP (the removed-splits report
-// file); HIDE_DETAILS; TARGET_DISPLAY / TARGET
-// (log label, in that order; defaults to TARGET_DIR).
+// leave no license at all, so it is restored from the base commit - but
+// NOT on recovery: without the module LICENSE is fleet-managed and the
+// overwrite is correct; with it the recopy emits no LICENSE, so the repo's
+// own survives. A committed LICENSE deletion in a repo still on the fleet
+// license is the remaining hole (copier honors the deletion, retired
+// cleanup never lists a path in both renders, no HEAD copy exists): the
+// fleet license is mandatory there, so it is re-seeded from the target
+// build ref, which must resolve in the cwd's git repository.
+// Env: RECOVER; TARGET_DIR (default target); TARGET_REF and MODULES (the
+// fleet-license re-seed); RUNNER_TEMP (the removed-splits report);
+// HIDE_DETAILS; TARGET_DISPLAY / TARGET (log label, in that order).
 
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,12 +46,10 @@ const modules = parseModules(env("MODULES")) ?? [];
 /** Run a git probe against the target checkout. A deadline expiry aborts
  * loudly here, at the one probe owner, because every consumer reads
  * nonzero as a benign answer (inHead skips a restore, the manifest read
- * downgrades to held-for-review) - a hung git is a broken step, never an
+ * downgrades to held-for-review): a hung git is a broken step, never an
  * answer. Subcommand only in the message: args can carry target paths.
- * Exported, with `timeoutMs` as the tests' injection seam, so the
- * fail-closed contract is behaviorally testable without waiting out the
- * production bound; production callers pass no timeout and get proc.ts's
- * default hang bound. */
+ * `timeoutMs` is the tests' injection seam for the fail-closed contract;
+ * production callers pass none and get proc.ts's default hang bound. */
 export function git(args: string[], timeoutMs?: number): { exitCode: number; stdout: string } {
   const proc = capture(["git", "-C", targetDir, ...args], { timeoutMs });
   if (proc.timedOut) {
@@ -218,25 +199,18 @@ function restoreRepoOwned(): void {
   }
 }
 
-// A file this update deletes never reaches the PR as a conflict: copier
-// resolves delete-vs-modify by dropping the file, and retired-file cleanup
-// deletes retired paths outright - so a split file's repository-owned half
-// silently leaves while the update looks clean enough to AUTO-MERGE. The
-// rule is CLASS-level: every deleted path HEAD's own manifest classes
-// `split` holds the PR (open_pr.ts's section list) with the leaving content
-// named. HEAD's manifest, not the post-sync one: a path split at HEAD but
-// absent from the new render is in neither the rebuild's walk nor the tail
-// tripwire's. LICENSE.md is a pointwise candidate on top - under the
-// custom-license module it is repo-owned with no manifest entry, yet its
-// deletion must still hold the PR.
-//
-// FAIL CLOSED when HEAD's manifest cannot be classified (missing or damaged
-// past parsing): the split map is unknown, so every deleted tracked path
-// becomes an unclassifiable candidate that forces review. The tail tripwire
-// cannot backstop this - it iterates the POST-sync manifest and skips paths
-// absent at HEAD before it reads HEAD's manifest, so a sync whose retained
-// split files are all new at HEAD leaves the wire silent while a retired
-// split file's half departs unseen.
+// A deleted file never reaches the PR as a conflict (copier drops it on
+// delete-vs-modify, retired cleanup deletes outright), so a split file's
+// repository-owned half leaves silently while the update looks clean enough
+// to AUTO-MERGE. The rule is CLASS-level: every deleted path HEAD's own
+// manifest classes `split` holds the PR with the leaving content named
+// (HEAD's, because a path split there but absent from the new render is in
+// neither the rebuild's walk nor the tripwire's), plus LICENSE.md pointwise
+// (repo-owned with no manifest entry under the custom-license module).
+
+// FAIL CLOSED when HEAD's manifest cannot be classified: every deleted
+// tracked path becomes a candidate that forces review; the tail tripwire
+// cannot backstop this, since it walks only the POST-sync manifest.
 
 /** Per-file excerpt bound (lines) and the byte budget for the WHOLE
  * rendered section - intro, bullets, fences, and the omission item, not
@@ -460,15 +434,14 @@ function escapePathBytes(raw: Buffer): string {
   return out;
 }
 
-/** Paths present at HEAD and gone from the working tree - the deletion axis
- * for the unreadable-manifest fail-closed path. `--no-renames` so a staged
+/** Paths present at HEAD and gone from the working tree: the deletion axis
+ * for the unreadable-manifest fail-closed path. `--no-renames`, so a staged
  * delete/add pair cannot be reclassified `R` and escape the D filter. Null
- * (not empty) when git itself fails, so the caller can fail closed rather
- * than read a git error as "nothing deleted". Raw Bun.spawnSync, not the
- * git() owner: capture()'s string result is a utf-8 decode that folds a
- * non-UTF-8 tracked name onto U+FFFD - the bytes are split and strictly
- * decoded instead, with undecodable names returned raw. Same fail-closed
- * deadline rule as git(), with the same test-only `timeoutMs` seam. */
+ * (not empty) when git itself fails, so the caller fails closed rather than
+ * reading a git error as "nothing deleted". Raw Bun.spawnSync, not git():
+ * capture()'s utf-8 decode folds a non-UTF-8 tracked name onto U+FFFD, so
+ * the bytes are split and strictly decoded, undecodable names returned raw.
+ * Same fail-closed deadline rule as git(), same test-only `timeoutMs` seam. */
 export function deletedTrackedPaths(
   timeoutMs = DEFAULT_HANG_BOUND_MS,
 ): { paths: string[]; undecodable: Buffer[] } | null {

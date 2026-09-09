@@ -1,39 +1,24 @@
 #!/usr/bin/env bun
-// Resolve copier's inline merge-conflict markers in favor of the template.
+// Resolves copier's inline merge-conflict markers in favor of the template:
+// `copier update --conflict inline` renders overlapping local edits as
+// git-style conflict blocks ("<<<<<<< before updating", local lines,
+// "=======", template lines, ">>>>>>> after updating"); this keeps the
+// template side of every block and collects the dropped local lines into a
+// markdown summary the sync embeds in the PR body, so a human can restore
+// anything that should stay local. The conflicts resolved here live in
+// fully managed files, where the template side is the owner by definition.
 //
-// `copier update --conflict inline` (the default) renders overlapping local
-// edits as git-style conflict blocks:
-//
-//     <(x7) before updating
-//     local lines
-//     =(x7)
-//     template lines
-//     >(x7) after updating
-//
-// This script keeps the "after updating" (template) side of every block and
-// collects the dropped local lines into a markdown summary, which the
-// template sync workflow embeds in the PR body so a human can restore
-// anything that should stay local. Split-class files never reach this pass:
-// the preceding "Rebuild split files structurally" step
-// (preserve_local_content.ts) discards copier's merged result for them -
-// conflict blocks included - rebuilds them from the clean render plus the
-// HEAD copy, and lists them in the --skip file, which this script excludes
-// outright (a carried repository half may legitimately contain
-// conflict-marker-shaped text, and rewriting it would mutate the bytes the
-// rebuild just preserved; real leftover markers there fail validation
-// instead). The conflicts resolved here live in non-split files - fully
-// managed ones, where the template side is the owner by definition. The
-// full summary goes to stdout; the
-// --summary file drops whole trailing sections past --limit bytes so it
-// fits a PR body with its markdown fences intact.
-//
-// A file whose markers are malformed (missing, nested, or out-of-order marker
-// lines) is left untouched and noted in the summary; the validator then fails
-// on the remaining markers and the sync run goes red for manual editing.
-//
-// Usage:
-//   bun resolve_copier_conflicts.ts --summary /path/to/summary.md [--root .]
-//     [--skip /path/to/rebuilt-paths.txt]
+// Split-class files never reach this pass: the preceding structural rebuild
+// (preserve_local_content.ts) discards copier's merged result for them and
+// lists them in the --skip file, excluded outright here - a carried
+// repository half may legitimately contain conflict-marker-shaped text, and
+// rewriting it would mutate the bytes the rebuild just preserved (real
+// leftover markers there fail validation instead). A file whose markers are
+// malformed (missing, nested, out of order) is left untouched and noted;
+// the validator then fails on the remaining markers and the run goes red
+// for manual editing.
+// Usage: bun resolve_copier_conflicts.ts --summary FILE [--root .]
+//   [--skip /path/to/rebuilt-paths.txt]
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";

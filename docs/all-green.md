@@ -117,4 +117,5 @@ The PR body OPENS with a directives block: its first paragraph is one bracketed 
 
 - A PR can still gut a called workflow's content (checks.yml is repo-owned) or hand-condition the managed `ci` caller away; the sync-time validator errors on a conditioned caller, validate-template's integrity check blocks managed-file edits, and review owns the rest - the same same-repo residual every check has.
 - Any workflow in this repository could mint a look-alike `all-green` check run (the Actions app pin does not distinguish jobs). The repo is its own sole workflow author; the roster rules and review own that surface.
+- A job-created `all-green` check from a pull_request run carries an opaque `external_id`, so the verdict-era event blocklist cannot reject it, and it would vouch for a sha that is also a main commit. Reachable only when a PR head becomes a main commit itself; squash-only merges make that contrived.
 - Copilot code review is advisory: the `copilot_code_review` rule requests a review on every public-repo PR, but nothing blocks on it ([settings.md](settings.md#copilot-code-review)).

@@ -1,33 +1,23 @@
 // Guards the sync's adopt semantics: live visibility and description feed
-// the render on purpose (the visibility-gated renders - CONTRIBUTING.md,
-// CODE_OF_CONDUCT.md, the CodeQL and dependency-review jobs - must follow
-// the repo's real state), so a value changed out-of-band in the GitHub UI
-// would ride a clean sync PR into the rendered files and auto-merge into
-// declared truth: exactly the drift the nightly settings heal exists to
-// revert. This script compares the live values against the answers
-// recorded in the target's .github/.copier-answers.yml. On a mismatch it emits
-// one ::warning:: per drifted field and writes a PR-body section;
-// open_pr.ts prepends that section and keeps auto-merge off, so ratifying
-// the change stays a human decision. A field the answers file does not
-// record is skipped (nothing to drift from; the sync adopts it), but a
-// recorded value of the wrong type fails the step rather than skipping:
-// silently comparing nothing is how the ratification bug worked.
-//
-// Usage:
-//   bun .github/scripts/sync/settings_drift.ts --target-dir <checkout>
-//     --repo <owner/name>
-//     --in-repo-settings <target's .github/settings.yml path>
-//     --live-private <true|false> --live-description <text>
-//     --summary <out-file>
+// the render on purpose (visibility-gated renders must follow the repo's
+// real state), so a value changed out-of-band in the GitHub UI would ride
+// a clean sync PR into the rendered files and auto-merge into declared
+// truth - the drift the nightly settings heal exists to revert. This
+// compares the live values against the recorded answers; a mismatch emits
+// one ::warning:: per field and writes a PR-body section that open_pr.ts
+// prepends with auto-merge off, so ratifying stays a human decision. An
+// unrecorded field is skipped (nothing to drift from), but a recorded value
+// of the wrong type fails the step: silently comparing nothing is how the
+// ratification bug worked.
 //
 // Merging ratifies nothing: the nightly heal enforces the baseline with the
-// repo's settings.yml merged over it, so driftSummary points there; the heal is
-// offered as the way back only while that file exists (--in-repo-settings).
-//
-// The summary file is written empty when nothing drifted, and its size is
-// the single source of truth for "this PR needs review" (open_pr.ts tests
-// it). Errors print as ::error:: workflow commands (on stdout, where the
-// runner parses them) with a nonzero exit.
+// repo's settings.yml merged over it, so driftSummary points there, offered
+// only while that file exists (--in-repo-settings). The summary file is
+// written empty when nothing drifted, and its size is the single source of
+// truth for "this PR needs review" (open_pr.ts tests it).
+// Usage: bun .github/scripts/sync/settings_drift.ts --target-dir <checkout>
+//   --repo <owner/name> --in-repo-settings <path> --live-private <bool>
+//   --live-description <text> --summary <out-file>
 
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

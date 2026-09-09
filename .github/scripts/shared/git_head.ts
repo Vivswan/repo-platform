@@ -116,18 +116,14 @@ export function headEntry(root: string, rel: string): HeadEntry {
   if (!((mode === "100644" || mode === "100755") && type === "blob")) {
     throw headEntryUnrecognized(raw);
   }
-  // Read the blob BY THE OID ls-tree returned, never by re-resolving HEAD
-  // (`git show HEAD:rel`): a HEAD move between the two git calls could
-  // otherwise route a different object's bytes through this blob arm.
-  // Raw Bun.spawnSync, not capture(): the blob contract is RAW BYTES, and
-  // capture's string result is a utf-8 decode that folds non-utf-8 file
-  // content onto U+FFFD. The hang bound still applies, carried inline with
-  // proc.ts's own constant and timeout-is-failure mapping - and so does
-  // proc.ts's env contract: live process.env is handed DELIBERATELY,
-  // because bun's default is a process-start snapshot, so a caller's
-  // GIT_* scrub would otherwise never reach this child and a stray
-  // startup GIT_DIR would silently point the byte read at another
-  // repository.
+  // By the OID ls-tree returned, never `git show HEAD:rel`: a HEAD move
+  // between the two git calls would route another object's bytes here.
+  // Raw Bun.spawnSync, not capture(): the contract is RAW BYTES, and
+  // capture's utf-8 decode folds non-utf-8 content onto U+FFFD. proc.ts's
+  // hang bound and env contract still apply: live process.env is spread
+  // deliberately (bun's default is a process-start snapshot), or a
+  // caller's GIT_* scrub never reaches this child and a stray GIT_DIR
+  // points the read at another repository.
   const proc = Bun.spawnSync(["git", "-C", root, "cat-file", "blob", oid], {
     env: { ...process.env },
     stdout: "pipe",

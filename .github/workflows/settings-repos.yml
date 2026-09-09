@@ -126,15 +126,13 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/require_green_commit.ts
 
-      # One matrix entry per target repo. Probes retry and then
-      # warn-and-skip a repo they cannot answer for; only
-      # selection-infrastructure failures (failed
-      # discovery) fail this job.
-      # ONLY_REPO carries only the workflow_call scope ("all", or public
-      # text off a main commit; empty on cron and dispatch runs). The
-      # typed dispatch input never rides here: it may be a private slug,
-      # and the runner prints step env values into this public log - the
-      # script reads it from the event payload instead.
+      # One matrix entry per target repo. Probes retry and then warn-and-skip
+      # a repo they cannot answer for; only selection-infrastructure failures
+      # (failed discovery) fail this job. ONLY_REPO carries only the
+      # workflow_call scope ("all", or public text off a main commit; empty
+      # on cron and dispatch runs). The typed dispatch input never rides
+      # here: it may be a private slug, and the runner prints step env into
+      # this public log, so the script reads it from the event payload.
       - name: Select settings targets
         id: targets
         env:
@@ -207,19 +205,14 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
-      # The managed baseline for THIS repository's facts (module
-      # selection, declared-or-live visibility, tracking-label answers),
-      # then the repo's own settings.yml merged over it. Scratch filenames
-      # are fixed and neutral - a redacted slug reaches the scripts only
-      # through env (already masked). The operator repo itself has no
-      # .repo-platform.yml to fetch; its facts come from its recorded
-      # answers file in this checkout.
-      # Both of these run BEFORE the settings action, so the action's own
-      # private-repos redaction cannot cover what they print, and both
-      # quote repo-owned content on their diagnostic paths. run_hidden.ts
-      # is the boundary: it passes output through untouched for a public
-      # target and captures it for a private one, publishing only a
-      # generic outcome.
+      # The managed baseline for THIS repository's facts, then the repo's own
+      # settings.yml merged over it. Scratch filenames are fixed and neutral:
+      # a redacted slug reaches the scripts only through env (already
+      # masked); the operator repo has no .repo-platform.yml to fetch, so its
+      # facts come from its recorded answers in this checkout. Both run
+      # BEFORE the settings action, so its own private-repos redaction cannot
+      # cover what they print, and both quote repo-owned content when they
+      # fail; run_hidden.ts captures that for a private target.
       - name: Render the managed settings baseline
         id: render
         env:
@@ -266,18 +259,13 @@ jobs:
           fi
 
       # The opt-in was rechecked at the pinned commit, but the apply runs
-      # later and the branch keeps moving. Re-resolving the head here
-      # narrows that window to this step: if the target moved, the run
-      # skips and the next one reads the new revision. It cannot CLOSE the
-      # window - there is no compare-and-swap on "still opted in" - so
-      # this is damage limitation, not a guarantee.
-      # Behind the same hidden-capture boundary as the render and merge:
-      # the moved warning quotes the current head sha and resolveTargetRef's
-      # failure strings name the target's default BRANCH, none of which a
-      # hide-details target's public log may carry. The pinned sha in this
-      # step's env still echoes into the log header - an accepted, opaque
-      # identifier (docs/private-repos.md), already printed by the merge
-      # step's rendered command above.
+      # later and the branch keeps moving; re-resolving the head narrows that
+      # window to this step (a moved target skips, and the next run reads the
+      # new revision). It cannot CLOSE the window (no compare-and-swap exists
+      # on "still opted in"), so this is damage limitation. Behind the hidden
+      # capture boundary: the moved warning quotes the head sha and the
+      # failure strings name the target's default BRANCH; the pinned sha in
+      # this step's env still echoes into the log header, an accepted opaque id.
       - name: Check the target has not moved
         id: freshness
         if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
@@ -312,20 +300,14 @@ jobs:
               "so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
           fi
 
-      # Referenced-label invariant, FAIL-CLOSED side: the apply's
-      # reconciliation DELETES every live label the merged document does
-      # not declare (and renames away `new_name` sources), and removing
-      # one the target's issue forms or workflows still reference breaks
-      # them silently. Before the action runs, the preflight lists the
-      # live labels, extracts the referenced ones (from this checkout for
-      # the operator, from the target at the pinned ref otherwise - the
-      # same fact-source split as the render), and fails THIS repo's apply
-      # naming the label and its referencing file. The action's mode is
-      # mirrored so a check_only run warns instead of failing (a check
-      # deletes nothing, and a hard fail would cost the drift report).
-      # Same gate as the apply itself: a moved target was never checked.
-      # Behind the same hidden-capture boundary as the render and merge -
-      # label names and file paths are target content.
+      # Referenced-label invariant, FAIL-CLOSED side (docs/settings.md, "Label
+      # preflight"): the apply's reconciliation deletes and renames labels the
+      # target's files may still reference, so before the action runs the
+      # preflight fails THIS repo's apply naming the label and file. Facts
+      # come from this checkout for the operator, from the target at the
+      # pinned ref otherwise (the render's split); the action's mode is
+      # mirrored so a check_only run warns (a check deletes nothing). Same
+      # moved-target gate and hidden-capture boundary as the render and merge.
       - name: Preflight labels the target still references
         id: labels
         if: steps.freshness.outputs.moved == 'false'
