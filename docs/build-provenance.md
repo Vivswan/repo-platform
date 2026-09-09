@@ -1,3 +1,8 @@
+---
+order: 250
+group: Fleet operations
+---
+
 # Build provenance
 
 How the `build` branch gets published, how a sync verifies the tip before consuming it, and which trusts remain. This document is the map, not the authority: every invariant here lives in exactly one code header, named per section, and the header is where the full reasoning stays.

@@ -4,10 +4,21 @@
 // a curated table keeps its search. Owns the keyboard shortcut everywhere
 // (Cmd K, Ctrl K, and `/` outside a field): a capturing window listener
 // that stops carbon's own search hotkeys and then focuses the panel when
-// there is one, else opens (or refocuses) the dialog.
+// there is one, else opens (or refocuses) the dialog. The same listener,
+// with a pointerdown twin, keeps the page's input modality for the
+// launcher's focus ring.
 
-import { defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
-import FleetLauncher, { searchIcon, shortcutKeys } from "./launcher.ts";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  type VNode,
+} from "vue";
+import FleetLauncher, { keyboardInput, searchIcon, shortcutKeys } from "./launcher.ts";
 import { hotkeyIntent, modifierLabel } from "./launcher-view.ts";
 
 const PANEL_FIELD = ".fleet-launcher-mode-panel .fleet-launcher-input";
@@ -27,11 +38,31 @@ function aim(field: HTMLInputElement | null): void {
   field.select();
 }
 
+/** Lucide's `x` glyph for the dialog's close button. */
+function closeIcon(): VNode {
+  return h(
+    "svg",
+    {
+      width: 20,
+      height: 20,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": 2,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "aria-hidden": "true",
+    },
+    [h("path", { d: "M18 6 6 18" }), h("path", { d: "m6 6 12 12" })],
+  );
+}
+
 export default defineComponent({
   name: "NavLauncher",
   setup() {
     const opened = ref(false);
     const dialog = shallowRef<HTMLDialogElement | null>(null);
+    const button = shallowRef<HTMLButtonElement | null>(null);
     const modifier = ref<"Cmd" | "Ctrl">("Cmd");
 
     async function show(): Promise<void> {
@@ -51,13 +82,20 @@ export default defineComponent({
       aim(element.querySelector<HTMLInputElement>(DIALOG_FIELD));
     }
 
+    // Focus goes back to the button on every close, not only the ones the
+    // browser restores itself: opened by the shortcut, the dialog had taken
+    // focus from the body, and Escape or the backdrop would leave it there.
     function close(): void {
       const element = dialog.value;
       if (element?.open) element.close();
       opened.value = false;
+      button.value?.focus();
     }
 
-    function onHotkey(event: KeyboardEvent): void {
+    function onKeydown(event: KeyboardEvent): void {
+      // Marked before the shortcut check: this handler stops the event, so
+      // no later listener could see the key that opens the dialog.
+      keyboardInput.value = true;
       const intent = hotkeyIntent(event, isEditing(event));
       if (intent === null) return;
       event.stopImmediatePropagation();
@@ -66,17 +104,26 @@ export default defineComponent({
       void show();
     }
 
+    function onPointerdown(): void {
+      keyboardInput.value = false;
+    }
+
     onMounted(() => {
       modifier.value = modifierLabel(navigator.platform);
-      window.addEventListener("keydown", onHotkey, true);
+      window.addEventListener("keydown", onKeydown, true);
+      window.addEventListener("pointerdown", onPointerdown, true);
     });
-    onBeforeUnmount(() => window.removeEventListener("keydown", onHotkey, true));
+    onBeforeUnmount(() => {
+      window.removeEventListener("keydown", onKeydown, true);
+      window.removeEventListener("pointerdown", onPointerdown, true);
+    });
 
     return () => {
       return [
         h(
           "button",
           {
+            ref: button,
             type: "button",
             class: "fleet-launcher-button",
             "aria-label": "Search the docs",
@@ -103,7 +150,22 @@ export default defineComponent({
                   if (event.target === dialog.value) close();
                 },
               },
-              h(FleetLauncher, { rows: "[]", mode: "dialog", onClose: close }),
+              // After the launcher in the DOM, so Tab from the field
+              // reaches it (the rows are out of the Tab order); the CSS
+              // seats it over the field's right end.
+              [
+                h(FleetLauncher, { rows: "[]", mode: "dialog", onClose: close }),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "fleet-launcher-close",
+                    "aria-label": "Close search",
+                    onClick: close,
+                  },
+                  closeIcon(),
+                ),
+              ],
             )
           : null,
       ];

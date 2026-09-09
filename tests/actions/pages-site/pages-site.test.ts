@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join, resolve } from "node:path";
 import {
   deriveRewrites,
-  deriveSidebar,
   detectLocales,
   isLocaleDir,
-  pageTitle,
+  pageMeta,
+  readPage,
   routeOf,
   walkMarkdown,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
@@ -286,31 +286,49 @@ describe("derive", () => {
     });
   });
 
-  test("titles come from the first heading, else the humanized filename", () => {
+  test("a page's title is its first heading, else the humanized filename, with no frontmatter to read", () => {
     const dir = fixture();
-    expect(pageTitle(dir, "setup.md")).toBe("Getting started");
-    expect(pageTitle(dir, "guide/deep-dive.md")).toBe("deep dive");
+    expect(readPage(dir, "setup.md")).toEqual({
+      title: "Getting started",
+      order: null,
+      group: null,
+    });
+    expect(readPage(dir, "guide/deep-dive.md")).toEqual({
+      title: "deep dive",
+      order: null,
+      group: null,
+    });
   });
 
-  test("the sidebar mirrors the tree: landing first, one group per directory titled from its folder name, pages titled as their h1 wrote them", () => {
-    const dir = fixture();
-    expect(deriveSidebar(dir, walkMarkdown(dir))).toEqual([
-      { text: "Home", link: "/" },
-      { text: "Getting started", link: "/setup" },
-      {
-        text: "Api Reference",
-        collapsed: false,
-        items: [{ text: "error codes", link: "/api-reference/errors" }],
-      },
-      {
-        text: "Guide",
-        collapsed: false,
-        items: [
-          { text: "Guide", link: "/guide/" },
-          { text: "deep dive", link: "/guide/deep-dive" },
-        ],
-      },
-    ]);
+  test.each<[string, string, ReturnType<typeof pageMeta>]>([
+    [
+      "order and group read as written, the title from the heading below them",
+      "---\norder: 20\ngroup: Modules\n---\n\n# Pages\n",
+      { title: "Pages", order: 20, group: "Modules" },
+    ],
+    [
+      "a title key wins over the heading, as it does for VitePress's own page title",
+      "---\ntitle: Pages module\n---\n\n# Pages\n",
+      { title: "Pages module", order: null, group: null },
+    ],
+    [
+      "a heading inside the frontmatter is not the page's heading",
+      "---\ndescription: '# not a heading'\n---\n\nno heading\n",
+      { title: "pages", order: null, group: null },
+    ],
+  ])("%s", (_, source, expected) => {
+    expect(pageMeta("pages.md", source)).toEqual(expected);
+  });
+
+  test.each([
+    ["order: first", "'order' must be a number"],
+    ["order: NaN", "'order' must be a number"],
+    ["group: 3", "'group' must be a non-empty string"],
+    ["group: ''", "'group' must be a non-empty string"],
+  ])("malformed frontmatter (%s) fails the build naming the page", (line, message) => {
+    expect(() => pageMeta("modules/pages.md", `---\n${line}\n---\n\n# Pages\n`)).toThrow(
+      `modules/pages.md: frontmatter ${message}`,
+    );
   });
 
   test("routes follow the rewrite map: only an exact index.md basename is a directory index", () => {
@@ -348,23 +366,6 @@ describe("derive", () => {
     expect(
       detectLocales(["README.md", "guide/a.md", "zh-cn/README.md", "ja/setup.md", "api/x.md"]),
     ).toEqual(["ja", "zh-cn"]);
-  });
-
-  test("a locale sidebar roots inside its tree with locale-prefixed links", () => {
-    const items = deriveSidebar(
-      "unused",
-      ["zh-cn/README.md", "zh-cn/guide/intro.md"],
-      "zh-cn/",
-      (file) => file,
-    );
-    expect(items).toEqual([
-      { text: "zh-cn/README.md", link: "/zh-cn/" },
-      {
-        text: "Guide",
-        collapsed: false,
-        items: [{ text: "zh-cn/guide/intro.md", link: "/zh-cn/guide/intro" }],
-      },
-    ]);
   });
 });
 

@@ -1,4 +1,9 @@
-# Private repositories in fleet logs
+---
+order: 260
+group: Fleet operations
+---
+
+# Private repositories
 
 repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step summaries, and job outputs are as readable as the repository they run in. Without countermeasures, a Sync Repos or Settings Repos run would print every private repo's name - in the job list itself (`sync (Vivswan/hidden-server)`) - plus its description, module selection, file paths, and whatever a failing tool dumped.
 

@@ -1,4 +1,9 @@
-# The all-green convention
+---
+order: 30
+group: Start here
+---
+
+# All-green convention
 
 Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. [ci.yml](../.github/workflows/ci.yml)'s `all-green` job needs every gating job, runs on `if: always()`, and judges the results through the shared [actions/all-green](../actions/all-green/action.yml) composite (rendered repos pin it `@build`, this repo calls it by local path):
 

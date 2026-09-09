@@ -1,29 +1,18 @@
 #!/usr/bin/env bash
 # Build the pages-site action's vitepress path end to end against a scratch
-# fixture repository, in the runner-shaped directory topology (workspace,
-# action checkout, and RUNNER_TEMP in three separate trees). This is the
-# gate for the class `bun run check` cannot see: the build works only when
-# the docs tree is materialized inside the build root, because the pages'
-# own SSR imports resolve by walking up from the SOURCE files - a srcDir
-# outside the root never reaches the action's node_modules on real runners
-# even though it can accidentally work on a laptop where the repo sits
-# near the dependencies.
+# fixture repository in the runner-shaped directory topology: workspace,
+# action checkout, and RUNNER_TEMP in three separate trees. This is the
+# gate for the class `bun run check` cannot see: the pages' own SSR imports
+# resolve by walking up from the SOURCE files, so a docs tree materialized
+# outside the build root never reaches the action's node_modules on a real
+# runner even though it can work by accident on a laptop where the repo
+# sits near the dependencies.
 #
-# Asserts, on the assembled artifact: the versioned tier layout, content
-# isolation between tiers, the locale build with carbon's translations
-# menu, the version switcher, the per-repo hue attribute on <html>, the
-# per-tier project facts (each tier's provenance names its OWN ref), a
-# carbon token in the built CSS (the base theme actually applied, not a
-# silent default-theme fallback) with carbon's remote font @imports
-# dropped and its unused Mona Sans gone (no @font-face, no asset, no
-# preload) while the theme's own fonts stay, the facts card rendered on
-# the landing page (repository link, the tier's own version row marked current
-# and noted as the one being read), the provenance line (the tier's ref and
-# the page's source file), the table scroll wrapper, llms.txt, the strict CHECK mode both passing on
-# clean docs and failing on a dead link, the deploy's per-tier strictness
-# (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
-# the deploy), the nested docs-dir build, and the deploy command's
-# legacy-tag skip (both arms) and HEAD calibration gate.
+# The fixture is a tagged docs repository (three tags plus HEAD, a locale,
+# a landing table, frontmatter ordering, every custom-block kind, and a
+# dead link on HEAD) built through build.ts and the deploy command; the
+# asserts below, one commented section per concern, pin what the theme and
+# the deploy's per-tier strictness must produce in the assembled artifact.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
@@ -58,7 +47,53 @@ absent() { if grep -qF -- "$1" "$2"; then fail "'$1' should not be in $2"; fi; }
 mkdir -p "$WORK/docs/guide"
 printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n' > "$WORK/docs/README.md"
 printf '| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n' >> "$WORK/docs/README.md"
-printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n## Install steps\n\nOne, then two.\n' > "$WORK/docs/setup.md"
+printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n## Install steps\n\nOne, then two.\n\n## Upgrade steps\n\nThree.\n' > "$WORK/docs/setup.md"
+# Every custom-block kind the theme styles, both syntaxes: GitHub alerts
+# (retitled in sentence case by custom-blocks.ts) and ::: containers, plus
+# a highlighted code block and an ansi fence (the one language shiki colors
+# from the theme's terminal palette, not its token colors).
+cat > "$WORK/docs/alerts.md" <<'MD'
+# Alerts
+
+> [!NOTE]
+> a note
+
+> [!TIP]
+> a tip
+
+> [!IMPORTANT]
+> important
+
+> [!WARNING]
+> a warning
+
+> [!CAUTION]
+> caution
+
+::: info
+info
+:::
+
+::: danger
+danger
+:::
+
+::: details Show
+hidden
+:::
+
+```ts
+// c
+const s = "x";
+```
+
+```ansi
+ESC[31mERRORESC[0m plain
+```
+MD
+# the fence needs a real escape byte, which the heredoc cannot carry
+esc="$(printf '\033')"
+sed -i.bak "s/ESC/$esc/g" "$WORK/docs/alerts.md" && rm "$WORK/docs/alerts.md.bak"
 printf '# Guide\n\nThe guide index, version one.\n' > "$WORK/docs/guide/README.md"
 git -C "$WORK" init -q -b main
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
@@ -71,6 +106,13 @@ git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost commit -qm "v2 docs + locale"
 git -C "$WORK" tag v0.2.0
 printf 'HEAD-only line.\n' >> "$WORK/docs/setup.md"
+# Sidebar placement, HEAD only: zulu.md ranks first by `order` and opens
+# the Basics group, which alpha.md joins by name alone; setup.md is placed
+# by the landing table; bravo.md is placed by nothing and so follows it
+# although it sorts first.
+printf -- '---\norder: 1\ngroup: Basics\n---\n\n# Zulu\n\nRanked.\n' > "$WORK/docs/zulu.md"
+printf -- '---\ngroup: Basics\n---\n\n# Alpha\n\nGrouped.\n' > "$WORK/docs/alpha.md"
+printf '# Bravo\n\nUnplaced.\n' > "$WORK/docs/bravo.md"
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost commit -qm "head docs"
 
@@ -110,6 +152,11 @@ present "VPNavBarTranslations" "$site/latest/index.html"
 # a carbon bump that moves its brand token should update this pin note.
 present "docs-site-version-switcher" "$site/latest/index.html"
 present 'data-fleet-hue="' "$site/latest/index.html"
+# The head: the description falls back to the site title (the fixture has
+# no settings.yml description), and a docs tree without public/favicon.*
+# gets no icon link (an invented one would 404 on every page).
+present '<meta name="description" content="Fixture Docs">' "$site/latest/index.html"
+absent 'rel="icon"' "$site/latest/index.html"
 # Per-tier facts: vitepress inlines the site data as an escaped JSON string,
 # hence the backslashes. Anchored on the provenance key because the version
 # dropdown lists every tier's label in every page.
@@ -151,22 +198,59 @@ present "fleet-provenance" "$site/latest/index.html"
 present "Built from main" "$site/latest/index.html"
 present "Source: docs/README.md" "$site/latest/index.html"
 present "Built from v0.2.0" "$site/v0.2.0/index.html"
-# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts),
+# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts):
+# the wrapper is the tab stop, the table is not (VitePress's own
+# tabindex="0" on the table would be a second stop that scrolls nothing),
 # and the built CSS carries the rule that makes the wrapper scroll.
-present '<div class="vp-table"><table tabindex="0">' "$site/latest/setup.html"
+present '<div class="vp-table" tabindex="0"><table>' "$site/latest/setup.html"
+absent '<table tabindex' "$site/latest/setup.html"
 present '</table></div>' "$site/latest/setup.html"
-grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" ||
+grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%;" "$site/latest/assets" ||
   fail "the table wrapper's overflow rule is missing from the built CSS"
+# Custom blocks: each kind renders with its class and sentence-case title
+# (both syntaxes), and the built CSS colors the two non-hue kinds from
+# their own tokens.
+for pair in note:Note tip:Tip important:Important warning:Warning caution:Caution; do
+  kind="${pair%%:*}"
+  grep -qE -- "class=\"$kind custom-block github-alert\"[^<]*<p class=\"custom-block-title\">${pair#*:}</p>" "$site/latest/alerts.html" ||
+    fail "the $kind alert did not render with its class and its sentence-case title"
+done
+present '<div class="info custom-block"><p class="custom-block-title">Info</p>' "$site/latest/alerts.html"
+present '<div class="danger custom-block"><p class="custom-block-title">Danger</p>' "$site/latest/alerts.html"
+present '<details class="details custom-block"><summary>Show</summary>' "$site/latest/alerts.html"
+grep -qrF -- ".vp-doc .custom-block.warning{border-left-color:var(--color-warning)}" "$site/latest/assets" ||
+  fail "the warning block's rule color is missing from the built CSS"
+# Code tokens are colored through the theme's own custom properties (the
+# shiki css-variables theme config.mts installs), never a baked-in hex; an
+# ansi fence reads the terminal palette the same way (a raw, re-normalized
+# theme would print its text in shiki's placeholder hex instead).
+present 'style="color:var(--fleet-code-token-comment);"' "$site/latest/alerts.html"
+present 'style="color:var(--fleet-code-ansi-red);"' "$site/latest/alerts.html"
+absent 'color:#000000' "$site/latest/alerts.html"
+absent 'shiki-dark' "$site/latest/alerts.html"
+# Under reduced motion carbon resets background-attachment, which BOTH
+# scrollers' edge shadows are built on, so the override must name both;
+# on paper a table cell's long value (bare or a code token) wraps instead
+# of pushing the table off the page. The minified rule text pins the
+# whole rule, selectors included, not one declaration either selector
+# could carry alone.
+grep -qrF -- ".vp-doc .vp-table,.vp-doc [class*=language-] pre{background-attachment:local,local,scroll,scroll!important}" "$site/latest/assets" ||
+  fail "the scrollers' reduced-motion background-attachment override is missing from the built CSS"
+grep -qrF -- ".vp-doc .vp-table :is(th,td){overflow-wrap:anywhere}.vp-doc .vp-table :is(th,td) code{white-space:normal;overflow-wrap:anywhere}" "$site/latest/assets" ||
+  fail "the print sheet's table-cell wrapping is missing from the built CSS"
 
 # The search launcher: the landing page's link table became the panel
-# (rendered server-side with its curated row AND the fixture's h2 as a
-# heading row under the same page group), every other page carries the
-# nav button, and the page index the launcher lists is inlined into the
-# client bundle as JSON - the h2 as an index header entry (not the page's
-# own id="..." markup) is the proof that the index carries headings.
+# (rendered server-side with its curated row in view and the fixture's two
+# h2s folded behind the page group's fold row - a heading label in the
+# HTML would mean the landing lists every heading unfolded), every other
+# page carries the nav button, and the page index the launcher lists is
+# inlined into the client bundle as JSON - the h2 as an index header entry
+# (not the page's own id="..." markup) is the proof that the index carries
+# headings.
 present 'class="fleet-launcher fleet-launcher-mode-panel"' "$site/latest/index.html"
 present 'fleet-launcher-label">Set things up<' "$site/latest/index.html"
-present 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
+present '>Show 2 headings on Setup<' "$site/latest/index.html"
+absent 'fleet-launcher-label">Install steps<' "$site/latest/index.html"
 # The guide/ directory: its launcher group is titled from the folder name,
 # capitalized, and its page row's note is the page's site path.
 grep -qE -- 'fleet-launcher-group-title"[^>]*>Guide<' "$site/latest/index.html" ||
@@ -176,11 +260,24 @@ present 'class="fleet-launcher-button"' "$site/latest/setup.html"
 grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
   fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"
 
+# The sidebar: every row text in document order, group heads included
+# (Basics is the frontmatter group, Guide the directory), and the
+# launcher's group titles in the same order after the curated Setup group.
+sidebar_rows="$(grep -o 'class="VPSidebar".*' "$site/latest/index.html" | sed 's#</aside>.*##' | { grep -o 'class="text"[^>]*>[^<]*<' || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
+test "$sidebar_rows" = "Fixture|Basics|Zulu|Alpha|Setup|Alerts|Bravo|Guide|Guide|" ||
+  fail "the sidebar order is '$sidebar_rows', not landing, ranked group, table-placed, unplaced, directory"
+launcher_groups="$({ grep -o 'fleet-launcher-group-title"[^>]*>[^<]*<' "$site/latest/index.html" || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
+test "$launcher_groups" = "Setup|Zulu|Alpha|Alerts|Bravo|Guide|" ||
+  fail "the launcher's groups run '$launcher_groups', not the sidebar's order after the curated row"
+absent 'group: Basics' "$site/latest/alpha.html"
+absent 'order: 1' "$site/latest/zulu.html"
+
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
 # the tagged tier and the HEAD tier alike.
-mkdir -p "$WORK2/site/manual"
+mkdir -p "$WORK2/site/manual/public"
 printf '# Nested\n\nnested landing page\n' > "$WORK2/site/manual/README.md"
+printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$WORK2/site/manual/public/favicon.svg"
 git -C "$WORK2" init -q -b main
 git -C "$WORK2" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK2" -c user.name=fixture -c user.email=f@localhost commit -qm "nested docs"
@@ -192,6 +289,9 @@ env GITHUB_WORKSPACE="$WORK2" GITHUB_REPOSITORY=fixture-owner/nested-repo \
 present "nested landing page" "$TEMP_REAL/pages-site/_site/index.html"
 present "nested landing page" "$TEMP_REAL/pages-site/_site/latest/index.html"
 present "Source: site/manual/README.md" "$TEMP_REAL/pages-site/_site/latest/index.html"
+# The shipped favicon is linked at the tier's own base, and served there.
+present 'rel="icon" href="/nested-repo/latest/favicon.svg"' "$TEMP_REAL/pages-site/_site/latest/index.html"
+test -f "$TEMP_REAL/pages-site/_site/latest/favicon.svg" || fail "the shipped favicon.svg did not reach the latest tier"
 
 # CHECK mode: green on clean docs, red on a dead internal link.
 env GITHUB_WORKSPACE="$WORK" GITHUB_REPOSITORY=fixture-owner/fixture-repo \
@@ -346,5 +446,6 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "font filter, facts card, provenance line, table wrapper, launcher panel with heading rows and page index," \
+  "font filter, facts card, provenance line, table wrapper, custom blocks, code tokens, launcher panel with heading rows and page index," \
+  "sidebar order from frontmatter and the landing table," \
   "llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

@@ -1,17 +1,22 @@
 // The launcher's page index, built once per site build: every markdown page
-// of the docs tree rendered through VitePress's shared markdown-it instance
-// for its headings, mapped by page-index.ts, and inlined into the client
-// bundle as `data`. Runs only inside a vitepress process, like any data
+// of the docs tree, in sidebar order (sidebar.ts, so the launcher's page
+// and directory groups follow the sidebar), rendered through VitePress's
+// shared markdown-it instance for its headings, mapped by page-index.ts,
+// and inlined into the client bundle as `data`. Runs only inside a vitepress process, like any data
 // loader. Pages render from their source as written, and VitePress expands
-// `<!-- @include -->` only in its page transform, so a page that uses the
-// directive lists NO heading rows (page-index.ts's sourceHeaders): the
-// unexpanded source would shift or collide the anchors after the include,
-// and full-text search still reaches those headings.
+// `<!-- @include -->` only in its page transform, so a page with a directive
+// VitePress would expand (one naming a readable file, resolved the way its
+// processIncludes does) lists NO heading rows (page-index.ts's
+// sourceHeaders): the unexpanded source would shift or collide the anchors
+// after the include, and full-text search still reaches those headings. A
+// directive whose file VitePress cannot read (missing, a directory, a path
+// through a file) stays literal there too, so it changes nothing here.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MarkdownEnv, SiteConfig } from "vitepress";
-import { pageTitle, walkMarkdown } from "../derive.ts";
+import { isRegularFile, readPage, walkMarkdown } from "../derive.ts";
+import { fileSource, sidebarOrder } from "../sidebar.ts";
 import type { PageIndexEntry } from "./launcher-model.ts";
 import { buildPageIndex, type HeadersEnv, sourceHeaders } from "./page-index.ts";
 
@@ -35,18 +40,24 @@ export default {
       config.site.base,
       config.logger,
     );
+    const site = { base: config.site.base, cleanUrls };
     return buildPageIndex(
-      walkMarkdown(srcDir),
-      { base: config.site.base, cleanUrls },
+      sidebarOrder(walkMarkdown(srcDir), fileSource(srcDir, md, site), site),
+      site,
       {
-        title: (file) => pageTitle(srcDir, file),
+        title: (file) => readPage(srcDir, file).title,
         headers: (file, relativePath) => {
           const env: MarkdownEnv & HeadersEnv = {
             path: join(srcDir, relativePath),
             relativePath,
             cleanUrls,
           };
-          return sourceHeaders(md, readFileSync(join(srcDir, file), "utf-8"), env);
+          const sourcePath = join(srcDir, file);
+          return sourceHeaders(md, readFileSync(sourcePath, "utf-8"), env, {
+            file: sourcePath,
+            srcDir,
+            isFile: isRegularFile,
+          });
         },
       },
     );

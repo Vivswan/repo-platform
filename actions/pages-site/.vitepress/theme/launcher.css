@@ -1,13 +1,15 @@
 /*
  * The search launcher: the landing page's panel, the nav's field-shaped
  * button, and the dialog the button opens. Material and metrics come from
- * the tokens in custom.css; the hue appears on the highlighted row and
- * the focused field (each a tint or icon plus a 2px inset ring, so
- * neither state rests on color alone) and on focus rings only. Reading
- * rules hold: 17px-class text, emphasis by weight, left-aligned rows,
- * line-height 1.6 on every row that can wrap (labels, notes, group heads,
- * the fold row, the empty state) and 1.5 on the single-line controls (the
- * input, the keycaps, the nav button).
+ * the tokens in custom.css; the hue appears on the highlighted row (a tint
+ * plus a 2px inset ring, so the state never rests on color alone), on the
+ * focused field (the icon; the ring joins it only while the reader is on
+ * the keyboard) and on focus rings only. Reading rules hold: 17px-class
+ * text, emphasis by weight, left-aligned rows, line-height 1.6 on every
+ * row that can wrap (labels, notes, group heads, the fold row, the empty
+ * state) and 1.5 on the single-line controls (the input, the keycaps, the
+ * nav button). Hover-only rules sit under `@media (hover: hover)`: on a
+ * touch screen a tap would otherwise leave them stuck on.
  * Carbon's own search button is retired here: the launcher owns the
  * shortcut, and keeping `search: local` in the config only ships the
  * index the launcher's full-text fallback loads.
@@ -33,9 +35,11 @@
   /* the dialog mounts under carbon's nav bar, which sets nowrap */
   white-space: normal;
 }
+/* The panel and the dialog rise on the one motion token (its duration and
+ * curve are the animation's), so both read as the same entrance. */
 .fleet-launcher-mode-panel {
   margin: 20px 0 32px;
-  animation: fleet-launcher-rise 240ms cubic-bezier(0.2, 0, 0, 1) both;
+  animation: fleet-launcher-rise var(--fleet-transition) both;
 }
 @keyframes fleet-launcher-rise {
   from {
@@ -67,9 +71,13 @@
   transition: color var(--fleet-transition);
 }
 /* The input's own outline is off; the field wrapper hosts the focus ring
- * so the whole 64px field lights up, not a box inside it. */
-.fleet-launcher-field:has(.fleet-launcher-input:focus-visible) {
+ * so the whole 64px field lights up, not a box inside it. Focus tints the
+ * icon; the ring follows data-keyboard (launcher.ts says why), never
+ * :focus-visible. */
+.fleet-launcher-field:has(.fleet-launcher-input:focus) {
   color: var(--fleet-hue);
+}
+.fleet-launcher[data-keyboard] .fleet-launcher-field:has(.fleet-launcher-input:focus) {
   outline: 2px solid var(--fleet-hue);
   outline-offset: -2px;
 }
@@ -127,10 +135,6 @@
 .fleet-launcher-list:empty {
   padding: 0;
 }
-.fleet-launcher-dialog .fleet-launcher-list {
-  max-height: min(60vh, 560px);
-  overflow-y: auto;
-}
 .fleet-launcher-group-title {
   padding: 16px 20px 6px;
   font-size: 13px;
@@ -142,9 +146,12 @@
   padding: 0 8px;
 }
 
+/* The label takes the row; the target sits at its own width, capped at
+ * 40% of the row so a long heading path (the full-text fallback) wraps
+ * instead of squeezing the label. */
 .fleet-launcher-link {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 36%);
+  grid-template-columns: minmax(0, 1fr) fit-content(40%);
   gap: 16px;
   align-items: baseline;
   min-height: 46px;
@@ -156,11 +163,9 @@
   line-height: 1.6;
   transition: background-color var(--fleet-transition);
 }
-.fleet-launcher-link:hover {
-  background: var(--vp-c-bg-soft-2);
-}
 .fleet-launcher-label {
   font-size: 16.5px;
+  text-wrap: pretty;
 }
 .fleet-launcher-target {
   font-size: 14.5px;
@@ -188,10 +193,6 @@
   transition:
     background-color var(--fleet-transition),
     color var(--fleet-transition);
-}
-.fleet-launcher-fold:hover {
-  background: var(--vp-c-bg-soft-2);
-  color: var(--vp-c-text-1);
 }
 
 .fleet-launcher-empty {
@@ -250,9 +251,6 @@
     border-color var(--fleet-transition),
     box-shadow var(--fleet-transition);
 }
-.VPNavBar .fleet-launcher-button:hover {
-  border-color: var(--fleet-hue);
-}
 .VPNavBar .fleet-launcher-button:focus-visible {
   outline: 2px solid var(--fleet-hue);
   outline-offset: 2px;
@@ -264,14 +262,93 @@
   flex: 1;
   min-width: 0;
 }
+/* One search field on screen at a time: the button hides while its dialog
+ * is open (the dialog's own field replaces it) and is back, and focusable
+ * again, the moment the dialog closes and focus returns to it. */
+.VPNavBar:has(.fleet-launcher-dialog[open]) .fleet-launcher-button {
+  visibility: hidden;
+}
+
+@media (hover: hover) {
+  .fleet-launcher-link:hover,
+  .fleet-launcher-fold:hover,
+  .fleet-launcher-close:hover {
+    background: var(--vp-c-bg-soft-2);
+  }
+  .fleet-launcher-fold:hover,
+  .fleet-launcher-close:hover {
+    color: var(--vp-c-text-1);
+  }
+  .VPNavBar .fleet-launcher-button:hover {
+    border-color: var(--fleet-hue);
+  }
+}
+
+/* In carbon's nav the title column sits left of the flex row that holds
+ * the field, so in-flow centering lands right of the viewport's center.
+ * The field needs the full-width nav bar as its containing block, which
+ * means carbon's positioned content wrappers go static. The width backs
+ * off symmetrically from the title column (the sidebar's width) so the
+ * field never reaches the title. */
+@media (min-width: 960px) {
+  .VPNav .VPNavBar.has-sidebar .content,
+  .VPNav .VPNavBar .content .content-body {
+    position: static;
+  }
+  .VPNavBar .fleet-launcher-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(520px, calc(100% - 2 * (var(--vp-sidebar-width) + 16px)));
+    margin: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+/* From carbon's aside breakpoint up the field spans the reading column, so
+ * it reads as that column's search. It stays in the nav's flex row so a
+ * field that would reach the row's controls shrinks instead of overlapping
+ * (the auto right margin takes the slack when there is room, flex takes
+ * the field when there is not). The article's place is carbon's arithmetic
+ * (VPContent's frame padding, VPDoc's 24px, content and aside centered in
+ * the rest) restated from the row's own width, that area less 16px: the
+ * nav is not a descendant of the layout it aligns to. */
+@media (min-width: 1280px) {
+  .VPNavBar.has-sidebar .fleet-launcher-button {
+    --fleet-reading-area: calc(100% + 16px);
+    --fleet-aside-span: calc(var(--vp-doc-aside-width) + 32px);
+    --fleet-reading-width: min(
+      var(--vp-doc-content-max-width),
+      calc(var(--fleet-reading-area) - var(--fleet-aside-span))
+    );
+    position: static;
+    flex: 0 1 auto;
+    width: var(--fleet-reading-width);
+    min-width: 0;
+    margin: 0 auto 0
+      calc(
+        (var(--fleet-reading-area) - var(--fleet-reading-width) - var(--fleet-aside-span)) /
+        2 -
+        8px
+      );
+    transform: none;
+  }
+  /* A page that drops its aside (frontmatter `aside: false`) centers the
+   * article alone in the column, and the field follows it. */
+  .Layout:has(.VPDoc:not(.has-aside)) .VPNavBar.has-sidebar .fleet-launcher-button {
+    --fleet-aside-span: 0px;
+  }
+}
 
 /* ---------- the dialog ---------- */
 
+/* A flex column, so the list takes what the field and the status line
+ * leave, in dynamic viewport units: on a phone the browser toolbar
+ * would otherwise cover the list's last rows. */
 .fleet-launcher-dialog {
   width: min(720px, 90vw);
   max-width: none;
-  max-height: none;
-  margin: 10vh auto auto;
+  max-height: min(80dvh, 624px);
+  margin: 10dvh auto auto;
   padding: 0;
   border: 1px solid var(--vp-c-border);
   border-radius: var(--fleet-radius-lg);
@@ -284,7 +361,62 @@
   background: var(--vp-backdrop-bg-color);
 }
 .fleet-launcher-dialog[open] {
-  animation: fleet-launcher-rise 180ms cubic-bezier(0.2, 0, 0, 1) both;
+  display: flex;
+  flex-direction: column;
+  animation: fleet-launcher-rise var(--fleet-transition) both;
+}
+/* A modal dialog does not stop the page behind it from scrolling; the
+ * page holds still while one is open, and the list keeps its own
+ * overscroll so a flick at its end does not reach the page either. */
+html:has(.fleet-launcher-dialog[open]) {
+  overflow: hidden;
+}
+.fleet-launcher-dialog .fleet-launcher {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.fleet-launcher-dialog .fleet-launcher-field {
+  flex: none;
+  /* room for the close button seated over the field's right end */
+  padding-right: 64px;
+}
+.fleet-launcher-dialog .fleet-launcher-keys {
+  display: none;
+}
+.fleet-launcher-dialog .fleet-launcher-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fleet-launcher-dialog .fleet-launcher-empty {
+  flex: none;
+}
+/* A 44px tap target, centered on the 64px field. */
+.fleet-launcher-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fleet-radius-md);
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.fleet-launcher-close:focus-visible {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: -2px;
 }
 
 /* ---------- narrow viewports ---------- */
@@ -301,6 +433,11 @@
   .fleet-launcher-field .fleet-launcher-keys {
     display: none;
   }
+  /* 14px is the floor for text that carries information on a phone; the
+   * keycaps stay 12px because they are hidden here. */
+  .fleet-launcher-group-title {
+    font-size: 14px;
+  }
   .fleet-launcher-link {
     grid-template-columns: 1fr;
     gap: 2px;
@@ -313,8 +450,11 @@
     font-size: 14px;
     text-align: left;
   }
+  /* Docked beside the hamburger, the same 48px column it has. */
   .VPNavBar .fleet-launcher-button {
-    width: 40px;
+    width: 48px;
+    height: 48px;
+    margin: 0;
     justify-content: center;
     padding: 0;
     border-color: transparent;
@@ -326,10 +466,15 @@
     display: none;
   }
   .fleet-launcher-dialog {
-    margin-top: 6vh;
+    max-height: 88dvh;
+    margin-top: 6dvh;
   }
-  .fleet-launcher-dialog .fleet-launcher-list {
-    max-height: calc(100vh - 6vh - 56px - 32px);
+  .fleet-launcher-dialog .fleet-launcher-field {
+    padding-right: 56px;
+  }
+  .fleet-launcher-close {
+    top: 6px;
+    right: 6px;
   }
 }
 
@@ -344,6 +489,7 @@
   .vp-doc .fleet-launcher a:hover,
   .fleet-launcher-target,
   .fleet-launcher-fold,
+  .fleet-launcher-close,
   .VPNavBar .fleet-launcher-button {
     transition: none;
   }

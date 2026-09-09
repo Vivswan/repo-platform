@@ -27,10 +27,33 @@
   --fleet-measure: 68ch;
 
   --vp-nav-height: 60px;
-  --vp-sidebar-width: 268px;
+  --vp-sidebar-width: 320px;
   --vp-doc-content-max-width: 760px;
   --vp-doc-aside-width: 240px;
   --vp-layout-max-width: 1440px;
+}
+
+/* Below carbon's aside breakpoint the sidebar shares the width with the
+ * article alone, and a 320px column would leave a 768px viewport a 37ch
+ * article; the doc column keeps 70ch from 1440px up either way. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  :root {
+    --vp-sidebar-width: 280px;
+  }
+}
+
+/* The margin each side of the 1440px frame on a wider viewport. Carbon
+ * offsets only the article by it (VPContent); components.css offsets the
+ * sidebar, the nav's title and controls, and the search field by the same
+ * value so the whole page reads as one centered frame. 100vw, not 100%,
+ * because that is what carbon's article formula uses. */
+:root {
+  --fleet-gutter: 0px;
+}
+@media (min-width: 1440px) {
+  :root {
+    --fleet-gutter: calc((100vw - var(--vp-layout-max-width)) / 2);
+  }
 }
 
 /* Light: paper grounds, ink text, the hue's deep variant. */
@@ -48,6 +71,11 @@
   --vp-c-bg-code: #eaecf0;
   --fleet-field-bg: #ffffff;
   --fleet-scroll: rgba(20, 24, 32, 0.18);
+  /* content scrollers (tables, code): the edge shade that says "more this
+   * way" (the thumb's own tint, so it reads as one system) and the thumb at
+   * 3:1 on the code ground */
+  --fleet-scroll-shade: rgba(20, 24, 32, 0.22);
+  --fleet-scroll-strong: rgba(20, 24, 32, 0.5);
 
   --vp-c-divider: rgba(20, 24, 32, 0.1);
   --vp-c-border: rgba(20, 24, 32, 0.18);
@@ -67,8 +95,30 @@
   --color-action-list-item-default-selected-bg: rgba(20, 24, 32, 0.04);
   --color-action-list-item-default-active-border: transparent;
 
+  --vp-shadow-1: 0 1px 2px rgba(20, 24, 32, 0.06), 0 1px 3px rgba(20, 24, 32, 0.08);
   --vp-shadow-3: 0 12px 32px rgba(20, 24, 32, 0.1), 0 2px 6px rgba(20, 24, 32, 0.06);
   --vp-shadow-4: 0 24px 60px rgba(20, 24, 32, 0.12), 0 2px 8px rgba(20, 24, 32, 0.06);
+
+  /* the two alert kinds that are not the hue (carbon's GitHub alert values,
+   * 4.5:1 on the panel ground bg-soft); the hue kinds are declared below */
+  --color-warning: #9a6700;
+  --color-caution: #d1242f;
+
+  /* the code palette (config.mts builds shiki's theme from these names;
+   * every value clears 4.5:1 on bg-code) */
+  --fleet-code-foreground: #1c1f26;
+  --fleet-code-token-comment: #5f6673;
+  --fleet-code-token-string: #0b4a8b;
+  --fleet-code-token-string-expression: #0b4a8b;
+  --fleet-code-token-constant: #005cc5;
+  --fleet-code-token-keyword: #b8232f;
+  --fleet-code-token-function: #6639b6;
+  --fleet-code-token-parameter: #1c1f26;
+  --fleet-code-token-punctuation: #585f6c;
+  --fleet-code-token-link: #0b4a8b;
+  --fleet-code-token-inserted: #1a6b2f;
+  --fleet-code-token-deleted: #b8232f;
+  --fleet-code-token-changed: #7a4f00;
 }
 
 /* Dark: night grounds, chalk text, the hue's light variant. */
@@ -86,6 +136,8 @@
   --vp-c-bg-code: #23262e;
   --fleet-field-bg: #1b1e24;
   --fleet-scroll: rgba(255, 255, 255, 0.14);
+  --fleet-scroll-shade: rgba(255, 255, 255, 0.22);
+  --fleet-scroll-strong: rgba(255, 255, 255, 0.36);
 
   --vp-c-divider: rgba(255, 255, 255, 0.09);
   --vp-c-border: rgba(255, 255, 255, 0.16);
@@ -104,8 +156,26 @@
   --color-action-list-item-default-selected-bg: rgba(255, 255, 255, 0.04);
   --color-action-list-item-default-active-border: transparent;
 
+  --vp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
   --vp-shadow-3: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
   --vp-shadow-4: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  --color-warning: #d29922;
+  --color-caution: #f85149;
+
+  --fleet-code-foreground: #e7e9ee;
+  --fleet-code-token-comment: #8c94a6;
+  --fleet-code-token-string: #9ecbff;
+  --fleet-code-token-string-expression: #9ecbff;
+  --fleet-code-token-constant: #79b8ff;
+  --fleet-code-token-keyword: #f97583;
+  --fleet-code-token-function: #b392f0;
+  --fleet-code-token-parameter: #e7e9ee;
+  --fleet-code-token-punctuation: #a5acb8;
+  --fleet-code-token-link: #9ecbff;
+  --fleet-code-token-inserted: #85e89d;
+  --fleet-code-token-deleted: #f97583;
+  --fleet-code-token-changed: #ffab70;
 }
 
 /* The hue set. Slot 0 is amber, declared above as the default. */
@@ -174,21 +244,21 @@ html.dark[data-fleet-hue="5"] {
 
   --vp-c-default-soft: var(--vp-c-bg-soft-2);
 
-  --vp-c-tip-soft: var(--fleet-hue-band);
-  --vp-c-important-soft: var(--fleet-hue-band);
   --vp-c-warning-soft: var(--vp-c-bg-soft-2);
   --vp-c-danger-1: var(--vp-c-text-1);
   --vp-c-danger-soft: var(--vp-c-bg-soft-2);
-  --vp-c-caution-soft: var(--vp-c-bg-soft-2);
   --vp-c-success-1: var(--vp-c-text-1);
   --vp-c-success-soft: var(--vp-c-bg-soft-2);
 
-  /* carbon's custom-block.css reads these GitHub names for the title color */
+  /* one color per custom-block kind, on carbon's GitHub names (its
+   * custom-block.css reads them for the rule and title; components.css reads
+   * them for the kinds carbon has no rule for); warning and caution are per
+   * mode above */
   --color-note: var(--fleet-hue);
   --color-tip: var(--fleet-hue);
-  --color-warning: var(--vp-c-text-1);
-  --color-caution: var(--vp-c-text-1);
   --color-important: var(--fleet-hue);
+  --color-info: var(--fleet-hue);
+  --color-details: var(--fleet-hue);
 
   --vp-code-font-size: 15px;
   --vp-code-line-height: 1.65;

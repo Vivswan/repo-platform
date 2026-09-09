@@ -1,4 +1,9 @@
-# The skills module
+---
+order: 130
+group: Modules
+---
+
+# Skills
 
 Selecting the `skills` module lets a repository host its own agent skills (consumable by `npx skills add <repo>` and Claude Code plugin tooling) with centrally-managed validation. The published layout:
 

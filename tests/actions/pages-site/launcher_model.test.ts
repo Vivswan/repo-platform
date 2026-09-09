@@ -9,6 +9,7 @@ import {
   queryTokens,
   type ResolvedHref,
   resolveHref,
+  splitRows,
 } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import { buildPageIndex } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
 
@@ -61,7 +62,7 @@ const ROOT_GROUPS: LauncherGroup[] = [
     key: "/repo/new-repo.html",
     title: "New repo",
     kind: "page",
-    folded: false,
+    folded: true,
     items: [
       {
         label: "Create a new managed repository",
@@ -184,6 +185,83 @@ describe("buildGroups", () => {
     expect(buildGroups(CURATED, PAGES, "root")).toEqual(ROOT_GROUPS);
   });
 
+  test("a file named with characters a URL reserves is reached by its escaped href and emitted escaped, on every row that links it", () => {
+    const pages = [
+      page("/repo/", "Docs", "", "root"),
+      page("/repo/z#b.html", "Hash", "", "root", [h("Part", "part")]),
+    ];
+    const curated: CuratedRow[] = [{ label: "Go", href: "./z%23b.html#part", note: null }];
+    expect(buildGroups(curated, pages, "root")).toEqual([
+      {
+        key: "/repo/z#b.html",
+        title: "Hash",
+        kind: "page",
+        folded: false,
+        items: [
+          { label: "Go", href: "/repo/z%23b.html#part", note: null, source: "curated" },
+          { label: "Hash", href: "/repo/z%23b.html", note: "z#b", source: "page" },
+        ],
+      },
+    ]);
+  });
+
+  test("a page group folds its headings behind its curated and page rows; a curated row never hides", () => {
+    const [newRepo] = buildGroups(CURATED, PAGES, "root");
+    expect(splitRows(newRepo.kind, newRepo.items)).toEqual({
+      kept: [ROOT_GROUPS[0].items[0]],
+      foldable: ROOT_GROUPS[0].items.slice(1),
+    });
+  });
+
+  // The landing table of a real site reaches most pages, so the fold rule
+  // must hold with a curated row in the group: only the headings fold.
+  const heads = (count: number) => Array.from({ length: count }, (_, i) => h(`H${i}`, `h${i}`));
+  const site = (headers: PageIndexEntry["headers"], dirPages = 0): PageIndexEntry[] => [
+    page("/repo/", "Docs", "", "root"),
+    page("/repo/guide.html", "Guide", "", "root", headers),
+    ...Array.from({ length: dirPages }, (_, i) =>
+      page(`/repo/api/p${i}.html`, `P${i}`, "api", "root"),
+    ),
+  ];
+  const curated: CuratedRow[] = [{ label: "Start", href: "guide.md#h0", note: null }];
+  test.each<[string, CuratedRow[], PageIndexEntry[], [string, boolean][]]>([
+    ["one heading stays in view", [], site(heads(1)), [["Guide", false]]],
+    ["two headings fold", [], site(heads(2)), [["Guide", true]]],
+    [
+      "a curated row leaves the page group's headings folding",
+      curated,
+      site(heads(3)),
+      [["Guide", true]],
+    ],
+    [
+      "a curated row taking the only other heading leaves one",
+      curated,
+      site(heads(2)),
+      [["Guide", false]],
+    ],
+    [
+      "a directory at the threshold stays open",
+      [],
+      site([], 8),
+      [
+        ["Guide", false],
+        ["Api", false],
+      ],
+    ],
+    [
+      "a directory past the threshold folds",
+      [],
+      site([], 9),
+      [
+        ["Guide", false],
+        ["Api", true],
+      ],
+    ],
+  ])("%s", (_, rows, pages, expected) => {
+    const groups = buildGroups(rows, pages, "root");
+    expect(groups.map((group) => [group.title, group.folded])).toEqual(expected);
+  });
+
   test("a directory group with more than eight items starts folded", () => {
     const groups = buildGroups([], [PAGES[0], ...PAGES.slice(3, 6)], "root");
     expect(groups).toEqual([
@@ -247,7 +325,7 @@ describe("buildGroups", () => {
         key: "/repo/new-repo.html",
         title: "New repo",
         kind: "page",
-        folded: false,
+        folded: true,
         items: [
           {
             label: "Print",
@@ -329,6 +407,11 @@ describe("resolveHref", () => {
       { key: "/repo/", href: "/repo/#quick-triage", suffix: "#quick-triage" },
     ],
     ["%E6%96%B0.md", "/repo/", { key: "/repo/新", href: "/repo/%E6%96%B0.md", suffix: "" }],
+    // A reserved character escaped in the href names the file spelled with
+    // it: the key decodes every escape, the href keeps them.
+    ["z%26b.md", "/repo/", { key: "/repo/z&b", href: "/repo/z%26b.md", suffix: "" }],
+    ["z%23b.md", "/repo/", { key: "/repo/z#b", href: "/repo/z%23b.md", suffix: "" }],
+    ["z%3Fb.md#x", "/repo/", { key: "/repo/z?b", href: "/repo/z%3Fb.md#x", suffix: "#x" }],
     [
       "download.zip?q=a%2526b#x%20y",
       "/repo/",

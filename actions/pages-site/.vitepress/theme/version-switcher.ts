@@ -24,7 +24,7 @@ export default defineComponent({
         "select",
         {
           class: "docs-site-version-switcher",
-          "aria-label": "Documentation version",
+          "aria-label": "Version",
           onChange: (event: Event) => {
             const link = (event.target as HTMLSelectElement).value;
             if (link !== "") window.location.href = link;

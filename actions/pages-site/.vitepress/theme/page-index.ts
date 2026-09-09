@@ -6,6 +6,7 @@
 // env), so VitePress's own pipeline, frontmatter stripping included, is
 // what decides which headings exist.
 
+import { dirname, join } from "node:path";
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
 import { deriveRewrites, detectLocales, routeOf } from "../derive.ts";
@@ -34,22 +35,68 @@ export function renderedHeaders(env: HeadersEnv): PageHeader[] {
   return env.launcherHeaders;
 }
 
-/** VitePress's `<!-- @include: file -->` directive, by its opening shape. */
-const INCLUDE_DIRECTIVE = /<!--\s*@include:/;
+/** VitePress's include directive and the suffixes its `processIncludes`
+ *  strips from the capture before resolving: a `#region` and a `{start,end}`
+ *  line range (the region test is unanchored, as VitePress's is). */
+const INCLUDE_DIRECTIVE = /<!--\s*@include:\s*(.*?)\s*-->/g;
+const INCLUDE_REGION = /(#[\w-]+)/;
+const INCLUDE_RANGE = /\{(\d*),(\d*)\}$/;
+
+/** What VitePress resolves a page's include directives against. */
+export interface IncludeScope {
+  /** The page's absolute source path; a relative include is joined to its
+   *  directory. */
+  file: string;
+  /** The site's srcDir; an `@/` include is joined to it. */
+  srcDir: string;
+  /** Whether VitePress's read of `path` succeeds: a regular file, not a
+   *  directory (a capture of only `./` or `#region` names the page's own
+   *  directory) and not a path through a file; VitePress leaves both
+   *  literal. */
+  isFile(path: string): boolean;
+}
+
+/** The file VitePress's `processIncludes` would read for one directive
+ *  capture, or null for the empty capture it leaves alone. */
+function includeTarget(
+  capture: string,
+  scope: Pick<IncludeScope, "file" | "srcDir">,
+): string | null {
+  if (capture.length === 0) return null;
+  const region = INCLUDE_REGION.exec(capture)?.[0] ?? "";
+  const range = INCLUDE_RANGE.exec(capture)?.[0] ?? "";
+  const path = region || range ? capture.slice(0, -(region.length + range.length)) : capture;
+  return path[0] === "@"
+    ? join(scope.srcDir, path.slice(path[1] === "/" ? 2 : 1))
+    : join(dirname(scope.file), path);
+}
+
+/** Whether VitePress's page transform expands at least one include in
+ *  `source`: it replaces a directive only when it can read the file it
+ *  names and leaves the rest of them, a mention in prose or a code span
+ *  among them, as written. */
+export function expandsIncludes(source: string, scope: IncludeScope): boolean {
+  return Array.from(source.matchAll(INCLUDE_DIRECTIVE)).some((match) => {
+    const target = includeTarget(match[1] ?? "", scope);
+    return target !== null && scope.isFile(target);
+  });
+}
 
 /** The launcher's headers of a page's source rendered through `md`. A
- *  source that uses the include directive gets NONE: the directive expands
- *  only inside VitePress's page transform, so a bare render numbers its
- *  anchors without the included headings (a page's own `## Install` below
- *  an included `## Install` serves as #install-1 while the bare render
- *  says #install). A missing row costs a shortcut; a shifted anchor
- *  misdirects, and full-text search still reaches those headings. */
+ *  source whose include directive VitePress would expand gets NONE: the
+ *  directive expands only inside the page transform, so a bare render
+ *  numbers its anchors without the included headings (a page's own
+ *  `## Install` below an included `## Install` serves as #install-1 while
+ *  the bare render says #install). A missing row costs a shortcut; a
+ *  shifted anchor misdirects, and full-text search still reaches those
+ *  headings. */
 export function sourceHeaders(
   md: Pick<MarkdownRenderer, "render">,
   source: string,
   env: HeadersEnv,
+  scope: IncludeScope,
 ): PageHeader[] {
-  if (INCLUDE_DIRECTIVE.test(source)) return [];
+  if (expandsIncludes(source, scope)) return [];
   md.render(source, env);
   return renderedHeaders(env);
 }

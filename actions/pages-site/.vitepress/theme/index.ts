@@ -8,6 +8,7 @@ import "@fontsource-variable/jetbrains-mono";
 import { inBrowser, type Theme } from "vitepress";
 import { VPCarbon } from "vitepress-carbon";
 import { h } from "vue";
+import type { ProjectFacts } from "../../facts.ts";
 import "./custom.css";
 import "./components.css";
 import "./launcher.css";
@@ -29,12 +30,22 @@ export default {
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);
     ctx.app.component("FleetLauncher", FleetLauncher);
+    if (inBrowser) {
+      // The built pages carry data-fleet-hue from config.mts's
+      // transformHtml (so the hue is there before any script runs);
+      // `vitepress dev` never runs that hook, so the dev server would
+      // show the default hue without this.
+      const facts: ProjectFacts | undefined = ctx.siteData.value.themeConfig.docsSiteFacts;
+      const root = document.documentElement;
+      if (facts && root.dataset.fleetHue === undefined) root.dataset.fleetHue = String(facts.hue);
+      return;
+    }
     // Vue's production SSR renderer catches a page's render error, logs
     // it, and emits the page with an EMPTY body (a literal `{{ x.y }}` in
     // markdown is compiled as an interpolation and blows up there), so
     // `vitepress build` stayed green while shipping blank pages. Only this
     // flag makes the render throw: a rethrowing app.config.errorHandler is
     // itself wrapped in callWithErrorHandling and logged the same way.
-    if (!inBrowser) ctx.app.config.throwUnhandledErrorInProduction = true;
+    ctx.app.config.throwUnhandledErrorInProduction = true;
   },
 } satisfies Theme;

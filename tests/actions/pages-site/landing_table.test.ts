@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import {
-  alertTitlesRule,
-  CUSTOM_BLOCK_LABELS,
-} from "../../../actions/pages-site/.vitepress/custom-blocks.ts";
 import { inlineTextRule } from "../../../actions/pages-site/.vitepress/inline-text.ts";
 import {
   isLandingPath,
@@ -14,9 +10,9 @@ import {
 import type { CuratedRow } from "../../../actions/pages-site/.vitepress/theme/launcher-model.ts";
 import {
   type HeadersEnv,
-  headersRule,
   renderedHeaders,
 } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
+import { REWRITES, vitepressRenderer } from "./vitepress_renderer.ts";
 
 type Md = Parameters<typeof landingTableRule>[0];
 
@@ -26,10 +22,6 @@ const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 const MarkdownIt = createRequire(join(ACTION_DIR, "package.json"))("markdown-it") as new (options: {
   html: boolean;
 }) => Md;
-
-/** A docs tree indexed by READMEs at the root and in ja/, with a guide/
- *  directory that carries both spellings (its README keeps its own route). */
-const REWRITES = { "README.md": "index.md", "ja/README.md": "ja/index.md" };
 
 function renderers(): { plain: Md; withRule: Md } {
   const plain = new MarkdownIt({ html: true });
@@ -243,32 +235,6 @@ describe("landingTableRule", () => {
     expect(withRule.render(src, { ...LANDING })).toBe(launcherTag(rows));
   });
 });
-
-/** VitePress's shared renderer with the fleet's rules, as config.mts
- *  installs them; createMarkdownRenderer returns one process-wide instance,
- *  so every caller passes the same options. */
-async function vitepressRenderer(): Promise<Md> {
-  const vitepress = (await import(
-    join(ACTION_DIR, "node_modules", "vitepress", "dist", "node", "index.js")
-  )) as {
-    createMarkdownRenderer(srcDir: string, options: object, base: string): Promise<Md>;
-  };
-  return vitepress.createMarkdownRenderer(
-    ACTION_DIR,
-    {
-      highlight: () => "",
-      headers: { level: [2, 3] },
-      container: CUSTOM_BLOCK_LABELS,
-      config(md: Md) {
-        inlineTextRule(md);
-        landingTableRule(md, REWRITES);
-        headersRule(md);
-        alertTitlesRule(md);
-      },
-    },
-    "/repo/",
-  );
-}
 
 describe("landingTableRule under VitePress's renderer", () => {
   test("hrefs come out normalized, links are recorded for the dead-link check, entities decode", async () => {

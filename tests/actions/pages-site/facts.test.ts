@@ -23,7 +23,6 @@ const HEAD_INPUT = {
 const EMPTY_FACTS: ProjectFacts = {
   repository: "fixture-owner/fixture-repo",
   repoUrl: "https://github.com/fixture-owner/fixture-repo",
-  name: "fixture-repo",
   description: null,
   homepage: null,
   topics: [],
