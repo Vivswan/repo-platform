@@ -23,6 +23,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// A nested list or mapping is named by shape: JSON.stringify throws on the
+// cycle a YAML alias can build, which would turn a bad entry into a crash.
+function describeEntry(entry: unknown): string {
+  if (Array.isArray(entry)) return "(a list)";
+  if (typeof entry === "object" && entry !== null) return "(a mapping)";
+  return JSON.stringify(entry) ?? String(entry);
+}
+
 export function readModules(
   data: unknown,
   label = ".repo-platform.yml",
@@ -50,7 +58,7 @@ export function readModules(
   const modules: string[] = [];
   for (const entry of raw) {
     if (typeof entry !== "string" || entry === "") {
-      errors.push(`${label}: ${key} entry ${JSON.stringify(entry)} is not a module name`);
+      errors.push(`${label}: ${key} entry ${describeEntry(entry)} is not a module name`);
       continue;
     }
     if (seen.has(entry)) {
@@ -64,6 +72,21 @@ export function readModules(
     return { modules: null, errors };
   }
   return { modules, errors: [] };
+}
+
+/** The module names a .repo-platform.yml TEXT declares (the fleet plans read
+ *  the file off the API, so the parse lives with the grammar); null when the
+ *  document or its top-level modules list is unreadable. logLevel error: the
+ *  parser's default level prints warned-on source lines (target content) to
+ *  stderr, which the plans' public logs must never carry. */
+export function declaredModules(registrationText: string): string[] | null {
+  let data: unknown;
+  try {
+    data = parse(registrationText, { logLevel: "error" });
+  } catch {
+    return null;
+  }
+  return readModules(data).modules;
 }
 
 // Extract the module choice values from parsed copier.yml data.

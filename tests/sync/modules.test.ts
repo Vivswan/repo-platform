@@ -46,6 +46,17 @@ describe("readModules", () => {
     });
   });
 
+  test("names a nested entry by shape, so a self-referencing alias is an error, not a crash", () => {
+    expect(readModules(parse("modules: [&loop [*loop], {a: 1}, null]"))).toEqual({
+      modules: null,
+      errors: [
+        `${FILE}: modules entry (a list) is not a module name`,
+        `${FILE}: modules entry (a mapping) is not a module name`,
+        `${FILE}: modules entry null is not a module name`,
+      ],
+    });
+  });
+
   test("fails on a duplicate entry", () => {
     expect(readModules(parse("modules: [agents, agents]"))).toEqual({
       modules: null,

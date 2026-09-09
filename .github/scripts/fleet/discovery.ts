@@ -111,9 +111,10 @@ const dispatchEvent = z.object({
  * non-empty ONLY_REPO env overrides the event payload's dispatch input
  * (post-green's called sync, the harnesses, and local runs pass it that
  * way). With `owner`, a bare name gets it prefixed, except the scope tokens
- * (all, public, private). The typed dispatch input may be a private slug,
- * so IT never rides in as step env: the runner prints step env into the
- * public log group; the event payload on disk is not logged. */
+ * (all, public, private, modules:...), which are never repo names. The typed
+ * dispatch input may be a private slug, so IT never rides in as step env: the
+ * runner prints step env into the public log group; the event payload on
+ * disk is not logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
   if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {

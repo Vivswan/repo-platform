@@ -27,7 +27,9 @@ on:
     inputs:
       repo:
         description: >-
-          owner/name to sync, a comma-separated list of them, the visibility tokens public and private, or the
+          owner/name to sync, a comma-separated list of them, the visibility tokens public and private,
+          modules:<a>+<b> (every managed repo whose .repo-platform.yml selects ALL the listed modules;
+          a visibility token intersects with it, a slug adds as typed), or the
           literal "all" - same as leaving it empty, every managed repo
           (recovery requires an explicit value)
         required: false
@@ -61,7 +63,8 @@ on:
         description: >-
           "all", or a comma-separated list of owner/name slugs and the
           visibility tokens public and private (fleet/sync_scope.ts); a
-          private repo may appear only under its token here
+          private repo may appear only under its token here, and the
+          dispatch-only modules: filter never does
         required: true
         type: string
       sha:

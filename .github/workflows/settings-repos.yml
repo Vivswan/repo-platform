@@ -30,7 +30,9 @@ on:
       repo:
         description: >-
           owner/name to heal (or a bare name, same owner), a
-          comma-separated list of them, public, private, or the literal "all" - same as
+          comma-separated list of them, public, private, modules:<a>+<b> (every
+          target whose .repo-platform.yml selects ALL the listed modules; a
+          visibility token intersects with it), or the literal "all" - same as
           leaving it empty, every settings target
         required: false
         type: string
@@ -53,7 +55,8 @@ on:
         description: >-
           "all", or a comma-separated list of owner/name slugs and the
           visibility tokens public and private (fleet/sync_scope.ts); a
-          private repo may appear only under its token here
+          private repo may appear only under its token here, and the
+          dispatch-only modules: filter never does
         required: true
         type: string
       sha:
