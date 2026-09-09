@@ -14,7 +14,7 @@ Selecting the `docs-site` module publishes a repository's `docs/` markdown as a 
 | `.../<repo>/vX.Y.Z/` | that tag's docs, one directory per kept tag |
 | `.../<repo>/versions.json` | the version index the theme's dropdown is fed from |
 
-Standalone, deploys run on pushes touching `docs/**`, nightly (04:41 UTC), and on dispatch; composed with the pages module, the deploy rides `pages.yml` instead (downstream of the `all-green` gate on every push to the default branch, 04:23 UTC nightly). Both shapes share the tag rules, version cap (`PAGES_MAX_VERSIONS`, default 5), custom-domain contract, and one-time setup of the [pages module](pages.md), whose pipeline this module shares.
+Standalone, deploys run on pushes touching `docs/**`, nightly (04:41 UTC), and on dispatch; composed with the pages module, the deploy rides `pages.yml` instead (downstream of the `all-green` gate on every push to the default branch, 04:23 UTC nightly). repo-platform's own site has one more trigger, from outside the module: every green push to main that advances the `build` branch dispatches its deploy from [post-green.yml](../.github/workflows/post-green.yml), because the push-triggered deploy starts before the branch is republished and would otherwise render the previous theme ([all-green.md](all-green.md#after-the-gate)); the `pages` lane serializes the two, and the dispatched one lands last. Both shapes share the tag rules, version cap (`PAGES_MAX_VERSIONS`, default 5), custom-domain contract, and one-time setup of the [pages module](pages.md), whose pipeline this module shares.
 
 ## Content conventions
 

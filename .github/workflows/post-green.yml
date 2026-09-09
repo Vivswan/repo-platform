@@ -110,11 +110,22 @@ jobs:
       # commit this run must not touch (that commit's own run publishes
       # it).
       - name: Publish the build branch
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
+
+      # This repository's docs site consumes @build, and its push-triggered
+      # deploy starts before this job advances the branch (docs/all-green.md,
+      # "After the gate"). Idempotent: a repeat rebuilds the same site. The
+      # PAT, because ci.yml's caller caps GITHUB_TOKEN at contents: read.
+      - name: Redeploy this repository's docs site from the new build tip
+        if: steps.publish.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: gh workflow run docs-site.yml --ref main --repo "$GITHUB_REPOSITORY"
 
   # The merged PRs' opt-in to an immediate fleet sync, read off every commit
   # since the last published build (fleet_sync_marker.ts) and handed to
