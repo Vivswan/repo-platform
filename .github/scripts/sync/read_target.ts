@@ -5,8 +5,10 @@
 // masked BEFORE anything is written. Resolves the delivery mode too: a
 // dispatch naming a `branch` (read off the event payload, never a step
 // input) puts the sync in branch mode - checkout_ref is that branch and the
-// render lands on it - after refusing the default branch and a branch the
-// target does not have.
+// render lands on it. The mode outputs are written before the branch
+// refusals (the default branch, a branch the target does not have): a
+// refusal's failure report must file under the branch's title, not the
+// default sync's (failure_issue.ts).
 //
 // Env: TARGET, TARGET_DISPLAY, HIDE_DETAILS, GH_TOKEN, RUNNER_TEMP,
 // GITHUB_OUTPUT, GITHUB_EVENT_PATH (TARGET_BRANCH overrides the payload).
@@ -76,8 +78,11 @@ setOutput("default_branch", branch);
 setOutput("private", String(info.private));
 
 const targetBranch = readDispatchBranch();
+if (hideDetails() && targetBranch !== "") addMask(targetBranch);
+setOutput("mode", targetBranch === "" ? "default" : "branch");
+setOutput("checkout_ref", targetBranch === "" ? branch : targetBranch);
+setOutput("branch", targetBranch);
 if (targetBranch !== "") {
-  if (hideDetails()) addMask(targetBranch);
   const display = env("TARGET_DISPLAY");
   const shown = hideDetails() ? "(name hidden: private repository)" : `'${targetBranch}'`;
   if (targetBranch === branch) {
@@ -117,6 +122,3 @@ if (targetBranch !== "") {
     process.exit(1);
   }
 }
-setOutput("mode", targetBranch === "" ? "default" : "branch");
-setOutput("checkout_ref", targetBranch === "" ? branch : targetBranch);
-setOutput("branch", targetBranch);

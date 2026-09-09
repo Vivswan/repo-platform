@@ -4,7 +4,7 @@
 // workflow-file change names the Workflows scope, README).
 // Env: TARGET, TARGET_DISPLAY (log label), BRANCH, DISPLAY, PAT, HIDE_DETAILS, RUNNER_TEMP,
 // GITHUB_OUTPUT; MODE (default|branch), BASE_BRANCH, and MODULES (the branch's selection) shape
-// the branch-mode subject.
+// the branch-mode subject; CHECKOUT_SHA (branch mode) is the commit the run checked out.
 
 import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
@@ -110,31 +110,42 @@ if (mustCapture(git("status", "--porcelain")) !== "") {
 }
 
 // The checkout kept no credentials (persist-credentials: false);
-// authenticate this push alone. The lease: the branch is regenerated every
-// run, so remote commits are overwritten by design, but any push racing
-// this run fails the lease loudly instead of vanishing.
+// authenticate this push alone.
 const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${target}.git`;
-// Captured, not mustCapture (inherited stderr would stream git's failure
-// text raw): git strips URL userinfo only version-dependently, and even
-// the stripped remainder names the repo - the leak for a hidden target.
-const lease = capture(git("ls-remote", pushUrl, `refs/heads/${branch}`));
-if (lease.exitCode !== 0) {
-  const leaseErr = redactText(lease.stderr);
-  if (hideDetails()) {
-    console.log("(ls-remote output hidden: private repository)");
-    recordHiddenFailure("branch lease", lease.exitCode, leaseErr);
-  } else {
-    writeSync(2, leaseErr);
+
+/** The rolling branch's current remote tip: it is regenerated every run,
+ * so remote commits are overwritten by design, but any push racing this
+ * run fails the lease loudly instead of vanishing. An empty sha means
+ * "expect the ref to be absent", so a branch created concurrently also
+ * fails the lease. */
+function remoteTipLease(): string {
+  // Captured, not mustCapture (inherited stderr would stream git's failure
+  // text raw): git strips URL userinfo only version-dependently, and even
+  // the stripped remainder names the repo - the leak for a hidden target.
+  const lease = capture(git("ls-remote", pushUrl, `refs/heads/${branch}`));
+  if (lease.exitCode !== 0) {
+    const leaseErr = redactText(lease.stderr);
+    if (hideDetails()) {
+      console.log("(ls-remote output hidden: private repository)");
+      recordHiddenFailure("branch lease", lease.exitCode, leaseErr);
+    } else {
+      writeSync(2, leaseErr);
+    }
+    if (lease.timedOut) console.error("git timed out (proc.ts hang bound)");
+    console.log(
+      `::error::reading the branch lease from ${targetDisplay} failed (${failureShape(lease, leaseErr)}). ${diagnosticsChannel()}`,
+    );
+    process.exit(lease.exitCode);
   }
-  if (lease.timedOut) console.error("git timed out (proc.ts hang bound)");
-  console.log(
-    `::error::reading the branch lease from ${targetDisplay} failed (${failureShape(lease, leaseErr)}). ${diagnosticsChannel()}`,
-  );
-  process.exit(lease.exitCode);
+  return lease.stdout.replace(/\n+$/, "").split("\t")[0];
 }
-// An empty lease sha means "expect the ref to be absent", so a branch
-// created concurrently also fails the lease.
-const leaseSha = lease.stdout.replace(/\n+$/, "").split("\t")[0];
+
+// Branch mode pushes onto a developer's branch, so the lease is the commit
+// this run checked out (the base the render was built on): a commit the
+// developer pushed meanwhile fails the lease instead of being overwritten.
+// A tip read now would equal that newer commit and let the force push
+// erase it.
+const leaseSha = env("MODE") === "branch" ? requireEnv("CHECKOUT_SHA") : remoteTipLease();
 
 function doPush(): { exitCode: number; timedOut: boolean; stderr: string } {
   const push = capture(git("push", `--force-with-lease=${branch}:${leaseSha}`, pushUrl, branch));

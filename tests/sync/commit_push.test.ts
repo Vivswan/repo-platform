@@ -16,10 +16,16 @@ const fixtures = tempDirs();
 const REPO_ROOT = join(import.meta.dir, "../..");
 const SCRIPT = join(REPO_ROOT, ".github/scripts/sync/commit_push.ts");
 const SENTINEL = "ghp_SENTINEL";
-const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@github.com/o/r.git/': The requested URL returned error: 403`;
+const PUSH_URL = `https://x-access-token:${SENTINEL}@github.com/o/r.git`;
+const GIT_ERROR = `fatal: unable to access '${PUSH_URL}/': The requested URL returned error: 403`;
+/** The remote tip the stub's ls-remote answers. */
+const REMOTE_TIP = "0123456789012345678901234567890123456789";
+/** The commit the run checked out (actions/checkout's commit output). */
+const CHECKOUT_SHA = "abcdef0123456789abcdef0123456789abcdef01";
 
 // Case order matters: the push argv also contains the URL, so ls-remote
-// must match first. STUB_MODE=lease-fail fails the lease probe; push-fail
+// must match first. Both remote calls record their argv in
+// $STUB_STATE.remote. STUB_MODE=lease-fail fails the lease probe; push-fail
 // serves the lease and fails the push itself; stale-push-fail fails the
 // push with stale-lease evidence flanked by 403-shaped progress bytes;
 // protect-push-fail fails it quoting a file whose NAME says "stale info";
@@ -27,13 +33,15 @@ const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@g
 const STUB_GIT = `#!/bin/sh
 case "$*" in
   *ls-remote*)
+    printf '%s\\n' "$*" >> "$STUB_STATE.remote"
     if [ "$STUB_MODE" = "lease-fail" ]; then
       echo "${GIT_ERROR}" >&2
       exit 128
     fi
-    printf '0123456789012345678901234567890123456789\\trefs/heads/automation/repo-platform\\n'
+    printf '${REMOTE_TIP}\\trefs/heads/automation/repo-platform\\n'
     exit 0 ;;
   *" push "*)
+    printf '%s\\n' "$*" >> "$STUB_STATE.remote"
     if [ "$STUB_MODE" = "stale-push-fail" ]; then
       echo "remote: Resolving deltas: 100% (403/403), done." >&2
       echo " ! [rejected]        automation/repo-platform -> automation/repo-platform (stale info)" >&2
@@ -114,11 +122,14 @@ function runCommitPush(
   return { ...result, runnerTemp };
 }
 
-/** The `git commit` argv lines the stub recorded for a run. */
-function recordedCommits(runnerTemp: string): string[] {
-  const file = join(runnerTemp, "push-state.commits");
+/** The argv lines the stub recorded for a run: `git commit` calls in
+ * `.commits`, the remote calls (ls-remote, push) in `.remote`. */
+function recorded(runnerTemp: string, kind: "commits" | "remote"): string[] {
+  const file = join(runnerTemp, `push-state.${kind}`);
   return existsSync(file) ? readFileSync(file, "utf-8").trimEnd().split("\n") : [];
 }
+
+const BRANCH_MODE = { MODE: "branch", BASE_BRANCH: "main", CHECKOUT_SHA };
 
 // The subject is the one thing the commit step decides; the stub reports a
 // dirty tree (STUB_DIRTY) so the commit runs, and records its argv.
@@ -131,12 +142,12 @@ describe("commit_push subjects", () => {
     },
     {
       reason: "branch mode names the module the branch adds over the default branch's selection",
-      env: { MODE: "branch", BASE_BRANCH: "main", MODULES: '["uv","fuzzer"]' },
+      env: { ...BRANCH_MODE, MODULES: '["uv","fuzzer"]' },
       subject: "chore: render the fuzzer module",
     },
     {
       reason: "branch mode with the selection unchanged falls back to the sync subject",
-      env: { MODE: "branch", BASE_BRANCH: "main", MODULES: '["uv"]' },
+      env: { ...BRANCH_MODE, MODULES: '["uv"]' },
       subject: "chore: update repo-platform template to v1 (abcdef012345)",
     },
   ])("$reason", ({ env, subject }) => {
@@ -144,10 +155,43 @@ describe("commit_push subjects", () => {
       STUB_DIRTY: "1",
       ...env,
     });
-    expect({ exitCode: result.exitCode, commits: recordedCommits(result.runnerTemp) }).toEqual({
+    expect({ exitCode: result.exitCode, commits: recorded(result.runnerTemp, "commits") }).toEqual({
       exitCode: 0,
       commits: [`-C target commit -qm ${subject}`],
     });
+  });
+});
+
+// The lease decides which of two concurrent commits survives the force
+// push. The stub's remote tip (REMOTE_TIP) has moved past the checkout
+// (CHECKOUT_SHA) in every row, the way a developer's push during the run
+// moves a PR branch.
+describe("commit_push lease", () => {
+  test.each<{ reason: string; env: Record<string, string>; remote: string[] }>([
+    {
+      reason:
+        "branch mode leases against the checked-out commit without reading the tip, so the developer's newer commit fails the push instead of being overwritten",
+      env: { ...BRANCH_MODE, BRANCH: "chore/fuzzer", MODULES: '["uv"]' },
+      remote: [
+        `-C target push --force-with-lease=chore/fuzzer:${CHECKOUT_SHA} ${PUSH_URL} chore/fuzzer`,
+      ],
+    },
+    {
+      reason:
+        "default mode leases against the rolling branch's tip read just before the push: the branch is regenerated every run",
+      env: { MODE: "default" },
+      remote: [
+        `-C target ls-remote ${PUSH_URL} refs/heads/automation/repo-platform`,
+        `-C target push --force-with-lease=automation/repo-platform:${REMOTE_TIP} ${PUSH_URL} automation/repo-platform`,
+      ],
+    },
+  ])("$reason", ({ env, remote }) => {
+    const result = runCommitPush("push-ok", "false", {}, join(scratch, "work"), env);
+    expect({
+      exitCode: result.exitCode,
+      remote: recorded(result.runnerTemp, "remote"),
+      outputs: readFileSync(join(result.runnerTemp, "gh-output.txt"), "utf-8"),
+    }).toEqual({ exitCode: 0, remote, outputs: "pushed=true\n" });
   });
 });
 

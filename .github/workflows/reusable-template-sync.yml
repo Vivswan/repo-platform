@@ -105,8 +105,10 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/read_target.ts
 
-      # The default branch, or the dispatched branch in branch mode.
+      # The default branch, or the dispatched branch in branch mode. The
+      # checked-out commit is the branch-mode push's lease (commit_push.ts).
       - name: Check out the target repo
+        id: checkout
         uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET }}
@@ -400,7 +402,9 @@ jobs:
 
       # MODULES and the default branch feed the branch-mode subject (which
       # module the render adds or drops); the default mode's subject names
-      # the delivered build.
+      # the delivered build. CHECKOUT_SHA: the branch-mode push leases
+      # against the commit this run rendered on, so a developer commit
+      # pushed meanwhile fails the lease instead of being overwritten.
       - name: Commit and push
         if: steps.changes.outputs.changed == 'true'
         id: push
@@ -409,6 +413,7 @@ jobs:
           DISPLAY: ${{ steps.versions.outputs.display }}
           MODE: ${{ steps.target.outputs.mode }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
+          CHECKOUT_SHA: ${{ steps.checkout.outputs.commit }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
