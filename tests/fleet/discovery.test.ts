@@ -6,6 +6,7 @@ import {
   NETWORK_TIMEOUT_MS,
   notAdoptedNotice,
   pushProbeSkipNotice,
+  readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
@@ -323,6 +324,45 @@ describe("readDispatchRepo", () => {
     }
     withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
       expect(readDispatchRepo(owner)).toBe(expected);
+    });
+  });
+
+  // The branch input rides the same payload slot; TARGET_BRANCH overrides
+  // it the way ONLY_REPO overrides the scope.
+  test.each([
+    {
+      reason: "TARGET_BRANCH wins and is trimmed",
+      targetBranch: " feat/x ",
+      eventBody: JSON.stringify({ inputs: { branch: "other" } }),
+      expected: "feat/x",
+    },
+    {
+      reason: "the payload's branch input, trimmed",
+      targetBranch: "",
+      eventBody: JSON.stringify({ inputs: { repo: "o/r", branch: " chore/fuzzer " } }),
+      expected: "chore/fuzzer",
+    },
+    {
+      reason: "an absent branch input reads as empty (an ordinary dispatch)",
+      targetBranch: "",
+      eventBody: JSON.stringify({ inputs: { repo: "o/r" } }),
+      expected: "",
+    },
+    {
+      reason: "an inputs-less payload reads as empty (cron, the post-green call)",
+      targetBranch: "",
+      eventBody: JSON.stringify({ inputs: null }),
+      expected: "",
+    },
+    { reason: "nothing set reads as empty", targetBranch: "", eventBody: undefined, expected: "" },
+  ])("readDispatchBranch: $reason", ({ targetBranch, eventBody, expected }) => {
+    let eventPath = "";
+    if (eventBody !== undefined) {
+      eventPath = join(root, `branch-event-${Bun.hash(eventBody).toString(16)}.json`);
+      writeFileSync(eventPath, eventBody);
+    }
+    withEnv({ TARGET_BRANCH: targetBranch, GITHUB_EVENT_PATH: eventPath }, () => {
+      expect(readDispatchBranch()).toBe(expected);
     });
   });
 

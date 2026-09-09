@@ -103,8 +103,32 @@ export function discoverOwnerRepos(
 // (parseWith's diagnostic names paths only, never the value, which may be
 // a private slug).
 const dispatchEvent = z.object({
-  inputs: z.object({ repo: z.string().optional() }).nullish(),
+  inputs: z.object({ repo: z.string().optional(), branch: z.string().optional() }).nullish(),
 });
+
+/** One typed dispatch input off the event payload (empty when the event
+ * carries none), read from the runner's disk rather than step env: the
+ * value may name a private repository's branch, and step env prints into
+ * the public log group. */
+function dispatchInput(name: "repo" | "branch"): string {
+  if (env("GITHUB_EVENT_PATH") === "") return "";
+  const event = parseJsonWith(
+    dispatchEvent,
+    readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
+    `readDispatch${name === "repo" ? "Repo" : "Branch"}: event payload`,
+  );
+  return event.inputs?.[name] ?? "";
+}
+
+/** The dispatch's `branch` input, trimmed: the branch the sync renders
+ * onto instead of opening its own PR (empty on cron, on the post-green
+ * call, and on an ordinary dispatch). A non-empty TARGET_BRANCH env
+ * overrides the payload, for the test harnesses and local runs, the way
+ * ONLY_REPO does for the scope. */
+export function readDispatchBranch(): string {
+  const override = env("TARGET_BRANCH");
+  return (override !== "" ? override : dispatchInput("branch")).trim();
+}
 
 /** The repo scope, case-folded (GitHub identity is case-insensitive, so it
  * must fold before any comparison): one slug or a comma-separated list. A
@@ -117,14 +141,7 @@ const dispatchEvent = z.object({
  * disk is not logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
-  if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {
-    const event = parseJsonWith(
-      dispatchEvent,
-      readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
-      "readDispatchRepo: event payload",
-    );
-    repo = event.inputs?.repo ?? "";
-  }
+  if (repo === "") repo = dispatchInput("repo");
   // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
   // rejects them loudly, where dropping one here would silently widen or
   // narrow the scope.

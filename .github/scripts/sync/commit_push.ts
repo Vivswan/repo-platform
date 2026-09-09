@@ -1,13 +1,20 @@
 #!/usr/bin/env bun
-// Commits the copier output and pushes the rolling automation branch; a push GitHub refuses is a
-// red step with GitHub's error (a refused workflow-file change names the Workflows scope, README).
-// Env: TARGET, TARGET_DISPLAY (log label), BRANCH, DISPLAY, PAT, HIDE_DETAILS, RUNNER_TEMP, GITHUB_OUTPUT.
+// Commits the copier output and pushes the rolling automation branch (or, in branch mode, the
+// dispatched branch itself); a push GitHub refuses is a red step with GitHub's error (a refused
+// workflow-file change names the Workflows scope, README).
+// Env: TARGET, TARGET_DISPLAY (log label), BRANCH, DISPLAY, PAT, HIDE_DETAILS, RUNNER_TEMP,
+// GITHUB_OUTPUT; MODE (default|branch), BASE_BRANCH, and MODULES (the branch's selection) shape
+// the branch-mode subject.
 
 import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
+import { parseModules } from "../shared/modules.ts";
 import { capture, must, mustCapture, redactText } from "../shared/proc.ts";
+import { branchSubject, syncSubject } from "./branch_subject.ts";
+import { readModules } from "./modules.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
 
 const target = requireEnv("TARGET");
@@ -67,13 +74,39 @@ function diagnosticsChannel(): string {
     : "git's output is in the log above.";
 }
 
+/** The default branch's module selection, or null when its registration
+ * file cannot be read as one (a branch that adds the file has nothing to
+ * diff against; the subject then falls back to the sync's). */
+function baseSelection(): string[] | null {
+  const shown = capture(git("show", `origin/${requireEnv("BASE_BRANCH")}:.repo-platform.yml`));
+  if (shown.exitCode !== 0) return null;
+  let data: unknown;
+  try {
+    data = parseYaml(shown.stdout, { logLevel: "error" });
+  } catch {
+    return null;
+  }
+  return readModules(data).modules;
+}
+
+function subject(): string {
+  const display = requireEnv("DISPLAY");
+  if (env("MODE") !== "branch") return syncSubject(display);
+  const modules = parseModules(requireEnv("MODULES"));
+  if (modules === null) {
+    console.log("::error::MODULES must be the JSON list select_modules.ts wrote");
+    process.exit(1);
+  }
+  return branchSubject(baseSelection(), modules, display);
+}
+
 must(git("config", "user.name", SYNC_IDENTITY.name));
 must(git("config", "user.email", SYNC_IDENTITY.email));
 must(git("add", "--all"));
 // The tree can be clean when the only change is the committed _src_path
 // normalization; there is still a branch to push.
 if (mustCapture(git("status", "--porcelain")) !== "") {
-  must(git("commit", "-qm", `chore: update repo-platform template to ${requireEnv("DISPLAY")}`));
+  must(git("commit", "-qm", subject()));
 }
 
 // The checkout kept no credentials (persist-credentials: false);

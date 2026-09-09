@@ -63,6 +63,8 @@ esac
 `;
 
 interface Options {
+  /** Extra env for the script (MODE and BRANCH for a branch render). */
+  env?: Record<string, string>;
   failures?: { label: string; slug: string; rc: number; output: string }[];
   /** Raw manifest rows appended verbatim (torn-write / short-row shapes). */
   rawRows?: string[];
@@ -107,6 +109,7 @@ function run(mode: string | undefined, opts: Options = {}) {
       GH_LOOKUP: opts.lookup ?? "",
       GH_FAIL: opts.fail ?? "",
       PR_URL: opts.prUrl ?? "",
+      ...opts.env,
     },
   });
   return {
@@ -156,6 +159,20 @@ describe("failure_issue.ts", () => {
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("no hidden step failed");
     expect(r.calls).toBe("");
+  });
+
+  test("a branch render reports under its own per-branch title and kind, so it never resolves the sync's report", () => {
+    const r = run("deliver", {
+      failures: oneFailure,
+      env: { MODE: "branch", BRANCH: "chore/fuzzer" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(
+      "title=[automated] repo-platform branch render: private failure report (chore/fuzzer)",
+    );
+    expect(r.calls).not.toContain("title=[automated] repo-platform sync: private failure report");
+    expect(r.body).toContain("The branch render from `Vivswan/repo-platform` failed");
+    expect(r.body).not.toContain("push sync");
   });
 
   test("deliver creates the issue when none exists and assigns the target's owner", () => {

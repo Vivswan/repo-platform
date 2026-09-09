@@ -51,6 +51,15 @@ case "$*" in
     echo "${GIT_ERROR}" >&2
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
     exit 1 ;;
+  *" show "*)
+    printf 'modules: ["uv"]\\n'
+    exit 0 ;;
+  *" status "*)
+    if [ -n "$STUB_DIRTY" ]; then echo " M rendered.txt"; fi
+    exit 0 ;;
+  *" commit "*)
+    printf '%s\\n' "$*" >> "$STUB_STATE.commits"
+    exit 0 ;;
   *" checkout "*|*" rm "*|*" reset "*)
     # A tree rewrite after a refused push would be a partial-delivery
     # fallback, which no longer exists; make one observable.
@@ -77,6 +86,7 @@ function runCommitPush(
   hideDetails: string,
   temp: Record<string, string> = {},
   work: string = join(scratch, "work"),
+  extraEnv: Record<string, string> = {},
 ) {
   const runnerTemp = fixtures.dir("rt-");
   writeFileSync(join(runnerTemp, "gh-output.txt"), "");
@@ -97,11 +107,49 @@ function runCommitPush(
       HIDE_DETAILS: hideDetails,
       RUNNER_TEMP: runnerTemp,
       GITHUB_OUTPUT: join(runnerTemp, "gh-output.txt"),
+      ...extraEnv,
     },
     timeoutMs: 30_000,
   });
   return { ...result, runnerTemp };
 }
+
+/** The `git commit` argv lines the stub recorded for a run. */
+function recordedCommits(runnerTemp: string): string[] {
+  const file = join(runnerTemp, "push-state.commits");
+  return existsSync(file) ? readFileSync(file, "utf-8").trimEnd().split("\n") : [];
+}
+
+// The subject is the one thing the commit step decides; the stub reports a
+// dirty tree (STUB_DIRTY) so the commit runs, and records its argv.
+describe("commit_push subjects", () => {
+  test.each<{ reason: string; env: Record<string, string>; subject: string }>([
+    {
+      reason: "default mode names the delivered build",
+      env: { MODE: "default" },
+      subject: "chore: update repo-platform template to v1 (abcdef012345)",
+    },
+    {
+      reason: "branch mode names the module the branch adds over the default branch's selection",
+      env: { MODE: "branch", BASE_BRANCH: "main", MODULES: '["uv","fuzzer"]' },
+      subject: "chore: render the fuzzer module",
+    },
+    {
+      reason: "branch mode with the selection unchanged falls back to the sync subject",
+      env: { MODE: "branch", BASE_BRANCH: "main", MODULES: '["uv"]' },
+      subject: "chore: update repo-platform template to v1 (abcdef012345)",
+    },
+  ])("$reason", ({ env, subject }) => {
+    const result = runCommitPush("push-ok", "false", {}, join(scratch, "work"), {
+      STUB_DIRTY: "1",
+      ...env,
+    });
+    expect({ exitCode: result.exitCode, commits: recordedCommits(result.runnerTemp) }).toEqual({
+      exitCode: 0,
+      commits: [`-C target commit -qm ${subject}`],
+    });
+  });
+});
 
 // One spawn per (STUB_MODE, HIDE_DETAILS) input, each pinning that run's
 // whole public outcome: both streams, the ::error shape line, and the

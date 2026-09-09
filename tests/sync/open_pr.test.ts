@@ -30,7 +30,8 @@ const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "gh"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 case "$1 $2" in
-  "pr list") printf '' ;;
+  "pr list") printf '%s' "\${STUB_EXISTING_PR:-}" ;;
+  "pr comment") : ;;
   "pr create") echo "https://github.com/o/r/pull/1" ;;
   "pr view") echo "https://github.com/o/r/pull/1" ;;
   "pr merge")
@@ -79,6 +80,8 @@ function run(opts: Options = {}) {
     if (content !== undefined) writeFileSync(path, content);
   }
   const calls = join(root, "calls.log");
+  const outputFile = join(root, "gh-output.txt");
+  writeFileSync(outputFile, "");
   const proc = boundedSpawnSync(["bun", script], {
     env: {
       ...process.env,
@@ -87,7 +90,7 @@ function run(opts: Options = {}) {
       TARGET: "Vivswan/target",
       RUNNER_TEMP: runnerTemp,
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
-      GITHUB_OUTPUT: join(root, "gh-output.txt"),
+      GITHUB_OUTPUT: outputFile,
       BRANCH: "automation/repo-platform",
       BASE_BRANCH: "main",
       DISPLAY: "build@newsha",
@@ -108,6 +111,8 @@ function run(opts: Options = {}) {
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
+    /** The GITHUB_OUTPUT file: the url handoff the tail steps read. */
+    outputs: readFileSync(outputFile, "utf-8"),
     records,
     body,
     merged: records.some((args) => args[1] === "pr" && args[2] === "merge"),
@@ -586,5 +591,54 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body).toContain("Validation failed on the updated tree");
     expect(r.body).toContain("validation diagnostic sentinel line");
     expect(r.merged).toBe(false);
+  });
+});
+
+// Branch mode: the render was pushed onto a dispatched branch, so the body
+// becomes a comment on that branch's PR (when one exists) and nothing is
+// created or armed; the url output carries the PR for the tail steps.
+describe("open_pr branch mode", () => {
+  test("with a PR on the branch: one comment carrying the sections, no create, no auto-merge", () => {
+    const r = run({
+      env: { MODE: "branch", BRANCH: "chore/fuzzer", STUB_EXISTING_PR: "9" },
+      temp: { [TAIL_SHRANK_NAME]: "- `AGENTS.md`: 1 line missing\n" },
+    });
+    const comment = r.records.find((args) => args[1] === "pr" && args[2] === "comment");
+    const body = comment ? (comment[comment.indexOf("--body") + 1] ?? "") : "";
+    expect({
+      exitCode: r.exitCode,
+      calls: r.records.map((args) => `${args[1]} ${args[2]} ${args[3] ?? ""}`.trim()),
+      merged: r.merged,
+      outputs: r.outputs,
+      bodyHead: body.split("\n")[0],
+      bodyCarriesSection: body.includes("AGENTS.md"),
+    }).toEqual({
+      exitCode: 0,
+      calls: ["pr list -R", "pr comment 9", "pr view 9"],
+      merged: false,
+      outputs: "url=https://github.com/o/r/pull/1\n",
+      bodyHead:
+        "Template render pushed to `chore/fuzzer` from [`Vivswan/repo-platform`](https://github.com/Vivswan/repo-platform/tree/build) (build branch).",
+      bodyCarriesSection: true,
+    });
+    expect(r.output).toContain(
+      "commented on https://github.com/o/r/pull/1 with the render's notes",
+    );
+  });
+
+  test("without a PR on the branch: nothing is posted, the url output is empty, and the log says where the notes are", () => {
+    const r = run({
+      env: { MODE: "branch", BRANCH: "chore/fuzzer" },
+      temp: { [TAIL_SHRANK_NAME]: "- `AGENTS.md`: 1 line missing\n" },
+    });
+    expect({
+      exitCode: r.exitCode,
+      calls: r.records.map((args) => `${args[1]} ${args[2]}`),
+      merged: r.merged,
+      outputs: r.outputs,
+    }).toEqual({ exitCode: 0, calls: ["pr list"], merged: false, outputs: "url=\n" });
+    expect(r.output).toContain(
+      "no pull request has chore/fuzzer as its head; the render is on the branch, and its review notes are in this run's step logs",
+    );
   });
 });

@@ -32,6 +32,7 @@ import {
   captureNetwork,
   notAdoptedNotice,
   pushProbeSkipNotice,
+  readDispatchBranch,
   readDispatchRepo,
   scopeSource,
   scrubSlug,
@@ -39,6 +40,7 @@ import {
 import { pushProbeStatus } from "./push_probe.ts";
 import { enrich, parseDiscoveredList, verifyTag } from "./redact.ts";
 import {
+  branchScopeRefusal,
   modulesAdmit,
   modulesFilterFor,
   modulesLeftOutLine,
@@ -66,6 +68,13 @@ if (env("RECOVER") === "recopy" && scopeInput === "") {
 const scope = parseScope(scopeInput, new Set(MODULE_ORDER));
 if (scope.kind === "error") {
   error(scope.message);
+  process.exit(1);
+}
+// The branch mode's scope guard (sync_scope.ts states the rule; the
+// reusable sync judges the branch itself against the target).
+const branchRefusal = branchScopeRefusal(scope, readDispatchBranch(), env("RECOVER"));
+if (branchRefusal !== null) {
+  error(branchRefusal);
   process.exit(1);
 }
 

@@ -42,6 +42,7 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | `all` or empty | the whole fleet |
 
 - A module name outside `templates/` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning (by hint when private) and left out, and the plan prints how many repos the filter left out.
+- `-f branch=<branch>` beside a single `repo=Vivswan/a` renders that repository's selection as found on the branch and pushes the commit onto it instead of opening a sync PR: the way a PR that changes `.repo-platform.yml` gets its render ([docs/new-repo.md](docs/new-repo.md#the-branch-dispatch)). Refused with a list, a token, `all`, the default branch, or `recover=recopy`.
 - The filter is dispatch-only: a `[fleet-sync: ...]` directive carrying it turns the read-directives leg red, since the leg unions the entries of every commit in its range and an intersecting token would misread there.
 - Deriving the filter from the template paths a build publish changed, so a merge targets its own repos without naming modules, is a possible follow-up.
 

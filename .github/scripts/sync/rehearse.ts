@@ -17,6 +17,8 @@
 // PR/auto-merge machinery do not apply (the tail tripwire CHECK runs, its
 // PR-body hold does not); validation uses this working tree's validator.
 // Usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo>
+//   [--branch <name>] (clone that branch instead of the default one: the
+//   read-only rehearsal of a branch-mode dispatch)
 //   [--fleet-outcome <file>] (rehearse_fleet's per-repo subprocess: quiet
 //   run, tagged JSON verdict)
 
@@ -121,6 +123,9 @@ export interface RehearsalOptions {
   verbose: boolean;
   /** Leave the /tmp workspace in place for inspection. */
   keepWorkspace: boolean;
+  /** The branch to clone and update, for rehearsing a branch-mode dispatch;
+   * undefined is the default branch. */
+  branch?: string;
 }
 
 /** One-line label for a failed command: the bun script's basename, "git
@@ -267,7 +272,7 @@ export function manifestStatus(root: string): ManifestStatus {
  * that stops the rehearsal - RecoveryNeededError for the unresolvable
  * recorded _commit - never process.exit, so the fleet loop survives it. */
 export function rehearseRepo(slug: string, options: RehearsalOptions): RehearsalOutcome {
-  const { verbose, keepWorkspace } = options;
+  const { verbose, keepWorkspace, branch } = options;
   const say = (line: string): void => {
     if (verbose) console.log(line);
   };
@@ -294,7 +299,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     const temp = join(work, "temp");
     mkdirSync(temp);
 
-    section(`cloning ${slug} (shallow, read-only)`);
+    section(`cloning ${slug}${branch === undefined ? "" : ` at ${branch}`} (shallow, read-only)`);
     say(`workspace: ${work}`);
     // A public-repo clone wants no credentials, so the helper is cleared
     // outright; with prompts disabled too, nothing here can stall on auth.
@@ -307,6 +312,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         "--quiet",
         "--depth",
         "1",
+        ...(branch === undefined ? [] : ["--branch", branch]),
         `https://github.com/${slug}.git`,
         targetDir,
       ],
@@ -773,16 +779,20 @@ export const fleetOutcomeSchema = z.discriminatedUnion("kind", [
 export type FleetOutcomeMessage = z.infer<typeof fleetOutcomeSchema>;
 
 function main(): number {
-  const [slug, flag, outFile, ...rest] = process.argv.slice(2);
-  const fleetMode = flag === "--fleet-outcome" && outFile !== undefined;
+  const [slug, flag, value, ...rest] = process.argv.slice(2);
+  const fleetMode = flag === "--fleet-outcome" && value !== undefined;
+  const branchMode = flag === "--branch" && value !== undefined && value !== "";
   if (
     slug === undefined ||
     rest.length > 0 ||
-    (flag !== undefined && !fleetMode) ||
+    (flag !== undefined && !fleetMode && !branchMode) ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(slug)
   ) {
-    fail("usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo> [--fleet-outcome <file>]");
+    fail(
+      "usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo> [--branch <name> | --fleet-outcome <file>]",
+    );
   }
+  const outFile = value;
   if (fleetMode) {
     // The fleet driver's per-repo subprocess (rehearse_fleet.ts runs N of
     // these in parallel - the legs are spawnSync-blocking, so in-process
@@ -809,7 +819,9 @@ function main(): number {
     return 0;
   }
   try {
-    return rehearseRepo(slug, { verbose: true, keepWorkspace: true }).validationOk ? 0 : 1;
+    const options: RehearsalOptions = { verbose: true, keepWorkspace: true };
+    if (branchMode) options.branch = value;
+    return rehearseRepo(slug, options).validationOk ? 0 : 1;
   } catch (err) {
     if (!(err instanceof RehearsalError)) throw err;
     fail(err.message);

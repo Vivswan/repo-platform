@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 // Creates or refreshes the sync PR in the target and arms squash
 // auto-merge on clean revisions (needs-review ones stay disarmed by the
-// earlier disarm_pr.ts step). Invoked by reusable-template-sync.yml's
-// "Create or refresh pull request" step.
+// earlier disarm_pr.ts step). In branch mode (MODE=branch: the render was
+// pushed onto a dispatched branch) the same body is posted as a comment on
+// that branch's PR when one exists, and nothing is armed. Invoked by
+// reusable-template-sync.yml's "Create or refresh pull request" step.
 //
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
-// HIDE_DETAILS, DISPLAY, BRANCH, BASE_BRANCH,
+// HIDE_DETAILS, MODE, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RECOVER, FORCE_MANUAL, DRIFT_FILE, the env-named section
 // files of section_files.ts's PR_BODY_SECTIONS (SUMMARY_FILE,
 // CARRIED_FILE, CARRY_REVIEW_FILE, REMOVED_PATHS_FILE,
@@ -58,8 +60,16 @@ const oldCommit = clip(slurp(join(runnerTemp, "old_commit.txt")));
 // DISPLAY (build@<sha>) drives the source line.
 const sourceLine = `[\`${repository}\`](https://github.com/${repository}/tree/build) (build branch)`;
 
+const branchMode = env("MODE") === "branch";
 const title = `chore: update repo-platform template to ${display}`;
-let body = `Automated template update from ${sourceLine}.
+let body = branchMode
+  ? `Template render pushed to \`${branch}\` from ${sourceLine}.
+
+- Previous: \`${oldCommit}\`
+- New: \`${display}\`
+
+The commit renders this branch's module selection through the ordinary sync legs (three-way merge, split-file rebuild, retired-file cleanup). Review it with the rest of the PR.`
+  : `Automated template update from ${sourceLine}.
 
 - Previous: \`${oldCommit}\`
 - New: \`${display}\`
@@ -307,6 +317,39 @@ const existing = mustCapture([
   "--jq",
   ".[0].number // empty",
 ]);
+// Branch mode: the developer's PR (when one exists) gets the sections as a
+// comment and nothing is armed - its own auto-merge waits for the new
+// head's checks. Without a PR the body has no private home, so a hidden
+// target keeps it off the log and the tail steps carry any failure.
+if (branchMode) {
+  if (existing === "") {
+    console.log(
+      `no pull request has ${hideDetails() ? "the branch" : branch} as its head; the render is on the branch, ${
+        needsReview
+          ? "and its review notes are in this run's step logs (a hidden target's are not printed)"
+          : "with nothing to review beyond the diff"
+      }`,
+    );
+    setOutput("url", "");
+  } else {
+    mustCapture(["gh", "pr", "comment", existing, "-R", target, "--body", body]);
+    const prUrl = mustCapture([
+      "gh",
+      "pr",
+      "view",
+      existing,
+      "-R",
+      target,
+      "--json",
+      "url",
+      "--jq",
+      ".url",
+    ]);
+    console.log(`commented on ${prUrl} with the render's notes`);
+    setOutput("url", prUrl);
+  }
+  process.exit(0);
+}
 let url: string;
 if (existing !== "") {
   // Auto-merge was disarmed BEFORE the push (disarm_pr.ts); this step
