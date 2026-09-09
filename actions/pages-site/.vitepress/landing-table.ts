@@ -6,7 +6,10 @@
 // so VitePress's link rule still normalizes every href and records it for
 // the dead-link check, and only then does the html_block replace the
 // table's token range. Cell text comes from inline-text.ts's stamp, so
-// inlineTextRule must be installed on the same renderer.
+// inlineTextRule must be installed on the same renderer. On EVERY page the
+// rule also stamps that table's link tokens on the env (CuratedEnv): the
+// sidebar (sidebar.ts) orders a level's pages by its landing's table, and
+// reads them there once the page has rendered.
 //
 // The landing test goes through the route the rewrite map gives the env's
 // relativePath, because VitePress renders a landing under both spellings:
@@ -31,38 +34,76 @@ export function isLandingPath(relativePath: string, rewrites: Record<string, str
   return match !== null && (match[1] === undefined || isLocaleDir(match[1]));
 }
 
+export interface CuratedEnv {
+  /** The link_open token of every row of the page's first curated table
+   *  (firstCuratedTable), in row order; their hrefs read as VitePress
+   *  normalized them once the page has rendered. */
+  curatedLinks?: Token[];
+}
+
 /** `rewrites` is the site's README-to-index map (derive.ts's
  *  deriveRewrites over the docs tree), the same one config.mts hands
- *  VitePress. */
+ *  VitePress. Every page gets its first curated table's links stamped on
+ *  the env (the sidebar's landing-table order reads them); a landing page
+ *  also has that table replaced by the launcher. */
 export function landingTableRule(md: MarkdownRenderer, rewrites: Record<string, string>): void {
   md.core.ruler.push("landing_table", (state) => {
+    const tokens = state.tokens;
+    const table = firstCuratedTable(tokens);
+    if (table === null) return;
+    (state.env as CuratedEnv).curatedLinks = table.links;
     const relativePath = (state.env as { relativePath?: unknown }).relativePath;
     if (typeof relativePath !== "string" || !isLandingPath(relativePath, rewrites)) return;
-    const tokens = state.tokens;
-    for (let start = 0; start < tokens.length; start += 1) {
-      // Only a top-level table: one inside a container, quote, or list item
-      // is an aside, not the page's goal table.
-      if (tokens[start].type !== "table_open" || tokens[start].level !== 0) continue;
-      const end = tokens.findIndex((token, index) => index > start && token.type === "table_close");
-      if (end === -1) return;
-      const rows = curatedRowsFromTable(tokens, start, end, () => {
-        for (const token of tokens.slice(start + 1, end)) {
-          if (token.type === "inline")
-            md.renderer.renderInline(token.children ?? [], md.options, state.env);
-        }
-      });
-      if (rows === null) {
-        start = end;
-        continue;
-      }
-      const block = new state.Token("html_block", "", 0);
-      block.content = launcherTag(rows);
-      block.map = tokens[start].map;
-      block.block = true;
-      tokens.splice(start, end - start + 1, block);
-      return;
+    // The cells render first, so VitePress's link rule normalizes every
+    // href and records it for the dead-link check before the rows are read.
+    for (const token of tokens.slice(table.start + 1, table.end)) {
+      if (token.type === "inline")
+        md.renderer.renderInline(token.children ?? [], md.options, state.env);
     }
+    const block = new state.Token("html_block", "", 0);
+    block.content = launcherTag(
+      curatedRows(bodyRows(tokens, table.start, table.end), table.column),
+    );
+    block.map = tokens[table.start].map;
+    block.block = true;
+    tokens.splice(table.start, table.end - table.start + 1, block);
   });
+}
+
+/** The first top-level table of a parsed page with a column of bare links
+ *  (one link and nothing else in every body row): its token span, the
+ *  column, and the rows' link tokens; null without one. Only a top-level
+ *  table: one inside a container, quote, or list item is an aside, not the
+ *  page's goal table. */
+export function firstCuratedTable(
+  tokens: Token[],
+): { start: number; end: number; column: number; links: Token[] } | null {
+  for (let start = 0; start < tokens.length; start += 1) {
+    if (tokens[start].type !== "table_open" || tokens[start].level !== 0) continue;
+    const end = tokens.findIndex((token, index) => index > start && token.type === "table_close");
+    if (end === -1) return null;
+    const rows = bodyRows(tokens, start, end);
+    const column = linkColumnOf(rows);
+    if (column !== null) {
+      const links = rows.map((row) => soleLinkToken(row[column]));
+      if (links.every((link): link is Token => link !== null)) {
+        return { start, end, column, links };
+      }
+    }
+    start = end;
+  }
+  return null;
+}
+
+/** The index of the first column holding exactly one link in every row,
+ *  or null (an empty table has none). */
+function linkColumnOf(rows: Token[][]): number | null {
+  if (rows.length === 0) return null;
+  const width = Math.min(...rows.map((row) => row.length));
+  const column = [...Array(width).keys()].find((index) =>
+    rows.every((row) => soleLinkToken(row[index]) !== null),
+  );
+  return column ?? null;
 }
 
 /** The tag the launcher component mounts from; `rows` is the JSON array of
@@ -79,38 +120,23 @@ function escapeAttribute(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
-/** The curated rows of the table spanning `tokens[start]` (table_open) to
- *  `tokens[end]` (table_close), or null when no body column holds exactly
- *  one link in every row. Per row: href from that column, label from the
- *  first other cell (the link text when that cell is empty or absent), note
- *  from every remaining cell joined by ", " (null when they are all empty).
- *  A row with no remaining cell takes the link text as its note, unless
- *  the label already spells it (then null, so nothing shows twice).
- *  `beforeRead` runs once the table qualifies and before any href or text
- *  is read (the rule renders the table's cells there, so a renderer's link
- *  rule has rewritten the hrefs this returns). */
-export function curatedRowsFromTable(
-  tokens: Token[],
-  start: number,
-  end: number,
-  beforeRead: () => void = () => {},
-): CuratedRow[] | null {
-  const rows = bodyRows(tokens, start, end);
-  if (rows.length === 0) return null;
-  const width = Math.min(...rows.map((row) => row.length));
-  const linkColumn = [...Array(width).keys()].find((column) =>
-    rows.every((row) => soleLink(row[column]) !== null),
-  );
-  if (linkColumn === undefined) return null;
-  beforeRead();
-  const hrefs = rows.map((row) => soleLink(row[linkColumn]));
-  if (!hrefs.every((href): href is string => href !== null)) return null;
-  return rows.map((row, index) => {
+/** The curated rows of a table's body rows given its link column. Per
+ *  row: href from that column, label from the first other cell (the link
+ *  text when that cell is empty or absent), note from every remaining cell
+ *  joined by ", " (null when they are all empty). A row with no remaining
+ *  cell takes the link text as its note, unless the label already spells
+ *  it (then null, so nothing shows twice). */
+export function curatedRows(rows: Token[][], linkColumn: number): CuratedRow[] {
+  return rows.map((row) => {
     const others = row.filter((_, column) => column !== linkColumn);
     const linkText = plainTextOf(row[linkColumn]);
     const cellLabel = others.length > 0 ? plainTextOf(others[0]) : "";
     const label = cellLabel === "" ? linkText : cellLabel;
-    return { label, href: hrefs[index], note: noteOf(others.slice(1), label, linkText) };
+    return {
+      label,
+      href: soleLinkToken(row[linkColumn])?.attrGet("href") ?? "",
+      note: noteOf(others.slice(1), label, linkText),
+    };
   });
 }
 
@@ -148,9 +174,9 @@ function bodyRows(tokens: Token[], start: number, end: number): Token[][] {
   return rows;
 }
 
-/** The href when the cell's inline content is exactly one link and nothing
- *  else (whitespace aside), else null. */
-function soleLink(cell: Token | undefined): string | null {
+/** The link_open token when the cell's inline content is exactly one link
+ *  and nothing else (whitespace aside), else null. */
+function soleLinkToken(cell: Token | undefined): Token | null {
   const children = (cell?.children ?? []).filter(
     (child) => !(child.type === "text" && child.content.trim() === ""),
   );
@@ -159,5 +185,5 @@ function soleLink(cell: Token | undefined): string | null {
     return null;
   }
   if (children.slice(1, -1).some((child) => child.type === "link_open")) return null;
-  return children[0].attrGet("href") ?? null;
+  return children[0];
 }

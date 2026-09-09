@@ -185,6 +185,26 @@ describe("buildGroups", () => {
     expect(buildGroups(CURATED, PAGES, "root")).toEqual(ROOT_GROUPS);
   });
 
+  test("a file named with characters a URL reserves is reached by its escaped href and emitted escaped, on every row that links it", () => {
+    const pages = [
+      page("/repo/", "Docs", "", "root"),
+      page("/repo/z#b.html", "Hash", "", "root", [h("Part", "part")]),
+    ];
+    const curated: CuratedRow[] = [{ label: "Go", href: "./z%23b.html#part", note: null }];
+    expect(buildGroups(curated, pages, "root")).toEqual([
+      {
+        key: "/repo/z#b.html",
+        title: "Hash",
+        kind: "page",
+        folded: false,
+        items: [
+          { label: "Go", href: "/repo/z%23b.html#part", note: null, source: "curated" },
+          { label: "Hash", href: "/repo/z%23b.html", note: "z#b", source: "page" },
+        ],
+      },
+    ]);
+  });
+
   test("a page group folds its headings behind its curated and page rows; a curated row never hides", () => {
     const [newRepo] = buildGroups(CURATED, PAGES, "root");
     expect(splitRows(newRepo.kind, newRepo.items)).toEqual({
@@ -387,6 +407,11 @@ describe("resolveHref", () => {
       { key: "/repo/", href: "/repo/#quick-triage", suffix: "#quick-triage" },
     ],
     ["%E6%96%B0.md", "/repo/", { key: "/repo/新", href: "/repo/%E6%96%B0.md", suffix: "" }],
+    // A reserved character escaped in the href names the file spelled with
+    // it: the key decodes every escape, the href keeps them.
+    ["z%26b.md", "/repo/", { key: "/repo/z&b", href: "/repo/z%26b.md", suffix: "" }],
+    ["z%23b.md", "/repo/", { key: "/repo/z#b", href: "/repo/z%23b.md", suffix: "" }],
+    ["z%3Fb.md#x", "/repo/", { key: "/repo/z?b", href: "/repo/z%3Fb.md#x", suffix: "#x" }],
     [
       "download.zip?q=a%2526b#x%20y",
       "/repo/",

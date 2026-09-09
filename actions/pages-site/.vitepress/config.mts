@@ -22,7 +22,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createCssVariablesTheme, normalizeTheme } from "shiki";
-import { defineConfigWithTheme } from "vitepress";
+import { createMarkdownRenderer, defineConfigWithTheme, type MarkdownOptions } from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
 // lists, the llms.txt plugin); the deep import is the path its own demo
@@ -30,9 +30,10 @@ import type { ThemeConfig } from "vitepress-carbon";
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
-import { deriveRewrites, deriveSidebar, detectLocales, walkMarkdown } from "./derive.ts";
+import { deriveRewrites, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
 import { landingTableRule } from "./landing-table.ts";
+import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
 import { tableWrapRule } from "./table-wrap.ts";
 import { headersRule } from "./theme/page-index.ts";
 
@@ -74,8 +75,6 @@ const icon = ["favicon.svg", "favicon.ico"].find((name) =>
 // structure IS a locale (derive.ts owns the detection rule); the root tree
 // is the default (English) locale. Detected per build, so a tagged
 // version's translations are that tag's own.
-const localeDirs = detectLocales(files);
-const rootFiles = files.filter((file) => !localeDirs.includes(file.split("/")[0]));
 const nativeName = (tag: string): string => {
   try {
     const name = new Intl.DisplayNames([tag], { type: "language" }).of(tag);
@@ -85,112 +84,128 @@ const nativeName = (tag: string): string => {
   }
 };
 
-const sidebar: NonNullable<ThemeConfig["sidebar"]> = { "/": deriveSidebar(srcDir, rootFiles) };
-const locales: Record<string, { label: string; lang: string }> = {
-  root: { label: "English", lang: "en" },
+const markdown: MarkdownOptions = {
+  // One highlighter theme whose colors are custom properties: custom.css
+  // owns the code palette per mode (--fleet-code-*), so token contrast is
+  // a token value the theme's contrast test can guard, not a hex shiki's
+  // github themes bake into every span. No italics: the fleet reads
+  // emphasis by weight. Normalized once here: VitePress hands shiki this
+  // object per fence, and shiki normalizes a raw theme on every pass,
+  // mutating its colors in place; the second pass then finds the ansi
+  // palette already replaced and loses its var() mapping, so an ansi
+  // fence prints its text in the placeholder hex (near-transparent black).
+  theme: normalizeTheme(
+    createCssVariablesTheme({
+      name: "fleet",
+      variablePrefix: "--fleet-code-",
+      fontStyle: false,
+    }),
+  ),
+  config(md) {
+    inlineTextRule(md);
+    landingTableRule(md, rewrites);
+    // After the landing rule: the launcher replaces its table's tokens, so
+    // the panel gets no scroll wrapper (and no wrapper tab stop before its
+    // combobox). VitePress installs its own table_open renderer between
+    // preConfig and config, so the wrapper's rule must land here to move the
+    // tab stop from the table to the wrapper.
+    tableWrapRule(md);
+    headersRule(md);
+    alertTitlesRule(md);
+  },
+  container: CUSTOM_BLOCK_LABELS,
 };
-for (const dir of localeDirs) {
-  locales[dir] = { label: nativeName(dir), lang: dir };
-  sidebar[`/${dir}/`] = deriveSidebar(
-    srcDir,
-    files.filter((file) => file.startsWith(`${dir}/`)),
-    `${dir}/`,
-  );
-}
 
-export default defineConfigWithTheme<FleetThemeConfig>({
-  extends: baseConfig,
-  title,
-  description: facts.description ?? title,
-  head: icon === undefined ? [] : [["link", { rel: "icon", href: `${base}${icon}` }]],
-  base,
-  srcDir,
-  locales,
-  rewrites,
-  ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
-  // No lastUpdated: every tier builds from a materialized copy of the docs
-  // tree (never a git checkout - see buildVitepressTier), so git-derived
-  // timestamps do not exist by construction.
-  vite: {
-    css: {
-      postcss: {
-        plugins: [
-          {
-            // Carbon's utils.css imports Google Fonts and cdnfonts (two third-party
-            // calls per page load) and declares its bundled Mona Sans, which nothing
-            // selects once custom.css sets the families yet carbon's transformHead
-            // preloads (137 KB per page) for as long as the @font-face survives.
-            // A Once hook, not AtRule visitors: vite emits url() assets from
-            // its own Once hook, and PostCSS runs every Once before any visitor.
-            postcssPlugin: "fleet-drop-carbon-fonts",
-            Once(root) {
-              root.walkAtRules("import", (rule) => {
-                if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
-              });
-              root.walkAtRules("font-face", (rule) => {
-                rule.walkDecls("font-family", (decl) => {
-                  if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
+// The sidebar reads each landing page through VitePress's renderer, so the
+// config is async. createMarkdownRenderer keeps one instance per process:
+// the one made here is the one the pages render with, so it gets the
+// options VitePress would resolve, carbon's (its header levels) under ours.
+export default async () => {
+  const md = await createMarkdownRenderer(srcDir, { ...baseConfig.markdown, ...markdown }, base);
+  const source = fileSource(srcDir, md, { base, cleanUrls: false });
+  const sidebar: NonNullable<ThemeConfig["sidebar"]> = {};
+  const locales: Record<string, { label: string; lang: string }> = {
+    root: { label: "English", lang: "en" },
+  };
+  for (const tree of sidebarTrees(files)) {
+    sidebar[`/${tree.prefix}`] = deriveSidebar(
+      tree.files,
+      source,
+      { base, cleanUrls: false },
+      {
+        prefix: tree.prefix,
+        siteTitle: title,
+      },
+    );
+    if (tree.prefix === "") continue;
+    const dir = tree.prefix.slice(0, -1);
+    locales[dir] = { label: nativeName(dir), lang: dir };
+  }
+
+  return defineConfigWithTheme<FleetThemeConfig>({
+    extends: baseConfig,
+    title,
+    description: facts.description ?? title,
+    head: icon === undefined ? [] : [["link", { rel: "icon", href: `${base}${icon}` }]],
+    base,
+    srcDir,
+    locales,
+    rewrites,
+    ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
+    // No lastUpdated: every tier builds from a materialized copy of the docs
+    // tree (never a git checkout - see buildVitepressTier), so git-derived
+    // timestamps do not exist by construction.
+    vite: {
+      css: {
+        postcss: {
+          plugins: [
+            {
+              // Carbon's utils.css imports Google Fonts and cdnfonts (two third-party
+              // calls per page load) and declares its bundled Mona Sans, which nothing
+              // selects once custom.css sets the families yet carbon's transformHead
+              // preloads (137 KB per page) for as long as the @font-face survives.
+              // A Once hook, not AtRule visitors: vite emits url() assets from
+              // its own Once hook, and PostCSS runs every Once before any visitor.
+              postcssPlugin: "fleet-drop-carbon-fonts",
+              Once(root) {
+                root.walkAtRules("import", (rule) => {
+                  if (/^(url\(\s*)?["']?https?:/.test(rule.params)) rule.remove();
                 });
-              });
+                root.walkAtRules("font-face", (rule) => {
+                  rule.walkDecls("font-family", (decl) => {
+                    if (/^["']?Mona Sans["']?$/.test(decl.value)) rule.remove();
+                  });
+                });
+              },
             },
-          },
-        ],
+          ],
+        },
       },
     },
-  },
-  markdown: {
-    // One highlighter theme whose colors are custom properties: custom.css
-    // owns the code palette per mode (--fleet-code-*), so token contrast is
-    // a token value the theme's contrast test can guard, not a hex shiki's
-    // github themes bake into every span. No italics: the fleet reads
-    // emphasis by weight. Normalized once here: VitePress hands shiki this
-    // object per fence, and shiki normalizes a raw theme on every pass,
-    // mutating its colors in place; the second pass then finds the ansi
-    // palette already replaced and loses its var() mapping, so an ansi
-    // fence prints its text in the placeholder hex (near-transparent black).
-    theme: normalizeTheme(
-      createCssVariablesTheme({
-        name: "fleet",
-        variablePrefix: "--fleet-code-",
-        fontStyle: false,
-      }),
-    ),
-    config(md) {
-      inlineTextRule(md);
-      landingTableRule(md, rewrites);
-      // After the landing rule: the launcher replaces its table's tokens, so
-      // the panel gets no scroll wrapper (and no wrapper tab stop before its
-      // combobox). VitePress installs its own table_open renderer between
-      // preConfig and config, so the wrapper's rule must land here to move the
-      // tab stop from the table to the wrapper.
-      tableWrapRule(md);
-      headersRule(md);
-      alertTitlesRule(md);
+    markdown,
+    // Landing pages (README.md, rewritten to index.md at any depth) are the
+    // site's front matter, not an article: the theme lays them out from the
+    // flag and they carry no outline.
+    transformPageData(pageData) {
+      if (!/(^|\/)index\.md$/.test(pageData.relativePath)) return;
+      return { frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false } };
     },
-    container: CUSTOM_BLOCK_LABELS,
-  },
-  // Landing pages (README.md, rewritten to index.md at any depth) are the
-  // site's front matter, not an article: the theme lays them out from the
-  // flag and they carry no outline.
-  transformPageData(pageData) {
-    if (!/(^|\/)index\.md$/.test(pageData.relativePath)) return;
-    return { frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false } };
-  },
-  transformHtml(code) {
-    return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
-  },
-  themeConfig: {
-    nav: [],
-    sidebar,
-    search: { provider: "local" },
-    outline: "deep",
-    // carbon's default title is uppercase; the fleet reads sentence case
-    notFound: { title: "Page not found", linkText: "Go to the front page" },
-    ...(process.env.DOCS_SITE_EDIT_PATTERN
-      ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
-      : {}),
-    docsSiteVersions: versions,
-    docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
-    docsSiteFacts: facts,
-  },
-});
+    transformHtml(code) {
+      return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
+    },
+    themeConfig: {
+      nav: [],
+      sidebar,
+      search: { provider: "local" },
+      outline: "deep",
+      // carbon's default title is uppercase; the fleet reads sentence case
+      notFound: { title: "Page not found", linkText: "Go to the front page" },
+      ...(process.env.DOCS_SITE_EDIT_PATTERN
+        ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
+        : {}),
+      docsSiteVersions: versions,
+      docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
+      docsSiteFacts: facts,
+    },
+  });
+};

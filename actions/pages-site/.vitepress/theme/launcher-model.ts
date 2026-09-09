@@ -77,13 +77,12 @@ function startsFolded(kind: LauncherGroup["kind"], items: LauncherItem[]): boole
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:|^\/\//i;
 
-/** The identity of a page across every way a link can spell it: no hash,
- *  no `.html`/`.md`, a directory index as its directory. */
+/** The identity of a page across every way a link can spell it: no
+ *  `.html`/`.md`, a directory index as its directory. `path` is a pathname
+ *  alone (no query or hash: those are the link's, not the page's, and a
+ *  `#` or `?` inside it is part of a file's name). */
 export function pageKey(path: string): string {
-  const bare = path
-    .replace(/[?#].*$/, "")
-    .replace(/\.(html|md)$/, "")
-    .replace(/(^|\/)index$/, "$1");
+  const bare = path.replace(/\.(html|md)$/, "").replace(/(^|\/)index$/, "$1");
   return bare === "" ? "/" : bare;
 }
 
@@ -105,19 +104,30 @@ export function resolveHref(href: string, landingUrl: string): ResolvedHref {
   const { pathname } = new URL(href, `http://launcher.invalid${landingUrl}`);
   const at = href.search(/[?#]/);
   const suffix = at === -1 ? "" : href.slice(at);
-  return { key: pageKey(decodedPath(pathname)), href: `${pathname}${suffix}`, suffix };
+  return { key: decodedPath(pageKey(pathname)), href: `${pathname}${suffix}`, suffix };
 }
 
-/** The path as the page index spells it (the URL class percent-encodes
- *  non-ASCII); for the identity key only, so the navigable href keeps the
- *  author's escapes (`%2526` stays `%2526`). A malformed escape stays as
- *  written and then only matches a page spelled the same way. */
+/** A key as the page index spells it: every escape decoded, since the
+ *  index spells a file's name as it is on disk (`z%26b` names `z&b.md`;
+ *  the URL class also percent-encodes non-ASCII). Decoded AFTER the key's
+ *  own trimming, so a decoded `#` or `?` never reads as a separator. For
+ *  the identity key only: the navigable href keeps the author's escapes. A
+ *  malformed escape stays as written and then only matches a page spelled
+ *  the same way. */
 function decodedPath(pathname: string): string {
   try {
-    return decodeURI(pathname);
+    return decodeURIComponent(pathname);
   } catch {
     return pathname;
   }
+}
+
+/** A page's URL as a browser can follow it: the index spells a file's
+ *  name as it is on disk, so a `#`, `?`, `%`, space or non-ASCII character
+ *  in the name is escaped here, and only here, at the point of emitting a
+ *  link. */
+export function navigable(url: string): string {
+  return encodeURI(url).replace(/[#?]/g, (char) => (char === "#" ? "%23" : "%3F"));
 }
 
 function landingUrlOf(pages: PageIndexEntry[]): string {
@@ -141,7 +151,8 @@ function pagePath(url: string, base: string): string {
  *  first, grouped under the page each href resolves to in table order
  *  (an href naming no page keeps its own single-row group); then every
  *  root page not yet reached as its own group; then one group per
- *  subdirectory. Every page's headings join its group; an href appears
+ *  subdirectory. Pages and subdirectories follow the index's order,
+ *  which is the sidebar's (pages.data.ts). Every page's headings join its group; an href appears
  *  once, whichever source reached it first. The landing page itself is
  *  the launcher's host and is not listed. */
 export function buildGroups(
@@ -173,7 +184,7 @@ export function buildGroups(
   for (const row of curated) {
     const resolved = resolveHref(row.href, landingUrl);
     const page = resolved.key === null ? undefined : byKey.get(resolved.key);
-    const href = page ? `${page.url}${resolved.suffix}` : resolved.href;
+    const href = page ? `${navigable(page.url)}${resolved.suffix}` : resolved.href;
     const target = page ? group(page.url, page.title, "page") : group(href, row.label, "page");
     add(target, { label: row.label, href, note: row.note, source: "curated" });
   }
@@ -182,7 +193,7 @@ export function buildGroups(
     for (const header of page.headers) {
       add(target, {
         label: header.title,
-        href: `${page.url}#${header.anchor}`,
+        href: `${navigable(page.url)}#${header.anchor}`,
         note: page.title,
         source: "heading",
       });
@@ -191,7 +202,7 @@ export function buildGroups(
   const pageRow = (target: LauncherGroup, page: PageIndexEntry): void => {
     add(target, {
       label: page.title,
-      href: page.url,
+      href: navigable(page.url),
       note: pagePath(page.url, base),
       source: "page",
     });

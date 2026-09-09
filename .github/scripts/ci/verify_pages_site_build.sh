@@ -24,7 +24,11 @@
 # label and the fixture's h2 as a heading row label, the guide/ group
 # titled "Guide" from its folder name, the page row's note being the page's
 # site path, the nav button on a non-landing page, and the fixture's h2
-# anchor in the page index inlined into the client bundle), llms.txt, the
+# anchor in the page index inlined into the client bundle), the sidebar
+# order from frontmatter and the landing table (a ranked page and its
+# group head lead, the table's page precedes the alphabetically earlier
+# unplaced one, the launcher's groups follow the same order, and no
+# frontmatter key reaches the HTML), llms.txt, the
 # strict CHECK mode both passing on clean docs and failing on a dead link,
 # the deploy's per-tier strictness
 # (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
@@ -123,6 +127,13 @@ git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost commit -qm "v2 docs + locale"
 git -C "$WORK" tag v0.2.0
 printf 'HEAD-only line.\n' >> "$WORK/docs/setup.md"
+# Sidebar placement, HEAD only: zulu.md ranks first by `order` and opens
+# the Basics group, which alpha.md joins by name alone; setup.md is placed
+# by the landing table; bravo.md is placed by nothing and so follows it
+# although it sorts first.
+printf -- '---\norder: 1\ngroup: Basics\n---\n\n# Zulu\n\nRanked.\n' > "$WORK/docs/zulu.md"
+printf -- '---\ngroup: Basics\n---\n\n# Alpha\n\nGrouped.\n' > "$WORK/docs/alpha.md"
+printf '# Bravo\n\nUnplaced.\n' > "$WORK/docs/bravo.md"
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost commit -qm "head docs"
 
@@ -269,6 +280,18 @@ present 'fleet-launcher-target">guide<' "$site/latest/index.html"
 present 'class="fleet-launcher-button"' "$site/latest/setup.html"
 grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
   fail "the fixture's h2 is missing from the inlined page index - the launcher lost its headings"
+
+# The sidebar: every row text in document order, group heads included
+# (Basics is the frontmatter group, Guide the directory), and the
+# launcher's group titles in the same order after the curated Setup group.
+sidebar_rows="$(grep -o 'class="VPSidebar".*' "$site/latest/index.html" | sed 's#</aside>.*##' | { grep -o 'class="text"[^>]*>[^<]*<' || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
+test "$sidebar_rows" = "Fixture|Basics|Zulu|Alpha|Setup|Bravo|Guide|Guide|" ||
+  fail "the sidebar order is '$sidebar_rows', not landing, ranked group, table-placed, unplaced, directory"
+launcher_groups="$({ grep -o 'fleet-launcher-group-title"[^>]*>[^<]*<' "$site/latest/index.html" || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
+test "$launcher_groups" = "Setup|Zulu|Alpha|Bravo|Guide|" ||
+  fail "the launcher's groups run '$launcher_groups', not the sidebar's order after the curated row"
+absent 'group: Basics' "$site/latest/alpha.html"
+absent 'order: 1' "$site/latest/zulu.html"
 
 # A NESTED docs-dir (multi-segment input): tag extraction must land the
 # leaf tree at the build root's fixed docs/ slot whatever its depth, for
@@ -445,4 +468,5 @@ absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
   "font filter, facts card, provenance line, table wrapper, custom blocks, code tokens, launcher panel with heading rows and page index," \
+  "sidebar order from frontmatter and the landing table," \
   "llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

@@ -25,7 +25,7 @@ describe("the page index under the action's build topology", () => {
   // bundles a data loader there as CommonJS, so a static import of
   // vitepress (ESM-only) fails to load; this build imports the loader from
   // a page and reads the index it produced back out of the built HTML.
-  test("a page importing pages.data.ts builds, and the data holds every page's URL, title, and headers", () => {
+  test("a page importing pages.data.ts builds, and the data holds every page's URL, title, and headers in sidebar order", () => {
     const root = temp.dir("pages-site-data-");
     const docs = join(root, "ws", "docs");
     mkdirSync(join(docs, "guide"), { recursive: true });
@@ -128,16 +128,6 @@ describe("the page index under the action's build topology", () => {
         locale: "root",
         headers: [{ title: "I want to...", anchor: "i-want-to", level: 2 }],
       },
-      {
-        url: "/guide/",
-        title: "Guide",
-        dir: "guide",
-        locale: "root",
-        headers: [
-          { title: "Install", anchor: "install", level: 2 },
-          { title: "From source", anchor: "from-source", level: 3 },
-        ],
-      },
       { url: "/includes.html", title: "Includes", dir: "", locale: "root", headers: [] },
       {
         url: "/mentions.html",
@@ -153,6 +143,18 @@ describe("the page index under the action's build topology", () => {
         dir: "",
         locale: "root",
         headers: [{ title: "Install!", anchor: "install", level: 2 }],
+      },
+      // Sidebar order: the root's own pages, then the guide/ directory,
+      // although guide/README.md sorts before them as a path.
+      {
+        url: "/guide/",
+        title: "Guide",
+        dir: "guide",
+        locale: "root",
+        headers: [
+          { title: "Install", anchor: "install", level: 2 },
+          { title: "From source", anchor: "from-source", level: 3 },
+        ],
       },
     ]);
     const includes = readFileSync(join(dist, "includes.html"), "utf-8");

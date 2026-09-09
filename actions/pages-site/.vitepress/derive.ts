@@ -1,12 +1,13 @@
 // Derives the VitePress site structure from the caller repository's docs
-// tree alone: the fleet's repos carry ONLY markdown, so the sidebar, the
-// route rewrites, and the nav come from the file layout, never from a
-// per-repo config. Imported by config.ts at build time and by the action's
-// tests directly.
+// tree alone: the fleet's repos carry ONLY markdown, so the routes, the
+// locales, and what a page says about itself (its title, its sidebar
+// order and group) come from the files, never from a per-repo config.
+// sidebar.ts builds the sidebar on these primitives. Imported by
+// config.mts at build time and by the action's tests directly.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { dirTitle } from "./dir-title.ts";
+import matter from "gray-matter";
 
 /** ISO 639-1 primary language subtags: the locale-directory convention
  *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary
@@ -62,6 +63,17 @@ export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   return files;
 }
 
+/** Whether a path is a regular file: false for whatever makes a read fail
+ *  (a missing entry, a directory, a path through a file). VitePress's
+ *  include directive expands only such a path. */
+export function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** README.md -> index.md route rewrites, one exact entry per README, so a
  *  docs tree indexed by READMEs (the fleet convention) serves each
  *  directory's landing page at the directory URL. A directory that carries
@@ -77,20 +89,52 @@ export function deriveRewrites(files: string[]): Record<string, string> {
   return rewrites;
 }
 
-/** A page's sidebar text: its first `# ` heading, else the filename
- *  humanized (dashes and underscores to spaces). */
-export function pageTitle(srcDir: string, file: string): string {
-  const heading = /^#\s+(.+?)\s*$/m.exec(readFileSync(join(srcDir, file), "utf-8"));
-  if (heading) return heading[1];
-  const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
-  return stem.replace(/[-_]/g, " ");
+/** What a page's markdown says about itself, read once at config time.
+ *  `order` and `group` are the sidebar's frontmatter keys (docs/docs-site.md
+ *  documents the contract); null when the page carries none. */
+export interface PageMeta {
+  /** The `title` frontmatter, else the first `# ` heading, else the
+   *  filename humanized (dashes and underscores to spaces). */
+  title: string;
+  order: number | null;
+  group: string | null;
 }
 
-export interface SidebarItem {
-  text: string;
-  link?: string;
-  items?: SidebarItem[];
-  collapsed?: boolean;
+export function readPage(srcDir: string, file: string): PageMeta {
+  return pageMeta(file, readFileSync(join(srcDir, file), "utf-8"));
+}
+
+/** `pageMeta` on a source string; `file` names the page in the error a
+ *  malformed key raises, so a fleet repo's docs PR check points at it. */
+export function pageMeta(file: string, source: string): PageMeta {
+  const { data, content } = matter(source);
+  const title =
+    typeof data.title === "string" && data.title.trim() !== "" ? data.title.trim() : null;
+  const heading = /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? null;
+  const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
+  return {
+    title: title ?? heading ?? stem.replace(/[-_]/g, " "),
+    order: frontmatterOrder(file, data.order),
+    group: frontmatterGroup(file, data.group),
+  };
+}
+
+function frontmatterOrder(file: string, value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${file}: frontmatter 'order' must be a number, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+function frontmatterGroup(file: string, value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(
+      `${file}: frontmatter 'group' must be a non-empty string, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value.trim();
 }
 
 /** The route a file SERVES at, which is the rewrite map's business: the
@@ -106,48 +150,4 @@ export function routeOf(file: string, rewrites: Record<string, string>): string 
     return dir === "" ? "/" : `/${dir}/`;
   }
   return `/${effective.slice(0, -".md".length)}`;
-}
-
-/** The sidebar for one subtree, from the tree structure alone: landing
- *  pages first, then one collapsible group per directory, recursively.
- *  `prefix` roots the level (a locale tree's sidebar starts inside it);
- *  `title` is injectable for tests. */
-export function deriveSidebar(
-  srcDir: string,
-  files: string[],
-  prefix = "",
-  title: (file: string) => string = (file) => pageTitle(srcDir, file),
-): SidebarItem[] {
-  return sidebarLevel(prefix, files, deriveRewrites(files), title);
-}
-
-function sidebarLevel(
-  prefix: string,
-  files: string[],
-  rewrites: Record<string, string>,
-  title: (file: string) => string,
-): SidebarItem[] {
-  const here = files.filter((f) => f.startsWith(prefix));
-  const locals = here.filter((f) => !f.slice(prefix.length).includes("/"));
-  const dirs = [
-    ...new Set(
-      here
-        .filter((f) => f.slice(prefix.length).includes("/"))
-        .map((f) => f.slice(prefix.length).split("/")[0]),
-    ),
-  ];
-  const landing = (name: string) => name === "README.md" || name === "index.md";
-  const items: SidebarItem[] = locals
-    .sort(
-      (a, b) => Number(landing(b.slice(prefix.length))) - Number(landing(a.slice(prefix.length))),
-    )
-    .map((file) => ({ text: title(file), link: routeOf(file, rewrites) }));
-  for (const dir of dirs) {
-    items.push({
-      text: dirTitle(dir),
-      collapsed: false,
-      items: sidebarLevel(`${prefix}${dir}/`, files, rewrites, title),
-    });
-  }
-  return items;
 }
