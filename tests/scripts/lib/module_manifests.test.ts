@@ -217,6 +217,19 @@ describe("parseManifest", () => {
     }
   });
 
+  test("a tracking_label without a default is refused", () => {
+    // The settings apply renders the default when a selected stream's
+    // answer is not recorded yet, so a stream with no default cannot load.
+    const withoutDefault = [
+      "description: x",
+      "tracking_label:",
+      "  answer: demo_label",
+      '  color: "B60205"',
+      "  description: Automated demo failure",
+    ].join("\n");
+    expect(() => parseManifest("demo", withoutDefault, WHERE)).toThrow("default");
+  });
+
   test("interpolation-hostile descriptions fail: ': ', '#', newlines, edge whitespace", () => {
     const bad: [string, string][] = [
       ['description: "broken: choice text"', '": "'],

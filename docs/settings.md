@@ -24,7 +24,7 @@ Every layer is a plain settings-as-code YAML document a human can read on its ow
 - Which layer files a module ships is DECLARED (`settings_layers` in its `module.yml`), never discovered from the tree: the manifest loader checks each declaration against the tree in both directions, so a deleted layer file is a hard error instead of a silently shorter stack whose missing labels the apply would then delete fleet-wide.
 - None of these files is ever synced into a client repo; only the repo's own settings.yml lives there, rendered ONCE as an identity starter (`_skip_if_exists`), so a settings edit is an ordinary PR in the repo itself.
 - Layer 6 is the only layer a repository cannot beat. Fleet defaults a repo may tune belong in layer 1.
-- Tracking labels are the one non-file input: the label NAME is the repo's `fuzzer_label` / `nightly_label` answer, its color and description live in the module manifest, and the assembly appends it after merging the layers (an unreadable answer fails that repo's apply rather than guessing).
+- Tracking labels are the one non-file input: the label NAME is the repo's `fuzzer_label` / `nightly_label` / `docs_site_label` answer, its color and description live in the module manifest, and the assembly appends it after merging the layers. An answer the file does not record yet resolves to the module's default label (the copier question's `default`, pinned to the manifest's) with a notice; an answer that is recorded but not a non-empty string fails that repo's apply rather than guessing.
 
 ## The merge dialect
 
@@ -76,6 +76,7 @@ Edge cases, all deliberate:
 - A MOVED target keeps any open failure report open, since that run never checked its settings; the two deliberate skips (opted out, not yet onboarded) are terminal and do close it.
 - A target with no `.github/settings.yml` yet is SKIPPED with a warning: absence of the repo layer means not-yet-onboarded, never an empty layer, and applying the baseline alone would delete every label that repo declares for itself. The starter seeds the file on the repo's next template sync; the apply after that picks it up.
 - A repo whose selection probes keep failing (after retries) is skipped for the run with a warning and picked up again the next night.
+- A stream module (fuzzer, nightly, docs-site) is selected in `.repo-platform.yml` one PR before the sync PR that renders it records its label answer in `.github/.copier-answers.yml`. In that window the apply renders the module's default label and continues, with a `::notice::` naming the repo, the module, and the assumed default; the first apply after the sync PR merges reads the recorded answer, so a label customized in that PR takes effect then (the default label is deleted as undeclared and the customized one created). A default that collides with another stream's recorded label fails the apply like any label collision, until that sync PR records a distinct name.
 - A private target shows up as a name hint (`apply (h**-s**r)`), and its details stay out of the public log; the full report is a marker-labelled issue on the repository itself - [private-repos.md](private-repos.md#the-settings-report-issue).
 
 ## What the baseline contains

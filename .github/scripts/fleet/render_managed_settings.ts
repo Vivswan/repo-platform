@@ -47,7 +47,7 @@ import {
   type SettingsLayerName,
 } from "../../../scripts/lib/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { fail, setOutput, warning } from "../shared/gha.ts";
+import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
 import { readModules } from "../sync/modules.ts";
@@ -344,16 +344,27 @@ export function assertKnownModules(
   return modules;
 }
 
+/** What an ABSENT tracking-label answer means to a fact source: a client
+ *  repository's answer arrives with its pending sync PR, so absence falls
+ *  back to the manifest default with a notice; the operator maintains its
+ *  own answers file by hand, so absence there is a defect. */
+export type AbsentAnswerPolicy =
+  | { readonly fallback: "default"; readonly report: (message: string) => void }
+  | { readonly fallback: "fail" };
+
 /** The selected stream modules' tracking-label answers from a
- *  .github/.copier-answers.yml text. A tracking label is the module's issue-stream
- *  identity: guessing a default could pass while the repo's real label
- *  loops on delete/recreate, so an unreadable answer for a SELECTED
- *  stream module throws, never falls back. */
+ *  .github/.copier-answers.yml text. A module reaches .repo-platform.yml one
+ *  PR before the sync PR recording its answer, so an ABSENT answer is a
+ *  normal state of every module addition: it resolves to the manifest
+ *  default (check_ssot pins it to the copier question's) with a notice, per
+ *  `absent`. A PRESENT but unreadable answer is an answers-file defect and
+ *  throws: the label is the stream's identity, and a guess would loop it. */
 export function trackingLabelsFrom(
   answersText: string,
   modules: string[],
   manifests: ModuleManifest[],
   where: string,
+  absent: AbsentAnswerPolicy = { fallback: "default", report: notice },
 ): { module: string; label: string }[] {
   const streams = manifests.filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
@@ -363,11 +374,29 @@ export function trackingLabelsFrom(
   return streams.map((m) => {
     const tracking = m.tracking_label;
     if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
+    if (!Object.hasOwn(answers, tracking.answer)) {
+      if (absent.fallback === "fail") {
+        throw new Error(
+          `${where}: the ${m.module} module is selected but the file records no ` +
+            `${tracking.answer} answer - no sync PR records this file, so the tracking label ` +
+            "cannot be resolved; record the answer",
+        );
+      }
+      absent.report(
+        `${where}: the ${m.module} module is selected but the file records no ` +
+          `${tracking.answer} answer yet, so this apply assumes the module's default label ` +
+          `'${tracking.default}'. The repository's pending sync PR writes the answer; the ` +
+          "first apply after it merges reads the recorded value, so a label customized in " +
+          "that PR takes effect then.",
+      );
+      return { module: m.module, label: tracking.default };
+    }
     const value = answers[tracking.answer];
     if (typeof value !== "string" || value === "") {
       throw new Error(
-        `${where}: the ${m.module} module is selected but no ${tracking.answer} answer ` +
-          "is readable - the tracking label cannot be resolved; fix the answers file",
+        `${where}: the ${m.module} module is selected but its ${tracking.answer} answer is ` +
+          "not readable (recorded, but not a non-empty string) - the tracking label cannot " +
+          "be resolved; fix the answers file",
       );
     }
     return { module: m.module, label: value };
@@ -487,9 +516,11 @@ export function factsFromOperatorAnswers(
     // The answers file records a selected stream module's label under the
     // same key copier asks for (docs_site_label today - the dogfood
     // answers schema is strict, so selecting another stream module means
-    // teaching that schema its answer first), and an unrecorded answer
-    // for a selected stream fails here, never falls back to a guess.
-    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath),
+    // teaching that schema its answer first). No sync PR writes this file,
+    // so an absent answer is a defect here, never a pending render.
+    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath, {
+      fallback: "fail",
+    }),
     prTitleWorkflowPresent: existsSync(join(dirname(resolve(answersPath)), PR_TITLE_WORKFLOW)),
   };
 }
@@ -508,6 +539,7 @@ export function factsFromFetch(
   manifests: ModuleManifest[],
   ref: string,
   fetch: RepoFileFetcher = fetchRepoFile,
+  report: (message: string) => void = notice,
 ): RepoFacts | null {
   const registration = fetch(repo, ".repo-platform.yml", ref);
   if (registration === null) return null;
@@ -531,6 +563,7 @@ export function factsFromFetch(
       modules,
       manifests,
       `${repo}/.github/.copier-answers.yml`,
+      { fallback: "default", report },
     );
   }
   // Probed only where it can matter (the module selected): a 404 is a

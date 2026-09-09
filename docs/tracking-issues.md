@@ -18,7 +18,7 @@ Because the starters are repo-owned, template sync never re-renders them, so the
 Each stream is identified by a label, set as a copier question (`fuzzer_label`, `nightly_label`, `docs_site_label`) rather than a starter edit, because two more places must agree on it:
 
 - The report and resolve steps: both dedup and auto-close by the label.
-- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The managed settings baseline declares the label automatically - repo-platform resolves the recorded answer at apply time, and an unreadable answer fails that repo's apply rather than guessing ([settings.md](settings.md)).
+- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The managed settings baseline declares the label automatically - repo-platform resolves the recorded answer at apply time, falls back to the question's default while the sync PR recording the answer is still open, and fails that repo's apply on an answer that is recorded but unreadable rather than guessing ([settings.md](settings.md)).
 
 The question's validator (it runs on `copier update` too) enforces:
 
