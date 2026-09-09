@@ -1,34 +1,23 @@
-// The two settings-document types and the YAML parse boundary that
-// produces the first of them. Every settings layer enters the fleet's
-// scripts through this file, and the types carry what each stage has
-// already established, so no later stage has to re-check it.
+// The two settings-document types and the YAML parse boundary that produces
+// the first. Every settings layer enters the fleet's scripts here, and the
+// types carry what each stage has established, so no later stage re-checks.
 //
-// SettingsLayer is INPUT: one layer file's document, exactly as a human
-// wrote it. Nulls are legal there and load bearing - the dialect's
-// opt-out marker (merge_settings_layers.ts) - so the type admits them.
-// What the type does NOT admit is anything YAML cannot produce, and the
-// boundary rejects the shapes that are illegal even in a layer: a ruleset
-// rule without a string `type`, which cannot be merged or deduplicated
-// and whose silent removal would apply a weaker policy than the file
-// declares, and a `labels` or `rulesets` section that is not a list of
-// mappings - the merge unions those sections by name, and any other
-// shape would fall out of the union into wholesale replace, silently
-// discarding the managed roster (the apply then deletes every label the
-// merged document no longer declares, and upserts rulesets missing the
-// modules' protection rules, green either way).
+// SettingsLayer is INPUT: one layer file's document as a human wrote it.
+// Nulls are legal and load bearing (the dialect's opt-out marker), so the
+// type admits them. The boundary rejects only the shapes illegal even in a
+// layer: a ruleset rule without a string `type` (unmergeable, and its
+// silent removal would apply a weaker policy than the file declares), and a
+// `labels` or `rulesets` section that is not a list of mappings (the merge
+// unions those by name; any other shape would fall into wholesale replace
+// and silently discard the managed roster - the apply then deletes every
+// undeclared label, green either way).
 //
-// MergedSettings is OUTPUT: the finished document the apply hands to
-// GitHub. `null` is ABSENT from MergedValue, so a merged document that
-// still carries the opt-out marker is not a runtime failure to detect -
-// it does not typecheck. That is the point of the split: the merge
-// consumes nulls, and the compiler now checks that every path out of the
-// merge really did (a plain `Record<string, unknown>` on both sides made
-// the two indistinguishable, so the guarantee lived only in whichever
-// runtime pass a future merge path remembered to call).
-//
-// Both types are structural, deliberately: layer documents are free-form
-// settings-as-code, and a nominal brand would only force casts at the
-// call sites that build one honestly.
+// MergedSettings is OUTPUT: the finished document the apply hands to GitHub.
+// `null` is ABSENT from MergedValue, so a merged document still carrying the
+// opt-out marker does not typecheck: the merge consumes nulls, and the
+// compiler checks that every path out of it did. Both types are structural
+// on purpose: layer documents are free-form settings-as-code, and a nominal
+// brand would only force casts at the sites that build one honestly.
 
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -50,27 +39,14 @@ export type SettingsLayer = { [key: string]: LayerValue };
 /** The same value space MINUS null: what survives the merge. */
 export type MergedValue = LayerScalar | MergedValue[] | { [key: string]: MergedValue };
 
-/** The finished document, the one thing an apply may be handed. Only
- *  merge_settings_layers.ts can build one from layers.
- *
- *  The guard is ONE-DIRECTIONAL on purpose: MergedValue is LayerValue minus
- *  null, so a MergedSettings is also a valid SettingsLayer, and passing one
- *  back in as a layer is not a leak but the fold - mergeLayers reduces with
- *  the accumulated document as the next `below`, and the sync's layering
- *  summary re-merges an already-merged fleet document with the override.
- *  Making that assignment fail (a brand, or a readonly-deep MergedValue,
- *  which does block it) would force casts at exactly those honest call
- *  sites, which is the reason the header gives for staying structural.
- *
- *  Re-entry is safe because the invariant lives at the construction point,
- *  not in the type's assignability: every path to a MergedSettings runs
- *  through merge_settings_layers.ts's hardenDocument, which builds a FRESH
- *  structure and drops nulls as it goes. So there is no mutable alias to
- *  write back through, and a merged document fed in as a layer is hardened
- *  again on the way out - idempotently, since it has no nulls left to
- *  strip. A post-merge write COULD reintroduce a null in layer space, and
- *  the next harden removes it; what the type stops is that document
- *  reaching an apply without one. */
+/** The finished document, the one thing an apply may be handed; only
+ *  merge_settings_layers.ts's hardenDocument builds one, as a FRESH
+ *  structure with nulls dropped. The guard is ONE-DIRECTIONAL on purpose:
+ *  MergedValue is LayerValue minus null, so a MergedSettings is also a valid
+ *  SettingsLayer, and passing one back in is the fold (mergeLayers reduces
+ *  with the accumulated document as the next `below`) - a brand would force
+ *  casts at exactly those honest sites. Re-entry is safe because a merged
+ *  document fed in as a layer is hardened again, idempotently, on the way out. */
 export type MergedSettings = { [key: string]: MergedValue };
 
 export function isMapping(value: unknown): value is Record<string, unknown> {

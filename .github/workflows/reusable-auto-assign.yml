@@ -2,26 +2,22 @@
 # event context flows through. A workflow_dispatch with an `issue` input
 # assigns that one issue (or PR - PRs are issues), for items whose creation
 # event fired no workflow. A schedule run, or a dispatch with the input left
-# empty, is a sweep instead: every open unassigned issue and PR gets the same
+# empty, is a sweep: every open unassigned issue and PR gets the same
 # CODEOWNERS assignment. The sweep runs on the repo's own token, so it also
 # picks up bot-authored PRs whose event runs got a read-only GITHUB_TOKEN
-# (Dependabot's) - a feature, not a bug. Code scanning alert assignment
-# lives in reusable-auto-assign-alerts.yml: a reusable-workflow call is
-# statically validated against the permissions of every job in the called
-# file regardless of each job's `if:`, so keeping the alert job out of this
-# file is what lets callers grant security-events only to that call.
+# (Dependabot's). Code scanning alert assignment lives in
+# reusable-auto-assign-alerts.yml: a reusable-workflow call is statically
+# validated against the permissions of every job in the called file
+# regardless of each job's `if:`, so keeping the alert job out of this file
+# lets callers grant security-events only to that call.
 #
 # Who gets assigned: the users on the last `*` entry of the repo's own
 # CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
-# Each repo controls its policy by editing CODEOWNERS.
-#
 # The job declares the minimum permissions it needs. A called job can only
 # downgrade the caller's token, so every scope below must also appear on the
-# calling job in the caller template - adding a scope here breaks callers
-# that have not synced the matching caller update yet.
-#
-# This runs in CALLER repos, where repo-platform's scripts do not exist:
-# every step stays inline.
+# calling job in the caller template; adding a scope here breaks callers
+# that have not synced the matching caller update yet. This runs in CALLER
+# repos, where repo-platform's scripts do not exist: every step stays inline.
 
 name: Reusable Auto Assign
 
@@ -143,17 +139,14 @@ jobs:
               reviewers
             });
 
-      # A dispatch with a number assigns that one issue or PR per the
-      # CODEOWNERS policy. GitHub fires no workflow for events created with a
-      # workflow's own GITHUB_TOKEN, so an issue or PR created by another
-      # workflow never triggers the paths above; the creating workflow
-      # dispatches this one with the number instead. Only the named item is
-      # touched, so unassigning yourself later sticks. A schedule run, or a
-      # dispatch with the input left empty, sweeps instead: every open issue
-      # and PR still unassigned (filtered server-side; the issues list API
-      # covers PRs too) gets the same assignment, page-bounded so a
-      # pathological backlog cannot run away - the nightly cadence drains
-      # the remainder.
+      # A dispatch with a number assigns that one issue or PR: GitHub fires no
+      # workflow for events created with a workflow's own GITHUB_TOKEN, so an
+      # issue or PR another workflow created never triggers the paths above;
+      # the creating workflow dispatches this one instead. Only the named item
+      # is touched, so unassigning yourself later sticks. A schedule run, or a
+      # dispatch with the input empty, sweeps every open unassigned issue and
+      # PR (filtered server-side; the issues list API covers PRs), page-bounded
+      # so a pathological backlog cannot run away; the nightly drains the rest.
       - name: Assign the dispatched item, or sweep open unassigned items
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         uses: actions/github-script@v9

@@ -1,48 +1,24 @@
 #!/usr/bin/env bun
-// Merges a repository's own .github/settings.yml OVER its computed
-// managed settings baseline (render_managed_settings.ts), producing the
-// one document github-settings-as-code applies. The single home of the
-// layering dialect:
+// Merges a repository's own .github/settings.yml OVER its computed managed
+// baseline (render_managed_settings.ts) into the one document
+// github-settings-as-code applies. The single implementation of the
+// layering dialect, whose rules are stated in docs/settings.md, "The merge
+// dialect" (deep merge, null opt-out, name-keyed label and ruleset unions,
+// rules appended by type, wholesale replace for everything else).
 //
-// - Deep merge: the repo layer wins; objects merge key by key.
-// - An explicit `null` in the repo layer opts that key out entirely: the
-//   key is stripped from the merged document, so the apply never touches
-//   that section (or nested key) on this repository.
-// - `labels` and `rulesets` are NAME-KEYED UNIONS: both sides' other
-//   entries are kept. A same-name LABEL is replaced wholesale by the
-//   higher layer; a same-name RULESET merges field by field, with its
-//   `rules` appended by rule `type` (see appendRules). Plain array-replace
-//   would freeze the managed roster (a repo declaring one extra label
-//   would nightly-delete every module label the moment the baseline
-//   grows); the union keeps repo additions and managed evolution both
-//   live. Label names match case-insensitively (GitHub deduplicates
-//   label names that way); ruleset names match exactly.
-// - Every other array (and every scalar) replaces wholesale.
-//
-// Layers arrive as the SettingsLayer type, from settings_document.ts's
-// parse boundary, and leave as a MergedSettings, which cannot hold a null
-// at all (hardenDocument below). The dialect's job is to consume the
-// opt-out markers; the type is what checks that it did. The boundary also
-// refuses a labels/rulesets section that is not a list of mappings, so
-// the unions here never meet a shape they would have to fall back from.
-//
-// A repository with no .github/settings.yml is NOT-YET-ONBOARDED, never
-// "an empty repo layer": applying the managed baseline alone would let
-// the action's delete-undeclared label reconciliation wipe every label
-// the repository declared for itself. Absence therefore SKIPS the apply
-// (loudly, and `skipped=true` on the step) instead of producing a
-// document. The settings.yml starter (base content of every render) seeds
-// the file on the next template sync, and the apply after that picks it up.
-//
-// CLI:
-//   bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
-//     --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
-//
-// --repo-file reads the repo layer from a local path (the operator row's
-// own checkout); --repo-fetch reads it from the target via gh api (env:
-// GH_TOKEN), pinned to --repo-ref, the commit the render read its facts
-// at. Exactly one source is required - there is no baseline-only mode,
-// because its output is the destructive document above.
+// Layers arrive as SettingsLayer from settings_document.ts's parse boundary
+// and leave as MergedSettings, which cannot hold a null (hardenDocument):
+// the dialect consumes the opt-out markers, and the type checks that it
+// did. A repository with no .github/settings.yml is NOT-YET-ONBOARDED,
+// never "an empty repo layer": applying the baseline alone would let the
+// action's delete-undeclared reconciliation wipe every label the repository
+// declared for itself, so absence SKIPS the apply (loudly, `skipped=true`)
+// until the settings.yml starter arrives with the next template sync.
+// CLI: bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
+//   --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
+// --repo-fetch reads via gh api (env: GH_TOKEN) pinned to --repo-ref, the
+// commit the render read its facts at. Exactly one source is required:
+// there is no baseline-only mode, because its output is destructive.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -86,17 +62,14 @@ const NAME_KEYED: Record<
  *  dialect's null opt-out has been consumed. */
 type Declared = Exclude<LayerValue, null>;
 
-/** THE choke-point, now a TYPE rather than a convention: merging works in
- *  layer space, where nulls are legal, and the merged document is the one
- *  thing an apply may be handed. Since MergedValue has no null, the only
- *  way out of the merge is through here - a future merge path that skips
- *  it does not compile, where before it merely produced a document that
- *  looked like every other Record<string, unknown>.
- *
+/** THE choke-point, a TYPE rather than a convention: merging works in layer
+ *  space, where nulls are legal, and the merged document is the one thing an
+ *  apply may be handed. Since MergedValue has no null, the only way out of
+ *  the merge is through here: a merge path that skips it does not compile.
  *  Two invariants, both about what GitHub rejects: a literal null anywhere
- *  fails the apply (the dialect's opt-out means ABSENT), and a ruleset
- *  repeating a rule `type` is rejected wholesale, which leaves a branch
- *  unprotected on a green run. */
+ *  fails the apply (the opt-out means ABSENT), and a ruleset repeating a
+ *  rule `type` is rejected wholesale, leaving a branch unprotected on a
+ *  green run. */
 function hardenDocument(doc: SettingsLayer): MergedSettings {
   return hardenMapping(doc, false, true);
 }
@@ -164,24 +137,14 @@ function hardenMapping(
   return out;
 }
 
-/** A ruleset's `rules` list APPENDS across layers, keyed by `type`: the
- *  lower layer's rules in order, each replaced in place by a higher-layer
- *  rule of the same type, then the higher layer's new types appended.
- *  This is what lets a module's visibility layer add `code_scanning` to
- *  the `main` ruleset that .github/settings-override.yml declares - the
- *  override sits at the top of the stack, so a whole-entry replace would
- *  drop the module's rule instead. When both layers carry rule arrays,
- *  every distinct rule TYPE survives the merge (and first occurrence
- *  wins within one layer), but a same-type rule in a higher layer
- *  replaces the lower one's parameters wholesale - which can weaken it
- *  as easily as tighten it - and an explicit `rules: null` in a higher
- *  layer strips the inherited list entirely (mergeRulesetEntry). Only
- *  the override's own rules are unbeatable, because no layer merges
- *  above them.
- *
- *  Two signatures for one body because this never invents an element: it
- *  picks from what it was handed, so hardened rules in means hardened
- *  rules out, and the hardening pass can dedup without a cast. */
+/** A ruleset's `rules` list APPENDS across layers, keyed by `type` (the
+ *  dialect: docs/settings.md, "The merge dialect"): the lower layer's rules
+ *  in order, each replaced in place by a same-type higher rule, then the
+ *  higher layer's new types. First occurrence wins within one layer; an
+ *  explicit `rules: null` in a higher layer strips the inherited list
+ *  (mergeRulesetEntry). Two signatures for one body because this never
+ *  invents an element: it picks from what it was handed, so hardened rules
+ *  in means hardened rules out, and the hardening pass can dedup uncast. */
 export function appendRules(
   lower: readonly MergedValue[],
   higher: readonly MergedValue[],
@@ -511,15 +474,13 @@ export const ALL_GREEN_CONTEXT = "all-green";
  *  could satisfy the required context just by matching its name. */
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
-/** The fleet-mandatory top layer: merged ABOVE the repository's own
- *  settings.yml, so no repository can weaken what it declares - including
- *  by nulling the key out, since the null opt-out only strips keys from
- *  the layers BELOW this one.
- *
- *  Validated here, the one place every consumer goes through, against the
- *  required-check mistakes that weaken the whole fleet: the main ruleset
- *  must require ALL_GREEN_CONTEXT, and every required-check entry must
- *  pin integration_id to GitHub Actions (see GITHUB_ACTIONS_APP_ID). */
+/** The fleet-mandatory top layer, merged ABOVE the repository's own
+ *  settings.yml so no repository can weaken what it declares, including by
+ *  nulling the key out (the null opt-out only strips keys from the layers
+ *  BELOW). Validated here, the one place every consumer goes through,
+ *  against the required-check mistakes that weaken the whole fleet: the
+ *  main ruleset must require ALL_GREEN_CONTEXT, and every required-check
+ *  entry must pin integration_id to GitHub Actions (GITHUB_ACTIONS_APP_ID). */
 export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
   const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];

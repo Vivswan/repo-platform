@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Renders the template twins this repository dogfoods and writes this
-// repo's own copies, so each generated file has exactly one author: the
+// repo's own copies, so each generated copy has exactly one author: the
 // template. The copies carry the template's comments verbatim; the pairs
 // generation cannot own (the prefix files with repo-specific tails) stay
 // compared by check_ssot's dogfood-parity rule instead.

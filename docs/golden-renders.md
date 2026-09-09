@@ -25,15 +25,16 @@ CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fai
 
 ## Determinism contract
 
-A golden changes if and only if rendered content changes. The volatile inputs are pinned at their sources; the full inventory lives in [scripts/generate/render_goldens.ts](../scripts/generate/render_goldens.ts)'s header. The essentials:
+A golden changes if and only if rendered content changes. Every volatile input is pinned at its source:
 
-- The scratch build tree is content-deterministic by design (no timestamps or source SHAs in-tree), and its git commit uses a pinned identity, pinned dates, a fixed message, and neutralized global/system git config, so a user's autocrlf or gpg-signing setup cannot leak into blob hashes.
-- copier runs from the scratch directory with a relative source path, so the recorded `_src_path` is the fixed string `./tree`, never a machine-specific temp path; `COPIER_SETTINGS_PATH` is pointed away from any user settings file so its answer defaults cannot leak into the render.
+- The scratch build tree is content-deterministic by design (no timestamps or source SHAs in-tree), and its git commit uses a pinned author and committer identity, pinned dates, and a fixed message, with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` pointed at `/dev/null` so a user's autocrlf or gpg-signing setup cannot leak into blob or commit hashes.
+- copier runs from the scratch directory with a relative source path, so the recorded `_src_path` is the fixed string `./tree`, never a machine-specific temp path. The same `/dev/null` git config is passed to copier for its internal clone, and `COPIER_SETTINGS_PATH` is pointed away from any user settings file so its answer defaults cannot leak into the render.
+- The `-d` answers are the fixed values in the runner; everything else takes copier.yml defaults.
 - The copier version itself is deliberately unpinned, matching the smoke legs and the fleet sync: a copier upgrade that changes rendered bytes is a real fleet-facing change and should surface here as golden drift.
 
 ## The sentinel
 
-One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.github/.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel (forty `x` characters, the width of the full sha the stamp hook records), and leaves every other byte verbatim.
+One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.github/.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel (forty `x` characters, the width of the full sha the stamp hook records), re-runs the manifest stamp so its answers-file hash matches the rewritten answers, and leaves every other byte verbatim.
 
 - The sentinel is deliberately non-hex, so no honest commit sha can ever read as it.
 - Only the true full sha is rewritten: any other value surfaces as drift - copier's 7-char abbreviation included, so a render whose hook rewrite did not run fails here - and a pre-stamped sentinel is rejected outright (it would false-match the committed goldens).

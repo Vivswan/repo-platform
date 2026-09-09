@@ -106,15 +106,14 @@ function hasActionManifest(dir: string): boolean {
   );
 }
 
-/** Composes the tree for `sourceSha` and, when the tree CHANGED (or the
- * tip's stamp needs recovery), chains a stamped commit onto the tip. Two
- * early returns, both skips: stale (a newer publisher already delivered
- * - newest-green wins, decided BEFORE the compose so a stale run costs
- * nothing) and no-change-with-healthy-stamp (nothing to publish: the
- * tip already IS this source's tree). The seed arm (a missing branch) never hits
- * the no-change skip: it requires the branch to exist, and the seed
- * stages the whole tree anyway. Returns whether the tip ADVANCED (a
- * commit was pushed); both skips return false. */
+/** Composes the tree for `sourceSha` and, when it CHANGED (or the tip's
+ * stamp needs recovery), chains a stamped commit onto the tip. Two skips
+ * return false: stale (a newer publisher already delivered; newest-green
+ * wins, decided BEFORE the compose so a stale run costs nothing) and
+ * no-change-with-healthy-stamp (the tip already IS this source's tree).
+ * The seed arm (a missing branch) never hits the no-change skip: that skip
+ * needs an existing tip, and the seed stages the whole tree. Returns
+ * whether the tip ADVANCED. */
 function publish(sourceSha: string): boolean {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   const scratch = scratchWorktrees();

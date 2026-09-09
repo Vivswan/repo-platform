@@ -51,16 +51,14 @@ export function expandCheckChain(
   return { text: bodies.join("\n"), names };
 }
 
-/** Every gating job in this repository's ci.yml, by job id - the authored
+/** Every gating job in this repository's ci.yml, by job id: the authored
  *  twin of the all-green job's needs list (the all-green-roster rule holds
- *  the three sides together). The run-time gate judges whatever its needs
- *  name, so a job deleted from ci.yml AND from the needs list would stop
- *  gating with nothing to notice it; this roster is where that deletion
- *  becomes loud. Adding a gating job means adding it here AND to the
- *  needs list; removing one means removing both entries in the same
- *  change, deliberately. Jobs downstream of the gate (post-green) are
- *  the one exemption and never appear here; the verdict era's info-*
- *  opt-out died with the verdict - every other job gates. */
+ *  the sides together). The run-time gate judges whatever its needs name,
+ *  so a job deleted from ci.yml AND the needs list would stop gating with
+ *  nothing to notice; this roster is where that deletion becomes loud.
+ *  Adding or removing a gating job means editing both, deliberately, in one
+ *  change. Jobs downstream of the gate (post-green) are the one exemption;
+ *  every other job gates. */
 export const ALL_GREEN_ROSTER = [
   "actionlint",
   "actionlint-binary",
@@ -133,18 +131,14 @@ export function rosterMismatches(
   return mismatches;
 }
 
-/** The meta-check gate's shape over this repository's parsed ci.yml,
- *  against the authored roster. The all-green JOB is the gate now: its
- *  own check run (named by its job id) is the ruleset's required check,
- *  so the job must exist, carry exactly `if: always()` (a failed
- *  dependency must FAIL the gate, not skip it), need EXACTLY the roster
- *  (a dropped needs entry un-gates a job that keeps running), and judge
- *  through the shared action with the needs context wired in. Gating
- *  jobs stay unconditional and un-renamed (the meta-check reads job
- *  RESULTS, and a skipped result stands down - conditions go on steps);
- *  downstream jobs (needs including all-green: post-green, release-style
- *  legs) are exempt from the roster but must spell out the gate's result
- *  in their condition. Pure over the parsed doc for the forcing tests. */
+/** The meta-check gate's shape over this repository's parsed ci.yml against
+ *  the authored roster. The all-green JOB's own check run is the ruleset's
+ *  required check, so it must exist, carry exactly `if: always()` (a failed
+ *  dependency must FAIL the gate, not skip it), need EXACTLY the roster (a
+ *  dropped needs entry un-gates a job that keeps running), and judge through
+ *  the shared action. Gating jobs stay unconditional and un-renamed (a
+ *  skipped RESULT stands down; conditions go on steps); downstream jobs are
+ *  exempt from the roster but must spell out the gate's result. Pure, for the forcing tests. */
 export function allGreenGateMismatches(
   ci: Record<string, unknown>,
   roster: string[],
@@ -482,16 +476,13 @@ export const allGreenRules: Rule[] = [
   },
   {
     // The gate check's NAME, pinned once as data: the string the ruleset
-    // REQUIRES and the job id whose check run CARRIES it must be provably
-    // the same at authoring time (a renamed job would leave branch
-    // protection waiting forever while every job stayed green). Its
-    // independently-authored homes: the shared green-gate predicate's
-    // CHECK_NAME (all_green.ts) - which must also feed its own check-run
-    // lookup - the all-green JOB id in this repo's ci.yml and in the
-    // template ci.yml.jinja (a job's check run is named by its id; the
-    // all-green-roster and fleet-ci-render-roster rules pin that neither
-    // job carries a name: override), the override layer's required-check
-    // context, and docs/all-green.md's prose.
+    // REQUIRES and the job id whose check run CARRIES it must be provably the
+    // same at authoring time, or a renamed job leaves branch protection
+    // waiting forever while every job stays green. Its independently-authored
+    // homes: the shared predicate's CHECK_NAME (which must also feed its own
+    // check-run lookup), the all-green JOB id in this ci.yml and in the
+    // template's (a job's check run is named by its id; the roster rules pin
+    // that neither carries name:), the override layer, and docs/all-green.md.
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];

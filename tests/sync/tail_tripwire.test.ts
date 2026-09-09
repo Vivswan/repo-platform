@@ -181,15 +181,14 @@ describe("headSplitEntries (re-exported for the sync legs)", () => {
     );
   });
 
-  // head_manifest.test.ts pins the plain refusals (unknown grammar -
-  // registry-proven there - unknown class, non-JSON, files: [],
-  // entry-level duplicate keys, non-ASCII markers). These rows are the
-  // shapes it does not: the unknown and grammar-less shapes with the
-  // ADVICE ORDER pinned (the recovery advice precedes the target-controlled
-  // values, so it always survives the PR-body clip), and the damage shapes
-  // whose silent acceptance would skip a real file's check or reclassify
-  // it - every one must throw so the sync legs fail closed (unverifiable,
-  // manual review) instead of guessing a split.
+  // head_manifest.test.ts pins the plain refusals (unknown grammar, unknown
+  // class, non-JSON, files: [], entry-level duplicate keys, non-ASCII
+  // markers). These rows are the shapes it does not: the unknown and
+  // grammar-less shapes with the ADVICE ORDER pinned (recovery advice
+  // precedes the target-controlled values, so it survives the PR-body
+  // clip), and the damage shapes whose silent acceptance would skip a real
+  // file's check or reclassify it; every one must throw so the sync legs
+  // fail closed (manual review) instead of guessing a split.
   const managedEntry = '{"class": "managed", "hash": null}';
   // The second spelling escapes the final "d" as backslash-u0064: a
   // byte-level raw-token compare would miss it, but JSON.parse still

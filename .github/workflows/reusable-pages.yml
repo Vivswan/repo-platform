@@ -1,26 +1,22 @@
 # Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
-# pages-site action (actions/pages-site@build) from a mount list.
-#   Per versioned mount: <mount>latest/ builds from the default branch head,
-#   <mount><tag>/ from each served version tag (vX.Y.Z, newest
-#   vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot build is
-#   skipped with a notice), and the mount root serves the newest served
-#   version - or the default branch head again while none serve.
-#   An unversioned mount is one build of the default branch head.
-# Command mounts run the caller's build under the PAGES_* contract
-# (docs/pages.md: base path, origin, version, and the tier's place in the
-# layout); vitepress mounts render the caller's docs tree
-# under the central fleet theme (repo-platform's docs/pages.md and
-# docs/docs-site.md).
-# A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN repo
-# variable together (docs/pages.md); when the variable is set, the root
-# moves from /<repo>/ to /, and the artifact carries CNAME.
-# On scheduled runs with link_rot_label set, the assembled site's external
-# links are checked after the deploy and findings ride the fleet's
-# tracking-issue stream (fuzz-issue@build) under that label.
-# Callers own `concurrency: pages`; this workflow does not declare one.
-# The commit built: the sha input when the caller passes one (the managed
-# pages.yml hands over the commit ci.yml's all-green gate judged), else a
-# push builds its own commit and every other event the default branch head.
+# pages-site action (actions/pages-site@build) from a mount list (the
+# contract: docs/pages.md). Per versioned mount: <mount>latest/ builds from
+# the default branch head, <mount><tag>/ from each served version tag
+# (newest vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot
+# build is skipped with a notice), and the mount root serves the newest
+# served version, or the default branch head while none serve. An
+# unversioned mount is one build of the default branch head. Command mounts
+# run the caller's build under the PAGES_* contract; vitepress mounts render
+# the caller's docs tree under the central fleet theme (docs/docs-site.md).
+# A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN variable
+# together; when set, the root moves from /<repo>/ to / and the artifact
+# carries CNAME. On scheduled runs with link_rot_label set, the assembled
+# site's external links are checked after the deploy and findings ride the
+# fleet's tracking-issue stream (fuzz-issue@build) under that label.
+# Callers own `concurrency: pages`; this workflow declares none. The commit
+# built: the sha input when the caller passes one (the managed pages.yml
+# hands over the commit ci.yml's all-green gate judged), else a push builds
+# its own commit and every other event the default branch head.
 
 name: Reusable Pages
 

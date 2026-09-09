@@ -2,21 +2,19 @@
 // The copier-render oracle for the generated dogfood copies: the
 // dogfood-oracle smoke row renders /tmp/smoke with this repository's own
 // answers (.repo-platform-answers.yml), and this script byte-compares each
-// generated pair's rendered file against the committed copy - proving the
+// generated pair's rendered file against the committed copy, proving the
 // TS renderer behind `bun run dogfood` (scripts/generate/render_dogfood.ts +
-// scripts/lib/jinja_subset.ts) agrees with what real copier produces from the
-// same templates and answers.
+// scripts/lib/jinja_subset.ts) agrees with what real copier produces from
+// the same templates and answers.
 //
 // No normalization before comparing: the committed copies carry the
-// render's remote-form `@build` pins verbatim (this repository consumes
-// the same green-gated delivery branch the fleet does), so the oracle is
-// a raw byte comparison.
+// render's remote-form `@build` pins verbatim (this repository consumes the
+// same green-gated delivery branch the fleet does), so it is a raw byte
+// comparison.
 //
 // The rendered .github/.copier-answers.yml is checked against the answers
-// file
-// first, so a dogfood-oracle matrix row that drifts from
-// .repo-platform-answers.yml fails here instead of comparing the wrong
-// render.
+// file first, so a dogfood-oracle matrix row that drifts from
+// .repo-platform-answers.yml fails here instead of comparing the wrong render.
 //
 // Usage: bun .github/scripts/ci/verify_dogfood_oracle.ts [render-root]
 //        (render-root defaults to /tmp/smoke)

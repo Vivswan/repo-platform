@@ -1,40 +1,24 @@
 #!/usr/bin/env bun
-// The sync-side referenced-labels warning: every label the target's issue
-// forms and its own workflows reference must exist in the target's MERGED
-// settings label roster (layers 1-6) under its POST-APPLY name, because
-// the settings apply's reconciliation deletes undeclared labels and
-// renames entries declaring `new_name` - a reference to a label the
-// roster's final names never carry is broken already or breaks on the
-// next heal (the chromium-bridge and litellm incidents;
-// label_references.ts owns the extraction rule and its stated limits). A
-// referenced-but-missing label writes a PR-body section that FORCES
-// manual review (open_pr.ts). WARN, never fail: a repo's own quirk must
-// not block its sync PR, and the apply side carries the fail-closed guard
-// (label_preflight.ts blocks the removal itself).
+// The sync-side referenced-labels warning (docs/settings.md, "Label
+// preflight"): every label the target's issue forms and workflows reference
+// must exist in the MERGED settings roster under its POST-APPLY name,
+// because the apply's reconciliation deletes undeclared labels and renames
+// `new_name` sources (label_references.ts owns the extraction rule and its
+// limits). A missing label writes a PR-body section that FORCES manual
+// review. WARN, never fail: a repo's own quirk must not block its sync PR,
+// and the apply side (label_preflight.ts) carries the fail-closed guard.
 //
-// Invoked by reusable-template-sync.yml after the preserve steps, so the
-// working tree it reads is the delivered content - the post-merge state
-// the invariant is about (delivered issue forms and workflows plus the
-// preserved repo-owned ones, including a freshly seeded settings.yml).
-//
-// Not applicable (empty report) when no apply would reconcile labels: no
-// .repo-platform.yml, no settings.yml to merge, or no labels key in the merged
-// document - the repo keeps its live labels, so nothing removes a reference.
-//
-// A computation failure (unreadable facts, a malformed layer) writes a
+// Runs after the preserve steps, so the tree it reads is the delivered
+// content the invariant is about. Not applicable (empty report) when no
+// apply would reconcile labels: no .repo-platform.yml, no settings.yml, or
+// no labels key in the merged document. A computation failure writes a
 // COULD-NOT-VERIFY section instead - still forcing review, still exit 0:
-// silently skipping would fail open, hard-failing would block delivery.
-// The report may quote target content (label names, paths, error detail);
-// it ships in the PR body to the target repo itself, whose access control
-// is the right one - the LOG lines stay value-free for a hidden target.
-//
-// Usage:
-//   bun referenced_labels.ts [--root target] [--report FILE]
-//     [--hide-details true|false]
-//
-// --report defaults to RUNNER_TEMP/<REFERENCED_LABELS_NAME> - the shared
-// constant open_pr.ts reads from (section_files.ts), so the workflow never
-// names the file and the pair cannot drift.
+// skipping silently would fail open, hard-failing would block delivery.
+// The report may quote target content; it ships in the PR body to the
+// target itself, so the LOG lines stay value-free for a hidden target.
+// Usage: bun referenced_labels.ts [--root target] [--report FILE]
+//   [--hide-details true|false]. --report defaults to RUNNER_TEMP/
+//   <REFERENCED_LABELS_NAME>, the section_files.ts constant open_pr.ts reads.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

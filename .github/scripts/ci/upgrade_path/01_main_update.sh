@@ -35,24 +35,14 @@ git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
-# Local modifications a real repo carries into a sync:
-# - settings.yml gains a line: it is repo-owned and must SURVIVE with the
-#   edit (protected in retired_paths.ts plus the preserve step below)
-# - checks.yml is generated-once (_skip_if_exists): local edits must survive
-# - bug_report.yml is generated-once (_skip_if_exists issue forms): local
-#   tailoring must survive the update
-# - LICENSE.md swaps to a repo-owned license and .repo-platform.yml gains
-#   the custom-license module (the opt-out a repo merges before the sync):
-#   the divergent content must survive the update, the de-render, and the
-#   retired-file cleanup (protectedPaths)
-# - retired-sentinel.txt left the render between the builds; it is
-#   resurrected after the update so its deletion provably comes from
-#   retired_cleanup.ts
-# - src/keep_me.txt is repo-owned content the template never rendered
-# - .repo-platform.yml still names agents, auto-assign, and settings-sync:
-#   the pre-fold selection the m0002 rung must drop (selection would
-#   refuse the names against the new template)
-# - a pending migration rung's input (the root SECURITY.md tail below)
+# Local modifications a real repo carries into a sync, each asserted after
+# the update: repo-owned and generated-once files (settings.yml, checks.yml,
+# bug_report.yml) gain edits that must SURVIVE; LICENSE.md swaps to a
+# repo-owned license with the custom-license module selected (must survive
+# the de-render and retired cleanup); retired-sentinel.txt is resurrected so
+# its deletion provably comes from retired_cleanup.ts; src/keep_me.txt is
+# never-rendered content; .repo-platform.yml still names the pre-fold
+# modules the m0002 rung must drop; SECURITY.md's tail feeds the m0001 rung.
 echo "# local settings note" >> .github/settings.yml
 # SECURITY.md carries a repository-owned tail below its END marker: the
 # security-policy rung must carry it byte-for-byte to .github/SECURITY.md.

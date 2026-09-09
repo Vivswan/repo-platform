@@ -405,18 +405,13 @@ describe("post-green publish wiring", () => {
 
   test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {
     // The no-empty-commits rule and its one exception, pinned as source
-    // shape (tests/build-branches/publish_behavior.test.ts proves the
-    // same behaviorally against real git):
-    //   - the skip fires on an existing branch with an unchanged tree
-    //     AND a healthy tip stamp (shared/stamp_checks.ts) - health
-    //     gating is what keeps a dispatch able to heal a tampered or
-    //     unparseable stamp instead of skipping forever;
-    //   - after the skip, nothing between the note and the push is an
-    //     `if` or a `return` (an `if (staged)` wrapped around the commit
-    //     would silently bring a diff-gate back);
-    //   - --allow-empty appears EXACTLY once, ternary-scoped to the
-    //     unstaged (stamp recovery) case - normal publishes never carry
-    //     it, so a regression to blanket empty commits fails here.
+    // shape (publish_behavior.test.ts proves it against real git). The skip
+    // needs an unchanged tree AND a healthy tip stamp: health gating keeps
+    // a dispatch able to heal a broken stamp instead of skipping forever.
+    // Nothing between the note and the push may be an `if` or `return` (an
+    // `if (staged)` around the commit would bring a diff-gate back), and
+    // --allow-empty appears EXACTLY once, ternary-scoped to the unstaged
+    // recovery case, so a regression to blanket empty commits fails here.
     const publish = read(".github/scripts/build-branches/publish.ts");
     expect(publish).toContain('if (branchExists && !staged && stampProblem === "") {');
     const body = publish.slice(

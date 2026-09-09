@@ -299,15 +299,14 @@ export function rungTestShortfall(source: string, id: string): string | null {
     : `no enabled test() reaches a call of ${local}.apply(...) (the rung must be exercised from a test, not merely named)`;
 }
 
-/** The ladder's single-source checks (docs/migrations.md has the
- *  contract): the ladder directory holds rung files only, each named
- *  `mNNNN_<slug>.ts` and default-exporting a rung whose id is its
- *  filename; every rung has a bound unit test, an upgrade-path harness
- *  case, and a docs mention; and no id-shaped token in the docs names a
- *  rung that does not exist. Drift guards over text and
- *  AST anchors, the threat model every rule in this file shares: an
- *  honest edit that forgets a site goes red; an author with commit rights
- *  who writes a decoy to satisfy the anchors is review's problem. */
+/** The ladder's single-source checks (docs/migrations.md has the contract):
+ *  rung files only, each `mNNNN_<slug>.ts` default-exporting a rung whose id
+ *  is its filename, every rung with a bound unit test, an upgrade-path
+ *  harness case, and a docs mention, and no id-shaped token in the docs
+ *  naming a rung that does not exist. Drift guards over text and AST
+ *  anchors, the threat model every rule in this file shares: an honest edit
+ *  that forgets a site goes red; an author with commit rights who writes a
+ *  decoy to satisfy the anchors is review's problem. */
 export function migrationLadderMismatches(input: {
   /** Ladder directory entry -> source. */
   rungFiles: Record<string, string>;

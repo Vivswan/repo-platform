@@ -18,15 +18,13 @@ import { tempDirs } from "./temp_dir";
 const temp = tempDirs();
 
 /** Explicit env OVERLAY deleting every GIT_* variable, handed to this
- * file's own spawns at the call site (the repo's adopted style for tests
- * that scrub - ambient process.env mutation around a spawn stays fragile
- * under parallel test execution). Scrubbing matters because a hook-driven
- * run (husky exports GIT_DIR/GIT_INDEX_FILE) can redirect a spawned git
- * away from its scratch directory and back into a real repository. The
- * overlay shape: capture() MERGES options.env over live process.env, so
- * the scrub must arrive as undefined-VALUED entries - bun then omits the
- * keys - never as a filtered env copy, which would merge over the live
- * base without deleting anything. */
+ * file's own spawns at the call site (ambient process.env mutation around
+ * a spawn stays fragile under parallel test execution). Scrubbing matters
+ * because a hook-driven run (husky exports GIT_DIR/GIT_INDEX_FILE) can
+ * redirect a spawned git away from its scratch directory into a real
+ * repository. capture() MERGES options.env over live process.env, so the
+ * scrub must be undefined-VALUED entries (bun then omits the keys), never
+ * a filtered env copy, which would delete nothing. */
 function gitFreeOverlay(): Record<string, string | undefined> {
   const overlay: Record<string, string | undefined> = {};
   for (const key of Object.keys(process.env)) {
@@ -35,15 +33,13 @@ function gitFreeOverlay(): Record<string, string | undefined> {
   return overlay;
 }
 
-/** Run `fn` with every GIT_* variable removed from process.env - the same
- * scrub as gitFreeOverlay, but for calls into headEntry, which takes no
- * env parameter, so the ambient mutation is the one channel this file has.
- * The mutation reaches headEntry's git because every spawn under it is
- * handed live process.env - proc.ts's contract, and the raw byte-read
- * spawn hands it explicitly too (bun's own default is a process-start
- * snapshot, which kept this scrub silently inert until the class was
- * closed - the poison-GIT_DIR test below pins that it genuinely bites
- * now). */
+/** Run `fn` with every GIT_* variable removed from process.env: the same
+ * scrub as gitFreeOverlay, but headEntry takes no env parameter, so the
+ * ambient mutation is the one channel this file has. It reaches headEntry's
+ * git only because every spawn under it is handed live process.env
+ * (proc.ts's contract; bun's own default is a process-start snapshot that
+ * kept this scrub silently inert until the class was closed). The
+ * poison-GIT_DIR test below pins that it genuinely bites. */
 function withoutGitEnv<T>(fn: () => T): T {
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(process.env)) {

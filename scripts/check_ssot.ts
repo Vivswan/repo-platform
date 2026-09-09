@@ -1,32 +1,25 @@
 #!/usr/bin/env bun
 
 // Single-source-of-truth drift checker: facts this repo intentionally states
-// in more than one INDEPENDENTLY-authored place (the
-// hand-written module-roster sites, dogfooded template counterparts,
-// settings/label rosters, doc-quoted constants) are compared here so drift
-// fails CI instead of rotting silently. Copies GENERATED from the module
-// manifests (copier.yml's regions, KNOWN_MODULES, the docs regions, the
-// dogfood copies) are NOT compared here: `bun run generate:check` and
-// `bun run dogfood:check` prove the generators ran, and re-checking
+// in more than one INDEPENDENTLY-authored place (hand-written module-roster
+// sites, dogfooded template counterparts, settings/label rosters, doc-quoted
+// constants) are compared here so drift fails CI instead of rotting silently.
+// Copies GENERATED from the module manifests are NOT compared: `bun run
+// generate:check` and `dogfood:check` prove the generators ran, and checking
 // generator output against generator input would pass vacuously.
 //
-// Structure: a flat list of named rules assembled from the rule-group
-// modules under scripts/check/ssot/, each returning mismatches. Every
+// The rules are a flat named list assembled from scripts/check/ssot/. Every
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
-// text disappears fails loudly instead of passing vacuously; structure
-// pulled out of TypeScript SOURCES (pinned consts, argv arrays, spawn and
-// stream-write call shapes) is read from the AST via scripts/lib/ts_extract.ts
-// under the same loud-anchor contract, so a comment, string, or template
-// decoy can neither satisfy an anchor nor hide the real declaration.
-// Template
-// (.jinja) inputs are compared modulo jinja via normalizeJinja() (from
-// scripts/lib/jinja_subset.ts, shared with scripts/generate/render_dogfood.ts);
-// recorded, intentional divergences live in RECORDED_DIVERGENCES with a
-// reason.
+// text disappears fails loudly instead of vacuously; structure read from
+// TypeScript SOURCES comes off the AST via scripts/lib/ts_extract.ts under
+// the same contract, so a comment, string, or template decoy can neither
+// satisfy an anchor nor hide the real declaration. Template (.jinja) inputs
+// are compared modulo jinja via normalizeJinja() (scripts/lib/jinja_subset.ts,
+// shared with render_dogfood.ts); intentional divergences live in
+// RECORDED_DIVERGENCES with a reason.
 //
-// Usage:
-//   bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y"
-//                               # lines and exits 1 on any mismatch
+// Usage: bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y"
+//                                    # lines and exits 1 on any mismatch
 
 import { allGreenRules } from "./check/ssot/all_green.ts";
 import { type Mismatch, RECORDED_DIVERGENCES, usedDivergences } from "./check/ssot/comparison.ts";

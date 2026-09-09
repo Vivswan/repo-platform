@@ -1,27 +1,20 @@
 // Behaviour tests for the validate-template-report action: the REAL
-// scripts run here against a stubbed gh. Nothing touches the network. The
-// rendered job's remaining shape (thin caller, fail-last re-raise) is
-// pinned by tests/templates/fleet_ci_shape.test.ts and the smoke harness.
+// scripts run here against a stubbed gh; nothing touches the network. The
+// rendered job's shape (thin caller, fail-last re-raise) is pinned by
+// tests/templates/fleet_ci_shape.test.ts and the smoke harness.
 //
-// The contract under test is the three-leg split: INTEGRITY blocks (one
-// verdict per run from the validator of the template the repository was
-// rendered from - fetched at the FULL build sha its `_commit` records,
-// never resolved from a short one, run on that tree's own bun; every
-// inconsistent, crashed, timed-out, or signal-killed run is `not-judged`
-// and blocks), the LATEST pass only warns (rules the next sync brings,
-// never said twice), and FRESHNESS only informs, read from the ONE
-// build-branch compare the fetch step makes and publishes only once the
-// whole admission (build-branch membership, then the vintage floor) has
-// passed, so a refused run has no distance to contradict its refusal. The
-// report step writes one body to the step summary and to the comment file
-// the sticky steps post (one comment per PR, upserted by the action's
-// header, deleted when a clean-and-fresh run has nothing to say) and never
-// fails, so a blocking verdict is readable in the conversation before the
-// caller fails the job.
+// The contract under test is the three-leg split of docs/new-repo.md
+// ("The template check"): INTEGRITY blocks with one verdict per run (any
+// inconsistent, crashed, timed-out, or signal-killed validator run is
+// `not-judged` and blocks), LATEST only warns and never repeats integrity's
+// findings, FRESHNESS only informs and is published only once the whole
+// admission has passed, so a refused run has no distance to contradict its
+// refusal. The report step never fails, so a blocking verdict is readable
+// in the PR conversation before the caller fails the job.
 //
-// Every scenario is judged WHOLE: the full rendered summary, the comment
-// body, the outputs file, the verdict file. A test that ignored a column
-// could not catch a regression in it.
+// Every scenario is judged WHOLE (summary, comment body, outputs file,
+// verdict file): a test that ignored a column could not catch a
+// regression in it.
 
 import { describe, expect, test } from "bun:test";
 import {

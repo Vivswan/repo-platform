@@ -1,87 +1,17 @@
 #!/usr/bin/env bun
-// Compose the flat template/ tree Copier renders from templates/ sources.
+// Compose the flat template/ tree Copier renders from the templates/ sources:
+// base/ passed through, each module's whole files at their plain paths,
+// fragments spliced at `{# compose:<anchor> #}` markers, data anchors filled
+// from the manifests, and the ownership manifest emitted from the declared
+// classes. The contract this enforces (gates recorded as data instead of
+// filename jinja, tight and guarded anchors, the by-value sharing rule,
+// collisions as errors, declared-never-inferred ownership) is
+// docs/compose.md; the schemas are scripts/lib/module_manifests.ts and
+// scripts/ownership/declarations.ts.
 //
-// templates/ is the source of truth, one folder per module plus base/:
-//
-// - templates/base/: passed through with content verbatim. A conditional
-//   base file DECLARES its gate in its source filename (CONTRIBUTING.md's
-//   `not private`, LICENSE.md's custom-license opt-out); the composer
-//   strips the gate from the EMITTED name and records it in the gate data
-//   below - the composed tree carries only plain filenames, because a
-//   `uses:` ref downloads the whole build branch as a tarball and
-//   extraction dies on jinja-expression path segments.
-// - templates/<module>/: whole files owned by that module, emitted at
-//   their plain paths; the module's gate (its manifest `gate:` override or
-//   plain membership) is recorded per file. module.yml is the module's
-//   manifest (schema: scripts/lib/module_manifests.ts).
-// - Conditional LANDING happens in copier.yml, not in filenames: its
-//   generated _exclude region (scripts/generate.ts, from exclude.ts's
-//   excludePatterns) carries one jinja-templated pattern per gated landed path,
-//   rendering to the literal path exactly when the file's gates do NOT
-//   hold - copier then never renders the file at all, on copy and update
-//   alike, byte-identical to the retired filename-gate behavior. build()
-//   errors when copier.yml's committed region is stale, so a build branch
-//   can never ship a tree whose excludes disagree with its content.
-// - templates/<module>/fragments/<anchor>.jinja: additive contributions to
-//   shared files. A skeleton file carries a marker line starting with
-//   `{# compose:<anchor> #}` (text after the closing tag is appended
-//   verbatim after the last contribution, for inline `{% endif %}<text>`
-//   junctions); the composer replaces the line with every contribution in
-//   MODULE_ORDER, each fragment wrapped in its module's gate. Fragments own
-//   all whitespace between the tags; the composer adds none. A `-#}`
-//   closer makes the anchor TIGHT: the marker line's newline is consumed
-//   too, so every contribution must end with a newline inside its own gate
-//   and the junction to the next line stays tight whichever gates render
-//   false (with a plain `#}` the skeleton newline terminates the block, so
-//   an all-conditional line list would leave it dangling when the last
-//   gate is off). On a plain anchor whose contributions all carry a
-//   recorded gate, the marker line's newline is wrapped in an any-gate
-//   guard (splice.ts's collapseGuard): with every gate false the whole line
-//   collapses instead of rendering as a stray blank line, and with any
-//   gate true the guard re-emits the same newline, byte-identical to an
-//   unguarded splice.
-// - templates/<module>/fragments/toolchain-setup.jinja is no anchor's
-//   fragment: it carries the module's toolchain setup steps, prepended by
-//   the composer to the module's own auto-format and copilot-setup-steps
-//   contributions so the two spliced copies can never drift apart.
-// - Data anchors (data_anchors.ts's DATA_ANCHORS) are filled from manifest data instead
-//   of fragment files, so the composed output carries no marker comments and
-//   list-shaped content (dependabot ecosystems, the fleet-ci call's
-//   codeql-languages input, gitleaks lockfiles) cannot drift from the
-//   manifests. The sharing rule: a
-//   manifest value declared by several modules is grouped BY VALUE, emitted
-//   ONCE, and gated on the or-chain of the contributing modules in
-//   MODULE_ORDER - never per-module duplicates, never precedence guards.
-//   A fragment file for a data anchor is an error, with one exception:
-//   agents-toolchain consumes its fragments as generator input.
-//
-// Every anchor needs at least one contribution (fragment or generated) and
-// every contribution needs its anchor. Collisions are errors, never silent
-// merges: the same logical path provided by two folders (or a module file
-// colliding with base) must be resolved by hoisting the file to base/ with
-// an explicit gate or by adding an anchor.
-//
-// All I/O is bytes (source files are copied verbatim, never re-encoded) and
-// symlinks are copied as symlinks. Output is deterministic: sorted walks plus
-// the fixed MODULE_ORDER (CI builds twice and diffs to prove it).
-//
-// Ownership contract (the manifest's source of truth): every file the
-// template lands carries a DECLARED ownership class - templates/base/
-// ownership.yml covers the base tree and each module.yml's `ownership:`
-// list covers its module's files (schema: scripts/ownership/declarations.ts).
-// Composition errors on a landed file with no declaration, a declaration
-// whose path never lands, same-path declarations that disagree across
-// sources, starter declarations out of step with copier.yml's
-// _skip_if_exists (both directions, dead skip patterns included), and
-// source text that contradicts its declared class - managed headers and
-// split marker lines are validated DECORATION, never classification
-// input. Split declarations carry their GRAMMAR (managed-region: a
-// BEGIN/END-bounded sync-owned region with repo-owned content allowed on
-// both sides); the manifest entries
-// expose the grammar to the sync's split-file rebuild. The entry LINES are
-// emitted by the shared entryLine (actions/shared/manifest.ts) - the same
-// module whose parser the stamp hook, the sync legs, and validate-template
-// read the manifest back through, so the wire layout cannot fork.
+// All I/O is bytes and symlinks stay symlinks, so sources are never
+// re-encoded; sorted walks plus the fixed MODULE_ORDER keep the output
+// deterministic (CI builds twice and diffs).
 //
 // Usage:
 //   bun scripts/compose/compose.ts   # regenerate the local template/ artifact

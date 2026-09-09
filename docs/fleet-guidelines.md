@@ -14,6 +14,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | check-typography |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); `deno fmt --prose-wrap preserve` (deno repos); review elsewhere |
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | validate-template; copier's `_skip_if_exists` |
+| [Split files: the managed region](#split-files-the-managed-region) | the sync's split-file rebuild and tail tripwire; validate-template's marker rule |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review; the `no-retired-shapes` ssot rule (repo-platform, landing) |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
@@ -60,6 +61,13 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Why: an edit to a managed file is overwritten by the next sync PR, so the change belongs in repo-platform.
 - How: change the template under `templates/` in repo-platform; the starters are the `_skip_if_exists` list in its copier.yml ([new-repo.md](new-repo.md#3-add-checks-to-checksyml) has the table).
 - Enforced by: validate-template (the headers and manifest parity checks) for managed files; copier's `_skip_if_exists` for the starters.
+
+## Split files: the managed region
+
+- Rule: a split file (`.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, ...) is optional repo-owned content above a BEGIN marker line, managed content, an END marker line, and optional repo-owned content below; the ownership manifest declares the markers per file. Repo-owned content goes outside the region; inside it, the content stays exactly as rendered.
+- Why: the sync rebuilds every split file structurally instead of merging it: the fresh render's managed region, the repository's own sides byte-for-byte around it. A template retraction can never eat a local side and a local side can never resurrect retracted managed lines, but an edit INSIDE the region is reset to the fresh render on every sync, with a reset note in the PR body and the PR held for review.
+- How: put local content above the BEGIN marker or below the END marker. A previous copy the sync cannot trust to split (markers missing, duplicated even as mid-line text, or reversed; or a manifest at the repo's HEAD it cannot read) is appended WHOLE below the END marker under a marked recovery-appendix comment and the PR is held for review: nothing is dropped silently. Marker text must appear exactly once per marker in the file.
+- Enforced by: the sync's split-file rebuild ([preserve_local_content.ts](https://github.com/Vivswan/repo-platform/blob/main/.github/scripts/sync/preserve_local_content.ts)); the tail tripwire ([tail_tripwire.ts](https://github.com/Vivswan/repo-platform/blob/main/.github/scripts/sync/tail_tripwire.ts)) holds the PR when repository-owned lines went missing after the rebuild; validate-template's exactly-once marker rule.
 
 ## Copilot review comments are advisory
 

@@ -1,28 +1,22 @@
-// Private-repo redaction for the fleet's public run logs. repo-platform is
-// public, so everything the plan/select jobs and the per-repo legs print -
-// job names, notices, step summaries - is world-readable. A private managed
-// repo must not appear there by name or detail. This module owns the two
-// mechanisms:
+// Private-repo redaction for the fleet's public run logs (the model:
+// docs/private-repos.md). repo-platform is public, so everything the plan
+// and select jobs and the per-repo legs print is world-readable, and a
+// private managed repo must not appear there by name or detail. Two
+// mechanisms live here:
 //
-// - hintName/assignHints: the display placeholder for a private name.
-//   "hidden-server" -> "h**-s**r": deterministic, so the operator can tell
-//   which repo a job is without the log disclosing it. Hints are partial
-//   pseudonymization, not encryption (docs/private-repos.md).
-// - verifyTag: the resolution verifier. Matrix values become public job
-//   names and reusable-workflow inputs are auto-printed, so a private
-//   row carries the hint plus an HMAC tag instead of the slug; the leg
-//   re-discovers the fleet and picks the unique tag match
-//   (resolve_private_repo.ts). Keyed by a value derived from the fleet
-//   PAT (domain-separated, never the raw PAT) and bound to GITHUB_RUN_ID,
-//   the tag is safe to print: without the PAT it cannot be brute-forced
-//   into a name, and it fingerprints nothing across runs.
-//
-// `enrich` turns the discovered fleet into the plan's rows, one redaction
-// decision each. Visibility is discovery's, fail-closed: a repo whose
-// discovery entry does not positively say `private: false` is private,
-// and a private repo is hinted AND hidden - one axis, since no fleet name
-// is committed anywhere in this public repository.
-//
+// - hintName/assignHints: the display placeholder ("hidden-server" ->
+//   "h**-s**r"), deterministic so the operator can tell jobs apart; partial
+//   pseudonymization, not encryption.
+// - verifyTag: matrix values become public job names and reusable-workflow
+//   inputs are auto-printed, so a private row carries the hint plus an HMAC
+//   tag instead of the slug, and the leg re-discovers the fleet and picks
+//   the unique match (resolve_private_repo.ts). Keyed by a value derived
+//   from the fleet PAT (domain-separated, never the raw PAT) and bound to
+//   GITHUB_RUN_ID, the tag is safe to print: it cannot be brute-forced into
+//   a name without the PAT and fingerprints nothing across runs.
+// `enrich` turns the discovered fleet into the plan's rows. Visibility is
+// fail-closed: a repo whose discovery entry does not positively say
+// `private: false` is private, hinted AND hidden.
 // CLI: bun .github/scripts/fleet/redact.ts hint <name>
 
 import { createHmac } from "node:crypto";
@@ -39,16 +33,13 @@ export const VERIFY_HEX_LENGTH = 32;
 // the PAT itself never keys a second protocol.
 export const KEY_DERIVATION_LABEL = "repo-platform-redact-key-v1";
 
-/**
- * The display hint for one bare repo name: each [-_.]-separated segment
- * renders as its first character plus "**" (separators kept), and the
- * final segment also keeps its last character when it has at least five -
- * shorter finals would echo most of the name back. "hidden-server" ->
- * "h**-s**r"; "myrepo" -> "m**o"; "ab" -> "a**". An empty segment
- * (consecutive separators) renders as "**" alone. Case and digits pass
- * through. A hint can never collide with a real name: "*" is illegal in
- * GitHub repo names.
- */
+/** The display hint for one bare repo name: each [-_.]-separated segment
+ * renders as its first character plus "**" (separators kept), and the final
+ * segment also keeps its last character when it has at least five (shorter
+ * finals would echo most of the name back): "hidden-server" -> "h**-s**r",
+ * "myrepo" -> "m**o", "ab" -> "a**". An empty segment renders as "**"
+ * alone; case and digits pass through. A hint can never collide with a
+ * real name: "*" is illegal in GitHub repo names. */
 export function hintName(name: string): string {
   const parts = name.split(/([-_.])/);
   const segments: string[] = [];

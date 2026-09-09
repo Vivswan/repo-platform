@@ -92,15 +92,11 @@ function stdioShape(
 // A GLOBAL receiver (Bun, process), shared by the spawn and stream-write
 // scans and hardened against decorative spellings: parentheses, the TS
 // non-null `!`, and type-only wrappers unwrap to the same receiver, and a
-// property access ENDING in the global's name (globalThis.Bun,
-// globalThis.process - like the old scans' token boundary) counts too -
-// over-matching someone else's `.Bun`/`.process` is the loud direction.
-// Identifier names match EXACTLY: a look-alike like `fakeprocess` is not
-// the global (the retired stream-write regex over-flagged it for want of
-// a left boundary - a recorded precision delta, not a lost guard).
-// The recorded residual: an alias of the global itself
-// (`const b = Bun; b.spawnSync(...)`) - nothing in house style writes
-// that, and the proc.ts helpers are the sanctioned route.
+// property access ENDING in the global's name (globalThis.Bun) counts too,
+// since over-matching someone else's `.Bun` is the loud direction.
+// Identifier names match EXACTLY, so a look-alike like `fakeprocess` is not
+// the global. The recorded residual: an alias of the global itself (`const b
+// = Bun; b.spawnSync(...)`), which nothing in house style writes.
 function isGlobalReceiver(expression: Expression, name: string): boolean {
   const node = unwrapExpression(expression);
   if (Node.isIdentifier(node)) return node.getText() === name;
@@ -157,15 +153,13 @@ function spawnOptionsText(call: CallExpression): string | null {
     .join(", ");
 }
 
-/** Every spawnSync site in a source file, read off the AST (a mention
- *  in a comment, a string, or a regex body is not a node; a template
- *  INTERPOLATION is code and is). A direct call - plain, optional, or
- *  re-punctuated - carries its options argument's text. Everything else
- *  is a reference the rule fails closed: a bare `Bun.spawnSync` (an
- *  alias binding, `.call`), a destructure pulling spawnSync off Bun (a
- *  binding pattern or an assignment target), and ANY computed access
- *  directly on Bun - the property expression can spell spawnSync any
- *  way it likes, so every such access is unauditable. */
+/** Every spawnSync site in a source file, read off the AST (a mention in a
+ *  comment, string, or regex body is not a node; a template INTERPOLATION is
+ *  code and is). A direct call, plain, optional, or re-punctuated, carries
+ *  its options argument's text. Everything else is a reference the rule
+ *  fails closed: a bare `Bun.spawnSync` (an alias binding, `.call`), a
+ *  destructure pulling spawnSync off Bun, and ANY computed access on Bun,
+ *  whose property expression can spell spawnSync any way it likes. */
 export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
   // A file the parser had to RECOVER must not be judged: a truncated
   // call's recovered options can read as a benign shape, so the scan
@@ -241,28 +235,14 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
   return sites.sort((a, b) => a.line - b.line);
 }
 
-/** Why a spawnSync call is an unbounded piped hazard, or null when safe.
- *  Measured on the pinned bun runtime (templates/bun/module.yml, 1.4.0):
- *  a PIPED synchronous spawn without an effective `timeout` returns at
- *  pipe EOF, not child exit, so a descendant holding the inherited pipe
- *  fds wedges the caller indefinitely - and a bare call pipes BOTH
- *  output streams by default (proc.ts's header records the semantics;
- *  its helpers carry the bound already). Safe shapes: a top-level
- *  `timeout` that is a positive finite numeric literal (any spelling of
- *  zero, and Infinity, measured or reasoned as no bound) or a plain
- *  identifier/member path (a named constant like DEFAULT_HANG_BOUND_MS -
- *  trusted, the stated residual), or every output stream explicitly
- *  shaped - a `stdio:` array whose slots 1 and 2 are each present and
- *  not undefined/null, or `stdout:`/`stderr:` values likewise - with no
- *  "pipe" literal among them (inherit/ignore/file fds have no EOF to
- *  wait on). Any other timeout value (an expression like `1 - 1`) is unprovable and fails closed. Properties
- *  are read structurally at the object literal's top level
- *  (topLevelProperties), so a nested `timeout` (say inside `env:`) never
- *  reads as a bound, and options the parser cannot audit are hazards
- *  outright. The residual of staying text-level: variable VALUES are
- *  trusted by their key - a variable smuggling "pipe" into a stream, or
- *  zero into `timeout`, escapes - and the fix for any flagged or
- *  doubtful site is the same: a proc.ts helper. */
+/** Why a spawnSync call is an unbounded piped hazard, or null when safe. Measured on the
+ *  pinned bun: a PIPED sync spawn without an effective `timeout` returns at pipe EOF, not
+ *  child exit, so a descendant holding the inherited pipe fds wedges the caller, and a bare
+ *  call pipes BOTH streams. Safe: a top-level `timeout` that is a positive finite numeric
+ *  literal or a plain identifier/member path, or every output stream explicitly non-"pipe";
+ *  unprovable shapes (an expression, nested options, unparsable text) fail closed. Variable
+ *  VALUES are trusted by their key (rejecting identifiers would red proc.ts's own shorthand
+ *  `timeout` option), so a variable smuggling "pipe" or zero escapes: the recorded residual. */
 export function spawnSyncHazard(options: string | null): string | null {
   if (options === null) {
     return "no options - stdout and stderr pipe by default, and nothing bounds a pipe-holding descendant";
@@ -319,18 +299,13 @@ export function spawnSyncHazard(options: string | null): string | null {
 }
 
 // ASYNC Bun.spawn is a different hazard model, judged as an EXACT-SET
-// enumeration rather than by the sync rule's bounded-or-unpiped bar:
-// an async site draining both pipes under Promise.all has no pipe-EOF
-// deadlock to bound, and the async Subprocess type has no `timeout`
-// option to pin - so every file calling Bun.spawn must appear here
-// with the rationale that bounds it (a manual deadline, or an outer
-// bound like the GitHub job timeout). The set pins NAMES, not a count:
-// a bounded spawnSync rewritten as async would EXIT the sync gate
-// silently - reading as an improvement - so the laundering must fail
-// by introducing a name this pin does not carry, a diagnostic that
-// names the offending file. The async scan's residual: an alias of Bun
-// escapes both scans, and a computed access (Bun["spawn"]) escapes THIS
-// one (the sync scan fails computed access closed as a reference).
+// enumeration rather than the sync rule's bounded-or-unpiped bar: an async
+// site draining both pipes has no pipe-EOF deadlock to bound and no
+// `timeout` option to pin, so every file calling Bun.spawn appears here with
+// the rationale that bounds it. The set pins NAMES, not a count: a bounded
+// spawnSync rewritten as async would EXIT the sync gate silently, reading as
+// an improvement, so the laundering must fail by introducing a name this pin
+// does not carry. Residual: an alias of Bun escapes both scans, Bun["spawn"] this one.
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
   ".github/scripts/sync/rehearse_fleet.ts":
     "implements its own manual deadline: the async Subprocess type has no built-in timeout, so a timer SIGKILLs an overrunning lane (the comment at its Bun.spawn call is the reference statement of why async needs one)",
@@ -595,35 +570,14 @@ export function asyncStreamWriteMismatches(
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const processDisciplineRules: Rule[] = [
   {
-    // No PIPED Bun spawnSync without a hard `timeout`. On the pinned bun
-    // runtime a piped synchronous spawn returns at pipe EOF rather than
-    // child exit and pipes both output streams by default
-    // (spawnSyncHazard has the measured semantics), so one bare git call
-    // can wedge a checker forever behind any descendant that inherited
-    // the pipe. Scope: scripts/**, .github/scripts/**, AND tests/** -
-    // bun-test's caps are no substitute for a spawn bound: a synchronous
-    // spawn blocks the runner, so the per-test timeout cannot interrupt
-    // a hung child, and the 5s hook cap trips spuriously on cold starts
-    // in fresh worktrees, so suites carry their own explicit bounds
-    // (the fleet selector suites' lesson). A positive numeric literal or
-    // a named constant IS the bar - tests legitimately need stdio/env
-    // shapes proc.ts does not expose, so the helpers are the recommended
-    // remedy, not the required one (constants stay spawnSyncHazard's
-    // recorded trusted residual: resolving one is value analysis a
-    // textual scan cannot do, and rejecting identifiers would red
-    // proc.ts's own `timeout: timeoutMs`). tests/ converts through
-    // tests/shared/bounded_spawn.ts, the bounded-by-default harness
-    // spawn (its internal call carries the bound this rule proves);
-    // every site reports per site - the tests/ debt book that once rode
-    // here burned to zero and was retired. ASYNC Bun.spawn is judged beside the sync bar under its
-    // own model (ASYNC_SPAWN_FILES has the statement): sync =
-    // bounded-or-unpiped, async = deadline-or-enumerated, because the
-    // async form neither blocks the caller at pipe EOF nor offers a
-    // timeout option to pin - and the async pass also scans actions/,
-    // where two enumerated sites live (the sync scan's scope is
-    // unchanged there; actions run in caller checkouts with their own
-    // conventions, and their sync spawns are the actions-bun-guard
-    // review surface, not this rule's).
+    // No PIPED Bun spawnSync without a hard `timeout`: on the pinned bun a piped synchronous
+    // spawn returns at pipe EOF, not child exit, and pipes both streams by default
+    // (spawnSyncHazard has the measured semantics), so one bare git call can wedge a checker
+    // forever behind a descendant holding the pipe. tests/** is in scope: a sync spawn blocks
+    // the runner, so bun-test's per-test timeout cannot interrupt a hung child, and its 5s
+    // hook cap trips on cold starts, so suites carry their own bounds. Tests need stdio/env
+    // shapes proc.ts lacks, so its helpers are the remedy, not the bar. actions/ sync spawns
+    // are the actions-bun-guard review surface; ASYNC Bun.spawn is judged under ASYNC_SPAWN_FILES.
     name: "spawn-sync-hang-bound",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -701,18 +655,14 @@ export const processDisciplineRules: Rule[] = [
     run: () => actionTestFileMismatches(walkFiles("actions")),
   },
   {
-    // No async process stream write in the executable trees: on
-    // pipe-backed stdio (the Actions runner shape) bun queues these
-    // writes, and a process.exit anywhere later in the run drops
-    // everything past the pipe buffer (measured at 64 KiB on bun 1.3.14,
-    // 128 KiB on 1.4.0) - 13 sites were converted to writeSync one
-    // truncation at a time before this rule pinned the class. Scope:
-    // scripts/**, .github/scripts/**, and actions/**; tests are excluded
-    // by design (tests/ sits outside these roots and the actions' *.test.ts
-    // files are filtered out): bun-test owns a test's process lifecycle,
-    // so the exit-under-buffered-write truncation is not a shape a test
-    // file can produce. tests/shared/stream_write_discipline.test.ts is
-    // the bun-test-side guard on the same contract.
+    // No async process stream write in the executable trees: on pipe-backed
+    // stdio (the Actions runner shape) bun queues these writes, and a
+    // process.exit later in the run drops everything past the pipe buffer
+    // (measured at 64 KiB on bun 1.3.14, 128 KiB on 1.4.0); 13 sites were
+    // converted one truncation at a time before this rule pinned the class.
+    // Scope: scripts/**, .github/scripts/**, actions/** minus *.test.ts; tests
+    // are excluded because bun-test owns a test's process lifecycle, so the
+    // shape cannot occur there (tests/shared/stream_write_discipline.test.ts guards that side).
     name: "stream-write-sync",
     run: () => {
       const files = ["scripts", ".github/scripts", "actions"].flatMap((root) => {

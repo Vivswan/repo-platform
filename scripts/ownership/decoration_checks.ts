@@ -122,22 +122,13 @@ function foreignMarkerMessage(
 // --- foreign-marker scanning ---------------------------------------------------
 
 /** Markers in the source that this declaration does not own, at most one.
- *  Sync dispatches on the DECLARED markers alone, so a foreign marker is
- *  always the same hazard however the declaration is spelled: the rebuild
- *  treats the repo-owned area that marker promises as its own and
- *  overwrites it.
- *
- *  Matching is TEXT PRESENCE: a foreign marker string anywhere in the
- *  source - a whole line, glued to jinja tags, inside a tag or a comment,
- *  a prose mention - is a claim, the same substring semantics the
- *  validator's exactly-once count and the appendix neutralization apply.
- *  Deciding instead which occurrences could RENDER as a live marker line
- *  needs a jinja evaluator, and the failure directions are not symmetric:
- *  an over-claim surfaces at compose time and costs a reword or an
- *  explicit declaration, an under-claim ships a live marker in a managed
- *  file - a silent ownership bypass. Exemption is POSITIONAL: a foreign
- *  occurrence lying entirely inside an own-marker occurrence is the own
- *  marker's text; one extending past it in either direction claims. */
+ *  Sync dispatches on the DECLARED markers alone, so a foreign marker makes
+ *  the rebuild treat the repo-owned area it promises as its own and
+ *  overwrite it. Matching is TEXT PRESENCE anywhere (a line, a tag, a prose
+ *  mention), the validator's own substring semantics: deciding what could
+ *  RENDER as a live marker needs a jinja evaluator, and an over-claim costs
+ *  a reword at compose time while an under-claim ships a silent ownership
+ *  bypass. An occurrence inside an own-marker occurrence is that marker's. */
 function foreignMarkerErrors(
   declaration: OwnershipDeclaration,
   source: string,
@@ -167,17 +158,14 @@ function foreignMarkerErrors(
   return [];
 }
 
-/** Errors when a template source's decoration contradicts its declared
- *  class or grammar. Purely textual, purely per-file: the declaration is
- *  the classification, headers and marker lines are validated decoration,
- *  never classification input. `skipMatched` says whether copier.yml's
- *  _skip_if_exists exempts the landed path: the starter class and the
- *  skip list must agree in both directions (copier needs the skip entry,
- *  the declaration is the single ownership truth). `declaredMarkers` is
- *  every declared grammar's marker strings (declaredMarkerTexts over ALL
- *  declaration sources); they join the shipped constants to form the
- *  roster the shared foreign-marker scan checks every declaration
- *  against. `where` names the source file in errors. */
+/** Errors when a template source's decoration contradicts its declared class
+ *  or grammar. Purely textual, purely per-file: the declaration is the
+ *  classification, headers and marker lines are validated decoration, never
+ *  classification input. `skipMatched` says whether copier.yml's
+ *  _skip_if_exists exempts the landed path (the starter class and the skip
+ *  list must agree in both directions). `declaredMarkers` is every declared
+ *  grammar's marker strings over ALL sources; with the shipped constants they
+ *  form the roster the foreign-marker scan checks each declaration against. */
 export function declarationTextErrors(
   declaration: OwnershipDeclaration,
   source: string,

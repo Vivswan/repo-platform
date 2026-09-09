@@ -86,14 +86,13 @@ export function trackingLabelsInput(manifests: ModuleManifest[], indent: number)
 }
 
 /** Every managed label name, lowercased (GitHub deduplicates label names
- *  case-insensitively) and deduped, in declaration order - from the
- *  settings baseline generator (render_managed_settings.ts), the single
- *  home of the managed roster. The tracking streams' labels are excluded
- *  there: they render from the very answers the validators check. A
- *  tracking-label answer equal to one of these would corrupt the roster's
- *  owner: settings applies would fight over the label's color/description,
- *  and a green night would close whatever issues carry it - including the
- *  release-blocker stream the release gate keys on. */
+ *  case-insensitively) and deduped, in declaration order, from the settings
+ *  baseline generator (render_managed_settings.ts), the roster's single home.
+ *  The tracking streams' labels are excluded there: they render from the very
+ *  answers the validators check. A tracking-label answer equal to a managed
+ *  name would corrupt the roster's owner: settings applies would fight over
+ *  the label's color/description, and a green night would close whatever
+ *  issues carry it, the release-blocker stream included. */
 export function reservedLabelNames(
   manifests: ModuleManifest[],
   roster: string[] = managedLabelNames(manifests),

@@ -82,15 +82,14 @@ export function isOwnPagesOrigin(
   return boundary === "" || !/[a-z0-9.-]/.test(boundary);
 }
 
-/** AGENTS.md's smoke-generate recipe stages a scratch build tree by hand;
- *  its staging command is a mirror of shared/stage_tree.ts's hermetic
- *  argv with no code twin the wiring tests can see (they pin call SITES,
- *  and a doc line is not one). Decision: a rule, not an accepted
- *  residual - a drifted recipe re-opens for the human's scratch tree the
- *  exact producer-vs-verifier skew the shared argv closed, so the doc
- *  command is derived FROM stageComposedTreeArgv and compared exactly.
- *  Anchored between the recipe's init and commit legs, so a staging
- *  command that vanished or moved fails loudly rather than vacuously. */
+/** AGENTS.md's smoke-generate recipe stages a scratch build tree by hand,
+ *  mirroring shared/stage_tree.ts's hermetic argv with no code twin the
+ *  wiring tests can see (they pin call SITES; a doc line is not one). A rule
+ *  rather than an accepted residual: a drifted recipe re-opens for the
+ *  human's scratch tree the exact producer-vs-verifier skew the shared argv
+ *  closed, so the doc command is derived FROM stageComposedTreeArgv and
+ *  compared exactly, anchored between the recipe's init and commit legs so
+ *  a vanished or moved staging command fails loudly rather than vacuously. */
 export function agentsStagingMismatches(agents: string): Mismatch[] {
   const argv = stageComposedTreeArgv("/tmp/bt");
   // Joining argv with spaces is only an exact shell rendering while
@@ -178,17 +177,14 @@ export const literalAnchorRules: Rule[] = [
         });
       }
 
-      // The answers-file path is spelled in three places that nothing
-      // binds behaviorally end to end: copier.yml's _answers_file (where
-      // copier WRITES; near-inert for reads, which honor only the CLI
-      // flag), apply_update.ts's standing --answers-file flag (the
-      // consequential one), and answers_file.ts's ANSWERS_PATH (the
-      // boundary the sync's filesystem reads share; clean_renders.ts's
-      // HEAD read spells the path through the same constant).
-      // The template filename under templates/base/.github/ is the fourth
-      // spelling, anchored via the rendered-path derivation. One editor
-      // moving one of them alone must be named here, not discovered at a
-      // fleet sync.
+      // The answers-file path is spelled in four places that nothing binds
+      // behaviorally end to end: copier.yml's _answers_file (where copier
+      // WRITES; reads honor only the CLI flag), apply_update.ts's standing
+      // --answers-file flag (the consequential one), answers_file.ts's
+      // ANSWERS_PATH (the sync's filesystem reads, clean_renders.ts included),
+      // and the template filename under templates/base/.github/, anchored via
+      // the rendered-path derivation. One editor moving one of them alone must
+      // be named here, not discovered at a fleet sync.
       const answersPath = mustMatch(
         read("copier.yml"),
         /^_answers_file: (\S+)$/m,

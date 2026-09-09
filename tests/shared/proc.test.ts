@@ -25,15 +25,13 @@ import {
 
 describe("spawn env is live process.env", () => {
   // Bun.spawnSync WITHOUT `env:` hands children a snapshot of the
-  // environment taken at PROCESS START (bun 1.4.0, both directions:
-  // post-start additions are missing, post-start deletions still
-  // present), so a test or script that mutates process.env before
-  // calling through proc.ts would get a silently inert pin. proc.ts
-  // closes the class at the chokepoint by handing every spawn
-  // `{ ...process.env, ...(options.env ?? {}) }` - these tests pin that
-  // contract for all three spawn wrappers, plus the two properties the
-  // merge must keep: an explicit options.env entry wins over the
-  // ambient value, and an undefined-valued entry deletes the key.
+  // environment taken at PROCESS START (bun 1.4.0, both directions), so a
+  // test or script mutating process.env before calling through proc.ts
+  // would get a silently inert pin. proc.ts closes the class at the
+  // chokepoint by handing every spawn `{ ...process.env, ...options.env }`;
+  // these tests pin that for all three wrappers plus the two merge
+  // properties: an explicit entry wins over the ambient value, and an
+  // undefined-valued entry deletes the key.
 
   test("a key added to process.env after start reaches capture's child", () => {
     process.env.PROC_ENV_PROBE_ADDED = "live";
@@ -315,18 +313,14 @@ describe("mustCapture timeoutMs", () => {
   });
 
   test("the expiry line redacts credentials carried in argv", () => {
-    // The sync push passes mustCapture an argv holding the fleet PAT
-    // inside the push URL; the deadline-expiry line is reachable for
-    // every call now that the default hang bound exists, so it must
-    // never echo the token into the (public) Actions log. The stalled
-    // child must EXEC its sleep with fds detached: a shell is the only
-    // child whose argv can carry the URL past the deadline, but a forked
-    // sleeper surviving the deadline kill would hold the inherited
-    // stderr - THIS test's outer pipe - which bun >= 1.4.0 waits on to
-    // EOF (a plain `sh -c "sleep 5"` forked exactly so on Linux and hung
-    // this test for the sleep's full 5s). exec pins the sleeper to the
-    // killed pid; the /dev/null fds mean even a survivor could not
-    // wedge the pipes.
+    // The sync push passes mustCapture an argv holding the fleet PAT inside
+    // the push URL, and the deadline-expiry line is reachable for every
+    // call, so it must never echo the token into the public Actions log. A
+    // shell is the only child whose argv can carry the URL past the
+    // deadline, and it must EXEC its sleep with fds detached: a forked
+    // sleeper surviving the kill would hold this test's outer stderr pipe,
+    // which bun >= 1.4.0 waits on to EOF (a plain `sh -c "sleep 5"` hung
+    // this test for the full 5s on Linux); /dev/null fds close that too.
     const url = "https://x-access-token:ghp_SUPERSECRET@github.com/octo/repo.git";
     const stalled = ["sh", "-c", "exec sleep 5 </dev/null >/dev/null 2>&1", "sh", url];
     const snippet = [

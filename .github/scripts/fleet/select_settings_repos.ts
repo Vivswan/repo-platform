@@ -1,32 +1,24 @@
 #!/usr/bin/env bun
-// Discovers the settings targets and builds the per-repo apply matrix
-// for settings-repos.yml. A target is an enrolled repo (the fleet token
-// can push - probed, since user/repos' permissions field reflects the
-// USER, not the token) that is adopted - a readable .repo-platform.yml is
-// the opt-in to centrally managed settings. The operator repository itself is always
-// a target (build_settings_matrix.ts's --self row; its baseline facts
-// come from .repo-platform-answers.yml).
+// Discovers the settings targets and builds the per-repo apply matrix for
+// settings-repos.yml. A target is an enrolled repo (the fleet token can
+// push - probed, since user/repos' permissions field reflects the USER,
+// not the token) that is adopted (a readable .repo-platform.yml is the
+// opt-in). The operator repository itself is always a target.
 //
 // One repo's flaky probe must never block the heal for the rest of the
 // fleet: every probe is retried, and a repo whose probes still return no
-// answer is skipped with a warning - the nightly cron retries it. exit 1
-// stays reserved for failures that invalidate the whole selection
-// (discovery, or the matrix builder).
+// answer is skipped with a warning (the nightly cron retries it); exit 1
+// is reserved for failures that invalidate the whole selection. This
+// job's log, summary, and matrix are publicly readable, so private repos
+// appear only by their redaction hint (redact.ts). No ::add-mask:: here:
+// the runner drops a job output holding a masked substring, which would
+// kill the matrix.
 //
-// This job's log, step summary, and matrix are publicly readable, so
-// private repos appear only by their redaction hint (redact.ts): probes
-// print the display, captured error text is scrubbed of the slug, and a
-// private matrix row carries the hint plus an HMAC tag instead of the
-// slug. No ::add-mask:: here - the runner drops a job output holding a
-// masked substring, which would kill the matrix.
-//
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, GITHUB_REPOSITORY, OWNER,
-// RUNNER_TEMP, GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives a
-// copy of every warning; GITHUB_EVENT_PATH supplies the dispatch scope
-// input (a non-empty ONLY_REPO env overrides it - post-green.yml's called
-// run passes its scope that way, and so do the test harness and local
-// runs). The scope grammar is the sync's (sync_scope.ts): owner/name slugs
-// (a bare name takes the fleet owner), public, private, or "all".
+// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, GITHUB_REPOSITORY, OWNER, RUNNER_TEMP,
+// GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives every warning;
+// GITHUB_EVENT_PATH supplies the dispatch scope input (a non-empty
+// ONLY_REPO env overrides it: post-green.yml's called run, the harness,
+// local runs). The scope grammar is the sync's (sync_scope.ts).
 
 import { appendFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";

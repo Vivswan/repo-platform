@@ -1,30 +1,23 @@
 // The split-grammar descriptor table: every per-grammar behavior the
-// platform dispatches on, stated once as columns keyed by grammar id.
+// platform dispatches on, stated once as columns keyed by grammar id. ONE
+// grammar exists, managed-region: [repo-owned above] BEGIN line, managed
+// content, END line, [repo-owned below]; sync owns the bounded region only.
+// A manifest naming any other grammar is refused loudly with recovery
+// advice (head_manifest.ts, the validator's parity check), and
+// scripts/ownership/declarations.ts welds GrammarId to the zod schema's
+// grammar union, so a schema arm without a table row (or the reverse) is a
+// compile error.
 //
-// ONE grammar exists: managed-region. Every split file has the shape
-// [optional repo-owned content above] BEGIN marker line, managed content,
-// END marker line, [optional repo-owned content below] - the repository
-// owns both sides, sync owns the bounded region. A manifest declaring any
-// other grammar is refused loudly with recovery advice
-// (.github/scripts/sync/head_manifest.ts, the validator's parity check).
+// This module also owns the split-file LINE SEMANTICS (marker predicate,
+// region slicers) shared by every splitter. One owner on purpose: three
+// sites once held three marker-line definitions, and the strictest sent a
+// marker line with one trailing space down a different path than the others.
 //
-// scripts/ownership/declarations.ts welds GrammarId to the zod schema's grammar union
-// at the type level, so adding a schema arm without a full table row (or a
-// row without a schema arm) is a compile error, and every consumer reads
-// its answer from the row instead of guessing.
-//
-// This module also owns the split-file LINE SEMANTICS: the marker-line
-// predicate and the region slicers every splitter in the pipeline shares
-// (the stamper's hash, the sync rebuild's carries, the validator's parity
-// check). One owner on purpose - three sites once held three marker-line
-// definitions, and the strictest sent a marker line with one trailing
-// space down a different path than the other two.
-//
-// DEPENDENCY-FREE ZONE: actions/shared/ ships on the build branch and is
-// imported by code that runs where no node_modules exist (copier's stamp
-// hook inside freshly rendered repositories, the composite actions before
-// their own installs). Node builtins and zone-internal relative imports
-// only - tests/actions/shared_zone.test.ts enforces it.
+// DEPENDENCY-FREE ZONE: actions/shared/ ships on the build branch and runs
+// where no node_modules exist (copier's stamp hook inside fresh renders,
+// composite actions before their own installs), so node builtins and
+// zone-internal relative imports only; tests/actions/shared_zone.test.ts
+// enforces it.
 
 /** The managed-region declaration's grammar fields, structurally (the zod
  *  schema in scripts/ownership/declarations.ts stays the validation owner; these shapes
@@ -190,15 +183,13 @@ export function substringCount(content: string, marker: string): number {
   return content.split(marker).length - 1;
 }
 
-/** A split file sliced at its declaration's marker LINES: above runs to
- *  the start of the first BEGIN line, region runs from that line through
- *  the first END line after it (its newline included, when present),
- *  below is the remainder. above and below are the repository-owned
- *  sides; region is the sync-owned half the stamped hash covers. Null
- *  when either marker line is missing - there is no honest split. This is
- *  the raw slice; writers slicing an EXISTING repository copy must use
- *  cleanManagedRegion below, which rejects malformed shapes instead of
- *  guessing. */
+/** A split file sliced at its declaration's marker LINES: above ends at
+ *  the first BEGIN line, region runs from it through the first END line
+ *  after it (newline included, when present), below is the remainder.
+ *  Region is the sync-owned half the stamped hash covers. Null when either
+ *  marker line is missing: there is no honest split. This is the raw
+ *  slice; writers slicing an EXISTING repository copy must use
+ *  cleanManagedRegion, which rejects malformed shapes instead of guessing. */
 export interface RegionSlice {
   above: string;
   region: string;

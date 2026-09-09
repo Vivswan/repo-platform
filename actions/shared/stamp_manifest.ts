@@ -1,48 +1,24 @@
 #!/usr/bin/env bun
 // Stamp per-repo content hashes into the ownership manifest
-// (.github/repo-platform-manifest.json) of a rendered repository.
+// (.github/repo-platform-manifest.json) of a rendered repository. The
+// template renders every hash null because hashes exist only once copier
+// has written the tree. copier.yml wires this script into _tasks (gated
+// off updates, which run tasks on the destination pass too) and the
+// 'after' migration stage; reusable-template-sync runs it once more as the
+// sync leg's final step, after conflict resolution and the preserve steps.
+// Symlink targets are normalized first (normalizeSymlinkTargets).
 //
-// The template renders the manifest with every hash null: hashes are
-// per-repo facts that exist only once copier has written the tree. This
-// script is the post-render stamping hook - copier.yml wires it into
-// _tasks (gated off updates: copier runs tasks on the destination pass of
-// an update too, measured on 9.17.0) and into _migrations at the 'after'
-// stage (update), one destination run per render - and reusable-template-sync
-// runs it once more as the sync leg's final stamping step, after conflict
-// resolution and the preserve steps have finished rewriting files. Before
-// stamping it also normalizes the manifest-listed symlinks' targets
-// (normalizeSymlinkTargets: the build branch ships targets with the
-// template suffix kept so no branch link is ever dangling).
+// STANDALONE BY DESIGN: copier.yml's hooks run this file from the build
+// branch's actions/shared/ inside fresh renders where none of this
+// repository's node_modules exist: node builtins and zone-internal imports
+// only, no argv subprocesses.
 //
-// STANDALONE BY DESIGN: this file lives in actions/shared/, the
-// dependency-free zone the build branch ships verbatim, and copier.yml's
-// hooks run it from there ({{ _copier_conf.src_path }}/actions/shared/...)
-// inside freshly rendered repositories where none of this repository's
-// node_modules exist - node builtins and zone-internal imports only, no
-// argv subprocesses.
-//
-// Under --commit the hook also owns the recorded provenance: it rewrites
-// the `_commit:` line to the full template sha copier.yml hands it, then
-// stamps the manifest's slot from it (why: docs/build-provenance.md).
-//
-// Each entry line is re-emitted through entryBody from the ENTRY_FIELDS vocabulary alone, hash
-// (and the self entry's commit) rewritten, unknown keys dropped, so a stamped manifest differs
-// from the render in those values only. Conflict blocks resolve toward the template first.
-//
-// Data problems (a missing or unparseable manifest, entries the line
-// rewrite cannot reach) warn and exit 0 on the argument-free re-stamp -
-// validate-template's parity check reports an unstamped manifest. Under --commit the provenance pair (answers line +
-// manifest slot) must never disagree, so a manifest that cannot take the
-// stamp fails the render before either file is touched. Entry classes are
-// trusted as written; the validator's roster cross-check reports a
-// hand-flipped class.
-//
-// Args: `--root <dir>` (the tree; absent = cwd, never the environment),
-// `--commit <40-hex sha>` and `--answers <path>` (the copier hooks pass
-// both; the sync's final re-stamp passes neither). `--answers` is refused
-// unless it names ANSWERS_FILE: alternates are outside the template's
-// contract, and stamping the default file while copier wrote another would
-// leave the pair split.
+// Under --commit the hook also owns the recorded provenance: the
+// `_commit:` line and the manifest's self entry must never disagree, so a
+// manifest that cannot take the stamp fails the render before either file
+// is touched (args and the why: docs/build-provenance.md). Without
+// --commit, data problems warn and exit 0 because validate-template's
+// parity check reports an unstamped manifest and a hand-flipped class.
 
 import { createHash } from "node:crypto";
 import {
@@ -128,15 +104,13 @@ export function recordedCommit(root: string): string | null {
   return value === "" ? null : value;
 }
 
-/** The hash a manifest entry should carry for the file as it sits on disk:
- *  sha256 of the whole content (managed), of the managed region between
- *  the entry's begin/end marker lines (split; the marker lines are part of
- *  the hashed region), or of the symlink target. The region slice is the
- *  STRICT one (cleanManagedRegion) - the same accept/reject every writer
- *  applies - so a file with duplicated or reordered markers stamps null
- *  rather than hashing an ambiguous first slice. null also when the file
- *  is missing or its split markers are gone - the parity check reports
- *  those; a stamp must not invent a value. */
+/** The hash a manifest entry should carry for the file on disk: sha256 of
+ *  the whole content (managed), of the managed region including its marker
+ *  lines (split), or of the symlink target. The region slice is the STRICT
+ *  one (cleanManagedRegion), the same accept/reject every writer applies,
+ *  so duplicated or reordered markers stamp null rather than hashing an
+ *  ambiguous first slice. Null also for a missing file or missing markers:
+ *  the parity check reports those, and a stamp must not invent a value. */
 export function entryHash(root: string, path: string, entry: ManifestEntryShape): string | null {
   const abs = join(root, path);
   let stat: ReturnType<typeof lstatSync>;
@@ -194,14 +168,12 @@ function containedForMutation(root: string, path: string): string | null {
 }
 
 /** Strip the template suffix from every MANAGED manifest-listed symlink's
- *  target: the build branch ships link targets with the suffix kept (a
+ *  target. The build branch ships link targets with the suffix kept (a
  *  dangling link anywhere in the tree kills the runner's `uses:` tarball
- *  staging) and copier renders targets verbatim, so the rendered
- *  repository's managed links arrive pointing at the templated twin's
- *  name. Only managed entries are touched - starters are repo-owned after
- *  the first render and unlisted links are repo content, so neither is
- *  ever rewritten, whatever its target - and the rewrite is idempotent.
- *  Returns the rewritten paths. */
+ *  staging) and copier renders targets verbatim, so rendered managed links
+ *  arrive pointing at the templated twin's name. Starters are repo-owned
+ *  after the first render and unlisted links are repo content, so neither
+ *  is ever rewritten. Idempotent; returns the rewritten paths. */
 export function normalizeSymlinkTargets(
   root: string,
   files: Record<string, ManifestEntryShape>,

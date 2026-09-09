@@ -1,45 +1,24 @@
 #!/usr/bin/env bun
-// Compose .gitignore files from the latest github/gitignore templates:
+// Compose .gitignore files from the latest github/gitignore templates: the
+// base skeleton downstream repos receive (OS sections plus the
+// `{# compose:gitignore #}` anchor), one fragment per module declaring
+// gitignore_sources in its manifest, and this repository's own .gitignore
+// (every toolchain template once; content outside the managed region is
+// preserved). The sharing rule (a source several modules declare is emitted
+// plain by the first and gate-negated by the rest) and the topology gate are
+// docs/compose.md. The template and self outputs open their managed block
+// with one section that has no upstream source: agent local state.
 //
-// - templates/base/.gitignore.jinja: the skeleton downstream repos receive
-//   (published onto the build branch by post-green.yml's publish):
-//   OS templates (Windows, macOS, Linux) plus a {# compose:gitignore #}
-//   anchor where the composer splices the toolchain fragments below, each
-//   wrapped in its module's gate.
-// - templates/<module>/fragments/gitignore.jinja: one fragment per module
-//   declaring gitignore_sources in its module.yml manifest (uv maps to
-//   Python.gitignore, which carries upstream's uv section - there is no
-//   standalone uv template) as module fragments. A source declared by
-//   several modules is emitted plain in the first declaring module's
-//   fragment; each later one carries the whole chunk (leading newline
-//   included) wrapped in the negation of the earlier declarers' gates, so
-//   a repo selecting both gets the section once and a suppressed chunk
-//   renders as nothing.
-// - .gitignore (this repo's own): same OS templates plus ALL toolchain
-//   templates, each once (downstream repos may carry any combination).
-//   Existing content OUTSIDE the managed region (above BEGIN and below
-//   END) is preserved across regenerations.
+// Every regeneration resolves github/gitignore's current HEAD and fetches
+// every section from that one commit; nothing records the SHA, so the
+// outputs change only when consumed upstream content changes and the
+// refresh-gitignore PR diff stays worth reading. There is no offline
+// REGENERATION mode: --topology only verifies (fragments match the
+// manifests' sources and gates), and content drift INSIDE a managed block
+// is ungated until the next refresh regenerates over it.
 //
-// The template and self outputs open their managed block with one section
-// that has no upstream source: agent local state.
-//
-// There is no pinned upstream SHA and no offline REGENERATION mode: every run resolves
-// github/gitignore's current HEAD and fetches every section from that one
-// commit. Nothing generated records the SHA, so the outputs change only
-// when upstream content we consume changes - which is what makes the
-// refresh-gitignore workflow's PR diff worth reading. That workflow is the
-// only caller of networked regeneration; `bun run check` and CI's validate
-// job also call this script with --topology for offline validation. Content
-// drift INSIDE a managed block is still ungated - only the fragments'
-// encoded source paths are checked - so a hand edit there survives until the
-// next refresh PR regenerates over it.
-//
-// Usage:
-//   bun scripts/generate/build_gitignore.ts              # fetch upstream HEAD, regenerate
-//   bun scripts/generate/build_gitignore.ts --topology   # offline: fragments match the manifests' gitignore_sources
-//
-// --topology is the one OFFLINE mode, and it only verifies; there is no
-// offline REGENERATION mode - producing content always fetches upstream HEAD.
+// Usage: bun scripts/generate/build_gitignore.ts [--topology]
+//   (no flag: fetch upstream HEAD and regenerate; --topology: offline verify)
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -341,19 +320,12 @@ async function run(topology = false): Promise<number> {
         "manifest's gitignore_sources)",
     );
   }
-  // --topology: the OFFLINE manifests-vs-fragments check (no upstream
-  // fetch, no lock read), for bun run check. It catches every topology
-  // direction on the PR that changes a manifest: a removed
-  // gitignore_sources key with the fragment left behind (the stray check
-  // above, which would otherwise ABORT the weekly refresh - the failure
-  // could never self-heal), a newly declared key whose fragment was never
-  // generated (composition would render nothing for it), an EDITED
-  // source list whose fragment still encodes the old sources (each
-  // fragment's section headings carry them - fragmentSourcePaths), and a
-  // changed module GATE whose fragment still embeds the old guard
-  // expressions (fragmentGuardExpressions vs the manifests' expected
-  // guards - a stale guard makes the next build emit duplicate shared
-  // sections).
+  // --topology: the OFFLINE manifests-vs-fragments check for bun run check.
+  // It fires on the PR that changes a manifest, before the weekly refresh
+  // would: a stray fragment would ABORT the refresh with no way to
+  // self-heal, a missing one would render nothing, a fragment whose encoded
+  // sources are stale keeps rendering the old sections, and a stale gate
+  // guard makes the next build emit duplicate shared sections.
   if (topology) {
     const missing = missingFragmentFiles(manifests, TEMPLATES_DIR);
     if (missing.length > 0) {

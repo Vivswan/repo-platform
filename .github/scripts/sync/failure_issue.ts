@@ -1,29 +1,24 @@
 #!/usr/bin/env bun
-// Failure-report issue on the target repo: a hide-details target's issues
-// are as private as the repo, so the full run_hidden.ts captures are safe
-// there when no sync PR exists to carry them. Invoked by
-// reusable-template-sync.yml's tail steps.
+// Failure-report issue on the target repo (reusable-template-sync.yml's
+// tail steps): a hide-details target's issues are as private as the repo,
+// so the full run_hidden.ts captures are safe there when no sync PR exists
+// to carry them.
 //
 // deliver (failed run): replace the issue body with every recorded hidden
-// failure (hidden-failures.tsv from run_hidden.ts) and (re)open it, and
-// assign the target's owner best-effort (see assignOwner for why here).
-// Skipped when PR_URL is set - the only hidden-wrapped failures that let
-// the run reach PR creation are validation ones, and open_pr.ts already
-// routed those into the PR body. resolve (fully successful run): close
-// the issue if one is open; none existing is a no-op.
+// failure (hidden-failures.tsv) and (re)open it, assigning the target's
+// owner best-effort. Skipped when PR_URL is set: the only hidden-wrapped
+// failures that let a run reach PR creation are validation ones, which
+// open_pr.ts already routed into the PR body. resolve (successful run):
+// close the issue if one is open.
 //
-// The issue is found by exact title among issues created by the token's
-// user, never by a marker label: the settings apply deletes undeclared
-// labels, so a label would enter a delete/recreate loop. Both modes are
-// best-effort - an API failure emits ONE ::warning and exits 0. The
-// warning follows the reference implementation's rule: it names the HTTP
-// status and generic advice only - never the slug, the request path, or
-// the API's message, all of which would leak into this public log (the
-// issue URL contains the slug, so it stays unprinted too).
-//
-// Usage: failure_issue.ts deliver|resolve
-// Env: TARGET, GH_TOKEN, RUN_URL, RUNNER_TEMP, GITHUB_REPOSITORY;
-// PR_URL (deliver only, may be empty).
+// Found by exact title among issues created by the token's user, never by
+// a marker label: the settings apply deletes undeclared labels, so a label
+// would enter a delete/recreate loop. Both modes are best-effort - an API
+// failure emits ONE ::warning and exits 0, naming the HTTP status and
+// generic advice only, never the slug, request path, API message, or issue
+// URL, all of which would leak into this public log.
+// Usage: failure_issue.ts deliver|resolve. Env: TARGET, GH_TOKEN, RUN_URL,
+// RUNNER_TEMP, GITHUB_REPOSITORY; PR_URL (deliver only, may be empty).
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -133,17 +128,13 @@ function findIssue(): string | null {
   return list.stdout.replace(/\n$/, "");
 }
 
-// Assign the target's owner to the failure-report issue at creation.
-// This delivery runs with the fleet PAT, whose issues CAN fire
-// issues:opened (unlike GITHUB_TOKEN) - but whether the target has any
-// automation listening is the target's business, so assigning here is the
-// only spot that guarantees the owner regardless of token or target
-// modules. The owner login is the target slug's first segment (a
-// personal-account fleet: a user repo's owner is assignable). Best-effort
-// by constraint: an org-owned target's owner is an org and not
-// assignable, and delivery must not gain a failure path over assignment,
-// so a failure logs one public-safe notice (no login, no issue number:
-// the target's owner is half the private slug) and the delivery stands.
+// Assigning at creation is the only spot that guarantees the owner: the
+// fleet PAT's issues CAN fire issues:opened (unlike GITHUB_TOKEN), but
+// whether the target has automation listening is its own business. The
+// owner is the slug's first segment (a personal-account fleet). Best-effort
+// by constraint: an org owner is not assignable, and delivery must not gain
+// a failure path over assignment, so a failure logs one public-safe notice
+// (no login, no issue number: the owner is half the private slug).
 function assignOwner(issueNumber: string): void {
   const owner = target.split("/")[0];
   // try/catch, not just the exit-code check: capture() can throw (the

@@ -1,40 +1,24 @@
 #!/usr/bin/env bun
-// Validates a repository hosting agent skills (the `skills` module of
-// Vivswan/repo-platform). Two modes, from the action's `mode` input:
+// Validates a repository hosting agent skills (repo-platform's `skills`
+// module); docs/skills.md ("What is checked and where") is the user-facing
+// contract. Two modes, from the action's `mode` input:
 //
-//   structure (default, offline): the plugin manifest parses and every
-//     skill path it lists is a real direct child of the skills directory
-//     with a SKILL.md; every folder under the skills directory satisfies
-//     the SKILL.md contract installers expect (frontmatter name matching
-//     the kebab-case folder, a nonempty description, both within Claude
-//     Code's length limits, a parsable .mcp.json when present); the
-//     skills directory, when it exists, is a directory carrying an index
-//     README.md at its root (a missing skills directory stays the valid
-//     starter state; any other entry at the path is an error);
-//     marketplace.json, when present, parses with well-formed plugins
-//     entries consistent with the plugin manifest.
+//   structure (default, offline): plugin manifest, each skill folder's
+//     SKILL.md contract, the skills root's index README.md, and
+//     marketplace.json's consistency with the plugin manifest; a missing
+//     skills directory is the valid starter state.
+//   discovery (network): the real `npx -y skills add <repo> --list` must
+//     list every skill the plugin manifest publishes.
 //
-//   discovery (network): runs the real `npx -y skills add <repo> --list`
-//     against the checkout and asserts every skill the plugin manifest
-//     publishes appears in the CLI listing. An empty catalog (the
-//     starter's seeded state) is a green no-op: the CLI has nothing to
-//     list.
+// Symlinks are rejected anywhere on a validated path, ancestors included:
+// a link can point outside the checkout, so what ships would not be what
+// was validated. The one exception is a marketplace plugin's `source`,
+// which may resolve through links while its physical path stays inside
+// the repository. An EMPTY `skills` array is valid: the starter seeds it
+// and a freshly adopted repo publishes nothing yet.
 //
-// Symlinks are rejected anywhere on a validated path - the skills
-// directory (every component of it, ancestors included), skill folders,
-// SKILL.md, .mcp.json, the skills root's index README.md, and the
-// plugin.json/marketplace.json manifests themselves: a link can point
-// outside the checkout, so what ships would not be what was validated. The one deliberate exception is a
-// marketplace plugin's `source`, which may resolve through links as long
-// as its physical path stays inside the repository.
-//
-// Unlike a dedicated skills repository's own checks, an EMPTY `skills`
-// array is valid here: the module's starter seeds `"skills": []` and a
-// freshly adopted repo publishes nothing yet. Repo-specific assertions
-// beyond this baseline belong in the repo's own checks.yml.
-//
-// Inputs (env): SKILLS_DIR, PLUGIN_MANIFEST, MODE.
-// Dependency-free (Bun + node builtins) so the action needs no install step.
+// Inputs (env): SKILLS_DIR, PLUGIN_MANIFEST, MODE. Dependency-free (Bun +
+// node builtins) so the action needs no install step.
 
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -83,11 +67,10 @@ function lstatOf(path: string) {
  *  comparison instead of a component walk: realpath(resolved) must equal
  *  realpath(root) + the lexical relative path, so a symlink at ANY
  *  component (a linked ancestor like lib/ under skills_dir=lib/skills, or
- *  the leaf itself) is caught. When the path does not resolve, "missing"
- *  is only declared after an lstat walk up the chain proves every existing
- *  component is symlink-free - a dangling ancestor link (lib -> missing)
- *  must not read as an absent starter dir. Returns the error, or undefined
- *  when clean or plain-missing (existence is the caller's own concern). */
+ *  the leaf) is caught. An unresolvable path is "missing" only after an
+ *  lstat walk proves every existing ancestor is symlink-free: a dangling
+ *  ancestor link must not read as an absent starter dir. Returns the error,
+ *  or undefined when clean or plain-missing (existence is the caller's). */
 export function symlinkFreeError(root: string, resolved: string, what: string): string | undefined {
   let physical: string;
   try {

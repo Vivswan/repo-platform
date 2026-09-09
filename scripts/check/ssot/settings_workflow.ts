@@ -104,15 +104,13 @@ export function settingsIdentityMismatches(repository: Record<string, unknown>):
 export const settingsWorkflowRules: Rule[] = [
   {
     // The base settings starter and repo-platform's own .github/settings.yml
-    // are the two independently-authored repo layers this repo controls;
-    // the managed baseline document (.github/settings-baseline.yml) is the
-    // single home of the fleet-generic content, so no baseline pair exists
-    // to compare here. This rule pins what the layers must declare: the
-    // starter seeds all four identity keys, repo-platform's own file
-    // declares them with valid shapes, and its hand-written non-bypassable
-    // override stays byte-equivalent to the baseline entry it replaces
-    // wholesale (a drifted override would silently weaken the ruleset the
-    // baseline promises).
+    // are the two independently-authored repo layers this repo controls; the
+    // managed baseline document is the single home of the fleet-generic
+    // content, so no baseline pair exists to compare here. The starter must
+    // seed all four identity keys, repo-platform's own file must declare them
+    // with valid shapes, and its hand-written non-bypassable override must
+    // stay byte-equivalent to the baseline entry it replaces wholesale (a
+    // drifted override would silently weaken the ruleset the baseline promises).
     name: "settings-starter",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -459,19 +457,14 @@ export const settingsWorkflowRules: Rule[] = [
     },
   },
   {
-    // Every run_hidden-wrapped step in settings-repos.yml must be
-    // followed by a PUBLIC ::notice:: step that fires on one of the
-    // wrapped step's own outputs. The capture swallows a wrapped step's
-    // success output - warnings included - for a hide-details target, so
-    // without a compensating notice its skip is a green job with no
-    // signal at all. DERIVED from the workflow rather than pinned per
-    // step: this gap was reintroduced three times one step at a time (the
-    // merge notice, then the freshness wrap, then the notice condition
-    // missing the freshness clause), so a fourth wrapped script fails
-    // here until it gets its notice instead of repeating the cycle.
-    // Order is part of the requirement - the notice must sit AFTER the
-    // wrapped step, or it reads outputs that do not exist yet.
-    // Self-contained like the neighbouring settings rules.
+    // Every run_hidden-wrapped step in settings-repos.yml must be followed by
+    // a PUBLIC ::notice:: step firing on one of the wrapped step's own outputs:
+    // the capture swallows a wrapped step's success output, warnings included,
+    // so without a compensating notice its skip is a green job with no signal.
+    // DERIVED from the workflow rather than pinned per step because this gap
+    // was reintroduced three times one step at a time; a fourth wrapped script
+    // fails here until it gets its notice. Order is part of the requirement:
+    // a notice BEFORE the wrapped step reads outputs that do not exist yet.
     name: "settings-hidden-step-notices",
     run: () => {
       const mismatches: Mismatch[] = [];

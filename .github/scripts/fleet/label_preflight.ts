@@ -1,48 +1,24 @@
 #!/usr/bin/env bun
-// FAIL-CLOSED label preflight for the settings apply: the action's label
-// reconciliation DELETES every live label the merged document does not
-// declare and RENAMES entries that declare `new_name` - either way a
+// FAIL-CLOSED label preflight for the settings apply (docs/settings.md,
+// "Label preflight"): the action's reconciliation DELETES every live label
+// the merged document does not declare and RENAMES `new_name` entries, so a
 // label the target's issue forms or workflows still reference vanishes
-// under its referenced name, a silent break the run stays green through
-// (the chromium-bridge and litellm incidents). Before the action runs,
-// this script lists the live labels, extracts the referenced ones from
-// the target's own files (label_references.ts owns the extraction rule
-// and its stated limits), and FAILS the apply for this repository when a
-// referenced label is scheduled for removal - naming the label and its
-// referencing files, so the fix (declare the label in a settings layer,
-// or drop the reference) is one message away. A false positive from the
-// heuristic blocks one repo's apply loudly; the silent break it prevents
-// surfaced only when a user hit the broken form.
-//
-// Scope is exactly the destructive act: a referenced label that is
-// neither live nor declared is already broken and removing nothing, so
-// it warns on the sync path (referenced_labels.ts), never here. A merged
-// document that declares NO labels key leaves the action's reconciliation
-// off entirely, so the preflight stands down without probing.
-//
-// Usage:
-//   bun label_preflight.ts --merged <merged-settings.yml> --repo owner/name
-//     (--target-dir <checkout> | --ref <40-hex sha>) [--sections <allowlist>]
-//     [--required-sections <list>] [--mode apply|check]
-//     [--on-missing-permission fail|warn]
-//
-// --target-dir reads the reference files from a local checkout (the
-// operator row of settings-repos.yml, whose facts came from its own
-// working tree); --ref fetches them from the target via gh api (env:
-// GH_TOKEN) at the SAME pinned commit the merged document's facts were
-// read at. The optional flags mirror the
-// ACTION's inputs so the preflight is never stricter OR looser than the
-// apply it guards: --sections stands the preflight down when a non-empty
-// allowlist does not select `labels` (that apply reconciles none); --mode
-// check reports findings as warnings and exits 0 (a check run deletes
-// nothing, and hard-failing would cost the drift report the run exists
-// for); --on-missing-permission warn turns a permission refusal on the
-// live-label listing into a warned stand-down (the action's own labels
-// section warns and skips under the same input) - UNLESS
-// --required-sections names labels, where the action fails that section
-// even under warn. Everything else fails closed: a non-permission listing
-// failure or a failed file fetch fails the step rather than reading as
-// "nothing referenced".
+// silently on a green run. Before the action runs, this lists the live
+// labels, extracts the referenced ones (label_references.ts owns the rule
+// and its limits), and FAILS the apply for this repository when a
+// referenced label is scheduled for removal, naming the label and files.
+// Scope is exactly the destructive act: a referenced label that is neither
+// live nor declared is already broken, so it warns on the sync path
+// (referenced_labels.ts), never here; a document with NO labels key leaves
+// reconciliation off, so the preflight stands down without probing.
+// Usage: bun label_preflight.ts --merged <merged-settings.yml> --repo
+//   owner/name (--target-dir <checkout> | --ref <40-hex sha>)
+//   [--sections <allowlist>] [--required-sections <list>]
+//   [--mode apply|check] [--on-missing-permission fail|warn]
+// --ref fetches the reference files via gh api (env: GH_TOKEN) at the SAME
+// pinned commit the merged document's facts were read at. The optional
+// flags mirror the ACTION's inputs so the preflight is never stricter OR
+// looser than the apply it guards; everything else fails closed.
 
 import { readFileSync } from "node:fs";
 import { parseFlags } from "../shared/flags.ts";

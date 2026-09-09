@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Build provenance
 
-How the `build` branch gets published, how a sync verifies the tip before consuming it, and which trusts remain. This document is the map, not the authority: every invariant here lives in exactly one code header, named per section, and the header is where the full reasoning stays.
+How the `build` branch gets published, how a sync verifies the tip before consuming it, and which trusts remain. This document states the contract; each invariant is owned by exactly one script, named per section, whose header carries only what the code alone cannot show.
 
 | Question | Owner |
 | --- | --- |
@@ -88,7 +88,7 @@ Stamp recovery is the one exception that commits an identical tree, and the only
 
 Checks 1 and 2 are the same battery publish.ts's no-change skip guard runs, shared so the two can never drift.
 
-A fourth check - proving the stamped run a green publish run via the Actions API - existed and was retired: it anchored no content of its own while adding live-state trust (runs age out, workflows get renamed, so a valid tip could wedge every sync on a dead run id). The documented cost of its removal: actor provenance degraded from verified to advisory - the commit's `run:` line is a human breadcrumb, and a hand-pushed byte-identical tip is no longer distinguishable. A forensics loss, never a content-injection gain; the full argument is verify_build_provenance.ts's header.
+A fourth check - proving the stamped run a green publish run via the Actions API - existed and was retired: a tree that rebuilds byte-identically from a main-history, non-rollback stamp IS the builder's output of that source, and greenness is proven independently (resolve_refs.ts runs the all-green gate on the stamped source), so it anchored no content of its own while adding live-state trust (runs age out, workflows get renamed, so a valid tip could wedge every sync on a dead run id). The documented cost of its removal: actor provenance degraded from verified to advisory - the commit's `run:` line is a human breadcrumb, and a hand-pushed byte-identical tip is no longer distinguishable. A forensics loss, never a content-injection gain.
 
 ## Hermetic staging: one function of the bytes
 
@@ -101,7 +101,9 @@ The tree proof compares a scratch rebuild's hash against the tip's, so producers
 | Ignore rules silently dropping staged files: an in-tree `.gitignore`, a machine-global excludesFile, a planted `info/exclude`, the producer checkout's own exclude. | `add -A --force` |
 | Blob rewriting at add time: a global `* text` attributes filter, a machine-global `core.autocrlf`. | `-c core.attributesFile=/dev/null -c core.autocrlf=false` |
 
-`$GIT_DIR/info/attributes` is the one axis no flag can close; no site plants one, so it stays a documented residual, not a covered vector (stage_tree.ts's header).
+`$GIT_DIR/info/attributes` is the one axis no flag can close (git reads it regardless of `core.attributesFile`); no site plants one, fresh checkouts and scratch repos carry none, so it stays a documented residual, not a covered vector. Any further rewrite axis git grows lands in this same class until a flag pins it: `core.autocrlf` sat here, measured live, before its override landed.
+
+Hooks an `init.templateDir` plants are a residual of the same kind: `init` fires none, `add` and `write-tree` fire only `post-index-change` once the index is written, and no site plants one, so they stay documented, not neutralized.
 
 Guards of this class - defenses against environmental hazards a hermetic test can never trip by accident - each ship with a hostile-fixture test that stages the hazard and forces the guard's failure branch, so a guard that stopped guarding goes red in the suite rather than silently passing.
 
@@ -109,7 +111,7 @@ Guards of this class - defenses against environmental hazards a hermetic test ca
 
 ## Extraction safety: one branch, every consumer
 
-The branch is both the copier source and the fleet's executable channel (`uses: ...@build`), which constrains every path on it:
+The branch is both the copier source and the fleet's executable channel (`uses: ...@build`). Its root, assembled by [branch_tree.ts](https://github.com/Vivswan/repo-platform/blob/main/.github/scripts/build-branches/branch_tree.ts): `copier.yml` (a byte copy of this repository's, its generated `_exclude` region carrying the conditional-landing gates), the composed `template/`, `actions/` (sources and dependency manifests, no `node_modules`; the dependency-free `actions/shared/` library ships with them so the tarball stays install-free), `.github/workflows/` (the fleet-facing reusable workflows that rendered workflows call `@build`; a `uses:` fetches the file at the named ref, so a branch without them 404s every caller), `migrations/`, and a static `README.md`. Being one branch for both consumers constrains every path on it:
 
 - Plain filenames only: a `uses:` ref downloads the whole branch tarball, and extraction dies on jinja-expression path segments, so conditional landing happens through copier.yml's generated `_exclude` region instead of filename gates.
 - Nothing the builder publishes can run on the branch: [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) hard-fails assembly if any shipped workflow carries a trigger other than `workflow_call` alone. PAT pushes can trigger workflows, so the safety is pinned by construction, not carried by omission; an out-of-band push bypasses the assembly guard entirely - the residuals section.

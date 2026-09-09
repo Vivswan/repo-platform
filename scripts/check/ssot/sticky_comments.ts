@@ -88,14 +88,12 @@ export function stickyScopeOf(rel: string, anchorHosts: Map<string, string[]>): 
 
 /** A jinja source as YAML the scanner can parse, every source line keeping
  *  its number: comments blanked with their newlines kept, whitespace-control
- *  dashes dropped (a `{%-` tag eats the newline beside it in jinja; the
- *  scanner needs the line, not the whitespace), else/elif turned into
- *  adjacent if-blocks so BOTH branches are scanned (a value-level else
- *  then repeats a key; the parser keeps the last), tags stripped and
- *  expressions placeholdered by the shared jinja subset. A source the
- *  subset cannot normalize, or whose normalization still lost a line,
- *  comes back comment-blanked only: the scanner then reads it as text and
- *  refuses any sticky step it cannot parse. */
+ *  dashes dropped (a `{%-` tag eats the newline beside it; the scanner needs
+ *  the line, not the whitespace), else/elif turned into adjacent if-blocks so
+ *  BOTH branches are scanned (a value-level else would repeat a key and the
+ *  parser keeps the last), tags stripped and expressions placeholdered by the
+ *  shared jinja subset. A source the subset cannot normalize, or that lost a
+ *  line, comes back comment-blanked only: read as text, sticky steps refused. */
 export function stickyYamlOf(rel: string, text: string, vars: JinjaVars): string {
   if (!rel.endsWith(".jinja")) return text;
   const blanked = text.replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""));
@@ -160,16 +158,14 @@ export function shellWords(command: string): string[] {
   return [...words, ...substituted.flatMap(shellWords)];
 }
 
-/** Where a folded block scalar's value line sits in the source, searched
- *  from `from`: folding joins each paragraph with spaces and keeps
- *  more-indented lines whole, so every value line begins with the text of
- *  exactly one source line of the block (the block ends at the first
- *  non-blank line indented less than its first). `line` is that source
- *  line, 1-based; `next` is the index after the last source line the value
- *  line consumed (a joined paragraph or `\` continuation spans several,
- *  blank lines between them included), where the following value line's
- *  search starts. Null when the value
- *  line matches no source line. */
+/** Where a folded block scalar's value line sits in the source, searched from
+ *  `from`: folding joins each paragraph with spaces and keeps more-indented
+ *  lines whole, so every value line begins with the text of exactly one
+ *  source line of the block (which ends at the first non-blank line indented
+ *  less than its first). `line` is that source line, 1-based; `next` is the
+ *  index after the last source line the value line consumed (a joined
+ *  paragraph or `\` continuation spans several, blank lines included), where
+ *  the following value line's search starts. Null when nothing matches. */
 export function foldedSourceLine(
   lines: readonly string[],
   indicatorLine: number,
@@ -266,17 +262,14 @@ function stringScalars(node: unknown, out: Scalar<string>[] = []): Scalar<string
   return out;
 }
 
-/** One source judged against its scope. YAML step lists (a workflow, a
- *  composite action, a step fragment) are read as the runner reads them:
- *  a step's keys in any order, its `run` as YAML folds it (`>-` is one
- *  shell line, `|` is one per line) and its other strings alike, each
- *  command line's words as the shell splits them. Anything else is read
- *  as command lines of text (an action's script). Everywhere: no
- *  hand-rolled PR comment; every sticky step pinned `@<40-hex sha> #
- *  vX.Y.Z` (the version comment is text no parser keeps, so that check is
- *  textual) with `header: repo-platform/<host>` (so exactly one host) and,
- *  unless the scope allows it, no continue-on-error; and the sticky action
- *  named in a source whose steps cannot be parsed is itself a mismatch. */
+/** One source judged against its scope. YAML step lists (a workflow, a composite
+ *  action, a step fragment) are read as the runner reads them: keys in any order,
+ *  `run` as YAML folds it (`>-` is one shell line, `|` one per line), each command
+ *  line's words as the shell splits them; anything else is read as command lines
+ *  of text. Everywhere: no hand-rolled PR comment; every sticky step pinned
+ *  `@<40-hex sha> # vX.Y.Z` (the version comment is text no parser keeps, so that
+ *  check is textual) with one `header:` host and, unless the scope allows it, no
+ *  continue-on-error; the sticky action in an unparsable source is a mismatch. */
 export function stickyCommentMismatches(
   rel: string,
   text: string,

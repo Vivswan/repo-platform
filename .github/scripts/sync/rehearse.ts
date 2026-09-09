@@ -1,46 +1,24 @@
 #!/usr/bin/env bun
 // Local rehearsal of one managed repo's sync PR: clones the target shallow
-// into /tmp, assembles a build tree from THIS working tree (uncommitted
-// template changes included), commits it as a synthetic build chained onto
-// the fetched build tip, and runs the legs
-// reusable-template-sync.yml runs - the pending migration rungs, module
-// selection, copier update,
-// clean-render materialization, the split-file structural rebuild,
-// conflict resolution (rebuilt files skipped), retired-file cleanup, the
-// repo-owned preserve step, the final manifest stamp, the post-stamp tail
-// tripwire, the manifest license
-// check, and validation - then prints the resulting diff and the would-be
-// PR-body sections.
+// into /tmp, assembles a synthetic build from THIS working tree (uncommitted
+// template changes included) chained onto the fetched build tip, runs the
+// legs reusable-template-sync.yml runs, and prints the resulting diff and
+// would-be PR-body sections. The workspace stays under /tmp for inspection;
+// rehearse_fleet.ts drives the exported rehearseRepo fleet-wide.
 //
 // READ-ONLY against the remote: the network is touched only to clone the
-// target, fetch this repo's build refs, and (first run) install the
-// validator's dependencies. Right after cloning, the target's origin URLs
-// (fetch and push) are pointed at an unroutable value, so any remote
-// operation through the clone's remote fails loudly. Network git calls run
-// with prompts disabled and a hard deadline, so a stalled network or a
-// credential prompt becomes a loud, fast failure instead of a hang. The
-// code that runs with --trust is this repository's own template - the same
-// trust the real sync extends - and nothing here opens PRs or writes to
-// any remote. The workspace under /tmp is left in place for inspection.
-//
-// The CLI below rehearses one repo; rehearse_fleet.ts drives the exported
-// rehearseRepo across every managed repo (quiet, workspace cleaned up) and
-// turns thrown RehearsalErrors into report rows instead of aborts.
-//
-// Known parity gaps vs the workflow (this is an operator convenience, not
-// a second pipeline): visibility, description, and the homepage/topics seeds
-// come from the recorded answers, not the GitHub API (an unrecorded seed
-// rehearses as "" where production seeds the live value), so drift is not rehearsed; hide-details redaction and the PR/auto-merge
-// machinery do not apply locally (the
-// tail tripwire CHECK runs and its report rides the outcome, but its
-// PR-body section and forced manual review are PR machinery); and
-// validation uses this working tree's validator, not a version-aligned
-// release checkout - which is the point when rehearsing unreleased changes.
-//
-// Usage:
-//   bun .github/scripts/sync/rehearse.ts <owner>/<repo>
-//   bun .github/scripts/sync/rehearse.ts <owner>/<repo> --fleet-outcome <file>
-//     (rehearse_fleet's per-repo subprocess: quiet run, tagged JSON verdict)
+// target, fetch this repo's build refs, and install the validator's
+// dependencies once; right after cloning, the target's origin URLs are
+// pointed at an unroutable value, so any remote operation through the clone
+// fails loudly, and network git runs with prompts disabled under a hard
+// deadline. Parity gaps (an operator convenience, not a second pipeline):
+// visibility, description, and the homepage/topics seeds come from the
+// recorded answers, so drift is not rehearsed; hide-details and the
+// PR/auto-merge machinery do not apply (the tail tripwire CHECK runs, its
+// PR-body hold does not); validation uses this working tree's validator.
+// Usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo>
+//   [--fleet-outcome <file>] (rehearse_fleet's per-repo subprocess: quiet
+//   run, tagged JSON verdict)
 
 import {
   cpSync,

@@ -1,40 +1,21 @@
 // scripts/ownership/ is the single owner of template-file OWNERSHIP truth:
-// how each file the template lands in a generated repository relates to
-// sync. This file holds the declaration schema and its loader; the siblings
-// are landed_paths.ts (copier.yml's landing rules), decoration_checks.ts
-// (the header/marker scans), and enforcement_tables.ts (the validator's
-// tables).
+// how each file the template lands relates to sync. This file holds the
+// declaration schema and its loader; the siblings are landed_paths.ts
+// (copier.yml's landing rules), decoration_checks.ts (the header/marker
+// scans), and enforcement_tables.ts (the validator's tables). The classes
+// and the contract are docs/compose.md's ownership section.
 //
-// Three classes (the ownership manifest's vocabulary):
-// - managed: sync overwrites the whole file; local edits are replaced.
-// - split: sync owns the BEGIN/END-bounded managed region; the repository
-//   owns everything outside it, above and below (the one grammar,
-//   managed-region).
-// - starter: rendered once, repo-owned from then on (_skip_if_exists).
+// Ownership is DECLARED as data (templates/base/ownership.yml and each
+// module.yml's `ownership:` list), never inferred from file text: headers
+// and marker lines are validated DECORATION, so deleting a header can never
+// silently downgrade a file's enforcement. Every consumer (the composer's
+// manifest, validate-template's generated tables) reads these same
+// declarations, so ownership can never fork.
 //
-// Ownership is DECLARED as data, never inferred from file text:
-// templates/base/ownership.yml covers every base file (loadBaseOwnership)
-// and each templates/<module>/module.yml carries an `ownership:` list
-// covering every file the module lands (ownershipListSchema, consumed by
-// scripts/lib/module_manifests.ts). Headers and marker lines in template
-// sources are validated DECORATION: declarationTextErrors
-// (decoration_checks.ts) reports a source whose text contradicts its
-// declared class, and the composer (scripts/compose/manifest.ts) errors on
-// a landed file with no declaration, a declaration whose path never lands,
-// and same-path declarations that disagree across sources.
-//
-// Consumers, all reading the same declarations so ownership can never fork:
-// - scripts/compose/manifest.ts emits the ownership manifest
-//   (.github/repo-platform-manifest.json) into the composed template tree.
-// - scripts/generate.ts derives validate-template's MODULE_OWNERSHIP and
-//   BASE_OWNERSHIP records (moduleOwnershipEntries / baseOwnershipTables
-//   in enforcement_tables.ts).
-//
-// Per-grammar behavior (owned markers, wire fields) is the GRAMMAR
-// descriptor table in actions/shared/grammar.ts; the schema's grammar
-// union is welded to the table's key set at compile time (the
-// Expect<Equal<...>> bridge below), so no consumer can meet a grammar the
-// table has no row for.
+// Per-grammar behavior (owned markers, wire fields) is the GRAMMAR descriptor
+// table in actions/shared/grammar.ts; the schema's grammar union is welded to
+// the table's key set at compile time (the Expect<Equal<...>> bridge below),
+// so no consumer can meet a grammar the table has no row for.
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,21 +33,14 @@ export const SETTINGS_LAYER_NAMES = new Set([
   "settings-private.yml",
 ]);
 
-// Declared paths and marker lines ride through YAML declarations, the
-// manifest template's jinja single-quoted string literals, and JSON, so a
-// single quote is refused (it would end the jinja literal early), and so
-// is every character JSON.stringify must escape: the manifest template
-// builds its entry lines with JSON.stringify, jinja UNESCAPES backslash
-// sequences inside string literals, and a control character lands raw
-// inside the JSON - a double quote breaks the rendered JSON, a backslash
-// decodes to a different character, a tab corrupts the string. Markers
-// are matched as whole trimmed lines against latin1-decoded file bytes by
-// the sync's split-file rebuild, so they must be trim-stable printable
-// ASCII (a non-ASCII marker would decode to different code units in the
-// manifest and the file and never match); the recovery appendix writes
-// comments in the marker's own syntax, so a marker must open as a hash or
-// HTML comment - a new comment syntax extends the appendix writer and
-// this schema together.
+// Declared paths and marker lines ride through YAML, the manifest template's
+// jinja single-quoted literals, and JSON.stringify, so a single quote (ends
+// the jinja literal early) and every character JSON must escape (jinja
+// UNESCAPES backslash sequences, so a control character lands raw in the
+// rendered JSON) are refused. The sync's split-file rebuild matches markers
+// as whole trimmed lines against latin1-decoded bytes, so they must be
+// trim-stable printable ASCII, and the recovery appendix writes comments in
+// the marker's own syntax, so a marker opens as a hash or HTML comment.
 const manifestSafeLine = (what: string) =>
   z
     .string()
@@ -138,15 +112,13 @@ const hashOrHtmlMarker = (what: string) =>
   });
 
 /** One declared file. Exported for scripts/lib/module_manifests.ts (module
- *  `ownership:` lists) and loadBaseOwnership below - one schema, so the
- *  two declaration homes can never diverge in shape.
- *
- *  `headerless: true` on a managed declaration says the file has no
- *  comment channel to carry the managed header (a symlink, a version pin,
- *  JSON): the validator then enforces its manifest class alone. It is
- *  DECLARED, never inferred from the source text - inferring it from a
- *  missing header would let deleting the header silently downgrade the
- *  file's enforcement, the exact bypass the header guards against. */
+ *  `ownership:` lists) and loadBaseOwnership below: one schema, so the two
+ *  declaration homes can never diverge in shape. `headerless: true` on a
+ *  managed declaration says the file has no comment channel for the managed
+ *  header (a symlink, a version pin, JSON), so the validator enforces its
+ *  manifest class alone. DECLARED, never inferred from a missing header:
+ *  inferring would let deleting the header silently downgrade the file's
+ *  enforcement, the exact bypass the header guards against. */
 export const ownershipEntrySchema = z.discriminatedUnion("class", [
   z.strictObject({
     path: declaredPath,

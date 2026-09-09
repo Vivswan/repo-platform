@@ -1,25 +1,22 @@
 // Builds the copier --data-file inputs for the sync's two clean renders:
-// the OLD render replays the recorded answers (non-underscore keys), the NEW
-// render applies the live module/private/description data plus the homepage
-// and topics seeds for unrecorded keys (the same seed `copier update` gets).
+// the OLD render replays the recorded answers (non-underscore keys), the
+// NEW render applies the live module/private/description data plus the
+// homepage and topics seeds for unrecorded keys (the same seed `copier
+// update` gets).
 //
 // The recorded answers ride through VERBATIM (answers_file.ts's
-// dataFileYaml): copier re-parses the data file with PyYAML (YAML 1.1),
-// and the renders must be byte-identical to what `copier update` rendered
-// from the same answers - so each recorded scalar must reach copier as the
-// exact bytes the answers file held, never a re-typed re-dump (which would
-// turn 1e3 into 1000 and a bare short sha into a float). The live values
-// are serialized in PyYAML-safe forms and the assembled document is
-// postcondition-checked there.
+// dataFileYaml): copier re-parses the data file with PyYAML (YAML 1.1), and
+// the renders must be byte-identical to what `copier update` rendered from
+// the same answers, so each recorded scalar must reach copier as the exact
+// bytes the answers file held, never a re-typed re-dump (1e3 to 1000, a
+// bare short sha to a float). Live values are serialized in PyYAML-safe
+// forms and the assembled document is postcondition-checked there.
 //
 // Usage:
 //   bun .github/scripts/sync/render_data.ts --answers-old <file>
 //     --out-old <file> --out-new <file> --modules <json-list>
 //     --private <true|false> --description <text>
 //     [--homepage <text>] [--topics <text>]
-//
-// Errors print as ::error:: workflow commands (on stdout, where the
-// runner parses them) with a nonzero exit.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseFlags } from "../shared/flags.ts";

@@ -1,27 +1,23 @@
 // The fleet LICENSE.md must not ship alongside registry metadata still
 // claiming a different license: npm, crates.io, PyPI, and the VS Code
-// Marketplace all display the manifest's claim, not the license file, so
-// a repo that adopts the fleet license while its package.json says "MIT"
-// publishes a false grant under the licensor's name. When the sync
-// renders the fleet LICENSE.md (custom-license module not selected), this
-// script scans the target's manifests and writes a PR-body section for
-// every conflicting claim; open_pr.ts appends it. Repos on the
-// custom-license module keep their own license, so their metadata is
-// theirs to state.
+// Marketplace display the manifest's claim, not the license file, so a
+// repo that adopts the fleet license while its package.json says "MIT"
+// publishes a false grant under the licensor's name. When the sync renders
+// the fleet LICENSE.md (custom-license module not selected), this scans
+// the target's manifests and writes a PR-body section per conflicting
+// claim, which open_pr.ts appends. Custom-license repos keep their own
+// license, so their metadata is theirs to state.
 //
 // Allowed forms (LicenseRef expressions are valid SPDX and the correct
 // custom-license spelling; a listed identifier like MIT is the error):
 //   package.json   "license": "SEE LICENSE IN LICENSE.md"
 //   Cargo.toml     license-file = "LICENSE.md" and no license key
-//   pyproject.toml license = "LicenseRef-..." (a single expression) or
-//                  license = { file = "LICENSE.md" }, and no "License ::"
-//                  trove classifier
+//   pyproject.toml license = "LicenseRef-..." or license = { file =
+//                  "LICENSE.md" }, and no "License ::" trove classifier
 //
-// Manifest values are target-derived, so the log line names only the
-// manifest files and the specifics travel in the summary file (it ships
-// in the target's PR).
-//
-// Env: MODULES (JSON array), TARGET_DIR (default target), RUNNER_TEMP.
+// Manifest values are target-derived, so the log names only the manifest
+// files; specifics travel in the summary file (it ships in the target's
+// PR). Env: MODULES (JSON array), TARGET_DIR (default target), RUNNER_TEMP.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

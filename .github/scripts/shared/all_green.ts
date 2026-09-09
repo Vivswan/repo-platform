@@ -1,52 +1,20 @@
 // The green-commit predicate behind "build and sync only from green
-// commits": a main commit counts as green when a completed, successful
-// `all-green` CHECK RUN exists at that exact sha. Since the meta-check
-// inversion that check is the ci.yml all-green JOB's own check run: the
-// job needs every gating job and its shared action fails unless each
-// result is success or skipped with at least one success
-// (docs/all-green.md). Reading the RUN conclusion instead would fail
-// open - a run whose gating job was skipped still concludes success -
-// so whatever consumes "did all-green fail" reads the check run.
+// commits": a main commit is green when a completed, successful
+// `all-green` CHECK RUN exists at that sha - the one implementation every
+// consumer shares (docs/all-green.md, "Consuming the gate": why the check
+// run and not the workflow run, which consumers, the look-alike residual).
 //
-// The lookup is by check NAME (filter=latest), created by the
-// github-actions app - which also matches the checks the retired verdict
-// workflow POSTed and the pre-inversion aggregate job created, so
-// commits vouched for under either earlier shape stay green. The trade
-// against a workflow-path-bound read: any workflow in this repository
-// could mint a look-alike check. The repo is its own sole workflow
-// author, and the roster ssot rule plus review own that surface.
-//
-// One belt from the verdict era survives: verdict-posted checks recorded
-// the judged run's EVENT in external_id, and this read rejects
-// pull_request verdicts - a PR run tests a synthetic merge tree, never
-// the sha's own tree, so its verdict must not vouch for a main commit.
-// It is a blocklist, not an allowlist, because job-created checks (the
-// current shape and the pre-inversion one) carry opaque external_ids and
-// must keep vouching. The same residual those job checks always had
-// applies: a PR-event job check at a sha that IS a main commit would
-// vouch, reachable only when a PR head becomes a main commit -
-// squash-only merges make that contrived.
-//
-// Two enforcement points share this ONE implementation:
-//
-//   - build-branches/publish.ts refuses to advance the build branch from
-//     an ungreen source: every trigger path alike (the same-run
-//     post-green call, dispatch, API) flows through this
-//     in-code gate - trigger conditions only save runners, they are
-//     never the authority;
-//   - sync/resolve_refs.ts refuses to sync a build tip whose STAMPED
-//     source is ungreen (belt over the builder's gate: it catches builds
-//     published before the gate existed or out-of-band).
-//
-// The read can still race the gate: the green-path publisher is
-// needs-ordered behind the all-green job that released it, but the
-// dispatch self-heal and the sync's stamped-source gate wake on
-// their own, and a re-run's fresh check can trail a stale one. So the
-// read polls for a SUCCESS under a hard deadline (ALL_GREEN_WAIT_MS)
-// instead of failing the race; past the deadline it still fails CLOSED,
-// with a CI re-run at the sha named as the unwedge path.
-//
-// Fail-closed: an API failure is a reason to refuse, never a pass.
+// Invariants this file owns: the lookup is by check NAME under the
+// github-actions app, so checks from the retired verdict workflow and the
+// pre-inversion aggregate job keep vouching; the one verdict-era belt
+// rejects checks whose external_id records a pull_request event (a PR run
+// judges a synthetic merge tree, never the sha's own) - a blocklist, not
+// an allowlist, because job-created checks carry opaque external_ids and
+// must keep vouching (so a PR-event job check at a sha that IS a main
+// commit would vouch: the residual the guide states); the read polls for a SUCCESS under ALL_GREEN_WAIT_MS
+// (self-waking consumers can race a fresh check) and past the deadline
+// fails CLOSED naming a CI re-run at the sha as the unwedge; an API
+// failure is a reason to refuse, never a pass.
 
 import { z } from "zod";
 import { parseJsonWith } from "./json.ts";
@@ -113,14 +81,12 @@ const DEFAULT_WAIT_MS = boundedMs(process.env.ALL_GREEN_WAIT_MS, 120_000);
 const DEFAULT_SLEEP_MS = 10_000;
 
 /** Whether a refusal from allGreenFailure could still change on a later
- *  poll: no all-green check has landed yet (CI still running), the check
- *  exists but has not completed, or the probe itself failed (an API blip
- *  deserves a caller's deadline, not an instant refusal - and an
- *  unhealed one still fails closed there). Anything else is a final
- *  verdict. Lives HERE, next to the reason strings it matches, so a
- *  reworded reason and its retryability can never drift apart across
- *  files; callers with their own outer wait (require_green_commit.ts)
- *  consume this instead of matching prose. */
+ *  poll: no check yet, a check not completed, or a failed probe (an API
+ *  blip deserves the caller's deadline, not an instant refusal; unhealed
+ *  it still fails closed there). Lives HERE, next to the reason strings it
+ *  matches, so a reworded reason and its retryability cannot drift apart;
+ *  callers with an outer wait (require_green_commit.ts) consume this
+ *  instead of matching prose. */
 export function verdictPending(reason: string): boolean {
   return (
     reason.includes("verdict is still '") ||
@@ -129,15 +95,13 @@ export function verdictPending(reason: string): boolean {
   );
 }
 
-/** Returns null when a completed, successful all-green verdict check
- * exists at `sha`, else a one-line reason the commit cannot be treated as
- * green. Any completed success counts: every verdict at one sha judged
- * the same tree through the whole gate, so one full pass proves the code
- * - later failures at the same sha are environment drift, which has its
- * own loud signals and its own fixes. The poll runs until a SUCCESS or
- * the deadline - never returning early on a completed failure, because a
- * re-judged sha's fresh verdict can land moments after its stale one
- * (a failed earlier attempt's) was read. */
+/** Null when a completed, successful all-green check exists at `sha`, else
+ * a one-line reason. Any completed success counts: every verdict at one
+ * sha judged the same tree, so one full pass proves the code and later
+ * failures at the same sha are environment drift with its own signals.
+ * The poll runs until a SUCCESS or the deadline, never returning early on
+ * a completed failure: a re-judged sha's fresh verdict can land moments
+ * after its stale one was read. */
 export function allGreenFailure(
   repository: string,
   sha: string,

@@ -99,17 +99,12 @@ export function evaluateIfBranches(
 }
 
 /**
- * Reduce a template file to the text this repo's own copy should carry:
- * strip raw markers, jinja comments and set/if/endif tags, and substitute
- * the identity expressions. Remote `<owner>/repo-platform/<path>@build`
- * references stay VERBATIM: the dogfooded copies consume the same
- * green-gated delivery branch the fleet does (the fleet-refs-ride-build
- * rule in check_ssot.ts forbids any other ref in a template, so there is
- * nothing left to localize). Without a `context`, every if/endif body is
- * kept (fine
- * while the kept bodies never contradict each other); with one, false
- * branches are dropped and only conditions the context cannot resolve keep
- * their bodies.
+ * Reduce a template file to the text this repo's own copy should carry: strip raw
+ * markers, jinja comments and set/if/endif tags, substitute the identity expressions.
+ * Remote `@build` refs stay VERBATIM: the dogfooded copies ride the fleet's delivery
+ * branch, and the fleet-refs-ride-build ssot rule leaves nothing else to localize.
+ * Without a `context` every if body is kept (fine while none contradict); with one,
+ * false branches drop and only conditions the context cannot resolve keep theirs.
  */
 export function normalizeJinja(
   text: string,
@@ -205,14 +200,12 @@ function stripTagsWithWhitespaceControl(text: string, re: RegExp): string {
 }
 
 /**
- * Render a template file the way render_dogfood.ts writes this repo's
- * generated copies. The output IS the artifact, so unlike the
- * comparison-mode normalizeJinja this never falls back: raw blocks are
- * extracted first and restored last (substitution can never rewrite text
- * inside them), set/comment tags disappear with jinja's real whitespace
- * control (a `-` eats the adjacent whitespace, newlines included), every
- * if/ternary condition must resolve through `context` or this throws, and
- * an expression left unsubstituted at the end throws instead of shipping.
+ * Render a template file the way render_dogfood.ts writes this repo's generated
+ * copies. The output IS the artifact, so unlike comparison-mode normalizeJinja this
+ * never falls back: raw blocks are extracted first and restored last (substitution
+ * cannot touch them), set/comment tags go with jinja's real whitespace control (a
+ * `-` eats adjacent whitespace, newlines included), every if/ternary condition must
+ * resolve through `context` or this throws, and a leftover expression throws too.
  */
 export function renderJinjaFile(
   text: string,

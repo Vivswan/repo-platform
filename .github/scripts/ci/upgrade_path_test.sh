@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
-# Upgrade-path test: generate a project from a synthetic OLD build tree,
-# add the local modifications a real repo carries, then update it to a
-# freshly assembled build tree the way reusable-template-sync does - module
-# selection via sync/modules.ts, the migration ladder via
-# sync/run_migrations.ts, live -d data via sync/apply_update.ts,
-# conflict resolution, retired-file cleanup via sync/retired_cleanup.ts,
-# and the settings preserve step via sync/preserve_repo_owned.ts. Asserts
-# that files the template dropped are deleted while repo-owned content
-# survives - including settings.yml, which is repo-owned wherever it exists
-# (protected from cleanup and restored if copier de-renders it). That main
-# update is upgrade_path/01_main_update.sh; the numbered legs after it each
-# prove one more transition (recovery, a visibility flip, the module fold's
-# arrival, a rung run from build history, ...) and upgrade_path/lib.sh holds
-# their shared helpers. This file owns the namespace, the cleanup, and the
-# synthetic old fixture, then sources the legs in order into this shell.
+# Upgrade-path test: generate a project from a synthetic OLD build tree, add
+# the local modifications a real repo carries, then update it to a freshly
+# assembled build tree the way reusable-template-sync does (module
+# selection, the migration ladder, live -d data, conflict resolution,
+# retired-file cleanup, the preserve step). Asserts that files the template
+# dropped are deleted while repo-owned content survives, settings.yml
+# included. That main update is upgrade_path/01_main_update.sh; the numbered
+# legs after it each prove one more transition (recovery, a visibility flip,
+# the module fold's arrival, a rung run from build history, ...) and
+# upgrade_path/lib.sh holds their shared helpers. This file owns the
+# namespace, the cleanup, and the synthetic old fixture, then sources the
+# legs in order into this shell.
 #
 # Both template refs must live in ONE clone (copier re-renders the old
-# version from _src_path), so build trees are committed to local orphan
-# refs + tags. The old fixture is SYNTHETIC: the current templates
-# assembled by the current tooling, plus a sentinel file the new build no
-# longer renders and the pre-transition shapes the legs model.
+# version from _src_path), so build trees are committed to local orphan refs
+# and tags. The old fixture is SYNTHETIC: the current templates assembled by
+# the current tooling, plus a sentinel file the new build no longer renders
+# and the pre-transition shapes the legs model.
 # shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
@@ -28,23 +25,14 @@ REPO_ROOT="$(pwd)"
 # The shared helpers and the legs, sourced into this shell in run order.
 UPGRADE_PATH_DIR="$REPO_ROOT/.github/scripts/ci/upgrade_path"
 
-# Every run gets its own fixture directory AND its own ref namespace, both
-# keyed on one random token. Linked worktrees share a single ref store and
-# a single /tmp, so two concurrent local runs used to delete each other's
-# build tags mid-flight ("pathspec 'ci-build/old' did not match any
-# file(s) known to git") and overwrite each other's fixtures. In CI the
-# harness runs alone, so isolation only ever costs a uniquely named
-# directory. Cleanup runs from the EXIT trap, which covers ordinary
-# failures and Ctrl-C. A SIGKILLed run leaves EVERYTHING behind - the
-# directory, its worktree admin entry, and its tags (SIGKILL skips EXIT
-# traps, and the prune below only drops admin entries whose directories
-# are already gone). The namespace records its owner in its own annotated
-# `<namespace>/run` tag (pid, host, start time, fixture dir), which is how
-# the sweeper tells a dead run's leftovers from a live run next door:
-#   bun .github/scripts/ci/sweep_harness_namespaces.ts            # plan
-#   bun .github/scripts/ci/sweep_harness_namespaces.ts --execute  # act
-# NEVER delete another namespace by hand: its token says nothing about
-# who owns it, and a wrong guess kills a live run mid-flight.
+# Every run gets its own fixture directory AND ref namespace, keyed on one
+# random token: linked worktrees share a ref store and /tmp, so concurrent
+# local runs used to delete each other's build tags mid-flight. Cleanup runs
+# from the EXIT trap (ordinary failures, Ctrl-C); a SIGKILLed run leaves
+# everything behind, and the namespace's annotated `<namespace>/run` tag
+# (pid, host, start time, fixture dir) is how the sweeper tells a dead run's
+# leftovers from a live run next door: `bun .github/scripts/ci/
+# sweep_harness_namespaces.ts [--execute]`. NEVER delete a namespace by hand.
 TMP_ROOT="${TMPDIR:-/tmp}"
 # Normalized to an absolute path: the harness cd's between the repo and
 # its fixtures, so a relative "$RUN_DIR/..." (cleanup rm included) would

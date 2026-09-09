@@ -99,20 +99,14 @@ export interface SelfPin {
   ref: string;
 }
 
-/** Self-delivery pins for the categorical delivery-channel rule: any
- *  jinja expression carrying `github_username` in the owner slot -
- *  `{{ github_username }}`, `{{ github_username | lower }}`, a `lower()`
- *  call, whitespace-controlled delimiters - renders an owner that
- *  resolves to this account (GitHub owners are case-insensitive), so the
- *  expression slot is matched wholesale rather than by enumerating
- *  spellings. Recorded residual, the same class the label-preflight
- *  rules record: this catches the honest-drift spellings, while a
- *  deliberately obfuscated owner (a `{% set %}` alias, a nested-brace
- *  expression like `{{ {"u": github_username}["u"] }}`) is adversarial
- *  code in a reviewed file, outside any textual rule's reach, and stays
- *  review's - and the rendered-side scan (renderedSelfPins over the
- *  golden snapshots, where jinja is already evaluated) still reds every
- *  obfuscated pin that lands in a branch the golden matrix renders. */
+/** Self-delivery pins for the categorical delivery-channel rule: any jinja
+ *  expression carrying `github_username` in the owner slot renders an owner
+ *  resolving to this account (GitHub owners are case-insensitive), so the
+ *  slot is matched wholesale rather than by enumerating spellings. Recorded
+ *  residual, the same class the label-preflight rules record: a deliberately
+ *  obfuscated owner (a `{% set %}` alias, a nested-brace expression) is
+ *  adversarial code in a reviewed file and stays review's, and renderedSelfPins
+ *  over the goldens still reds every obfuscated pin the matrix renders. */
 export function templateSelfPins(text: string, file: string): SelfPin[] {
   const token =
     /(?<![A-Za-z0-9-])\{\{[^{}]*\bgithub_username\b[^{}]*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
@@ -120,17 +114,13 @@ export function templateSelfPins(text: string, file: string): SelfPin[] {
 }
 
 /** Self-delivery pins in RENDERED text (the golden snapshots), where the
- *  username expression is already substituted: templateSelfPins' token
- *  grammar with the literal `owner` in the username slot, owner-boundary
- *  guard included and matched case-insensitively (the `| lower` template
- *  spelling renders a lowercased owner, and GitHub resolves owner and
- *  repository names in any case). The stem's `repo-platform` prefix is
- *  normalized to canonical case so downstream comparisons (the
- *  FLEET_WORKFLOWS coupling) cannot be dodged by a case-variant repo
- *  name; the path AFTER it keeps its case - file paths at a ref ARE
- *  case-sensitive, so a case-variant filename must mismatch the roster
- *  and go loud. The owner must be a plain GitHub username so it can ride
- *  the regex verbatim. */
+ *  username expression is already substituted: templateSelfPins' grammar
+ *  with the literal `owner` in the username slot, matched case-insensitively
+ *  (`| lower` renders a lowercased owner and GitHub resolves owners in any
+ *  case). The stem's `repo-platform` prefix is normalized to canonical case
+ *  so the FLEET_WORKFLOWS coupling cannot be dodged by a case-variant repo
+ *  name; the path after it keeps its case because paths at a ref ARE
+ *  case-sensitive, so a case-variant filename must go loud. */
 export function renderedSelfPins(text: string, file: string, owner: string): SelfPin[] {
   if (!/^[A-Za-z0-9-]+$/.test(owner)) {
     throw new Error(`renderedSelfPins: owner '${owner}' is not a plain GitHub username`);
@@ -184,15 +174,14 @@ export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mis
     }));
 }
 
-/** The shipping side of the delivery-channel law: a reusable-workflow
- *  `uses:` fetches the FILE at the named ref, so a rendered pin on a
- *  workflow the build branch does not ship 404s every caller run even
- *  though the ref itself is right. Every
- *  `repo-platform/.github/workflows/<name>` pin must name a
- *  FLEET_WORKFLOWS roster entry (branch_tree.ts ships exactly that
- *  roster). Actions need no twin check: copyActions ships the whole
- *  actions/ tree, so an action pin can only 404 by pointing at a
- *  directory that does not exist - the compose smoke catches that. */
+/** The shipping side of the delivery-channel law: a reusable-workflow `uses:`
+ *  fetches the FILE at the named ref, so a rendered pin on a workflow the
+ *  build branch does not ship 404s every caller run even though the ref is
+ *  right; every `repo-platform/.github/workflows/<name>` pin must name a
+ *  FLEET_WORKFLOWS entry (branch_tree.ts ships exactly that roster). Actions
+ *  need no twin check: copyActions ships the whole actions/ tree, so an
+ *  action pin can only 404 by naming a directory that does not exist, which
+ *  the compose smoke catches. */
 export function fleetWorkflowPinMismatches(
   pins: SelfPin[],
   shipped: readonly string[],
@@ -346,19 +335,13 @@ export const deliveryPinRules: Rule[] = [
   },
   {
     // The categorical delivery-channel law: EVERY self-reference in
-    // fleet-rendered content - composite action or reusable workflow,
-    // template source or golden snapshot - rides the green-gated build
-    // branch. One blanket scan, never per-file pins: a planted @main (or
-    // any other ref to this repo) reds with the file and the offending
-    // ref. The scope boundary is structural, not a whitelist:
-    // templates/ and tests/golden-renders/ are exactly what the fleet
-    // renders and executes, while repo-platform's own workflows (./
-    // locals, @main on itself) live outside both trees. DELIVERY_REF
-    // itself is pinned against publish.ts's BRANCH (AST extraction of the
-    // declaration: importing the publisher would run its top-level git
-    // wiring). The shipping side rides along: a reusable-workflow pin
-    // must also name a FLEET_WORKFLOWS entry, or the right ref still
-    // 404s.
+    // fleet-rendered content (composite action or reusable workflow, template
+    // source or golden snapshot) rides the green-gated build branch. One
+    // blanket scan, never per-file pins, so a planted @main reds with the
+    // file and ref; the scope (templates/ and tests/golden-renders/) is
+    // structural, exactly what the fleet renders and executes, while this
+    // repo's own workflows live outside both. DELIVERY_REF is pinned against
+    // publish.ts's BRANCH by AST (importing the publisher would run its git wiring).
     name: "fleet-refs-ride-build",
     run: () => {
       const published = constStringValue(
@@ -382,16 +365,13 @@ export const deliveryPinRules: Rule[] = [
   },
   {
     // copier.yml's hooks run with {{ _copier_conf.src_path }} = the build
-    // branch root, and actions/ is the one tree the branch ships verbatim
-    // at its checkout-relative path (branch_tree.ts copies it whole, minus
-    // its EXCLUDED_DIRS). A hook command therefore resolves on renders
-    // exactly when its path is a clean actions/ file the copy ships; a
-    // moved or renamed hook file that copier.yml still names the old way
-    // would fail every render's stamping at hook time, on the fleet, not
-    // in this repo's CI. The rule also pins the stamping WIRING itself:
-    // _tasks (copy/recopy) and _migrations (update) must each run the
-    // stamper at its real location - hooks that all name some other valid
-    // file would leave every render's manifest unstamped and stay green.
+    // branch root, and actions/ is the one tree the branch ships verbatim at
+    // its checkout-relative path, so a hook command resolves on renders
+    // exactly when it names a clean actions/ file the copy ships; a moved
+    // hook file copier.yml still names the old way would fail every render's
+    // stamping on the fleet, not in this repo's CI. The stamping WIRING is
+    // pinned too: _tasks (copy/recopy) and _migrations (update) must each run
+    // the stamper, or every render's manifest stays unstamped and green.
     name: "stamp-hook-path",
     run: () => {
       const mismatches: Mismatch[] = [];

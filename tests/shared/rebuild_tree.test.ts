@@ -31,13 +31,11 @@ let savedCwd: string;
 const savedGitEnv: Record<string, string> = {};
 
 /** Explicit env OVERLAY deleting every GIT_* variable, handed to this
- * file's own spawns at the call site (the repo's adopted style for tests
- * that scrub - ambient process.env mutation around a spawn stays fragile
- * under parallel test execution). The overlay shape: capture() MERGES
- * options.env over live process.env, so the scrub must arrive as
- * undefined-VALUED entries - bun then omits the keys - never as a
- * filtered env copy, which would merge over the live base without
- * deleting anything. The same shape works spread into a raw spawn's
+ * file's own spawns at the call site (ambient process.env mutation around
+ * a spawn stays fragile under parallel test execution). capture() MERGES
+ * options.env over live process.env, so the scrub must be undefined-VALUED
+ * entries (bun then omits the keys), never a filtered env copy, which
+ * would delete nothing. The same shape works spread into a raw spawn's
  * replacement env (bun omits undefined values there too). */
 function gitFreeOverlay(): Record<string, string | undefined> {
   const overlay: Record<string, string | undefined> = {};
@@ -61,14 +59,13 @@ function git(...args: string[]): string {
 
 beforeAll(() => {
   // Hook-driven runs export GIT_DIR/GIT_INDEX_FILE, which would redirect
-  // git subprocesses away from the scratch repo. rebuildBranchTree takes
-  // no env parameter, so this ambient scrub is the one channel that can
-  // clean ITS children - and it reaches them only because every spawn
-  // under the helper is handed live process.env (proc.ts's contract; the
-  // helper's inherited-stdio steps hand it explicitly too - bun's own
-  // default is a process-start snapshot that kept this scrub silently
-  // inert; the poison-GIT_DIR test below pins that it bites now). This
-  // file's own spawns take the gitFreeOverlay() scrub explicitly instead.
+  // git subprocesses away from the scratch repo. rebuildBranchTree takes no
+  // env parameter, so this ambient scrub is the one channel that can clean
+  // ITS children, and it reaches them only because every spawn under the
+  // helper is handed live process.env (proc.ts's contract; bun's default
+  // process-start snapshot kept this scrub silently inert, and the
+  // poison-GIT_DIR test below pins that it bites now). This file's own
+  // spawns take the gitFreeOverlay() scrub explicitly instead.
   for (const key of Object.keys(process.env)) {
     if (key.startsWith("GIT_")) {
       savedGitEnv[key] = process.env[key] as string;
@@ -295,14 +292,13 @@ describe("rebuildBranchTree", () => {
     "hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash",
     () => {
       // The scratch staging feeds the provenance tree proof, so a silent
-      // staging skew turns into a false tamper accusation. Three
-      // measured skew vectors, all planted at once: a .gitignore INSIDE
-      // the composed tree hiding a sibling (only `add --force` covers it -
-      // an excludesFile override does not), a machine-global
-      // core.excludesFile hiding another file, and a machine-global
-      // core.attributesFile whose `* text` filter rewrites a CRLF blob at
-      // add time. The hash must not move, and the hidden files must be IN
-      // the tree.
+      // staging skew becomes a false tamper accusation. Three measured skew
+      // vectors, planted at once: a .gitignore INSIDE the composed tree
+      // hiding a sibling (only `add --force` covers it; an excludesFile
+      // override does not), a machine-global core.excludesFile hiding
+      // another file, and a machine-global core.attributesFile whose
+      // `* text` filter rewrites a CRLF blob at add time. The hash must
+      // not move, and the hidden files must be IN the tree.
       const hostileBuilder = `${STUB_BUILDER}
 writeFileSync(join(dest, "ignored.txt"), "must be staged\\n");
 writeFileSync(join(dest, "crlf.txt"), "windows line\\r\\n");
@@ -326,16 +322,13 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
         `[core]\n\texcludesFile = ${join(cfg, "ignore")}\n\tattributesFile = ${join(cfg, "attributes")}\n`,
       );
       // BOTH arms run in DRIVER subprocesses with pinned startup
-      // environments - the shape that first made this arm genuinely
-      // hostile: as an in-process mutation the config never reached the
-      // helper's then-snapshot-env `git add`, the exact spawn the
+      // environments: as an in-process mutation the config never reached
+      // the helper's then-snapshot-env `git add`, the exact spawn the
       // excludesFile must fail to skew. Drivers also keep the arms
-      // SYMMETRIC: both startup envs are pinned like stage_tree.test.ts's
-      // buildHermeticEnv and differ ONLY in which file the global scope
-      // reads, so a hash move is attributable to the hostile config alone
-      // - unpinned, the machine's real global config leaks into the clean
-      // arm asymmetrically (a developer core.autocrlf=input was measured
-      // doing exactly that).
+      // SYMMETRIC, differing ONLY in which file the global scope reads, so
+      // a hash move is attributable to the hostile config alone; unpinned,
+      // the machine's real global config leaks into the clean arm (a
+      // developer core.autocrlf=input was measured doing exactly that).
       writeFileSync(join(cfg, "empty-gitconfig"), "");
       mkdirSync(join(cfg, "empty-xdg"));
       const baseEnv = {

@@ -52,37 +52,24 @@ on:
 permissions: {}
 
 jobs:
-  # The build-branch publisher, on both ways in: composes the tree from
-  # the sha's own script and sources in this run and advances
-  # refs/heads/build. On the call the caller releases this job
-  # needs-ordered behind the all-green gate, and publish.ts still
-  # hard-verifies the all-green check run at the source commit before
-  # any mutation (defense in depth there, the sole gate on a dispatch).
-  #
-  # State-shaped: publish.ts publishes SOURCE_SHA behind a
-  # newest-green-wins staleness preflight against the branch tip's stamp,
-  # onto an append-only branch whose plain push doubles as the
-  # compare-and-swap - a rerun of an already-published source is a no-op
-  # (unchanged tree, no commit), and a superseded pending publish is
-  # covered by the evicting run whenever its source is newer (the common
-  # case: same-run gating means publishes arrive in push order). The
-  # residual is an OUT-OF-ORDER eviction - a re-run of an older commit's
-  # CI replacing a pending newer publish - which leaves the branch stale
-  # by one push, never rolled back; the next push heals it, or a dispatch
-  # with the newer commit's sha; a sync meanwhile renders the previous
-  # build (a sync PR, when one opens, records the build commit it rendered).
+  # The build-branch publisher, on both ways in (docs/build-provenance.md):
+  # composes the tree from the sha's own script in this run and advances
+  # refs/heads/build. On the call the caller releases this job needs-ordered
+  # behind the all-green gate, and publish.ts still hard-verifies the check
+  # at the source before any mutation (defense in depth there, the sole gate
+  # on a dispatch). State-shaped: newest-green wins behind a staleness
+  # preflight, the plain push is the compare-and-swap, and the residual is an
+  # out-of-order eviction leaving the branch one push stale, never rolled back.
   publish-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # THE single publisher lane: one repo-scoped group serializes every
-    # writer of refs/heads/build - the called runs and the dispatched
-    # ones, which are runs of DIFFERENT workflows (the caller's and this
-    # one). LITERAL on purpose: never derive this group from
+    # writer of refs/heads/build, the called runs and the dispatched ones,
+    # which are runs of DIFFERENT workflows. LITERAL on purpose: derived from
     # github.workflow, which inside a workflow_call'd workflow resolves to
-    # the CALLER's workflow name and would silently split the lane. The
-    # calling job in ci.yml holds NO lane at all, for the deadlock law's
-    # other half: a caller must never hold the resource its called
-    # workflow requires, or the call deadlocks against itself.
+    # the CALLER's name, it would silently split the lane. The calling job
+    # in ci.yml holds NO lane, the deadlock law's other half: a caller must
+    # never hold the resource its called workflow requires.
     concurrency:
       group: build-branches-publish
       cancel-in-progress: false
@@ -163,17 +150,13 @@ jobs:
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
   # The opted-in sync: sync-repos.yml called in this run, needs-ordered
-  # behind the publish so the sync renders from the tip as the publish
-  # left it (a red publish skips it rather than sync the previous build).
-  # State-shaped: each target's
-  # automation branch is regenerated under a lease, and the called sync
-  # re-verifies the build's green source and provenance itself; a
-  # swallowed run leaves a repo one sync behind, which the weekly cron
-  # heals. THIS job holds the fleet's single-writer lane: the same
-  # literal sync-repos.yml's cron and dispatch runs hold at workflow
-  # level, while a called run takes a per-run group there, so the called
-  # workflow never waits on the lane its caller holds (the deadlock law
-  # above).
+  # behind the publish so the sync renders from the tip as the publish left
+  # it (a red publish skips it rather than sync the previous build).
+  # State-shaped: the called sync re-verifies the build's green source and
+  # provenance itself, and a swallowed run leaves a repo one sync behind,
+  # healed by the weekly cron. THIS job holds the fleet's single-writer lane
+  # (the literal sync-repos.yml's cron and dispatch runs hold at workflow
+  # level) while the called run takes a per-run group: the deadlock law above.
   sync-fleet:
     needs: [publish-build, read-directives]
     if: needs.read-directives.outputs.armed == 'true'

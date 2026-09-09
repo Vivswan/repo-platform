@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
-# Behavior test for the all-green gate's judgment, run against the REAL
-# run block extracted from actions/all-green/action.yml - never a copy,
-# so the assertions cannot drift from what ships. The block judges the
-# calling job's needs context (toJSON(needs)) and exits nonzero on any
-# non-green shape; each scenario feeds one NEEDS payload and asserts the
-# exit code (and the named branch, where it matters). This harness stays
-# pure bash + jq and imports nothing it verifies (repo law for the ci/
-# harnesses).
+# Behavior test for the all-green gate's judgment, run against the REAL run
+# block extracted from actions/all-green/action.yml - never a copy, so the
+# assertions cannot drift from what ships. The block judges the calling
+# job's needs context (toJSON(needs)) and exits nonzero on any non-green
+# shape; each scenario feeds one NEEDS payload and asserts the exit code
+# (and the named branch, where it matters). This harness stays pure bash +
+# jq and imports nothing it verifies (repo law for the ci/ harnesses).
 #
-# Scenarios, chosen to fail through the same path a real disarm would:
-#    1. every needed job succeeded              -> pass
-#    2. success next to skipped (a conditioned
-#       gate standing down)                     -> pass
-#    3. one failed gating job                   -> fail, naming it
-#    4. a cancelled job                         -> fail (only success and
-#       skipped are green shapes)
-#    5. EVERY job skipped                       -> fail (vouches for nothing)
-#    6. an empty needs context                  -> fail (no gate at all -
-#       a needs list emptied by refactor must never read as green)
-#    7. a null result (an unknown future shape) -> fail closed
-#    8. malformed input (not JSON / not object) -> fail closed
+# Scenarios, chosen to fail through the same path a real disarm would: all
+# succeeded and success-next-to-skipped pass; one failed job, a cancelled
+# job, EVERY job skipped (vouches for nothing), an empty needs context (a
+# needs list emptied by refactor must never read as green), a null result
+# (an unknown future shape), and malformed input all fail closed.
 #
 # shellcheck disable=SC2016  # jq programs and assertion strings carry literals
 set -euo pipefail
@@ -49,15 +41,11 @@ grep -qF 'succeeded' "$WORK/judge.sh" || fail "the extracted run block is missin
 # --- Class ban: command substitution only in plain assignments -------------
 # A $(...) anywhere but a plain assignment can swallow its probe's failure
 # under errexit: inside [ ]/[[ ]]/test/case words the substitution is
-# errexit-exempt (a crashing probe reads as empty/zero and the guard falls
-# OPEN). This class produced real fail-opens in the retired verdict
-# engine, so the invariant is structural: every non-arithmetic $( must
-# OPEN a bare assignment (var=, or the `if ! var=` parse-guard shape,
-# where the status IS the tested thing). $((...)) arithmetic runs no
-# command and stays legal; comment lines are ignored. The self-checks
-# below are the ban's own controls: it must be seen catching every banned
-# shape and passing every legal one, or a regex regression could blind it
-# silently.
+# errexit-exempt, so a crashing probe reads as empty and the guard falls
+# OPEN (real fail-opens in the retired verdict engine). Every non-arithmetic
+# $( must OPEN a bare assignment (var=, or `if ! var=`, where the status IS
+# the tested thing); $((...)) runs no command. The self-checks below are the
+# ban's own controls, or a regex regression could blind it silently.
 banned_substitutions() { # <script> -> offending "line:content" lines, if any
   awk '
     /^[[:space:]]*#/ { next }

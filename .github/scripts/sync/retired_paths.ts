@@ -59,16 +59,14 @@ export function protectedPaths(modules: readonly string[]): ReadonlySet<string> 
     : new Set([".github/settings.yml"]);
 }
 
-// A repo dropping the custom-license module still carries its own
-// repo-owned license file, which no clean render of either version
-// contains - retired-path diffing cannot see it, and the incoming fleet
-// LICENSE.md would land alongside (or clobber) terms the sync cannot
-// reconcile, in a PR that could otherwise auto-merge. The flip is a
-// deliberate human act in the target repo, so the sync fails with
-// instructions instead of deleting a license file it does not manage.
-// Recovery mode (recover=recopy) skips retired cleanup and this guard
-// with it; a recopy PR is always manual-review, so the human sees the
-// whole diff there.
+// A repo dropping the custom-license module still carries its own license
+// file, which no clean render of either version contains: retired-path
+// diffing cannot see it, and the incoming fleet LICENSE.md would land
+// alongside (or clobber) terms the sync cannot reconcile, in a PR that
+// could otherwise auto-merge. The flip is a deliberate human act, so the
+// sync fails with instructions instead of deleting a license it does not
+// manage. Recovery mode skips retired cleanup and this guard with it; a
+// recopy PR is always manual-review, so the human sees the whole diff.
 export function customLicenseFlipError(
   oldModules: readonly string[],
   newModules: readonly string[],

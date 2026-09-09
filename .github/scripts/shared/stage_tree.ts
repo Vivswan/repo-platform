@@ -1,55 +1,21 @@
-// The ONE staging form for a composed build tree, shared by every site
-// that turns the composed tree into git content: the PRODUCER
-// (build-branches/publish.ts commits the branch tip) and the VERIFIER
-// (shared/rebuild_tree.ts hashes a scratch rebuild for the sync's
-// provenance tree proof). Producer and verifier must stage IDENTICALLY -
-// the same function of the composed tree's bytes - or their tree hashes
-// skew, and a skew reads as a false tamper accusation in the provenance
-// proof.
+// The ONE staging argv for a composed build tree, shared by the producer
+// (build-branches/publish.ts) and the verifier (shared/rebuild_tree.ts):
+// the two must stage IDENTICALLY, or their tree hashes skew and the
+// provenance proof reads a false tamper (docs/build-provenance.md,
+// "Hermetic staging": the vectors each flag closes and the residual no
+// flag can).
 //
-// Why the hermetic form, at every site:
-//   - `--force` stages ignored files no matter where the ignore comes
-//     from: a .gitignore INSIDE the composed tree (measured to silently
-//     drop staged siblings - the one vector an excludesFile override
-//     does not cover), a machine-global core.excludesFile or its XDG
-//     fallback ~/.config/git/ignore (which applies even with the key
-//     unset), an init.templateDir-planted info/exclude, and - the
-//     producer-only axis - the repo-platform checkout's own
-//     .git/info/exclude and repo-level config, which the producers'
-//     /tmp worktrees inherit while the verifier's fresh scratch repo
-//     sees neither.
-//   - `core.attributesFile=/dev/null` and `core.autocrlf=false` close
-//     the blob-content axis from both of its config homes: a global
-//     `* text` ATTRIBUTES filter and a machine-global `core.autocrlf`
-//     CONFIG (autocrlf=input rewrites CRLF at add time with no
-//     attributes file anywhere, so neutralizing attributes alone still
-//     skews a config-bearing machine against a config-free runner).
-//     `--force` touches neither. templateDir HOOKS are a non-issue: no
-//     hook fires on init, add, or write-tree.
+// Safe for the producer: `add -A --force` differs from plain `add -A` only
+// where an ignore rule would exclude something, and the attributesFile
+// and autocrlf overrides change staged blobs only where a machine-global
+// setting would have rewritten them at add time - so for every tree
+// shipped today both forms stage identical content and publish.ts's
+// staged-diff decisions are unchanged (tests/shared/stage_tree.test.ts
+// proves it with a control arm).
 //
-// Safe for the producers to adopt: `add -A --force` differs from plain
-// `add -A` only when an ignore rule would exclude something, and the
-// attributesFile/autocrlf overrides change staged BLOBS only where a
-// machine-global attributes file or autocrlf setting would have
-// rewritten them at add time - absent on fresh CI runners, and
-// neutralizing them is the point (the verifier neutralizes them too,
-// so a machine that ever grew either would skew a plain-staging
-// producer against the verifier). For every
-// composed tree shipped today - nothing ignored, no attribute source -
-// both forms stage identical content, so publish.ts's staged-diff
-// decisions (skip guard, stamp recovery lane) are unchanged
-// (tests/shared/stage_tree.test.ts proves the equivalence with a
-// control arm). $GIT_DIR/info/attributes stays the known axis no flag
-// can close (git reads it regardless of core.attributesFile): no site
-// plants one - fresh checkouts and scratch repos carry none - so it
-// stays a documented residual, not a covered vector; and any further
-// rewrite axis git grows lands in this same class until a flag pins it
-// (core.autocrlf sat here, measured live, before its override landed).
-//
-// Exported as ARGV, not a running function: the composed-tree staging
-// sites run subprocesses through different wrappers (proc.ts's `must`,
-// rebuild_tree.ts's deadline-bearing `step`) with their own stdio and
-// deadline policies - this module owns only WHAT is run.
+// Exported as ARGV, not a running function: the sites run subprocesses
+// through different wrappers with their own stdio and deadline policies;
+// this module owns only WHAT is run.
 
 /** The hermetic staging argv for the composed tree at `treeDir`. */
 export function stageComposedTreeArgv(treeDir: string): string[] {

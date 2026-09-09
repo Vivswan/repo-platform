@@ -193,15 +193,13 @@ describe("collectReferences and the roster comparisons", () => {
 
   test("finalLabelNames: a new_name rename contributes the POST-APPLY name, not the source", () => {
     // The action upserts by name and renames via new_name, so after the
-    // apply the label exists only under the new name - a reference to the
+    // apply the label exists only under the new name: a reference to the
     // source name breaks exactly like a deletion (the fail-open the gate
-    // reproduced: the source name reading as declared stood the guard
-    // down while the apply renamed the label out from under the form).
-    // An empty-string new_name wins the action's ?? too, but that PATCH
-    // 422s before the undeclared-label deletion pass (and the source
-    // stays declared, so it is never deleted as undeclared) - keeping ""
-    // instead of the source here is the conservative read: a reference to
-    // the source blocks an apply that could not have succeeded anyway.
+    // reproduced: the source name read as declared and stood the guard
+    // down). An empty-string new_name wins the action's ?? too, but that
+    // PATCH 422s before the undeclared-label deletion pass, so keeping ""
+    // instead of the source is the conservative read: a reference to the
+    // source blocks an apply that could not have succeeded anyway.
     const merged = {
       labels: [
         { name: "awaiting-reply", new_name: "needs-response" },

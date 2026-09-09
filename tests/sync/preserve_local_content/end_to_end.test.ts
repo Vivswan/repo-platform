@@ -11,14 +11,12 @@ import { E, gitFreeEnv, HB, initGitRepo, repoRoot, script } from "./fixtures";
 const temp = tempDirs();
 
 // End-to-end against a REAL template render and a REAL `copier recopy
-// --overwrite`, mirroring reusable-template-sync.yml's recovery path:
-// build a scratch template tree, generate a repo from it, customize the
-// sanctioned repo-owned sides, commit, recopy (which resets them - the
-// live defect), then assert the carry restores every side. Requires
-// copier on PATH, so it runs where copier exists (locally and on the sync
-// runner); CI's script-tests job skips it, and the always-on CI coverage
-// is the upgrade-path harness's recovery leg (ci/upgrade_path/02_recovery_recopy.sh),
-// which drives the same carry against a real recopy in the upgrade-path job.
+// --overwrite`, mirroring reusable-template-sync.yml's recovery path: the
+// recopy resets the sanctioned repo-owned sides (the live defect) and the
+// carry must restore every one. Requires copier on PATH, so CI's
+// script-tests job skips it; the always-on coverage is the upgrade-path
+// harness's recovery leg (ci/upgrade_path/02_recovery_recopy.sh), which
+// drives the same carry against a real recopy.
 const hasCopier = Bun.which("copier") !== null;
 
 describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)", () => {
