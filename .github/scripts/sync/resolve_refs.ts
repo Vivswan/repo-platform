@@ -5,8 +5,9 @@
 // target repo is checked out under target/).
 //
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
-// HIDE_DETAILS, RECOVER, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
-// RUNNER_TEMP.
+// HIDE_DETAILS, RECOVER, TARGET_BRANCH (branch mode: the branch the render
+// lands on, else the rolling automation branch), GH_TOKEN,
+// GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
 import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { lastLine } from "../shared/lines.ts";
 import { capture, DEFAULT_HANG_BOUND_MS, must, mustCapture } from "../shared/proc.ts";
 import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
+import { AUTOMATION_BRANCH } from "./automation_branch.ts";
 import { resolveRecordedCommit, unusableReason } from "./recorded_commit.ts";
 
 const target = requireEnv("TARGET");
@@ -197,6 +199,8 @@ if (oldSha !== "") {
 setOutput("old_sha", oldSha);
 setOutput("target_ref", targetRef);
 setOutput("validate_ref", validateRef);
-setOutput("branch", "automation/repo-platform");
+// The branch the commit lands on: the PR's own in branch mode, else the
+// rolling automation branch every default-branch sync regenerates.
+setOutput("branch", env("TARGET_BRANCH") || AUTOMATION_BRANCH);
 setOutput("display", display);
 console.log(`Updating ${targetDisplay} from ${hideUnlessRefShaped(oldCommit)} to ${display}`);

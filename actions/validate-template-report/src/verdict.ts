@@ -3,7 +3,7 @@
 // is `not-judged`, never a pass.
 
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
-import type { ChildExit } from "./runtime.ts";
+import type { ChildExit } from "../../shared/action_runtime.ts";
 
 export type Integrity =
   | { kind: "clean"; advisories: string }

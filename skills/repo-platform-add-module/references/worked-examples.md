@@ -15,17 +15,18 @@ Both streams dedup AND auto-close their tracking issue by label, so `nightly_lab
 ```bash
 git checkout -b add-nightly
 # .repo-platform.yml: add "nightly" to the top-level modules list.
-# .github/.copier-answers.yml: record the label even when accepting the
-# default (the central-settings preflight reads it from this file):
-#   nightly_label: nightly-failure     # or a custom label
+# .github/.copier-answers.yml: only for a custom label (the render records
+# the default):
+#   nightly_label: slow-suite-failure
 git commit -am "chore: add the nightly module"
-gh pr create && gh pr merge --auto --squash
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
+gh pr create
+# module-render is red on the PR until the render lands; push it onto the branch:
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=add-nightly
 ```
 
-### The sync PR
+### The render commit
 
-Every file should be explained by the modules diff:
+One commit, `chore: render the nightly module`, lands on the PR; `module-render` goes green. Every file in it should be explained by the modules diff:
 
 - `.github/workflows/nightly.yml` - NEW, the starter (repo-owned from now on).
 - `.github/.copier-answers.yml` - records `nightly` and `nightly_label`.
@@ -42,9 +43,9 @@ Move the real checks in either way:
 
 Unlike the fuzz stream, the nightly issue does NOT gate releases; add `release-blocker` to a nightly issue by hand when it should block a cut.
 
-### Companion step: record the answer
+### Companion step: the label answer
 
-The settings assembly reads the module list from the repo's `.repo-platform.yml` (live as soon as the step-1 PR merges) but the label value from `.github/.copier-answers.yml` - so record `nightly_label` in the step-1 PR even when accepting the default, or the repo's settings apply fails (the assembly refuses to guess a tracking label) until the sync PR merges the recorded answer.
+The settings assembly reads the module list from the repo's `.repo-platform.yml` and the label value from `.github/.copier-answers.yml`, both at the default branch, and refuses to guess a tracking label. The render commit records `nightly_label` (the default, or the custom value from the step-1 edit), so merging the PR with its render lands both at once. Merging first instead (the sync PR fallback) leaves the selection without its answer until that PR merges; record `nightly_label` in the selection PR to close that window.
 
 ## 2. Adding `skills`
 
@@ -60,11 +61,13 @@ git checkout -b add-skills
 # Non-default directory? Also add to .github/.copier-answers.yml:
 #   skills_dir: lib/skills
 git commit -am "chore: add the skills module"
-gh pr create && gh pr merge --auto --squash
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
+gh pr create
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=add-skills
 ```
 
-### The sync PR
+### The render commit
+
+`chore: render the skills module`, pushed onto the PR by the dispatch:
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` - starters, seeded from the repo identity with an empty `skills` catalog, repo-owned from now on. A repo that already carries them (an existing skills repo adopting the module) sees NO diff here - `_skip_if_exists` files are never re-rendered.
 - `.github/workflows/validate-skills.yml` - managed, the advisory discovery workflow (runs the real `npx -y skills add . --list`; network-dependent, deliberately outside the gate).

@@ -36,7 +36,7 @@ Two files the render plants matter later:
 
 | File | Role |
 |---|---|
-| `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
+| `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list in a PR and have the render pushed onto that PR ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
 | `.github/repo-platform-manifest.json` | The ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render. validate-template's INTEGRITY check blocks on drift against it, judged by the validator of the template commit the repo was rendered from ([the template check](#the-template-check)): managed content changed outside a sync, a listed managed file missing from the repo, or a roster path the manifest does not list. Severity follows the recorded `_commit`: a rule newer than the repo's build arrives as a latest-validator warning until the next sync PR merges. Its freshness report never blocks. |
 
 ### Mirror copies of rendered files
@@ -70,7 +70,7 @@ CI is split so the template can keep improving its half while each repo keeps it
 
 A `_skip_if_exists` file is generated once and never touched by a sync after that, so when the template INTRODUCES a starter at a path a repository already owns a file at (post-green.yml on its rollout), copier keeps the repository's file with no conflict and no diff. The sync then holds that repository's PR for review, naming the file, the template files that call it, and the template's starter, so the kept file can be checked against the interface the callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-The `ci` job runs the standard checks (typography, file-size, commit-names, actionlint, gitleaks, yamllint, as the steps of one `base-checks` job whose judge step lists every failed check), `validate-template`, and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
+The `ci` job runs the standard checks (typography, file-size, commit-names, actionlint, gitleaks, yamllint, as the steps of one `base-checks` job whose judge step lists every failed check), `validate-template`, `module-render` ([changing the module selection](#changing-the-module-selection)), and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
 
 ### File size caps
 
@@ -99,6 +99,36 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 - Integrity is ONE verdict per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
 - Freshness reads the same compare that admitted the commit, published only once the whole admission (build-branch membership, then the vintage floor) has passed, so a refused commit shows the refusal there too rather than a distance.
+
+### Changing the module selection
+
+A module change is one PR in the managed repository, and the render lands on that same PR. The `module-render` job in fleet-ci.yml is the check that says whether it has:
+
+```text
+PR edits .repo-platform.yml (or a recorded answer)
+  -> module-render RED: ci.yml and .copier-answers.yml do not match the render of the selected modules
+     remedy: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=<pr-branch>
+  -> the sync pushes one commit onto the PR branch (the render, three-way merged like every sync)
+  -> module-render GREEN; validate-template green; merge
+```
+
+| | |
+|---|---|
+| When it runs | Pull requests only (a push has no selection diff). A PR that changes neither `.repo-platform.yml` nor `.github/.copier-answers.yml` passes as a no-op; the managed files stand as `validate-template` judged them. |
+| What it compares | A fresh copier render of the template at the PR tree's recorded `_commit` with the PR's module selection, seeded with the PR's own answers file (the way `copier update` seeds the render it merges), against the PR tree: every managed file whole, every split file's managed region, every symlink's target, hashed the way the manifest stamp hashes. Starters are seeded once and never compared; a managed file the tree lists but the render no longer carries (a deselected module's) is a finding too, since the sync deletes it. |
+| Why the recorded `_commit` | The same principle as the template check: judged at the repository's own build commit, the render cannot go red because repo-platform published a newer build while the PR was open. The sync moves `_commit` to the build tip when it pushes, and the check follows. |
+| On a finding | The job fails with one annotation per stale path and the dispatch line above, also in the step summary. Run it (the fleet PAT pushes; the managed repo's own token is read-only by design), `gh run watch` the sync run, and the commit appears on the PR. |
+| Admission | The recorded `_commit` must be a published commit of repo-platform's `build` branch before its render hooks run with `--trust`: the same admission the template check makes. A fork PR's head branch is outside the fleet PAT's grant, so the render must be pushed from a same-repository branch. |
+| Enforced by | [actions/module-render](../actions/module-render/action.yml), called by fleet-ci.yml's `module-render` job. The sync side is sync-repos.yml's `branch` input ([the branch dispatch](#the-branch-dispatch)). |
+
+#### The branch dispatch
+
+`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` runs the ordinary sync against `<branch>` instead of the default branch and pushes the result onto it instead of opening a sync PR:
+
+- Same code path as a weekly sync: the migration ladder, the three-way `copier update` with the branch's selection, the split-file rebuild, the retired-file cleanup, the repo-owned preserve step, the manifest stamp, and validation. Only the delivery differs: one commit on the branch, the PR-body sections posted as a comment on the branch's PR when one exists.
+- The commit subject names the change: `chore: render the fuzzer module` when the branch adds a module, `chore: remove the pages module render` when it drops one, `chore: render the module selection (+a, -b)` for both, and the ordinary `chore: update repo-platform template to build@<sha>` when the selection is unchanged (an answers-only edit, say).
+- Refused, with the reason in the run log: `branch` with `repo` empty, `all`, a visibility token, or more than one slug; `branch` naming the default branch (the default-branch flow is the sync PR); a branch that does not exist; `branch` with `recover=recopy`.
+- A failed branch dispatch surfaces where every sync failure does: the run log for a public repository, the failure-report issue on a private one ([private-repos.md](private-repos.md)). A validation failure after the push fails the run and names the branch.
 
 ### What each module adds
 

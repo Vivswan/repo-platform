@@ -42,8 +42,9 @@ grep -qF "trip-local tail line" "$TRIP_WORK/tail-shrank.md" \
   || fail "the tripwire report does not list the missing tail line"
 
 # The chain's tail: open_pr.ts must append the section and refuse to arm
-# auto-merge. The stub gh records its argv (PR body included) and serves
-# the two reads open_pr makes.
+# auto-merge. The stub gh records its argv and serves the two reads
+# open_pr makes; the body itself is the file the create call names with
+# --body-file (never argv: a gh timeout prints the argv into the log).
 TRIP_BIN="$TRIP_WORK/bin"
 mkdir -p "$TRIP_BIN"
 cat > "$TRIP_BIN/gh" <<'GHSTUB'
@@ -72,8 +73,9 @@ GH_CALLS="$TRIP_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   bun .github/scripts/sync/open_pr.ts > "$TRIP_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$TRIP_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a tripped tail tripwire"
-grep -q '^gh pr create' "$TRIP_WORK/gh-calls.txt" || fail "open_pr never created the PR"
-grep -qF "TAIL TRIPWIRE" "$TRIP_WORK/gh-calls.txt" \
+grep -q '^gh pr create .* --body-file ' "$TRIP_WORK/gh-calls.txt" \
+  || fail "open_pr never created the PR with a --body-file body"
+grep -qF "TAIL TRIPWIRE" "$TRIP_WORK/pr-body.md" \
   || fail "the PR body lacks the tail tripwire section"
 if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
   fail "open_pr attempted to arm auto-merge on a tripped run"

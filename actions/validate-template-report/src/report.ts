@@ -9,7 +9,7 @@
 // AHEAD_BY, RUN_URL.
 
 import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { env, requireEnv } from "./runtime.ts";
+import { env, requireEnv } from "../../shared/action_runtime.ts";
 import { type Integrity, readVerdict } from "./verdict.ts";
 
 // Unless the clear step succeeded, neither fetch nor the latest leg ran:

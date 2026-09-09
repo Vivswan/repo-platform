@@ -18,7 +18,10 @@
 // generic advice only, never the slug, request path, API message, or issue
 // URL, all of which would leak into this public log.
 // Usage: failure_issue.ts deliver|resolve. Env: TARGET, GH_TOKEN, RUN_URL,
-// RUNNER_TEMP, GITHUB_REPOSITORY; PR_URL (deliver only, may be empty).
+// RUNNER_TEMP, GITHUB_REPOSITORY; PR_URL (deliver only, may be empty); MODE
+// and BRANCH (a branch render reports under its own per-branch title);
+// REPORT_TITLE and REPORT_KIND (another reporting workflow's, the settings
+// apply's).
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,18 +39,23 @@ const runUrl = requireEnv("RUN_URL");
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-// One title per REPORTING WORKFLOW. The issue is matched by exact title,
-// so a shared one lets an unrelated green run resolve a report the other
-// workflow is still failing on - the settings apply and the template sync
-// fail for different reasons and recover independently.
+// One title per REPORTING WORKFLOW, and per branch for a branch render.
+// The issue is matched by exact title, so a shared one lets an unrelated
+// green run resolve a report the other is still failing on - the settings
+// apply, the default-branch sync, and each branch's render fail for
+// different reasons and recover independently.
+const branchRender = env("MODE") === "branch";
 const ISSUE_TITLE =
   env("REPORT_TITLE") !== ""
     ? env("REPORT_TITLE")
-    : "[automated] repo-platform sync: private failure report";
+    : branchRender
+      ? `[automated] repo-platform branch render: private failure report (${requireEnv("BRANCH")})`
+      : "[automated] repo-platform sync: private failure report";
 /** What FAILED, in the report's own words. Follows the title so the two
  *  cannot describe different workflows: a settings report that says "push
  *  sync" sends the reader to the wrong run. */
-const REPORT_KIND = env("REPORT_KIND") !== "" ? env("REPORT_KIND") : "push sync";
+const REPORT_KIND =
+  env("REPORT_KIND") !== "" ? env("REPORT_KIND") : branchRender ? "branch render" : "push sync";
 // gh's stderr accumulates here, captured and never printed: it embeds the
 // request path and API message.
 let errlog = "";

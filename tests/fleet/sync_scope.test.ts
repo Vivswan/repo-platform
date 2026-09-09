@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  branchScopeRefusal,
   classifyEntry,
   modulesAdmit,
   modulesFilterFor,
@@ -349,5 +350,85 @@ describe("scopeRefusal", () => {
     },
   ])("$reason", ({ scope, source, expected }) => {
     expect(scopeRefusal(scope, known, source, "o")).toBe(expected);
+  });
+});
+
+describe("branchScopeRefusal", () => {
+  const ONE_SLUG =
+    "branch needs repo to name exactly one owner/name: the sync renders onto that repository's branch instead of opening its own PR, so a list, a visibility or modules: token, all, or an empty repo cannot carry it";
+  const RECOVERY =
+    "branch cannot combine with recover=recopy: a recovery re-render is delivered through a manual-review PR, and the branch mode pushes onto an existing branch instead";
+  test.each<{
+    reason: string;
+    scope: Scope;
+    branch: string;
+    recover: string;
+    expected: string | null;
+  }>([
+    {
+      reason: "no branch: nothing to judge, whatever the scope",
+      scope: ALL,
+      branch: "",
+      recover: "recopy",
+      expected: null,
+    },
+    {
+      reason: "one slug carries a branch",
+      scope: list([], ["o/a"]),
+      branch: "feat",
+      recover: "",
+      expected: null,
+    },
+    {
+      reason: "one slug with the recovery default 'none' still carries it",
+      scope: list([], ["o/a"]),
+      branch: "feat",
+      recover: "none",
+      expected: null,
+    },
+    {
+      reason: "the whole fleet cannot",
+      scope: ALL,
+      branch: "feat",
+      recover: "",
+      expected: ONE_SLUG,
+    },
+    {
+      reason: "a visibility token cannot",
+      scope: list(["public"], []),
+      branch: "feat",
+      recover: "",
+      expected: ONE_SLUG,
+    },
+    {
+      reason: "a token beside the slug cannot",
+      scope: list(["private"], ["o/a"]),
+      branch: "feat",
+      recover: "",
+      expected: ONE_SLUG,
+    },
+    {
+      reason: "two slugs cannot",
+      scope: list([], ["o/a", "o/b"]),
+      branch: "feat",
+      recover: "",
+      expected: ONE_SLUG,
+    },
+    {
+      reason: "a modules: filter beside the one slug cannot (it names a set of repositories)",
+      scope: list([], ["o/a"], [["uv"]]),
+      branch: "feat",
+      recover: "",
+      expected: ONE_SLUG,
+    },
+    {
+      reason: "a recovery re-render cannot land on a branch",
+      scope: list([], ["o/a"]),
+      branch: "feat",
+      recover: "recopy",
+      expected: RECOVERY,
+    },
+  ])("$reason", ({ scope, branch, recover, expected }) => {
+    expect(branchScopeRefusal(scope, branch, recover)).toBe(expected);
   });
 });

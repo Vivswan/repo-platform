@@ -7,8 +7,9 @@
 # dropped are deleted while repo-owned content survives, settings.yml
 # included. That main update is upgrade_path/01_main_update.sh; the numbered
 # legs after it each prove one more transition (recovery, a visibility flip,
-# the module fold's arrival, a rung run from build history, ...) and
-# upgrade_path/lib.sh holds their shared helpers. This file owns the
+# the module fold's arrival, a rung run from build history, a branch that
+# changes the selection getting its render, ...) and upgrade_path/lib.sh
+# holds their shared helpers. This file owns the
 # namespace, the cleanup, and the synthetic old fixture, then sources the
 # legs in order into this shell.
 #
@@ -305,3 +306,5 @@ source "$UPGRADE_PATH_DIR/09_pages_answer_retirement.sh"
 source "$UPGRADE_PATH_DIR/10_module_fold_arrival.sh"
 # shellcheck source=upgrade_path/11_migration_history_walk.sh
 source "$UPGRADE_PATH_DIR/11_migration_history_walk.sh"
+# shellcheck source=upgrade_path/12_branch_render.sh
+source "$UPGRADE_PATH_DIR/12_branch_render.sh"

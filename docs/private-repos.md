@@ -57,7 +57,9 @@ When resolution fails, the job goes red with an error naming only the hint. The 
 
 ### The sync PR
 
-The sync PR in the target repo is where the hidden detail lands: dropped conflict hunks, removed paths, drift values, the removed-splits report, and the tail tripwire's report. The PR's checks run in the private repo, where logs are private, and the manual-review decision never rides on this prose (each hold comes from an independent flag or non-empty report file).
+The sync PR in the target repo is where the hidden detail lands: dropped conflict hunks, the managed files whose local edits the clean render replaced, removed paths, drift values, the removed-splits report, and the tail tripwire's report. The PR's checks run in the private repo, where logs are private, and the manual-review decision never rides on this prose (each hold comes from an independent flag or non-empty report file).
+
+A branch dispatch ([the branch dispatch](new-repo.md#the-branch-dispatch)) has no sync PR: the same sections are posted as a comment on the PR whose head is that branch, and the branch name is masked like the default branch. With no PR on the branch, a hidden target's notes are not printed anywhere (the log says so); a failed run still delivers its captures to the failure-report issue.
 
 - These ordinary sections share one PR-body size budget; a section that does not fit is OMITTED whole and the body carries a truncation banner - reproduce the sync locally for the full report.
 - The failed-validation warning is the one GUARANTEED section: its space is reserved out of that budget, so it is in the PR body even when every ordinary section was omitted - and when a hidden run has captured diagnostics in hand, their bounded excerpt (with its own truncation note) is guaranteed to fit inside that reservation.

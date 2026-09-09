@@ -1,14 +1,17 @@
 // open_pr.ts: the PR-body section collection and the auto-merge decision.
 // The script is gh-bound, so a stub gh on PATH records every invocation
-// and serves canned answers; the assertions read the recorded `pr create`
-// body and the presence/absence of the `pr merge` arm call. The section
+// and serves canned answers; the assertions read the body file the
+// recorded `pr create` names and the presence/absence of the `pr merge`
+// arm call. The section
 // fixtures write through the SAME filename constants the production
 // writers use (section_files.ts), so a renamed report file fails here.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { redactCommand } from "../../.github/scripts/shared/proc.ts";
 import {
+  MANAGED_REPLACED_NAME,
   MIGRATIONS_NAME,
   MIGRATIONS_REVIEW_NAME,
   MIRRORS_NOTE_NAME,
@@ -30,7 +33,8 @@ const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "gh"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 case "$1 $2" in
-  "pr list") printf '' ;;
+  "pr list") printf '%s' "\${STUB_EXISTING_PR:-}" ;;
+  "pr comment") : ;;
   "pr create") echo "https://github.com/o/r/pull/1" ;;
   "pr view") echo "https://github.com/o/r/pull/1" ;;
   "pr merge")
@@ -79,6 +83,8 @@ function run(opts: Options = {}) {
     if (content !== undefined) writeFileSync(path, content);
   }
   const calls = join(root, "calls.log");
+  const outputFile = join(root, "gh-output.txt");
+  writeFileSync(outputFile, "");
   const proc = boundedSpawnSync(["bun", script], {
     env: {
       ...process.env,
@@ -87,7 +93,7 @@ function run(opts: Options = {}) {
       TARGET: "Vivswan/target",
       RUNNER_TEMP: runnerTemp,
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
-      GITHUB_OUTPUT: join(root, "gh-output.txt"),
+      GITHUB_OUTPUT: outputFile,
       BRANCH: "automation/repo-platform",
       BASE_BRANCH: "main",
       DISPLAY: "build@newsha",
@@ -104,14 +110,22 @@ function run(opts: Options = {}) {
     .filter(Boolean)
     .map((record) => record.split("\x1f"));
   const create = records.find((args) => args[1] === "pr" && args[2] === "create");
-  const body = create ? (create[create.indexOf("--body") + 1] ?? "") : "";
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
+    /** The GITHUB_OUTPUT file: the url handoff the tail steps read. */
+    outputs: readFileSync(outputFile, "utf-8"),
     records,
-    body,
+    body: create ? bodyOf(create) : "",
     merged: records.some((args) => args[1] === "pr" && args[2] === "merge"),
   };
+}
+
+/** The body a recorded gh call delivered: the content of the file its
+ * `--body-file` names (gh never receives the body in its argv). */
+function bodyOf(args: string[]): string {
+  const at = args.indexOf("--body-file");
+  return at === -1 ? "" : readFileSync(args[at + 1] ?? "", "utf-8");
 }
 
 describe("open_pr sections and auto-merge", () => {
@@ -254,6 +268,14 @@ describe("open_pr sections and auto-merge", () => {
       name: "CARRY_REVIEW_FILE",
       content: "AGENTS.md: managed-half edits reset\n",
       section: null,
+      forcesReview: true,
+    },
+    {
+      reason: "managed files replaced whole: a kept local edit vanished and needs a human",
+      where: "temp",
+      name: MANAGED_REPLACED_NAME,
+      content:
+        "> [!WARNING]\n> These managed files carried local edits\n\n- `.github/workflows/ci.yml`\n",
       forcesReview: true,
     },
     {
@@ -586,5 +608,97 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body).toContain("Validation failed on the updated tree");
     expect(r.body).toContain("validation diagnostic sentinel line");
     expect(r.merged).toBe(false);
+  });
+});
+
+describe("open_pr body delivery", () => {
+  // mustCapture's deadline-expiry line prints redactCommand(argv)
+  // (tests/shared/proc.test.ts pins that line), so the argv of every
+  // body-carrying gh call is what a timeout would print into the public
+  // log. A hidden target's body holds private hunk text no mask covers.
+  test.each<{ reason: string; env: Record<string, string>; call: string }>([
+    {
+      reason: "the branch-mode comment",
+      env: { MODE: "branch", BRANCH: "chore/fuzzer", STUB_EXISTING_PR: "9" },
+      call: "comment",
+    },
+    { reason: "the refreshed sync PR", env: { STUB_EXISTING_PR: "9" }, call: "edit" },
+    { reason: "the created sync PR", env: {}, call: "create" },
+  ])(
+    "$reason delivers its body through a file, so the timeout line prints no hunk text",
+    ({ env, call }) => {
+      const hunk = "PRIVATE_HUNK_SENTINEL_7f3a";
+      const r = run({
+        env: { HIDE_DETAILS: "true", ...env },
+        files: { SUMMARY_FILE: `- \`src/secret.ts\`: dropped hunk ${hunk}\n` },
+      });
+      const record = r.records.find((args) => args[1] === "pr" && args[2] === call);
+      expect(record).toBeDefined();
+      const argv = record as string[];
+      expect({
+        exitCode: r.exitCode,
+        timeoutLine: redactCommand(argv).includes(hunk),
+        anyArgvCarriesHunk: r.records.some((args) => args.some((arg) => arg.includes(hunk))),
+        bodyFileFlag: argv.includes("--body-file"),
+        bodyArgvFlag: argv.includes("--body"),
+        bodyCarriesHunk: bodyOf(argv).includes(hunk),
+      }).toEqual({
+        exitCode: 0,
+        timeoutLine: false,
+        anyArgvCarriesHunk: false,
+        bodyFileFlag: true,
+        bodyArgvFlag: false,
+        bodyCarriesHunk: true,
+      });
+    },
+  );
+});
+
+// Branch mode: the render was pushed onto a dispatched branch, so the body
+// becomes a comment on that branch's PR (when one exists) and nothing is
+// created or armed; the url output carries the PR for the tail steps.
+describe("open_pr branch mode", () => {
+  test("with a PR on the branch: one comment carrying the sections, no create, no auto-merge", () => {
+    const r = run({
+      env: { MODE: "branch", BRANCH: "chore/fuzzer", STUB_EXISTING_PR: "9" },
+      temp: { [TAIL_SHRANK_NAME]: "- `AGENTS.md`: 1 line missing\n" },
+    });
+    const comment = r.records.find((args) => args[1] === "pr" && args[2] === "comment");
+    const body = comment ? bodyOf(comment) : "";
+    expect({
+      exitCode: r.exitCode,
+      calls: r.records.map((args) => `${args[1]} ${args[2]} ${args[3] ?? ""}`.trim()),
+      merged: r.merged,
+      outputs: r.outputs,
+      bodyHead: body.split("\n")[0],
+      bodyCarriesSection: body.includes("AGENTS.md"),
+    }).toEqual({
+      exitCode: 0,
+      calls: ["pr list -R", "pr comment 9", "pr view 9"],
+      merged: false,
+      outputs: "url=https://github.com/o/r/pull/1\n",
+      bodyHead:
+        "Template render pushed to `chore/fuzzer` from [`Vivswan/repo-platform`](https://github.com/Vivswan/repo-platform/tree/build) (build branch).",
+      bodyCarriesSection: true,
+    });
+    expect(r.output).toContain(
+      "commented on https://github.com/o/r/pull/1 with the render's notes",
+    );
+  });
+
+  test("without a PR on the branch: nothing is posted, the url output is empty, and the log says where the notes are", () => {
+    const r = run({
+      env: { MODE: "branch", BRANCH: "chore/fuzzer" },
+      temp: { [TAIL_SHRANK_NAME]: "- `AGENTS.md`: 1 line missing\n" },
+    });
+    expect({
+      exitCode: r.exitCode,
+      calls: r.records.map((args) => `${args[1]} ${args[2]}`),
+      merged: r.merged,
+      outputs: r.outputs,
+    }).toEqual({ exitCode: 0, calls: ["pr list"], merged: false, outputs: "url=\n" });
+    expect(r.output).toContain(
+      "no pull request has chore/fuzzer as its head; the render is on the branch, and its review notes are in this run's step logs",
+    );
   });
 });

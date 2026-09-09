@@ -165,3 +165,23 @@ export function scopeRefusal(
   }
   return null;
 }
+
+/** Why a dispatch naming a `branch` cannot run, or null: the branch mode
+ *  renders onto ONE repository's branch, so the scope must be exactly one
+ *  slug (no tokens, no list, not all), and a recovery re-render has no PR
+ *  to hold for review. Value-free like every other refusal here. */
+export function branchScopeRefusal(scope: Scope, branch: string, recover: string): string | null {
+  if (branch === "") return null;
+  if (recover === "recopy") {
+    return "branch cannot combine with recover=recopy: a recovery re-render is delivered through a manual-review PR, and the branch mode pushes onto an existing branch instead";
+  }
+  if (
+    scope.kind === "all" ||
+    scope.visibility.size > 0 ||
+    scope.modules.length > 0 ||
+    scope.slugs.size !== 1
+  ) {
+    return "branch needs repo to name exactly one owner/name: the sync renders onto that repository's branch instead of opening its own PR, so a list, a visibility or modules: token, all, or an empty repo cannot carry it";
+  }
+  return null;
+}

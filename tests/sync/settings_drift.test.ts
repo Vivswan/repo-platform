@@ -183,6 +183,22 @@ describe("driftSummary", () => {
     expect(summary).toContain("settings-repos heal");
   });
 
+  test("branch mode: the section names the branch's PR and claims no disarm (none happens there)", () => {
+    const summary = driftSummary(
+      "Vivswan/demo",
+      [{ field: "private", recorded: "false", live: "true" }],
+      true,
+      "branch",
+    );
+    expect(summary).toContain("Merging the PR this branch belongs to records the live values");
+    expect(summary).toContain(
+      "its PR's own auto-merge is untouched, so settle this before merging",
+    );
+    expect(summary).not.toContain("Auto-merge is off");
+    expect(summary).not.toContain("Merging this PR");
+    for (const line of summary.split("\n")) expect(line).toStartWith(">");
+  });
+
   test("keeps a multiline description value on one body line", () => {
     const summary = driftSummary(
       "Vivswan/demo",
@@ -225,13 +241,45 @@ describe("driftWarnings", () => {
   // opt-in and lives in the PR body alone.
   const TAIL = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
 
+  // Branch mode runs before open_pr.ts knows whether the branch has a PR,
+  // so the comment is promised only "when there is one" and the no-PR
+  // reader is told what the run leaves them.
+  const BRANCH_COMMENT =
+    "The sync's comment on the branch's open PR, when there is one, explains what merging does and how to revert; a branch without a PR receives no comment";
+
   test.each<{
     reason: string;
     repo: string;
     drifts: Drift[];
     hideDetails: boolean;
+    delivery?: "default" | "branch";
     expected: string[];
   }>([
+    {
+      reason:
+        "branch mode: no disarm is claimed, the comment is conditional, the values are the record",
+      repo: "Vivswan/demo",
+      drifts: [{ field: "private", recorded: "false", live: "true" }],
+      hideDetails: false,
+      delivery: "branch",
+      expected: [
+        `::warning::Vivswan/demo: private changed out of band: "false" -> "true". ${BRANCH_COMMENT}, and this line is the run's record.`,
+      ],
+    },
+    {
+      reason:
+        "branch mode, hidden: the field alone, and the no-PR reader is sent to the render commit's diff",
+      repo: "h**-s**r",
+      drifts: [{ field: "description", recorded: "secret", live: "other" }],
+      hideDetails: true,
+      delivery: "branch",
+      expected: [
+        "::warning::h**-s**r: description changed out of band (values hidden: private repository). " +
+          "The sync's comment on the branch's open PR, when there is one, carries the values and " +
+          "explains what merging does and how to revert; a branch without a PR receives no comment, " +
+          "so read both values off the render commit's diff of .github/.copier-answers.yml.",
+      ],
+    },
     {
       reason: "one single-line warning per drifted field, values shown",
       repo: "Vivswan/demo",
@@ -267,7 +315,7 @@ describe("driftWarnings", () => {
         `::warning::h**-s**r: description changed out of band (values hidden: private repository; details in the PR body). ${TAIL}`,
       ],
     },
-  ])("$reason", ({ repo, drifts, hideDetails, expected }) => {
-    expect(driftWarnings(repo, drifts, hideDetails)).toEqual(expected);
+  ])("$reason", ({ repo, drifts, hideDetails, delivery, expected }) => {
+    expect(driftWarnings(repo, drifts, hideDetails, delivery)).toEqual(expected);
   });
 });

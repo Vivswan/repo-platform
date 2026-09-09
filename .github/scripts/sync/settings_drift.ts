@@ -18,6 +18,9 @@
 // Usage: bun .github/scripts/sync/settings_drift.ts --target-dir <checkout>
 //   --repo <owner/name> --in-repo-settings <path> --live-private <bool>
 //   --live-description <text> --summary <out-file>
+//
+// --mode branch (a render pushed onto a PR branch) words the section for that
+// delivery: no sync PR exists and no auto-merge is disarmed.
 
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +47,12 @@ const FLAGS = [
 // suppresses recorded/live VALUES from warnings and errors - the summary
 // file keeps them, because it ships in the PR body to the target repo
 // itself, whose access control is the right one.
-const OPTIONAL_FLAGS = ["--display", "--hide-details"] as const;
+const OPTIONAL_FLAGS = ["--display", "--hide-details", "--mode"] as const;
+
+/** Where the drift report lands: the sync PR's body, or (branch mode) a
+ *  comment on the branch's PR when one exists (open_pr.ts looks it up
+ *  after this step ran; without a PR the report goes nowhere). */
+export type Delivery = "default" | "branch";
 
 export interface Drift {
   field: "private" | "description";
@@ -99,10 +107,16 @@ function show(value: string): string {
   return JSON.stringify(value);
 }
 
-export function driftSummary(repo: string, drifts: Drift[], settingsPresent: boolean): string {
+export function driftSummary(
+  repo: string,
+  drifts: Drift[],
+  settingsPresent: boolean,
+  delivery: Delivery = "default",
+): string {
   if (drifts.length === 0) {
     return "";
   }
+  const branch = delivery === "branch";
   const changes = drifts
     .map((d) => `> - \`${d.field}\`: ${show(d.recorded)} -> ${show(d.live)} (recorded -> live)`)
     .join("\n");
@@ -112,7 +126,7 @@ export function driftSummary(repo: string, drifts: Drift[], settingsPresent: boo
     : `> To revert instead, flip the setting back in the GitHub UI, then
 > re-run the sync for a clean PR (the heal skips this repository until it
 > has a \`.github/settings.yml\`).`;
-  const consequence = `> Merging this PR records the live values as the answers and
+  const consequence = `> Merging ${branch ? "the PR this branch belongs to" : "this PR"} records the live values as the answers and
 > re-renders the answer-derived files - but it does NOT decide the
 > enforced settings. What the nightly heal does next depends on the
 > \`.github/settings.yml\` this branch leaves behind (the sync may have
@@ -135,30 +149,58 @@ ${revert}`;
 ${changes}
 >
 ${consequence}
-> Auto-merge is off until this is settled.`;
+${
+  branch
+    ? "> This render was pushed onto the branch; its PR's own auto-merge is untouched, so settle this before merging."
+    : "> Auto-merge is off until this is settled."
+}`;
 }
 
 // The log line deliberately does not say what merging ratifies:
 // driftSummary is the one place that spells that out, and two
 // descriptions would drift apart.
-export function driftWarnings(repo: string, drifts: Drift[], hideDetails = false): string[] {
-  return drifts.map((d) =>
-    hideDetails
-      ? `::warning::${escapeData(
-          `${repo}: ${d.field} changed out of band (values hidden: private repository; ` +
-            "details in the PR body). Auto-merge is disabled; the PR body explains " +
-            "what merging does and how to revert.",
-        )}`
-      : `::warning::${escapeData(
-          `${repo}: ${d.field} changed out of band: ${show(d.recorded)} -> ${show(d.live)}. ` +
-            "Auto-merge is disabled; the PR body explains what merging does " +
-            "and how to revert.",
-        )}`,
-  );
+export function driftWarnings(
+  repo: string,
+  drifts: Drift[],
+  hideDetails = false,
+  delivery: Delivery = "default",
+): string[] {
+  const line = (d: Drift, detail: string, tail: string) =>
+    `::warning::${escapeData(`${repo}: ${d.field} changed out of band${detail}. ${tail}`)}`;
+  const values = (d: Drift) => `: ${show(d.recorded)} -> ${show(d.live)}`;
+  if (delivery === "branch") {
+    // Whether the branch has a PR is only known once open_pr.ts runs, so
+    // the comment is promised conditionally and the no-PR reader is told
+    // what this run leaves them: the values here, or (hidden) the render
+    // commit, whose answers-file hunk shows recorded -> live.
+    const comment =
+      "The sync's comment on the branch's open PR, when there is one, " +
+      `${hideDetails ? "carries the values and " : ""}explains what merging does and how to revert; ` +
+      "a branch without a PR receives no comment";
+    return hideDetails
+      ? drifts.map((d) =>
+          line(
+            d,
+            " (values hidden: private repository)",
+            `${comment}, so read both values off the render commit's diff of .github/.copier-answers.yml.`,
+          ),
+        )
+      : drifts.map((d) => line(d, values(d), `${comment}, and this line is the run's record.`));
+  }
+  const tail = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
+  return hideDetails
+    ? drifts.map((d) =>
+        line(d, " (values hidden: private repository; details in the PR body)", tail),
+      )
+    : drifts.map((d) => line(d, values(d), tail));
 }
 
 function main(args: string[]): void {
   const flags = parseFlags(args, FLAGS, OPTIONAL_FLAGS);
+  const mode = flags["--mode"] ?? "default";
+  if (mode !== "default" && mode !== "branch") {
+    fail(`--mode must be default or branch, got ${mode}`);
+  }
   const repo = flags["--repo"];
   const display = flags["--display"] ?? repo;
   const hideDetails = flags["--hide-details"] === "true";
@@ -199,13 +241,13 @@ function main(args: string[]): void {
   }
   writeFileSync(
     flags["--summary"],
-    driftSummary(repo, drifts, existsSync(flags["--in-repo-settings"])),
+    driftSummary(repo, drifts, existsSync(flags["--in-repo-settings"]), mode),
   );
   if (drifts.length === 0) {
     console.log(`${display}: live settings match the recorded answers; no out-of-band drift.`);
     return;
   }
-  for (const warning of driftWarnings(display, drifts, hideDetails)) {
+  for (const warning of driftWarnings(display, drifts, hideDetails, mode)) {
     console.log(warning);
   }
 }
