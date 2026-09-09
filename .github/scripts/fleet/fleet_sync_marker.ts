@@ -3,6 +3,7 @@
 // (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
 // range and unioned. Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
 
+import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
 import {
@@ -30,6 +31,7 @@ const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
+const MODULE_ROSTER = new Set(MODULE_ORDER);
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
 const POSITION =
@@ -284,7 +286,7 @@ export function parseDirectives(body: string): Directives {
     }
     // The one scope grammar: what the plans accept, the leg accepts. Its
     // messages carry counts, never entries, so the line is not quoted here.
-    const parsed = parseScope(value);
+    const parsed = parseScope(value, MODULE_ROSTER);
     if (parsed.kind === "error") {
       errors.push(`[${keyword}] scope: ${parsed.message}`);
       continue;
@@ -292,6 +294,16 @@ export function parseDirectives(body: string): Directives {
     if (parsed.kind === "all") {
       if (reason === "") errors.push(`"${line}": ${NEEDS_REASON}`);
       else scope = "all";
+      continue;
+    }
+    // A modules: filter intersects with the visibility tokens, and this leg
+    // UNIONS the entries of every commit in the range: "public, modules:x"
+    // plus "private" would read as every repo selecting x, dropping the
+    // private repos the second commit asked for. Dispatch-only, therefore.
+    if (parsed.modules.length > 0) {
+      errors.push(
+        `"${line}" carries a modules: filter, which is dispatch-only (it intersects with the visibility tokens, so the range union would misread it): dispatch the sync by hand with gh workflow run sync-repos.yml -f repo=...`,
+      );
       continue;
     }
     if (reason !== "") {

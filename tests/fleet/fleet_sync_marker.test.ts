@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
+import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -521,6 +522,27 @@ describe("parseDirectives", () => {
         kind: "error",
         errors: [
           '[fleet-sync] scope: "all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+        ],
+      },
+    },
+    {
+      reason:
+        "a modules: filter is dispatch-only: it intersects with the tokens, so the range union would misread it",
+      body: message("[fleet-sync: public, modules:pages]", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          '"[fleet-sync: public, modules:pages]" carries a modules: filter, which is dispatch-only (it intersects with the visibility tokens, so the range union would misread it): dispatch the sync by hand with gh workflow run sync-repos.yml -f repo=...',
+        ],
+      },
+    },
+    {
+      reason: "a modules: filter naming no module of the template fails on the grammar first",
+      body: message("[fleet-sync: modules:pagez]", PROSE),
+      expected: {
+        kind: "error",
+        errors: [
+          `[fleet-sync] scope: 1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
         ],
       },
     },

@@ -46,7 +46,7 @@ One implementation ([merge_settings_layers.ts](../.github/scripts/fleet/merge_se
 |---|---|
 | The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | every target is applied on every green main run, after the run's fleet sync when a directive armed one - the apply is idempotent, so no diff decides it |
 | Nightly cron | heals out-of-band drift |
-| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, a comma list of them, or `all` - an entry naming no managed repo fails the run, a repo without a `.repo-platform.yml` is skipped with a notice |
+| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, `modules:<a>+<b>` (the targets whose `.repo-platform.yml` selects every listed module; a visibility token intersects with it, and repo-platform itself, which is not a render, joins only by name or visibility), a comma list of them, or `all` - an entry naming no managed repo or no module of the template fails the run, a repo without a `.repo-platform.yml` is skipped with a notice |
 
 Targets are the enrolled, adopted repos (a `.repo-platform.yml` on the default branch), plus repo-platform itself. A private target's report issue is delivered even under `check_only`, and the very first check on a private target can flag the report's marker label itself as drift - the label does not exist until that same run's delivery creates it, so the next run is clean.
 

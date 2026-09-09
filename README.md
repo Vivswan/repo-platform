@@ -30,6 +30,21 @@ The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO
 
 Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. To sync right after the merge instead, open the PR body with a directives block as its first paragraph: `[fleet-sync: public]` for the public repos (the default), `[fleet-sync: private]` for the private ones, `[fleet-sync: public, Vivswan/a]` to add public repos by slug, or `[fleet-sync: all] <why every repo needs this now>` for the whole fleet (the justification is required); a bracket-only line may sit in exactly one pair of backticks, and the justified `all` line is written bare. The parser reads the whole merged message, so a bare `[fleet-sync` anywhere else in the body, even inside a fenced example, turns the read-directives leg red and nothing syncs, while a mention wrapped in a code span is prose ([docs/all-green.md](docs/all-green.md#after-the-gate) has the grammar). By hand: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>` (a comma list works), or `gh workflow run sync-repos.yml` for the whole fleet.
 
+The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_scope.ts) owns the grammar; settings-repos.yml's `repo=` reads the same):
+
+| `repo=` | Syncs |
+| --- | --- |
+| `Vivswan/a,Vivswan/b` | those repos |
+| `public` or `private` | every managed repo of that visibility |
+| `modules:pages+release-please` | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names) |
+| `modules:pages,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the pages or release legs of ci.yml renders into |
+| `public,modules:pages` | the public repos selecting pages: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:pages`) adds as typed |
+| `all` or empty | the whole fleet |
+
+- A module name outside `templates/` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning (by hint when private) and left out, and the plan prints how many repos the filter left out.
+- The filter is dispatch-only: a `[fleet-sync: ...]` directive carrying it turns the read-directives leg red, since the leg unions the entries of every commit in its range and an intersecting token would misread there.
+- Deriving the filter from the template paths a build publish changed, so a merge targets its own repos without naming modules, is a possible follow-up.
+
 ## Credentials
 
 One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `REPO_PLATFORM_TOKEN` Actions secret ([create it with the permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write)), granted access to the managed repositories. Store it with `gh secret set REPO_PLATFORM_TOKEN`.

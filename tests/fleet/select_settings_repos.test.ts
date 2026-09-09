@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { declaredModules } from "../../.github/scripts/fleet/build_settings_matrix";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
+import { declaredModules } from "../../.github/scripts/sync/modules.ts";
+import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -16,7 +17,8 @@ const temp = tempDirs();
 // retries must heal, revoked push access (a public repo prints one notice
 // per selecting plan; a private one vanishes from GET /user/repos, so the
 // stubs admit hidden-gone only in a control run), and PRIVATE personas
-// whose every public surface carries the hint, never the slug.
+// whose every public surface carries the hint, never the slug. For the
+// modules filters, hidden-server declares [uv, pages].
 describe("declaredModules", () => {
   test("answers the list for a readable declaration, in the sync's grammar", () => {
     expect(declaredModules("modules:\n  - settings-sync\n")).toEqual(["settings-sync"]);
@@ -29,6 +31,7 @@ describe("declaredModules", () => {
     expect(declaredModules("modules: notalist\n")).toBeNull();
     expect(declaredModules("modules: [uv, uv]\n")).toBeNull();
     expect(declaredModules(": broken\n")).toBeNull();
+    expect(declaredModules("modules: [&loop [*loop]]\n")).toBeNull();
   });
 });
 
@@ -89,6 +92,9 @@ describe("select_settings_repos.ts", () => {
         "    ;;",
         "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml)",
         '    echo "notmodules: true"',
+        "    ;;",
+        "  repos/Vivswan/hidden-server/contents/.repo-platform.yml)",
+        '    echo "modules: [uv, pages]"',
         "    ;;",
         // Error text with the slug in a URL, the bare name, and a case
         // variant: every retry line and the final warning must scrub all
@@ -623,6 +629,111 @@ describe("select_settings_repos.ts", () => {
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  // The modules: filters, dispatched: every candidate the tokens admit is
+  // probed (all of them when only a filter constrains the fleet, in row
+  // order), an adopted one is judged over its declared list, and the
+  // operator repo joins only by slug or visibility, never through a filter.
+  // Declared: nomodule [uv, release-please], hidden-server [uv, pages],
+  // flaky/open-lib/steady [settings-sync].
+  const ALL_PROBES = [
+    ...RETRY("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL)}`,
+    ...RETRY("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+    `::warning::${GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL)}`,
+    "Vivswan/flaky: push-permission probe failed (attempt 1/3: HTTP 500); retrying...",
+    "Vivswan/flaky: settings adoption check failed (attempt 1/3: HTTP 502 from stub); retrying...",
+    ...RETRY("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
+    `::warning::${GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL)}`,
+    `::notice::${pushProbeSkipNotice("h**-l**d")}`,
+    `::warning::${NOMODS_WARNING}`,
+    `::notice::${pushProbeSkipNotice("Vivswan/locked")}`,
+    `::notice::${UNADOPTED_NOTICE}`,
+  ];
+  const ALL_SUMMARY = `### Settings heal warnings\n${[
+    GAVE_UP("Vivswan/deadapi", "settings adoption check", DEADAPI_DETAIL),
+    GAVE_UP("Vivswan/deadprobe", "push-permission probe", DEADPROBE_DETAIL),
+    GAVE_UP("h**-d**i", "settings adoption check", HIDDEN_DEADAPI_DETAIL),
+    NOMODS_WARNING,
+  ]
+    .map((line) => `- ${line}\n`)
+    .join("")}`;
+  const LEFT_OUT = (count: number) =>
+    `modules filter: ${count} adopted ${count === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
+  test.each<{
+    reason: string;
+    repo: string;
+    targets: ReturnType<typeof targetsOf>;
+    stdout: string;
+    summary: string;
+  }>([
+    {
+      reason:
+        "a filter alone probes every visibility and keeps the repos selecting the module; the operator repo is not a render",
+      repo: "modules:uv",
+      targets: [NOMODULE, HIDDEN_SERVER],
+      stdout: lines(...ALL_PROBES, LEFT_OUT(3), "settings targets: Vivswan/nomodule, h**-s**r"),
+      summary: ALL_SUMMARY,
+    },
+    {
+      reason:
+        "a visibility token intersects: only public candidates are probed, self included in none",
+      repo: "public,modules:release-please",
+      targets: [NOMODULE],
+      stdout: lines(...PUBLIC_PROBES, LEFT_OUT(3), "settings targets: Vivswan/nomodule"),
+      summary: PUBLIC_SUMMARY,
+    },
+    {
+      reason: "a bare name unions in as typed, the operator repo's own included",
+      repo: "repo-platform,modules:uv",
+      targets: [NOMODULE, SELF, HIDDEN_SERVER],
+      stdout: lines(
+        ...ALL_PROBES,
+        LEFT_OUT(3),
+        "settings targets: Vivswan/nomodule, Vivswan/repo-platform, h**-s**r",
+      ),
+      summary: ALL_SUMMARY,
+    },
+  ])(
+    "dispatched with $repo: $reason",
+    ({ repo, targets, stdout, summary }) => {
+      const name = `filter-${Bun.hash(repo).toString(16)}`;
+      const eventFile = join(root, `${name}-event.json`);
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo } }));
+      const r = run(name, { env: { GITHUB_EVENT_PATH: eventFile } });
+      expect({ ...r, output: r.output.split("\n")[0].slice(0, "targets=".length) }).toEqual({
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        output: "targets=",
+        summary,
+      });
+      expect(r.output.split("\n")).toHaveLength(2);
+      expect(targetsOf(r)).toEqual(targets);
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel.toLowerCase()).not.toContain("hidden-server");
+        expect(channel.toLowerCase()).not.toContain("hidden-nomods");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a filter naming no module of the template fails before discovery, naming the roster",
+    () => {
+      const eventFile = join(root, "filter-unknown-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "modules:uv+pagez" } }));
+      const r = run("filter-unknown", { env: { GITHUB_EVENT_PATH: eventFile } });
+      expect(r).toEqual({
+        exitCode: 1,
+        stdout: `::error::1 of 2 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}\n`,
+        stderr: "",
+        output: "",
+        summary: "",
+      });
     },
     TEST_TIMEOUT_MS,
   );

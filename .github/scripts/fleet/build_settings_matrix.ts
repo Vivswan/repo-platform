@@ -20,28 +20,9 @@
 // slug (the apply leg re-resolves it from `verify`).
 
 import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-import { readModules } from "../sync/modules.ts";
 import { type EnrichedRow, parseEnrichedRows, type RedactionState } from "./redact.ts";
-
-/** The module names a .repo-platform.yml text declares - the readable
- *  registration that makes a repository a settings target; null when the
- *  file or its top-level modules list is unreadable. One grammar with the
- *  sync's module selection (readModules), and logLevel error so a warned-on
- *  source line (target content) never reaches a public log. Lives here (not
- *  in the selector script, which runs at import time) so the parse stays
- *  unit-testable. */
-export function declaredModules(registrationText: string): string[] | null {
-  let data: unknown;
-  try {
-    data = parseYaml(registrationText, { logLevel: "error" });
-  } catch {
-    return null;
-  }
-  return readModules(data).modules;
-}
 
 // `private` rides the matrix so the render and merge steps, which run BEFORE the
 // settings action and quote repo-owned content, can hide it via run_hidden.ts.

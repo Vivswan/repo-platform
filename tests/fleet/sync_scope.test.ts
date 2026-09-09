@@ -4,21 +4,34 @@
 import { describe, expect, test } from "bun:test";
 import {
   classifyEntry,
+  modulesAdmit,
+  modulesFilterFor,
+  modulesLeftOutLine,
   parseScope,
   type Scope,
   type ScopeSource,
   scopeRefusal,
   scopeSelects,
 } from "../../.github/scripts/fleet/sync_scope.ts";
+import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
 
 const CALL: ScopeSource = { kind: "call", sha: "8096c4920f84ec4122d14c5bd884703dd0d382ba" };
 const DISPATCH: ScopeSource = { kind: "dispatch" };
 
+// The real roster: the filter tests name real modules so a renamed module
+// fails here, not in a fleet run.
+const ROSTER = new Set(MODULE_ORDER);
+
 const ALL: Scope = { kind: "all" };
-const list = (visibility: ("public" | "private")[], slugs: string[]): Scope => ({
+const list = (
+  visibility: ("public" | "private")[],
+  slugs: string[],
+  modules: string[][] = [],
+): Scope => ({
   kind: "list",
   visibility: new Set(visibility),
   slugs: new Set(slugs),
+  modules: modules.map((names) => new Set(names)),
 });
 
 describe("parseScope", () => {
@@ -31,6 +44,16 @@ describe("parseScope", () => {
     { raw: "public, Vivswan/Dotfiles", expected: list(["public"], ["vivswan/dotfiles"]) },
     { raw: "o/a,o/b, O/A", expected: list([], ["o/a", "o/b"]) },
     { raw: "public,private", expected: list(["public", "private"], []) },
+    { raw: "modules:pages", expected: list([], [], [["pages"]]) },
+    {
+      raw: "Modules: Pages + release-please",
+      expected: list([], [], [["pages", "release-please"]]),
+    },
+    { raw: "modules:uv+uv", expected: list([], [], [["uv"]]) },
+    {
+      raw: "public, modules:pages, o/a, modules:rust+uv",
+      expected: list(["public"], ["o/a"], [["pages"], ["rust", "uv"]]),
+    },
     {
       raw: "o/a,,o/b",
       expected: {
@@ -56,6 +79,14 @@ describe("parseScope", () => {
       },
     },
     {
+      raw: "all, modules:pages",
+      expected: {
+        kind: "error",
+        message:
+          '"all" mixes with nothing: pass all alone, or public, private, and owner/name slugs',
+      },
+    },
+    {
       raw: "o/a, just-a-name",
       expected: {
         kind: "error",
@@ -71,8 +102,46 @@ describe("parseScope", () => {
           "2 of 3 scope entries are neither owner/name slugs nor public/private (values withheld - they may be private slugs)",
       },
     },
+    {
+      raw: "modules:",
+      expected: {
+        kind: "error",
+        message:
+          "a modules: filter has an empty module name: write modules:<name>, or modules:<a>+<b> for the repos selecting every listed module",
+      },
+    },
+    {
+      raw: "public, modules:pages+",
+      expected: {
+        kind: "error",
+        message:
+          "a modules: filter has an empty module name: write modules:<name>, or modules:<a>+<b> for the repos selecting every listed module",
+      },
+    },
+    {
+      raw: "modules:pagez",
+      expected: {
+        kind: "error",
+        message: `1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
+      },
+    },
+    {
+      raw: "modules:pages+Vivswan/secret, modules:o/hidden",
+      expected: {
+        kind: "error",
+        message: `2 of 3 module names in the modules: filters are not modules of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
+      },
+    },
   ])("$raw", ({ raw, expected }) => {
-    expect(parseScope(raw)).toEqual(expected);
+    expect(parseScope(raw, ROSTER)).toEqual(expected);
+  });
+
+  test("the roster names what the message lists, so a module the template retires drops out", () => {
+    expect(parseScope("modules:pages", new Set(["uv", "rust"]))).toEqual({
+      kind: "error",
+      message:
+        "1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: uv, rust",
+    });
   });
 });
 
@@ -82,6 +151,9 @@ describe("classifyEntry", () => {
     ["Public", "public"],
     ["PRIVATE", "private"],
     ["Vivswan/a", "slug"],
+    ["modules:pages", "modules"],
+    ["MODULES:", "modules"],
+    ["module:pages", "invalid"],
     ["steady", "invalid"],
     ["", "invalid"],
   ] as const)("%s -> %s", (entry, kind) => {
@@ -120,8 +192,109 @@ describe("scopeSelects", () => {
       scope: list(["public", "private"], []),
       expected: ["o/pub-a", "o/pub-b", "o/priv"],
     },
+    {
+      reason: "a modules filter alone admits every visibility as a candidate",
+      scope: list([], [], [["pages"]]),
+      expected: ["o/pub-a", "o/pub-b", "o/priv"],
+    },
+    {
+      reason: "a visibility token narrows the filter's candidates",
+      scope: list(["private"], [], [["pages"]]),
+      expected: ["o/priv"],
+    },
+    {
+      reason: "a slug joins the filter's candidates as typed",
+      scope: list(["private"], ["o/pub-a"], [["pages"]]),
+      expected: ["o/pub-a", "o/priv"],
+    },
   ])("$reason", ({ scope, expected }) => {
     expect(select(scope).map(([repo]) => repo)).toEqual(expected);
+  });
+});
+
+describe("modules filters", () => {
+  const PAGES_AND_RELEASE = list(["public"], ["o/named"], [["pages", "release-please"]]);
+  const EITHER = list([], [], [["pages"], ["rust", "uv"]]);
+
+  test.each<{ reason: string; scope: Scope; repo: string; filters: string[][] | null }>([
+    {
+      reason: "no filter in the scope",
+      scope: list(["public"], ["o/a"]),
+      repo: "o/a",
+      filters: null,
+    },
+    { reason: "the whole fleet", scope: ALL, repo: "o/a", filters: null },
+    {
+      reason: "a repo named by slug is admitted as typed, any casing",
+      scope: PAGES_AND_RELEASE,
+      repo: "O/Named",
+      filters: null,
+    },
+    {
+      reason: "every other candidate is judged",
+      scope: PAGES_AND_RELEASE,
+      repo: "o/other",
+      filters: [["pages", "release-please"]],
+    },
+  ])("modulesFilterFor: $reason", ({ scope, repo, filters }) => {
+    expect(modulesFilterFor(scope, repo)).toEqual(
+      filters === null ? null : filters.map((names) => new Set(names)),
+    );
+  });
+
+  test.each<{ reason: string; scope: Scope; declared: string[]; admitted: boolean }>([
+    {
+      reason: "AND: every named module must be selected",
+      scope: PAGES_AND_RELEASE,
+      declared: ["uv", "pages", "release-please"],
+      admitted: true,
+    },
+    {
+      reason: "AND: one missing module fails the filter",
+      scope: PAGES_AND_RELEASE,
+      declared: ["uv", "pages"],
+      admitted: false,
+    },
+    { reason: "an empty selection passes no filter", scope: EITHER, declared: [], admitted: false },
+    {
+      reason: "OR across filters: the first one passes",
+      scope: EITHER,
+      declared: ["pages"],
+      admitted: true,
+    },
+    {
+      reason: "OR across filters: the second one passes",
+      scope: EITHER,
+      declared: ["uv", "rust", "nightly"],
+      admitted: true,
+    },
+    {
+      reason: "OR across filters: half of each passes neither",
+      scope: EITHER,
+      declared: ["uv", "docs-site"],
+      admitted: false,
+    },
+  ])("modulesAdmit: $reason", ({ scope, declared, admitted }) => {
+    const filters = modulesFilterFor(scope, "o/judged");
+    if (filters === null) throw new Error("the case must carry a filter");
+    expect(modulesAdmit(filters, declared)).toBe(admitted);
+  });
+
+  test.each<{ scope: Scope; leftOut: number; line: string | null }>([
+    { scope: ALL, leftOut: 0, line: null },
+    { scope: list(["public"], []), leftOut: 3, line: null },
+    {
+      scope: EITHER,
+      leftOut: 1,
+      line: "modules filter: 1 adopted repo left out (selecting none of the listed module sets)",
+    },
+    {
+      scope: PAGES_AND_RELEASE,
+      leftOut: 0,
+      line: "modules filter: 0 adopted repos left out (selecting none of the listed module sets)",
+    },
+  ])("modulesLeftOutLine: $leftOut left out -> $line", ({ scope, leftOut, line }) => {
+    expect(modulesLeftOutLine(scope, leftOut)).toBe(line);
   });
 });
 
@@ -137,6 +310,12 @@ describe("scopeRefusal", () => {
     {
       reason: "tokens alone are never refused",
       scope: list(["private"], []),
+      source: CALL,
+      expected: null,
+    },
+    {
+      reason: "a modules filter alone is never refused",
+      scope: list([], [], [["pages"]]),
       source: CALL,
       expected: null,
     },

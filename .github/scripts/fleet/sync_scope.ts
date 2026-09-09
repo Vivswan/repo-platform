@@ -1,6 +1,7 @@
 // The fleet scope grammar, one owner for the directive parser and both selectors: `all`, the
-// tokens `public` and `private`, or owner/name slugs. Only the plans know visibility (fail-closed:
-// not discovered as public counts as private), so they expand the tokens the leg passes through.
+// tokens `public` and `private`, owner/name slugs, or `modules:<a>+<b>` filters (the repos whose
+// .repo-platform.yml selects every named module). Only the plans know visibility and module
+// selections (fail-closed: not discovered as public counts as private), so they expand the tokens.
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 
@@ -9,22 +10,34 @@ export function isSlug(value: unknown): value is string {
   return typeof value === "string" && SLUG_RE.test(value);
 }
 
+const MODULES_PREFIX = "modules:";
+// Inside one filter the names are joined with "+" (the entry list already spends the comma).
+const MODULES_JOINER = "+";
+
 export type Visibility = "public" | "private";
-export type ScopeEntryKind = "all" | Visibility | "slug" | "invalid";
+export type ScopeEntryKind = "all" | Visibility | "slug" | "modules" | "invalid";
 
 export function classifyEntry(entry: string): ScopeEntryKind {
   const folded = entry.toLowerCase();
   if (folded === "all" || folded === "public" || folded === "private") return folded;
+  if (folded.startsWith(MODULES_PREFIX)) return "modules";
   return isSlug(entry) ? "slug" : "invalid";
 }
 
+/** `modules` holds one set per modules: filter, the names that filter ANDs; a repo passes when
+ *  any set is a subset of its selection (modulesAdmit). Empty: no filter. */
 export type Scope =
   | { kind: "all" }
-  | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string> };
+  | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string>; modules: Set<string>[] };
 
-/** The whole fleet for "" and "all", else the folded list. Messages carry counts, never
- *  entries: a dispatch entry may be a private slug and the caller's log is public. */
-export function parseScope(raw: string): Scope | { kind: "error"; message: string } {
+/** The whole fleet for "" and "all", else the folded list. `roster` is the template's module
+ *  list (scripts/lib/module_manifests.ts's MODULE_ORDER): a filter naming anything else is refused
+ *  here, before any repository is probed. Messages carry counts, never entries: a dispatch entry
+ *  may be a private slug and the caller's log is public. */
+export function parseScope(
+  raw: string,
+  roster: ReadonlySet<string>,
+): Scope | { kind: "error"; message: string } {
   const trimmed = raw.trim();
   if (trimmed === "" || trimmed.toLowerCase() === "all") return { kind: "all" };
   const entries = trimmed.split(",").map((entry) => entry.trim());
@@ -37,14 +50,27 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
   }
   const visibility = new Set<Visibility>();
   const slugs = new Set<string>();
+  const modules: Set<string>[] = [];
   let invalid = 0;
   let alls = 0;
+  let emptyModuleNames = 0;
+  let moduleNames = 0;
+  let unknownModules = 0;
   for (const entry of entries) {
     const kind = classifyEntry(entry);
     if (kind === "all") alls++;
     else if (kind === "slug") slugs.add(entry.toLowerCase());
     else if (kind === "invalid") invalid++;
-    else visibility.add(kind);
+    else if (kind === "modules") {
+      const names = entry
+        .slice(MODULES_PREFIX.length)
+        .split(MODULES_JOINER)
+        .map((name) => name.trim().toLowerCase());
+      emptyModuleNames += names.filter((name) => name === "").length;
+      moduleNames += names.length;
+      unknownModules += names.filter((name) => name !== "" && !roster.has(name)).length;
+      modules.push(new Set(names));
+    } else visibility.add(kind);
   }
   if (alls > 0) {
     return {
@@ -58,18 +84,57 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
       message: `${invalid} of ${entries.length} scope entries ${invalid === 1 ? "is" : "are"} neither owner/name slugs nor public/private (values withheld - they may be private slugs)`,
     };
   }
-  return { kind: "list", visibility, slugs };
+  if (emptyModuleNames > 0) {
+    return {
+      kind: "error",
+      message: `a modules: filter has an empty module name: write modules:<name>, or modules:<a>${MODULES_JOINER}<b> for the repos selecting every listed module`,
+    };
+  }
+  if (unknownModules > 0) {
+    return {
+      kind: "error",
+      message: `${unknownModules} of ${moduleNames} module names in the modules: filters ${unknownModules === 1 ? "is not a module" : "are not modules"} of this template (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`,
+    };
+  }
+  return { kind: "list", visibility, slugs, modules };
 }
 
 /** Where the scope came from: the workflow_call input (ONLY_REPO, public text off the judged
  *  main commit) or the typed dispatch input (may be a private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 
+/** Whether the scope admits `repo` before its module selection is known: named by slug, or passed
+ *  by the visibility tokens (any visibility when only modules: filters constrain the fleet). The
+ *  filters then still judge it: modulesFilterFor, then modulesAdmit over its declared list. */
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
   if (scope.kind === "all") return true;
-  return (
-    scope.slugs.has(repo.toLowerCase()) || scope.visibility.has(isPrivate ? "private" : "public")
-  );
+  if (scope.slugs.has(repo.toLowerCase())) return true;
+  if (scope.visibility.size === 0) return scope.modules.length > 0;
+  return scope.visibility.has(isPrivate ? "private" : "public");
+}
+
+/** The modules: filters `repo` must pass, or null when none applies: the scope carries no filter,
+ *  or it named the repo by slug (a slug is admitted as typed, its selection unread). */
+export function modulesFilterFor(scope: Scope, repo: string): Set<string>[] | null {
+  if (scope.kind !== "list" || scope.modules.length === 0) return null;
+  return scope.slugs.has(repo.toLowerCase()) ? null : scope.modules;
+}
+
+/** The filters' verdict over a repo's declared module list: some filter names only modules the
+ *  repo selects (AND inside a filter, OR across filters). */
+export function modulesAdmit(
+  filters: readonly ReadonlySet<string>[],
+  declared: readonly string[],
+): boolean {
+  const selected = new Set(declared);
+  return filters.some((names) => [...names].every((name) => selected.has(name)));
+}
+
+/** The plan's one line about the adopted repos its modules: filters left out, counts only (a
+ *  left-out repo may be private). Null when the scope carries no filter. */
+export function modulesLeftOutLine(scope: Scope, leftOut: number): string | null {
+  if (scope.kind !== "list" || scope.modules.length === 0) return null;
+  return `modules filter: ${leftOut} adopted ${leftOut === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
 }
 
 /** Why a list scope cannot run, counts only: a slug naming no known repo, or on the called path

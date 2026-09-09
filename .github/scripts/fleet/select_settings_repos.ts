@@ -18,14 +18,17 @@
 // GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives every warning;
 // GITHUB_EVENT_PATH supplies the dispatch scope input (a non-empty
 // ONLY_REPO env overrides it: post-green.yml's called run, the harness,
-// local runs). The scope grammar is the sync's (sync_scope.ts).
+// local runs). The scope grammar is the sync's (sync_scope.ts): slugs,
+// public, private, modules:<a>+<b> filters (judged over each adopted repo's
+// declared list below), or "all".
 
 import { appendFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
-import { declaredModules } from "./build_settings_matrix.ts";
+import { declaredModules } from "../sync/modules.ts";
 import {
   captureNetwork,
   discoverOwnerRepos,
@@ -37,7 +40,14 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { type EnrichedRow, enrich, verifyTag } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
+import {
+  modulesAdmit,
+  modulesFilterFor,
+  modulesLeftOutLine,
+  parseScope,
+  scopeRefusal,
+  scopeSelects,
+} from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -48,7 +58,7 @@ const selfRepo = requireEnv("GITHUB_REPOSITORY");
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
 // lives with readDispatchRepo. A list is validated against the discovered
 // fleet once the rows are known (below).
-const scope = parseScope(readDispatchRepo(owner));
+const scope = parseScope(readDispatchRepo(owner), new Set(MODULE_ORDER));
 if (scope.kind === "error") {
   console.log(`::error::${scope.message}`);
   process.exit(1);
@@ -72,29 +82,33 @@ function warn(message: string): void {
   }
 }
 
-// Each probe answers one question about one repo. Results: "pass" keeps
-// the repo, "drop" is a definitive negative (the probe already explained
-// it), and any string is the no-answer detail for the retry loop.
-type ProbeResult = "pass" | "drop" | { detail: string };
+// Each probe answers one question about one repo. Results: a pass carries
+// what the probe learned, a drop is a definitive negative (the probe already
+// explained it), and a retry carries the no-answer detail for the retry loop.
+type ProbeResult<T> =
+  | { kind: "pass"; value: T }
+  | { kind: "drop" }
+  | { kind: "retry"; detail: string };
 
 // Enrollment = the token's actual grant (push_probe.ts; 200 only with
 // push permission; 401/403/404 = no grant; a transport failure reports 0
 // and is retried like any other non-answer).
-function probePush(slug: string, display: string): ProbeResult {
+function probePush(slug: string, display: string): ProbeResult<true> {
   const code = pushProbeStatus(slug, pat);
-  if (code === 200) return "pass";
+  if (code === 200) return { kind: "pass", value: true };
   if (code === 401 || code === 403 || code === 404) {
     notice(pushProbeSkipNotice(display));
-    return "drop";
+    return { kind: "drop" };
   }
-  return { detail: `HTTP ${String(code).padStart(3, "0")}` };
+  return { kind: "retry", detail: `HTTP ${String(code).padStart(3, "0")}` };
 }
 
 // The adoption probe: the repo's .repo-platform.yml must exist and carry a
-// readable modules list. Only a 404 means "not adopted"; any other API
-// failure is a non-answer. An unreadable modules list is a repo defect
-// worth a warning - its settings stay unmanaged until fixed.
-function probeAdoption(slug: string, display: string): ProbeResult {
+// readable modules list, which a pass carries for the scope's modules:
+// filters. Only a 404 means "not adopted"; any other API failure is a
+// non-answer. An unreadable modules list is a repo defect worth a warning -
+// its settings stay unmanaged until fixed.
+function probeAdoption(slug: string, display: string): ProbeResult<string[]> {
   const probe = captureNetwork([
     "gh",
     "api",
@@ -103,22 +117,23 @@ function probeAdoption(slug: string, display: string): ProbeResult {
     "Accept: application/vnd.github.raw",
   ]);
   if (probe.exitCode === 0) {
-    if (declaredModules(probe.stdout) !== null) return "pass";
+    const declared = declaredModules(probe.stdout);
+    if (declared !== null) return { kind: "pass", value: declared };
     warn(
       `${display}: its .repo-platform.yml has no readable top-level modules list, so its ` +
         "settings baseline cannot be computed - the repo is skipped and its settings stay " +
         "unmanaged until the file is fixed.",
     );
-    return "drop";
+    return { kind: "drop" };
   }
   if (/HTTP 404/.test(probe.stderr)) {
     notice(notAdoptedNotice(display, "The settings heal only manages adopted repos."));
-    return "drop";
+    return { kind: "drop" };
   }
-  return { detail: probe.stderr.replace(/\n+$/, "") };
+  return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// true keeps the repo in the pipeline, false drops it - either a
+// The pass value keeps the repo in the pipeline, null drops it - either a
 // definitive negative (already reported by the probe) or still no answer
 // after the retries, which warns loudly: a silently dropped repo would
 // heal nothing tonight and nobody would know. The no-answer detail is
@@ -127,17 +142,17 @@ function probeAdoption(slug: string, display: string): ProbeResult {
 const ATTEMPTS = 3;
 // Test knob: the harness sets it to 0 so retry coverage does not sleep.
 const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
-async function probe(
+async function probe<T>(
   label: string,
-  fn: (slug: string, display: string) => ProbeResult,
+  fn: (slug: string, display: string) => ProbeResult<T>,
   slug: string,
   display: string,
-): Promise<boolean> {
+): Promise<T | null> {
   let detail = "";
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     const result = fn(slug, display);
-    if (result === "pass") return true;
-    if (result === "drop") return false;
+    if (result.kind === "pass") return result.value;
+    if (result.kind === "drop") return null;
     detail = scrubSlug(result.detail, slug, display);
     if (attempt < ATTEMPTS) {
       console.log(
@@ -149,7 +164,7 @@ async function probe(
   warn(
     `${display}: the ${label} failed ${ATTEMPTS} times (last error: ${detail}) - not a permission or adoption answer, so the repo is skipped this run; the nightly heal retries it. If this persists, check the repo's availability and the fleet token.`,
   );
-  return false;
+  return null;
 }
 
 // Discovery pre-filters to owned, user-writable repos; the token's actual
@@ -174,31 +189,45 @@ if (refusal !== null) {
   process.exit(1);
 }
 
+// A modules: filter judges each adopted repo's declared list; a repo it
+// leaves out is counted, never named (it may be private).
 const targets: EnrichedRow[] = [];
+let leftOut = 0;
 for (const row of rows) {
   if (!scopeSelects(scope, row.repo, isPrivate(row.repo))) continue;
   const { repo, display } = row;
   // The operator repo rides in as the matrix builder's --self row (it is
   // not adopted, so the adoption probe would drop it here).
   if (repo.toLowerCase() === selfRepo.toLowerCase()) continue;
-  if (!(await probe("push-permission probe", probePush, repo, display))) continue;
-  if (!(await probe("settings adoption check", probeAdoption, repo, display))) continue;
+  if ((await probe("push-permission probe", probePush, repo, display)) === null) continue;
+  const declared = await probe("settings adoption check", probeAdoption, repo, display);
+  if (declared === null) continue;
+  const filters = modulesFilterFor(scope, repo);
+  if (filters !== null && !modulesAdmit(filters, declared)) {
+    leftOut++;
+    continue;
+  }
   targets.push(row);
 }
 writeFileSync(join(runnerTemp, "settings_targets.json"), JSON.stringify(targets));
+const leftOutLine = modulesLeftOutLine(scope, leftOut);
+if (leftOutLine !== null) console.log(leftOutLine);
 
 // The matrix joins the probed opt-in list (already scoped above) with the
-// operator repo's own row when the scope selects it; a builder failure
-// invalidates the whole selection and exits 1. capture() pipes stderr (the
-// hang bound needs the pipe); re-emit it whole with writeSync - an async
-// stream write racing the process.exit below truncates at the pipe buffer
-// (~64 KiB).
+// operator repo's own row when the scope selects it - by slug or visibility,
+// never through a modules: filter, since the operator repo is not a render
+// and selects no modules. A builder failure invalidates the whole selection
+// and exits 1. capture() pipes stderr (the hang bound needs the pipe);
+// re-emit it whole with writeSync - an async stream write racing the
+// process.exit below truncates at the pipe buffer (~64 KiB).
+const selfSelected =
+  scopeSelects(scope, selfRepo, false) && modulesFilterFor(scope, selfRepo) === null;
 const matrix = capture([
   "bun",
   ".github/scripts/fleet/build_settings_matrix.ts",
   "--targets",
   join(runnerTemp, "settings_targets.json"),
-  ...(scopeSelects(scope, selfRepo, false) ? ["--self", selfRepo] : []),
+  ...(selfSelected ? ["--self", selfRepo] : []),
 ]);
 writeSync(2, matrix.stderr);
 if (matrix.exitCode !== 0) {

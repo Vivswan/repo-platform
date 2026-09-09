@@ -11,10 +11,12 @@
 // would kill the matrix.
 //
 // Scope (sync_scope.ts owns the grammar): owner/name slugs, public/private,
-// or the literal "all", an explicit whole-fleet scope (never ambiguous, since
-// real slugs are always owner/name). RECOVER=recopy requires a scope: a
-// recovery re-render clobbers local edits in template-managed files and must
-// never fan out across the fleet by accident, so an empty repo is rejected.
+// modules:<a>+<b> filters (judged over each adopted repo's declared list
+// below), or the literal "all", an explicit whole-fleet scope (never
+// ambiguous, since real slugs are always owner/name). RECOVER=recopy requires
+// a scope: a recovery re-render clobbers local edits in template-managed
+// files and must never fan out across the fleet by accident, so an empty
+// repo is rejected.
 // Only the input's PRESENCE is judged (its value may be a private slug and
 // this log is public); sync-repos.yml fast-fails the same check before
 // checkout, and the copy here is the tested backstop. Env: PAT, GH_TOKEN,
@@ -22,8 +24,10 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
+import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
+import { declaredModules } from "../sync/modules.ts";
 import {
   captureNetwork,
   notAdoptedNotice,
@@ -34,7 +38,14 @@ import {
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { enrich, parseDiscoveredList, verifyTag } from "./redact.ts";
-import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
+import {
+  modulesAdmit,
+  modulesFilterFor,
+  modulesLeftOutLine,
+  parseScope,
+  scopeRefusal,
+  scopeSelects,
+} from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -52,7 +63,7 @@ if (env("RECOVER") === "recopy" && scopeInput === "") {
   process.exit(1);
 }
 
-const scope = parseScope(scopeInput);
+const scope = parseScope(scopeInput, new Set(MODULE_ORDER));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
@@ -83,6 +94,7 @@ if (refusal !== null) {
 }
 
 const repos: Record<string, unknown>[] = [];
+let leftOut = 0;
 for (const row of rows) {
   const { repo: slug, display } = row;
   if (!scopeSelects(scope, slug, row.private)) continue;
@@ -98,28 +110,49 @@ for (const row of rows) {
     process.exit(1);
   }
   // Only a 404 means "not adopted"; any other API failure (auth, rate
-  // limit, outage) fails the plan instead of silently skipping repos.
+  // limit, outage) fails the plan instead of silently skipping repos. The
+  // raw content is read only for a modules: filter and never printed.
   const adoption = captureNetwork([
     "gh",
     "api",
     `repos/${slug}/contents/.repo-platform.yml`,
-    "--silent",
+    "-H",
+    "Accept: application/vnd.github.raw",
   ]);
-  if (adoption.exitCode === 0) {
-    // The display IS the slug for public rows (enrichedRowSchema holds
-    // that invariant), so every matrix row can emit it as its repo.
-    repos.push({ repo: row.display, private: row.private, verify: row.verify });
-  } else {
-    const probe = adoption.stdout + adoption.stderr;
-    if (/HTTP 404/.test(probe)) {
+  if (adoption.exitCode !== 0) {
+    // stderr only: a failed or timed-out read can leave file content on
+    // stdout, target-owned text that may name other private repos.
+    if (/HTTP 404/.test(adoption.stderr)) {
       notice(notAdoptedNotice(display));
-    } else {
-      error(`adoption check failed for ${display}: ${scrubSlug(probe, slug, display)}`);
-      process.exit(1);
+      continue;
+    }
+    error(`adoption check failed for ${display}: ${scrubSlug(adoption.stderr, slug, display)}`);
+    process.exit(1);
+  }
+  // A filter judges the declared list; a list it cannot read is reported
+  // and left out (the leg's own selection would fail on it), a repo it
+  // leaves out is counted, never named (it may be private).
+  const filters = modulesFilterFor(scope, slug);
+  if (filters !== null) {
+    const declared = declaredModules(adoption.stdout);
+    if (declared === null) {
+      warning(
+        `${display}: its .repo-platform.yml has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
+      );
+      continue;
+    }
+    if (!modulesAdmit(filters, declared)) {
+      leftOut++;
+      continue;
     }
   }
+  // The display IS the slug for public rows (enrichedRowSchema holds
+  // that invariant), so every matrix row can emit it as its repo.
+  repos.push({ repo: row.display, private: row.private, verify: row.verify });
 }
 
+const leftOutLine = modulesLeftOutLine(scope, leftOut);
+if (leftOutLine !== null) console.log(leftOutLine);
 setOutput("repos", JSON.stringify(repos));
 if (repos.length === 0) {
   notice("no adopted repos selected; nothing to sync.");
