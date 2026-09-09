@@ -1217,6 +1217,32 @@ a:focus-visible {
   margin: 16px 0 2px;
 }
 
+.fleet-facts dt,
+.fleet-facts dd {
+  margin: 0;
+  min-width: 0;
+  line-height: 1.45;
+}
+.fleet-facts dt {
+  font-family: var(--fleet-font-display);
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  /* an item's label sits inside a value cell and would inherit its alignment */
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.fleet-facts dd {
+  text-align: right;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--vp-c-text-1);
+  /* anywhere, not break-word: the card has one value column, so the only
+   * thing min-content decides is whether an unbroken value (a long
+   * repository name) pushes the grid past the card; where a value breaks
+   * is the same under both (a hyphen is a break point either way) */
+  overflow-wrap: anywhere;
+}
+
 /* One grid for the whole card: every section list, row, and nested item
  * list is a subgrid of it, so the label column is shared and values start
  * on one line whatever a section's longest label. A counted group holds
@@ -1274,32 +1300,6 @@ a:focus-visible {
 }
 .fleet-facts .fleet-facts-item {
   padding: 11px 0;
-}
-
-.fleet-facts dt,
-.fleet-facts dd {
-  margin: 0;
-  min-width: 0;
-  line-height: 1.45;
-}
-.fleet-facts dt {
-  font-family: var(--fleet-font-display);
-  font-weight: 600;
-  color: var(--vp-c-text-1);
-  /* an item's label sits inside a value cell and would inherit its alignment */
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.fleet-facts dd {
-  text-align: right;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  color: var(--vp-c-text-1);
-  /* anywhere, not break-word: the card has one value column, so the only
-   * thing min-content decides is whether an unbroken value (a long
-   * repository name) pushes the grid past the card; where a value breaks
-   * is the same under both (a hyphen is a break point either way) */
-  overflow-wrap: anywhere;
 }
 /* A path segment (facts-panel.ts splits repository and homepage at their
  * slashes) wraps as a unit: the line breaks between segments, and inside
@@ -1520,6 +1520,7 @@ a:focus-visible {
   letter-spacing: -0.02em;
   color: var(--vp-c-text-1);
 }
+/* biome-ignore lint/style/noDescendingSpecificity: the flyout menu's .title never shares an element with this one */
 .NotFound .title {
   font-family: var(--fleet-font-display);
   padding-top: 16px;
@@ -1535,6 +1536,7 @@ a:focus-visible {
   font-weight: 400;
   line-height: 1.6;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: the flyout menu's .link never shares an element with this one */
 .NotFound .link {
   display: inline-flex;
   align-items: center;
@@ -1565,12 +1567,14 @@ a:focus-visible {
 @media print {
   .VPNav,
   .VPLocalNav,
+  /* biome-ignore lint/style/noDescendingSpecificity: the sidebar's screen rule positions it and sets no display */
   .VPSidebar,
   .Layout .VPDoc.has-aside .aside,
   .VPSkipLink,
   .fleet-launcher,
   .fleet-launcher-button,
   .VPDoc .content-top,
+  /* biome-ignore lint/style/noDescendingSpecificity: the footer's screen rule sets its margin and no display */
   .VPDocFooter,
   .vp-doc [class*="language-"] > button.copy,
   .vp-doc [class*="language-"] > span.lang {
@@ -1620,9 +1624,7 @@ a:focus-visible {
     padding: 0;
     margin: 0;
   }
-  .Layout .VPDoc .container,
-  .Layout .VPDoc .content,
-  .Layout .VPDoc .content-container {
+  .Layout .VPDoc :is(.container, .content, .content-container) {
     max-width: none;
   }
   /* The address replaces carbon's 11px masked icon box in the same
@@ -1698,6 +1700,7 @@ a:focus-visible {
 /* Motion is a cue, never the content: with reduced motion requested every
  * transition and animation on the page stops, carbon's !important ones
  * included. */
+/* biome-ignore-start lint/complexity/noImportantStyles: carbon's reduced-motion rules are !important and the pager's hover transform outranks by specificity, so only !important wins here */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1708,8 +1711,9 @@ a:focus-visible {
   /* carbon's own !important transitions on the switch are scoped, so they
    * outrank the universal selector above; the .VPNav ancestor (the bar and
    * the phone menu both mount the switch inside it) lifts these past them */
-  .VPNav .VPSwitch,
+  /* biome-ignore lint/style/noDescendingSpecificity: the bar's .check rule sets color and shadow, not transition */
   .VPNav .VPSwitch .check,
+  .VPNav .VPSwitch,
   .VPNav .VPSwitch .icon svg {
     transition: none !important;
   }
@@ -1725,3 +1729,4 @@ a:focus-visible {
     transform: none !important;
   }
 }
+/* biome-ignore-end lint/complexity/noImportantStyles: the reduced-motion block ends here */
