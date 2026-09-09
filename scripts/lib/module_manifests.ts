@@ -214,14 +214,11 @@ export const manifestSchema = z.strictObject({
     })
     .optional(),
   // The settings LAYER FILES the module ships next to this manifest
-  // (docs/settings.md) - filenames only, never settings content: the files
-  // stay plain settings-YAML documents that the fleet's render selects and
-  // merges. readManifest holds this declaration and the tree together in
-  // both directions, so a declared-but-missing or present-but-undeclared
-  // layer file is a hard error for every manifest consumer - selecting by
-  // existence alone failed OPEN (a deleted layer file silently shrank the
-  // merged roster and the apply deleted its labels fleet-wide). A module
-  // shipping no layer files omits the key.
+  // (docs/settings.md): filenames only, never settings content, so the files
+  // stay plain settings-YAML documents the fleet's render selects and merges.
+  // readManifest holds this declaration and the tree together in both
+  // directions (assertSettingsLayerFiles carries the why), so a declared-but-
+  // missing or present-but-undeclared layer file is a hard error everywhere.
   settings_layers: z
     .array(z.enum(SETTINGS_LAYER_ORDER))
     .min(1)
@@ -351,15 +348,14 @@ export function assertTrackingLabelUniqueness(manifests: ModuleManifest[]): void
   }
 }
 
-/** The manifest's settings_layers declaration against the module folder,
- *  in BOTH directions. Layer files used to be selected by existence,
- *  which failed OPEN: a deleted templates/uv/settings.yml simply vanished
- *  from the fleet render's stack, the merged label roster came out short
- *  but valid-looking, and the apply's delete-undeclared pass removed that
- *  module's labels from every live repository. readManifest runs this on
- *  every load, so the declaration can only ever shrink on purpose (one
- *  change updating manifest and tree together). `exists` is injectable so
- *  a test can prove a deletion fails loudly without deleting anything. */
+/** The manifest's settings_layers declaration against the module folder, in BOTH
+ *  directions. Layer files used to be selected by existence, which failed OPEN: a
+ *  deleted templates/uv/settings.yml simply vanished from the fleet render's stack,
+ *  the merged label roster came out short but valid-looking, and the apply's
+ *  delete-undeclared pass removed that module's labels from every live repository.
+ *  readManifest runs this on every load, so the declaration can only shrink on
+ *  purpose (one change updating manifest and tree together). `exists` is injectable
+ *  so a test can prove a deletion fails loudly without deleting anything. */
 export function assertSettingsLayerFiles(
   manifest: ModuleManifest,
   templatesDir: string = TEMPLATES_DIR,
