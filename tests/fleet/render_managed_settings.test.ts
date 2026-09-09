@@ -364,6 +364,7 @@ describe("the render CLI acts on the adoption recheck", () => {
 
   function runCli(modules: string | null): {
     exitCode: number | null;
+    stdout: string;
     outputs: string;
     document: string | null;
     root: string;
@@ -398,6 +399,7 @@ describe("the render CLI acts on the adoption recheck", () => {
     );
     return {
       exitCode: proc.exitCode,
+      stdout: proc.stdout,
       outputs: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : "",
       document: existsSync(outPath) ? readFileSync(outPath, "utf-8") : null,
       root,
@@ -426,6 +428,21 @@ describe("the render CLI acts on the adoption recheck", () => {
     // The pin the freshness step compares against: without it that step
     // refuses, and the apply never runs.
     expect(result.outputs).toContain(`ref=${result.head}`);
+  });
+
+  test("a selected stream module with no recorded answer renders on its default with a notice", () => {
+    // The unit tests inject the report sink; this proves the script's own
+    // sink is the workflow command the apply log shows, and that the render
+    // still writes the document (the label is the default, not a failure).
+    const result = runCli("uv, fuzzer");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      `::notice::${join(result.root, ".github/.copier-answers.yml")}: the fuzzer module is ` +
+        "selected but the file records no fuzzer_label answer yet, so this apply assumes the " +
+        "module's default label 'fuzz-nightly'.",
+    );
+    expect(result.document).toContain("name: fuzz-nightly");
+    expect(result.outputs).toContain("skipped=false");
   });
 });
 
@@ -514,14 +531,147 @@ describe("fact resolvers", () => {
     expect(() => modulesFrom("a: [unclosed\n", "f")).toThrow("YAML parse error");
   });
 
-  test("trackingLabelsFrom resolves selected streams and fails closed on a missing answer", () => {
-    expect(trackingLabelsFrom("fuzzer_label: my-fuzz\n", ["fuzzer"], manifests, "f")).toEqual([
-      { module: "fuzzer", label: "my-fuzz" },
-    ]);
-    expect(trackingLabelsFrom("{}\n", ["uv"], manifests, "f")).toEqual([]);
-    expect(() => trackingLabelsFrom("{}\n", ["fuzzer"], manifests, "f")).toThrow(
-      "cannot be resolved",
-    );
+  describe("trackingLabelsFrom", () => {
+    // A module lands in .repo-platform.yml one PR before the sync PR that
+    // records its label answer, so an ABSENT answer is a normal state of
+    // every module addition and resolves to the manifest default with this
+    // notice; a PRESENT but unreadable answer is an answers-file defect.
+    const WHERE = "owner/name/.github/.copier-answers.yml";
+    const PENDING_FUZZER_NOTICE =
+      "owner/name/.github/.copier-answers.yml: the fuzzer module is selected but the file " +
+      "records no fuzzer_label answer yet, so this apply assumes the module's default label " +
+      "'fuzz-nightly'. The repository's pending sync PR writes the answer; the first apply " +
+      "after it merges reads the recorded value, so a label customized in that PR takes " +
+      "effect then.";
+    test.each<{
+      reason: string;
+      answers: string;
+      modules: string[];
+      labels: { module: string; label: string }[] | "throws";
+      notices: string[];
+    }>([
+      {
+        reason: "a recorded answer is the label, no notice",
+        answers: "fuzzer_label: my-fuzz\n",
+        modules: ["fuzzer"],
+        labels: [{ module: "fuzzer", label: "my-fuzz" }],
+        notices: [],
+      },
+      {
+        reason: "no selected stream module resolves nothing",
+        answers: "{}\n",
+        modules: ["uv"],
+        labels: [],
+        notices: [],
+      },
+      {
+        reason: "an absent answer for a selected stream is the manifest default, with the notice",
+        answers: "github_username: o\n",
+        modules: ["uv", "fuzzer"],
+        labels: [{ module: "fuzzer", label: "fuzz-nightly" }],
+        notices: [PENDING_FUZZER_NOTICE],
+      },
+      {
+        reason: "the fallback is per stream: the recorded one stays recorded",
+        answers: "nightly_label: my-nightly\n",
+        modules: ["fuzzer", "nightly"],
+        labels: [
+          { module: "fuzzer", label: "fuzz-nightly" },
+          { module: "nightly", label: "my-nightly" },
+        ],
+        notices: [PENDING_FUZZER_NOTICE],
+      },
+      {
+        reason: "a present but empty answer still fails",
+        answers: 'fuzzer_label: ""\n',
+        modules: ["fuzzer"],
+        labels: "throws",
+        notices: [],
+      },
+      {
+        reason: "a present but null answer still fails",
+        answers: "fuzzer_label:\n",
+        modules: ["fuzzer"],
+        labels: "throws",
+        notices: [],
+      },
+      {
+        reason: "a present but non-string answer still fails",
+        answers: "fuzzer_label: [a]\n",
+        modules: ["fuzzer"],
+        labels: "throws",
+        notices: [],
+      },
+    ])("$reason", ({ answers, modules, labels, notices }) => {
+      const seen: string[] = [];
+      const absent = {
+        fallback: "default",
+        report: (message: string) => seen.push(message),
+      } as const;
+      if (labels === "throws") {
+        expect(() => trackingLabelsFrom(answers, modules, manifests, WHERE, absent)).toThrow(
+          "the fuzzer module is selected but its fuzzer_label answer is not readable",
+        );
+      } else {
+        expect(trackingLabelsFrom(answers, modules, manifests, WHERE, absent)).toEqual(labels);
+      }
+      expect(seen).toEqual(notices);
+    });
+
+    test("an assumed default that collides with another stream's recorded label still fails", () => {
+      // A repo may record another stream's default as its own label while
+      // that stream is unselected. Selecting the stream then has no
+      // resolvable label until its sync PR records a distinct one (copier's
+      // validator refuses the equal pair), so the render fails as on any
+      // label collision instead of guessing.
+      const absent = { fallback: "default", report: () => {} } as const;
+      const trackingLabels = trackingLabelsFrom(
+        "docs_site_label: fuzz-nightly\n",
+        ["docs-site", "fuzzer"],
+        manifests,
+        WHERE,
+        absent,
+      );
+      expect(trackingLabels).toEqual([
+        { module: "docs-site", label: "fuzz-nightly" },
+        { module: "fuzzer", label: "fuzz-nightly" },
+      ]);
+      expect(() =>
+        managedSettings(facts({ modules: ["docs-site", "fuzzer"], trackingLabels }), manifests),
+      ).toThrow("which collide");
+    });
+
+    test("under the fail policy an absent answer throws instead of assuming the default", () => {
+      expect(() =>
+        trackingLabelsFrom("github_username: o\n", ["fuzzer"], manifests, WHERE, {
+          fallback: "fail",
+        }),
+      ).toThrow(
+        "owner/name/.github/.copier-answers.yml: the fuzzer module is selected but the file " +
+          "records no fuzzer_label answer - no sync PR records this file, so the tracking " +
+          "label cannot be resolved; record the answer",
+      );
+    });
+
+    test("the fetched facts resolve a pending answer the same way, naming the repository", () => {
+      // The observed shape: .repo-platform.yml already lists the module,
+      // the sync PR rendering it (and recording fuzzer_label) is still open.
+      const fetcher = (_repo: string, path: string): string | null => {
+        if (path === ".repo-platform.yml") return "modules: [uv, fuzzer]\n";
+        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
+        if (path === ".github/.copier-answers.yml") return "github_username: o\nprivate: false\n";
+        return null;
+      };
+      const seen: string[] = [];
+      const report = (message: string) => seen.push(message);
+      expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher, report)).toEqual({
+        modules: ["uv", "fuzzer"],
+        private: false,
+        trackingLabels: [{ module: "fuzzer", label: "fuzz-nightly" }],
+        prTitleWorkflowPresent: false,
+      });
+      expect(seen).toEqual([PENDING_FUZZER_NOTICE]);
+    });
   });
 
   test("declaredPrivate reads only a boolean repository.private", () => {
@@ -553,6 +703,20 @@ describe("fact resolvers", () => {
     const real = readFileSync(".repo-platform-answers.yml", "utf-8");
     writeFileSync(file, real.replace("- bun", "- bnu"));
     expect(() => factsFromOperatorAnswers(file, manifests)).toThrow("unknown module");
+  });
+
+  test("the operator's absent stream answer is a defect, not a pending render", () => {
+    // No sync PR writes .repo-platform-answers.yml, so the client-side
+    // default fallback must not engage: the file is hand-maintained.
+    const dir = temp.dir("operator-label-");
+    const file = join(dir, "answers.yml");
+    const real = readFileSync(".repo-platform-answers.yml", "utf-8");
+    const stripped = real.replace(/^docs_site_label: .*\n/m, "");
+    if (stripped === real) throw new Error("the real operator answers record no docs_site_label");
+    writeFileSync(file, stripped);
+    expect(() => factsFromOperatorAnswers(file, manifests)).toThrow(
+      "records no docs_site_label answer - no sync PR records this file",
+    );
   });
 
   test("the operator answers reproduce this repository's own facts", () => {
