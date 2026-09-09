@@ -1,0 +1,33 @@
+/* The reduced-motion stop: with the preference set every transition and
+ * animation on the page stops, carbon's !important ones included, while
+ * the scroll-cue shadows (not motion) keep their attachment. */
+
+/* biome-ignore-start lint/complexity/noImportantStyles: carbon's reduced-motion rules are !important and the pager's hover transform outranks by specificity, so only !important wins here */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+  /* carbon's own !important transitions on the switch are scoped, so they
+   * outrank the universal selector above; the .VPNav ancestor (the bar and
+   * the phone menu both mount the switch inside it) lifts these past them */
+  .VPNav .VPSwitch .check,
+  .VPNav .VPSwitch,
+  .VPNav .VPSwitch .icon svg {
+    transition: none !important;
+  }
+  /* carbon's reset also pins background-attachment (against parallax),
+   * which would fix the scrollers' cover layers over their edge shadows;
+   * the shadows are a scroll cue, not motion */
+  .vp-doc .vp-table,
+  .vp-doc [class*="language-"] pre {
+    background-attachment: local, local, scroll, scroll !important;
+  }
+  /* the pager arrow's hover slide is motion, not a cue: the hue change stays */
+  .VPDocFooter .pager-link .pager-icon {
+    transform: none !important;
+  }
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: the reduced-motion block ends here */

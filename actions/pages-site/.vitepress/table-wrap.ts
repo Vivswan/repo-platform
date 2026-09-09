@@ -1,5 +1,5 @@
 // Wraps every top-level markdown table in <div class="vp-table" tabindex="0">
-// so the theme can make the WRAPPER the horizontal scroller (components.css):
+// so the theme can make the WRAPPER the horizontal scroller (tables.css):
 // a table wider than the doc column scrolls inside the wrapper instead of
 // clipping at the viewport, and the wrapper, not the table, is the tab stop
 // keyboard users scroll from. VitePress renders every table as

@@ -1,0 +1,136 @@
+/* The doc column's frame over carbon: the row above the article (the Edit
+ * button alone, at the height the aside and the landing card read), the
+ * outline's top level with the h1, and the aside's edge rule dropped. */
+
+/* Carbon's breadcrumb repeated the h1, so it is hidden; its Markdown menu
+ * is off in ../config.mts. */
+.VPDoc {
+  --fleet-content-top-height: 45px;
+}
+.VPDoc .content-top {
+  height: var(--fleet-content-top-height);
+  padding: 0 0 12px;
+  border-bottom-color: var(--vp-c-divider);
+  background-color: transparent;
+}
+.VPDoc .content-top .content-file {
+  display: none;
+}
+
+.VPDoc .content-top .edit-link-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fleet-radius-sm);
+  background-color: transparent;
+  color: var(--vp-c-text-3);
+  transition:
+    background-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.VPDoc .content-top .edit-link-button:hover {
+  background-color: var(--color-action-list-item-default-hover-bg);
+  color: var(--fleet-hue);
+}
+.VPDoc .content-top .edit-link-button .content-box-icon {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  color: inherit;
+}
+/* The label stays in the DOM as the control's accessible name. */
+.VPDoc .content-top .edit-link-button .edit-link-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The outline's own rule runs down the headings; carbon's second rule on
+ * the aside's edge ran the viewport's height 25px beside it. Carbon's
+ * viewport-high minimum (for a sponsors spacer this theme has no use for)
+ * would, under the deeper top padding below, make a short outline scroll
+ * through blank space. */
+.VPDoc .aside .aside-content {
+  border-left: 0;
+  min-height: 0;
+}
+/* The outline's top is level with the h1's: the article's top padding,
+ * the row above it, and the main's top padding. */
+.VPDoc .aside .aside-container {
+  padding-top: calc(
+    var(--vp-nav-height) +
+    var(--vp-layout-top-height, 0px) +
+    var(--vp-doc-top-height, 0px) +
+    32px +
+    var(--fleet-content-top-height) +
+    32px
+  );
+}
+
+/* The footer's own margin sets the gap above the pager; carbon's 80px
+ * bottom padding here would stack under it. */
+.VPDoc .content .main {
+  padding-bottom: 0;
+}
+
+/* Flush with the link text below it: the list's 1px rule and 12px inset
+ * plus the row's 10px padding. */
+.VPDocAside .VPAsideContent .outline-title {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-c-text-3);
+  margin: 0 0 8px 23px;
+}
+.VPDocAside .VPDocOutlineItem.root {
+  border-left-color: var(--vp-c-divider);
+  max-height: none;
+  overflow: visible;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item {
+  /* the active marker (::after) positions against this row, not the li
+   * that also holds the nested headings */
+  position: relative;
+  border-radius: 0;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+}
+.VPDocAside .VPDocOutlineItem .nested .vp-outline-item {
+  padding-left: 22px;
+}
+.VPDocAside .VPDocOutlineItem .outline-link {
+  font-size: 14.5px;
+  line-height: 1.5;
+  white-space: normal;
+  color: var(--vp-c-text-2);
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item:hover {
+  background-color: transparent;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-item:hover .outline-link {
+  color: var(--vp-c-text-1);
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .vp-outline-item {
+  background-color: transparent;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .vp-outline-item::after {
+  left: -13px;
+  top: 8px;
+  height: calc(100% - 16px);
+  border-radius: 1px;
+}
+.VPDocAside .VPDocOutlineItem .vp-outline-li.active .outline-link {
+  color: var(--fleet-hue);
+  font-weight: 600;
+}

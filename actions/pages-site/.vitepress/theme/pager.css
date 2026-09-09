@@ -1,0 +1,98 @@
+/* The footer's pager over carbon: two quiet links under one hairline,
+ * never cards; label, title and arrow at rest, the hue on the arrow and a
+ * band tint on the whole link only on hover and focus. */
+
+/* The provenance line closes the footer under the pager (provenance.css
+ * drops its own rule there). */
+.VPDoc .VPDocFooter {
+  margin-bottom: 0;
+}
+.VPDocFooter .prev-next {
+  border-top-color: var(--vp-c-divider);
+  padding-top: 12px;
+  /* the links' pulled-out padding eats 24px of the gap; 8px stays between the tints */
+  gap: 32px;
+}
+/* The whole link is the hit target. Its padding is pulled outside the
+ * column with a matching negative margin, so the text stays flush with the
+ * article and the tint spills past it the way a hovered list row does. */
+.VPDocFooter .pager-link {
+  gap: 4px;
+  margin: 0 -12px;
+  width: calc(100% + 24px);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--fleet-radius-md);
+  background-color: transparent;
+  transition: background-color var(--fleet-transition);
+}
+.VPDocFooter .pager-link:hover,
+.VPDocFooter .pager-link:focus-visible {
+  background-color: var(--fleet-hue-band);
+}
+.VPDocFooter .pager-link .desc {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-text-3);
+  transition: color var(--fleet-transition);
+}
+/* the tertiary ink sits under 4.5:1 on the tint (theme_contrast.test.ts) */
+.VPDocFooter .pager-link:hover .desc,
+.VPDocFooter .pager-link:focus-visible .desc {
+  color: var(--vp-c-text-2);
+}
+.VPDocFooter .pager-link .title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--vp-c-text-1);
+  text-wrap: balance;
+  transition: none;
+}
+.VPDocFooter .pager-link:hover .title {
+  color: var(--vp-c-text-1);
+}
+/* The arrow carries the direction: it takes the hue and moves 2px the
+ * way the link goes. */
+.VPDocFooter .pager-link .pager-icon {
+  color: var(--vp-c-text-3);
+  transition:
+    color var(--fleet-transition),
+    transform var(--fleet-transition);
+}
+.VPDocFooter .pager-link:hover .pager-icon,
+.VPDocFooter .pager-link:focus-visible .pager-icon {
+  color: var(--fleet-hue);
+}
+.VPDocFooter .pager-link.prev:hover .pager-icon,
+.VPDocFooter .pager-link.prev:focus-visible .pager-icon {
+  transform: translateX(-2px);
+}
+.VPDocFooter .pager-link.next:hover .pager-icon,
+.VPDocFooter .pager-link.next:focus-visible .pager-icon {
+  transform: translateX(2px);
+}
+
+@media (max-width: 767px) {
+  /* 14px is the floor for informational text on a phone. */
+  .VPDocFooter .pager-link .desc {
+    font-size: 14px;
+  }
+  .VPDoc .VPDocFooter {
+    margin-top: 40px;
+  }
+  .VPDocFooter .prev-next {
+    gap: 4px;
+  }
+  /* Stacked, the next link keeps its right alignment (carbon flips it left
+   * and pushes the arrow to the far edge, a card's shape); a lone next
+   * link sits right at its own width. */
+  .VPDocFooter .pager-link.next {
+    align-items: flex-end;
+    text-align: right;
+  }
+  .VPDocFooter .pager-link.next .desc-row,
+  .VPDocFooter .pager-link.next .title-row {
+    justify-content: flex-end;
+  }
+}
