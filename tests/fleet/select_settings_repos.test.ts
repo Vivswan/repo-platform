@@ -9,46 +9,14 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
-// End-to-end harness for the selector: the script runs against stub `gh`
-// and `curl` binaries on PATH (plus a no-op `sleep`, so the retry loop
-// costs no wall time). Personas, all enrolled unless probed otherwise;
-// adoption (a .repo-platform.yml with a readable modules list) is the
-// opt-in to managed settings, whether or not the list still names the
-// folded settings-sync module:
-//   deadapi       - .repo-platform.yml fetch fails HTTP 502 every attempt
-//   deadprobe     - push probe answers HTTP 500 every attempt
-//   flaky         - push probe 500s once then 200s; the adoption fetch 502s
-//                   once then succeeds (both must be healed by the retries)
-//   steady        - every probe answers first try; adopted (its list still
-//                   names settings-sync, the pre-fold shape)
-//   nomodule      - adopted with a list naming no folded module: a target
-//                   like any other
-//   unadopted     - no .repo-platform.yml (404): a routine notice-level
-//                   skip, never a warning
-//   locked        - public, push probe 403s: a public repo whose write
-//                   access was revoked stays discovered; every plan whose
-//                   scope selects that repository prints one notice that the
-//                   token cannot push to it (a private-scoped plan does not
-//                   select it), never a target
-//   hidden-locked - PRIVATE, push probe 403s: the same notice, by hint
-//   hidden-gone   - PRIVATE, NOT in the listing: a private repo whose write
-//                   access was revoked vanishes from GET /user/repos; the
-//                   stubs would admit it, so a control run lists it
-//   hidden-server - PRIVATE: healthy adoption, must reach the matrix as
-//                   its hint with a verify tag, never as a slug
-//   hidden-nomods - PRIVATE: its .repo-platform.yml has no readable
-//                   modules list, so the unmanaged warning and summary
-//                   line must carry the hint
-//   hidden-deadapi - PRIVATE: the adoption fetch 502s every attempt with
-//                   the slug and bare name in the error text; the retry
-//                   lines and the final warning must carry only the hint
-// Every persona is discovered (the listing IS the fleet - the PAT's grant
-// is the only membership fact); the public ones print plainly. The
-// operator repository itself (GITHUB_REPOSITORY) always joins the matrix
-// as the builder's self row. The heal must select flaky, steady,
-// nomodule, open-lib, and hidden-server, warn about deadapi, deadprobe,
-// hidden-nomods, and hidden-deadapi (skipped this run, retried nightly),
-// and exit 0; only a failed discovery or matrix build still exits 1.
+// End-to-end harness for the selector against stub `gh`, `curl`, and no-op
+// `sleep` binaries on PATH (the retry loop costs no wall time). The stub
+// fleet covers every selection axis: adoption (a readable modules list is
+// the opt-in, folded settings-sync name or not), dead and flaky probes the
+// retries must heal, revoked push access (a public repo prints one notice
+// per selecting plan; a private one vanishes from GET /user/repos, so the
+// stubs admit hidden-gone only in a control run), and PRIVATE personas
+// whose every public surface carries the hint, never the slug.
 describe("declaredModules", () => {
   test("answers the list for a readable declaration, in the sync's grammar", () => {
     expect(declaredModules("modules:\n  - settings-sync\n")).toEqual(["settings-sync"]);
@@ -183,15 +151,12 @@ describe("select_settings_repos.ts", () => {
   }
 
   // run() spawns bun which spawns more bun children, so one healthy run
-  // costs seconds. Host load stretches that, and a cold start (deps
-  // installed but caches unwarmed - exactly this file run in isolation
-  // in a fresh worktree) reliably pushed the beforeAll past bun-test's
-  // default 5s per-test/hook cap (the 5005ms hook-timeout signature;
-  // full-suite runs ride earlier suites' warmth and merely flaked).
-  // SPAWN_TIMEOUT_MS turns a wedged child into a diagnostic throw
-  // instead of exitCode null with partial output, and TEST_TIMEOUT_MS
-  // sits above it on every spawning test/hook so that throw always
-  // beats bun's value-free kill.
+  // costs seconds, and a cold start (this file alone in a fresh worktree)
+  // reliably pushed the beforeAll past bun-test's default 5s hook cap.
+  // SPAWN_TIMEOUT_MS turns a wedged child into a diagnostic throw instead
+  // of exitCode null with partial output, and TEST_TIMEOUT_MS sits above
+  // it on every spawning test/hook so that throw always beats bun's
+  // value-free kill.
   const SPAWN_TIMEOUT_MS = 15_000;
   const TEST_TIMEOUT_MS = 20_000;
 

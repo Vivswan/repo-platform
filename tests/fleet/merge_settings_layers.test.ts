@@ -772,17 +772,13 @@ describe("the override layer", () => {
 
 describe("what the six layers emit for a rule the fleet stopped declaring", () => {
   // The payload is the whole answer to "does the apply remove a dropped
-  // rule": the pinned action upserts a declared ruleset with a
-  // FULL-PAYLOAD PUT, so the live rules array becomes exactly what these
-  // layers emit. The dialect's rule APPEND runs between LAYERS, never
-  // against live state, so no live rule can survive its absence here.
-  // What this pins is the emitted document; the PUT itself is the
-  // action's contract (docs/settings.md's apply semantics).
-  //
-  // Both halves matter because a private repo's own settings.yml (layer
-  // 5) can still declare a copilot_code_review rule: the identity starter
-  // declares no ruleset, so the rule leaves the payload only once the
-  // repo file stops carrying it.
+  // rule": the pinned action upserts a declared ruleset with a FULL-PAYLOAD
+  // PUT (docs/settings.md's apply semantics), and the dialect's rule APPEND
+  // runs between LAYERS, never against live state, so no live rule can
+  // survive its absence here. Both halves matter because a private repo's
+  // own settings.yml (layer 5) can still declare a copilot_code_review
+  // rule: the identity starter declares no ruleset, so the rule leaves the
+  // payload only once the repo file stops carrying it.
   const manifests = loadManifests();
   const privateFleet = managedSettings(
     { modules: [], private: true, trackingLabels: [], prTitleWorkflowPresent: false },

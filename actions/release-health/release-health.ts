@@ -1,27 +1,21 @@
 /**
- * Gate a release on the repository's health. Runs at two points, selected by
- * MODE:
- * - pull-request: on a release-please PR's CI; the PR's own labels supply
- *   the override.
- * - release: on the main-push release path just before release-please cuts a
- *   release. Only a commit that is the merge of a release-please PR is
- *   gated; every other main push exits 0 untouched (release-please runs on
- *   every push but only cuts a release from a release-PR merge, so gating
- *   ordinary pushes would paint all of main red while one issue is open).
+ * Gate a release on the repository's health, at two points selected by
+ * MODE: pull-request (a release-please PR's CI; the PR's own labels supply
+ * the override) and release (the main-push path just before release-please
+ * cuts). In release mode only the merge commit of a release-please PR is
+ * gated; every other main push exits 0, because release-please runs on
+ * every push but cuts only from a release-PR merge, and gating ordinary
+ * pushes would paint all of main red while one issue is open.
  *
- * Three gate families, all evaluated even when the override label is present
- * so the report is complete: one tracking gate per label in TRACKING_LABELS
- * (the nightly fuzz/CI streams' tracking-issue labels; each open tracking
- * issue blocks and is reported under its own label), an open blocker issue
- * (BLOCKER_LABEL), and open Dependabot alerts at or above SECURITY_SEVERITY.
- * Failures without the override label on the release PR are ::error + exit
- * 1; with it they become ::warning + a loud ::notice and exit 0.
+ * Three gate families, all evaluated even under the override so the report
+ * is complete: one tracking gate per label in TRACKING_LABELS (each open
+ * tracking issue blocks under its own label), the open blocker issue
+ * (BLOCKER_LABEL), and open Dependabot alerts at or above
+ * SECURITY_SEVERITY. Without the override label failures are ::error and
+ * exit 1; with it they become ::warning plus a loud ::notice and exit 0.
  *
- * Configuration from the environment (set by action.yml): MODE,
- * TRACKING_LABELS (comma-separated; FUZZ_LABEL is the deprecated
- * single-label spelling, folded in), BLOCKER_LABEL, OVERRIDE_LABEL,
- * SECURITY_SEVERITY. Context: GH_TOKEN (gh auth), GITHUB_REPOSITORY,
- * GITHUB_SHA (release mode), GITHUB_EVENT_PATH (pull-request mode).
+ * Inputs come from the environment as action.yml sets them; FUZZ_LABEL is
+ * the deprecated single-label spelling of TRACKING_LABELS, folded in.
  */
 
 import { existsSync, readFileSync } from "node:fs";

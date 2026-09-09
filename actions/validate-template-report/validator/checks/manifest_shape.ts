@@ -6,23 +6,13 @@ import { coveredPaths } from "../ownership.ts";
 const RECOVERY = "run a recovery sync (recover=recopy)";
 
 /** The ownership manifest's shape and trust model. The manifest is itself
- *  a managed render, so client repos carry it and the template repo must
- *  NOT (self mode inverts - repo-platform is not a render of itself); a
- *  conflict-marked manifest is the conflict-marker check's report. Every
- *  build ships the manifest and the stamper writes the render's recorded
- *  _commit into the self entry verbatim, so absence, an unparseable file,
- *  and a provenance stamp differing from the recorded value are errors.
- *  The manifest's ownership METADATA is not trusted for the paths this
- *  validator's roster covers: the sync BASELINES non-conflicting local
- *  manifest edits rather than healing them, so a hand-flipped class
- *  (managed -> starter) would otherwise disable parity for that path
- *  permanently and invisibly. A class or split-metadata mismatch, an entry
- *  whose render condition is off, and a roster path the manifest does not
- *  list are all errors: the roster and the manifest come from the same
- *  template commit, so any disagreement is a hand edit. No in-repo signal
- *  can be tamper-proof against the repo's own owner; the guarantee is
- *  VISIBILITY, and a tampered _commit both self-heals on the next sync and
- *  breaks the repo's own update base loudly. */
+ *  a managed render, so clients carry it and the template repo must NOT
+ *  (self mode inverts); absence, unparseable text, and a provenance stamp
+ *  differing from the recorded _commit are errors. Ownership METADATA is
+ *  not trusted for roster paths: the sync BASELINES local manifest edits,
+ *  so a hand-flipped class would disable parity permanently and invisibly;
+ *  roster and manifest come from one template commit, so disagreement is
+ *  a hand edit. The guarantee is VISIBILITY, not tamper-proofing. */
 export function checkManifestShape(ctx: Context): Finding[] {
   if (ctx.mode === "self") {
     if (!ctx.manifestPresent) return [];

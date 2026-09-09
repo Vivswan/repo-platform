@@ -1,27 +1,21 @@
 // The ownership manifest's ONE emitter and ONE parser.
 //
 // .github/repo-platform-manifest.json is written and read at four stations
-// - compose/manifest.ts renders its template, copier's stamp hook rewrites
-// its hash tokens in place, the sync legs read it to rebuild split files,
-// and validate-template verifies byte parity against it - and each station
-// once carried its own private copy of the entry-line layout or the
-// duplicate-tolerant parse, which drifted (duplicate-key handling existed
-// on one side only). This module is the single owner of both directions:
-// entryLine emits the one-line entry layout, parseEntry reads one such
-// line back, and parseManifestFiles parses (and validates) a whole
-// manifest text. Consumers keep their own DATA - the validator's ownership
-// tables are generated from the template declarations, never read from the
-// manifest, because sync baselines manifest edits and a hand-flipped class
-// would self-certify - but the CODE that turns bytes into entries lives
-// here alone.
+// (compose/manifest.ts renders it, copier's stamp hook rewrites its hash
+// tokens, the sync legs rebuild split files from it, validate-template
+// checks byte parity against it), and each once carried its own copy of
+// the entry-line layout or the duplicate-tolerant parse, which drifted.
+// Consumers keep their own DATA: the validator's ownership tables are
+// generated from the template declarations, never read from the manifest,
+// because sync baselines manifest edits and a hand-flipped class would
+// self-certify. Only the CODE that turns bytes into entries lives here.
 //
-// The layout contract: one entry per line, 4-space indent, the JSON-quoted
+// Layout contract: one entry per line, 4-space indent, the JSON-quoted
 // path, one inline JSON object, so a stamped manifest differs from the raw
 // render in token values alone and copier's three-way update merge sees
 // minimal local edits.
 //
-// DEPENDENCY-FREE ZONE (see grammar.ts): ships on the build branch, runs
-// inside freshly rendered repositories - node builtins and zone-internal
+// DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal
 // imports only.
 
 import {
@@ -210,24 +204,12 @@ export function unknownEntryFields(
 
 /** The manifest's files mapping parsed from `text` (conflict blocks
  *  resolved toward the template side first), or a problem string when the
- *  text cannot be trusted - shared by every consumer, so no two stations
- *  can read different manifests and every one inherits the SAME
- *  validation: no mutation, stamp, or parity check ever sees a manifest
- *  this function did not clear. Every problem string is VALUE-FREE: the
- *  text is target-repo content on updates and the strings reach public
- *  logs, so none of them ever carries manifest bytes. Rejected here:
- *  - unparseable JSON, or no top-level 'files' mapping;
- *  - an entry value that is not a plain object with a string class (a
- *    null or scalar entry would throw at entry.class in a consumer,
- *    turning warn-and-continue contracts into hard failures);
- *  - a duplicated key anywhere in the JSON (found structurally, by
- *    hasDuplicateKey): duplicate JSON keys last-win at parse time, so a
- *    duplicate can flip a path's class with no parse error, and acting
- *    on the parsed value would launder it. Detection compares DECODED
- *    keys (two spellings of one key collide, like JSON.parse), but the
- *    key is deliberately NOT named in the problem - manifest keys are
- *    target-repo paths; existence is the diagnostic and the operator has
- *    the manifest. */
+ *  text cannot be trusted. Every consumer reads through here, so no station
+ *  can act on a manifest another one refused. Every problem string is
+ *  VALUE-FREE: the text is target-repo content on updates and the strings
+ *  reach public logs. A null entry is refused because a consumer would throw
+ *  at entry.class, turning warn-and-continue contracts into hard failures; a
+ *  scalar or classless entry and duplicate keys (below) are refused too. */
 export function parseManifestFiles(text: string):
   | { files: Record<string, ManifestEntryShape>; resolved: string; problem: null }
   | {
@@ -270,19 +252,13 @@ export function parseManifestFiles(text: string):
       };
     }
   }
-  // Duplicates count STRUCTURALLY: hasDuplicateKey walks the (already
-  // JSON.parse-validated) text and finds a key bound twice inside any one
-  // object - the thing JSON.parse flattens away by keeping the LAST value.
-  // Any duplicate shape is caught this way: two entry lines for one path
-  // (which would flip that path's ownership class silently), a duplicated
-  // field inside one entry (which would flip its marker or hash), and a
-  // duplicated top-level "files" mapping (which would swap the whole entry
-  // set); a path literally named "files" or "$comment" is never confused
-  // with its top-level structural twin, because scopes are tracked per
-  // object. The problem string stays value-free like every other branch:
-  // manifest keys are target-repo paths, so naming one would print
-  // private-repo content into a public log - existence is the diagnostic,
-  // and the operator has the manifest.
+  // JSON.parse keeps the LAST value of a duplicated key, so a duplicate can
+  // flip a path's ownership class, a field inside one entry (marker, hash),
+  // or the whole top-level "files" mapping with no parse error; acting on
+  // the parsed value would launder it. hasDuplicateKey walks the text
+  // structurally with per-object scopes, so a path literally named "files"
+  // never collides with its top-level twin. The key stays unnamed in the
+  // problem: manifest keys are target-repo paths and the log is public.
   if (hasDuplicateKey(resolved)) {
     return {
       files: null,

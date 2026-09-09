@@ -32,19 +32,14 @@ const oldProducerArgv = (treeDir: string) => ["git", "-C", treeDir, "add", "-A"]
 let fixtures: string;
 let hermeticEnv: Record<string, string>;
 
-/** Every spawn gets this explicit env (Bun.spawnSync must be HANDED the
- * env - the pins are inert as process.env mutations): GIT_* scrubbed
- * (hook-driven runs export GIT_DIR/GIT_INDEX_FILE, which would redirect
- * the fixture repos' git subprocesses), the global and system config
- * scopes pinned to a known-empty file, and XDG_CONFIG_HOME pinned to an
- * empty fixture dir (GIT_CONFIG_GLOBAL replaces the global CONFIG files
- * but not the default $XDG_CONFIG_HOME/git/ignore and attributes paths,
- * which apply even with the keys unset): a developer machine's global
- * or XDG ignore matching a fixture name would false-red the control arm
- * (the old form would drop a file the premise says nothing ignores).
- * The hostile arms plant their vectors explicitly, so pinning loses
- * nothing. Same pattern as tests/sync/normalize_src.test.ts's
- * gitFreeEnv. */
+/** Every spawn is HANDED this env (the pins are inert as process.env
+ * mutations): GIT_* scrubbed (hook-driven runs export GIT_DIR and
+ * GIT_INDEX_FILE, which would redirect the fixture repos' git), the global
+ * and system config scopes pinned to a known-empty file, and XDG_CONFIG_HOME
+ * pinned to an empty dir, because GIT_CONFIG_GLOBAL replaces the global
+ * config files but not $XDG_CONFIG_HOME/git/ignore and attributes. A
+ * developer's global or XDG ignore matching a fixture name would false-red
+ * the control arm; the hostile arms plant their vectors explicitly. */
 function buildHermeticEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   for (const key of Object.keys(env)) {
@@ -210,17 +205,14 @@ describe("stageComposedTreeArgv", () => {
   });
 
   test("the attributesFile override is ARMED: a global attributes rewrite cannot touch the helper's staged bytes", () => {
-    // The empty-config pin above means no attributes file ever exists
-    // for `-c core.attributesFile=/dev/null` to neutralize - deleting
-    // the flag left the rest of this suite green. So this arm points
-    // the global scope at a test-owned config whose attributes file
-    // carries a staging-visible rewrite (`* text` normalizes CRLF to LF
-    // at add time), and requires the helper's staging IMMUNE while a
-    // plain-add control IS bitten - the control proving the fixture
-    // actually rewrites, so immunity is the flag's doing. autocrlf is
-    // pinned false in the fixture config so the two normalization
-    // mechanisms cannot confound: this arm discriminates the
-    // ATTRIBUTES neutralization alone (the arm below owns autocrlf).
+    // The empty-config pin above means no attributes file exists for
+    // `-c core.attributesFile=/dev/null` to neutralize (deleting the flag
+    // left the rest of this suite green). So this arm points the global
+    // scope at a test-owned config whose attributes file rewrites CRLF to
+    // LF at add time, and requires the helper's staging IMMUNE while a
+    // plain-add control IS bitten, proving the fixture actually rewrites.
+    // autocrlf is pinned false in the fixture so this arm discriminates
+    // the ATTRIBUTES neutralization alone (the arm below owns autocrlf).
     const attributes = join(fixtures, "attr-rules");
     writeFileSync(attributes, "* text\n");
     const gitconfig = join(fixtures, "attr-gitconfig");
@@ -233,19 +225,14 @@ describe("stageComposedTreeArgv", () => {
   });
 
   test("the autocrlf override is ARMED: a machine-global core.autocrlf cannot touch the helper's staged bytes", () => {
-    // autocrlf=input rewrites CRLF at add time through CONFIG alone -
-    // no attributes file anywhere - so `-c core.attributesFile=/dev/null`
-    // does not cover it: a config-bearing machine (a developer laptop
-    // with dotfiles) would skew a local verifier against a config-free
-    // CI producer, the exact class the helper exists to prevent. The
-    // vector MUST ride a test-owned GIT_CONFIG_GLOBAL fixture file:
-    // unlike attributes (whose XDG fallback survives GIT_CONFIG_GLOBAL),
-    // autocrlf is a pure config key with no fallback path, so under
-    // buildHermeticEnv's pins this fixture is the only scope that can
-    // carry a live vector - planted anywhere else the arm would pass
-    // with and without the override, vacuously. No attributesFile is
-    // set here, so this arm discriminates the AUTOCRLF neutralization
-    // alone.
+    // autocrlf=input rewrites CRLF at add time through CONFIG alone, so
+    // `-c core.attributesFile=/dev/null` does not cover it: a config-bearing
+    // developer laptop would skew a local verifier against a config-free CI
+    // producer, the exact class the helper exists to prevent. The vector
+    // MUST ride a test-owned GIT_CONFIG_GLOBAL fixture: autocrlf is a pure
+    // config key with no XDG fallback, so under buildHermeticEnv's pins
+    // this is the only scope that can carry a live vector; planted anywhere
+    // else the arm would pass vacuously. No attributesFile is set here.
     const gitconfig = join(fixtures, "autocrlf-gitconfig");
     writeFileSync(gitconfig, "[core]\n\tautocrlf = input\n");
     const crlfEnv = { ...hermeticEnv, GIT_CONFIG_GLOBAL: gitconfig };
@@ -257,32 +244,22 @@ describe("stageComposedTreeArgv", () => {
 
   test("every composed-tree staging site stages through the ONE shared argv", () => {
     // The agreement holds BY CONSTRUCTION only while every composed-tree
-    // site calls the helper: a site quietly reverting to a raw `add`
-    // argv is the regression this pin makes loud. Beyond the
-    // producer/verifier trio, the pin covers the sites whose staged tree
-    // only has to EQUAL the published one (CI's smoke source, the golden
-    // renders, the sync rehearsal's synthetic build): none feeds the
-    // provenance hash, but a composed tree that ever grew an
-    // ignore-matching file would make them validate a DIFFERENT tree
-    // than production publishes.
-    //
-    // The matcher sees BOTH raw spellings (`-A` and `--all`) so a
-    // spelling switch cannot dodge it, and the deliberately-raw sites
-    // are enumerated with their exact calls (one allowedPlainAdds entry
-    // per occurrence) instead of left unscanned - pinned to the call, so
-    // a swap (helper on the exempt site, raw add back on a composed one)
-    // cannot false-pass. They stage managed-repo trees whose own ignore
-    // rules must keep applying, so they stay plain AND must not adopt
-    // the helper (--force would smuggle ignored files): rehearse.ts's
-    // TARGET repo post-update staging (the would-be PR diff),
-    // open_automation_pr.ts's working-tree regeneration outputs, and
-    // commit_push.ts's rendered target repo.
+    // site calls the helper, so a site quietly reverting to a raw `add`
+    // argv is the regression this pin makes loud. Sites whose staged tree
+    // only has to EQUAL the published one (smoke source, golden renders,
+    // the sync rehearsal) are covered too: a composed tree that grew an
+    // ignore-matching file would make them validate a different tree than
+    // production publishes. Both raw spellings (`-A`, `--all`) match, and
+    // deliberately-raw sites are pinned per call so a swap cannot pass.
     const rawAdd = /"add",\s*"(?:-A|--all)"/g;
     const sites: { rel: string; composed: boolean; allowedPlainAdds?: string[] }[] = [
       { rel: ".github/scripts/build-branches/publish.ts", composed: true },
       { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
       { rel: ".github/scripts/ci/smoke_generate.ts", composed: true },
       { rel: "scripts/generate/render_goldens.ts", composed: true },
+      // The plain adds stage managed-repo trees whose own ignore rules must
+      // keep applying: --force would smuggle ignored files, so these sites
+      // must never adopt the helper.
       {
         rel: ".github/scripts/sync/rehearse.ts",
         composed: true,

@@ -122,15 +122,13 @@ describe("managedRulesets", () => {
 
   test("the fleet protection rulesets are NOT in these layers", () => {
     // main and non-bypassable PROTECTION rules live in
-    // .github/settings-override.yml, which merges above the repo layer at
-    // apply time - a repo must not be able to beat them, so they cannot
-    // sit in a layer the repo wins over. The public overlay contributes a
-    // main ENTRY, but it carries only the code_quality rule and the
-    // public-only copilot_code_review auto-request (Copilot reviews are
-    // disabled on private repos); the private side contributes no
-    // ruleset at all. The baseline's pr-title ruleset IS here - repos may
-    // beat module policy - and renders on every visibility (the disabled
-    // deselection heal must reach every managed repo).
+    // .github/settings-override.yml, which merges above the repo layer, so
+    // a repo cannot beat them. The public overlay's main ENTRY carries only
+    // the code_quality rule and the public-only copilot_code_review
+    // auto-request (Copilot reviews are disabled on private repos); the
+    // private side contributes no ruleset. The baseline's pr-title ruleset
+    // IS here (repos may beat module policy) and renders on every
+    // visibility, so the disabled deselection heal reaches every repo.
     expect(rulesetNames(facts())).toEqual(["pr-title", "main"]);
     expect(mainRuleTypes(facts())).toEqual(["code_quality", "copilot_code_review"]);
     expect(rulesetNames(facts({ private: true }))).toEqual(["pr-title"]);
@@ -276,16 +274,14 @@ describe("layerPaths", () => {
 });
 
 describe("the layer topology fails CLOSED", () => {
-  // layerPaths used to select layer files by existence, which failed
-  // OPEN: a deleted templates/uv/settings.yml just vanished from the
-  // stack, the roster came out short but valid-looking, and the apply's
-  // delete-undeclared pass removed the module's labels from live repos.
-  // The module declaration now lives in each module.yml (settings_layers)
-  // and the manifest LOADER holds it against the tree in both directions
-  // (assertSettingsLayerFiles, tests/scripts/lib/module_manifests.test.ts),
-  // so a genuine drift fails at loadManifests - never as a shorter render;
-  // what the render still owns is the fleet layer files and the
-  // declaration-driven selection proven here.
+  // layerPaths once selected layer files by existence, which failed OPEN:
+  // a deleted templates/uv/settings.yml vanished from the stack, the roster
+  // came out short but valid-looking, and the apply's delete-undeclared
+  // pass removed the module's labels from live repos. The declaration now
+  // lives in each module.yml (settings_layers) and the manifest LOADER
+  // holds it against the tree both ways (assertSettingsLayerFiles), so a
+  // genuine drift fails at loadManifests, never as a shorter render; the
+  // render still owns the declaration-driven selection proven here.
 
   test("selection follows the manifest declaration, never the tree", () => {
     // templates/uv/settings.yml exists on disk, but a manifest that does

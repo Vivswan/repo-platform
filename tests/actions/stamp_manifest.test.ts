@@ -1043,16 +1043,14 @@ describe("stampManifestText", () => {
   });
 
   test("a duplicated entry line for one path is a soft, value-free problem, never a throw", () => {
-    // Duplicate JSON keys last-win at parse time, so a duplicate line (a
-    // bad conflict resolution) can flip a path's ownership class with no
-    // parse error; stamping both lines would launder the flip. But this
-    // must stay SOFT: the same code ships as copier's after-hook over the
-    // MERGED tree, where a throw would fail the render and deliver no PR -
-    // the validator's parity check reports it in a delivered PR instead.
-    // The second line here has NO hash token - the starter-shaped flip.
-    // And the key is deliberately hostile: manifest keys are target-repo
-    // paths, so naming the duplicate would print a PRIVATE repo's path
-    // (or inject control bytes) into the public sync log.
+    // A duplicate line (a bad conflict resolution) can flip a path's class
+    // with no parse error, and stamping both lines would launder it. The
+    // refusal must stay SOFT: the same code is copier's after-hook over the
+    // MERGED tree, where a throw would deliver no PR; the validator's parity
+    // check reports it in a delivered PR instead. The second line has NO
+    // hash token (the starter-shaped flip), and the key is hostile because
+    // manifest keys are target-repo paths: naming it would print a PRIVATE
+    // path (or control bytes) into the public sync log.
     const key = String.raw`"SECRET-private/path\nleak.md"`;
     const root = tree({ "x.md": "content\n" });
     const text = manifestText([

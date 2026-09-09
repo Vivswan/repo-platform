@@ -1,32 +1,18 @@
 /**
- * File, update, or resolve a repository's nightly tracking issue.
- * Generalized from github-settings-as-code's file-fuzz-issue.ts: this version
- * knows nothing about any repo's fuzzer - or about fuzzing at all when the
- * stream carries no artifacts. With ARTIFACTS_DIR set it reads failure
- * reports from a directory whose layout is a small contract (docs/fuzzer.md,
- * "failure-report contract v1"): each immediate subdirectory is one failure
- * and carries a report.md whose first line is a `# title` heading and whose
- * body contains the replay command. The producer writes the replay command;
- * this script only assembles the issue. With ARTIFACTS_DIR empty the issue
- * body is a generic nightly-failure report (workflow, date, commit, run
- * link) - the shape the nightly module's plain-CI starter uses.
+ * File, update, or resolve a repository's nightly tracking issue. Knows
+ * nothing about any repo's fuzzer: with ARTIFACTS_DIR set the body is built
+ * from failure reports laid out per docs/fuzzer.md ("The failure-report
+ * contract (v1)"); the producer writes the replay command and this script
+ * only assembles the issue. With ARTIFACTS_DIR empty the body is the
+ * generic nightly-failure report the plain-CI starter uses.
  *
- * Two modes, selected by MODE:
- * - report: build a body (from the failure reports, or the generic one) and
- *   comment on the open labeled issue, or create it if none is open. One
- *   open issue per label. The repository owner is assigned at creation
- *   (best-effort; see assignOwner).
- * - resolve: after a green run, comment on and close every open labeled
- *   issue (the release gate blocks on any of them); a silent no-op when
- *   none is open.
+ * MODE=report comments on the open labeled issue or creates it (one open
+ * issue per label, owner assigned at creation; see assignOwner).
+ * MODE=resolve comments on and closes EVERY open labeled issue after a
+ * green run, because the release gate blocks on any of them.
  *
- * Configuration from the environment (set by action.yml): MODE, LABEL,
- * TITLE, ARTIFACTS_DIR, ARTIFACT_NAME, LABEL_COLOR, LABEL_DESCRIPTION,
- * STREAM (resolve-comment wording; report bodies key on ARTIFACTS_DIR).
- * Context: GH_TOKEN (gh auth), GITHUB_REPOSITORY (the repo every gh call
- * names via --repo, and part of the run link with GITHUB_SERVER_URL /
- * GITHUB_RUN_ID), GITHUB_WORKFLOW / GITHUB_SHA (the generic body),
- * GITHUB_OUTPUT (the issue-number step output).
+ * Inputs and context come from the environment as action.yml sets them;
+ * GITHUB_REPOSITORY names the repo on every gh call via --repo.
  */
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -282,12 +268,10 @@ async function openIssues(
 }
 
 /**
- * Best-effort owner assignment for a filed issue. Issues created with a
- * workflow token fire no issues:opened event, so the auto-assign module
- * structurally cannot catch them - assignment must happen at creation,
- * here. The owner login comes from the repo slug (a personal-account
- * fleet: a user repo's owner is assignable). Best-effort by constraint:
- * an org-owned repo's owner is an org and not assignable, and the nightly
+ * Best-effort owner assignment at creation: an issue created with a
+ * workflow token fires no issues:opened event, so the auto-assign module
+ * structurally cannot catch it. The owner login is the repo slug's owner (a
+ * personal-account fleet); an org owner is not assignable, and the nightly
  * pipeline must not gain a failure path over assignment, so a failed
  * assignment logs a notice and the filing stands.
  */
@@ -338,14 +322,12 @@ async function labelExists(run: GhRunner, repo: string, label: string): Promise<
 }
 
 /**
- * Comment on the open labeled issue if one exists, else create it, and
- * assign the repository owner at creation (see assignOwner for why the
- * assignment cannot live anywhere downstream). An already-open issue that
- * is still unassigned picks the owner up on the comment path; an assigned
- * one is left alone - a human may have deliberately reassigned it. Returns
- * the issue number so the caller can dispatch auto-assign at it (which
- * layers the CODEOWNERS policy on top of the owner default); undefined
- * only when gh's create URL fails to parse.
+ * Comment on the open labeled issue if one exists, else create it and
+ * assign the owner (see assignOwner). A still-unassigned open issue picks
+ * the owner up on the comment path; an assigned one is left alone, since a
+ * human may have deliberately reassigned it. Returns the issue number so
+ * the caller can dispatch auto-assign at it (CODEOWNERS policy on top of the
+ * owner default); undefined only when gh's create URL fails to parse.
  */
 export async function fileIssue(
   run: GhRunner,
@@ -417,16 +399,12 @@ export async function fileIssue(
 export type Stream = "fuzz" | "generic";
 
 /**
- * After a green run: comment on and close every open labeled issue, or do
- * nothing when none is open. Closing all of them matters because the
- * release-health gate blocks while ANY open issue carries the label, so
- * leaving extras open (a human labeling a related issue) would keep
- * releases blocked with a log that says everything was resolved. The
- * fuzz-stream comment (the default - fleet fuzzer starters predate the
- * STREAM input and must keep seeing the exact wording they always got; a
- * test pins it verbatim) hedges on unpinned crashes: one green night is
- * only evidence for inputs pinned as regression seeds. The generic-stream
- * comment carries no fuzz notions.
+ * After a green run: comment on and close EVERY open labeled issue. The
+ * release-health gate blocks while any open issue carries the label, so an
+ * extra left open (a human labeling a related issue) would keep releases
+ * blocked under a log saying all was resolved. The fuzz-stream comment is
+ * the default because fleet fuzzer starters predate STREAM (a test pins the
+ * wording); it hedges on unpinned crashes, which one green night cannot prove.
  */
 export async function resolveIssue(
   run: GhRunner,

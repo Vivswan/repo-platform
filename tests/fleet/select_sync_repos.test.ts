@@ -9,24 +9,13 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const temp = tempDirs();
 
 // End-to-end harness for the sync fan-out selector, stub-gh/curl style
-// (see select_settings_repos.test.ts). Personas, all discovered:
-//   steady        - public, adopted
-//   unadopted     - public, no .repo-platform.yml (skip notice)
-//   hidden-server - PRIVATE, adopted: every public surface (log, matrix,
-//                   roster) must carry its hint
-//   hidden-locked - PRIVATE, push probe 403s (the token cannot push, so it
-//                   is not a fleet member): the notice must carry its hint
-//   locked        - public, push probe 403s: a public repo whose write
-//                   access was revoked stays discovered; every plan whose
-//                   scope selects that repository prints one notice that the
-//                   token cannot push to it (the private-scoped cases below
-//                   do not select it, so they print none)
-//   hidden-gone   - PRIVATE, NOT discovered: a private repo whose write
-//                   access was revoked vanishes from GET /user/repos; the
-//                   stubs would admit it (adopted, probe 200), so the
-//                   control run below discovers it and it selects
-// The matrix rows are this job's output contract: a private row holds
-// {repo: <hint>, private: true, verify} and never the slug.
+// (see select_settings_repos.test.ts). Personas cover adoption and its
+// skip notice, revoked push access (a public repo stays discovered and
+// prints one notice per plan whose scope selects it; a private one
+// vanishes from GET /user/repos, so the stubs admit hidden-gone only in
+// the control run), and PRIVATE repos whose every public surface (log,
+// matrix, roster) carries the hint. The matrix rows are the job's output
+// contract: a private row holds {repo: <hint>, private: true, verify}.
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
   const root = temp.dir("select-sync-");

@@ -1,26 +1,21 @@
-// Assembles the fleet's versioned GitHub Pages site artifact (the planning
-// contract and layout live in lib.ts; docs/pages.md and docs/docs-site.md
-// document the result). Stateless by design: every deploy re-enumerates the
-// repository's version tags and rebuilds every tier from scratch, so theme
-// updates restyle every version on the next deploy and nothing accumulates
-// between runs.
+// Assembles the fleet's versioned GitHub Pages site artifact (planning
+// contract and layout in lib.ts; docs/pages.md and docs/docs-site.md
+// describe the result). Stateless by design: every deploy re-enumerates the
+// version tags and rebuilds every tier, so theme updates restyle every
+// version and nothing accumulates between runs.
 //
-// Two entry modes (env, set by action.yml):
-//   CHECK=true  build the caller's docs tree once, strictly (dead internal
-//               links fatal), and stop - the docs PR check. No artifact.
-//   otherwise   read MOUNTS, build every mount's tiers, lay out _site, and
-//               emit the site-dir output for upload.
-// Both modes need a committed git checkout at GITHUB_WORKSPACE: each tier's
-// project facts (settings.yml, copier answers, toolchain pins, LICENSE.md)
-// and its commit are read from the ref's tree with git, never from the
-// working files.
+// Entry modes (env, set by action.yml): CHECK=true builds the caller's docs
+// tree once, strictly (dead internal links fatal), and emits no artifact;
+// otherwise MOUNTS drives a full _site layout and the site-dir output.
+// Both need a committed git checkout at GITHUB_WORKSPACE: each tier's
+// project facts and commit are read from the ref's tree with git, never
+// from the working files.
 //
-// Builds run against materialized trees (hermetic - no cross-tier
-// node_modules or dist bleed): command tiers extract the whole ref with
-// `git archive` because the caller's build command mutates its tree, and
-// vitepress tiers copy the docs tree INTO the build root (a real copy;
-// module resolution walks up from the source files, so anything outside
-// the root misses the root's node_modules - see buildVitepressTier).
+// Builds run against materialized trees so no node_modules or dist bleeds
+// across tiers: command tiers `git archive` the whole ref because the
+// build command mutates its tree, and vitepress tiers COPY the docs tree
+// into the build root because module resolution walks up from the source
+// files (see buildVitepressTier).
 
 import { spawnSync } from "node:child_process";
 import {
@@ -450,15 +445,12 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
 }
 
 /** The version tags a command mount can serve: kept tags whose tree can
- *  structurally run the build command - for a probeable `bun run <script>`
- *  shape, some package.json the command can reach declares the script at
- *  that tag (lib.ts's judgeCommandTag carries the proof rules and
- *  the dependency-bin residual). A tag from before the site's build
- *  script existed is guaranteed unbuildable forever and would fail every
- *  deploy, so it is excluded with a notice (the vitepress mounts'
- *  missing-docs rule, mirrored); a tag that declares the script but whose
- *  build errors still fails the deploy loudly. An unprobeable command
- *  keeps every tag - only the shell can judge it. */
+ *  structurally run the build command (lib.ts's judgeCommandTag holds the
+ *  proof rules). A tag from before the site's build script existed is
+ *  unbuildable forever and would fail every deploy, so it is excluded with
+ *  a notice, mirroring the vitepress mounts' missing-docs rule; a tag that
+ *  declares the script but fails to build still fails the deploy loudly.
+ *  An unprobeable command keeps every tag: only the shell can judge it. */
 function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
   if (kept.length === 0) return kept;
   const probe = parseCommandProbe(cfg.buildCommand);
@@ -469,15 +461,13 @@ function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
       (path) => treeFile(cfg, ref, path),
       () => listTree(cfg, ref),
     );
-  // Calibration: skipping is armed only by the AFFIRMATIVE verdict at
-  // HEAD - a scripts entry there proves the command resolves through the
-  // scripts table at all. A command that works some other way (a
-  // dependency bin, a PATH executable, a file named like the script)
-  // declares nothing at HEAD, and an inconclusive HEAD (a symlinked cwd,
-  // an unparseable package.json) proves nothing either; both keep every
-  // tag building. An install command that rewrites package.json at build
-  // time stays the documented residual (the probe reads committed trees
-  // only).
+  // Skipping is armed only by the AFFIRMATIVE verdict at HEAD: a scripts
+  // entry there proves the command resolves through the scripts table at
+  // all. A command that works another way (a dependency bin, a PATH
+  // executable) declares nothing at HEAD, and an inconclusive HEAD (a
+  // symlinked cwd, an unparseable package.json) proves nothing either; both
+  // keep every tag building. An install command that rewrites package.json
+  // at build time stays the documented residual (docs/pages.md).
   if (judgeAt("HEAD").kind !== "declared") return kept;
   return kept.filter((tag) => {
     const verdict = judgeAt(tag);
