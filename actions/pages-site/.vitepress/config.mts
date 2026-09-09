@@ -87,13 +87,11 @@ const nativeName = (tag: string): string => {
 const markdown: MarkdownOptions = {
   // One highlighter theme whose colors are custom properties: custom.css
   // owns the code palette per mode (--fleet-code-*), so token contrast is
-  // a token value the theme's contrast test can guard, not a hex shiki's
-  // github themes bake into every span. No italics: the fleet reads
-  // emphasis by weight. Normalized once here: VitePress hands shiki this
-  // object per fence, and shiki normalizes a raw theme on every pass,
-  // mutating its colors in place; the second pass then finds the ansi
-  // palette already replaced and loses its var() mapping, so an ansi
-  // fence prints its text in the placeholder hex (near-transparent black).
+  // a token value the contrast test can guard, not a hex baked into every
+  // span. No italics: the fleet reads emphasis by weight. Normalized once
+  // here because shiki normalizes a raw theme on every fence and mutates
+  // its colors in place; the second pass then loses the ansi var() mapping
+  // and an ansi fence prints in the placeholder hex.
   theme: normalizeTheme(
     createCssVariablesTheme({
       name: "fleet",

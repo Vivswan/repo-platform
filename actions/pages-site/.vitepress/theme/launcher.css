@@ -304,16 +304,14 @@
     transform: translate(-50%, -50%);
   }
 }
-/* From carbon's aside breakpoint up the field spans the reading column:
- * its edges are the article's edges, so it reads as that column's search.
- * It is back in the nav's flex row for that: the row's right end is the
- * controls, and a field that would reach them shrinks instead of
- * overlapping (the auto right margin takes the slack when there is room,
- * flex takes the field when there is not). The article's place is carbon's
- * arithmetic (VPContent's frame padding, VPDoc's 24px, the content and
- * aside centered in what is left) restated from the row's own width, which
- * is that area less 16px; the nav is not a descendant of the layout it
- * aligns to. */
+/* From carbon's aside breakpoint up the field spans the reading column, so
+ * it reads as that column's search. It stays in the nav's flex row so a
+ * field that would reach the row's controls shrinks instead of overlapping
+ * (the auto right margin takes the slack when there is room, flex takes
+ * the field when there is not). The article's place is carbon's arithmetic
+ * (VPContent's frame padding, VPDoc's 24px, content and aside centered in
+ * the rest) restated from the row's own width, that area less 16px: the
+ * nav is not a descendant of the layout it aligns to. */
 @media (min-width: 1280px) {
   .VPNavBar.has-sidebar .fleet-launcher-button {
     --fleet-reading-area: calc(100% + 16px);

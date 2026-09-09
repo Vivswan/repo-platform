@@ -732,16 +732,14 @@ a:focus-visible {
   border-radius: var(--fleet-radius-md);
 }
 
-/* Tables: the wrapper table-wrap.ts adds is the horizontal scroller at
- * every width (carbon scrolls the table itself below 768px, which leaves
- * the off-screen cells setting the row heights), so a table wider than the
- * doc column scrolls inside the column, never under the aside and never
- * clipped at the viewport. What makes a table "wider" is its columns'
- * natural widths: an inline-code token counts whole up to the cap the
- * inline-code rules set, prose counts as its longest word. The scroll cue
- * is a shadow at each edge that has content past it: two ground-colored
- * layers scroll with the content and cover the two fixed shadow layers
- * exactly at the ends of the scroll range. */
+/* Tables: table-wrap.ts's wrapper is the horizontal scroller at every
+ * width (carbon scrolls the table itself below 768px, which leaves the
+ * off-screen cells setting the row heights), so a wide table scrolls
+ * inside the doc column, never under the aside or clipped at the viewport.
+ * What makes a table wider is its columns' natural widths: an inline-code
+ * token counts whole up to the inline-code cap, prose as its longest word.
+ * The scroll cue is an edge shadow only where content lies past it: two
+ * ground-colored layers scroll with the content and cover the fixed shadow layers at the ends. */
 .vp-doc .vp-table {
   overflow-x: auto;
   max-width: 100%;

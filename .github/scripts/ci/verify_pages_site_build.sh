@@ -1,39 +1,18 @@
 #!/usr/bin/env bash
 # Build the pages-site action's vitepress path end to end against a scratch
-# fixture repository, in the runner-shaped directory topology (workspace,
-# action checkout, and RUNNER_TEMP in three separate trees). This is the
-# gate for the class `bun run check` cannot see: the build works only when
-# the docs tree is materialized inside the build root, because the pages'
-# own SSR imports resolve by walking up from the SOURCE files - a srcDir
-# outside the root never reaches the action's node_modules on real runners
-# even though it can accidentally work on a laptop where the repo sits
-# near the dependencies.
+# fixture repository in the runner-shaped directory topology: workspace,
+# action checkout, and RUNNER_TEMP in three separate trees. This is the
+# gate for the class `bun run check` cannot see: the pages' own SSR imports
+# resolve by walking up from the SOURCE files, so a docs tree materialized
+# outside the build root never reaches the action's node_modules on a real
+# runner even though it can work by accident on a laptop where the repo
+# sits near the dependencies.
 #
-# Asserts, on the assembled artifact: the versioned tier layout, content
-# isolation between tiers, the locale build with carbon's translations
-# menu, the version switcher, the per-repo hue attribute on <html>, the
-# per-tier project facts (each tier's provenance names its OWN ref), a
-# carbon token in the built CSS (the base theme actually applied, not a
-# silent default-theme fallback) with carbon's remote font @imports
-# dropped and its unused Mona Sans gone (no @font-face, no asset, no
-# preload) while the theme's own fonts stay, the facts card rendered on
-# the landing page (repository link, the tier's own version row marked current
-# and noted as the one being read), the provenance line (the tier's ref and
-# the page's source file), the table scroll wrapper, the search launcher
-# (the landing page's link table rendered as the panel, its curated row
-# label and the fixture's h2 as a heading row label, the guide/ group
-# titled "Guide" from its folder name, the page row's note being the page's
-# site path, the nav button on a non-landing page, and the fixture's h2
-# anchor in the page index inlined into the client bundle), the sidebar
-# order from frontmatter and the landing table (a ranked page and its
-# group head lead, the table's page precedes the alphabetically earlier
-# unplaced one, the launcher's groups follow the same order, and no
-# frontmatter key reaches the HTML), llms.txt, the
-# strict CHECK mode both passing on clean docs and failing on a dead link,
-# the deploy's per-tier strictness
-# (a dead link sealed into a tag builds lenient, the same rot on HEAD fails
-# the deploy), the nested docs-dir build, and the deploy command's
-# legacy-tag skip (both arms) and HEAD calibration gate.
+# The fixture is a tagged docs repository (three tags plus HEAD, a locale,
+# a landing table, frontmatter ordering, every custom-block kind, and a
+# dead link on HEAD) built through build.ts and the deploy command; the
+# asserts below, one commented section per concern, pin what the theme and
+# the deploy's per-tier strictness must produce in the assembled artifact.
 #
 # Needs bun and git on PATH and the action's dependencies installed
 # (bun install --frozen-lockfile --cwd actions/pages-site).
