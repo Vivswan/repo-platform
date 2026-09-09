@@ -21,6 +21,7 @@ import {
   readFileSync,
   readSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -284,6 +285,11 @@ function capBody(full: string): string {
 // fail `gh pr create/edit` outright and lose the delivery channel.
 body = nulSafe(body);
 body = capBody(body);
+// gh reads the body from a file, never from its argv: mustCapture's
+// deadline-expiry line prints the whole argv, and a hidden target's body
+// carries private hunk text that no mask covers.
+const bodyFile = join(runnerTemp, "pr-body.md");
+writeFileSync(bodyFile, body);
 
 // Anything that needs human review (each condition below, plus every
 // report-file section whose roster entry sets forcesReview, so a new
@@ -332,7 +338,7 @@ if (branchMode) {
     );
     setOutput("url", "");
   } else {
-    mustCapture(["gh", "pr", "comment", existing, "-R", target, "--body", body]);
+    mustCapture(["gh", "pr", "comment", existing, "-R", target, "--body-file", bodyFile]);
     const prUrl = mustCapture([
       "gh",
       "pr",
@@ -355,7 +361,18 @@ if (existing !== "") {
   // Auto-merge was disarmed BEFORE the push (disarm_pr.ts); this step
   // only refreshes the PR and re-arms clean revisions below.
   // The rolling branch is force-pushed over; keep title/body honest.
-  mustCapture(["gh", "pr", "edit", existing, "-R", target, "--title", title, "--body", body]);
+  mustCapture([
+    "gh",
+    "pr",
+    "edit",
+    existing,
+    "-R",
+    target,
+    "--title",
+    title,
+    "--body-file",
+    bodyFile,
+  ]);
   url = mustCapture(["gh", "pr", "view", existing, "-R", target, "--json", "url", "--jq", ".url"]);
   console.log(`PR already exists for ${branch}; refreshed ${url}`);
 } else {
@@ -371,8 +388,8 @@ if (existing !== "") {
     branch,
     "--title",
     title,
-    "--body",
-    body,
+    "--body-file",
+    bodyFile,
   ]);
   console.log(`Created ${url}`);
 }

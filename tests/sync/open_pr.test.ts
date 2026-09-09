@@ -1,13 +1,15 @@
 // open_pr.ts: the PR-body section collection and the auto-merge decision.
 // The script is gh-bound, so a stub gh on PATH records every invocation
-// and serves canned answers; the assertions read the recorded `pr create`
-// body and the presence/absence of the `pr merge` arm call. The section
+// and serves canned answers; the assertions read the body file the
+// recorded `pr create` names and the presence/absence of the `pr merge`
+// arm call. The section
 // fixtures write through the SAME filename constants the production
 // writers use (section_files.ts), so a renamed report file fails here.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { redactCommand } from "../../.github/scripts/shared/proc.ts";
 import {
   MIGRATIONS_NAME,
   MIGRATIONS_REVIEW_NAME,
@@ -107,16 +109,22 @@ function run(opts: Options = {}) {
     .filter(Boolean)
     .map((record) => record.split("\x1f"));
   const create = records.find((args) => args[1] === "pr" && args[2] === "create");
-  const body = create ? (create[create.indexOf("--body") + 1] ?? "") : "";
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     /** The GITHUB_OUTPUT file: the url handoff the tail steps read. */
     outputs: readFileSync(outputFile, "utf-8"),
     records,
-    body,
+    body: create ? bodyOf(create) : "",
     merged: records.some((args) => args[1] === "pr" && args[2] === "merge"),
   };
+}
+
+/** The body a recorded gh call delivered: the content of the file its
+ * `--body-file` names (gh never receives the body in its argv). */
+function bodyOf(args: string[]): string {
+  const at = args.indexOf("--body-file");
+  return at === -1 ? "" : readFileSync(args[at + 1] ?? "", "utf-8");
 }
 
 describe("open_pr sections and auto-merge", () => {
@@ -594,6 +602,49 @@ describe("open_pr sections and auto-merge", () => {
   });
 });
 
+describe("open_pr body delivery", () => {
+  // mustCapture's deadline-expiry line prints redactCommand(argv)
+  // (tests/shared/proc.test.ts pins that line), so the argv of every
+  // body-carrying gh call is what a timeout would print into the public
+  // log. A hidden target's body holds private hunk text no mask covers.
+  test.each<{ reason: string; env: Record<string, string>; call: string }>([
+    {
+      reason: "the branch-mode comment",
+      env: { MODE: "branch", BRANCH: "chore/fuzzer", STUB_EXISTING_PR: "9" },
+      call: "comment",
+    },
+    { reason: "the refreshed sync PR", env: { STUB_EXISTING_PR: "9" }, call: "edit" },
+    { reason: "the created sync PR", env: {}, call: "create" },
+  ])(
+    "$reason delivers its body through a file, so the timeout line prints no hunk text",
+    ({ env, call }) => {
+      const hunk = "PRIVATE_HUNK_SENTINEL_7f3a";
+      const r = run({
+        env: { HIDE_DETAILS: "true", ...env },
+        files: { SUMMARY_FILE: `- \`src/secret.ts\`: dropped hunk ${hunk}\n` },
+      });
+      const record = r.records.find((args) => args[1] === "pr" && args[2] === call);
+      expect(record).toBeDefined();
+      const argv = record as string[];
+      expect({
+        exitCode: r.exitCode,
+        timeoutLine: redactCommand(argv).includes(hunk),
+        anyArgvCarriesHunk: r.records.some((args) => args.some((arg) => arg.includes(hunk))),
+        bodyFileFlag: argv.includes("--body-file"),
+        bodyArgvFlag: argv.includes("--body"),
+        bodyCarriesHunk: bodyOf(argv).includes(hunk),
+      }).toEqual({
+        exitCode: 0,
+        timeoutLine: false,
+        anyArgvCarriesHunk: false,
+        bodyFileFlag: true,
+        bodyArgvFlag: false,
+        bodyCarriesHunk: true,
+      });
+    },
+  );
+});
+
 // Branch mode: the render was pushed onto a dispatched branch, so the body
 // becomes a comment on that branch's PR (when one exists) and nothing is
 // created or armed; the url output carries the PR for the tail steps.
@@ -604,7 +655,7 @@ describe("open_pr branch mode", () => {
       temp: { [TAIL_SHRANK_NAME]: "- `AGENTS.md`: 1 line missing\n" },
     });
     const comment = r.records.find((args) => args[1] === "pr" && args[2] === "comment");
-    const body = comment ? (comment[comment.indexOf("--body") + 1] ?? "") : "";
+    const body = comment ? bodyOf(comment) : "";
     expect({
       exitCode: r.exitCode,
       calls: r.records.map((args) => `${args[1]} ${args[2]} ${args[3] ?? ""}`.trim()),

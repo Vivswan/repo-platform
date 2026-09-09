@@ -78,7 +78,7 @@ grep -qF "deselect-local contributing tail" "$DESEL_WORK/removed-splits.md" \
 # auto-merge on the removed-splits hold alone (the only other non-empty
 # inputs - the removed-paths list and the carry summary - are
 # informational and never force review; the gh stub from the tripwire leg
-# records the body).
+# records the calls, the body is the --body-file open_pr wrote).
 echo "build@old" > "$DESEL_WORK/old_commit.txt"
 : > "$DESEL_WORK/empty.txt"
 GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
@@ -93,7 +93,7 @@ GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   bun .github/scripts/sync/open_pr.ts > "$DESEL_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$DESEL_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a deleted split-classed file"
-grep -qF "deselect-local contributing tail" "$DESEL_WORK/gh-calls.txt" \
+grep -qF "deselect-local contributing tail" "$DESEL_WORK/pr-body.md" \
   || fail "the PR body does not name the repository-owned content the deletion takes with it"
 if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
   fail "open_pr attempted to arm auto-merge on a removed-splits hold"
