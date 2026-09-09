@@ -16,6 +16,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Managed vs repo-owned files](#managed-vs-repo-owned-files) | validate-template; copier's `_skip_if_exists` |
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review; the `no-retired-shapes` ssot rule (repo-platform, landing) |
+| [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
 
 ## Sticky PR comments
 
@@ -73,3 +74,10 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Why: a one-shot replacement with a loud PR note stays readable; a compat era accretes paths nobody removes.
 - How: replace the shape in one PR and say so in the PR body; when live state must be moved, write a migration rung.
 - Enforced by: review; the `no-retired-shapes` ssot rule in repo-platform once its migration ladder lands.
+
+## Short comments
+
+- Rule: a comment says what the code cannot show, in one to three lines; a comment block over 8 lines, or a file header comment over 20, is a warning.
+- Why: a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
+- How: cut the comment to its constraint. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone; the reason is mandatory, and a bare marker warns.
+- Enforced by: the comment caps of the `file-size` step ([the file size caps](new-repo.md#file-size-caps)), warn only, never a failure.

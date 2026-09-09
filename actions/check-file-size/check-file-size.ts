@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
-// Two-tier caps (HARD fails, WARN annotates) on file length and line width
-// over the tracked files of a checkout; .file-size-allow.local exempts by
-// path with a mandatory `# reason`. Policy and exemptions: docs/new-repo.md.
+// Two-tier caps (HARD fails, WARN annotates) on file length and line width,
+// and a warn-only cap on comment block length, over the tracked files of a
+// checkout; .file-size-allow.local exempts a path with a mandatory `# reason`,
+// `comment-cap: ignore <reason>` one comment block. Policy: docs/new-repo.md.
 
 import {
   appendFileSync,
@@ -16,6 +17,9 @@ import { join, relative, resolve } from "node:path";
 
 export type Kind = "source" | "test" | "workflow" | "shell" | "markdown";
 export type Tier = "hard" | "warn";
+/** The header is the first comment block when no code precedes it; every
+ *  other block is judged as a block. */
+export type CommentScope = "header" | "block";
 
 export interface Caps {
   lines: Readonly<Record<Kind, number>>;
@@ -39,6 +43,13 @@ export const WARN: Caps = {
   ) as Caps["lines"],
   width: 150,
 };
+/** Maximum comment block length, in lines, by scope: one annotating tier,
+ *  never a failure, so not derived from any hard cap. Fleet-wide, like every
+ *  cap here: the fleet takes the action from `@build`. */
+export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 8, header: 20 };
+/** The per-block exemption, on a comment line inside the block (a comment
+ *  line directly above it is part of it); the reason after it is mandatory. */
+export const COMMENT_MARKER = "comment-cap: ignore";
 /** Prose (markdown) has no width cap: the fleet writes one source line per
  *  paragraph, so its lines are long by design. */
 export const WIDTH_KINDS: ReadonlySet<Kind> = new Set(["source", "test", "workflow", "shell"]);
@@ -70,6 +81,10 @@ const SOURCE_EXTENSIONS = new Set([
   "hpp",
 ]);
 const SHELL_EXTENSIONS = new Set(["sh", "bash", "zsh"]);
+/** Files whose whole-line comments are `#` runs; every other source
+ *  extension uses `//` runs and `/* *\/` blocks (Python is listed here, so
+ *  it is checked before the source set). */
+const HASH_EXTENSIONS = new Set([...SHELL_EXTENSIONS, "yml", "yaml", "py", "pyi"]);
 const TEST_DIRS = new Set(["test", "tests", "__tests__"]);
 /** Test files by name: the JS/Python/Go conventions, and Rust's sibling
  *  test modules (`foo_tests.rs`, `tests.rs`, `proptests.rs`). */
@@ -101,14 +116,19 @@ const MANAGED_HEADER = /\bThis file is managed by [\w.-]+\/repo-platform\b/;
 const REGION_BEGIN = /\bBEGIN GENERATED\b/;
 const REGION_END = /\bEND GENERATED\b/;
 
+function extensionOf(relPath: string): string {
+  const name = relPath.slice(relPath.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
 /** The kind a tracked path is judged as, or null when it is exempt. */
 export function classify(relPath: string): Kind | null {
   const segments = relPath.split("/");
   const dirs = segments.slice(0, -1);
   if (dirs.some((dir) => EXEMPT_DIRS.has(dir))) return null;
   const name = segments[segments.length - 1];
-  const dot = name.lastIndexOf(".");
-  const ext = dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+  const ext = extensionOf(relPath);
   const workflowsDir =
     dirs.length >= 2 &&
     dirs[dirs.length - 2] === ".github" &&
@@ -168,6 +188,130 @@ function generatedRegionMask(lines: string[]): boolean[] {
     }
   });
   return mask;
+}
+
+interface CommentSyntax {
+  /** The prefix that makes a whole line a comment. */
+  line: string;
+  /** The delimiters of a comment that may span lines, where the language has one. */
+  block?: readonly [open: string, close: string];
+}
+const SLASH_COMMENTS: CommentSyntax = { line: "//", block: ["/*", "*/"] };
+const HASH_COMMENTS: CommentSyntax = { line: "#" };
+
+/** The comment syntax of a path, or null for files with no comment blocks
+ *  to judge (markdown is prose). */
+function commentSyntax(relPath: string): CommentSyntax | null {
+  const ext = extensionOf(relPath);
+  if (HASH_EXTENSIONS.has(ext)) return HASH_COMMENTS;
+  if (SOURCE_EXTENSIONS.has(ext)) return SLASH_COMMENTS;
+  return null;
+}
+
+interface CommentBlock {
+  /** The block's first line, 1-based. */
+  line: number;
+  /** Its length in lines. */
+  length: number;
+  scope: CommentScope;
+  /** Every exemption marker in the block: its 1-based line and the reason
+   *  after it (empty for a bare marker, which exempts nothing). */
+  markers: { line: number; reason: string }[];
+}
+
+const MARKER = new RegExp(`\\b${COMMENT_MARKER}\\b`, "g");
+/** The reason after each marker in comment text: what follows it up to the
+ *  next marker or the block comment's closing delimiter, "" when bare. */
+function markerReasons(text: string, closer: string | undefined): string[] {
+  const matches = [...text.matchAll(MARKER)];
+  return matches.map((match, i) => {
+    const rest = text.slice(match.index + match[0].length, matches[i + 1]?.index ?? text.length);
+    const close = closer === undefined ? -1 : rest.indexOf(closer);
+    return (close === -1 ? rest : rest.slice(0, close)).trim();
+  });
+}
+
+/** A shebang: `#!` and an interpreter path (Rust's `#![...]` attribute is
+ *  code). */
+const SHEBANG = /^#!\s*\//;
+
+/** Whether trimmed text is a whole-line comment, code, or opens a block
+ *  comment that closes on a later line (then: the delimiter that closes it).
+ *  Text after a one-line block comment is classified again, so
+ *  `/* a *\/ // b` is a comment and `/* a *\/ x` is code. */
+function lineKind(text: string, syntax: CommentSyntax): "comment" | "code" | { closer: string } {
+  if (text.startsWith(syntax.line)) return "comment";
+  if (syntax.block === undefined || !text.startsWith(syntax.block[0])) return "code";
+  const [open, closer] = syntax.block;
+  const at = text.indexOf(closer, open.length);
+  if (at === -1) return { closer };
+  const rest = text.slice(at + closer.length).trim();
+  return rest === "" ? "comment" : lineKind(rest, syntax);
+}
+
+/** Contiguous runs of whole-line comments. A blank line, a code line (an
+ *  inline trailing comment is code, so is a `*\/` followed by code), or a
+ *  `skip`ped line ends a run; a block comment counts every line between its
+ *  delimiters, blanks included. A first-line shebang is neither. */
+function commentBlocks(lines: string[], syntax: CommentSyntax, skip: boolean[]): CommentBlock[] {
+  const blocks: CommentBlock[] = [];
+  let start = -1;
+  let markers: CommentBlock["markers"] = [];
+  let headerAhead = true;
+  /** The delimiter that closes the block comment the run is inside, if any. */
+  let closer: string | null = null;
+  const end = (at: number): void => {
+    if (start === -1) return;
+    const scope = headerAhead ? "header" : "block";
+    blocks.push({ line: start + 1, length: at - start, scope, markers });
+    start = -1;
+    markers = [];
+    headerAhead = false;
+  };
+  /** Records the markers on comment text that belongs to the current block. */
+  const note = (index: number, text: string): void => {
+    for (const reason of markerReasons(text, syntax.block?.[1])) {
+      markers.push({ line: index + 1, reason });
+    }
+  };
+  const code = (at: number): void => {
+    end(at);
+    headerAhead = false;
+  };
+  for (const [index, raw] of lines.entries()) {
+    if (skip[index]) {
+      closer = null;
+      code(index);
+      continue;
+    }
+    let text = raw.trim();
+    if (closer !== null) {
+      const at = text.indexOf(closer);
+      if (at === -1) {
+        note(index, text);
+        continue;
+      }
+      note(index, text.slice(0, at));
+      text = text.slice(at + closer.length).trim();
+      closer = null;
+      if (text === "") continue;
+    } else if (index === 0 && SHEBANG.test(text)) {
+      continue;
+    } else if (text === "") {
+      end(index);
+      continue;
+    }
+    const kind = lineKind(text, syntax);
+    if (kind === "code") {
+      code(index);
+      continue;
+    }
+    if (start === -1) start = index;
+    note(index, text);
+    if (kind !== "comment") closer = kind.closer;
+  }
+  end(lines.length);
+  return blocks;
 }
 
 /** One string or regex literal, optionally assigned, returned, keyed, or
@@ -271,59 +415,110 @@ interface FindingBase {
   path: string;
   kind: Kind;
   tier: Tier;
+}
+interface Measured {
   value: number;
   cap: number;
 }
 /** A line-count finding names the file; a width finding names the 1-based
- *  line as well. */
+ *  line as well; a comment finding names the block's first line and scope;
+ *  a marker finding names the line of a `comment-cap: ignore` with no
+ *  reason. */
 export type Finding =
-  | (FindingBase & { measure: "lines" })
-  | (FindingBase & { measure: "width"; line: number });
+  | (FindingBase & Measured & { measure: "lines" })
+  | (FindingBase & Measured & { measure: "width"; line: number })
+  | (FindingBase &
+      Measured & { measure: "comment"; tier: "warn"; line: number; scope: CommentScope })
+  | (FindingBase & { measure: "marker"; tier: "warn"; line: number });
 
-function tierOf(value: number, hard: number, warn: number): Tier | null {
-  if (value > hard) return "hard";
-  if (value > warn) return "warn";
+/** The tier a value lands in, with the cap it exceeded; null under both. */
+function exceeded(value: number, hard: number, warn: number): { tier: Tier; cap: number } | null {
+  if (value > hard) return { tier: "hard", cap: hard };
+  if (value > warn) return { tier: "warn", cap: warn };
   return null;
 }
 
-/** Every finding for one file, generated regions excluded from both
- *  measures: the line count against the kind's caps, and each line's width.
- *  A line lands in the highest tier whose cap it exceeds. */
+/** Every finding for one file, generated regions excluded from every
+ *  measure: the line count against the kind's caps, each line's width (each
+ *  landing in the highest tier whose cap it exceeds), and each comment
+ *  block's length (warn only, unless a marker with a reason exempts it). */
 export function judgeFile(path: string, kind: Kind, text: string): Finding[] {
   const findings: Finding[] = [];
   const lines = splitLines(text);
   const generated = generatedRegionMask(lines);
   const counted = generated.filter((inRegion) => !inRegion).length;
-  const lineTier = tierOf(counted, HARD.lines[kind], WARN.lines[kind]);
-  if (lineTier !== null) {
-    const cap = lineTier === "hard" ? HARD.lines[kind] : WARN.lines[kind];
-    findings.push({ path, kind, tier: lineTier, measure: "lines", value: counted, cap });
+  const lineCount = exceeded(counted, HARD.lines[kind], WARN.lines[kind]);
+  if (lineCount !== null) {
+    findings.push({ path, kind, ...lineCount, measure: "lines", value: counted });
   }
-  if (!WIDTH_KINDS.has(kind)) return findings;
-  lines.forEach((line, index) => {
-    if (generated[index] || isUnbreakable(line)) return;
-    const width = [...line].length;
-    for (const [tier, cap] of [
-      ["hard", HARD.width],
-      ["warn", WARN.width],
-    ] as const) {
-      if (width > cap) {
-        if (tier === "warn" && isLiteralLine(line)) return;
-        findings.push({ path, kind, tier, line: index + 1, measure: "width", value: width, cap });
-        return;
+  if (WIDTH_KINDS.has(kind)) {
+    lines.forEach((line, index) => {
+      if (generated[index] || isUnbreakable(line)) return;
+      const width = [...line].length;
+      const over = exceeded(width, HARD.width, WARN.width);
+      if (over === null || (over.tier === "warn" && isLiteralLine(line))) return;
+      findings.push({ path, kind, ...over, measure: "width", line: index + 1, value: width });
+    });
+  }
+  const syntax = commentSyntax(path);
+  if (syntax !== null) {
+    for (const { line, length, scope, markers } of commentBlocks(lines, syntax, generated)) {
+      for (const marker of markers) {
+        if (marker.reason === "") {
+          findings.push({ path, kind, tier: "warn", measure: "marker", line: marker.line });
+        }
+      }
+      if (markers.some((marker) => marker.reason !== "")) continue;
+      const cap = COMMENT_CAPS[scope];
+      if (length > cap) {
+        findings.push({
+          path,
+          kind,
+          tier: "warn",
+          measure: "comment",
+          line,
+          value: length,
+          cap,
+          scope,
+        });
       }
     }
-  });
+  }
   return findings;
 }
 
-/** The one-line log form: `path: 3021 lines (cap 2000 for source)` or
- *  `path:412: 613 chars (cap 256)`. */
+/** The one-line log form: `path: 3021 lines (cap 2000 for source)`,
+ *  `path:412: 613 chars (cap 256)`, `path:1: 21 comment lines (cap 20 for a
+ *  header)`, or `path:7: comment-cap: ignore needs a reason`. */
 export function describe(finding: Finding): string {
-  if (finding.measure === "lines") {
-    return `${finding.path}: ${finding.value} lines (cap ${finding.cap} for ${finding.kind})`;
+  switch (finding.measure) {
+    case "lines":
+      return `${finding.path}: ${finding.value} lines (cap ${finding.cap} for ${finding.kind})`;
+    case "width":
+      return `${finding.path}:${finding.line}: ${finding.value} chars (cap ${finding.cap})`;
+    case "comment": {
+      const scope = finding.scope === "header" ? " for a header" : "";
+      return `${finding.path}:${finding.line}: ${finding.value} comment lines (cap ${finding.cap}${scope})`;
+    }
+    case "marker":
+      return `${finding.path}:${finding.line}: ${COMMENT_MARKER} needs a reason`;
   }
-  return `${finding.path}:${finding.line}: ${finding.value} chars (cap ${finding.cap})`;
+}
+
+/** The Size and Cap cells of a finding's table row. */
+function sizeCells(finding: Finding): [size: string, cap: string] {
+  switch (finding.measure) {
+    case "lines":
+      return [`${finding.value} lines`, `${finding.cap}`];
+    case "width":
+      return [`${finding.value} chars`, `${finding.cap}`];
+    case "comment": {
+      const scope = finding.scope === "header" ? " (header)" : "";
+      return [`${finding.value} comment lines${scope}`, `${finding.cap}`];
+    }
+    case "marker":
+      return [`${COMMENT_MARKER} without a reason`, "-"];
+  }
 }
 
 export interface AllowEntry {
@@ -486,7 +681,8 @@ export function outcomeOf(verdict: Verdict): Outcome {
 }
 
 /** The step summary body on every outcome, and the sticky comment's on
- *  findings: hard failures first, then warnings. */
+ *  findings: hard failures first, then warnings (over a sensible size, or a
+ *  bare exemption marker). */
 export function report(outcome: Outcome): string {
   const parts = ["## File size check", ""];
   if (outcome.state === "error") {
@@ -497,14 +693,11 @@ export function report(outcome: Outcome): string {
   if (outcome.state === "clean") {
     parts.push("Every file is under its caps.");
   } else {
-    parts.push(
-      `${failures.length} over a hard cap (fails), ${warnings.length} over a sensible size (warns).`,
-    );
+    parts.push(`${failures.length} over a hard cap (fails), ${warnings.length} warning(s).`);
     const rows = [...failures, ...warnings].map((finding) => {
       const where = finding.measure === "lines" ? finding.path : `${finding.path}:${finding.line}`;
-      const value =
-        finding.measure === "lines" ? `${finding.value} lines` : `${finding.value} chars`;
-      return `| \`${where}\` | ${value} | ${finding.tier} | ${finding.cap} |`;
+      const [size, cap] = sizeCells(finding);
+      return `| \`${where}\` | ${size} | ${finding.tier} | ${cap} |`;
     });
     if (rows.length > 0) {
       parts.push("", "| File | Size | Tier | Cap |", "| --- | --- | --- | --- |", ...rows);
@@ -514,7 +707,7 @@ export function report(outcome: Outcome): string {
     }
     parts.push(
       "",
-      `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+      `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     );
   }
   if (managedSkipped > 0) {
@@ -565,7 +758,7 @@ if (import.meta.main) {
   if (failures.length > 0) {
     for (const failure of failures) console.error(`::error::${failure}`);
     console.error(
-      `${failures.length} finding(s). Split the file, wrap the line, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
+      `${failures.length} finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
     );
   } else {
     console.log(

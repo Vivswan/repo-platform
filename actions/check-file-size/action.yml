@@ -1,7 +1,9 @@
 name: Check File Size
 description: >-
-  Caps file length and line width in two tiers: sensible sizes warn, hard
-  caps fail (caps and kinds: check-file-size.ts). Findings are written ONCE
+  Caps file length and line width in two tiers (sensible sizes warn, hard
+  caps fail) and comment block length in one (warns only; a comment line
+  `comment-cap: ignore <reason>` exempts its block); caps and kinds:
+  check-file-size.ts. Findings are written ONCE
   as one table and reported through two sinks - the step summary and the
   log annotations on every event, plus a sticky PR comment on pull_request
   events (deleted when there is nothing to say); the fleet rule for any
