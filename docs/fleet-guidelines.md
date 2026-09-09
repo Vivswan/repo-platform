@@ -85,7 +85,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## Short comments
 
-- Rule: a comment says what the code cannot show, in one to three lines; a comment block over 8 lines, or a file header comment over 20, is a warning.
+- Rule: a comment says what the code cannot show, in one to three lines; a comment block over 10 lines, or a file header comment over 25, is a warning.
 - Why: a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
 - How: cut the comment to its constraint. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone; the reason is mandatory, and a bare marker warns.
 - Enforced by: the comment caps of the `file-size` step ([the file size caps](new-repo.md#file-size-caps)), warn only, never a failure.
