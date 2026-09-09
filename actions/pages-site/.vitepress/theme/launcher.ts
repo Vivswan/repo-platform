@@ -369,7 +369,7 @@ export default defineComponent({
           h(
             "p",
             { class: "fleet-launcher-empty", role: "status" },
-            empty ? ["No page or heading matches ", h("b", query.value.trim()), "."] : [],
+            empty ? ["No matches for ", h("b", query.value.trim()), "."] : [],
           ),
         ],
       );

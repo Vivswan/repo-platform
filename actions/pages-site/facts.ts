@@ -15,8 +15,6 @@ export interface ProjectFacts {
   /** owner/name */
   repository: string;
   repoUrl: string;
-  /** The repository name alone. */
-  name: string;
   description: string | null;
   homepage: string | null;
   topics: string[];
@@ -257,12 +255,10 @@ export function hueOf(name: string): number {
 }
 
 export function collectFacts(read: FactsReader, input: FactsInput): ProjectFacts {
-  const name = input.repository.split("/")[1];
   const repoUrl = `${input.serverUrl}/${input.repository}`;
   return {
     repository: input.repository,
     repoUrl,
-    name,
     ...readIdentity(read),
     toolchains: TOOLCHAIN_FILES.flatMap((toolchain) => {
       const text = read(toolchain.path);
@@ -276,6 +272,6 @@ export function collectFacts(read: FactsReader, input: FactsInput): ProjectFacts
       sha: input.sha,
       url: `${repoUrl}/commit/${input.sha}`,
     },
-    hue: hueOf(name),
+    hue: hueOf(input.repository.split("/")[1]),
   };
 }

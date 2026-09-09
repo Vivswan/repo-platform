@@ -200,6 +200,7 @@ export default async () => {
       outline: "deep",
       // carbon's default title is uppercase; the fleet reads sentence case
       notFound: { title: "Page not found", linkText: "Go to the front page" },
+      docFooter: { prev: "Previous", next: "Next" },
       ...(process.env.DOCS_SITE_EDIT_PATTERN
         ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
         : {}),

@@ -422,7 +422,9 @@ a:focus-visible {
   text-wrap: balance;
   transition: color var(--fleet-transition);
 }
-.VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .text,
+/* A group head, collapsible (a directory) or plain (pages sharing a
+ * frontmatter group), is the one row without a link. */
+.VPSidebar .nav .group .VPSidebarItem:not(.is-link) > .item > .text,
 .VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .link > .text {
   font-weight: 500;
 }
@@ -471,10 +473,11 @@ a:focus-visible {
 
 /* ---------- doc column ---------- */
 
-/* The row above the article: the breadcrumb at the left, the Markdown
- * menu and the Edit link as two quiet icon buttons at the right. Its
- * height is one token because the aside's top and the landing card's top
- * are set level with the h1 below it. */
+/* The row above the article: the Markdown menu and the Edit link as two
+ * quiet icon buttons at the right, alone. Carbon's breadcrumb at the left
+ * repeated the h1 below it, so it is gone. The row's height is one token
+ * because the aside's top and the landing card's top are set level with
+ * the h1 below it. */
 .VPDoc {
   --fleet-content-top-height: 45px;
 }
@@ -485,24 +488,6 @@ a:focus-visible {
   background-color: transparent;
 }
 .VPDoc .content-top .content-file {
-  min-height: 0;
-}
-.VPDoc .content-top .content-box-item {
-  border-radius: var(--fleet-radius-md);
-  font-size: 14px;
-  color: var(--vp-c-text-2);
-}
-/* The breadcrumb's glyph starts where the h1 does; the hover pill keeps
- * its 8px each side by overhanging the column instead. */
-.VPDoc .content-top .content-file .content-box-item {
-  margin-left: -8px;
-}
-.VPDoc .content-top .content-box-text {
-  font-weight: 500;
-}
-/* A page without a title renders no breadcrumb; its wrapper would still
- * hold a blank strip and the controls sit right-aligned regardless. */
-.VPDoc .content-top .content-file:not(:has(.content-box-item)) {
   display: none;
 }
 
@@ -1207,20 +1192,8 @@ a:focus-visible {
   text-align: left;
 }
 
-.fleet-facts .fleet-facts-title {
-  font-family: var(--fleet-font-display);
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  color: var(--vp-c-text-1);
-}
-
 .fleet-facts .fleet-facts-description {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 14.5px;
   line-height: 1.6;
   color: var(--vp-c-text-2);
@@ -1458,9 +1431,6 @@ a:focus-visible {
   .fleet-facts {
     padding: 16px 16px 14px;
     font-size: 14px;
-  }
-  .fleet-facts .fleet-facts-title {
-    font-size: 20px;
   }
   .fleet-facts .fleet-facts-description {
     font-size: 14px;

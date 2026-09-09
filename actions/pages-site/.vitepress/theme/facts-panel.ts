@@ -154,11 +154,9 @@ export default defineComponent({
         sections.push(section([row("License", h("a", { href }, facts.license.name))]));
       }
 
-      // The aside-top slot renders before the page h1 in document order, so
-      // the card's title is a labelled region's name, not a heading that
-      // would sit above the h1 in the outline.
-      return h("aside", { class: "fleet-facts", "aria-labelledby": "fleet-facts-title" }, [
-        h("p", { class: "fleet-facts-title", id: "fleet-facts-title" }, facts.name),
+      // No title and no heading: the landing h1 beside the card already
+      // names the project, and the aside-top slot renders before that h1.
+      return h("aside", { class: "fleet-facts", "aria-label": "About" }, [
         facts.description === null
           ? null
           : h("p", { class: "fleet-facts-description" }, facts.description),

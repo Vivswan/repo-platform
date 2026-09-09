@@ -7,7 +7,6 @@ const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 const FACTS: ProjectFacts = {
   repository: "fixture-owner/fixture-repo",
   repoUrl: "https://github.com/fixture-owner/fixture-repo",
-  name: "Fixture",
   description: "A fixture repository",
   homepage: "https://example.test/docs/",
   topics: ["bun", "github-actions"],
@@ -38,8 +37,7 @@ interface Scenario {
  *  nested in its value cell, the version being read marked by aria-current
  *  and the note, the license linked at the tier's own ref. */
 const FULL_CARD =
-  '<aside class="fleet-facts" aria-labelledby="fleet-facts-title">' +
-  '<p class="fleet-facts-title" id="fleet-facts-title">Fixture</p>' +
+  '<aside class="fleet-facts" aria-label="About">' +
   '<p class="fleet-facts-description">A fixture repository</p>' +
   '<hr class="fleet-facts-rule">' +
   '<div class="fleet-facts-body">' +
@@ -80,8 +78,7 @@ const FULL_CARD =
 
 /** Only what the repository always has: no optional row renders empty. */
 const BARE_CARD =
-  '<aside class="fleet-facts" aria-labelledby="fleet-facts-title">' +
-  '<p class="fleet-facts-title" id="fleet-facts-title">Fixture</p>' +
+  '<aside class="fleet-facts" aria-label="About">' +
   "<!---->" +
   '<hr class="fleet-facts-rule">' +
   '<div class="fleet-facts-body">' +
