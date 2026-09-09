@@ -9,6 +9,8 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 
 The starter is generated once and then repo-owned (`_skip_if_exists`): fuzzers and their toolchains differ too much across repos for the template to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Issue lifecycle, release gating, label renaming, and the action pin's history are shared with the nightly module: [Tracking issues](tracking-issues.md).
 
+Repo-owned also means a fix to the starter never reaches repos that already rendered it. The upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent); repos that rendered the starter before that line existed add it themselves (cloud-speech already did).
+
 ## Module parameter (copier question)
 
 | Question | Meaning | Default |
