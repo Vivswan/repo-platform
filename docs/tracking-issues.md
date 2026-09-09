@@ -1,4 +1,9 @@
-# Tracking-issue streams
+---
+order: 220
+group: Fleet operations
+---
+
+# Tracking issues
 
 The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open GitHub issue per failure stream: a red night files or updates it, a green night closes it, and while it is open the stream [blocks releases](#release-gating). The [docs-site](docs-site.md) module's nightly link-rot check rides the same machinery under its `docs_site_label` answer. This page is the machinery the streams share; the module pages cover what each one runs.
 

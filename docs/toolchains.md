@@ -1,4 +1,9 @@
-# Toolchain version pins
+---
+order: 210
+group: Fleet operations
+---
+
+# Toolchain pins
 
 One version per toolchain, fleet-wide. Each pin lives in the module manifest (`templates/<module>/module.yml`, `toolchain.pin: {file, version}`); `bun run generate` emits the dotfile containing exactly the version plus a newline, and template sync delivers it to every repo that selects the module.
 

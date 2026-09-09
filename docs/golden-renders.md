@@ -1,3 +1,8 @@
+---
+order: 240
+group: Fleet operations
+---
+
 # Golden renders
 
 `tests/golden-renders/` holds committed snapshots of real copier output for a canonical matrix of module selections. A PR that leaves the goldens unchanged proves byte-identity of every rendered file in the matrix; a PR that changes them shows the exact rendered diff for review.

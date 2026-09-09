@@ -1,4 +1,9 @@
-# Ejecting a repository from repo-platform management
+---
+order: 270
+group: Fleet operations
+---
+
+# Ejecting a repository
 
 Detaching is cheap by design: managed repos degrade to normal repos, not broken ones. Nothing at runtime depends on repo-platform except workflow `uses:` references, which keep working as long as repo-platform exists:
 

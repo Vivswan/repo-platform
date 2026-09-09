@@ -1,4 +1,9 @@
-# The pages module
+---
+order: 110
+group: Modules
+---
+
+# Pages
 
 Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout.
 

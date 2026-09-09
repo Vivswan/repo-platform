@@ -1,3 +1,8 @@
+---
+order: 20
+group: Start here
+---
+
 # Fleet guidelines
 
 Conventions every managed repository follows, whether the file is managed by sync or repo-owned. Each entry names what enforces it; "review only" means nothing in CI does.

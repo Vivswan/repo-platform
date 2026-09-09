@@ -1,3 +1,8 @@
+---
+order: 40
+group: Start here
+---
+
 # Repository settings
 
 Managed repos get their settings (repository fields, topics, labels, rulesets) applied through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code), the replacement for the [Probot Settings app](https://github.com/repository-settings/app). Every apply is a visible workflow run whose problems surface as loud warnings and errors.
