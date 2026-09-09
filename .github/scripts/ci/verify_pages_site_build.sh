@@ -65,6 +65,52 @@ mkdir -p "$WORK/docs/guide"
 printf '# Fixture\n\nWelcome. See the [guide](guide/) and [setup](setup).\n\n' > "$WORK/docs/README.md"
 printf '| Goal | Read |\n|---|---|\n| Set things up | [Setup](setup.md) |\n' >> "$WORK/docs/README.md"
 printf '# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n## Install steps\n\nOne, then two.\n\n## Upgrade steps\n\nThree.\n' > "$WORK/docs/setup.md"
+# Every custom-block kind the theme styles, both syntaxes: GitHub alerts
+# (retitled in sentence case by custom-blocks.ts) and ::: containers, plus
+# a highlighted code block and an ansi fence (the one language shiki colors
+# from the theme's terminal palette, not its token colors).
+cat > "$WORK/docs/alerts.md" <<'MD'
+# Alerts
+
+> [!NOTE]
+> a note
+
+> [!TIP]
+> a tip
+
+> [!IMPORTANT]
+> important
+
+> [!WARNING]
+> a warning
+
+> [!CAUTION]
+> caution
+
+::: info
+info
+:::
+
+::: danger
+danger
+:::
+
+::: details Show
+hidden
+:::
+
+```ts
+// c
+const s = "x";
+```
+
+```ansi
+ESC[31mERRORESC[0m plain
+```
+MD
+# the fence needs a real escape byte, which the heredoc cannot carry
+esc="$(printf '\033')"
+sed -i.bak "s/ESC/$esc/g" "$WORK/docs/alerts.md" && rm "$WORK/docs/alerts.md.bak"
 printf '# Guide\n\nThe guide index, version one.\n' > "$WORK/docs/guide/README.md"
 git -C "$WORK" init -q -b main
 git -C "$WORK" -c user.name=fixture -c user.email=f@localhost add -A
@@ -162,12 +208,46 @@ present "fleet-provenance" "$site/latest/index.html"
 present "Built from main" "$site/latest/index.html"
 present "Source: docs/README.md" "$site/latest/index.html"
 present "Built from v0.2.0" "$site/v0.2.0/index.html"
-# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts),
+# Every top-level table sits in the theme's scroll wrapper (table-wrap.ts):
+# the wrapper is the tab stop, the table is not (VitePress's own
+# tabindex="0" on the table would be a second stop that scrolls nothing),
 # and the built CSS carries the rule that makes the wrapper scroll.
-present '<div class="vp-table"><table tabindex="0">' "$site/latest/setup.html"
+present '<div class="vp-table" tabindex="0"><table>' "$site/latest/setup.html"
+absent '<table tabindex' "$site/latest/setup.html"
 present '</table></div>' "$site/latest/setup.html"
-grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%}" "$site/latest/assets" ||
+grep -qrF -- ".vp-table{overflow-x:auto;max-width:100%;" "$site/latest/assets" ||
   fail "the table wrapper's overflow rule is missing from the built CSS"
+# Custom blocks: each kind renders with its class and sentence-case title
+# (both syntaxes), and the built CSS colors the two non-hue kinds from
+# their own tokens.
+for pair in note:Note tip:Tip important:Important warning:Warning caution:Caution; do
+  kind="${pair%%:*}"
+  grep -qE -- "class=\"$kind custom-block github-alert\"[^<]*<p class=\"custom-block-title\">${pair#*:}</p>" "$site/latest/alerts.html" ||
+    fail "the $kind alert did not render with its class and its sentence-case title"
+done
+present '<div class="info custom-block"><p class="custom-block-title">Info</p>' "$site/latest/alerts.html"
+present '<div class="danger custom-block"><p class="custom-block-title">Danger</p>' "$site/latest/alerts.html"
+present '<details class="details custom-block"><summary>Show</summary>' "$site/latest/alerts.html"
+grep -qrF -- ".vp-doc .custom-block.warning{border-left-color:var(--color-warning)}" "$site/latest/assets" ||
+  fail "the warning block's rule color is missing from the built CSS"
+# Code tokens are colored through the theme's own custom properties (the
+# shiki css-variables theme config.mts installs), never a baked-in hex; an
+# ansi fence reads the terminal palette the same way (a raw, re-normalized
+# theme would print its text in shiki's placeholder hex instead).
+present 'style="color:var(--fleet-code-token-comment);"' "$site/latest/alerts.html"
+present 'style="color:var(--fleet-code-ansi-red);"' "$site/latest/alerts.html"
+absent 'color:#000000' "$site/latest/alerts.html"
+absent 'shiki-dark' "$site/latest/alerts.html"
+# Under reduced motion carbon resets background-attachment, which BOTH
+# scrollers' edge shadows are built on, so the override must name both;
+# on paper a table cell's long value (bare or a code token) wraps instead
+# of pushing the table off the page. The minified rule text pins the
+# whole rule, selectors included, not one declaration either selector
+# could carry alone.
+grep -qrF -- ".vp-doc .vp-table,.vp-doc [class*=language-] pre{background-attachment:local,local,scroll,scroll!important}" "$site/latest/assets" ||
+  fail "the scrollers' reduced-motion background-attachment override is missing from the built CSS"
+grep -qrF -- ".vp-doc .vp-table :is(th,td){overflow-wrap:anywhere}.vp-doc .vp-table :is(th,td) code{white-space:normal;overflow-wrap:anywhere}" "$site/latest/assets" ||
+  fail "the print sheet's table-cell wrapping is missing from the built CSS"
 
 # The search launcher: the landing page's link table became the panel
 # (rendered server-side with its curated row in view and the fixture's two
@@ -364,5 +444,5 @@ present "PATH-ERA" "$site/v0.1.0/index.html"
 absent "::notice::site version" "$pathbin_log"
 
 echo "pages-site build check passed: tiers, locales, switcher, carbon skin, fleet hue, per-tier facts," \
-  "font filter, facts card, provenance line, table wrapper, launcher panel with heading rows and page index," \
+  "font filter, facts card, provenance line, table wrapper, custom blocks, code tokens, launcher panel with heading rows and page index," \
   "llms.txt, strict mode both arms, legacy-tag skip both arms, calibration gate"

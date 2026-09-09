@@ -12,20 +12,42 @@ const { default: MarkdownIt } = (await import(Bun.resolveSync("markdown-it", ACT
 
 const TABLE = ["| Key | Value |", "|---|---|", "| a | 1 |"].join("\n");
 
+/** A renderer as VitePress hands it to markdown.config: its own table_open
+ *  rule (the tabindex a wrapped table must drop and a nested one keeps)
+ *  already installed. */
 function render(markdown: string): string {
   const md = new MarkdownIt();
+  md.renderer.rules.table_open = () => '<table tabindex="0">\n';
   tableWrapRule(md);
   return md.render(markdown);
 }
 
-test("wraps each top-level table in div.vp-table and leaves nested tables bare", () => {
+const TABLE_HTML = [
+  "<table>",
+  "<thead>",
+  "<tr>",
+  "<th>Key</th>",
+  "<th>Value</th>",
+  "</tr>",
+  "</thead>",
+  "<tbody>",
+  "<tr>",
+  "<td>a</td>",
+  "<td>1</td>",
+  "</tr>",
+  "</tbody>",
+  "</table>",
+].join("\n");
+
+test("wraps each top-level table in a focusable div.vp-table; a nested table stays bare with its own tab stop", () => {
   const html = render(
     `${TABLE}\n\nBetween.\n\n${TABLE}\n\n> quoted\n>\n> ${TABLE.replaceAll("\n", "\n> ")}\n`,
   );
-  expect(html.match(/<div class="vp-table">\n<table>/g)).toHaveLength(2);
-  expect(html.match(/<\/table>\n<\/div>/g)).toHaveLength(2);
-  expect(html).toContain("<blockquote>\n<p>quoted</p>\n<table>");
-  expect(html).toContain("</table>\n</blockquote>");
+  const wrapped = `<div class="vp-table" tabindex="0">\n${TABLE_HTML}\n</div>\n`;
+  const nested = TABLE_HTML.replace("<table>", '<table tabindex="0">');
+  expect(html).toBe(
+    `${wrapped}<p>Between.</p>\n${wrapped}<blockquote>\n<p>quoted</p>\n${nested}\n</blockquote>\n`,
+  );
 });
 
 test("a document without tables renders unchanged", () => {

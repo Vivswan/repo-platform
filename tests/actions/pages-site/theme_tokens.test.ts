@@ -8,17 +8,22 @@
 // `--vp-button-alt-bg: var(--vp-c-default-3)` in carbon's vars.css stops
 // reading --vp-c-default-3 once custom.css sets --vp-button-alt-bg itself;
 // a scoped redeclaration such as carbon's `.result.selected { ... }` still
-// wins over :root and keeps reading.
+// wins over :root and keeps reading. The code palette (--fleet-code-*) has
+// one more reader: the shiki css-variables theme config.mts installs, whose
+// token colors are var() reads of those names in the highlighted HTML.
 
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const THEME = resolve(import.meta.dir, "../../../actions/pages-site/.vitepress/theme");
-const CARBON = resolve(
-  import.meta.dir,
-  "../../../actions/pages-site/node_modules/vitepress-carbon/dist",
-);
+const ACTION = resolve(import.meta.dir, "../../../actions/pages-site");
+const THEME = join(ACTION, ".vitepress/theme");
+const CONFIG = join(ACTION, ".vitepress/config.mts");
+const CARBON = join(ACTION, "node_modules/vitepress-carbon/dist");
+// shiki is the action's dependency, not the root's.
+const { createCssVariablesTheme } = (await import(Bun.resolveSync("shiki", ACTION))) as {
+  createCssVariablesTheme: (options: { variablePrefix: string }) => unknown;
+};
 
 const DECLARATION = /^\s*(--[a-z0-9-]+)\s*:([^;]*)/gm;
 const VAR_READ = /var\(\s*(--[a-z0-9-]+)/g;
@@ -59,6 +64,30 @@ function liveCarbonReads(text: string, overridden: Set<string>): string[] {
   return live;
 }
 
+/** The var() reads shiki emits for the prefix config.mts hands it: the
+ *  theme is built the way config.mts builds it, so a renamed prefix or a
+ *  token shiki stopped reading shows up here as an unread declaration.
+ *  `colored` is the subset every highlighted span can carry (the token
+ *  colors and the default foreground) and so must be declared per mode.
+ *  The editor background never reaches a page (VitePress strips the pre's
+ *  style), and the terminal palette only through an ansi fence, whose
+ *  undeclared var() reads fall back to the code foreground. */
+function shikiReads(): { all: string[]; colored: string[] } {
+  const prefix = readFileSync(CONFIG, "utf-8").match(/variablePrefix:\s*"(--[a-z0-9-]+)"/)?.[1];
+  if (prefix === undefined) throw new Error("config.mts declares no shiki variablePrefix");
+  const theme = createCssVariablesTheme({ variablePrefix: prefix }) as {
+    colors: Record<string, string>;
+    tokenColors: unknown[];
+  };
+  return {
+    all: tokens(JSON.stringify(theme), VAR_READ),
+    colored: tokens(
+      JSON.stringify([theme.tokenColors, theme.colors["editor.foreground"]]),
+      VAR_READ,
+    ),
+  };
+}
+
 function themeDeclarations(themeFiles: string[]): Set<string> {
   const declared = new Set<string>();
   for (const file of themeFiles.filter((f) => f.endsWith(".css"))) {
@@ -77,9 +106,36 @@ test("every custom property the theme declares has a live var() reader", () => {
   for (const file of filesUnder(CARBON, [".css", ".vue", ".js"])) {
     for (const token of liveCarbonReads(readFileSync(file, "utf-8"), declared)) read.add(token);
   }
+  const shiki = shikiReads();
+  expect(shiki.colored).toContain("--fleet-code-token-comment");
+  for (const token of shiki.all) read.add(token);
   const unread = [...declared].filter((token) => !read.has(token)).sort();
   expect(declared.size).toBeGreaterThan(50);
   expect(unread).toEqual([]);
+});
+
+/** The properties declared under blocks whose whole selector is `selector`. */
+function modeDeclarations(css: string, selector: string): Set<string> {
+  const declared = new Set<string>();
+  for (const block of css.split("}")) {
+    const brace = block.lastIndexOf("{");
+    if (block.slice(0, brace).trim().split("\n").at(-1)?.trim() !== selector) continue;
+    for (const token of tokens(block.slice(brace + 1), DECLARATION)) declared.add(token);
+  }
+  return declared;
+}
+
+// The reverse: a color shiki can put on a span (a diff fence's inserted
+// and deleted lines, a link) with no declared value falls back to the
+// plain text ink, so every colored variable must be declared in each mode.
+test.each([
+  ["custom.css", ":root"],
+  ["custom.css", ".dark"],
+  ["components.css", "html:root.dark"],
+])("every token color the shiki theme emits is declared in %s under %s", (file, selector) => {
+  const declared = modeDeclarations(readFileSync(join(THEME, file), "utf-8"), selector);
+  const undeclared = [...new Set(shikiReads().colored)].filter((token) => !declared.has(token));
+  expect(undeclared).toEqual([]);
 });
 
 // The control for the filter above: with the override rule disabled every

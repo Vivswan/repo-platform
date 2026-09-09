@@ -32,7 +32,11 @@ button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--fleet-hue);
   outline-offset: 2px;
-  border-radius: var(--fleet-radius-sm);
+}
+/* An inline link's ring sits inside the word spacing: at 2px it touches
+ * the neighbouring words. */
+.vp-doc a:focus-visible {
+  outline-offset: 1px;
 }
 
 * {
@@ -293,6 +297,59 @@ a:focus-visible {
   font-size: 14px;
   color: var(--vp-c-text-2);
 }
+/* The outline trigger is a 44px tap target; the container's vertical
+ * padding moves into the button so the bar keeps its height. */
+.VPLocalNav .VPLocalNavOutlineDropdown {
+  padding: 2px 20px 1px;
+}
+.VPLocalNav .VPLocalNavOutlineDropdown button {
+  min-height: 44px;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: var(--fleet-radius-sm);
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--vp-c-text-2);
+}
+/* A page without headings (a landing) beside a sidebar has nothing to
+ * list, and carbon's fallback there is a no-op "Return to top" at the top
+ * of the page. Without a sidebar the bar appears only once scrolled, where
+ * that button does something. */
+.VPLocalNav.empty.has-sidebar .VPLocalNavOutlineDropdown {
+  display: none;
+}
+/* The sheet: one opaque panel with a hairline under its header. Carbon
+ * draws that divider as a 1px grid gap over the gutter color, and the
+ * fleet's translucent gutter lets the page text bleed through it. */
+.VPLocalNav .VPLocalNavOutlineDropdown .items {
+  gap: 0;
+  border-color: var(--vp-c-border);
+  border-radius: var(--fleet-radius-md);
+  background-color: var(--vp-c-bg-elv);
+  box-shadow: var(--vp-shadow-4);
+}
+.VPLocalNav .VPLocalNavOutlineDropdown .header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+.VPLocalNav .VPLocalNavOutlineDropdown .top-link {
+  padding: 0 20px;
+  line-height: 44px;
+  font-size: 14px;
+}
+.VPLocalNav .VPLocalNavOutlineDropdown .outline {
+  padding: 8px 8px 8px 0;
+  background-color: transparent;
+}
+.VPLocalNav .VPLocalNavOutlineDropdown .vp-outline-item {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+.VPLocalNav .VPLocalNavOutlineDropdown .outline-link {
+  font-size: 14px;
+  line-height: 24px;
+  white-space: normal;
+}
 
 /* ---------- sidebar ---------- */
 
@@ -533,10 +590,10 @@ a:focus-visible {
   );
 }
 
-@media (min-width: 768px) {
-  .VPDoc .content .main {
-    padding-bottom: 0;
-  }
+/* The footer's own margin sets the gap above the pager; carbon's 80px
+ * bottom padding here would stack under it. */
+.VPDoc .content .main {
+  padding-bottom: 0;
 }
 
 /* Flush with the link text below it: the list's 1px rule and 12px inset
@@ -609,6 +666,12 @@ a:focus-visible {
   line-height: 1.2;
   letter-spacing: -0.015em;
   margin: 0 0 24px;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  text-wrap: balance;
 }
 
 .vp-doc h2 {
@@ -689,7 +752,7 @@ a:focus-visible {
   padding: 14px 18px;
   background: var(--vp-c-bg-soft);
   border: 1px solid var(--vp-c-divider);
-  border-left: 1px solid var(--fleet-hue);
+  border-left: 2px solid var(--fleet-hue);
   border-radius: var(--fleet-radius-md);
 }
 .vp-doc blockquote > p {
@@ -710,25 +773,31 @@ a:focus-visible {
   border-radius: var(--fleet-radius-md);
 }
 
-/* Tables replace carbon's scrolling block with a full-width table, so
- * cell sizing must hold two shapes: a short inline-code token beside prose
- * columns stays whole, and one very long unbroken token wraps inside its
- * cell instead of pushing the table under the facts card. max-width caps
- * what each cell contributes to auto layout (about 37 monospace characters
- * of inline code) and break-word wraps only a token past that cap.
- * overflow-wrap: anywhere fails the first shape: it feeds break
- * opportunities into min-content, and prose columns then starve a code
- * column down to a few glyphs. The bound is per cell, so a row of several
- * capped columns can still exceed the doc column, so table-wrap.ts wraps
- * every top-level table in .vp-table, which scrolls that overflow inside
- * the column. The launcher panel mounts in place of a landing table and
- * must never be clipped by the wrapper. */
+/* Tables: the wrapper table-wrap.ts adds is the horizontal scroller at
+ * every width (carbon scrolls the table itself below 768px, which leaves
+ * the off-screen cells setting the row heights), so a table wider than the
+ * doc column scrolls inside the column, never under the aside and never
+ * clipped at the viewport. What makes a table "wider" is its columns'
+ * natural widths: an inline-code token counts whole up to the cap the
+ * inline-code rules set, prose counts as its longest word. The scroll cue
+ * is a shadow at each edge that has content past it: two ground-colored
+ * layers scroll with the content and cover the two fixed shadow layers
+ * exactly at the ends of the scroll range. */
 .vp-doc .vp-table {
   overflow-x: auto;
   max-width: 100%;
+  margin: 8px 0 1.5em;
+  background:
+    linear-gradient(to right, var(--vp-c-bg) 50%, transparent) left / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--vp-c-bg) 50%, transparent) right / 40px 100% no-repeat local,
+    linear-gradient(to right, var(--fleet-scroll-shade), transparent) left / 16px 100% no-repeat
+    scroll,
+    linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
+    scroll;
+  scrollbar-color: var(--fleet-scroll-strong) transparent;
 }
-.vp-doc .vp-table:has(> .fleet-launcher) {
-  overflow: visible;
+.vp-doc .vp-table::-webkit-scrollbar-thumb {
+  background: var(--fleet-scroll-strong);
 }
 .vp-doc table {
   margin: 8px 0 1.5em;
@@ -736,16 +805,18 @@ a:focus-visible {
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
-@media (min-width: 768px) {
-  .vp-doc table {
-    display: table;
-    width: 100%;
-  }
+/* A table nested in a quote or list has no wrapper (table-wrap.ts leaves
+ * it bare) and keeps carbon's own scrolling block. */
+.vp-doc .vp-table > table {
+  display: table;
+  width: 100%;
+  margin: 0;
 }
 .vp-doc tr,
 .vp-doc tr:nth-child(2n) {
   background-color: transparent;
   border-top: 0;
+  transition: none;
 }
 .vp-doc th,
 .vp-doc td {
@@ -754,7 +825,6 @@ a:focus-visible {
   padding: 12px 14px;
   text-align: left;
   vertical-align: top;
-  max-width: 22em;
   overflow-wrap: break-word;
 }
 .vp-doc th {
@@ -768,45 +838,157 @@ a:focus-visible {
   font-size: 16px;
 }
 
-/* Code: inline spans in the ink, blocks as bordered panels. */
+/* Inline code is an atomic inline in the ink: a token stays whole and
+ * drops to the next line when it does not fit, and only one wider than its
+ * column wraps inside (max-width plus break-word, the facts card's path
+ * segment shape). break-word, not anywhere: anywhere feeds break points
+ * into min-content, and prose columns then starve a code column down to a
+ * few glyphs. The line-height keeps the box inside the prose line, so the
+ * padding never opens the lines. An inline-block draws no inherited
+ * underline, so a link's code inherits the decoration explicitly. */
 .vp-doc :not(pre) > code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: break-word;
   border-radius: var(--fleet-radius-sm);
   padding: 0.1em 0.4em;
   font-size: 0.88em;
+  line-height: 1.5;
+  transition: none;
+}
+/* In a table cell the percentage cap resolves to nothing while the column
+ * is being sized (the token would wrap at any width), so cells carry no
+ * cap: a token contributes its whole width to the column. Inside the
+ * scroll wrapper it never wraps at all; the wrapper scrolls instead. */
+.vp-doc :is(th, td) code {
+  max-width: none;
+}
+.vp-doc .vp-table :is(th, td) code {
+  white-space: nowrap;
 }
 .vp-doc :not(pre, h1, h2, h3, h4, h5, h6) > code {
   font-size: 0.88em;
 }
 .vp-doc a > code {
   color: var(--fleet-hue);
+  text-decoration: inherit;
 }
-
-.vp-doc div[class*="language-"],
-.vp-block {
-  border: 1px solid var(--vp-c-divider);
-  margin: 0 0 1.25em;
+/* Highlights carry the hue's band, never the agent's yellow; keycaps are
+ * the launcher's (launcher.css .fleet-launcher-keys kbd). */
+.vp-doc mark {
+  background: var(--fleet-hue-band);
+  color: inherit;
+  border-radius: var(--fleet-radius-sm);
+  padding: 0 0.15em;
 }
-@media (min-width: 640px) {
-  .vp-doc div[class*="language-"],
-  .vp-block {
-    border-radius: var(--fleet-radius-md);
-    margin: 0 0 1.25em;
-  }
-}
-.vp-doc [class*="language-"] > button.copy {
+.vp-doc kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 0.45em;
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--vp-c-text-2);
+  background: var(--vp-c-bg-soft-2);
+  border: 1px solid var(--vp-c-border);
   border-radius: var(--fleet-radius-sm);
 }
+
+/* Code blocks are bordered panels with a control row above the code: the
+ * language label and the copy button sit in the pre's top padding, so the
+ * button never covers the first line, and on touch screens (no hover to
+ * reveal it) it is always shown at a 36px target. The radius holds at
+ * every width: the block never reaches the viewport edge (the column keeps
+ * its side padding), so carbon's squared phone box reads as a fault, not a
+ * bleed. Horizontal overflow gets the tables' edge shadows and thumb. */
+.vp-doc div[class*="language-"],
+.vp-doc li div[class*="language-"],
+.vp-block {
+  /* the control row's height, shared by the pre and its line-number gutter */
+  --fleet-codeblock-top: 48px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--fleet-radius-md);
+  margin: 0 0 1.25em;
+}
+.vp-doc [class*="language-"] pre {
+  padding: var(--fleet-codeblock-top) 0 20px;
+  background:
+    linear-gradient(to right, var(--vp-c-bg-code) 50%, transparent) left / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--vp-c-bg-code) 50%, transparent) right / 40px 100% no-repeat local,
+    linear-gradient(to right, var(--fleet-scroll-shade), transparent) left / 16px 100% no-repeat
+    scroll,
+    linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
+    scroll;
+  scrollbar-color: var(--fleet-scroll-strong) transparent;
+}
+.vp-doc [class*="language-"] pre::-webkit-scrollbar-thumb {
+  background: var(--fleet-scroll-strong);
+}
+.vp-doc .line-numbers-wrapper {
+  padding-top: var(--fleet-codeblock-top);
+}
+/* The pre is a scroll region in the tab order; its own ring would be
+ * clipped by the block's overflow, so the block draws it. */
+.vp-doc [class*="language-"] pre:focus-visible {
+  outline: none;
+}
+.vp-doc div[class*="language-"]:has(> pre:focus-visible) {
+  outline: 2px solid var(--fleet-hue);
+  outline-offset: 2px;
+}
+.vp-doc [class*="language-"] > button.copy {
+  top: 8px;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--fleet-radius-sm);
+  transition:
+    border-color var(--fleet-transition),
+    background-color var(--fleet-transition),
+    opacity var(--fleet-transition);
+}
+.vp-doc [class*="language-"] > button.copy:focus-visible {
+  opacity: 1;
+}
+.vp-doc [class*="language-"] > button.copy.copied,
+.vp-doc [class*="language-"] > button.copy:hover.copied {
+  border-radius: 0 var(--fleet-radius-sm) var(--fleet-radius-sm) 0;
+}
+.vp-doc [class*="language-"] > button.copy.copied::before,
+.vp-doc [class*="language-"] > button.copy:hover.copied::before {
+  height: 36px;
+  border-radius: var(--fleet-radius-sm) 0 0 var(--fleet-radius-sm);
+  font-size: 13px;
+}
+@media (hover: none) {
+  .vp-doc [class*="language-"] > button.copy {
+    opacity: 1;
+  }
+}
 .vp-doc [class*="language-"] > span.lang {
+  top: 16px;
+  right: 54px;
   font-family: var(--vp-font-family-mono);
-  top: 6px;
-  right: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  transition: none;
+}
+/* carbon hides the label while the copy button shows; here they share the row */
+.vp-doc [class*="language-"]:hover > button.copy + span.lang,
+.vp-doc [class*="language-"] > button.copy:focus + span.lang {
+  opacity: 1;
 }
 .vp-doc .vp-code-group .tabs {
   border-bottom: 1px solid var(--vp-c-divider);
 }
 
 /* Custom blocks (::: tip, warning, ...): one panel material, the kind
- * named by its title text, the hue on the left rule. */
+ * named by its title text and by its --color-<kind> token (custom.css) on
+ * the 2px rule. Note, tip, important, info and details carry the hue with
+ * the title in the ink; warning and caution (and the ::: danger container,
+ * GitHub's CAUTION) color the title too, so a risk reads apart from a hint
+ * at a glance while the body stays the ink. */
 .vp-doc .custom-block {
   margin: 0 0 1.25em;
   padding: 14px 18px;
@@ -825,9 +1007,39 @@ a:focus-visible {
   color: var(--vp-c-text-1);
   margin-bottom: 6px;
 }
+.vp-doc .custom-block.note {
+  border-left-color: var(--color-note);
+}
+.vp-doc .custom-block.tip {
+  border-left-color: var(--color-tip);
+}
+.vp-doc .custom-block.important {
+  border-left-color: var(--color-important);
+}
+.vp-doc .custom-block.info {
+  border-left-color: var(--color-info);
+}
+.vp-doc .custom-block.details {
+  border-left-color: var(--color-details);
+}
 .vp-doc .custom-block p {
   margin: 6px 0;
   line-height: 1.65;
+  transition: none;
+}
+.vp-doc .custom-block.warning {
+  border-left-color: var(--color-warning);
+}
+.vp-doc .custom-block.warning .custom-block-title {
+  color: var(--color-warning);
+}
+.vp-doc .custom-block.caution,
+.vp-doc .custom-block.danger {
+  border-left-color: var(--color-caution);
+}
+.vp-doc .custom-block.caution .custom-block-title,
+.vp-doc .custom-block.danger .custom-block-title {
+  color: var(--color-caution);
 }
 .vp-doc .custom-block.details {
   padding: 12px 18px;
@@ -838,7 +1050,12 @@ a:focus-visible {
   cursor: pointer;
 }
 
-/* Footer pager. */
+/* The footer: the pager's hairline opens it, the cards follow, and the
+ * provenance line closes it (its own rule is dropped after a pager, in the
+ * provenance section). */
+.VPDoc .VPDocFooter {
+  margin-bottom: 0;
+}
 .VPDocFooter .prev-next {
   border-top-color: var(--vp-c-divider);
 }
@@ -846,6 +1063,9 @@ a:focus-visible {
   border-color: var(--vp-c-divider);
   border-radius: var(--fleet-radius-md);
   padding: 14px 16px;
+  transition:
+    border-color var(--fleet-transition),
+    background-color var(--fleet-transition);
 }
 .VPDocFooter .pager-link:hover {
   border-color: var(--fleet-hue);
@@ -860,6 +1080,8 @@ a:focus-visible {
   font-size: 16px;
   font-weight: 500;
   line-height: 1.45;
+  text-wrap: balance;
+  transition: color var(--fleet-transition);
 }
 .VPDocFooter .pager-link:hover .title {
   color: var(--vp-c-text-1);
@@ -878,6 +1100,13 @@ a:focus-visible {
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--vp-c-text-3);
+}
+/* After a pager the line is the footer's last row, not a third ruled
+ * band under the two ruled cards. */
+.VPDocFooter:has(.prev-next) + .fleet-provenance {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
 }
 .fleet-provenance a {
   color: var(--vp-c-text-3);
@@ -1261,14 +1490,245 @@ a:focus-visible {
   .VPNavBar .VPNavBarTitle .title .nav-bar-title-text {
     font-size: 16px;
   }
+  /* A phone column cannot hold two readable prose columns: a table may
+   * spread to twice the column (the wrapper scrolls it) before its cells
+   * wrap, and up to there every column sits at its natural width. */
+  .vp-doc .vp-table > table {
+    width: max-content;
+    min-width: 100%;
+    max-width: 200%;
+  }
+  /* 14px is the floor for informational text on a phone. */
+  .vp-doc th,
+  .VPDocFooter .pager-link .desc,
+  .fleet-provenance,
+  .vp-doc [class*="language-"] > span.lang {
+    font-size: 14px;
+  }
+  .VPDoc .VPDocFooter {
+    margin-top: 40px;
+  }
+  /* A lone "Next page" card spans the column; carbon's margin-left: auto
+   * shrinks it to its text in the stacked layout. */
+  .VPDocFooter .prev-next.has-next:not(.has-prev) .pager {
+    margin-left: 0;
+  }
 }
 
+@media (max-width: 429px) {
+  .vp-doc h1 {
+    font-size: 28px;
+  }
+}
+
+/* ---------- the not-found page ---------- */
+
+/* Carbon's page in the fleet's type: the number in the display face, the
+ * title (config.mts sets its text in sentence case) at the h2's weight, the
+ * link a button in the theme's radius and hover timing. */
+.NotFound .code {
+  font-family: var(--fleet-font-display);
+  letter-spacing: -0.02em;
+  color: var(--vp-c-text-1);
+}
+.NotFound .title {
+  font-family: var(--fleet-font-display);
+  padding-top: 16px;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  font-size: 22px;
+  font-weight: 600;
+  text-transform: none;
+}
+.NotFound .quote {
+  max-width: 320px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.NotFound .link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border-color: var(--vp-c-border);
+  border-radius: var(--fleet-radius-md);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 15px;
+  font-weight: 500;
+  transition:
+    border-color var(--fleet-transition),
+    color var(--fleet-transition);
+}
+.NotFound .link:hover {
+  border-color: var(--fleet-hue);
+  color: var(--vp-c-text-1);
+}
+
+/* ---------- print ---------- */
+
+/* The article alone, on paper: the chrome (nav, local nav, sidebar, aside,
+ * launcher, skip link, code controls, pager) is gone, the grounds are paper
+ * and the text ink whatever the screen mode was, the column spans the
+ * page, external links print their address, and a code block or table is
+ * not split across pages. */
+@media print {
+  .VPNav,
+  .VPLocalNav,
+  .VPSidebar,
+  .Layout .VPDoc.has-aside .aside,
+  .VPSkipLink,
+  .fleet-launcher,
+  .fleet-launcher-button,
+  .VPDoc .content-top,
+  .VPDocFooter,
+  .vp-doc [class*="language-"] > button.copy,
+  .vp-doc [class*="language-"] > span.lang {
+    display: none;
+  }
+  /* html:root outranks custom.css's :root and .dark token blocks */
+  html:root,
+  html:root.dark {
+    --vp-c-bg: #ffffff;
+    --vp-c-bg-alt: #ffffff;
+    --vp-c-bg-elv: #ffffff;
+    --vp-c-bg-soft: #ffffff;
+    --vp-c-bg-soft-2: #f3f4f6;
+    --vp-c-bg-code: #f3f4f6;
+    --vp-c-divider: rgba(20, 24, 32, 0.2);
+    --vp-c-border: rgba(20, 24, 32, 0.3);
+    --vp-c-text-1: #000000;
+    --vp-c-text-2: #333840;
+    --vp-c-text-3: #4a505c;
+    /* the accents are ink on paper: a dark-mode hue or alert color printed
+     * from a dark screen would sit at 2:1 on white */
+    --fleet-hue: #1c1f26;
+    --fleet-hue-band: rgba(20, 24, 32, 0.1);
+    --fleet-hue-soft: rgba(20, 24, 32, 0.28);
+    --color-warning: #9a6700;
+    --color-caution: #d1242f;
+    --fleet-code-foreground: #000000;
+    --fleet-code-token-comment: #4a505c;
+    --fleet-code-token-string: #0b4a8b;
+    --fleet-code-token-string-expression: #0b4a8b;
+    --fleet-code-token-constant: #005cc5;
+    --fleet-code-token-keyword: #b8232f;
+    --fleet-code-token-function: #6639b6;
+    --fleet-code-token-parameter: #000000;
+    --fleet-code-token-punctuation: #333840;
+    --fleet-code-token-link: #0b4a8b;
+    --fleet-code-token-inserted: #1a6b2f;
+    --fleet-code-token-deleted: #b8232f;
+    --fleet-code-token-changed: #7a4f00;
+  }
+  body {
+    background: #ffffff;
+    font-size: 12pt;
+  }
+  .Layout .VPContent.has-sidebar,
+  .Layout .VPDoc {
+    padding: 0;
+    margin: 0;
+  }
+  .Layout .VPDoc .container,
+  .Layout .VPDoc .content,
+  .Layout .VPDoc .content-container {
+    max-width: none;
+  }
+  /* The address replaces carbon's 11px masked icon box in the same
+   * ::after, so the box's mask and size go too, or the text is masked
+   * away one glyph per line. */
+  .vp-doc :is(a[href*="://"], a[target="_blank"]):not(.no-icon)::after {
+    content: " (" attr(href) ")";
+    display: inline;
+    width: auto;
+    height: auto;
+    margin: 0;
+    background: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    font-size: 0.85em;
+    color: var(--vp-c-text-3);
+    text-decoration: none;
+  }
+  .vp-doc div[class*="language-"],
+  .vp-doc .vp-table,
+  .vp-doc .custom-block,
+  .vp-doc blockquote {
+    break-inside: avoid;
+  }
+  .vp-doc .vp-table,
+  .vp-doc [class*="language-"] pre {
+    overflow: visible;
+    background: none;
+  }
+  /* Nothing scrolls on paper: the table fits the page, and a cell's long
+   * value (a code token, whole on screen, or a bare unbroken word) wraps
+   * inside its column. */
+  .vp-doc .vp-table > table {
+    width: 100%;
+    max-width: 100%;
+  }
+  .vp-doc .vp-table :is(th, td) {
+    overflow-wrap: anywhere;
+  }
+  /* the inline-code rule's own break-word would outrank the inherited value */
+  .vp-doc .vp-table :is(th, td) code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .vp-doc div[class*="language-"] {
+    --fleet-codeblock-top: 20px;
+    overflow: visible;
+  }
+  /* A line wraps to the page instead of scrolling; a token wider than the
+   * page (one long identifier) breaks inside, and the code box gives up
+   * carbon's fit-content width, which would keep it as wide as that token
+   * and clip its tail at the column. */
+  .vp-doc [class*="language-"] code {
+    width: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* The gutter advances one fixed row per source line, so once a line
+   * wraps the numbers drift off their lines: the gutter goes, and its
+   * column with it. */
+  .vp-doc div[class*="language-"].line-numbers-mode {
+    padding-left: 0;
+  }
+  .vp-doc .line-numbers-wrapper {
+    display: none;
+  }
+  .vp-doc h2,
+  .vp-doc h3 {
+    break-after: avoid;
+  }
+}
+
+/* Motion is a cue, never the content: with reduced motion requested every
+ * transition and animation on the page stops, carbon's !important ones
+ * included. */
 @media (prefers-reduced-motion: reduce) {
-  .fleet-facts,
-  .vp-doc a,
-  .VPSidebar .nav .group .VPSidebarItem .item,
-  .VPSidebar .nav .group .VPSidebarItem .text,
-  .VPSidebar .nav .group .VPSidebarItem .caret {
-    transition: none;
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+  /* carbon's own !important transitions on the switch are scoped, so they
+   * outrank the universal selector above; the .VPNav ancestor (the bar and
+   * the phone menu both mount the switch inside it) lifts these past them */
+  .VPNav .VPSwitch,
+  .VPNav .VPSwitch .check,
+  .VPNav .VPSwitch .icon svg {
+    transition: none !important;
+  }
+  /* carbon's reset also pins background-attachment (against parallax),
+   * which would fix the scrollers' cover layers over their edge shadows;
+   * the shadows are a scroll cue, not motion */
+  .vp-doc .vp-table,
+  .vp-doc [class*="language-"] pre {
+    background-attachment: local, local, scroll, scroll !important;
   }
 }

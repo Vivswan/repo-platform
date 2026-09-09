@@ -21,6 +21,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { createCssVariablesTheme, normalizeTheme } from "shiki";
 import { defineConfigWithTheme } from "vitepress";
 import type { ThemeConfig } from "vitepress-carbon";
 // Carbon's base config wires the theme package into vite (alias, optimize
@@ -138,12 +139,31 @@ export default defineConfigWithTheme<FleetThemeConfig>({
     },
   },
   markdown: {
-    preConfig(md) {
-      tableWrapRule(md);
-    },
+    // One highlighter theme whose colors are custom properties: custom.css
+    // owns the code palette per mode (--fleet-code-*), so token contrast is
+    // a token value the theme's contrast test can guard, not a hex shiki's
+    // github themes bake into every span. No italics: the fleet reads
+    // emphasis by weight. Normalized once here: VitePress hands shiki this
+    // object per fence, and shiki normalizes a raw theme on every pass,
+    // mutating its colors in place; the second pass then finds the ansi
+    // palette already replaced and loses its var() mapping, so an ansi
+    // fence prints its text in the placeholder hex (near-transparent black).
+    theme: normalizeTheme(
+      createCssVariablesTheme({
+        name: "fleet",
+        variablePrefix: "--fleet-code-",
+        fontStyle: false,
+      }),
+    ),
     config(md) {
       inlineTextRule(md);
       landingTableRule(md, rewrites);
+      // After the landing rule: the launcher replaces its table's tokens, so
+      // the panel gets no scroll wrapper (and no wrapper tab stop before its
+      // combobox). VitePress installs its own table_open renderer between
+      // preConfig and config, so the wrapper's rule must land here to move the
+      // tab stop from the table to the wrapper.
+      tableWrapRule(md);
       headersRule(md);
       alertTitlesRule(md);
     },
@@ -164,6 +184,8 @@ export default defineConfigWithTheme<FleetThemeConfig>({
     sidebar,
     search: { provider: "local" },
     outline: "deep",
+    // carbon's default title is uppercase; the fleet reads sentence case
+    notFound: { title: "Page not found", linkText: "Go to the front page" },
     ...(process.env.DOCS_SITE_EDIT_PATTERN
       ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
       : {}),
