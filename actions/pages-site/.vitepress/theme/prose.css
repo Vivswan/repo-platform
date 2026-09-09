@@ -5,193 +5,194 @@
 .vp-doc {
   font-size: 17px;
   line-height: 1.7;
-}
 
-.vp-doc h1,
-.vp-doc h2 {
-  font-family: var(--fleet-font-display);
-}
+  h1,
+  h2 {
+    font-family: var(--fleet-font-display);
+  }
 
-.vp-doc h1 {
-  font-size: 40px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.015em;
-  margin: 0 0 24px;
-}
+  h1 {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    margin: 0 0 24px;
+  }
 
-.vp-doc h1,
-.vp-doc h2,
-.vp-doc h3 {
-  text-wrap: balance;
-}
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
 
-.vp-doc h2 {
-  font-size: 26px;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  margin: 64px 0 18px;
-  padding-top: 24px;
-  border-top: 1px solid var(--vp-c-divider);
-}
+  h2 {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin: 64px 0 18px;
+    padding-top: 24px;
+    border-top: 1px solid var(--vp-c-divider);
+  }
 
-.vp-doc h3 {
-  font-size: 19px;
-  font-weight: 600;
-  line-height: 1.4;
-  letter-spacing: 0;
-  margin: 32px 0 12px;
-}
+  h3 {
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0;
+    margin: 32px 0 12px;
+  }
 
-.vp-doc h4 {
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.5;
-  margin: 24px 0 8px;
-}
+  h4 {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.5;
+    margin: 24px 0 8px;
+  }
 
-.vp-doc h1 .header-anchor,
-.vp-doc h2 .header-anchor,
-.vp-doc h3 .header-anchor,
-.vp-doc h4 .header-anchor {
-  color: var(--vp-c-text-3);
-}
+  h1 .header-anchor,
+  h2 .header-anchor,
+  h3 .header-anchor,
+  h4 .header-anchor {
+    color: var(--vp-c-text-3);
+  }
 
-.vp-doc p {
-  margin: 0 0 1.25em;
-  line-height: 1.7;
-}
+  p {
+    margin: 0 0 1.25em;
+    line-height: 1.7;
+  }
 
-.vp-doc ul,
-.vp-doc ol {
-  margin: 0 0 1.25em;
-  padding-left: 1.4em;
-}
-.vp-doc li + li {
-  margin-top: 0.6em;
-}
-.vp-doc li::marker {
-  color: var(--vp-c-text-3);
-}
+  ul,
+  ol {
+    margin: 0 0 1.25em;
+    padding-left: 1.4em;
+  }
 
-.vp-doc strong,
-.vp-doc b {
-  font-weight: 600;
-}
-.vp-doc em,
-.vp-doc i {
-  font-style: normal;
-  font-weight: 600;
-}
+  li {
+    & + li {
+      margin-top: 0.6em;
+    }
+    &::marker {
+      color: var(--vp-c-text-3);
+    }
+  }
 
-.vp-doc a {
-  font-weight: 400;
-  color: var(--fleet-hue);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-decoration-color: var(--fleet-hue-soft);
-  text-underline-offset: 0.2em;
-  transition: text-decoration-color var(--fleet-transition);
-}
-.vp-doc a:hover {
-  color: var(--fleet-hue);
-  text-decoration-color: var(--fleet-hue);
-}
+  strong,
+  b {
+    font-weight: 600;
+  }
+  em,
+  i {
+    font-style: normal;
+    font-weight: 600;
+  }
+  a {
+    font-weight: 400;
+    color: var(--fleet-hue);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: var(--fleet-hue-soft);
+    text-underline-offset: 0.2em;
+    transition: text-decoration-color var(--fleet-transition);
+    &:hover {
+      color: var(--fleet-hue);
+      text-decoration-color: var(--fleet-hue);
+    }
+  }
+  blockquote {
+    margin: 0 0 1.25em;
+    padding: 14px 18px;
+    background: var(--vp-c-bg-soft);
+    border: 1px solid var(--vp-c-divider);
+    border-left: 2px solid var(--fleet-hue);
+    border-radius: var(--fleet-radius-md);
+    & > p {
+      margin: 0;
+      font-size: 17px;
+      color: var(--vp-c-text-2);
+      & + p {
+        margin-top: 1em;
+      }
+    }
+  }
 
-.vp-doc blockquote {
-  margin: 0 0 1.25em;
-  padding: 14px 18px;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  border-left: 2px solid var(--fleet-hue);
-  border-radius: var(--fleet-radius-md);
-}
-.vp-doc blockquote > p {
-  margin: 0;
-  font-size: 17px;
-  color: var(--vp-c-text-2);
-}
-.vp-doc blockquote > p + p {
-  margin-top: 1em;
-}
+  hr {
+    margin: 32px 0;
+    border-top-color: var(--vp-c-divider);
+  }
 
-.vp-doc hr {
-  margin: 32px 0;
-  border-top-color: var(--vp-c-divider);
-}
+  img {
+    border-radius: var(--fleet-radius-md);
+  }
 
-.vp-doc img {
-  border-radius: var(--fleet-radius-md);
-}
-
-/* Inline code is an atomic inline in the ink: a token stays whole and
- * drops to the next line when it does not fit, and only one wider than its
- * column wraps inside (max-width plus break-word, the facts card's path
- * segment shape). break-word, not anywhere: anywhere feeds break points
- * into min-content, and prose columns then starve a code column down to a
- * few glyphs. The line-height keeps the box inside the prose line, so the
- * padding never opens the lines. An inline-block draws no inherited
- * underline, so a link's code inherits the decoration explicitly. */
-.vp-doc :not(pre) > code {
-  display: inline-block;
-  max-width: 100%;
-  overflow-wrap: break-word;
-  border-radius: var(--fleet-radius-sm);
-  padding: 0.1em 0.4em;
-  font-size: 0.88em;
-  line-height: 1.5;
-  transition: none;
-}
-/* In a table cell the percentage cap resolves to nothing while the column
- * is being sized (the token would wrap at any width), so cells carry no
- * cap: a token contributes its whole width to the column. Inside the
- * scroll wrapper it never wraps at all; the wrapper scrolls instead. */
-.vp-doc :is(th, td) code {
-  max-width: none;
-}
-.vp-doc .vp-table :is(th, td) code {
-  white-space: nowrap;
-}
-.vp-doc :not(pre, h1, h2, h3, h4, h5, h6) > code {
-  font-size: 0.88em;
-}
-.vp-doc a > code {
-  color: var(--fleet-hue);
-  text-decoration: inherit;
-}
-/* Highlights carry the hue's band, never the agent's yellow; keycaps are
- * the launcher's (launcher.css .fleet-launcher-keys kbd). */
-.vp-doc mark {
-  background: var(--fleet-hue-band);
-  color: inherit;
-  border-radius: var(--fleet-radius-sm);
-  padding: 0 0.15em;
-}
-.vp-doc kbd {
-  display: inline-block;
-  min-width: 1.6em;
-  padding: 0 0.45em;
-  font-family: var(--vp-font-family-mono);
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: center;
-  color: var(--vp-c-text-2);
-  background: var(--vp-c-bg-soft-2);
-  border: 1px solid var(--vp-c-border);
-  border-radius: var(--fleet-radius-sm);
+  /* Inline code is an atomic inline in the ink: a token stays whole and
+   * drops to the next line when it does not fit, and only one wider than its
+   * column wraps inside (max-width plus break-word, the facts card's path
+   * segment shape). break-word, not anywhere: anywhere feeds break points
+   * into min-content, and prose columns then starve a code column down to a
+   * few glyphs. The line-height keeps the box inside the prose line, so the
+   * padding never opens the lines. An inline-block draws no inherited
+   * underline, so a link's code inherits the decoration explicitly. */
+  :not(pre) > code {
+    display: inline-block;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    border-radius: var(--fleet-radius-sm);
+    padding: 0.1em 0.4em;
+    font-size: 0.88em;
+    line-height: 1.5;
+    transition: none;
+  }
+  /* In a table cell the percentage cap resolves to nothing while the column
+   * is being sized (the token would wrap at any width), so cells carry no
+   * cap: a token contributes its whole width to the column. Inside the
+   * scroll wrapper it never wraps at all; the wrapper scrolls instead. */
+  :is(th, td) code {
+    max-width: none;
+  }
+  .vp-table :is(th, td) code {
+    white-space: nowrap;
+  }
+  :not(pre, h1, h2, h3, h4, h5, h6) > code {
+    font-size: 0.88em;
+  }
+  a > code {
+    color: var(--fleet-hue);
+    text-decoration: inherit;
+  }
+  /* Highlights carry the hue's band, never the agent's yellow; keycaps are
+   * the launcher's (launcher.css .fleet-launcher-keys kbd). */
+  mark {
+    background: var(--fleet-hue-band);
+    color: inherit;
+    border-radius: var(--fleet-radius-sm);
+    padding: 0 0.15em;
+  }
+  kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 0.45em;
+    font-family: var(--vp-font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+    color: var(--vp-c-text-2);
+    background: var(--vp-c-bg-soft-2);
+    border: 1px solid var(--vp-c-border);
+    border-radius: var(--fleet-radius-sm);
+  }
 }
 
 @media (max-width: 767px) {
   .vp-doc {
     font-size: 16px;
-  }
-  .vp-doc h1 {
-    font-size: 31px;
-  }
-  .vp-doc h2 {
-    font-size: 23px;
-    margin-top: 48px;
+    h1 {
+      font-size: 31px;
+    }
+    h2 {
+      font-size: 23px;
+      margin-top: 48px;
+    }
   }
 }
 

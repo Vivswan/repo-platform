@@ -26,63 +26,67 @@
     linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
     scroll;
   scrollbar-color: var(--fleet-scroll-strong) transparent;
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll-strong);
+  }
 }
-.vp-doc [class*="language-"] pre::-webkit-scrollbar-thumb {
-  background: var(--fleet-scroll-strong);
-}
-.vp-doc .line-numbers-wrapper {
-  padding-top: var(--fleet-codeblock-top);
-}
-/* The pre is a scroll region in the tab order; its own ring would be
- * clipped by the block's overflow, so the block draws it. */
-.vp-doc [class*="language-"] pre:focus-visible {
-  outline: none;
-}
-.vp-doc div[class*="language-"]:has(> pre:focus-visible) {
-  outline: 2px solid var(--fleet-hue);
-  outline-offset: 2px;
-}
-.vp-doc [class*="language-"] > button.copy {
-  top: 8px;
-  right: 8px;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--fleet-radius-sm);
-  transition:
-    border-color var(--fleet-transition),
-    background-color var(--fleet-transition),
-    opacity var(--fleet-transition);
-}
-.vp-doc [class*="language-"] > button.copy:focus-visible {
-  opacity: 1;
-}
-.vp-doc [class*="language-"] > button.copy.copied,
-.vp-doc [class*="language-"] > button.copy:hover.copied {
-  border-radius: 0 var(--fleet-radius-sm) var(--fleet-radius-sm) 0;
-}
-.vp-doc [class*="language-"] > button.copy.copied::before,
-.vp-doc [class*="language-"] > button.copy:hover.copied::before {
-  height: 36px;
-  border-radius: var(--fleet-radius-sm) 0 0 var(--fleet-radius-sm);
-  font-size: 13px;
+.vp-doc {
+  .line-numbers-wrapper {
+    padding-top: var(--fleet-codeblock-top);
+  }
+  /* The pre is a scroll region in the tab order; its own ring would be
+   * clipped by the block's overflow, so the block draws it. */
+  [class*="language-"] pre:focus-visible {
+    outline: none;
+  }
+  div[class*="language-"]:has(> pre:focus-visible) {
+    outline: 2px solid var(--fleet-hue);
+    outline-offset: 2px;
+  }
+  [class*="language-"] > button.copy {
+    top: 8px;
+    right: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--fleet-radius-sm);
+    transition:
+      border-color var(--fleet-transition),
+      background-color var(--fleet-transition),
+      opacity var(--fleet-transition);
+    &:focus-visible {
+      opacity: 1;
+    }
+    &.copied,
+    &:hover.copied {
+      border-radius: 0 var(--fleet-radius-sm) var(--fleet-radius-sm) 0;
+    }
+    &.copied::before,
+    &:hover.copied::before {
+      height: 36px;
+      border-radius: var(--fleet-radius-sm) 0 0 var(--fleet-radius-sm);
+      font-size: 13px;
+    }
+  }
 }
 @media (hover: none) {
   .vp-doc [class*="language-"] > button.copy {
     opacity: 1;
   }
 }
-.vp-doc [class*="language-"] > span.lang {
-  top: 16px;
-  right: 54px;
-  font-family: var(--vp-font-family-mono);
-  font-size: 13px;
-  line-height: 20px;
-  transition: none;
-}
-/* carbon hides the label while the copy button shows; here they share the row */
-.vp-doc [class*="language-"]:hover > button.copy + span.lang,
-.vp-doc [class*="language-"] > button.copy:focus + span.lang {
-  opacity: 1;
+.vp-doc [class*="language-"] {
+  & > span.lang {
+    top: 16px;
+    right: 54px;
+    font-family: var(--vp-font-family-mono);
+    font-size: 13px;
+    line-height: 20px;
+    transition: none;
+  }
+  /* carbon hides the label while the copy button shows; here they share the row */
+  &:hover > button.copy + span.lang,
+  & > button.copy:focus + span.lang {
+    opacity: 1;
+  }
 }
 .vp-doc .vp-code-group .tabs {
   border-bottom: 1px solid var(--vp-c-divider);

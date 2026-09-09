@@ -9,6 +9,7 @@
  * longest word. The scroll cue is an edge shadow only where content lies
  * past it: two ground-colored layers scroll with the content and cover the
  * fixed shadow layers at the ends. */
+
 .vp-doc .vp-table {
   overflow-x: auto;
   max-width: 100%;
@@ -21,60 +22,65 @@
     linear-gradient(to left, var(--fleet-scroll-shade), transparent) right / 16px 100% no-repeat
     scroll;
   scrollbar-color: var(--fleet-scroll-strong) transparent;
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll-strong);
+  }
 }
-.vp-doc .vp-table::-webkit-scrollbar-thumb {
-  background: var(--fleet-scroll-strong);
-}
-.vp-doc table {
-  margin: 8px 0 1.5em;
-  font-size: 16px;
-  line-height: 1.6;
-  font-variant-numeric: tabular-nums;
-}
-/* A table nested in a quote or list has no wrapper (table-wrap.ts leaves
- * it bare) and keeps carbon's own scrolling block. */
-.vp-doc .vp-table > table {
-  display: table;
-  width: 100%;
-  margin: 0;
-}
-.vp-doc tr,
-.vp-doc tr:nth-child(2n) {
-  background-color: transparent;
-  border-top: 0;
-  transition: none;
-}
-.vp-doc th,
-.vp-doc td {
-  border: 0;
-  border-bottom: 1px solid var(--vp-c-divider);
-  padding: 12px 14px;
-  text-align: left;
-  vertical-align: top;
-  overflow-wrap: break-word;
-}
-.vp-doc th {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--vp-c-text-3);
-  background-color: transparent;
-  padding-bottom: 8px;
-}
-.vp-doc td {
-  font-size: 16px;
+
+.vp-doc {
+  table {
+    margin: 8px 0 1.5em;
+    font-size: 16px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+  }
+  /* A table nested in a quote or list has no wrapper (table-wrap.ts leaves
+   * it bare) and keeps carbon's own scrolling block. */
+  .vp-table > table {
+    display: table;
+    width: 100%;
+    margin: 0;
+  }
+  tr,
+  tr:nth-child(2n) {
+    background-color: transparent;
+    border-top: 0;
+    transition: none;
+  }
+  th,
+  td {
+    border: 0;
+    border-bottom: 1px solid var(--vp-c-divider);
+    padding: 12px 14px;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: break-word;
+  }
+  th {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--vp-c-text-3);
+    background-color: transparent;
+    padding-bottom: 8px;
+  }
+  td {
+    font-size: 16px;
+  }
 }
 
 @media (max-width: 767px) {
   /* A phone column cannot hold two readable prose columns: a table may
    * spread to twice the column (the wrapper scrolls it) before its cells
    * wrap, and up to there every column sits at its natural width. */
-  .vp-doc .vp-table > table {
-    width: max-content;
-    min-width: 100%;
-    max-width: 200%;
-  }
-  /* 14px is the floor for informational text on a phone. */
-  .vp-doc th {
-    font-size: 14px;
+  .vp-doc {
+    .vp-table > table {
+      width: max-content;
+      min-width: 100%;
+      max-width: 200%;
+    }
+    /* 14px is the floor for informational text on a phone. */
+    th {
+      font-size: 14px;
+    }
   }
 }

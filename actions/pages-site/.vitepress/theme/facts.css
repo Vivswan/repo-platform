@@ -12,175 +12,176 @@
   line-height: 1.45;
   color: var(--vp-c-text-1);
   text-align: left;
-}
 
-.fleet-facts .fleet-facts-description {
-  margin: 0;
-  font-size: 14.5px;
-  line-height: 1.6;
-  color: var(--vp-c-text-2);
-}
+  .fleet-facts-description {
+    margin: 0;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--vp-c-text-2);
+  }
 
-/* The title rule: the hue's one appearance inside the card besides the
- * repository link. */
-.fleet-facts .fleet-facts-rule {
-  border: 0;
-  border-top: 2px solid var(--fleet-hue);
-  margin: 16px 0 2px;
-}
+  /* The title rule: the hue's one appearance inside the card besides the
+   * repository link. */
+  .fleet-facts-rule {
+    border: 0;
+    border-top: 2px solid var(--fleet-hue);
+    margin: 16px 0 2px;
+  }
 
-.fleet-facts dt,
-.fleet-facts dd {
-  margin: 0;
-  min-width: 0;
-  line-height: 1.45;
-}
-.fleet-facts dt {
-  font-family: var(--fleet-font-display);
-  font-weight: 600;
-  color: var(--vp-c-text-1);
-  /* an item's label sits inside a value cell and would inherit its alignment */
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-.fleet-facts dd {
-  text-align: right;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  color: var(--vp-c-text-1);
-  /* anywhere, not break-word: the card has one value column, so the only
-   * thing min-content decides is whether an unbroken value (a long
-   * repository name) pushes the grid past the card; where a value breaks
-   * is the same under both (a hyphen is a break point either way) */
-  overflow-wrap: anywhere;
-}
+  dt,
+  dd {
+    margin: 0;
+    min-width: 0;
+    line-height: 1.45;
+  }
+  dt {
+    font-family: var(--fleet-font-display);
+    font-weight: 600;
+    color: var(--vp-c-text-1);
+    /* an item's label sits inside a value cell and would inherit its alignment */
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+  dd {
+    text-align: right;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: var(--vp-c-text-1);
+    /* anywhere, not break-word: the card has one value column, so the only
+     * thing min-content decides is whether an unbroken value (a long
+     * repository name) pushes the grid past the card; where a value breaks
+     * is the same under both (a hyphen is a break point either way) */
+    overflow-wrap: anywhere;
+  }
 
-/* One grid for the whole card: every section list, row, and nested item
- * list is a subgrid of it, so the label column is shared and values start
- * on one line whatever a section's longest label. A counted group holds
- * its items inside its value cell (facts-panel.ts); that cell spans both
- * columns of the group's first grid row, under the group's label, and
- * lays the count on the value column and the items below it. The label
- * track is capped: a version tag is a label here, and one long enough
- * would otherwise take the whole card and leave the values no width. */
-.fleet-facts .fleet-facts-body {
-  display: grid;
-  grid-template-columns: fit-content(45%) minmax(0, 1fr);
-  column-gap: 12px;
-}
-.fleet-facts .fleet-facts-section,
-.fleet-facts .fleet-facts-row,
-.fleet-facts .fleet-facts-group > dd,
-.fleet-facts .fleet-facts-items,
-.fleet-facts .fleet-facts-item {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  margin: 0;
-}
-.fleet-facts .fleet-facts-group > dt {
-  grid-column: 1;
-  grid-row: 1;
-}
-.fleet-facts .fleet-facts-group > dd {
-  grid-row: 1;
-}
-.fleet-facts .fleet-facts-count {
-  grid-column: 2;
-}
+  /* One grid for the whole card: every section list, row, and nested item
+   * list is a subgrid of it, so the label column is shared and values start
+   * on one line whatever a section's longest label. A counted group holds
+   * its items inside its value cell (facts-panel.ts); that cell spans both
+   * columns of the group's first grid row, under the group's label, and
+   * lays the count on the value column and the items below it. The label
+   * track is capped: a version tag is a label here, and one long enough
+   * would otherwise take the whole card and leave the values no width. */
+  .fleet-facts-body {
+    display: grid;
+    grid-template-columns: fit-content(45%) minmax(0, 1fr);
+    column-gap: 12px;
+  }
+  .fleet-facts-section,
+  .fleet-facts-row,
+  .fleet-facts-group > dd,
+  .fleet-facts-items,
+  .fleet-facts-item {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+  .fleet-facts-group {
+    & > dt {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    & > dd {
+      grid-row: 1;
+    }
+  }
+  .fleet-facts-count {
+    grid-column: 2;
+  }
 
-/* Section breaks are a hairline plus air: hierarchy by spacing, not by
- * thickness. */
-.fleet-facts .fleet-facts-section + .fleet-facts-section {
-  border-top: 1px solid var(--vp-c-divider);
-  margin-top: 6px;
-  padding-top: 6px;
-}
+  /* Section breaks are a hairline plus air: hierarchy by spacing, not by
+   * thickness. */
+  .fleet-facts-section + .fleet-facts-section {
+    border-top: 1px solid var(--vp-c-divider);
+    margin-top: 6px;
+    padding-top: 6px;
+  }
 
-.fleet-facts .fleet-facts-row {
-  padding: 11px 0;
-}
-.fleet-facts .fleet-facts-row + .fleet-facts-row,
-.fleet-facts .fleet-facts-item {
-  border-top: 1px solid var(--vp-c-divider);
-}
-.fleet-facts .fleet-facts-group {
-  padding-bottom: 0;
-}
-.fleet-facts .fleet-facts-items {
-  margin-top: 11px;
-}
-.fleet-facts .fleet-facts-item {
-  padding: 11px 0;
-}
-/* A path segment (facts-panel.ts splits repository and homepage at their
- * slashes) wraps as a unit: the line breaks between segments, and inside
- * one only when it is wider than the column alone. text-decoration does
- * not reach into an inline block, so the link's underline is inherited. */
-.fleet-facts .fleet-facts-segment {
-  display: inline-block;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  text-decoration: inherit;
-}
-/* Items: the body face, the secondary ink, indented under their group. */
-.fleet-facts .fleet-facts-item > dt {
-  font-family: var(--vp-font-family-base);
-  font-weight: 400;
-  color: var(--vp-c-text-2);
-  padding-left: 18px;
-}
-.fleet-facts .fleet-facts-note {
-  color: var(--vp-c-text-3);
-  font-size: 13.5px;
-}
+  .fleet-facts-row {
+    padding: 11px 0;
+  }
+  .fleet-facts-row + .fleet-facts-row,
+  .fleet-facts-item {
+    border-top: 1px solid var(--vp-c-divider);
+  }
+  .fleet-facts-group {
+    padding-bottom: 0;
+  }
+  .fleet-facts-items {
+    margin-top: 11px;
+  }
+  .fleet-facts-item {
+    padding: 11px 0;
+  }
+  /* A path segment (facts-panel.ts splits repository and homepage at their
+   * slashes) wraps as a unit: the line breaks between segments, and inside
+   * one only when it is wider than the column alone. text-decoration does
+   * not reach into an inline block, so the link's underline is inherited. */
+  .fleet-facts-segment {
+    display: inline-block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-decoration: inherit;
+  }
+  /* Items: the body face, the secondary ink, indented under their group. */
+  .fleet-facts-item > dt {
+    font-family: var(--vp-font-family-base);
+    font-weight: 400;
+    color: var(--vp-c-text-2);
+    padding-left: 18px;
+  }
+  .fleet-facts-note {
+    color: var(--vp-c-text-3);
+    font-size: 13.5px;
+  }
 
-/* Topics are chips under their label, the card's full width: each chip is
- * a flex item, so a hyphenated topic moves to the next line whole and
- * breaks inside only when it is wider than the card alone. Five chips
- * need four lines in the value column alone; here they need two. */
-.fleet-facts .fleet-facts-row:has(.fleet-facts-topics) > dd {
-  grid-column: 1 / -1;
-  margin-top: 6px;
-}
-.fleet-facts .fleet-facts-topics {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.fleet-facts .fleet-facts-topic {
-  margin: 0;
-  padding: 1px 8px;
-  border: 1px solid var(--vp-c-border);
-  border-radius: var(--fleet-radius-sm);
-  font-size: 13.5px;
-  line-height: 1.45;
-  color: var(--vp-c-text-2);
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.fleet-facts a {
-  color: var(--vp-c-text-1);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-decoration-color: var(--vp-c-border);
-  text-underline-offset: 0.2em;
-  transition: text-decoration-color var(--fleet-transition);
-}
-.fleet-facts a:hover {
-  text-decoration-color: var(--vp-c-text-1);
-}
-.fleet-facts a.fleet-facts-repository {
-  color: var(--fleet-hue);
-  font-weight: 600;
-  text-decoration-color: var(--fleet-hue-soft);
-}
-.fleet-facts a.fleet-facts-repository:hover {
-  text-decoration-color: var(--fleet-hue);
+  /* Topics are chips under their label, the card's full width: each chip is
+   * a flex item, so a hyphenated topic moves to the next line whole and
+   * breaks inside only when it is wider than the card alone. Five chips
+   * need four lines in the value column alone; here they need two. */
+  .fleet-facts-row:has(.fleet-facts-topics) > dd {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+  }
+  .fleet-facts-topics {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .fleet-facts-topic {
+    margin: 0;
+    padding: 1px 8px;
+    border: 1px solid var(--vp-c-border);
+    border-radius: var(--fleet-radius-sm);
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--vp-c-text-2);
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  a {
+    color: var(--vp-c-text-1);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: var(--vp-c-border);
+    text-underline-offset: 0.2em;
+    transition: text-decoration-color var(--fleet-transition);
+    &:hover {
+      text-decoration-color: var(--vp-c-text-1);
+    }
+    &.fleet-facts-repository {
+      color: var(--fleet-hue);
+      font-weight: 600;
+      text-decoration-color: var(--fleet-hue-soft);
+      &:hover {
+        text-decoration-color: var(--fleet-hue);
+      }
+    }
+  }
 }
 
 /* In flow above the article (below carbon's aside breakpoint) the card is
@@ -189,45 +190,47 @@
  * the count retired (the items show it), the description holds two lines,
  * and the rows tighten. */
 @media (max-width: 1279px) {
-  .fleet-facts .fleet-facts-description {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-  }
-  .fleet-facts .fleet-facts-row {
-    padding: 8px 0;
-  }
-  .fleet-facts .fleet-facts-group {
-    padding-bottom: 8px;
-  }
-  .fleet-facts dd {
-    text-align: left;
-  }
-  .fleet-facts .fleet-facts-group > dd {
-    display: block;
-    grid-column: 2;
-  }
-  .fleet-facts .fleet-facts-count {
-    display: none;
-  }
-  .fleet-facts .fleet-facts-items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px 16px;
-    margin: 0;
-  }
-  .fleet-facts .fleet-facts-item {
-    display: inline-flex;
-    gap: 6px;
-    padding: 0;
-    border: 0;
-  }
-  .fleet-facts .fleet-facts-item > dt {
-    padding-left: 0;
-  }
-  .fleet-facts .fleet-facts-item > dd:empty {
-    display: none;
+  .fleet-facts {
+    .fleet-facts-description {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+    }
+    .fleet-facts-row {
+      padding: 8px 0;
+    }
+    .fleet-facts-group {
+      padding-bottom: 8px;
+    }
+    dd {
+      text-align: left;
+    }
+    .fleet-facts-group > dd {
+      display: block;
+      grid-column: 2;
+    }
+    .fleet-facts-count {
+      display: none;
+    }
+    .fleet-facts-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px 16px;
+      margin: 0;
+    }
+    .fleet-facts-item {
+      display: inline-flex;
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      & > dt {
+        padding-left: 0;
+      }
+      & > dd:empty {
+        display: none;
+      }
+    }
   }
 }
 
@@ -235,30 +238,30 @@
   .fleet-facts {
     padding: 16px 16px 14px;
     font-size: 14px;
-  }
-  .fleet-facts .fleet-facts-description {
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  .fleet-facts .fleet-facts-rule {
-    margin: 12px 0 0;
-  }
-  .fleet-facts .fleet-facts-row {
-    padding: 5px 0;
-  }
-  .fleet-facts .fleet-facts-group {
-    padding-bottom: 5px;
-  }
-  .fleet-facts .fleet-facts-row:has(.fleet-facts-topics) > dd {
-    margin-top: 4px;
-  }
-  /* one level of divider: on a phone the card is a flat list */
-  .fleet-facts .fleet-facts-section + .fleet-facts-section {
-    margin-top: 0;
-    padding-top: 0;
-  }
-  .fleet-facts .fleet-facts-topic,
-  .fleet-facts .fleet-facts-note {
-    font-size: 13px;
+    .fleet-facts-description {
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .fleet-facts-rule {
+      margin: 12px 0 0;
+    }
+    .fleet-facts-row {
+      padding: 5px 0;
+    }
+    .fleet-facts-group {
+      padding-bottom: 5px;
+    }
+    .fleet-facts-row:has(.fleet-facts-topics) > dd {
+      margin-top: 4px;
+    }
+    /* one level of divider: on a phone the card is a flat list */
+    .fleet-facts-section + .fleet-facts-section {
+      margin-top: 0;
+      padding-top: 0;
+    }
+    .fleet-facts-topic,
+    .fleet-facts-note {
+      font-size: 13px;
+    }
   }
 }

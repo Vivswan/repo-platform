@@ -29,21 +29,20 @@ a:focus-visible {
 .vp-doc a:focus-visible {
   outline-offset: 1px;
 }
-
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--fleet-scroll) transparent;
-}
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--fleet-scroll);
-  border-radius: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--fleet-scroll);
+    border-radius: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 @media (max-width: 767px) {

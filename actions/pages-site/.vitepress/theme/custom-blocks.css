@@ -6,6 +6,7 @@
  * the title in the ink; warning and caution (and the ::: danger container,
  * GitHub's CAUTION) color the title too, so a risk reads apart from a hint
  * at a glance while the body stays the ink. */
+
 .vp-doc .custom-block {
   margin: 0 0 1.25em;
   padding: 14px 18px;
@@ -16,53 +17,53 @@
   font-size: 16px;
   line-height: 1.65;
   color: var(--vp-c-text-1);
-}
-.vp-doc .custom-block .custom-block-title {
-  font-weight: 600;
-  font-size: 15px;
-  line-height: 1.5;
-  color: var(--vp-c-text-1);
-  margin-bottom: 6px;
-}
-.vp-doc .custom-block.note {
-  border-left-color: var(--color-note);
-}
-.vp-doc .custom-block.tip {
-  border-left-color: var(--color-tip);
-}
-.vp-doc .custom-block.important {
-  border-left-color: var(--color-important);
-}
-.vp-doc .custom-block.info {
-  border-left-color: var(--color-info);
-}
-.vp-doc .custom-block.details {
-  border-left-color: var(--color-details);
-}
-.vp-doc .custom-block p {
-  margin: 6px 0;
-  line-height: 1.65;
-  transition: none;
-}
-.vp-doc .custom-block.warning {
-  border-left-color: var(--color-warning);
-}
-.vp-doc .custom-block.warning .custom-block-title {
-  color: var(--color-warning);
-}
-.vp-doc .custom-block.caution,
-.vp-doc .custom-block.danger {
-  border-left-color: var(--color-caution);
-}
-.vp-doc .custom-block.caution .custom-block-title,
-.vp-doc .custom-block.danger .custom-block-title {
-  color: var(--color-caution);
-}
-.vp-doc .custom-block.details {
-  padding: 12px 18px;
-}
-.vp-doc .custom-block.details summary {
-  margin: 0;
-  font-weight: 600;
-  cursor: pointer;
+  .custom-block-title {
+    font-weight: 600;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--vp-c-text-1);
+    margin-bottom: 6px;
+  }
+  &.note {
+    border-left-color: var(--color-note);
+  }
+  &.tip {
+    border-left-color: var(--color-tip);
+  }
+  &.important {
+    border-left-color: var(--color-important);
+  }
+  &.info {
+    border-left-color: var(--color-info);
+  }
+  &.details {
+    border-left-color: var(--color-details);
+  }
+  p {
+    margin: 6px 0;
+    line-height: 1.65;
+    transition: none;
+  }
+  &.warning {
+    border-left-color: var(--color-warning);
+    .custom-block-title {
+      color: var(--color-warning);
+    }
+  }
+  &.caution,
+  &.danger {
+    border-left-color: var(--color-caution);
+  }
+  &.caution .custom-block-title,
+  &.danger .custom-block-title {
+    color: var(--color-caution);
+  }
+  &.details {
+    padding: 12px 18px;
+    summary {
+      margin: 0;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  }
 }

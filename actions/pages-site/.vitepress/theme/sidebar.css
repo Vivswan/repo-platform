@@ -28,94 +28,96 @@
 :root .Layout .VPSidebar:focus-visible {
   outline: none;
 }
-
 .VPSidebar .nav {
   padding: 16px 16px 40px 24px;
   border-right: 1px solid var(--vp-c-divider);
-}
 
-/* Carbon sizes the group at `sidebar - 48px` regardless of the nav's own
- * padding, which clipped the rows' right end. */
-.VPSidebar .nav .group {
-  width: auto;
-}
+  /* Carbon sizes the group at `sidebar - 48px` regardless of the nav's own
+   * padding, which clipped the rows' right end. */
 
-.VPSidebar .nav .group + .group {
-  border-top: 0;
-  padding-top: 4px;
-}
+  .group {
+    width: auto;
 
-.VPSidebar .nav .group .VPSidebarItem.level-0,
-.VPSidebar .nav .group .VPSidebarItem.collapsed.level-0 {
-  padding-bottom: 2px;
-}
+    & + .group {
+      border-top: 0;
+      padding-top: 4px;
+    }
 
-/* A one-line row is 40px tall (3 + 6 + 21.75 + 6 + 3): the hit area holds
- * while the type sits denser than carbon's. */
-.VPSidebar .nav .group .VPSidebarItem .item {
-  border-radius: var(--fleet-radius-md);
-  padding: 3px 8px 3px 10px;
-  transition:
-    background-color var(--fleet-transition),
-    color var(--fleet-transition);
-}
-.VPSidebar .nav .group .VPSidebarItem .indicator {
-  display: none;
-}
-.VPSidebar .nav .group .VPSidebarItem .text {
-  padding: 6px 0;
-  font-size: 15px;
-  line-height: 1.45;
-  font-weight: 400;
-  color: var(--vp-c-text-2);
-  text-wrap: balance;
-  transition: color var(--fleet-transition);
-}
-/* A group head, collapsible (a directory) or plain (pages sharing a
- * frontmatter group), is the one row without a link. */
-.VPSidebar .nav .group .VPSidebarItem:not(.is-link) > .item > .text,
-.VPSidebar .nav .group .VPSidebarItem.collapsible > .item > .link > .text {
-  font-weight: 500;
-}
-.VPSidebar .nav .group .VPSidebarItem .item:hover {
-  background-color: var(--color-action-list-item-default-hover-bg);
-}
-.VPSidebar .nav .group .VPSidebarItem .item:hover .text {
-  color: var(--vp-c-text-1);
-}
-.VPSidebar .nav .group .VPSidebarItem.is-link > .item > .link:hover .text {
-  text-decoration: none;
-}
-.VPSidebar .nav .group .VPSidebarItem.is-active > .item {
-  background-color: var(--fleet-hue-band);
-}
-.VPSidebar .nav .group .VPSidebarItem.is-active.is-link > .item > .link > .text {
-  color: var(--fleet-hue);
-  font-weight: 600;
-}
-.VPSidebar .nav .group .VPSidebarItem .caret {
-  color: var(--vp-c-text-3);
-  transition: color var(--fleet-transition);
-}
-/* The row is the one box for every state: the hover tint, the active band
- * and the focus ring, at the row's radius (the link inside is narrower and
- * carbon's ring sat on it). A group head is itself the focusable row. */
-.VPSidebar .nav .group .VPSidebarItem .link:focus-visible {
-  outline: none;
-}
-.VPSidebar .nav .group .VPSidebarItem .item:focus-visible,
-.VPSidebar .nav .group .VPSidebarItem .item:has(> .link:focus-visible) {
-  outline: 2px solid var(--fleet-hue);
-  outline-offset: 2px;
-  border-radius: var(--fleet-radius-md);
-}
-/* Children step in under their group head; a headless group (a docs
- * tree's root files) sits flush, with no rule down its edge. */
-.VPSidebar .nav .group .VPSidebarItem .items {
-  border-left: 0;
-  padding-left: 0;
-  margin: 2px 0 6px;
-}
-.VPSidebar .nav .group .VPSidebarItem .item + .items {
-  margin-left: 12px;
+    .VPSidebarItem {
+      &.level-0,
+      &.collapsed.level-0 {
+        padding-bottom: 2px;
+      }
+
+      /* A one-line row is 40px tall (3 + 6 + 21.75 + 6 + 3): the hit area holds
+       * while the type sits denser than carbon's. */
+      .item {
+        border-radius: var(--fleet-radius-md);
+        padding: 3px 8px 3px 10px;
+        transition:
+          background-color var(--fleet-transition),
+          color var(--fleet-transition);
+      }
+      .indicator {
+        display: none;
+      }
+      .text {
+        padding: 6px 0;
+        font-size: 15px;
+        line-height: 1.45;
+        font-weight: 400;
+        color: var(--vp-c-text-2);
+        text-wrap: balance;
+        transition: color var(--fleet-transition);
+      }
+      /* A group head, collapsible (a directory) or plain (pages sharing a
+       * frontmatter group), is the one row without a link. */
+      &:not(.is-link) > .item > .text,
+      &.collapsible > .item > .link > .text {
+        font-weight: 500;
+      }
+      .item:hover {
+        background-color: var(--color-action-list-item-default-hover-bg);
+      }
+      .item:hover .text {
+        color: var(--vp-c-text-1);
+      }
+      &.is-link > .item > .link:hover .text {
+        text-decoration: none;
+      }
+      &.is-active > .item {
+        background-color: var(--fleet-hue-band);
+      }
+      &.is-active.is-link > .item > .link > .text {
+        color: var(--fleet-hue);
+        font-weight: 600;
+      }
+      .caret {
+        color: var(--vp-c-text-3);
+        transition: color var(--fleet-transition);
+      }
+      /* The row is the one box for every state: the hover tint, the active band
+       * and the focus ring, at the row's radius (the link inside is narrower and
+       * carbon's ring sat on it). A group head is itself the focusable row. */
+      .link:focus-visible {
+        outline: none;
+      }
+      .item:focus-visible,
+      .item:has(> .link:focus-visible) {
+        outline: 2px solid var(--fleet-hue);
+        outline-offset: 2px;
+        border-radius: var(--fleet-radius-md);
+      }
+      /* Children step in under their group head; a headless group (a docs
+       * tree's root files) sits flush, with no rule down its edge. */
+      .items {
+        border-left: 0;
+        padding-left: 0;
+        margin: 2px 0 6px;
+      }
+      .item + .items {
+        margin-left: 12px;
+      }
+    }
+  }
 }

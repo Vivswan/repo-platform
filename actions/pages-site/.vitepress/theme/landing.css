@@ -14,18 +14,18 @@
 .VPDoc.has-aside:has(.fleet-facts) .aside {
   display: block;
   order: 2;
-}
-.VPDoc.has-aside:has(.fleet-facts) .aside .aside-container {
-  position: static;
-  padding-top: 0;
-  height: auto;
-  width: auto;
-  overflow: visible;
-}
-.VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
-  min-height: 0;
-  border-left: 0;
-  padding: 0 0 32px;
+  .aside-container {
+    position: static;
+    padding-top: 0;
+    height: auto;
+    width: auto;
+    overflow: visible;
+  }
+  .aside-content {
+    min-height: 0;
+    border-left: 0;
+    padding: 0 0 32px;
+  }
 }
 @media (min-width: 1280px) {
   .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
@@ -34,20 +34,22 @@
   }
 }
 @media (max-width: 1279px) {
-  .VPDoc.has-aside:has(.fleet-facts) .container {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-  }
-  .VPDoc.has-aside:has(.fleet-facts) .aside {
-    flex: none;
-    order: 0;
-    width: 100%;
-    max-width: none;
-  }
-  .VPDoc.has-aside:has(.fleet-facts) .aside .aside-content {
-    padding: 24px 0 12px;
+  .VPDoc.has-aside:has(.fleet-facts) {
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+    .aside {
+      flex: none;
+      order: 0;
+      width: 100%;
+      max-width: none;
+      .aside-content {
+        padding: 24px 0 12px;
+      }
+    }
   }
 }
 
@@ -56,20 +58,23 @@
  * markdown in one div inside .vp-doc. The intro runs at 18px, where the
  * measure (68ch, 783px) is wider than the 740px doc column, so the column
  * is what caps it: 64ch, inside the 45 to 75ch reading range. */
-.VPDoc:has(.fleet-facts) .vp-doc > div > p,
-.VPDoc:has(.fleet-facts) .vp-doc > div > ul,
-.VPDoc:has(.fleet-facts) .vp-doc > div > ol,
-.VPDoc:has(.fleet-facts) .vp-doc > div > blockquote {
-  max-width: var(--fleet-measure);
+
+.VPDoc:has(.fleet-facts) .vp-doc > div {
+  & > p,
+  & > ul,
+  & > ol,
+  & > blockquote {
+    max-width: var(--fleet-measure);
+  }
 }
 .VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p {
   font-size: 18px;
-}
-/* The intro's own bottom margin (1.25em, 22.5px) plus 28px of air before
- * the first section head; adjacent siblings here, so the two margins
- * collapse into this one. */
-.VPDoc:has(.fleet-facts) .vp-doc > div > h1 + p + h2 {
-  margin-top: 50px;
+  /* The intro's own bottom margin (1.25em, 22.5px) plus 28px of air before
+   * the first section head; adjacent siblings here, so the two margins
+   * collapse into this one. */
+  & + h2 {
+    margin-top: 50px;
+  }
 }
 
 @media (max-width: 767px) {
