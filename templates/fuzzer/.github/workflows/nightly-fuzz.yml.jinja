@@ -74,6 +74,8 @@ jobs:
           name: fuzz-failures-{% raw %}${{ github.run_attempt }}{% endraw %}
           # Point this at your failure-report directory.
           path: .fuzz-failures/
+          # Hidden paths are skipped by default since upload-artifact v4.4.
+          include-hidden-files: true
           if-no-files-found: ignore
 
       - name: File or update the fuzz issue
