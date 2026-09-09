@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   ALLOWLIST_FILE,
+  COMMENT_CAPS,
+  COMMENT_MARKER,
+  type CommentScope,
   check,
   classify,
   describe as describeFinding,
@@ -197,10 +200,18 @@ describe("judgeFile line counts", () => {
 
   test("a missing trailing newline still counts the last line; a trailing newline adds none", () => {
     const cap = HARD.lines.source;
+    const finding = (tier: Tier, value: number, over: number): Finding => ({
+      path: "a.ts",
+      kind: "source",
+      tier,
+      measure: "lines",
+      value,
+      cap: over,
+    });
     const body = Array.from({ length: cap + 1 }, () => "x").join("\n");
-    expect(judgeFile("a.ts", "source", body).map((f) => f.value)).toEqual([cap + 1]);
-    expect(judgeFile("a.ts", "source", lines(cap)).map((f) => [f.tier, f.value])).toEqual([
-      ["warn", cap],
+    expect(judgeFile("a.ts", "source", body)).toEqual([finding("hard", cap + 1, cap)]);
+    expect(judgeFile("a.ts", "source", lines(cap))).toEqual([
+      finding("warn", cap, WARN.lines.source),
     ]);
   });
 });
@@ -369,6 +380,321 @@ describe("isLiteralLine", () => {
   });
 });
 
+describe("judgeFile comment blocks", () => {
+  const { block: BLOCK, header: HEADER } = COMMENT_CAPS;
+  const slashes = (count: number): string =>
+    `${Array.from({ length: count }, (_, i) => `// c${i}`).join("\n")}\n`;
+  const hashes = (count: number): string =>
+    `${Array.from({ length: count }, (_, i) => `# c${i}`).join("\n")}\n`;
+  /** A `/* ... *\/` comment of `count` lines including both delimiter lines. */
+  const starred = (count: number, open = "/*"): string =>
+    `${open}\n${Array.from({ length: count - 2 }, (_, i) => ` * c${i}`).join("\n")}\n */\n`;
+  /** Expected rows: an over-cap block, or a bare marker line; every comment
+   *  finding is a warning, so the tier is implied and the cap follows the
+   *  scope. */
+  type Row = [line: number, length: number, scope: CommentScope] | [marker: number];
+  const commentFinding = (path: string, kind: Kind, row: Row): Finding =>
+    row.length === 1
+      ? { path, kind, tier: "warn", measure: "marker", line: row[0] }
+      : {
+          path,
+          kind,
+          tier: "warn",
+          measure: "comment",
+          line: row[0],
+          value: row[1],
+          cap: COMMENT_CAPS[row[2]],
+          scope: row[2],
+        };
+
+  test("the caps: one warn-only tier per scope", () => {
+    expect(COMMENT_CAPS).toEqual({ block: 8, header: 20 });
+  });
+
+  // Every case names its file, since the comment syntax follows the extension.
+  test.each<[string, string, string, Row[]]>([
+    ["a block at the cap passes", "f.ts", `x\n\n${slashes(BLOCK)}x\n`, []],
+    [
+      "a block one over the cap warns",
+      "f.ts",
+      `x\n\n${slashes(BLOCK + 1)}x\n`,
+      [[3, BLOCK + 1, "block"]],
+    ],
+    [
+      "a block far over the cap still only warns",
+      "f.ts",
+      `x\n\n${slashes(50)}x\n`,
+      [[3, 50, "block"]],
+    ],
+    ["a header at the cap passes", "f.ts", `${slashes(HEADER)}x\n`, []],
+    [
+      "a header one over the cap warns",
+      "f.ts",
+      `${slashes(HEADER + 1)}x\n`,
+      [[1, HEADER + 1, "header"]],
+    ],
+    [
+      "a header after a shebang is still the header, and the shebang does not count",
+      "f.ts",
+      `#!/usr/bin/env bun\n${slashes(HEADER + 1)}x\n`,
+      [[2, HEADER + 1, "header"]],
+    ],
+    [
+      "a header after a shebang and a blank line",
+      "f.sh",
+      `#!/bin/sh\n\n${hashes(HEADER + 1)}echo x\n`,
+      [[3, HEADER + 1, "header"]],
+    ],
+    [
+      "a shebang alone is no comment block (control)",
+      "f.sh",
+      `#!/bin/sh\n${hashes(HEADER)}echo x\n`,
+      [],
+    ],
+    [
+      "a shebang with a space before the path is still a shebang",
+      "f.py",
+      `#! /usr/bin/env python3\n${hashes(HEADER + 1)}x = 1\n`,
+      [[2, HEADER + 1, "header"]],
+    ],
+    [
+      "a Rust inner attribute on line 1 is code, not a shebang",
+      "f.rs",
+      `#![allow(dead_code)]\n${slashes(BLOCK + 1)}pub fn f() {}\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a header past the block cap but under the header cap passes; the same block after code is judged as a block",
+      "f.ts",
+      `${slashes(BLOCK + 1)}x\n\n${slashes(BLOCK + 1)}x\n`,
+      [[BLOCK + 4, BLOCK + 1, "block"]],
+    ],
+    [
+      "a second block before any code is a block, not a header",
+      "f.ts",
+      `${slashes(2)}\n${slashes(BLOCK + 1)}x\n`,
+      [[4, BLOCK + 1, "block"]],
+    ],
+    [
+      "a /* */ block spanning lines counts every line, delimiters included",
+      "f.ts",
+      `x\n${starred(BLOCK + 1)}x\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a JSDoc block is a block",
+      "f.mts",
+      `x\n${starred(BLOCK + 1, "/**")}x\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a blank line inside a /* */ comment does not split it",
+      "f.js",
+      `x\n/*\n${"a\n\nb\n".repeat(3)}*/\nx\n`,
+      [[2, 11, "block"]],
+    ],
+    [
+      "a // run flowing into a /* */ block is one block",
+      "f.ts",
+      `x\n${slashes(BLOCK)}${starred(3)}x\n`,
+      [[2, BLOCK + 3, "block"]],
+    ],
+    [
+      "a closing delimiter followed by code is a code line: the block ends before it",
+      "f.ts",
+      `x\n/*\n${"a\n".repeat(BLOCK)}*/ y();\n${slashes(BLOCK)}x\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a closing delimiter followed by a comment continues the block",
+      "f.ts",
+      `x\n/*\n${"a\n".repeat(6)}*/ // b\n${slashes(9)}x\n`,
+      [[2, 17, "block"]],
+    ],
+    [
+      "a one-line /* */ followed by a // comment is a comment line",
+      "f.ts",
+      `x\n${"/* a */ // b\n".repeat(BLOCK + 1)}x\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    ["a one-line /* */ before code is code", "f.ts", `${"/* a */ x();\n".repeat(20)}`, []],
+    [
+      "a generated region inside an open /* */ contributes nothing and ends the run",
+      "f.ts",
+      `x();\n/*\n// BEGIN GENERATED: x\n${"g\n".repeat(20)}// END GENERATED: x\n*/\n`,
+      [],
+    ],
+    [
+      "a # run in a shell file",
+      "f.sh",
+      `echo x\n${hashes(BLOCK + 1)}echo y\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a # run in a workflow, indented under a key",
+      ".github/workflows/ci.yml",
+      `on: push\njobs:\n${hashes(BLOCK + 1).replace(/^/gm, "  ")}  a: b\n`,
+      [[3, BLOCK + 1, "block"]],
+    ],
+    [
+      "a # header in a python file",
+      "f.py",
+      `${hashes(HEADER + 1)}x = 1\n`,
+      [[1, HEADER + 1, "header"]],
+    ],
+    [
+      "directive lines count as comment lines",
+      "f.sh",
+      `echo x\n# shellcheck disable=SC2034\n${hashes(BLOCK)}echo y\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    ["an inline trailing comment is not a block", "f.ts", `${"x(); // c\n".repeat(50)}`, []],
+    ["a blank line splits two blocks", "f.ts", `x\n${slashes(BLOCK)}\n${slashes(BLOCK)}x\n`, []],
+    [
+      "the same lines without the blank are one block (control)",
+      "f.ts",
+      `x\n${slashes(BLOCK)}${slashes(BLOCK)}x\n`,
+      [[2, 2 * BLOCK, "block"]],
+    ],
+    ["markdown is prose: its # headings are not comments", "README.md", hashes(50), []],
+    ["a # run in a // language is code", "f.ts", `x\n${hashes(50)}x\n`, []],
+    ["a // run in a # language is code", "f.sh", `x\n${slashes(50)}x\n`, []],
+    [
+      "a comment block inside a generated region is not counted; the marker ends a run",
+      "f.ts",
+      `x\n${slashes(BLOCK)}// BEGIN GENERATED: x\n${slashes(50)}// END GENERATED: x\nx\n`,
+      [],
+    ],
+    [
+      "a CRLF file counts the same",
+      "f.ts",
+      `x\r\n\r\n${slashes(BLOCK + 1).replace(/\n/g, "\r\n")}x\r\n`,
+      [[3, BLOCK + 1, "block"]],
+    ],
+    [
+      "an unterminated /* */ block runs to the end of the file",
+      "f.ts",
+      `x\n/*\n${"a\n".repeat(BLOCK)}`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    // The exemption marker: a comment line inside the block, reason required.
+    [
+      "an exempted block over the cap produces nothing",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER} the license text upstream ships\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "the marker on the block's last line exempts it too",
+      "f.ts",
+      `x\n${slashes(50)}// ${COMMENT_MARKER} upstream text\nx\n`,
+      [],
+    ],
+    [
+      "an exempted header over its cap produces nothing",
+      "f.ts",
+      `// ${COMMENT_MARKER} upstream text\n${slashes(HEADER + 5)}x\n`,
+      [],
+    ],
+    [
+      "the # form exempts a shell block",
+      "f.sh",
+      `echo x\n# ${COMMENT_MARKER} upstream text\n${hashes(50)}echo y\n`,
+      [],
+    ],
+    [
+      "the /* */ form exempts, and the closing delimiter is not the reason",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} upstream text */\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "a marker inside a /* */ body exempts that block",
+      "f.ts",
+      `x\n/*\n * ${COMMENT_MARKER} upstream text\n${" * a\n".repeat(50)} */\nx\n`,
+      [],
+    ],
+    [
+      "a bare marker warns and exempts nothing: the over-cap block warns as well",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER}\n${slashes(BLOCK)}x\n`,
+      [[2], [2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a bare /* */ marker warns: the closing delimiter is no reason",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} */\n${slashes(2)}x\n`,
+      [[2]],
+    ],
+    [
+      "a bare marker in an under-cap block is the only finding",
+      "f.sh",
+      `echo x\n# ${COMMENT_MARKER}\n# a\necho y\n`,
+      [[2]],
+    ],
+    [
+      "the marker exempts only its own block: the next one over the cap still warns",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER} upstream text\n${slashes(50)}\n${slashes(BLOCK + 1)}x\n`,
+      [[54, BLOCK + 1, "block"]],
+    ],
+    [
+      "a marker on a code line's trailing comment is not in any block (control)",
+      "f.ts",
+      `x(); // ${COMMENT_MARKER} upstream text\n${slashes(BLOCK + 1)}x\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a marker after a closing delimiter and code is on a code line: not in the block",
+      "f.ts",
+      `x();\n/*\n${" * a\n".repeat(8)}*/ y(); // ${COMMENT_MARKER}\n`,
+      [[2, 9, "block"]],
+    ],
+    [
+      "a marker before the closing delimiter on the closer line is in the block",
+      "f.ts",
+      `x();\n/*\n${" * a\n".repeat(50)} * ${COMMENT_MARKER} upstream text */\n`,
+      [],
+    ],
+    [
+      "every marker counts: a bare one warns while a reasoned one exempts the same block",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER} upstream text\n// ${COMMENT_MARKER}\n${slashes(50)}x\n`,
+      [[3]],
+    ],
+    [
+      "a one-line /* */ marker followed by an empty // comment is bare: the closing delimiter ends the reason",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} */ //\n${slashes(BLOCK)}x\n`,
+      [[2], [2, BLOCK + 1, "block"]],
+    ],
+    [
+      "two markers on one line are both read: the reasoned one exempts, the bare one warns",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} upstream text */ // ${COMMENT_MARKER}\n${slashes(50)}x\n`,
+      [[2]],
+    ],
+    [
+      "a # reason may start with a closing delimiter (no block syntax to end it)",
+      "f.sh",
+      `echo x\n# ${COMMENT_MARKER} */ is the upstream glob\n${hashes(50)}echo y\n`,
+      [],
+    ],
+    [
+      "a marker inside a generated region is not read",
+      "f.ts",
+      `x\n// BEGIN GENERATED: x\n// ${COMMENT_MARKER} upstream text\n// END GENERATED: x\n${slashes(BLOCK + 1)}x\n`,
+      [[5, BLOCK + 1, "block"]],
+    ],
+  ])("%s", (_name, path, text, expected) => {
+    const kind = classify(path);
+    if (kind === null) throw new Error(`${path} has no kind`);
+    expect(judgeFile(path, kind, text)).toEqual(
+      expected.map((row) => commentFinding(path, kind, row)),
+    );
+  });
+});
+
 describe("isUnbreakable", () => {
   test.each<[string, boolean]>([
     ["https://example.com/a/very/long/path", true],
@@ -427,6 +753,8 @@ describe("check", () => {
         "src/big.ts": BIG,
         "src/warm.ts": WARM,
         "src/wide.sh": WIDE,
+        "src/chatty.ts": `${"// h\n".repeat(COMMENT_CAPS.header + 1)}x\n\n${"// b\n".repeat(COMMENT_CAPS.block + 1)}x\n`,
+        "src/exempt.ts": `// ${COMMENT_MARKER} upstream text\n${"// h\n".repeat(60)}x\n\n// ${COMMENT_MARKER}\nx\n`,
         "src/gen.ts": `// This file is generated by gen.ts\n${BIG}`,
         ".github/workflows/ci.yml": `${MANAGED}${WIDE}`,
         ".github/dependabot.yml": `${MANAGED}${BIG}`,
@@ -440,6 +768,9 @@ describe("check", () => {
     expect(summary(root)).toEqual({
       failures: [bigLine, `src/wide.sh:1: 279 chars (cap ${HARD.width})`],
       warnings: [
+        `src/chatty.ts:1: ${COMMENT_CAPS.header + 1} comment lines (cap ${COMMENT_CAPS.header} for a header)`,
+        `src/chatty.ts:${COMMENT_CAPS.header + 4}: ${COMMENT_CAPS.block + 1} comment lines (cap ${COMMENT_CAPS.block})`,
+        `src/exempt.ts:64: ${COMMENT_MARKER} needs a reason`,
         `src/warm.ts: ${WARN.lines.source + 1} lines (cap ${WARN.lines.source} for source)`,
       ],
       allowlistErrors: [],
@@ -549,26 +880,27 @@ describe("the CLI", () => {
     [
       "## File size check",
       "",
-      "1 over a hard cap (fails), 1 over a sensible size (warns).",
+      "1 over a hard cap (fails), 1 warning(s).",
       "",
       "| File | Size | Tier | Cap |",
       "| --- | --- | --- | --- |",
       `| \`src/big.ts\` | ${hardLines} lines | hard | ${HARD.lines.source} |`,
       `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
       "",
-      `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+      `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
       "",
     ].join("\n");
   const warmBody = [
     "## File size check",
     "",
-    "0 over a hard cap (fails), 1 over a sensible size (warns).",
+    "0 over a hard cap (fails), 2 warning(s).",
     "",
     "| File | Size | Tier | Cap |",
     "| --- | --- | --- | --- |",
+    "| `src/chatty.ts:1` | 30 comment lines (header) | warn | 20 |",
     `| \`src/warm.sh:1\` | 239 chars | warn | ${WARN.width} |`,
     "",
-    `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+    `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
     "",
   ].join("\n");
   const cleanBody = [
@@ -617,7 +949,7 @@ describe("the CLI", () => {
       stdout: [`::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`],
       stderr: [
         `::error::src/big.ts: ${hardLines} lines (cap ${HARD.lines.source} for source)`,
-        `1 finding(s). Split the file, wrap the line, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
+        `1 finding(s). Split the file, wrap the line, shorten or exempt the comment, or list the path in ${ALLOWLIST_FILE} with a '# reason'.`,
       ],
       comment: hardBody(hardLines),
       summary: hardBody(hardLines),
@@ -625,13 +957,17 @@ describe("the CLI", () => {
     });
   });
 
-  test("warnings only: exit 0 with the same three sinks", () => {
-    const root = checkout({ "src/warm.sh": `${"a ".repeat(120).trim()}\n` });
+  test("warnings only, an over-cap comment among them: exit 0 with the same three sinks", () => {
+    const root = checkout({
+      "src/warm.sh": `${"a ".repeat(120).trim()}\n`,
+      "src/chatty.ts": `${"// h\n".repeat(30)}x\n`,
+    });
     expect(run(root)).toEqual({
       exitCode: 0,
       stdout: [
+        "::warning::src/chatty.ts:1: 30 comment lines (cap 20 for a header)",
         `::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`,
-        "File size check passed (1 warning(s), 0 managed file(s) skipped).",
+        "File size check passed (2 warning(s), 0 managed file(s) skipped).",
       ],
       stderr: [""],
       comment: warmBody,
@@ -690,6 +1026,27 @@ describe("report", () => {
         value: 180,
         cap: 150,
       },
+      {
+        path: "c.ts",
+        kind: "source",
+        tier: "warn",
+        line: 12,
+        measure: "comment",
+        value: 9,
+        cap: 8,
+        scope: "block",
+      },
+      {
+        path: "d.ts",
+        kind: "source",
+        tier: "warn",
+        line: 1,
+        measure: "comment",
+        value: 21,
+        cap: 20,
+        scope: "header",
+      },
+      { path: "e.sh", kind: "shell", tier: "warn", measure: "marker", line: 3 },
     ],
     allowlistErrors: [`${ALLOWLIST_FILE}:1: 'c.ts' is stale`],
     managedSkipped: 3,
@@ -702,18 +1059,21 @@ describe("report", () => {
       [
         "## File size check",
         "",
-        "1 over a hard cap (fails), 1 over a sensible size (warns).",
+        "1 over a hard cap (fails), 4 warning(s).",
         "",
         "| File | Size | Tier | Cap |",
         "| --- | --- | --- | --- |",
         "| `a.ts` | 2100 lines | hard | 2000 |",
         "| `b.sh:7` | 180 chars | warn | 150 |",
+        "| `c.ts:12` | 9 comment lines | warn | 8 |",
+        "| `d.ts:1` | 21 comment lines (header) | warn | 20 |",
+        "| `e.sh:3` | comment-cap: ignore without a reason | warn | - |",
         "",
         `### ${ALLOWLIST_FILE}`,
         "",
         `- ${ALLOWLIST_FILE}:1: 'c.ts' is stale`,
         "",
-        `Split the file, wrap the line, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
+        `Split the file, wrap the line, shorten or exempt the comment, or list the path in \`${ALLOWLIST_FILE}\` with a \`# reason\`.`,
         "",
         "3 managed file(s) skipped; repo-platform owns them.",
         "",
