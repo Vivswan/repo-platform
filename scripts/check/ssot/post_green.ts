@@ -210,7 +210,9 @@ export function postGreenCallerMismatches(
 export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/ci.yml": "passes the secret through to post-green.yml",
   ".github/workflows/post-green.yml":
-    "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push) and passes the secret through to the two writers it calls",
+    "pushes THIS repository's build branch (workflow-scope files GITHUB_TOKEN may not push), " +
+    "dispatches THIS repository's docs-site.yml after a publish (the caller caps GITHUB_TOKEN at " +
+    "contents: read), and passes the secret through to the two writers it calls",
   ".github/workflows/dependabot-bun-lockfile.yml": "pushes to THIS repository's dependabot PRs",
   ".github/workflows/refresh-gitignore.yml": "opens PRs in THIS repository",
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
