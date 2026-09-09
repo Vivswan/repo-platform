@@ -99,14 +99,22 @@ The full ownership table is in [references/file-ownership.md](references/file-ow
 
 ### 5b. Seed the docs site (docs-site module only)
 
-The module deploys `docs/` markdown as a versioned VitePress site; the repo carries NOTHING but the markdown - config, theme, sidebar, and navigation all live in repo-platform (`actions/pages-site`), so there is no docs config to write, ever.
+The module deploys `docs/` markdown as a versioned VitePress site; the repo carries NOTHING but the markdown - config, theme, sidebar, and navigation all live in repo-platform (`actions/pages-site`), so there is no docs config to write, ever. The theme reads everything from the markdown and the repository itself; the full author contract is repo-platform's [docs/docs-site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/docs-site.md) (Content conventions), and the parts that shape what you seed are:
 
-- Create `docs/README.md` (the site's landing page) before the first deploy - the deploy refuses an absent docs tree. Each directory's `README.md` is its index; the sidebar mirrors the file tree.
+- Create `docs/README.md` (the site's landing page) before the first deploy - the deploy refuses an absent docs tree. Each directory's `README.md` is its index.
+- Titles and order come from the pages: a page is titled by its `title` frontmatter, else its first h1. Within a directory the sidebar lists the landing, then pages with an `order` frontmatter (a number, ascending), then the pages the landing's link table names in that order, then the rest in file order. Pages sharing a `group` frontmatter (a string) sit under one heading; a landing titled exactly like the site reads Overview.
+- Seed the landing's first top-level table with a column of bare page links (one link and nothing else in every row of that column) with the reader's top tasks: it becomes the search launcher's curated rows (label from the first other cell, note from the remaining cells) and fixes the sidebar order above.
+- The landing's facts card reads the repository's own files: description, homepage, and topics from the `repository` block of `.github/settings.yml` (the identity starter of step 7; the copier answers fill in only what it lacks), the license from `LICENSE.md`'s heading, toolchain versions from the pin files. Nothing docs-specific to write.
 - Keep links inside `docs/` or absolute: a `../README.md`-style link works on GitHub but is dead on the site, and dead links fail the build (the module's PR check names the broken link before merge).
 - Translations, when wanted, go in `docs/<lang>/` (e.g. `zh-cn/`) mirroring the root structure - detected automatically, no config.
 - The first deploy needs Pages enabled: the module's settings layer enables it on the next fleet settings apply; only a deploy before that apply needs Settings -> Pages -> Source: GitHub Actions (in Owner actions below).
 
-Onboarding an EXISTING repository that already has a `docs/` tree differs in two ways: enable the module through the `repo-platform-add-module` skill when the repo is already managed (edit `.repo-platform.yml`; an unmanaged repo selects `docs-site` during this skill's copier adoption instead), and expect a link-fixing pass - existing docs usually carry out-of-tree relative links, and the first PR touching `docs/` will name every one. A repo that self-managed VitePress before must also delete its `docs/.vitepress/` - the build refuses it, because a repo-local theme could never apply (the theme is central by design).
+Onboarding an EXISTING repository that already has a `docs/` tree: enable the module through the `repo-platform-add-module` skill when the repo is already managed (edit `.repo-platform.yml`; an unmanaged repo selects `docs-site` during this skill's copier adoption instead), then expect four adoption effects:
+
+- A link-fixing pass - existing docs usually carry out-of-tree relative links, and the first PR touching `docs/` will name every one.
+- A repo that self-managed VitePress before must delete its `docs/.vitepress/` - the build refuses it, because a repo-local theme could never apply (the theme is central by design).
+- Without `title` frontmatter, each page's h1 is its sidebar and launcher label as written, so `# Widget Documentation` shows as "Widget Documentation" next to its siblings; shorten the heading or set `title` only if the author wants a shorter label.
+- A page whose VitePress `<!-- @include: file.md -->` directive names a file that exists lists no heading rows in the search launcher (full-text search still reaches them), and a landing with such a directive places no pages by its link table.
 
 ### 6. Create the GitHub repo and push
 
