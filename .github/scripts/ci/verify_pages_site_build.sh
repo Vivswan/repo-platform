@@ -285,10 +285,10 @@ grep -qrF -- '"anchor":"install-steps"' "$site/latest/assets" ||
 # (Basics is the frontmatter group, Guide the directory), and the
 # launcher's group titles in the same order after the curated Setup group.
 sidebar_rows="$(grep -o 'class="VPSidebar".*' "$site/latest/index.html" | sed 's#</aside>.*##' | { grep -o 'class="text"[^>]*>[^<]*<' || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
-test "$sidebar_rows" = "Fixture|Basics|Zulu|Alpha|Setup|Bravo|Guide|Guide|" ||
+test "$sidebar_rows" = "Fixture|Basics|Zulu|Alpha|Setup|Alerts|Bravo|Guide|Guide|" ||
   fail "the sidebar order is '$sidebar_rows', not landing, ranked group, table-placed, unplaced, directory"
 launcher_groups="$({ grep -o 'fleet-launcher-group-title"[^>]*>[^<]*<' "$site/latest/index.html" || true; } | sed 's/^.*>//; s/<$//' | tr '\n' '|')"
-test "$launcher_groups" = "Setup|Zulu|Alpha|Bravo|Guide|" ||
+test "$launcher_groups" = "Setup|Zulu|Alpha|Alerts|Bravo|Guide|" ||
   fail "the launcher's groups run '$launcher_groups', not the sidebar's order after the curated row"
 absent 'group: Basics' "$site/latest/alpha.html"
 absent 'order: 1' "$site/latest/zulu.html"
