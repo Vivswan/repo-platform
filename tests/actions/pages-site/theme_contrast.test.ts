@@ -125,6 +125,56 @@ test.each([
   },
 );
 
+// The hue band is a hover tint on the page ground (the pager links, the
+// launcher's rows), so the text it sits under must clear AA on the
+// composite in every hue and mode: the secondary ink does, the tertiary
+// ink does not (its control), which is why a hovered pager label lifts
+// to the secondary ink.
+const HUE_BAND = "--fleet-hue-band";
+const RGBA = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*(0?\.\d+)\)$/;
+const HUES = [0, 1, 2, 3, 4, 5];
+
+function channels(hex: string): number[] {
+  return [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
+}
+
+/** The band composited over `ground`, as a six-digit hex. */
+function tinted(band: string, ground: string): string {
+  const match = RGBA.exec(band);
+  if (match === null) throw new Error(`${HUE_BAND} is not an rgba(): ${band}`);
+  const alpha = Number(match[4]);
+  return `#${channels(ground)
+    .map((channel, i) => Math.round(Number(match[i + 1]) * alpha + channel * (1 - alpha)))
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+test.each([
+  [":root", "html", "light"],
+  [".dark", "html.dark", "dark"],
+])(
+  "the secondary ink clears 4.5:1 on every hue's band over the %s ground; the tertiary does not",
+  (mode, hueSelector) => {
+    const css = readFileSync(CUSTOM_CSS, "utf-8");
+    const base = modeDeclarations(css, mode);
+    const ground = base.get("--vp-c-bg");
+    const secondary = base.get("--vp-c-text-2");
+    const tertiary = base.get("--vp-c-text-3");
+    if (ground === undefined || secondary === undefined || tertiary === undefined) {
+      throw new Error(`${mode} lacks a ground or an ink`);
+    }
+    const bands = HUES.map((hue) => {
+      const band = (
+        hue === 0 ? base : modeDeclarations(css, `${hueSelector}[data-fleet-hue="${hue}"]`)
+      ).get(HUE_BAND);
+      if (band === undefined) throw new Error(`hue ${hue} declares no ${HUE_BAND} in ${mode}`);
+      return tinted(band, ground);
+    });
+    expect(bands.filter((tint) => contrast(secondary, tint) < AA_SMALL_TEXT)).toEqual([]);
+    expect(bands.filter((tint) => contrast(tertiary, tint) < AA_SMALL_TEXT)).toEqual(bands);
+  },
+);
+
 // The values the theme replaced fail the same measurement: the tertiary text
 // values shipped before the contrast fix on the code grounds, and shiki's
 // github themes' comment gray and light string green on the fleet's.

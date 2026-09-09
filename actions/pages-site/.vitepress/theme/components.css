@@ -1035,41 +1035,77 @@ a:focus-visible {
   cursor: pointer;
 }
 
-/* The footer: the pager's hairline opens it, the cards follow, and the
- * provenance line closes it (its own rule is dropped after a pager, in the
- * provenance section). */
+/* The footer: one hairline over the pager, two quiet links under it (no
+ * card: at rest only the label, the title and the arrow; the tint and the
+ * arrow's slide appear on hover and focus), and the provenance line closing
+ * it (its own rule is dropped after a pager, in the provenance section). */
 .VPDoc .VPDocFooter {
   margin-bottom: 0;
 }
 .VPDocFooter .prev-next {
   border-top-color: var(--vp-c-divider);
+  padding-top: 12px;
+  /* the links' pulled-out padding eats 24px of the gap; 8px stays between the tints */
+  gap: 32px;
 }
+/* The whole link is the hit target. Its padding is pulled outside the
+ * column with a matching negative margin, so the text stays flush with the
+ * article and the tint spills past it the way a hovered list row does. */
 .VPDocFooter .pager-link {
-  border-color: var(--vp-c-divider);
+  gap: 4px;
+  margin: 0 -12px;
+  width: calc(100% + 24px);
+  padding: 10px 12px;
+  border: 0;
   border-radius: var(--fleet-radius-md);
-  padding: 14px 16px;
-  transition:
-    border-color var(--fleet-transition),
-    background-color var(--fleet-transition);
+  background-color: transparent;
+  transition: background-color var(--fleet-transition);
 }
-.VPDocFooter .pager-link:hover {
-  border-color: var(--fleet-hue);
-  background-color: var(--vp-c-bg-soft);
+.VPDocFooter .pager-link:hover,
+.VPDocFooter .pager-link:focus-visible {
+  background-color: var(--fleet-hue-band);
 }
 .VPDocFooter .pager-link .desc {
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--vp-c-text-3);
+  transition: color var(--fleet-transition);
+}
+/* the tertiary ink sits under 4.5:1 on the tint (theme_contrast.test.ts) */
+.VPDocFooter .pager-link:hover .desc,
+.VPDocFooter .pager-link:focus-visible .desc {
+  color: var(--vp-c-text-2);
 }
 .VPDocFooter .pager-link .title {
   font-size: 16px;
   font-weight: 500;
   line-height: 1.45;
+  color: var(--vp-c-text-1);
   text-wrap: balance;
-  transition: color var(--fleet-transition);
+  transition: none;
 }
 .VPDocFooter .pager-link:hover .title {
   color: var(--vp-c-text-1);
+}
+/* The arrow carries the direction: it takes the hue and moves 2px the
+ * way the link goes. */
+.VPDocFooter .pager-link .pager-icon {
+  color: var(--vp-c-text-3);
+  transition:
+    color var(--fleet-transition),
+    transform var(--fleet-transition);
+}
+.VPDocFooter .pager-link:hover .pager-icon,
+.VPDocFooter .pager-link:focus-visible .pager-icon {
+  color: var(--fleet-hue);
+}
+.VPDocFooter .pager-link.prev:hover .pager-icon,
+.VPDocFooter .pager-link.prev:focus-visible .pager-icon {
+  transform: translateX(-2px);
+}
+.VPDocFooter .pager-link.next:hover .pager-icon,
+.VPDocFooter .pager-link.next:focus-visible .pager-icon {
+  transform: translateX(2px);
 }
 
 /* ---------- the provenance line ---------- */
@@ -1478,10 +1514,19 @@ a:focus-visible {
   .VPDoc .VPDocFooter {
     margin-top: 40px;
   }
-  /* A lone "Next page" card spans the column; carbon's margin-left: auto
-   * shrinks it to its text in the stacked layout. */
-  .VPDocFooter .prev-next.has-next:not(.has-prev) .pager {
-    margin-left: 0;
+  .VPDocFooter .prev-next {
+    gap: 4px;
+  }
+  /* Stacked, the next link keeps its right alignment (carbon flips it left
+   * and pushes the arrow to the far edge, a card's shape); a lone next
+   * link sits right at its own width. */
+  .VPDocFooter .pager-link.next {
+    align-items: flex-end;
+    text-align: right;
+  }
+  .VPDocFooter .pager-link.next .desc-row,
+  .VPDocFooter .pager-link.next .title-row {
+    justify-content: flex-end;
   }
 }
 
@@ -1700,5 +1745,9 @@ a:focus-visible {
   .vp-doc .vp-table,
   .vp-doc [class*="language-"] pre {
     background-attachment: local, local, scroll, scroll !important;
+  }
+  /* the pager arrow's hover slide is motion, not a cue: the hue change stays */
+  .VPDocFooter .pager-link .pager-icon {
+    transform: none !important;
   }
 }
