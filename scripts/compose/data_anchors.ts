@@ -149,15 +149,13 @@ export type Contribution = { order: number; source: string; gate: string | null;
 export class GeneratorValidationError extends Error {}
 
 /** Rendered-separation invariant for an anchor's ordered contributions:
- *  every NON-LAST contribution, once its trailing closing tags are
- *  stripped, must end with a newline - otherwise two selected
- *  contributions render onto one line (adjacent `{% if %}...{% endif %}`
- *  wrappers emit no separator of their own). On a plain anchor the last
- *  contribution may end mid-line (the skeleton's own newline terminates
- *  the block - the collapse guard re-emits it whenever any contribution
- *  is selected, so guarding changes nothing here); on a TIGHT anchor
- *  (`-#}`) that newline is consumed, so the last contribution must supply
- *  the line ending itself. */
+ *  every NON-LAST contribution, once its trailing closing tags are stripped,
+ *  must end with a newline, or two selected contributions render onto one
+ *  line (adjacent `{% if %}...{% endif %}` wrappers emit no separator). On a
+ *  plain anchor the last may end mid-line, since the skeleton's own newline
+ *  terminates the block (the collapse guard re-emits it whenever any
+ *  contribution is selected); on a TIGHT anchor (`-#}`) that newline is
+ *  consumed, so the last contribution must supply the line ending itself. */
 export function renderedSeparationErrors(
   anchor: string,
   contributions: { source: string; text: Buffer }[],

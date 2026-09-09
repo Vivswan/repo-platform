@@ -198,15 +198,13 @@ export function postGreenCallerMismatches(
   ];
 }
 
-/** Every workflow that reads the fleet PAT and is NOT a fleet writer,
- *  with why it holds the token. The PAT is the one credential that can
- *  mutate managed repositories, so holding it is the independent census
- *  of "could this workflow be a fleet writer": a holder must be a
- *  registered writer (FLEET_WRITERS) or classified here, and a stale
- *  entry (a holder that stopped reading the token) must be removed - the
- *  two rosters are held together in both directions by
- *  fleetTokenHolderMismatches, so an unregistered fleet-mutating workflow
- *  cannot land silently. */
+/** Every workflow that reads the fleet PAT and is NOT a fleet writer, with
+ *  why it holds the token. The PAT is the one credential that can mutate
+ *  managed repositories, so holding it is the independent census of "could
+ *  this workflow be a fleet writer": a holder must be a registered writer
+ *  (FLEET_WRITERS) or classified here, and a stale entry must be removed;
+ *  fleetTokenHolderMismatches holds the two rosters together in both
+ *  directions, so an unregistered fleet-mutating workflow cannot land silently. */
 export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/ci.yml": "passes the secret through to post-green.yml",
   ".github/workflows/post-green.yml":
@@ -220,16 +218,14 @@ export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
     "workflow_call-only; sync-repos.yml hands it the secret per target",
 };
 
-/** Whether a parsed workflow can read the fleet PAT: any string value
- *  (never a comment - the census works on the parsed document) whose
- *  Actions expressions reference the `secrets` context other than by
- *  the name of a DIFFERENT secret - `secrets.REPO_PLATFORM_TOKEN`,
- *  `secrets['REPO_PLATFORM_TOKEN']`, and every whole or computed access
- *  (`toJSON(secrets)`, `secrets[name]`) count, since those reach the PAT
- *  too - or a job passing `secrets: inherit`, which hands a called
- *  workflow every secret without naming one. Conservative on purpose: a
- *  false holder costs a classification line, a missed one a silent
- *  writer. */
+/** Whether a parsed workflow can read the fleet PAT: any string value (never
+ *  a comment; the census works on the parsed document) whose Actions
+ *  expressions reference the `secrets` context other than by the name of a
+ *  DIFFERENT secret, every whole or computed access (`toJSON(secrets)`,
+ *  `secrets[name]`) included since those reach the PAT too, or a job passing
+ *  `secrets: inherit`, which hands a called workflow every secret without
+ *  naming one. Conservative on purpose: a false holder costs a
+ *  classification line, a missed one a silent writer. */
 export function readsFleetToken(doc: unknown): boolean {
   // Every `secrets.<name>` / `secrets['<name>']` reference; any other
   // `secrets` token left in an expression is a whole or computed access.
@@ -297,17 +293,14 @@ export function fleetTokenHolderMismatches(workflows: Record<string, string>): M
   return mismatches;
 }
 
-/** One fleet writer's way in, judged structurally on the parsed writer
- *  and every workflow in the repository (exported so the forcing tests
- *  run the exact judgment the rule runs): triggers exactly
- *  FLEET_WRITER_TRIGGERS, the call declaring both `repos` and `sha`, the
- *  concurrency ternary keying the call-only input into a per-run group
- *  and naming the lane, every call input landing on the step that
- *  consumes it, and post-green.yml's caller job - the ONLY caller
- *  anywhere in `workflows` (keyed by repo-relative path, post-green.yml
- *  included) - calling this file with the judged sha while holding that
- *  lane. A second caller would be a second way into the fleet, gated by
- *  whatever that workflow's trigger is. */
+/** One fleet writer's way in, judged structurally on the parsed writer and
+ *  every workflow in the repository (exported so the forcing tests run the
+ *  exact judgment): triggers exactly FLEET_WRITER_TRIGGERS, the call
+ *  declaring both `repos` and `sha`, the concurrency ternary keying the
+ *  call-only input into a per-run group and naming the lane, every call input
+ *  landing on the step that consumes it, and post-green.yml's caller job as
+ *  the ONLY caller anywhere in `workflows` (repo-relative paths), holding
+ *  that lane: a second caller would be a second way into the fleet. */
 export function fleetWriterMismatches(
   rel: string,
   text: string,

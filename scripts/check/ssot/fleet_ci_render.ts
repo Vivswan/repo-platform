@@ -394,11 +394,12 @@ export function spliceLegMismatches(legText: string, leg: SpliceLeg): Mismatch[]
 /** The pages module's gate-downstream leg and its two called halves: the
  *  fragment (spliceLegMismatches' model, ordered behind the release leg
  *  where release-please is selected), the managed pages.yml it calls
- *  (judged sha in, NO push trigger, nightly and dispatch kept, lane keyed
- *  per called run, sha handed on), and reusable-pages.yml's checkout
- *  reading that sha. The source pins are line censuses over jinja, so the
+ *  (judged sha passed on, NO push trigger, so the deploy's only way onto
+ *  main is downstream of the gate; nightly and dispatch kept; the lane
+ *  keyed per run on a call), and reusable-pages.yml's sha input feeding
+ *  its checkout. The source pins are line censuses over jinja, so the
  *  RENDERED shape is judged too, as parsed YAML of the all-modules and
- *  pages-no-release-please goldens: one per arm of the ordering gate. */
+ *  pages-no-release-please goldens, one per arm of the ordering gate. */
 export function pagesLegMismatches(
   pagesLegText: string,
   pagesWorkflowText: string,
@@ -929,23 +930,14 @@ export function fleetCiRenderMismatches(
   return mismatches;
 }
 
-/** The pr-title module's natively-required check, pinned at its three
- *  sources. The managed workflow template must run on every event that
- *  changes what the check judges PLUS synchronize (a required check must
- *  exist at the PR's NEWEST head commit - a types list without it leaves
- *  the merge box waiting on a check nothing creates), its job id must be
- *  the exact check-run name the ruleset requires, and the semantic-title
- *  action must be the one unconditional step (a replaced step is a green
- *  no-op check). The BASELINE carries the ruleset's full shape DISABLED
- *  (so deselection heals through the ordinary apply - whole undeclared
- *  rulesets are never deleted), with the context pinned to the GitHub
- *  Actions app (integration_id 15368, the app that creates job check
- *  runs); the MODULE layer carries exactly the enforcement flip, and
- *  nothing else - a rules list there would REPLACE the baseline's
- *  same-type rule, not merge into it. Its own ruleset, not a rule in
- *  `main`: the override layer's same-type rule would replace a
- *  required_status_checks rule merged into `main`. Pure over the three
- *  texts for the suite's forcing cases. */
+/** The pr-title module's natively-required check, pinned at its three sources.
+ *  The workflow runs on every judged event PLUS synchronize (a required check
+ *  must exist at the PR's NEWEST head, or the merge box waits forever), its job
+ *  id is the ruleset's check-run name, and the semantic-title action is the one
+ *  unconditional step (a replaced step is a green no-op). The BASELINE holds the
+ *  ruleset DISABLED, context pinned to the GitHub Actions app (integration_id
+ *  15368), so deselection heals via the ordinary apply; the MODULE layer holds
+ *  only the enforcement flip, in its own ruleset (a same-type rule REPLACES). */
 export function prTitleWorkflowMismatches(
   workflowText: string,
   baselineText: string,

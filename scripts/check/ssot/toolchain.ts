@@ -143,12 +143,11 @@ export function bunTypesAheadMismatches(
 /** The resolved @types/bun version a bun.lock INSTALLS: the packages
  *  section's top-level `"@types/bun"` entry, whose first tuple element is
  *  `@types/bun@<version>`. The lock is what typechecking actually runs
- *  against - a caret range in package.json admits a lock resolving a
- *  newer MINOR, so the declared floor alone cannot vouch for the
- *  installed version. mustMatch keeps a lockfile that stops carrying the
- *  entry loud instead of vacuous; nested per-package resolutions
- *  ("x/@types/bun") are not the version the root typecheck sees and do
- *  not match the anchored key. */
+ *  against: a caret range in package.json admits a lock resolving a newer
+ *  MINOR, so the declared floor alone cannot vouch for the installed version.
+ *  mustMatch keeps a lockfile that stops carrying the entry loud; nested
+ *  per-package resolutions ("x/@types/bun") are not the version the root
+ *  typecheck sees and do not match the anchored key. */
 export function lockedTypesBunVersion(lockText: string, where: string): string {
   return mustMatch(
     lockText,
@@ -215,13 +214,12 @@ export const SETUP_VERSION_FILES: [action: RegExp, input: string][] = [
 
 /** Whether the workflow step whose `uses:` line sits at `usesAt` carries
  *  `key` as a DIRECT child of its OWN with: block. Structural,
- *  indentation-scoped: the step's keys live two columns inside the `- `
- *  item start, the scan stops where the step ends (a non-blank line left
- *  of the key column), and the key only counts at the with: block's
- *  direct-child level - the first child fixes that level, and anything
- *  deeper (a nested mapping, a block scalar body that merely LOOKS like
- *  the key) is a value, not an input. A comment, a neighbouring step's
- *  input, or a look-alike elsewhere never matches. */
+ *  indentation-scoped: the step's keys live two columns inside the `- ` item
+ *  start, the scan stops where the step ends, and the key only counts at the
+ *  with: block's direct-child level (the first child fixes it), so a nested
+ *  mapping or a block scalar body that merely LOOKS like the key is a value,
+ *  not an input, and a comment, a neighbouring step's input, or a look-alike
+ *  elsewhere never matches. */
 export function stepCarriesWithKey(lines: string[], usesAt: number, key: string): boolean {
   const usesLine = lines[usesAt];
   const usesIndent = usesLine.length - usesLine.trimStart().length;
@@ -526,16 +524,14 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // The INSTALLED @types/bun - each lockfile's resolved entry, for the
-    // root plus the actions/ packages that declare the dependency (the
-    // same directories the bun-dirs rule keeps under dependabot) -
-    // against the manifests' bun runtime pin, ahead-direction only
-    // (bunTypesAheadMismatches states why one direction). The lock is the
-    // compared side on purpose: package.json's caret range is only a
-    // floor, so a lock resolving a newer MINOR while the declared range
-    // stays put would typecheck against APIs the pinned runtime lacks and
-    // previously passed here. The runtime side reads the manifest itself
-    // - the single source the .bun-version dotfiles are generated from.
+    // The INSTALLED @types/bun (each lockfile's resolved entry, root plus the
+    // actions/ packages declaring it, the bun-dirs directories) against the
+    // manifests' bun runtime pin, ahead-direction only
+    // (bunTypesAheadMismatches says why). The lock is the compared side on
+    // purpose: package.json's caret range is only a floor, so a lock resolving
+    // a newer MINOR while the range stays put would typecheck against APIs the
+    // pinned runtime lacks and previously passed here. The runtime side reads
+    // the manifest itself, the single source the .bun-version dotfiles come from.
     name: "bun-types-pin",
     run: () => {
       const bun = loadManifests().find((m) => m.module === "bun");
@@ -564,16 +560,13 @@ export const toolchainRules: Rule[] = [
   },
   {
     // Every pinned-toolchain setup step must read its version dotfile: the
-    // manifest pin (and the generated dotfile) only govern anything while
-    // the workflows actually pass the version-file input. Real steps are
-    // matched structurally (the key must sit inside that step's own with:
-    // block); commented starter examples are checked as comment text and
-    // can never satisfy the per-action anchors. actions/ is out of this
-    // rule's scope but not unpinned: each composite action's setup reads
-    // its own generated .bun-version (the actions-bun-guard rule pins
-    // that block, action_path-anchored so the CALLER's dotfiles never
-    // pick the version). reusable-pages.yml satisfies the rule with
-    // its hashFiles() checkout-root expression.
+    // manifest pin and the generated dotfile only govern anything while the
+    // workflows actually pass the version-file input. Real steps are matched
+    // structurally (the key inside that step's own with: block); commented
+    // starter examples are checked as comment text and can never satisfy the
+    // per-action anchors. actions/ is out of scope but not unpinned: each
+    // composite action reads its own generated .bun-version (the actions-bun-guard
+    // rule pins that, action_path-anchored so the CALLER's dotfiles never pick the version).
     name: "toolchain-version-files",
     run: () => {
       const mismatches: Mismatch[] = [];

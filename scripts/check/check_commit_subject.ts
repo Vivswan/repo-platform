@@ -43,16 +43,13 @@ function firstContentLine(text: string): string {
 }
 
 /** The subjects git could store for this message file, deduplicated. Git
- *  applies the message cleanup AFTER the commit-msg hook runs, and the
- *  mode is unknowable here: `git commit -m` cleans whitespace only (the
- *  raw first content line is the subject, comment lines survive), while
- *  editor commits also strip comment lines - delegated to `git
- *  stripspace --strip-comments` (the cleanup's own code path, honoring
- *  core.commentChar) rather than reimplemented. The gate refuses only
- *  when NO mode could store a valid subject; the residual false-pass (a
- *  message whose two candidates diverge and whose stored one is the
- *  invalid one, e.g. `-m "#..."`) is CI-caught - the hook is the local
- *  echo, CI stays authoritative. */
+ *  cleans the message AFTER the commit-msg hook and the mode is unknowable
+ *  here: `git commit -m` cleans whitespace only (comment lines survive as
+ *  the subject), editor commits also strip comment lines, delegated to `git
+ *  stripspace --strip-comments` (the cleanup's own path, honoring
+ *  core.commentChar). The gate refuses only when NO mode could store a valid
+ *  subject; the residual false-pass (candidates diverge and the stored one
+ *  is invalid, e.g. `-m "#..."`) is CI's: the hook is the local echo. */
 export function candidateSubjects(raw: string): string[] {
   const bounded = raw.slice(0, CLEANUP_INPUT_BOUND);
   const cleaned = execFileSync("git", ["stripspace", "--strip-comments"], {

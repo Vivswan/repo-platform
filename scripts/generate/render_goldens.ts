@@ -1,63 +1,18 @@
 #!/usr/bin/env bun
-// Golden renders: committed snapshots of real copier output for a canonical
-// matrix of module selections, kept under tests/golden-renders/<name>/ (the
-// whole directory is generated - regen rewrites it). Any change to
-// templates/ or the composer proves its fleet-facing effect here: unchanged
-// goldens prove byte-identity, changed goldens show the exact rendered diff
-// in the PR.
-//
-// The matrix:
-// - all-modules: every module in MODULE_ORDER except custom-license. No
-//   module pair conflicts (copier.yml's multiselect allows any
-//   combination); custom-license is left out because its whole effect is
-//   opting OUT of the fleet license render (no LICENSE.md, no
-//   copyright_holder answer), which would hide the default path every
-//   other selection exercises.
-// - minimal: modules=[] - the smallest selection copier.yml's validators
-//   allow (no validator requires a non-empty list; ci.yml's smoke "none"
-//   row exercises the same floor).
-// - uv-no-release-please: modules=[uv] - the dotfiles shape that exposed
-//   the anchor blank-line bug (compose/splice.ts's collapse guard);
-//   its rendered .typography-allow must end with exactly one newline.
-// - pages-no-release-please: modules=[bun, pages] - the pages leg's
-//   plain arm: without release-please the ci.yml pages job must render
-//   the gate-only needs and condition (the pages-leg rule parses it; bun
-//   supplies the build command copier's pages validator requires).
-//
-// DETERMINISM CONTRACT: a golden changes if and only if rendered content
-// changes. Everything volatile is pinned at the source:
-// - The scratch build tree (branch_tree.ts) is content-deterministic by
-//   design: no timestamps or source SHAs in-tree.
-// - Its git commit uses a pinned author/committer identity and date and a
-//   fixed message, and git runs with GIT_CONFIG_GLOBAL/SYSTEM pointed at
-//   /dev/null (a user's autocrlf or gpg-signing config must not leak into
-//   blob or commit hashes). The commit sha - recorded as `_commit` in
-//   .github/.copier-answers.yml and stamped into the ownership manifest's
-//   provenance slot - is still a pure function of the WHOLE tree content,
-//   so every template edit would move it; normalizeRenderedTree therefore
-//   rewrites the `_commit` answer to the fixed sentinel SHA_SENTINEL
-//   before the write/diff step and re-runs the manifest stamp hook
-//   against the result (which carries the sentinel into the commit slot
-//   and the answers hash), gated on the render's stamp being honest so the
-//   re-stamp cannot heal a lying hook. Those two provenance fields are the
-//   ONLY normalized bytes - everything else is snapshot verbatim - and
-//   only the true FULL sha is rewritten: a bug that stamps a WRONG sha
-//   shows as drift, a render that kept copier's abbreviated describe
-//   output (the hook's --commit rewrite did not run) shows as drift, and
-//   a render already carrying the sentinel is rejected outright.
-// - copier runs from the scratch directory with a RELATIVE src path, so
-//   the recorded `_src_path` is the fixed string "./tree", never a temp
-//   path. The same /dev/null git config is passed to copier for its
-//   internal clone, and COPIER_SETTINGS_PATH is pointed away from any
-//   user settings file (its answer defaults would leak into the render).
-// - The `-d` answers are the fixed values below; everything else takes
-//   copier.yml defaults.
-// The copier version itself is deliberately unpinned, matching the smoke
-// legs and the fleet sync: a copier upgrade that changes rendered bytes is
-// a real fleet-facing change and should surface here as golden drift.
+// Golden renders: committed snapshots of real copier output for the canonical
+// module matrix under tests/golden-renders/<name>/ (the whole directory is
+// generated; regen rewrites it), so any templates/ or composer change proves
+// its fleet-facing effect: unchanged goldens prove byte-identity, changed
+// ones show the exact rendered diff in the PR. The matrix, the determinism
+// contract (every volatile input pinned at its source), and the one
+// normalization (the scratch commit sha rewritten to SHA_SENTINEL in the two
+// provenance fields, honesty-gated so the re-stamp cannot heal a lying hook)
+// are docs/golden-renders.md.
 //
 // Requires copier and bun on PATH (copier runs the template's _tasks with
-// bun), like ci.yml's smoke legs.
+// bun), like ci.yml's smoke legs. The copier version is deliberately
+// unpinned, matching the smoke legs and the fleet sync: an upgrade that
+// changes rendered bytes is a real fleet-facing change and must surface here.
 //
 // Usage:
 //   bun scripts/generate/render_goldens.ts           # rewrite tests/golden-renders/
@@ -142,21 +97,13 @@ export const SHA_SENTINEL = "x".repeat(FULL_SHA_HEX);
  *  the name stamp_manifest.ts's recordedCommit reads. */
 const ANSWERS_NAME = ".github/.copier-answers.yml";
 
-/** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records
- *  the scratch tree's FULL commit sha - the form the stamp hook writes; a
- *  prefix is a render whose hook rewrite did not run and stays put so it
- *  shows as drift. The value may arrive YAML-quoted (the hook quotes an
- *  all-digit sha so PyYAML keeps it a string - vanishingly rare at 40
- *  hex, but a quoted true sha must not drift). This is the ONLY
- *  substitution the runner performs, addressed to the one field that
- *  carries provenance by design: a tree-wide byte substitution would
- *  corrupt unrelated content, because hex-looking runs occur in English
- *  prose ("feedback" starts with hex "feedbac"). Three properties are the
- *  point: the `_commit` key stays in the goldens (dropping or renaming it
- *  still shows as drift), a value that is anything but the true sha is
- *  left alone and shows as drift, and a value already reading as the
- *  sentinel throws - a pre-stamped sentinel would false-match the
- *  committed goldens. */
+/** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records the
+ *  scratch tree's FULL sha (the form the stamp hook writes; a prefix means the
+ *  hook rewrite did not run and stays put to show as drift). The value may
+ *  arrive YAML-quoted: the hook quotes an all-digit sha so PyYAML keeps it a
+ *  string. Addressed to this one field, never a tree-wide substitution: hex
+ *  runs occur in prose ("feedbac"). A value already reading as the sentinel
+ *  throws, since a pre-stamped sentinel would false-match the goldens. */
 export function normalizeAnswers(text: string, fullSha: string): string {
   if (!/^[0-9a-f]{40}$/.test(fullSha)) throw new Error(`not a full sha1: ${fullSha}`);
   return text.replace(/^(_commit:[ \t]*)(\S*)([ \t]*)$/m, (line, key, value, pad) => {
@@ -181,20 +128,13 @@ function honestlyStamped(manifest: string, root: string): string {
 }
 
 /** Normalize a rendered tree in place: rewrite the `_commit` answer to the
- *  sentinel, then re-run the manifest stamp hook against the result. The
- *  hook ran inside copier, hashing the answers file and stamping the
- *  manifest's commit slot BEFORE this normalization, so the manifest would
- *  otherwise keep its scratch-sha dependence (directly in the commit slot,
- *  indirectly through the answers file's hash); the re-stamp recomputes
- *  both from the now-sentinel answers file, with the stamper's own
- *  semantics for every hash class. Two safeguards keep that re-stamp from
- *  laundering a broken render: the manifest is honesty-gated FIRST (the
- *  hook is idempotent on a manifest it stamped honestly, so re-stamping
- *  against the pre-normalization tree must be a byte-level no-op - a hook
- *  that stamped a lying provenance or hash fails loudly here instead of
- *  being healed to the sentinel), and the stamper is the manifest's ONLY
- *  writer. Symlink targets are untouched: they are fixed template
- *  filenames, and one that somehow embedded a sha would show as drift. */
+ *  sentinel, then re-run the manifest stamp hook (the manifest's ONLY writer)
+ *  so its commit slot and answers hash lose their scratch-sha dependence with
+ *  the stamper's own semantics. The manifest is honesty-gated FIRST: the hook
+ *  is idempotent on a manifest it stamped honestly, so re-stamping against
+ *  the pre-normalization tree must be a byte-level no-op, and a lying stamp
+ *  fails here instead of being healed to the sentinel. Symlink targets are
+ *  fixed template filenames and stay untouched. */
 export function normalizeRenderedTree(root: string, scratchSha: string): void {
   const manifestPath = join(root, MANIFEST_NAME);
   let manifest: string | null;

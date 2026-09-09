@@ -24,14 +24,12 @@ const parsedByText = new Map<string, SourceFile>();
 let serial = 0;
 
 /** The parsed source file for `source`, cached by content, ONLY when the
- *  parser recovered nothing: extraction over a recovered tree is
- *  unauditable (a truncated declaration can read as a benign shape), so
- *  a source with any syntax diagnostic throws here, at the one entry
- *  every extractor parses through. Callers that need a softer or
- *  better-located failure (a scan naming its file, a null for
- *  unauditable option text) check syntaxErrorCount first. Read-only by
- *  contract: the cache hands the SAME tree to every caller, so mutating
- *  it would corrupt later reads of the same text. */
+ *  parser recovered nothing: extraction over a recovered tree is unauditable
+ *  (a truncated declaration can read as a benign shape), so any syntax
+ *  diagnostic throws here, at the one entry every extractor parses through;
+ *  callers needing a softer or better-located failure check syntaxErrorCount
+ *  first. Read-only by contract: the cache hands the SAME tree to every
+ *  caller, so mutating it would corrupt later reads of the same text. */
 export function parseTs(source: string): SourceFile {
   const errors = syntaxErrorCount(source);
   if (errors > 0) {
@@ -182,16 +180,13 @@ export function constRegexSource(source: string, name: string, anchor: ConstAnch
 }
 
 /** Whether any TEMPLATE literal in `source` carries `needle` in its RAW
- *  spelling, reconstructed token by token (head, middles, tail) with
- *  interpolations contributing their raw text only when they are plain
- *  IDENTIFIERS - the only interpolation shape the pinned needles name.
- *  Raw source slices, never getText(): the compiler cooks unicode
- *  escapes, which would let an escape-spelled identifier cook into the
- *  pinned one. Any non-identifier interpolation (a string or nested
- *  template smuggling the needle's characters, a comment-carrying
- *  expression) contributes an unmatchable placeholder instead, and a
- *  plain string is not a template node at all - so no decoy class can
- *  satisfy a needle whose real wiring is gone. */
+ *  spelling, reconstructed token by token with interpolations contributing
+ *  raw text only when they are plain IDENTIFIERS (the only shape the pinned
+ *  needles name); anything else contributes an unmatchable placeholder, so
+ *  no string or nested template smuggling the needle's characters can
+ *  satisfy a needle whose real wiring is gone. Raw source slices, never
+ *  getText(): the compiler cooks unicode escapes, which would let an
+ *  escape-spelled identifier cook into the pinned one. */
 export function templateCarries(source: string, needle: string): boolean {
   const raw = (node: Node) => source.slice(node.getStart(), node.getEnd());
   const interpolated = (node: Expression) => (Node.isIdentifier(node) ? raw(node) : "\u0000");

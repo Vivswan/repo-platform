@@ -29,6 +29,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
 | Move or rewrite a rendered file across the fleet (a one-shot transition) | [Migrations: adding a rung](migrations.md#adding-a-rung) |
 | Find out why a sync PR moved a file before the copier diff | [Migrations: the walk](migrations.md#the-walk-over-build-history) |
+| Add a module file, fragment, or anchor to the template | [Composition](compose.md) |
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
@@ -58,7 +59,8 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, and docs-site modules share: lifecycle, release gating, renaming.
 12. [Migrations](migrations.md) - the ladder of one-shot fleet transitions: one self-contained file per rung on the build branch, and the sync's walk over build history that runs the rungs a repository has not crossed.
-13. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
-14. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-15. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
-16. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+13. [Composition](compose.md) - how templates/ composes into the tree copier renders: gates, anchors, fragments, data anchors, collisions, and the ownership contract.
+14. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
+15. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+16. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
+17. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

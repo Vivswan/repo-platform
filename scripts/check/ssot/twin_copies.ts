@@ -150,16 +150,12 @@ export function ownershipTableMismatches(
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const twinCopyRules: Rule[] = [
   {
-    // Most dogfooded copies (.editorconfig,
-    // .github/CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
-    // dependabot-bun-lockfile.yml, validate-skills.yml) are GENERATED from
-    // their templates by
-    // scripts/generate/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
-    // and byte-compared against a REAL copier render by ci.yml's
-    // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no
-    // comparison here. This rule keeps only the pairs generation cannot
-    // own: the prefix files, whose repo-specific tails
-    // live below the template's marker.
+    // Most dogfooded copies are GENERATED from their templates by
+    // scripts/generate/render_dogfood.ts, byte-checked by `bun run
+    // dogfood:check`, and byte-compared against a REAL copier render by
+    // ci.yml's dogfood-oracle smoke row, so they need no comparison here.
+    // This rule keeps only the pairs generation cannot own: the prefix files,
+    // whose repo-specific tails live below the template's marker.
     name: "dogfood-parity",
     run: () => {
       const vars = jinjaVars();

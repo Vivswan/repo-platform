@@ -49,17 +49,13 @@ export function allOf(gates: string[]): string {
   return gates.length === 1 ? gates[0] : gates.map((gate) => `(${gate})`).join(" and ");
 }
 
-/** Fail-closed filename validation for a source's logical path: after the
- *  recognized `{% if %}NAME{% endif %}` gates are stripped, no jinja
- *  syntax may remain (a `{# comment #}` or `{{ var }}` segment would ship
- *  verbatim on the build branch while copier renders a DIFFERENT
- *  destination name than the manifest records), a gate's inner name must
- *  not end in .jinja (the suffix belongs OUTSIDE the gate; wrapped
- *  inside, the emitted plain name would be treated as a template and land
- *  suffix-stripped, again diverging from the manifest), and no LANDED
- *  segment may carry edge whitespace (pathspec strips trailing whitespace
- *  from gitwildmatch patterns, so such a path could never be excluded
- *  literally). */
+/** Fail-closed filename validation for a source's logical path, after the
+ *  recognized `{% if %}NAME{% endif %}` gates are stripped. Leftover jinja
+ *  syntax would ship verbatim on the build branch while copier renders a
+ *  DIFFERENT destination than the manifest records; a gate's inner name
+ *  ending in .jinja would land suffix-stripped, diverging the same way; and
+ *  a LANDED segment with edge whitespace could never be excluded literally,
+ *  since pathspec strips trailing whitespace from gitwildmatch patterns. */
 export function templatePathErrors(logical: string): string[] {
   const errors: string[] = [];
   const emitted = plainTemplatePath(logical);
@@ -116,12 +112,10 @@ function anchored(pattern: string): string {
  *  plain-named composed tree, from the same entries the ownership manifest
  *  is generated from: per gated FILE a pattern rendering to the literal
  *  landed path exactly when its gates do not hold, and per DIRECTORY whose
- *  every landed file is gated a pattern excluding the directory itself
- *  when no gate combination under it holds (copier would otherwise render
- *  it as an empty directory; a gitwildmatch pattern naming a directory
- *  covers its descendants too, so the per-file patterns underneath are
- *  belt and braces). scripts/generate.ts writes these into copier.yml's
- *  generated region; build() refuses a stale region. */
+ *  every landed file is gated a pattern for the directory itself (copier
+ *  would otherwise render it empty; a gitwildmatch directory pattern also
+ *  covers descendants, so the per-file ones underneath are belt and braces).
+ *  scripts/generate.ts writes these into copier.yml; build() refuses a stale region. */
 export function excludePatterns(entries: ManifestEntry[]): string[] {
   const patterns: string[] = [];
   for (const entry of entries) {

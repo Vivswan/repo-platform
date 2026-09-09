@@ -10,18 +10,14 @@ import type { Rule } from "./rule_roster.ts";
  *  and the settings-label-preflight rule key on. */
 export const PREFLIGHT_SCRIPT = "fleet/label_preflight.ts";
 
-/** A run block's executable shell command segments: heredoc BODIES
- *  dropped (they are text fed to a command, not commands - openers
- *  stay), backslash continuations joined onto their command's line,
- *  then one quote-aware sweep splits at unquoted newlines, `;`, `&&`,
- *  and `||`, with an unquoted word-start `#` commenting out the rest
- *  of its line. Text inside quotes stays segment text, so quoted data
- *  can neither split into a phantom command nor truncate a real one.
- *  Still textual, not a shell: `$(...)` substitution and quotes
- *  spanning lines are not modeled, and a `<<` inside a quoted string
- *  opens a phantom heredoc - each degrades toward dropped lines, a
- *  FALSE MISMATCH against the exact pinned shapes, never toward
- *  reading non-command text as a command. */
+/** A run block's executable shell command segments: heredoc BODIES dropped
+ *  (text fed to a command, not commands), continuations joined, then one
+ *  quote-aware split at unquoted newlines, `;`, `&&`, `||`, with an unquoted
+ *  word-start `#` commenting out its line. Text inside quotes stays segment
+ *  text, so quoted data can neither split into a phantom command nor
+ *  truncate a real one. Still textual, not a shell: `$(...)`, quotes spanning
+ *  lines, and a `<<` inside a quoted string are not modeled, and each degrades
+ *  toward dropped lines (a FALSE MISMATCH), never toward reading data as a command. */
 export function shellSegments(run: string): string[] {
   // Pass 1, line-wise: every heredoc opener on a non-comment line
   // queues its terminator (POSIX order for multiple heredocs on one
@@ -92,19 +88,14 @@ export function shellSegments(run: string): string[] {
   return segments.filter((segment) => segment.trim() !== "");
 }
 
-/** How a segment RUNS the preflight at command position: 'direct'
- *  (`bun <...>fleet/label_preflight.ts` opens the segment), 'hidden'
- *  (it is the command run_hidden.ts executes after one closed
- *  double-quoted capture-name argument and its `--` separator - the
- *  landed shape, anchored so text INSIDE the quoted label, or a label
- *  left unterminated by comment truncation, never reads as the wrapped
- *  command), or null. An echoed or argument-position token, a quoted
- *  script path, and an inline `VAR=x bun ...` env prefix are all null -
- *  not invocations - so a spoof or an unrecognized form fails the
- *  invocation count loudly instead of satisfying the pin. EXECUTION is
- *  not proven at this level - dead-code short-circuits
- *  (`false && bun ...`) and `|| true` suppression pass the grammar;
- *  the rule's EXPECTED_RUN byte pin owns those. */
+/** How a segment RUNS the preflight at command position: 'direct' (`bun
+ *  <...>fleet/label_preflight.ts` opens the segment), 'hidden' (the command
+ *  run_hidden.ts executes after one closed double-quoted capture-name
+ *  argument and `--`, anchored so text INSIDE the quoted label never reads
+ *  as the wrapped command), or null for everything else (an echoed or
+ *  argument-position token, a quoted path, an inline `VAR=x bun` prefix), so
+ *  a spoof fails the invocation count loudly. EXECUTION is not proven here:
+ *  `false && bun ...` and `|| true` pass the grammar; the run byte pin owns those. */
 export function preflightInvocation(segment: string): "direct" | "hidden" | null {
   // The path stems carry a path-segment boundary: a stem glued to ANY
   // preceding non-separator character (not-sync/, my.fleet/) is a
@@ -139,15 +130,13 @@ function asMapping(value: unknown): Record<string, unknown> {
     : {};
 }
 
-/** The terminal backstop: each preflight step's run block,
- *  byte-for-byte. The invocation grammar names WHICH facet drifted for
- *  ordinary edits, but a textual parser cannot prove EXECUTION, and
- *  each reviewer-built smuggle (heredoc bodies, quoted-label text,
- *  quoted-data splits, exotic delimiters) needed another refinement -
- *  this pin ends the class: ANY deviation mismatches, and a deliberate
- *  edit to the step updates this constant in the same change. Exported
- *  so the suite can build a green synthetic step and prove each
- *  comparison fires on its own mutation. */
+/** The terminal backstop: each preflight step's run block, byte-for-byte.
+ *  The invocation grammar names WHICH facet drifted for ordinary edits, but
+ *  a textual parser cannot prove EXECUTION, and each reviewer-built smuggle
+ *  (heredoc bodies, quoted-label text, quoted-data splits, exotic delimiters)
+ *  needed another refinement; this pin ends the class: ANY deviation
+ *  mismatches, and a deliberate edit updates this constant in the same
+ *  change. Exported so the suite can prove each comparison fires. */
 export const PREFLIGHT_EXPECTED_RUN: Record<string, string> = {
   ".github/workflows/settings-repos.yml":
     'if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then\n' +
@@ -178,33 +167,25 @@ const PREFLIGHT_EXPECTED_ARGS: Record<string, string[]> = {
 };
 
 /** One apply input's expectation in the census below: mirrored from a
- *  preflight env var AND pinned to one expected expression (comparing
- *  the two sides' text alone is not enough - the same expression
- *  string can EVALUATE differently in a run step's env and a uses
- *  step's with, e.g. via github.action, so the census pins the one
- *  context-stable expression both sides must carry), a fixed literal,
- *  or presence-only because another rule owns the value
- *  (settings-apply-merged-input pins settings-file for the operator workflow -
- *  re-pinning it here would double-report one edit). */
+ *  preflight env var AND pinned to one expected expression (text parity alone
+ *  is not enough: the same expression string can EVALUATE differently in a
+ *  run step's env and a uses step's with, e.g. via github.action, so both
+ *  sides must carry the one context-stable expression), a fixed literal, or
+ *  presence-only because another rule owns the value (re-pinning it here
+ *  would double-report one edit). */
 export type ApplyWithExpectation =
   | { parity: string; value: string }
   | { literal: string }
   | { pinnedElsewhere: true };
 
-// The COMPLETE census of each apply step's with: inputs - key set and
-// values. Every input either mirrors a preflight env var (the guard
-// must judge under exactly the configuration the apply runs with,
-// with both sides pinned to the census's context-stable expression),
-// is a fixed literal, or is value-pinned by another rule; a with: key
-// outside the census is an input the guard cannot mirror and fails
-// outright. This is what makes the mirrored-input class CLOSED: adding
-// or changing any apply input goes loud here, not silently past a
-// partial parity list. The parity env names double as the preflight's
-// env-key ALLOWLIST - an env var outside the census (BASH_ENV) can
-// inject execution the run pin cannot see. Exported (with the
-// companion allowlists) so the suite can assert its own copy of each
-// table and mutation-test every entry - a dropped entry breaks the
-// suite's table equality, not just the live files' luck.
+// The COMPLETE census of each apply step's with: inputs. Every input mirrors
+// a preflight env var (the guard must judge under exactly the configuration
+// the apply runs with, both sides pinned to one context-stable expression),
+// is a fixed literal, or is value-pinned by another rule; a key outside the
+// census fails outright, which is what makes the mirrored-input class
+// CLOSED. The parity env names double as the preflight's env-key ALLOWLIST:
+// an env var outside the census (BASH_ENV) can inject execution the run pin
+// cannot see. Exported so the suite can mutation-test every entry.
 export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpectation>> = {
   ".github/workflows/settings-repos.yml": {
     token: { parity: "GH_TOKEN", value: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
@@ -234,20 +215,14 @@ export const PREFLIGHT_JOB_ENV_KEYS: Record<string, ReadonlySet<string>> = {
   ".github/workflows/settings-repos.yml": new Set(["HIDE_DETAILS", "SETTINGS_REPORT_TITLE"]),
 };
 
-// The job-level EXECUTION-CONTEXT census (decision: a rule, not an
-// accepted residual - the class is in-file and closable the same way
-// the step-key allowlist closes its level). The whole job runs WHERE
-// its keys say: `container:` re-homes every step into an arbitrary
-// image whose env (BASH_ENV again) and PATH arrive underneath the
-// step- and job-level env allowlists' sight, `services:` attaches
-// containers, and runner keys keep being added - so the apply job's
-// keys are ALLOWLISTED rather than enumerated as hazards, and runs-on
-// is value-pinned to the hosted runner the byte-pinned run blocks
-// assume (a self-hosted label is a different machine wearing the same
-// workflow text). `defaults:` is deliberately absent here AND skipped
-// by the census: its dedicated check above owns it, and double-listing
-// would double-report one edit. `env:` is allowlisted as a KEY because
-// PREFLIGHT_JOB_ENV_KEYS judges its content.
+// The job-level EXECUTION-CONTEXT census, a rule rather than an accepted
+// residual because the class is in-file and closable: `container:` re-homes
+// every step into an image whose env and PATH arrive underneath the env
+// allowlists' sight, `services:` attaches containers, and runner keys keep
+// being added, so the apply job's keys are ALLOWLISTED rather than
+// enumerated as hazards, with runs-on value-pinned to the hosted runner the
+// byte-pinned run blocks assume. `defaults:` is absent here because its
+// dedicated check owns it; `env:` is a KEY here, PREFLIGHT_JOB_ENV_KEYS judges its content.
 export const PREFLIGHT_APPLY_JOB_KEYS: Record<string, ReadonlySet<string>> = {
   ".github/workflows/settings-repos.yml": new Set([
     "name",
@@ -264,18 +239,14 @@ export const PREFLIGHT_APPLY_JOB_KEYS: Record<string, ReadonlySet<string>> = {
 /** The one hosted runner the apply job may request. */
 export const PREFLIGHT_APPLY_RUNS_ON = "ubuntu-latest";
 
-// The persisted-environment class: a PRIOR step's run block can write
-// `BASH_ENV=<hook> >> $GITHUB_ENV` (bash sources the hook before the
-// pinned run block executes - `exit 0` there skips the guard green) or
-// prepend a counterfeit bun via GITHUB_PATH. No landed step in the
-// apply job touches these, so ANY mention in a run block mismatches.
-// Two recorded residuals bound what a textual scan can prove: the
-// scripts those steps call are this repository's own reviewed,
-// CI-gated code (the rule's trust boundary is the WORKFLOW FILE, not
-// the .ts sources behind it), and the scan catches LITERAL spellings -
-// the honest-drift class; a write obfuscated through fragment-built
-// variable names is deliberately adversarial code in a reviewed file,
-// outside any textual rule's reach, and stays review's.
+// The persisted-environment class: a PRIOR step can write `BASH_ENV=<hook>
+// >> $GITHUB_ENV` (bash sources the hook before the pinned run block, and an
+// `exit 0` there skips the guard green) or prepend a counterfeit bun via
+// GITHUB_PATH. No landed apply-job step touches these, so ANY mention in a
+// run block mismatches. Recorded residuals: the called scripts are this
+// repo's own CI-gated code (the trust boundary is the WORKFLOW FILE), and the
+// scan catches LITERAL spellings; an obfuscated write is adversarial code in
+// a reviewed file, outside any textual rule's reach, and stays review's.
 export const PREFLIGHT_FORBIDDEN_RUN_TOKENS = ["GITHUB_ENV", "BASH_ENV", "GITHUB_PATH"] as const;
 
 // The steps strictly BETWEEN the preflight and the apply, byte-pinned
@@ -513,15 +484,12 @@ export function labelPreflightJobMismatches(
       });
     }
     const applyIf = String(steps[applyAt].if ?? "").trim();
-    // TEXT parity only, deliberately: this check proves the guard and
-    // the apply share ONE condition; the condition's pinned VALUE is the
-    // sibling settings-apply-skip-gate rule's job (it pins every apply
-    // step's if: in the operator workflow), so a JOINT drift of both sides fires
-    // there, not here - re-pinning the value here would double-report
-    // every legitimate condition edit. That split is load-bearing
-    // defense in depth: retiring the sibling rule (its roster entry
-    // makes that loud) would leave this parity satisfiable by any
-    // condition, agreed or wrong.
+    // TEXT parity only, deliberately: this proves the guard and the apply
+    // share ONE condition; the condition's VALUE is the sibling
+    // settings-apply-skip-gate rule's job, so a JOINT drift fires there, and
+    // re-pinning it here would double-report every legitimate edit. The split
+    // is load-bearing defense in depth: retiring the sibling (its roster entry
+    // makes that loud) would leave this parity satisfiable by any condition.
     if (preflightIf !== applyIf) {
       mismatches.push({
         file: rel,
@@ -652,39 +620,14 @@ export function labelPreflightFileMismatches(
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const labelPreflightRules: Rule[] = [
   {
-    // Referenced-label preflight: the FAIL-CLOSED guard the apply runs
-    // before github-settings-as-code's reconciliation DELETES labels
-    // (fleet/label_preflight.ts). Dropping, reordering, softening, or
-    // re-aiming the step is silent - the apply stays green while
-    // referenced-label deletions go unchecked, or checked against the
-    // WRONG repository - so the whole landed shape is pinned: exactly
-    // one preflight and exactly one apply step per apply job, the
-    // preflight BEFORE the apply, `if:`
-    // identical (after trimming) to each apply step's, the invocation
-    // MULTISET as exact argument lists, the run block byte-identical
-    // (PREFLIGHT_EXPECTED_RUN, the terminal backstop a textual parser
-    // cannot be smuggled past), the preflight-to-apply GAP byte-pinned
-    // (PREFLIGHT_GAP_STEPS - an intervening step could rewrite the
-    // merged document after the guard validated it), the COMPLETE
-    // apply-input census (PREFLIGHT_APPLY_WITH: every with: key
-    // parity-mirrored from a preflight env var, literal-pinned, or
-    // presence-only where another rule owns the value), ALLOWLISTED
-    // step, step-env, job-env, and job keys (PREFLIGHT_APPLY_JOB_KEYS,
-    // with runs-on value-pinned - a container:, services:, or runner
-    // change re-homes the execution context under every step-level
-    // pin), and no workflow/job defaults
-    // and no persisted-environment writes (shell:, working-directory:,
-    // continue-on-error:, BASH_ENV, GITHUB_ENV, GITHUB_PATH each
-    // reroute or soften the guard while every pinned fact reads
-    // intact). In settings-repos.yml every invocation must
-    // be run_hidden-wrapped (label names and referencing paths are
-    // target content) on the fixed id 'labels' its stood-down notice
-    // keys on - settings-hidden-step-notices pins the notice; this rule
-    // pins the step it compensates. The judgment itself is
-    // labelPreflightJobMismatches, pure over a parsed job, with the
-    // grammar in shellSegments/preflightInvocation/preflightArgs - all
-    // unit-tested against the spoof shapes a live-file mutation cannot
-    // isolate.
+    // Referenced-label preflight: the FAIL-CLOSED guard the apply runs before
+    // github-settings-as-code's reconciliation DELETES labels. Dropping,
+    // reordering, softening, or re-aiming the step is silent (the apply stays
+    // green while referenced-label deletions go unchecked, or checked against
+    // the WRONG repository), so the whole landed shape is pinned, down to the
+    // byte-identical run block and gap: every earlier textual refinement was
+    // smuggled past. labelPreflightJobMismatches is the judgment, pure over a parsed
+    // job; settings-hidden-step-notices pins the notice compensating for this step's hidden output.
     name: "settings-label-preflight",
     run: () => {
       const rel = ".github/workflows/settings-repos.yml";

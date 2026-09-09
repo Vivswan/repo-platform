@@ -12,18 +12,14 @@ import { FRAGMENTS_DIR, JINJA_SUFFIX, type SourcedEntry } from "./entries.ts";
 export const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) (-?)#\}([^\r]*)$/;
 
 const ANCHOR_HINT = Buffer.from("{# compose:");
-/** Loose recognizer for text MEANT to be an anchor marker: a jinja comment
- *  opener with an optional trim dash and any same-line whitespace, then the
- *  compose keyword. Both malformed-marker scans match this: the skeleton
- *  scan then demands the strict ANCHOR_RE form, and the contribution scan
- *  rejects every match outright (contributions may not carry markers at
- *  all) - recognizing only the canonical ANCHOR_HINT spelling would let a
- *  variant like '{#- compose:x #}' skip validation and vanish at render.
- *  The colon is one boundary: prose like '{# composes the tree #}' stays a
- *  plain comment. Horizontal whitespace is the other: markers are line
- *  constructs (ANCHOR_RE is line-anchored), and the skeleton scan reads
- *  line by line, so a newline inside the opener must not match here or the
- *  two scans would disagree on the same bytes. */
+/** Loose recognizer for text MEANT to be an anchor marker (a jinja comment
+ *  opener, optional trim dash, same-line whitespace, the compose keyword).
+ *  Both malformed-marker scans match this before the skeleton scan demands
+ *  the strict ANCHOR_RE form: recognizing only the canonical spelling would
+ *  let a variant like '{#- compose:x #}' skip validation and vanish at
+ *  render. The colon keeps prose like '{# composes the tree #}' a plain
+ *  comment; horizontal-only whitespace keeps the two scans agreeing on the
+ *  same bytes, since the skeleton scan reads line by line. */
 const ANCHOR_HINT_RE = /\{#-?[ \t]*compose:/;
 
 /** Marker scan over the RAW fragment bodies, before any transformation
@@ -163,17 +159,13 @@ export function spliceContributions(
     }
   }
 
-  // Contributions are spliced verbatim, so an anchor marker inside one
-  // would dodge the skeleton scan above whole: it never registers an owner
-  // (contributions to it get the misleading no-anchor error), a malformed
-  // marker goes undiagnosed, and a well-formed one survives into the
-  // composed tree as a comment rendering to nothing. Anchors live in
-  // skeleton files only. In the composed pipeline fragmentMarkerErrors has
-  // already named the editable fragment for any smuggled marker (before
-  // the transformations copy fragment bytes into contributions with other
-  // sources); this scan is the seam's own backstop, so a caller feeding
-  // un-scanned contributions - or a generator synthesizing a marker -
-  // still fails closed.
+  // Contributions are spliced verbatim, so an anchor marker inside one would
+  // dodge the skeleton scan whole: no owner registered, a malformed marker
+  // undiagnosed, a well-formed one shipped as a comment rendering to nothing.
+  // Anchors live in skeleton files only. fragmentMarkerErrors already names
+  // the editable fragment for a smuggled marker; this scan is the seam's own
+  // backstop, so un-scanned contributions or a generator synthesizing a
+  // marker still fail closed.
   for (const [anchor, list] of sortedByKey(contributions)) {
     for (const { source, text } of list) {
       const hint = ANCHOR_HINT_RE.exec(text.toString("latin1"));

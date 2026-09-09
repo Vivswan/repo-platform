@@ -35,16 +35,14 @@ export interface DeclarationSources {
   modules: Map<string, OwnershipDeclaration[]>;
 }
 
-/** The full ownership map for the composed tree: every landed path with
- *  its DECLARED class and its render gates, plus the manifest's own
- *  self-entry, sorted by path. Errors on: a landed file with no
- *  declaration, a declaration whose path never lands, same-path
- *  declarations disagreeing across sources, dead _skip_if_exists patterns,
- *  starter/skip disagreement, symlinks declared anything but managed
- *  (sync re-renders links whole), and source text contradicting the
- *  declared class (declarationTextErrors). Called after
- *  spliceContributions, so the decoration checks read the final template
- *  text, fragments included. */
+/** The full ownership map for the composed tree: every landed path with its
+ *  DECLARED class and render gates, plus the manifest's own self-entry,
+ *  sorted by path. The declaration errors it raises (undeclared landed
+ *  files, dead declarations, cross-source disagreement, starter/skip
+ *  mismatch, dead _skip_if_exists patterns, contradicting decoration) are
+ *  docs/compose.md's ownership contract; symlinks must be managed because
+ *  sync re-renders links whole. Called after spliceContributions, so the
+ *  decoration checks read the final template text, fragments included. */
 export function manifestEntries(
   files: Map<string, SourcedEntry>,
   skipPatterns: { pattern: string; matcher: RegExp }[],

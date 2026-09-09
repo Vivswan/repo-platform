@@ -11,19 +11,13 @@ export interface Mismatch {
 }
 
 // Intentional, recorded divergences between a repo file and its templates/
-// counterpart. A divergence means exactly one thing: the OPERATOR copy
-// carries a line the template lacks. Each entry excuses, from the operator
-// side only, AT MOST ONE line matching `skip` sitting immediately before a
-// line matching `before` (both matched against trimmed lines, after
-// semanticLines dropped comments and blanks): a second copy, or the same
-// line migrated elsewhere, still mismatches. A template side that carries
-// the same anchored line makes the entry stale - reported, with nothing
-// excused - so the excuse can never mask the template catching up. Honored
-// only by the semantic-mode dogfood-parity pairs - the prefix-mode pairs
-// compare their template prefix verbatim and cannot skip lines - and
-// subset rules already tolerate repo-side additions without an entry.
-// Every entry must say why the divergence is deliberate; an entry that
-// excused nothing anywhere is reported as stale.
+// counterpart: the OPERATOR copy carries a line the template lacks. Each
+// entry excuses, from the operator side only, AT MOST ONE line matching
+// `skip` sitting immediately before a line matching `before` (trimmed, after
+// semanticLines dropped comments and blanks), so a second copy or a migrated
+// line still mismatches. A template side carrying the same anchored line, or
+// an entry that excused nothing, is reported as stale, so an excuse can never
+// mask the template catching up. Honored only by the semantic-mode dogfood-parity pairs.
 export const RECORDED_DIVERGENCES: {
   file: string;
   reason: string;

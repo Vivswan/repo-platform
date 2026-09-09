@@ -79,14 +79,13 @@ export const RULE_ROSTER = [
   "skill-ownership-tables",
 ] as const;
 
-/** Set-plus-uniqueness comparison between the authored roster and the
- *  live rules' names, mirroring rosterMismatches' two directions:
- *  a live rule missing from the roster is a gate the roster never vouched
- *  for, a roster entry with no live rule is a DROPPED rule - the silent
- *  case the roster exists for, since the run loop only ever counts what
- *  survived - and a duplicate on either side is a double-run rule or a
- *  double-vouched entry. Not a rule itself: it runs unconditionally in
- *  main(), before the loop it audits, so it cannot drop out of the rules
+/** Set-plus-uniqueness comparison between the authored roster and the live
+ *  rules' names, in both directions: a live rule missing from the roster is
+ *  a gate the roster never vouched for, a roster entry with no live rule is
+ *  a DROPPED rule (the silent case the roster exists for, since the run loop
+ *  only counts what survived), and a duplicate on either side is a double-run
+ *  rule or a double-vouched entry. Not a rule itself: it runs unconditionally
+ *  in main(), before the loop it audits, so it cannot drop out of the rules
  *  array alongside what it guards. */
 export function ruleRosterMismatches(
   roster: readonly string[],
