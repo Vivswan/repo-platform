@@ -21,3 +21,4 @@ jobs:
     timeout-minutes: 59
     steps:
       - uses: actions/checkout@v7
+{{blocks}}

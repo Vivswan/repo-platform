@@ -16,5 +16,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+{{blocks}}
+
       - name: No repository checks yet
         run: echo "add this repository's test and lint jobs to checks.yml"

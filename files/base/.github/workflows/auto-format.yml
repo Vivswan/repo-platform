@@ -34,6 +34,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
+{{blocks}}
+
       - name: Commit and push changes
         id: push
         env:

@@ -1,0 +1,9 @@
+
+      # Example deno checks; replace the placeholder below with real ones.
+      # - uses: denoland/setup-deno@v2
+      #   with:
+      #     deno-version-file: .dvmrc
+      # - run: deno ci
+      # - run: deno lint
+      # - run: deno fmt --check --prose-wrap preserve
+      # - run: deno test

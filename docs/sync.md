@@ -97,10 +97,11 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 
 | Entry class | Used for |
 | --- | --- |
-| `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files |
-| `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `.github/dependabot.yml` |
+| `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files |
+| `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
 | `starter` | `checks.yml`, `post-green.yml`, the release hooks, `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.yml`, the release-please, skills, fuzzer, and nightly starters |
+| `link` | `CLAUDE.md` (to `AGENTS.md`), `.github/agents.md` and `.github/copilot-instructions.md` (to `../AGENTS.md`) |
 
 | `when` form | Used by |
 | --- | --- |
@@ -109,11 +110,14 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variants of `.typography-allow`, `AGENTS.md`, and `auto-assign.yml` |
 | `private: true` / `false` | the two `.github/settings.yml` starters, the `auto-assign.yml` variants (code scanning exists on public repositories only) |
 
-| `blocks` key | Split entry | Block files |
+The three links carry no `when`: every repository gets them.
+
+| `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` | `files/<module>/.gitignore.block.<Source>`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)) |
-| `dependabot_ecosystems` | `.github/dependabot.yml` | `files/<module>/.github/dependabot.yml.block.<ecosystem>` |
-| `agents_toolchain` | `AGENTS.md` (Toolchain variant) | `files/<module>/AGENTS.md.block.toolchain`, the module's Toolchain bullets |
+| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.gitignore.block.<Source>`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)); the Node source three toolchains declare is byte-identical in each, so it lands once |
+| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.yml.block.<ecosystem>`, appended at the anchor line that ends the source |
+| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.md.block.toolchain`, the module's Toolchain bullets, appended after the region body |
+| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<file>.block.toolchain`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
 
 | Module data key | Meaning | Reader |
 | --- | --- | --- |
@@ -124,8 +128,12 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
+| `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
+| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder falls back to when the registration sets no `skills.dir` | the writer |
 | `settings_layers` | the settings layer files the module contributes | the settings apply |
-| `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key | the fleet plan and the settings baseline |
+| `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder | the fleet plan, the settings baseline, and the writer |
+
+Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. `docs_site_label` is listed for the day `docs-site.yml` and `pages.yml` pass the link-rot label; the committed sources do not name it yet.
 
 A module with no files still appears under `modules` (`issue-templates`, `custom-license`) so a registration selecting it is known and a `when` can name it.
 

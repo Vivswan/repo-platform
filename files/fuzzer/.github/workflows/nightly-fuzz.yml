@@ -84,7 +84,7 @@ jobs:
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
         with:
           mode: report
-          label: "fuzz-nightly"
+          label: "{{fuzzer_label}}"
           # Explicit even though it matches the action's default: older
           # renders rely on the default, so it can never change.
           title: Nightly fuzz failures
@@ -107,4 +107,4 @@ jobs:
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
         with:
           mode: resolve
-          label: "fuzz-nightly"
+          label: "{{fuzzer_label}}"

@@ -55,7 +55,7 @@ jobs:
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
         with:
           mode: report
-          label: "nightly-failure"
+          label: "{{nightly_label}}"
           title: Nightly CI failures
           # No artifacts directory: this stream files the generic report,
           # not the fuzzer's failure-report contract. The label tuple is
@@ -79,7 +79,7 @@ jobs:
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
         with:
           mode: resolve
-          label: "nightly-failure"
+          label: "{{nightly_label}}"
           # The generic close wording; without it the action keeps the fuzz
           # stream's regression-seed hedging.
           stream: generic

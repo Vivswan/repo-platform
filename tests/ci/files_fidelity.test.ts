@@ -14,7 +14,14 @@
 // rendered from.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { sectionsIn, templateRegionBody } from "../../scripts/generate/build_gitignore";
@@ -24,6 +31,7 @@ import { tempDirs } from "../shared/temp_dir";
 const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
+const FILES_TREE = join(REPO_ROOT, "files");
 const RENDERS = join(import.meta.dir, "files_fidelity/renders");
 const SELECTIONS = ["minimal", "uv-no-release-please", "all-modules"] as const;
 type Selection = (typeof SELECTIONS)[number];
@@ -89,9 +97,6 @@ const ABSENT: Record<string, string> = {
   ".github/ISSUE_TEMPLATE/bug_report.yml": STARTER_LEFT_ALONE,
   ".github/ISSUE_TEMPLATE/config.yml": STARTER_LEFT_ALONE,
   ".github/ISSUE_TEMPLATE/feature_request.yml": STARTER_LEFT_ALONE,
-  "CLAUDE.md": "writer gap: files.yml has no symlink entry class",
-  ".github/agents.md": "writer gap: files.yml has no symlink entry class",
-  ".github/copilot-instructions.md": "writer gap: files.yml has no symlink entry class",
 };
 
 /** Paths present on both sides that are not compared, with why. */
@@ -110,44 +115,17 @@ interface Known {
 const region = (text: string, begin: string, end: string) =>
   text.slice(text.indexOf(`${begin}\n`), text.indexOf(`${end}\n`) + end.length + 1);
 
-/** The golden's `## <name>` gitignore section (through its trailing blank
- *  line), re-inserted before each of `before`: the writer reads a block
- *  file per declaring module, so a source several modules declare lands
- *  once per module. */
-function repeatSharedSection(text: string, name: string, before: string[]): string {
-  const start = text.indexOf(`## ${name} (`);
-  const end = text.indexOf("\n## ", start + 1) + 1;
-  const section = text.slice(start, end);
-  let out = text;
-  for (const marker of before) out = out.replace(marker, `${section}${marker}`);
-  return out;
-}
-
-const skeleton = (path: string) => readFileSync(join(RENDERS, "minimal", path), "utf-8");
-
 const KNOWN: Record<string, Known> = {
   ".gitignore": {
     selections: SELECTIONS,
     reason:
       "region only (the comment above BEGIN is repository-owned); one blank line before the first toolchain section instead of the composer's two;" +
-      " a source several selected modules declare lands once per module (writer gap: no cross-module block dedupe);" +
       " the github/gitignore sections are the templates side's current ones (a refresh rewrites them)",
-    expected: (golden, selection) => {
-      let out = region(golden, HASH_BEGIN, HASH_END).replace(
-        "nohup.out\n\n\n## ",
-        "nohup.out\n\n## ",
-      );
-      if (selection === "all-modules") {
-        out = repeatSharedSection(out, "Node", ["## Deno (", "## Python ("]);
-      }
-      return refreshSections(out, currentSections());
-    },
-  },
-  ".github/dependabot.yml": {
-    selections: SELECTIONS,
-    reason:
-      "split instead of managed: blocks exist for split entries only, so the ecosystems ride in a marked region",
-    expected: (golden) => `${HASH_BEGIN}\n${golden}${HASH_END}\n`,
+    expected: (golden) =>
+      refreshSections(
+        region(golden, HASH_BEGIN, HASH_END).replace("nohup.out\n\n\n## ", "nohup.out\n\n## "),
+        currentSections(),
+      ),
   },
   ".gitleaks.toml": {
     selections: ["minimal", "uv-no-release-please"],
@@ -156,25 +134,13 @@ const KNOWN: Record<string, Known> = {
     expected: () => readFileSync(join(RENDERS, "all-modules", ".gitleaks.toml"), "utf-8"),
   },
   ".github/workflows/checks.yml": {
-    selections: ["uv-no-release-please", "all-modules"],
+    selections: ["minimal"],
     reason:
-      "the starter carries no per-toolchain example comments (writer gap: blocks on starter entries)",
-    expected: () => skeleton(".github/workflows/checks.yml"),
-  },
-  ".github/workflows/copilot-setup-steps.yml": {
-    selections: ["uv-no-release-please", "all-modules"],
-    reason:
-      "the starter carries no toolchain setup or install steps (writer gap: blocks on starter entries)",
-    expected: () => skeleton(".github/workflows/copilot-setup-steps.yml"),
-  },
-  ".github/workflows/auto-format.yml": {
-    selections: ["uv-no-release-please", "all-modules"],
-    reason:
-      "the starter carries no toolchain setup or format steps (writer gap: blocks on starter entries)",
+      "one blank line between the checkout step and the placeholder step: the seam the toolchain example blocks land in stays when no toolchain is selected",
     expected: (golden) =>
       golden.replace(
-        /(persist-credentials: false\n)[\s\S]*?( {6}- name: Commit and push changes)/,
-        "$1$2",
+        "      - uses: actions/checkout@v7\n      - name: No repository checks yet",
+        "      - uses: actions/checkout@v7\n\n      - name: No repository checks yet",
       ),
   },
   "AGENTS.md": {
@@ -241,9 +207,9 @@ interface Run {
   summary: { hold: boolean; modules: string[]; written: { path: string }[]; notes: string[] };
 }
 
-function runWriter(selection: Selection): Run {
-  const answers = answersOf(selection);
-  const target = temp.dir(`files-fidelity-${selection}-`);
+/** sync.ts over an empty checkout registered with `answers`. */
+function runWriter(label: string, answers: Answers): Run {
+  const target = temp.dir(`files-fidelity-${label}-`);
   const registration = [
     `modules: ${JSON.stringify(answers.modules)}`,
     "project:",
@@ -254,7 +220,7 @@ function runWriter(selection: Selection): Run {
     "",
   ].join("\n");
   writeFileSync(join(target, ".repo-platform.yml"), registration);
-  const summaryPath = join(temp.dir(`files-fidelity-summary-${selection}-`), "summary.json");
+  const summaryPath = join(temp.dir(`files-fidelity-summary-${label}-`), "summary.json");
   const result = boundedSpawnSync(
     [
       "bun",
@@ -262,7 +228,7 @@ function runWriter(selection: Selection): Run {
       "--files",
       join(REPO_ROOT, "files.yml"),
       "--tree",
-      join(REPO_ROOT, "files"),
+      FILES_TREE,
       "--target",
       target,
       "--build",
@@ -284,8 +250,9 @@ function runWriter(selection: Selection): Run {
 describe.each([...SELECTIONS])("files.yml reproduces the %s render", (selection) => {
   const golden = join(RENDERS, selection);
   const goldenPaths = walk(golden);
-  const run = runWriter(selection);
+  const run = runWriter(selection, answersOf(selection));
   const knownHere = Object.keys(KNOWN).filter((path) => KNOWN[path].selections.includes(selection));
+  const isLink = (root: string, path: string) => lstatSync(join(root, path)).isSymbolicLink();
 
   test("the writer knows every module the golden selected and holds nothing", () => {
     expect(run.summary.modules).toEqual(answersOf(selection).modules);
@@ -312,13 +279,25 @@ describe.each([...SELECTIONS])("files.yml reproduces the %s render", (selection)
         !(path in NOT_COMPARED) &&
         !(path in PIN_FILES) &&
         !knownHere.includes(path) &&
-        !lstatSync(join(golden, path)).isSymbolicLink(),
+        !isLink(golden, path),
     );
     expect(compared.length).toBeGreaterThan(10);
     const differing = compared.filter(
       (path) => !readFileSync(join(golden, path)).equals(readFileSync(join(run.target, path))),
     );
     expect(differing).toEqual([]);
+  });
+
+  test("every symlink is a symlink with the same target", () => {
+    const links = goldenPaths.filter((path) => isLink(golden, path));
+    expect(links).toEqual([".github/agents.md", ".github/copilot-instructions.md", "CLAUDE.md"]);
+    const targets = (root: string) =>
+      links.map((path) => ({
+        path,
+        link: isLink(root, path),
+        target: isLink(root, path) ? readlinkSync(join(root, path)) : null,
+      }));
+    expect(targets(run.target)).toEqual(targets(golden));
   });
 
   test("each pin dotfile is the templates side's generated dotfile, not the frozen copy", () => {
@@ -341,6 +320,79 @@ describe.each([...SELECTIONS])("files.yml reproduces the %s render", (selection)
         path,
         content: KNOWN[path].expected(before, selection),
       });
+    }
+  });
+});
+
+/** How often `needle` occurs in the written file at `path`. */
+function occurrences(run: Run, path: string, needle: string): number {
+  return readFileSync(join(run.target, path), "utf-8").split(needle).length - 1;
+}
+
+const block = (module: string, name: string) =>
+  readFileSync(join(FILES_TREE, module, name), "utf-8");
+
+describe("blocks land once per distinct content, in module order", () => {
+  const TOOLCHAINS = ["bun", "node", "deno", "uv", "rust"];
+  const STEPS = ["bun", "node", "deno", "uv"];
+
+  test("the three toolchains sharing the Node gitignore source ship one byte-identical block", () => {
+    const node = block("bun", ".gitignore.block.Node");
+    expect(block("node", ".gitignore.block.Node")).toBe(node);
+    expect(block("deno", ".gitignore.block.Node")).toBe(node);
+  });
+
+  test("every module selected: Node lands once, each toolchain's own blocks land", () => {
+    const run = runWriter("every-module", answersOf("all-modules"));
+    expect(occurrences(run, ".gitignore", "\n## Node (")).toBe(1);
+    expect(occurrences(run, ".gitignore", "\n## bun (")).toBe(1);
+    expect(occurrences(run, ".gitignore", "\n## Deno (")).toBe(1);
+    for (const module of TOOLCHAINS) {
+      expect({
+        module,
+        bullets: occurrences(run, "AGENTS.md", block(module, "AGENTS.md.block.toolchain")),
+      }).toEqual({ module, bullets: 1 });
+    }
+    for (const ecosystem of ["github-actions", "bun", "npm", "deno", "uv", "cargo"]) {
+      expect({
+        ecosystem,
+        entries: occurrences(run, ".github/dependabot.yml", `package-ecosystem: "${ecosystem}"`),
+      }).toEqual({ ecosystem, entries: 1 });
+    }
+    for (const path of ["checks.yml", "copilot-setup-steps.yml", "auto-format.yml"]) {
+      const text = readFileSync(join(run.target, ".github/workflows", path), "utf-8");
+      const at = STEPS.map((module) =>
+        text.indexOf(block(module, `.github/workflows/${path}.block.toolchain`)),
+      );
+      expect({ path, at }).toEqual({ path, at: [...at].sort((a, b) => a - b) });
+      expect({ path, found: at.every((index) => index > 0) }).toEqual({ path, found: true });
+    }
+  });
+
+  test("bun alone: its two gitignore sources, its ecosystem, and its steps, nothing of the others", () => {
+    const run = runWriter("bun-only", { ...answersOf("minimal"), modules: ["bun"] });
+    expect(run.summary.modules).toEqual(["bun"]);
+    expect(run.summary.hold).toBe(false);
+    expect(occurrences(run, ".gitignore", "\n## Node (")).toBe(1);
+    expect(occurrences(run, ".gitignore", "\n## bun (")).toBe(1);
+    expect(occurrences(run, ".gitignore", "\n## Deno (")).toBe(0);
+    expect(occurrences(run, ".gitignore", "\n## Python (")).toBe(0);
+    expect(occurrences(run, ".github/dependabot.yml", "package-ecosystem: ")).toBe(2);
+    expect(occurrences(run, ".github/dependabot.yml", 'package-ecosystem: "bun"')).toBe(1);
+    expect(occurrences(run, "AGENTS.md", block("bun", "AGENTS.md.block.toolchain"))).toBe(1);
+    expect(occurrences(run, "AGENTS.md", block("uv", "AGENTS.md.block.toolchain"))).toBe(0);
+    for (const path of ["checks.yml", "copilot-setup-steps.yml", "auto-format.yml"]) {
+      const counts = Object.fromEntries(
+        STEPS.map((module) => [
+          module,
+          occurrences(
+            run,
+            `.github/workflows/${path}`,
+            block(module, `.github/workflows/${path}.block.toolchain`),
+          ),
+        ]),
+      );
+      expect({ path, counts }).toEqual({ path, counts: { bun: 1, node: 0, deno: 0, uv: 0 } });
     }
   });
 });

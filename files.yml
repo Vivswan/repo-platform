@@ -1,6 +1,7 @@
 # The sync writer's data file (loader: .github/scripts/sync/writer/files_config.ts,
 # contract: docs/sync.md). Every source lives under files/; the writer copies
-# it, substitutes the placeholders below, and nothing else.
+# it, splices the selected modules' block files in at its {{blocks}} line,
+# substitutes the placeholders below, and nothing else.
 
 placeholders:
   - project_name
@@ -9,6 +10,10 @@ placeholders:
   - github_username
   - github_username_lower
   - copyright_holder
+  - skills_dir
+  - fuzzer_label
+  - nightly_label
+  - docs_site_label
 
 modules:
   bun:
@@ -19,6 +24,7 @@ modules:
     dependabot_label: {name: javascript, color: "168700"}
     gitignore_sources: [Node, bun]
     agents_toolchain: [toolchain]
+    toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
   node:
     description: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
@@ -28,6 +34,7 @@ modules:
     dependabot_label: {name: javascript, color: "168700"}
     gitignore_sources: [Node]
     agents_toolchain: [toolchain]
+    toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
@@ -37,6 +44,7 @@ modules:
     dependabot_label: {name: deno, color: "70ffaf"}
     gitignore_sources: [Deno, Node]
     agents_toolchain: [toolchain]
+    toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
@@ -45,6 +53,7 @@ modules:
     dependabot_label: {name: "python:uv", color: "2b67c6"}
     gitignore_sources: [Python]
     agents_toolchain: [toolchain]
+    toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
   rust:
     description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
@@ -67,6 +76,7 @@ modules:
     description: bug/feature issue forms (served by the account's .github repository; no files here)
   skills:
     description: agent skills hosting (plugin manifests, skill validation)
+    skills_dir: {default: skills}
   pr-title:
     description: Conventional Commit PR title check, its own required workflow
     settings_layers: [settings.yml]
@@ -85,29 +95,32 @@ files:
   - {path: .gitattributes, class: split, region: hash}
   - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
   - {path: .github/CODEOWNERS, class: split, region: hash}
-  - {path: .github/dependabot.yml, class: split, region: hash, blocks: dependabot_ecosystems}
+  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/actionlint.yaml, class: starter}
   - {path: .github/instructions/review.instructions.md, class: managed}
   - {path: .github/settings.yml, class: starter, when: {private: false}}
   - {path: .github/settings.yml, class: starter, when: {private: true}, source: files/base/.github/settings.private.yml}
   - {path: .github/workflows/ci.yml, class: managed}
-  - {path: .github/workflows/checks.yml, class: starter}
+  - {path: .github/workflows/checks.yml, class: starter, blocks: toolchain_steps}
   - {path: .github/workflows/post-green.yml, class: starter}
   - {path: .github/workflows/update-release.yml, class: starter}
   - {path: .github/workflows/update-release-pr.yml, class: starter}
-  - {path: .github/workflows/copilot-setup-steps.yml, class: starter}
+  - {path: .github/workflows/copilot-setup-steps.yml, class: starter, blocks: toolchain_steps}
   - {path: .gitleaks.toml, class: starter}
   - {path: .yamllint, class: managed}
   # auto-assign: the code-scanning alert job exists where CodeQL runs (public, with a toolchain).
   - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, any: [bun, node, deno, uv]}, source: files/base/.github/workflows/auto-assign.codeql.yml}
   - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: true}}
   - {path: .github/workflows/auto-assign.yml, class: managed, when: {private: false, without: [bun, node, deno, uv]}}
-  - {path: .github/workflows/auto-format.yml, class: starter, when: {any: [bun, node, deno, uv]}}
+  - {path: .github/workflows/auto-format.yml, class: starter, when: {any: [bun, node, deno, uv]}, blocks: toolchain_steps}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
   - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
   - {path: AGENTS.md, class: split, region: html, when: {without: [bun, node, deno, uv, rust]}}
   - {path: AGENTS.md, class: split, region: html, when: {any: [bun, node, deno, uv, rust]}, source: files/base/AGENTS.toolchain.md, blocks: agents_toolchain}
   - {path: LICENSE.md, class: split, region: html, when: {without: [custom-license]}}
+  - {path: CLAUDE.md, class: link, target: AGENTS.md}
+  - {path: .github/agents.md, class: link, target: ../AGENTS.md}
+  - {path: .github/copilot-instructions.md, class: link, target: ../AGENTS.md}
   # --- modules
   - {path: .bun-version, class: managed, when: {modules: [bun]}}
   - {path: .github/workflows/dependabot-bun-lockfile.yml, class: managed, when: {modules: [bun]}}

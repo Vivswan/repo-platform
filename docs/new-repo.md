@@ -41,7 +41,7 @@ Two files the render plants matter later:
 
 ### What the sync writes
 
-Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on. A path listed more than once has one variant per condition.
+Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on, `link` is a relative symlink placed and repaired on every sync. A path listed more than once has one variant per condition.
 
 <!-- BEGIN GENERATED: files-table (scripts/files_table.ts - edit files.yml, not this block) -->
 | File | Class | When |
@@ -50,7 +50,7 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.gitattributes` | split | always |
 | `.gitignore` | split | always |
 | `.github/CODEOWNERS` | split | always |
-| `.github/dependabot.yml` | split | always |
+| `.github/dependabot.yml` | managed | always |
 | `.github/actionlint.yaml` | starter | always |
 | `.github/instructions/review.instructions.md` | managed | always |
 | `.github/settings.yml` | starter | public |
@@ -72,6 +72,9 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `AGENTS.md` | split | without `bun`, `node`, `deno`, `uv`, `rust` |
 | `AGENTS.md` | split | any of `bun`, `node`, `deno`, `uv`, `rust` |
 | `LICENSE.md` | split | without `custom-license` |
+| `CLAUDE.md` | link | always |
+| `.github/agents.md` | link | always |
+| `.github/copilot-instructions.md` | link | always |
 | `.bun-version` | managed | modules: `bun` |
 | `.github/workflows/dependabot-bun-lockfile.yml` | managed | modules: `bun` |
 | `.node-version` | managed | modules: `node` |
