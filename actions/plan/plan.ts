@@ -1,9 +1,9 @@
 // The fleet's plan: resolves one managed repository's CI configuration at
 // run time from the repository's registration (.repo-platform.yml, with
 // the recorded copier answers as the fallback for values it does not
-// carry) and the template's module data shipped beside this action on the
-// build branch. Every managed ci.yml is byte-identical; what differs per
-// repository is computed here and handed to the jobs as step outputs.
+// carry) and files.yml, the module data shipped at the build branch root
+// beside this action. Every managed ci.yml is byte-identical; what differs
+// per repository is computed here and handed to the jobs as step outputs.
 //
 // Two modes. `default` resolves what fleet-ci.yml's jobs key on: the
 // selection in canonical order, the visibility, the skills directory, the
@@ -17,19 +17,19 @@
 // registration into a green run.
 //
 // Env: MODE (default|pages), PRIVATE ("true"/"false"; empty asks the API
-// for GITHUB_REPOSITORY with GH_TOKEN), MODULES_DIR and COPIER_FILE (the
-// build branch's modules/<name>.yml copies and its copier.yml, whose module
-// choices are the vocabulary and its order), RESERVED_LABELS_FILE (the
-// labels the template manages, which no tracking stream may reuse), and
-// GITHUB_OUTPUT. A non-empty CALLER_MOUNTS (pages mode) is the caller-
-// configured deploy: the CALLER_* values are published unchanged after the
-// setup grammar check, the registration unread. Runs in the caller's checkout.
+// for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
+// files.yml, whose `modules` keys are the vocabulary in canonical order
+// and whose values carry every default the registration may leave unset),
+// RESERVED_LABELS_FILE (the labels the template manages, which no tracking
+// stream may reuse), GITHUB_OUTPUT. In pages mode a non-empty CALLER_MOUNTS
+// means the caller configured the deploy itself: the CALLER_* values are
+// published unchanged after the setup grammar check and the registration
+// is not read. Runs in the caller's checkout.
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { z } from "zod";
 import {
   capture,
   env,
@@ -38,12 +38,12 @@ import {
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
+import { FilesConfigError, type ModuleData, parseFilesConfig } from "./files_config.ts";
 import {
   LABEL_RE,
   parseRegistration,
   REGISTRATION_PATH,
   type Registration,
-  readModuleOrder,
 } from "./registration.ts";
 
 export const ANSWERS_PATH = ".github/.copier-answers.yml";
@@ -62,84 +62,78 @@ export class PlanError extends Error {
   }
 }
 
-// The manifest slice the plan reads; the rest of a manifest is the
-// composer's business, so unknown keys pass here.
-const moduleDataSchema = z.looseObject({
-  toolchain: z.looseObject({ codeql_language: z.string().min(1) }).optional(),
-  tracking_label: z
-    .looseObject({ answer: z.string().regex(/^[a-z][a-z0-9_]*$/), default: z.string().min(1) })
-    .optional(),
-  pages: z.looseObject({ install: z.string(), build: z.string().min(1) }).optional(),
-});
+/** One module of files.yml, named. */
+export type Module = ModuleData & { name: string };
 
-export interface TrackingStream {
-  /** The copier answer recording the label. */
-  answer: string;
-  /** The registration's `labels` key: the answer without its `_label` suffix. */
-  key: string;
-  default: string;
+/** The values a registration may leave unset, each declared once in
+ *  files.yml by the module that owns the setting. */
+export interface PlanDefaults {
+  /** modules.skills.skills_dir.default */
+  skillsDir: string;
+  /** modules.pages.dist: the build output directory a pages deploy publishes. */
+  pagesDist: string;
+  /** modules.docs-site.path: the URL segment the docs mount under beside a website. */
+  docsPath: string;
 }
 
-export interface ModuleData {
-  name: string;
-  codeqlLanguage?: string;
-  trackingLabel?: TrackingStream;
-  pages?: { install: string; build: string };
+export interface TemplateData {
+  /** Every module in files.yml order, which is the canonical module order. */
+  modules: Module[];
+  defaults: PlanDefaults;
 }
 
-/** Every module's data in canonical order: the vocabulary and order come
- *  from copier.yml's module choices, the data from modules/<name>.yml. A
- *  choice without a data file or a data file without a choice is an error:
- *  the two ship together and disagreeing means a broken build tree. */
-export function loadModuleData(modulesDir: string, copierText: string): ModuleData[] {
-  const order = readModuleOrder(parseYaml(copierText, { logLevel: "error" }));
-  if (order.choices === null) throw new PlanError(order.errors);
-  const files = new Set(readdirSync(modulesDir).filter((name) => name.endsWith(".yml")));
-  const modules: ModuleData[] = [];
-  for (const name of order.choices) {
-    const file = `${name}.yml`;
-    if (!files.delete(file)) {
-      throw new PlanError([`${modulesDir}/${file}: missing - copier.yml offers the module`]);
-    }
-    const parsed = moduleDataSchema.safeParse(
-      parseYaml(readFileSync(join(modulesDir, file), "utf-8"), { logLevel: "error" }) ?? {},
-    );
-    if (!parsed.success) {
-      throw new PlanError(
-        parsed.error.issues.map(
-          (issue) => `${modulesDir}/${file}: ${issue.path.join(".")}: ${issue.message}`,
-        ),
-      );
-    }
-    const data = parsed.data;
-    modules.push({
-      name,
-      ...(data.toolchain ? { codeqlLanguage: data.toolchain.codeql_language } : {}),
-      ...(data.tracking_label
-        ? {
-            trackingLabel: {
-              answer: data.tracking_label.answer,
-              key: data.tracking_label.answer.replace(/_label$/, ""),
-              default: data.tracking_label.default,
-            },
-          }
-        : {}),
-      ...(data.pages ? { pages: data.pages } : {}),
-    });
+/** A default the plan cannot do without: the module and key must be there,
+ *  or the build tree is broken and no repository plans. */
+function requiredDefault(
+  label: string,
+  modules: Record<string, ModuleData>,
+  module: string,
+  key: string,
+  pick: (data: ModuleData) => string | undefined,
+): string {
+  const data = modules[module];
+  const value = data === undefined ? undefined : pick(data);
+  if (value === undefined) {
+    throw new PlanError([
+      `${label}: modules.${module}.${key}: missing - the plan reads it as the default`,
+    ]);
   }
-  if (files.size > 0) {
-    throw new PlanError(
-      [...files].sort().map((file) => `${modulesDir}/${file}: not a module copier.yml offers`),
-    );
+  return value;
+}
+
+/** files.yml's module data as the plan reads it: an unreadable or invalid
+ *  file, or one missing a default the plan resolves from, is an error
+ *  naming the file. */
+export function loadModuleData(text: string, label = "files.yml"): TemplateData {
+  let modules: Record<string, ModuleData>;
+  try {
+    modules = parseFilesConfig(text, label).modules;
+  } catch (error) {
+    if (!(error instanceof FilesConfigError)) throw error;
+    throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
-  return modules;
+  return {
+    modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })),
+    defaults: {
+      skillsDir: requiredDefault(
+        label,
+        modules,
+        "skills",
+        "skills_dir.default",
+        (d) => d.skills_dir?.default,
+      ),
+      pagesDist: requiredDefault(label, modules, "pages", "dist", (d) => d.dist),
+      docsPath: requiredDefault(label, modules, "docs-site", "path", (d) => d.path),
+    },
+  };
 }
 
 export interface PlanInput {
   registration: Registration;
   /** The recorded copier answers; empty when the file is absent. */
   answers: Record<string, unknown>;
-  modules: ModuleData[];
+  modules: Module[];
+  defaults: PlanDefaults;
   /** Lowercased names of the labels the template manages (the settings
    *  layers' labels): a tracking stream reusing one would let a green night
    *  close unrelated issues and every settings apply fight over it. */
@@ -157,7 +151,7 @@ export function readReservedLabels(path: string): Set<string> {
 }
 
 /** The selected modules' data in canonical order; an unknown name fails. */
-export function selectModules(input: PlanInput): ModuleData[] {
+export function selectModules(input: PlanInput): Module[] {
   const known = new Map(input.modules.map((module) => [module.name, module]));
   const unknown = input.registration.modules.filter((name) => !known.has(name));
   if (unknown.length > 0) {
@@ -210,9 +204,17 @@ function resolved(
  *  registration's `labels.<key>`, else the recorded answer, else the
  *  module's default. A `labels` key naming no selected stream fails: it
  *  would silently label nothing. */
-export function trackingLabels(input: PlanInput, selected: ModuleData[]): string[] {
+export function trackingLabels(input: PlanInput, selected: Module[]): string[] {
   const streams = selected.flatMap((module) =>
-    module.trackingLabel ? [module.trackingLabel] : [],
+    module.tracking_label
+      ? [
+          {
+            key: module.tracking_label.key,
+            default: module.tracking_label.default,
+            answer: `${module.tracking_label.key}_label`,
+          },
+        ]
+      : [],
   );
   const declared = input.registration.labels ?? {};
   const keys = new Set(streams.map((stream) => stream.key));
@@ -283,9 +285,9 @@ export const SECURITY_LABEL = "security-nightly";
 /** CodeQL is off for a private repository (personal-account code scanning
  *  is public-only) and where no selected module analyzes as a language;
  *  otherwise the distinct languages in canonical order. */
-export function codeqlLanguages(selected: ModuleData[], isPrivate: boolean): string[] {
+export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[] {
   if (isPrivate) return [];
-  return [...new Set(selected.flatMap((m) => (m.codeqlLanguage ? [m.codeqlLanguage] : [])))];
+  return [...new Set(selected.flatMap((m) => (m.codeql_language ? [m.codeql_language] : [])))];
 }
 
 export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
@@ -294,8 +296,13 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
     modules: selected.map((module) => module.name),
     private: input.private,
     skillsDir:
-      resolved(input, "skills.dir", input.registration.skills?.dir, "skills_dir", "skills") ??
-      "skills",
+      resolved(
+        input,
+        "skills.dir",
+        input.registration.skills?.dir,
+        "skills_dir",
+        input.defaults.skillsDir,
+      ) ?? input.defaults.skillsDir,
     codeqlLanguages: codeqlLanguages(selected, input.private),
     trackingLabels: [...trackingLabels(input, selected), SECURITY_LABEL],
     weekly: weekly(now),
@@ -342,11 +349,11 @@ export function setupProblem(setup: string, tokens: readonly string[]): string |
   return null;
 }
 
-/** The pages defaults copier.yml derives: every selected toolchain module
+/** The pages defaults files.yml carries: every selected toolchain module
  *  (one carrying pages data) joined by commas or `none`, and the commands
  *  of the first module in canonical order whose token `setup` names - among
  *  ALL modules, since setup may name a toolchain the selection does not. */
-export function defaultSetup(selected: ModuleData[]): string {
+export function defaultSetup(selected: Module[]): string {
   return (
     selected
       .filter((m) => m.pages !== undefined)
@@ -356,7 +363,7 @@ export function defaultSetup(selected: ModuleData[]): string {
 }
 
 export function defaultCommands(
-  modules: ModuleData[],
+  modules: Module[],
   setup: string,
 ): { install: string; build: string } {
   const tokens = new Set(setup.split(","));
@@ -381,8 +388,8 @@ export function planPages(input: PlanInput): PagesPlan {
       "docs_site.path",
       input.registration.docs_site?.path,
       "docs_site_path",
-      "docs",
-    ) ?? "docs";
+      input.defaults.docsPath,
+    ) ?? input.defaults.docsPath;
   const include = input.registration.docs_site?.include;
   const docsMount = (path: string): Mount => ({
     path,
@@ -398,7 +405,7 @@ export function planPages(input: PlanInput): PagesPlan {
   let setup = SETUP_NONE;
   let installCommand = "";
   let buildCommand = "";
-  let distDir = "dist";
+  let distDir = input.defaults.pagesDist;
   if (pages) {
     const declared = input.registration.pages ?? {};
     setup =
@@ -423,7 +430,9 @@ export function planPages(input: PlanInput): PagesPlan {
         `${REGISTRATION_PATH}: the pages module needs a build command (pages.build, or the recorded pages_build_command)`,
       ]);
     }
-    distDir = resolved(input, "pages.dist", declared.dist, "pages_dist_dir", "dist") ?? "dist";
+    distDir =
+      resolved(input, "pages.dist", declared.dist, "pages_dist_dir", input.defaults.pagesDist) ??
+      input.defaults.pagesDist;
   }
   let siteTitle = "";
   let linkRotLabel = "";
@@ -432,7 +441,7 @@ export function planPages(input: PlanInput): PagesPlan {
     siteTitle =
       resolved(input, "project.name", input.registration.project?.name, "project_name", "") ?? "";
     const labels = trackingLabels(input, selected);
-    const streams = selected.flatMap((m) => (m.trackingLabel ? [m.name] : []));
+    const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
     linkRotLabel = labels[streams.indexOf("docs-site")];
   }
   return {
@@ -460,7 +469,7 @@ export interface CallerPages {
   linkRotLabel: string;
 }
 
-export function callerConfiguredPages(caller: CallerPages, modules: ModuleData[]): CallerPages {
+export function callerConfiguredPages(caller: CallerPages, modules: Module[]): CallerPages {
   const tokens = modules.filter((m) => m.pages !== undefined).map((m) => m.name);
   const problem = setupProblem(caller.setup, tokens);
   if (problem !== null) throw new PlanError([`setup input: ${problem}`]);
@@ -502,6 +511,16 @@ export function readAnswers(root: string): Record<string, unknown> {
   return data as Record<string, unknown>;
 }
 
+/** files.yml's text, or an error naming the path. */
+export function readFilesConfig(path: string): string {
+  try {
+    return readFileSync(path, "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PlanError([`${path}: cannot read the file (${detail})`]);
+  }
+}
+
 export function readRegistration(root: string): Registration {
   const path = join(root, REGISTRATION_PATH);
   if (!existsSync(path)) {
@@ -539,10 +558,8 @@ function main(): number {
   if (!MODES.includes(mode as Mode)) {
     throw new PlanError([`MODE must be one of ${MODES.join(", ")}; got '${mode}'`]);
   }
-  const modules = loadModuleData(
-    requireEnv("MODULES_DIR"),
-    readFileSync(requireEnv("COPIER_FILE"), "utf-8"),
-  );
+  const filesConfig = requireEnv("FILES_CONFIG");
+  const template = loadModuleData(readFilesConfig(filesConfig), filesConfig);
   const callerMounts = env("CALLER_MOUNTS");
   if (mode === "pages" && callerMounts !== "") {
     const text = outputLines(
@@ -558,7 +575,7 @@ function main(): number {
             docsDir: env("CALLER_DOCS_DIR"),
             linkRotLabel: env("CALLER_LINK_ROT_LABEL"),
           },
-          modules,
+          template.modules,
         ),
       ),
     );
@@ -570,7 +587,7 @@ function main(): number {
   const input: PlanInput = {
     registration: readRegistration(root),
     answers: readAnswers(root),
-    modules,
+    ...template,
     reservedLabels: readReservedLabels(requireEnv("RESERVED_LABELS_FILE")),
     private:
       mode === "pages" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),

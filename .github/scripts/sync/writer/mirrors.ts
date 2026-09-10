@@ -6,9 +6,9 @@
 
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathProblem } from "../../../../actions/plan/files_config.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { lstatOrNull, statOrNull } from "../../shared/fs_probe.ts";
-import { pathProblem } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
 

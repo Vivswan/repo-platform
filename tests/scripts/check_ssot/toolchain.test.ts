@@ -12,9 +12,10 @@ import {
   bunDirsMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
-  copierDistDefault,
+  COPIER_BACKED_DEFAULTS,
+  copierDefault,
   FETCHED_TREE_PIN_ANCHOR,
-  filesDistMismatches,
+  filesDefaultMismatches,
   filesModuleDataMismatches,
   lockedTypesBunVersion,
   majorMinor,
@@ -707,25 +708,78 @@ describe("filesModuleDataMismatches", () => {
   });
 });
 
-describe("filesDistMismatches", () => {
-  test("a dist equal to copier.yml's default passes", () => {
-    expect(filesDistMismatches("dist", { pages: { dist: "dist" } })).toEqual([]);
+describe("filesDefaultMismatches", () => {
+  const modules = {
+    pages: { dist: "dist" },
+    "docs-site": { path: "docs" },
+    skills: { skills_dir: { default: "skills" } },
+  };
+  const backed = (module: string) => {
+    const found = COPIER_BACKED_DEFAULTS.find((entry) => entry.module === module);
+    if (found === undefined) throw new Error(`no copier-backed default for ${module}`);
+    return found;
+  };
+
+  test("the three defaults the plan reads, each equal to its copier question's default, pass", () => {
+    const defaults = { pages: "dist", "docs-site": "docs", skills: "skills" };
+    for (const [module, value] of Object.entries(defaults)) {
+      expect(filesDefaultMismatches(backed(module), value, modules)).toEqual([]);
+    }
   });
 
-  test("a missing dist and a dist that differs from the default are named", () => {
-    const expected = '"dist" (copier.yml\'s pages_dist_dir default)';
-    expect(filesDistMismatches("dist", { pages: { description: "no dist" } })).toEqual([
-      { file: "files.yml modules.pages.dist", expected, got: "no dist" },
-    ]);
-    expect(filesDistMismatches("dist", { pages: { dist: "site" } })).toEqual([
-      { file: "files.yml modules.pages.dist", expected, got: '"site"' },
-    ]);
+  test.each([
+    [
+      "a dist that differs",
+      "pages",
+      { pages: { dist: "site" } },
+      {
+        file: "files.yml modules.pages.dist",
+        expected: '"dist" (copier.yml\'s pages_dist_dir default)',
+        got: '"site"',
+      },
+    ],
+    [
+      "a module without the key",
+      "pages",
+      { pages: { description: "no dist" } },
+      {
+        file: "files.yml modules.pages.dist",
+        expected: '"dist" (copier.yml\'s pages_dist_dir default)',
+        got: "no dist",
+      },
+    ],
+    [
+      "a nested default that is absent",
+      "skills",
+      { skills: {} },
+      {
+        file: "files.yml modules.skills.skills_dir.default",
+        expected: '"skills" (copier.yml\'s skills_dir default)',
+        got: "no skills_dir.default",
+      },
+    ],
+    [
+      "a module files.yml lacks",
+      "docs-site",
+      {},
+      {
+        file: "files.yml modules.docs-site.path",
+        expected: '"docs" (copier.yml\'s docs_site_path default)',
+        got: "no path",
+      },
+    ],
+  ])("%s is named", (_case, module, files, mismatch) => {
+    const expected = { pages: "dist", "docs-site": "docs", skills: "skills" }[module] ?? "";
+    expect(filesDefaultMismatches(backed(module), expected, files)).toEqual([mismatch]);
   });
 });
 
-describe("copierDistDefault", () => {
-  test("reads the pages_dist_dir question's string default", () => {
-    expect(copierDistDefault({ pages_dist_dir: { type: "str", default: "dist" } })).toBe("dist");
+describe("copierDefault", () => {
+  test("reads the named question's string default", () => {
+    expect(
+      copierDefault("pages_dist_dir", { pages_dist_dir: { type: "str", default: "dist" } }),
+    ).toBe("dist");
+    expect(copierDefault("skills_dir", { skills_dir: { default: "skills" } })).toBe("skills");
   });
 
   test.each([
@@ -734,7 +788,7 @@ describe("copierDistDefault", () => {
     ["an empty default", { pages_dist_dir: { default: "" } }],
     ["a non-string default", { pages_dist_dir: { default: 1 } }],
   ])("%s is refused", (_case, copier) => {
-    expect(() => copierDistDefault(copier)).toThrow(/pages_dist_dir/);
+    expect(() => copierDefault("pages_dist_dir", copier)).toThrow(/pages_dist_dir/);
   });
 });
 

@@ -25,7 +25,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { parseFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
+import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 import { gateExpression } from "../compose/exclude.ts";
 import { loadManifests, type ModuleManifest } from "../lib/module_manifests.ts";

@@ -1,7 +1,7 @@
-// files.yml loading: the shape, the cross-checks (paths, unknown modules,
-// same-path exclusivity, retired vs written), source verification against
-// a tree, block resolution, and the retirement check against a previous
-// data file.
+// The writer's side of files.yml: the placeholder defaults the module data
+// declares, source verification against a tree, block resolution, and the
+// retirement check against a previous data file. The grammar's own tests
+// sit beside the shared loader (tests/actions/plan/files_config.test.ts).
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -9,15 +9,11 @@ import { dirname, join } from "node:path";
 import {
   blockSources,
   checkRetirements,
-  type FileEntry,
-  FilesConfigError,
-  linkTargetProblem,
   loadFilesConfig,
-  mutuallyExclusive,
-  parseFilesConfig,
-  pathProblem,
+  placeholderDefaults,
   verifySources,
 } from "../../../.github/scripts/sync/writer/files_config.ts";
+import { FilesConfigError, parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -47,11 +43,9 @@ retired:
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
-const sourceOf = (entry: FileEntry) => (entry.class === "link" ? null : entry.source);
-
-function problemsOf(text: string): string[] {
+function defaultProblemsOf(text: string): string[] {
   try {
-    parseFilesConfig(text);
+    placeholderDefaults(parseFilesConfig(text));
   } catch (error) {
     if (error instanceof FilesConfigError) return error.problems;
     throw error;
@@ -66,133 +60,8 @@ function writeTree(root: string, files: Record<string, string>): void {
   }
 }
 
-describe("parseFilesConfig", () => {
-  test("resolves default sources under files/<module or base>/ and keeps the region", () => {
-    const config = parseFilesConfig(BASE);
-    expect(config.files.map(sourceOf)).toEqual([
-      "base/.github/workflows/ci.yml",
-      "base/.gitignore",
-      "docs-site/docs-site.standalone.yml",
-      "docs-site/docs-site.with-pages.yml",
-      "fuzzer/.github/workflows/nightly-fuzz.yml",
-      null,
-    ]);
-    expect(config.files[5]).toEqual({
-      path: "CLAUDE.md",
-      class: "link",
-      target: "AGENTS.md",
-      when: null,
-    });
-    expect(config.defaults).toEqual({});
-    expect(config.files[1]).toMatchObject({
-      class: "split",
-      region: "hash",
-      blocks: "gitignore_sources",
-    });
-    expect(config.retired).toEqual([
-      { path: ".github/.copier-answers.yml" },
-      { path: "SECURITY.md", moved_to: ".github/SECURITY.md" },
-    ]);
-  });
-
-  test("two entries for one path must be mutually exclusive by when", () => {
-    const text = BASE.replace("without: [pages] ", "");
-    expect(problemsOf(text)).toEqual([
-      expect.stringContaining(
-        ".github/workflows/docs-site.yml is listed twice with conditions that can both hold",
-      ),
-    ]);
-  });
-
-  test.each([
-    [
-      "an unknown key",
-      "files:\n  - { path: a, class: managed, extra: 1 }\nplaceholders: []",
-      "extra",
-    ],
-    ["an unknown class", "files:\n  - { path: a, class: owned }\nplaceholders: []", "class"],
-    [
-      "a split without a region",
-      "files:\n  - { path: a, class: split }\nplaceholders: []",
-      "needs a region",
-    ],
-    [
-      "a region on a managed entry",
-      "files:\n  - { path: a, class: managed, region: hash }\nplaceholders: []",
-      "region applies to split entries only",
-    ],
-    [
-      "a link without a target",
-      "files:\n  - { path: a, class: link }\nplaceholders: []",
-      "a link entry needs a target",
-    ],
-    [
-      "a link with a source or blocks",
-      "files:\n  - { path: a, class: link, target: b, source: files/base/a }\nplaceholders: []",
-      "a link entry has a target, not a source or blocks",
-    ],
-    [
-      "a target on a managed entry",
-      "files:\n  - { path: a, class: managed, target: b }\nplaceholders: []",
-      "target applies to link entries only",
-    ],
-    [
-      "a link target leaving the repository",
-      "files:\n  - { path: .github/a, class: link, target: ../../x }\nplaceholders: []",
-      "target resolves to '../x', which carries an empty, '.', or '..' segment",
-    ],
-    [
-      "a defaulted placeholder no module backs",
-      "files: []\nplaceholders: [fuzzer_label]",
-      "no module declares the default for {{fuzzer_label}}",
-    ],
-    [
-      "a default declared twice",
-      "files: []\nplaceholders: []\nmodules:\n  a: { tracking_label: { key: fuzzer, default: x } }\n  b: { tracking_label: { key: fuzzer, default: y } }",
-      "modules.b.tracking_label: names the {{fuzzer_label}} default a second time (modules.a already does)",
-    ],
-    [
-      "a tracking label without a default",
-      "files: []\nplaceholders: []\nmodules:\n  a: { tracking_label: { key: fuzzer } }",
-      "modules.a.tracking_label: must carry a label key and a default",
-    ],
-    [
-      "a placeholder the writer cannot derive",
-      "files: []\nplaceholders: [owner]",
-      "not one the writer derives",
-    ],
-    [
-      "a when naming an unknown module",
-      "files:\n  - { path: a, class: managed, when: { modules: [nope] } }\nplaceholders: []",
-      "unknown module 'nope'",
-    ],
-    [
-      "a path escaping the repository",
-      "files:\n  - { path: ../a, class: managed }\nplaceholders: []",
-      "'..' segment",
-    ],
-    [
-      "a source outside files/",
-      "files:\n  - { path: a, class: managed, source: other/a }\nplaceholders: []",
-      "under files/",
-    ],
-    [
-      "a module name that is not one path segment",
-      "files: []\nmodules:\n  ../bun: {}\nplaceholders: []",
-      "modules.../bun: Invalid key in record",
-    ],
-    [
-      "a path both written and retired",
-      "files:\n  - { path: a, class: managed }\nretired:\n  - { path: a }\nplaceholders: []",
-      "written or retired, not both",
-    ],
-  ])("refuses %s", (_reason, text, fragment) => {
-    expect(problemsOf(text).join("\n")).toContain(fragment);
-  });
-});
-
-describe("placeholder defaults", () => {
-  test("come from tracking_label (as <key>_label) and skills_dir; other keys ride along", () => {
+describe("placeholderDefaults", () => {
+  test("come from tracking_label (as <key>_label) and skills_dir; a stream no placeholder names rides along", () => {
     const config = parseFilesConfig(
       [
         "placeholders: [skills_dir, fuzzer_label, docs_site_label]",
@@ -204,56 +73,32 @@ describe("placeholder defaults", () => {
         "files: []",
       ].join("\n"),
     );
-    expect(config.defaults).toEqual({
+    expect(placeholderDefaults(config)).toEqual({
       skills_dir: "skills",
       fuzzer_label: "fuzz-nightly",
       docs_site_label: "docs-link-rot",
     });
+    expect(placeholderDefaults(parseFilesConfig(BASE))).toEqual({});
   });
-});
 
-describe("linkTargetProblem", () => {
   test.each([
-    ["CLAUDE.md", "AGENTS.md", null],
-    [".github/agents.md", "../AGENTS.md", null],
-    ["CLAUDE.md", "/etc/passwd", "target is absolute"],
-    ["CLAUDE.md", "a//b", "target carries an empty segment"],
     [
-      "CLAUDE.md",
-      "../x",
-      "target resolves to '../x', which carries an empty, '.', or '..' segment",
+      "a defaulted placeholder no module backs",
+      "files: []\nplaceholders: [fuzzer_label]",
+      "placeholders: no module declares the default for {{fuzzer_label}}",
     ],
-    ["CLAUDE.md", "CLAUDE.md", "target is the link itself"],
-    ["docs/a", "../docs/a", "target is the link itself"],
-  ])("%s -> %s: %p", (path, target, problem) => {
-    expect(linkTargetProblem(path, target)).toBe(problem);
-  });
-});
-
-describe("mutuallyExclusive", () => {
-  test.each([
-    [{ modules: ["a"] }, { without: ["a"] }, true],
-    [{ any: ["a", "b"] }, { without: ["a", "b"] }, true],
-    [{ any: ["a", "b"] }, { without: ["a"] }, false],
-    [{ private: true }, { private: false }, true],
-    [{ modules: ["a"] }, { modules: ["b"] }, false],
-    [null, { modules: ["a"] }, false],
-  ])("%j vs %j -> %p", (a, b, expected) => {
-    expect(mutuallyExclusive(a, b)).toBe(expected);
-    expect(mutuallyExclusive(b, a)).toBe(expected);
-  });
-});
-
-describe("pathProblem", () => {
-  test.each([
-    ["a/b.txt", null],
-    ["/abs", "is absolute"],
-    ["a/../b", "carries an empty, '.', or '..' segment"],
-    ["a//b", "carries an empty, '.', or '..' segment"],
-    [".git/config", "carries a .git segment"],
-    ["a\\b", "contains a backslash"],
-  ])("%s -> %p", (path, problem) => {
-    expect(pathProblem(path)).toBe(problem);
+    [
+      "a default declared twice",
+      "files: []\nplaceholders: []\nmodules:\n  a: { tracking_label: { key: fuzzer, default: x } }\n  b: { tracking_label: { key: fuzzer, default: y } }",
+      "modules.b.tracking_label: names the {{fuzzer_label}} default a second time (modules.a already does)",
+    ],
+    [
+      "a placeholder the writer cannot derive",
+      "files: []\nplaceholders: [owner]",
+      "placeholders: 'owner' is not one the writer derives",
+    ],
+  ])("refuses %s", (_reason, text, problem) => {
+    expect(defaultProblemsOf(text)).toEqual([problem]);
   });
 });
 
@@ -397,15 +242,23 @@ describe("blockSources and verifySources", () => {
     expect(() => verifySources(config, tree)).toThrow("mentions the hash region markers");
   });
 
-  test("loadFilesConfig runs every check, retirements included", () => {
+  test("loadFilesConfig runs every check: defaults, sources, and retirements", () => {
     const root = temp.dir("writer-files-load-");
     writeTree(root, {
-      "files.yml": "placeholders: [year]\nfiles:\n  - { path: a.txt, class: managed }\n",
+      "files.yml":
+        "placeholders: [year, skills_dir]\nmodules:\n  skills: { skills_dir: { default: skills } }\nfiles:\n  - { path: a.txt, class: managed }\n",
+      "unbacked.yml":
+        "placeholders: [year, fuzzer_label]\nfiles:\n  - { path: a.txt, class: managed }\n",
       "previous.yml":
         "placeholders: []\nfiles:\n  - { path: a.txt, class: managed }\n  - { path: b.txt, class: managed }\n",
       "files/base/a.txt": "{{year}}\n",
     });
-    expect(loadFilesConfig(join(root, "files.yml"), join(root, "files")).files).toHaveLength(1);
+    const loaded = loadFilesConfig(join(root, "files.yml"), join(root, "files"));
+    expect(loaded.files).toHaveLength(1);
+    expect(loaded.defaults).toEqual({ skills_dir: "skills" });
+    expect(() => loadFilesConfig(join(root, "unbacked.yml"), join(root, "files"))).toThrow(
+      "no module declares the default for {{fuzzer_label}}",
+    );
     expect(() =>
       loadFilesConfig(join(root, "files.yml"), join(root, "files"), join(root, "previous.yml")),
     ).toThrow("b.txt was in the previous files.yml but is neither written nor retired now");

@@ -1,10 +1,10 @@
 // The plan action's resolution, judged on the REAL module data (the
-// checkout's manifests and copier.yml, staged as the build branch ships
-// them) plus synthetic rows for the fail-closed edges, and the script
-// itself run as a child the way the action runs it.
+// checkout's files.yml, which the build branch ships verbatim) plus
+// synthetic rows for the fail-closed edges, and the script itself run as a
+// child the way the action runs it.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   callerConfiguredPages,
@@ -12,7 +12,7 @@ import {
   defaultCommands,
   defaultSetup,
   loadModuleData,
-  type ModuleData,
+  type Module,
   outputLines,
   outputsOf,
   PlanError,
@@ -34,24 +34,21 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const REPO_ROOT = join(import.meta.dir, "../../..");
-const COPIER = readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8");
+const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 
-/** The module data as the build branch ships it: every module's manifest
- *  copied to modules/<name>.yml. */
-function stagedModulesDir(): string {
-  const dir = temp.dir("plan-modules-");
-  const templates = join(REPO_ROOT, "templates");
-  for (const name of readdirSync(templates, { withFileTypes: true })) {
-    if (!name.isDirectory() || name.name === "base") continue;
-    writeFileSync(
-      join(dir, `${name.name}.yml`),
-      readFileSync(join(templates, name.name, "module.yml")),
-    );
-  }
-  return dir;
-}
+const TEMPLATE = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"));
+const MODULES = TEMPLATE.modules;
 
-const MODULES = loadModuleData(stagedModulesDir(), COPIER);
+/** files.yml reduced to the modules block the plan cannot load without. */
+const MINIMAL_FILES = [
+  "placeholders: []",
+  "files: []",
+  "modules:",
+  "  skills: { skills_dir: { default: skills } }",
+  "  pages: { dist: dist }",
+  "  docs-site: { path: docs }",
+  "",
+].join("\n");
 
 /** The reserved label roster as the build branch ships it. */
 function stagedReservedLabels(): string {
@@ -76,19 +73,20 @@ function input(
   text: string,
   answers: Record<string, unknown> = {},
   isPrivate = false,
-  modules: ModuleData[] = MODULES,
+  modules: Module[] = MODULES,
 ): PlanInput {
   return {
     registration: registration(text),
     answers,
     modules,
+    defaults: TEMPLATE.defaults,
     reservedLabels: RESERVED,
     private: isPrivate,
   };
 }
 
 describe("loadModuleData", () => {
-  test("the real manifests in copier.yml's order, with the slices the plan reads", () => {
+  test("the real files.yml in its key order, with the data and defaults the plan reads", () => {
     expect(MODULES.map((m) => m.name)).toEqual([
       "bun",
       "node",
@@ -106,28 +104,67 @@ describe("loadModuleData", () => {
       "custom-license",
     ]);
     const byName = new Map(MODULES.map((m) => [m.name, m]));
-    expect(byName.get("bun")?.codeqlLanguage).toBe("javascript-typescript");
-    expect(byName.get("uv")?.codeqlLanguage).toBe("python");
-    expect(byName.get("rust")?.codeqlLanguage).toBeUndefined();
+    expect(byName.get("bun")?.codeql_language).toBe("javascript-typescript");
+    expect(byName.get("uv")?.codeql_language).toBe("python");
+    expect(byName.get("rust")?.codeql_language).toBeUndefined();
     expect(byName.get("rust")?.pages).toEqual({
       install: "cargo +stable install mdbook --locked",
       build: "mdbook build -d dist",
     });
-    expect(byName.get("fuzzer")?.trackingLabel).toEqual({
-      answer: "fuzzer_label",
+    expect(byName.get("fuzzer")?.tracking_label).toMatchObject({
       key: "fuzzer",
       default: "fuzz-nightly",
     });
-    expect(byName.get("docs-site")?.trackingLabel?.key).toBe("docs_site");
+    expect(byName.get("docs-site")?.tracking_label?.key).toBe("docs_site");
+    expect(TEMPLATE.defaults).toEqual({ skillsDir: "skills", pagesDist: "dist", docsPath: "docs" });
   });
 
-  test("a choice without a data file, or a data file without a choice, fails", () => {
-    const dir = stagedModulesDir();
-    writeFileSync(join(dir, "extra.yml"), "description: x\n");
-    expect(() => loadModuleData(dir, COPIER)).toThrow("extra.yml: not a module copier.yml offers");
-    const missing = stagedModulesDir();
-    rmSync(join(missing, "uv.yml"));
-    expect(() => loadModuleData(missing, COPIER)).toThrow("uv.yml: missing");
+  test("the minimal modules block loads; a default the plan reads going missing fails, naming the file and key", () => {
+    expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(TEMPLATE.defaults);
+    const cases: [drop: string, replacement: string, error: string][] = [
+      ["  pages: { dist: dist }\n", "", "modules.pages.dist: missing"],
+      ["  docs-site: { path: docs }\n", "", "modules.docs-site.path: missing"],
+      ["{ skills_dir: { default: skills } }", "{}", "modules.skills.skills_dir.default: missing"],
+    ];
+    for (const [drop, replacement, error] of cases) {
+      expect(MINIMAL_FILES).toContain(drop);
+      const text = MINIMAL_FILES.replace(drop, replacement);
+      expect(() => loadModuleData(text, "/build/files.yml")).toThrow(PlanError);
+      expect(() => loadModuleData(text, "/build/files.yml")).toThrow(`/build/files.yml: ${error}`);
+    }
+  });
+
+  test.each<[reason: string, text: string, error: string]>([
+    ["a YAML parse error", "a: [\n", "files.yml: YAML parse error"],
+    [
+      "a modules block that is a list",
+      "placeholders: []\nfiles: []\nmodules: [bun]\n",
+      "files.yml: modules: ",
+    ],
+    [
+      "a tracking label without a default",
+      MINIMAL_FILES.replace(
+        "modules:\n",
+        "modules:\n  fuzzer: { tracking_label: { key: fuzzer } }\n",
+      ),
+      "files.yml: modules.fuzzer.tracking_label.default: ",
+    ],
+    [
+      "a pages block without a build command",
+      MINIMAL_FILES.replace("modules:\n", "modules:\n  bun: { pages: { install: bun install } }\n"),
+      "files.yml: modules.bun.pages.build: ",
+    ],
+    [
+      "a file entry naming a module the block lacks",
+      MINIMAL_FILES.replace(
+        "files: []",
+        "files: [{ path: a, class: managed, when: { modules: [nope] } }]",
+      ),
+      "files.yml: files: a: when names unknown module 'nope'",
+    ],
+  ])("an invalid files.yml fails closed on %s", (_reason, text, error) => {
+    expect(() => loadModuleData(text)).toThrow(PlanError);
+    expect(() => loadModuleData(text)).toThrow(error);
   });
 });
 
@@ -569,7 +606,8 @@ describe("resolvePrivate", () => {
 });
 
 // The script as the action runs it: a caller checkout with the two files,
-// the staged module data, and GITHUB_OUTPUT collecting the rows.
+// the checkout's files.yml as the build branch ships it, and GITHUB_OUTPUT
+// collecting the rows.
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
@@ -587,8 +625,7 @@ describe("plan.ts as a child", () => {
       env: {
         PATH: process.env.PATH ?? "",
         HOME: process.env.HOME ?? "",
-        MODULES_DIR: stagedModulesDir(),
-        COPIER_FILE: join(REPO_ROOT, "copier.yml"),
+        FILES_CONFIG,
         RESERVED_LABELS_FILE: stagedReservedLabels(),
         GITHUB_OUTPUT: output,
         GITHUB_REPOSITORY: "o/r",
@@ -653,6 +690,32 @@ describe("plan.ts as a child", () => {
     );
   });
 
+  test("a missing or invalid files.yml, or an unknown module, fails as a workflow error naming the file", () => {
+    const missing = join(temp.dir("plan-files-missing-"), "files.yml");
+    const noFile = run(
+      { ".repo-platform.yml": "modules: [bun]\n" },
+      { PRIVATE: "false", FILES_CONFIG: missing },
+    );
+    expect(noFile.exitCode).toBe(1);
+    expect(noFile.stdout).toContain(`::error::${missing}: cannot read the file`);
+    expect(noFile.output).toBe("");
+    const invalid = join(temp.dir("plan-files-invalid-"), "files.yml");
+    writeFileSync(invalid, "placeholders: []\nfiles: []\nmodules: [bun]\n");
+    const badBlock = run(
+      { ".repo-platform.yml": "modules: [bun]\n" },
+      { PRIVATE: "false", FILES_CONFIG: invalid },
+    );
+    expect(badBlock.exitCode).toBe(1);
+    expect(badBlock.stdout).toContain(`::error::${invalid}: modules: `);
+    expect(badBlock.output).toBe("");
+    const unknown = run({ ".repo-platform.yml": "modules: [bun, agents]\n" }, { PRIVATE: "false" });
+    expect(unknown.exitCode).toBe(1);
+    expect(unknown.stdout).toContain(
+      '::error::.repo-platform.yml: module "agents" is not a module this template offers',
+    );
+    expect(unknown.output).toBe("");
+  });
+
   test("a missing registration, an invalid one, or an unknown mode fails as a workflow error", () => {
     const missing = run({}, { PRIVATE: "false" });
     expect(missing.exitCode).toBe(1);
@@ -713,6 +776,65 @@ describe("plan.ts as a child", () => {
     const invalid = run({}, { ...caller, CALLER_SETUP: "bun," });
     expect(invalid.exitCode).toBe(1);
     expect(invalid.stdout).toContain("::error::setup input: invalid setup value 'bun,'");
+  });
+
+  test("every default comes from files.yml: other defaults there change the outputs, a missing one fails", () => {
+    const real = readFileSync(FILES_CONFIG, "utf-8");
+    const edits: [string, string][] = [
+      ["skills_dir: {default: skills}", "skills_dir: {default: agents}"],
+      ["    dist: dist\n", "    dist: site\n"],
+      ["    path: docs\n", "    path: manual\n"],
+    ];
+    let other = real;
+    for (const [from, to] of edits) {
+      expect(other).toContain(from);
+      other = other.replace(from, to);
+    }
+    const dir = temp.dir("plan-files-other-");
+    const otherPath = join(dir, "files.yml");
+    writeFileSync(otherPath, other);
+    const ci = run(
+      { ".repo-platform.yml": "modules: [skills, docs-site]\n" },
+      { PRIVATE: "false", FILES_CONFIG: otherPath },
+    );
+    expect(ci.exitCode).toBe(0);
+    expect(ci.output).toBe(
+      [
+        'modules=["docs-site","skills"]',
+        "private=false",
+        "skills-dir=agents",
+        "codeql-languages=[]",
+        "tracking-labels=docs-link-rot",
+        "",
+      ].join("\n"),
+    );
+    const pages = run(
+      { ".repo-platform.yml": "modules: [bun, pages, docs-site]\npages: { setup: bun }\n" },
+      { MODE: "pages", FILES_CONFIG: otherPath },
+    );
+    expect(pages.exitCode).toBe(0);
+    expect(pages.output).toBe(
+      [
+        'mounts=[{"path":"/","source":"command","versioned":false},{"path":"/manual/","source":"vitepress","versioned":true}]',
+        "setup=bun",
+        "install_command=bun install --frozen-lockfile",
+        "build_command=bun run build",
+        "dist_dir=site",
+        "site_title=",
+        "docs_dir=docs",
+        "link_rot_label=docs-link-rot",
+        "",
+      ].join("\n"),
+    );
+    const missingPath = join(dir, "missing-dist.yml");
+    writeFileSync(missingPath, real.replace("    dist: dist\n", ""));
+    const missing = run(
+      { ".repo-platform.yml": "modules: [skills]\n" },
+      { PRIVATE: "false", FILES_CONFIG: missingPath },
+    );
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stdout).toContain(`::error::${missingPath}: modules.pages.dist: missing`);
+    expect(missing.output).toBe("");
   });
 
   test("the answers file is optional: a v2 registration plans alone", () => {

@@ -2,7 +2,7 @@
 // (unknown names dropped and reported, never an error that blocks the
 // rest) and its visibility, judged against each entry's `when`.
 
-import type { FileEntry, FilesConfig, When } from "./files_config.ts";
+import type { FileEntry, FilesConfig, When } from "../../../../actions/plan/files_config.ts";
 
 export interface Selection {
   /** Selected modules in files.yml order. */

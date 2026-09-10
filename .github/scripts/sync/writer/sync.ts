@@ -13,17 +13,16 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  type FileEntry,
+  type FilesConfig,
+  pathProblem,
+} from "../../../../actions/plan/files_config.ts";
 import { REGISTRATION_PATH } from "../../../../actions/plan/registration.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
-import {
-  blockSources,
-  type FileEntry,
-  type FilesConfig,
-  loadFilesConfig,
-  pathProblem,
-} from "./files_config.ts";
+import { blockSources, loadFilesConfig } from "./files_config.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,

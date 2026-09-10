@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { canonicalize, destOverlapsRepo } from "../.github/scripts/build-branches/branch_tree.ts";
 import { capture } from "../.github/scripts/shared/proc.ts";
-import { parseFilesConfig } from "../.github/scripts/sync/writer/files_config.ts";
+import { parseFilesConfig } from "../actions/plan/files_config.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const DEFAULT_DEST = join(REPO_ROOT, "tests", "golden-renders", "all-modules");

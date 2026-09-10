@@ -34,6 +34,7 @@ export const RULE_ROSTER = [
   "toolchain-version-files",
   "files-pins",
   "files-pages",
+  "files-defaults",
   "local-gates",
   "dogfood-parity",
   "gitattributes-region",
