@@ -327,9 +327,10 @@ describe("fleet-ci.yml", () => {
 
   test("zizmor runs for every visibility, uploading SARIF only where code scanning exists", () => {
     const job = fleetCi.jobs.zizmor;
-    // Unconditional: the high-severity gate applies to private repositories
-    // too; only the upload is visibility-keyed, on the step's input.
-    expect(job?.if).toBeUndefined();
+    // Every visibility (the high-severity gate applies to private
+    // repositories too; only the upload is visibility-keyed, on the step's
+    // input), standing down on the schedule with the other gate jobs.
+    expect(job?.if).toBe(SKIP_ON_SCHEDULE);
     const steps = job?.steps ?? [];
     expect(steps.map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
@@ -348,7 +349,7 @@ describe("fleet-ci.yml", () => {
     const bun = "contains(fromJSON(needs.plan.outputs.modules), 'bun')";
     const node = "contains(fromJSON(needs.plan.outputs.modules), 'node')";
     const noBun = "${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}";
-    expect(job?.if).toBe(`${bun} || ${node}`);
+    expect(job?.if).toBe(`(${bun} || ${node}) && ${SKIP_ON_SCHEDULE}`);
     const steps = job?.steps ?? [];
     // A repository selecting both modules has bun.lock, not package-lock.json:
     // the package-manager choice is resolved once, on the bun module.
@@ -370,7 +371,7 @@ describe("fleet-ci.yml", () => {
 
   test("semgrep is public-only and calls its action at @build with the SARIF grant", () => {
     const job = fleetCi.jobs.semgrep;
-    expect(job?.if).toBe("${{ needs.plan.outputs.private != 'true' }}");
+    expect(job?.if).toBe(`needs.plan.outputs.private != 'true' && ${SKIP_ON_SCHEDULE}`);
     expect((job?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
       expect.stringContaining("actions/checkout@"),
       expect.stringContaining("repo-platform/actions/semgrep@build"),
@@ -383,7 +384,7 @@ describe("fleet-ci.yml", () => {
       .filter(([, job]) => job.permissions?.["security-events"] === "write")
       .map(([name]) => name)
       .sort();
-    expect(granted).toEqual(["codeql", "semgrep", "zizmor"]);
+    expect(granted).toEqual(["codeql", "semgrep", "trivy-nightly", "zizmor"]);
   });
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {

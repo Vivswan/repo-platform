@@ -5,7 +5,9 @@ description: >-
   the step failing on an ERROR-severity finding. Public repositories only:
   the registry needs no token, but code scanning needs a public repository
   or Advanced Security. The only bypass is semgrep's own `// nosemgrep:
-  rule-id` comment on the finding, with a reason.
+  rule-id` comment on the finding, with a reason. One registry rule is
+  excluded: the mutable-action-tag rule duplicates zizmor's unpinned-uses,
+  and one tool owns each finding class.
 
 runs:
   using: composite
@@ -15,13 +17,14 @@ runs:
       run: python3 -m pip install --quiet semgrep==1.176.1
 
     # No --error: the JSON copy is judged by severity below, so WARNING and
-    # INFO findings reach code scanning without blocking.
+    # INFO findings reach code scanning without blocking. The excluded rule
+    # is the one zizmor's unpinned-uses already owns.
     - name: Scan
       shell: bash
-      run: semgrep scan --config p/default --metrics=off --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" .
+      run: semgrep scan --config p/default --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag --metrics=off --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" .
 
     - name: Upload the findings to code scanning
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ runner.temp }}/semgrep.sarif
         category: semgrep

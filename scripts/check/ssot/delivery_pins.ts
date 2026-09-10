@@ -14,9 +14,16 @@ import { asRecord, jinjaVars, REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 // Actions allowed to be pinned at more than one ref, with the full expected
-// ref set. Record any intentional split here with a comment. Empty since
-// the delivery channels converged on the one green-gated `build` ref.
-export const ALLOWED_MULTI_REFS: Record<string, string[]> = {};
+// ref set. Record any intentional split here with a comment. The splits
+// below are the sha pins of the lint legs beside the moving major tags the
+// rest of the repository still carries; the repo-wide sha-pin sweep
+// collapses each and removes its entry (a stale entry fails the rule).
+export const ALLOWED_MULTI_REFS: Record<string, string[]> = {
+  "actions/checkout": ["3d3c42e5aac5ba805825da76410c181273ba90b1", "v7"],
+  "actions/setup-node": ["820762786026740c76f36085b0efc47a31fe5020", "v7"],
+  "github/codeql-action": ["b96794f015dfd88f77b49b1c93e0fa7110f94c63", "v4"],
+  "oven-sh/setup-bun": ["0c5077e51419868618aeaa5fe8019c62421857d6", "v2"],
+};
 
 export interface Pin {
   file: string;
