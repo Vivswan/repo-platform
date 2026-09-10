@@ -10,10 +10,10 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | Question | Owner |
 | --- | --- |
 | What does `files.yml` look like, and what does the loader refuse? | [sync/writer/files_config.ts](../.github/scripts/sync/writer/files_config.ts) |
-| Which `{{name}}` tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
+| Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
 | Which entries apply to one repository? | [sync/writer/select.ts](../.github/scripts/sync/writer/select.ts) |
-| How is each class written? | `write_managed.ts`, `write_split.ts`, `write_starter.ts` under [sync/writer/](../.github/scripts/sync/writer/) |
+| How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts) |
 | When does a retired file leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../.github/scripts/sync/writer/report.ts) |
@@ -56,7 +56,7 @@ retired:
 
 | Key | Meaning |
 | --- | --- |
-| `placeholders` | The `{{name}}` tokens sources may use. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
+| `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
 | `modules.<name>` | A module and its data. Any key is allowed; `blocks` entries name one of these keys. |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, or `starter` (below). |
@@ -69,7 +69,7 @@ retired:
 
 The loader refuses, all problems at once:
 
-- a placeholder the writer cannot derive, or a source file using a `{{name}}` outside `placeholders`
+- a placeholder the writer cannot derive, or a source file using a token outside `placeholders`
 - a `when` naming a module absent from `modules`
 - a `split` without `region`; `region` or `blocks` on a non-split entry
 - a `source` outside `files/`, or one missing from the tree (block files included)
@@ -89,9 +89,9 @@ The loader refuses, all problems at once:
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
 
-- A token is `{{name}}` with no spaces. `{{ name }}` is not a token.
-- A `$` before the braces marks a GitHub Actions expression (`${{ github.sha }}`), left untouched.
-- Substitution runs on source files only. A literal `{{` in a repository-owned tail is never touched.
+- A token is the name inside double braces with no spaces; spaces inside the braces make it plain text.
+- A `$` before the braces marks a GitHub Actions expression, left untouched.
+- Substitution runs on source files only. A literal double brace in a repository-owned tail is never touched.
 
 ## Selection
 
