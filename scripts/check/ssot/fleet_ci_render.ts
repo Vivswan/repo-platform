@@ -800,7 +800,7 @@ export function docsSiteLegMismatches(
 
 /** The fleet gate's render shape at the jinja SOURCE, pinned as exact
  *  lines against a maintainer's accidental omission (the rendered shape is
- *  asserted by verify_smoke_gating.sh); docs/all-green.md has the model. */
+ *  asserted by tests/ci/smoke_gating); docs/all-green.md has the model. */
 export function fleetCiRenderMismatches(
   ciTemplateText: string,
   releaseLegText: string,

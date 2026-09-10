@@ -4,6 +4,10 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  GATED_MODULES,
+  MODULES as SMOKE_GATING_MODULES,
+} from "../../../tests/ci/smoke_gating/expectations.ts";
 import { ANSWERS_FILE, parseAnswers } from "../../generate/render_dogfood.ts";
 import { type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, loadManifests, REPO_ROOT, read, repoCi } from "./inputs.ts";
@@ -23,26 +27,6 @@ function smokeMatrixRow(name: string): Record<string, unknown> {
 /** A row's `modules` value (a YAML list serialized as a string). */
 function smokeRowModules(row: Record<string, unknown>): string[] {
   return (parseYaml(String(row.modules)) as unknown[]).map(String);
-}
-
-/** True when verify_smoke_gating.sh CONDITIONS on the module through its
- *  `has` helper - an executable shell-condition use (`if has X`, `elif has
- *  X`, `&& has X`, `|| has X`, `{ has X`, `! has X`). Comment lines and
- *  trailing comments are stripped first, and a condition keyword/operator
- *  must immediately precede `has`, so a mention in a comment or an
- *  unrelated substring (e.g. "bun" inside setup-bun) cannot satisfy it. */
-export function gatesOnModule(script: string, module: string): boolean {
-  const executable = script
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .map((line) => line.replace(/\s#.*$/, ""))
-    .join("\n");
-  const escaped = module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const condition = new RegExp(
-    `(?:^|[\\s;{])(?:if|elif|&&|\\|\\||\\{|!|;)\\s+has\\s+${escaped}(?=$|[\\s;])`,
-    "m",
-  );
-  return condition.test(executable);
 }
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
@@ -72,13 +56,19 @@ export const moduleRules: Rule[] = [
         ...setMismatch("ci.yml smoke-generate 'everything' row", reference, everyModules),
       );
 
-      const gating = read(".github/scripts/ci/verify_smoke_gating.sh");
+      // The smoke-gating expectation table's own module tuple, and the
+      // modules its rows actually condition on (a module no row gates
+      // would render ungated for every matrix row).
+      const gatingFile = "tests/ci/smoke_gating/expectations.ts";
+      mismatches.push(
+        ...setMismatch(`${gatingFile} MODULES`, reference, [...SMOKE_GATING_MODULES]),
+      );
       for (const module of reference) {
-        if (!gatesOnModule(gating, module)) {
+        if (!GATED_MODULES.has(module as (typeof SMOKE_GATING_MODULES)[number])) {
           mismatches.push({
-            file: ".github/scripts/ci/verify_smoke_gating.sh",
-            expected: `an executable 'has ${module}' condition gating an assertion`,
-            got: "none (comments and unrelated substrings do not count)",
+            file: gatingFile,
+            expected: `an expectation row whose condition names '${module}'`,
+            got: "none",
           });
         }
       }
