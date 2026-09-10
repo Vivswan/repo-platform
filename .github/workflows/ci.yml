@@ -529,7 +529,7 @@ jobs:
   # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
   # nothing else in the gate ever RUNS vitepress, and the build's module
   # resolution only breaks under that separation - the class a laptop
-  # layout cannot reproduce (.github/scripts/ci/verify_pages_site_build.sh).
+  # layout cannot reproduce (tests/ci/pages_site_build/).
   pages-site-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -541,7 +541,7 @@ jobs:
       - name: Install the action's pinned dependencies
         run: bun install --frozen-lockfile --cwd actions/pages-site
       - name: Build the fixture site and assert the artifact
-        run: .github/scripts/ci/verify_pages_site_build.sh
+        run: bun run test tests/ci/pages_site_build
 
   # Dry-run sync against every fleet repo's REAL current state (no push, no
   # PR, private repos hard-skipped by rehearse_fleet.ts's fail-closed
