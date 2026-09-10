@@ -17,8 +17,8 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    # Nightly: the scheduled run is fleet-ci's, and its plan output
-    # decides what the run carries.
+    # Nightly: the scheduled run carries the fleet's scheduled scans, and
+    # CodeQL keeps its weekly rescan through fleet-ci's plan output.
     - cron: "3 4 * * *"
 
 permissions:

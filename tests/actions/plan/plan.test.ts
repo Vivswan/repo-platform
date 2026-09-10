@@ -24,6 +24,7 @@ import {
   selectModules,
   setupProblem,
   trackingLabels,
+  weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
 import { reservedLabelNames } from "../../../scripts/generate/copier_questions.ts";
@@ -131,14 +132,21 @@ describe("loadModuleData", () => {
 });
 
 describe("planCi", () => {
+  const MONDAY = new Date("2026-09-07T04:03:00Z");
+  const THURSDAY = new Date("2026-09-10T04:03:00Z");
+
   test("canonical order, CodeQL per toolchain, tracking labels per stream (defaults)", () => {
-    const plan = planCi(input("modules: [nightly, uv, bun, fuzzer, docs-site, release-please]"));
+    const plan = planCi(
+      input("modules: [nightly, uv, bun, fuzzer, docs-site, release-please]"),
+      MONDAY,
+    );
     expect(plan).toEqual({
       modules: ["bun", "uv", "docs-site", "release-please", "fuzzer", "nightly"],
       private: false,
       skillsDir: "skills",
       codeqlLanguages: ["javascript-typescript", "python"],
       trackingLabels: ["docs-link-rot", "fuzz-nightly", "nightly-failure"],
+      weekly: true,
     });
     expect(outputsOf(plan)).toEqual({
       "modules": '["bun","uv","docs-site","release-please","fuzzer","nightly"]',
@@ -146,7 +154,16 @@ describe("planCi", () => {
       "skills-dir": "skills",
       "codeql-languages": '["javascript-typescript","python"]',
       "tracking-labels": "docs-link-rot,fuzz-nightly,nightly-failure",
+      "weekly": "true",
     });
+  });
+
+  test("weekly is the Monday of the UTC calendar, whatever the hour", () => {
+    expect(weekly(MONDAY)).toBe(true);
+    expect(weekly(new Date("2026-09-07T23:59:59Z"))).toBe(true);
+    expect(weekly(new Date("2026-09-08T00:00:00Z"))).toBe(false);
+    expect(weekly(THURSDAY)).toBe(false);
+    expect(planCi(input("modules: []"), THURSDAY).weekly).toBe(false);
   });
 
   test("recorded answers win over defaults; a registration value stands in for an absent answer", () => {
@@ -181,12 +198,13 @@ describe("planCi", () => {
   });
 
   test("an empty selection plans an empty repository", () => {
-    expect(outputsOf(planCi(input("modules: []")))).toEqual({
+    expect(outputsOf(planCi(input("modules: []"), THURSDAY))).toEqual({
       "modules": "[]",
       "private": "false",
       "skills-dir": "skills",
       "codeql-languages": "[]",
       "tracking-labels": "",
+      "weekly": "false",
     });
   });
 
@@ -584,7 +602,7 @@ describe("plan.ts as a child", () => {
   const ANSWERS =
     "_commit: abc\nproject_name: Demo\nskills_dir: skills\nfuzzer_label: fuzz-nightly\n";
 
-  test("default mode writes the five fleet-ci rows and echoes them", () => {
+  test("default mode writes the six fleet-ci rows and echoes them", () => {
     const result = run(
       {
         ".repo-platform.yml": "modules: [bun, fuzzer, release-please]\n",
@@ -600,6 +618,7 @@ describe("plan.ts as a child", () => {
         "skills-dir=skills",
         'codeql-languages=["javascript-typescript"]',
         "tracking-labels=fuzz-nightly",
+        `weekly=${new Date().getUTCDay() === 1}`,
         "",
       ].join("\n"),
     );

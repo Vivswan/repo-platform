@@ -55,7 +55,17 @@ describe("fleet-ci.yml", () => {
   // used to pass as inputs is resolved there, so it runs first and every
   // other job keys on its outputs (a job reading inputs.* would silently
   // read the ignored legacy defaults).
-  const PLAN_OUTPUTS = ["modules", "private", "skills-dir", "codeql-languages", "tracking-labels"];
+  const PLAN_OUTPUTS = [
+    "modules",
+    "private",
+    "skills-dir",
+    "codeql-languages",
+    "tracking-labels",
+    "weekly",
+  ];
+  // The nightly schedule carries only the jobs that ask for it: the
+  // other gate jobs stand down there with this exact clause.
+  const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
 
   test("plan is the first job: a sparse checkout of the registration files, then the plan action at @build", () => {
     const [first, ...rest] = Object.keys(fleetCi.jobs);
@@ -156,9 +166,9 @@ describe("fleet-ci.yml", () => {
     { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
   ];
 
-  test("base-checks is one unconditional job: checkout, six !cancelled() check steps, the judge last", () => {
+  test("base-checks is one job for every visibility (skipped on the schedule): checkout, six !cancelled() steps, the judge last", () => {
     const job = fleetCi.jobs["base-checks"];
-    expect(job?.if).toBeUndefined();
+    expect(job?.if).toBe(SKIP_ON_SCHEDULE);
     const steps = job?.steps ?? [];
     // commit-names walks history and gitleaks scans the event's range.
     expect(steps[0]?.uses).toContain("actions/checkout@");
@@ -316,7 +326,8 @@ describe("fleet-ci.yml", () => {
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {
     const GUARDS = {
-      "validate-skills": "contains(fromJSON(needs.plan.outputs.modules), 'skills')",
+      "validate-skills":
+        "contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'",
       "release-freshness":
         "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
       "release-health":
@@ -346,7 +357,9 @@ describe("fleet-ci.yml", () => {
 
   test("codeql is a matrix over the plan's codeql-languages output, skipped when empty", () => {
     const job = fleetCi.jobs.codeql;
-    expect(job?.if).toContain("needs.plan.outputs.codeql-languages != '[]'");
+    expect(job?.if).toBe(
+      "needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != '' && (github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')",
+    );
     expect(job?.uses).toBe("./.github/workflows/reusable-codeql.yml");
     // The matrix and the forwarding are the wiring the test name claims:
     // either expression breaking would silently scan nothing.
@@ -355,6 +368,28 @@ describe("fleet-ci.yml", () => {
     );
     expect(job?.with?.language).toBe("${{ matrix.language }}");
     expect(job?.permissions?.["security-events"]).toBe("write");
+  });
+
+  // Which jobs a scheduled run may reach: the plan and CodeQL on its weekly
+  // day. Every other job's condition excludes the schedule event outright
+  // (the skip clause, or a PR-only guard), so a new job must take a side.
+  const SCHEDULE_RUNS = new Set(["plan", "codeql"]);
+
+  test("on the nightly schedule only plan and (weekly) codeql can run", () => {
+    for (const [name, job] of Object.entries(fleetCi.jobs)) {
+      const condition = job.if ?? "";
+      const skips = condition.split("&&").some((clause) => clause.trim() === SKIP_ON_SCHEDULE);
+      if (SCHEDULE_RUNS.has(name)) {
+        expect([name, skips]).toEqual([name, false]);
+        continue;
+      }
+      const excluded = skips || condition.includes("github.event_name == 'pull_request'");
+      expect([name, excluded]).toEqual([name, true]);
+    }
+    expect(fleetCi.jobs["validate-template"]?.if).toBe(SKIP_ON_SCHEDULE);
+    expect(fleetCi.jobs.codeql?.if).toContain(
+      "(github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')",
+    );
   });
 
   test("nothing sleeps: the gate waits by failing fast", () => {

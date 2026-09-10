@@ -7,7 +7,8 @@
 //
 // Two modes. `default` resolves what fleet-ci.yml's jobs key on: the
 // selection in canonical order, the visibility, the skills directory, the
-// CodeQL languages, and the tracking labels. `pages` resolves the deploy
+// CodeQL languages, the tracking labels, and whether a scheduled run is
+// the week's CodeQL rescan. `pages` resolves the deploy
 // configuration reusable-pages.yml consumes (mounts, toolchain, commands,
 // output directory, site title, link-rot label), from the registration or,
 // for a caller passing `mounts`, from its own inputs (below). Fail closed:
@@ -264,6 +265,13 @@ export interface CiPlan {
   skillsDir: string;
   codeqlLanguages: string[];
   trackingLabels: string[];
+  weekly: boolean;
+}
+
+/** Whether a scheduled run is the week's CodeQL rescan: the skeleton's
+ *  schedule fires nightly, and CodeQL reruns on Mondays (UTC) only. */
+export function weekly(now: Date): boolean {
+  return now.getUTCDay() === 1;
 }
 
 /** CodeQL is off for a private repository (personal-account code scanning
@@ -274,7 +282,7 @@ export function codeqlLanguages(selected: ModuleData[], isPrivate: boolean): str
   return [...new Set(selected.flatMap((m) => (m.codeqlLanguage ? [m.codeqlLanguage] : [])))];
 }
 
-export function planCi(input: PlanInput): CiPlan {
+export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   const selected = selectModules(input);
   return {
     modules: selected.map((module) => module.name),
@@ -284,6 +292,7 @@ export function planCi(input: PlanInput): CiPlan {
       "skills",
     codeqlLanguages: codeqlLanguages(selected, input.private),
     trackingLabels: trackingLabels(input, selected),
+    weekly: weekly(now),
   };
 }
 
@@ -472,6 +481,7 @@ export function outputsOf(plan: CiPlan | PagesPlan | CallerPages): Record<string
     "skills-dir": plan.skillsDir,
     "codeql-languages": JSON.stringify(plan.codeqlLanguages),
     "tracking-labels": plan.trackingLabels.join(","),
+    "weekly": String(plan.weekly),
   };
 }
 

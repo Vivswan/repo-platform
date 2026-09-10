@@ -80,6 +80,9 @@ outputs:
   tracking-labels:
     description: Comma-separated nightly tracking-issue labels of the selected stream modules (mode default).
     value: ${{ steps.plan.outputs.tracking-labels }}
+  weekly:
+    description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
+    value: ${{ steps.plan.outputs.weekly }}
   mounts:
     description: The pages-site mount list, compact JSON (mode pages).
     value: ${{ steps.plan.outputs.mounts }}

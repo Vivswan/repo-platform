@@ -781,8 +781,8 @@ export const EXPECTATIONS: Row[] = [
   },
   {
     // The analysis jobs live in fleet-ci, which decides the languages from
-    // the registration; every render carries fleet-ci's nightly trigger
-    // and no CodeQL workflow of its own.
+    // the registration; every render carries the nightly trigger (CodeQL
+    // reruns on the plan's weekly day) and no CodeQL workflow of its own.
     name: "CodeQL rides fleet-ci: the nightly schedule renders and no codeql.yml does",
     when: ALWAYS,
     checks: () => [

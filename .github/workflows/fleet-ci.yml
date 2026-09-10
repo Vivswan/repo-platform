@@ -69,6 +69,7 @@ jobs:
       skills-dir: ${{ steps.plan.outputs.skills-dir }}
       codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
+      weekly: ${{ steps.plan.outputs.weekly }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -85,9 +86,11 @@ jobs:
 
   # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
   # behind the build branch) only informs. The action DEFERS the integrity
-  # step so the findings comment is posted before the gate goes red.
+  # step so the findings comment is posted before the gate goes red. The
+  # nightly schedule carries only the jobs that ask for it.
   validate-template:
     needs: [plan]
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -135,6 +138,7 @@ jobs:
   # running past a failure, and the judge last names every failed check.
   base-checks:
     needs: [plan]
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -212,10 +216,11 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
 
-  # CodeQL, one call per language.
+  # CodeQL, one call per language. On the nightly schedule it runs on the
+  # week's Monday alone (the plan's weekly output).
   codeql:
     needs: [plan]
-    if: needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != ''
+    if: needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != '' && (github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -232,7 +237,7 @@ jobs:
   # stays advisory in the standalone validate-skills.yml.
   validate-skills:
     needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'skills')
+    if: contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
