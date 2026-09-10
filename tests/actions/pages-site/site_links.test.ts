@@ -79,6 +79,15 @@ describe("fragment reads", () => {
     ]);
   });
 
+  test("a text-fragment directive names text, not an element: the id before it is judged, a bare one is not", () => {
+    const html =
+      '<a href="#intro:~:text=Hello%20world">i</a> <a href="#:~:text=Hello">bare</a>' +
+      ' <a href="p.html#:~:text=x">page</a>';
+    expect(fragmentTargets(html, "https://site.invalid/r/i.html")).toEqual([
+      { href: "/r/i.html#intro:~:text=Hello%20world", path: "/r/i.html", fragment: "intro" },
+    ]);
+  });
+
   test("fragmentIds collects element ids and anchor names as the browser reads them, and top always resolves", () => {
     expect(
       fragmentIds(

@@ -139,10 +139,14 @@ export function fragmentTargets(
           return;
         }
         if (url.origin !== page.origin || url.hash.length < 2) return;
+        // A text-fragment directive (`#intro:~:text=Hello`) names text, not
+        // an element; the id before it, if any, is what the page must carry.
+        const fragment = decodedComponent(url.hash.slice(1)).split(":~:")[0];
+        if (fragment === "") return;
         rows.push({
           href: url.pathname + url.hash,
           path: decodedComponent(url.pathname),
-          fragment: decodedComponent(url.hash.slice(1)),
+          fragment,
         });
       },
     })

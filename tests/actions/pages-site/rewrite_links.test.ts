@@ -11,6 +11,7 @@ const SCOPE = {
     "guide/README.md": "guide/index.md",
     "skills/README.md": "skills/index.md",
     "skills/alpha/SKILL.md": "skills/alpha/index.md",
+    "100%/README.md": "100%/index.md",
   },
   repoUrl: "https://github.com/o/r",
   ref: "v1.2.0",
@@ -26,6 +27,13 @@ describe("rewriteHref", () => {
     ["SKILL.md?x=1#top", "skills/alpha/reference.md", "index.md?x=1#top"],
     ["../alpha/SKILL.md", "skills/beta/index.md", "../alpha/index.md"],
     ["/skills/README.md", "guide/x.md", "/skills/index.md"],
+    // Percent escapes name the file for the lookup and go back out encoded,
+    // from any page, VitePress decoding the href once more.
+    ["100%25/README.md", "index.md", "100%25/index.md"],
+    ["README.md", "100%/x.md", "index.md"],
+    ["../100%25/README.md", "guide/x.md", "../100%25/index.md"],
+    ["/100%25/README.md", "guide/x.md", "/100%25/index.md"],
+    ["../a%20b/c.md", "guide/x.md", "../a%20b/c.md"],
     // A link written in repository space, as it reads on GitHub, lands on
     // the staged route.
     ["../skills/alpha/SKILL.md", "index.md", "skills/alpha/index.md"],
