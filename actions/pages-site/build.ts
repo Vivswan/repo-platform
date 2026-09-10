@@ -630,7 +630,9 @@ async function main(): Promise<void> {
             ?.include ?? []);
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], includes, { base: "/" });
-    const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], cfg.scratch);
+    // No origin: this build sits at "/", not at the deployed layout, so a
+    // link spelled with the site's own origin stays external here.
+    const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], cfg.scratch, null);
     console.log(
       `docs build check passed (${checked.judged} links judged across ${checked.pages} pages)`,
     );
@@ -669,7 +671,7 @@ async function main(): Promise<void> {
   }
   // After every mount is in place: a link from one mount into another has
   // no other judge, and the artifact is handed back only when all resolve.
-  const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.scratch);
+  const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.scratch, cfg.origin);
   console.log(
     `internal links resolve (${checked.judged} links judged across ${checked.pages} current pages)`,
   );
