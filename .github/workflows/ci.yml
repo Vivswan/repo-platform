@@ -480,11 +480,12 @@ jobs:
           bun actions/validate-template-report/validator/validate_generated_files.ts /tmp/smoke
       - name: Verify module/visibility gating
         env:
+          SMOKE_DIR: /tmp/smoke
           MODULES: ${{ matrix.modules }}
           PRIVATE: ${{ matrix.private }}
           EXPECT_IN_PAGES: ${{ matrix.expect_in_pages }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: .github/scripts/ci/verify_smoke_gating.sh
+        run: bun run test tests/ci/smoke_gating/smoke_gating.test.ts
       # The dogfood-oracle row rendered with this repo's own answers, so
       # real copier output must byte-match the committed generated copies
       # (closing the TS-renderer-vs-copier gap render_dogfood leaves open).

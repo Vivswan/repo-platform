@@ -13,8 +13,8 @@
 // where the build tree is assembled. Both default to the historical paths,
 // so ci.yml passes neither. They exist because two concurrent local runs
 // otherwise fight over the same two directories, and the verification step
-// (ci/verify_smoke_gating.sh) already takes SMOKE_DIR for the same reason -
-// pass the same value to both to run a whole smoke leg in isolation.
+// (tests/ci/smoke_gating) reads the same SMOKE_DIR - pass one value to both
+// to run a whole smoke leg in isolation.
 
 import { env, requireEnv } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
