@@ -18,6 +18,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review; the `no-retired-shapes` ssot rule (repo-platform, landing) |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
+| [How to bypass a check](#how-to-bypass-a-check) | each tool's own per-finding, in-repo bypass; no job-level switch exists |
 
 ## Sticky PR comments
 
@@ -89,3 +90,26 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Why: a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
 - How: cut the comment to its constraint. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone; the reason is mandatory, and a bare marker warns.
 - Enforced by: the comment caps of the `file-size` step ([the file size caps](new-repo.md#file-size-caps)), warn only, never a failure.
+
+## How to bypass a check
+
+- Rule: a blocking check is bypassed only through its tool's own per-finding mechanism, in the repository, visible in the diff, with a reason beside it. No job-level switch, environment variable, or label skips a check.
+- Why: a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
+- How: the table below, one row per check fleet-ci.yml runs. A repo-owned config file (`.github/zizmor.yml`, `knip.json`) replaces the fleet default for that tool; `_typos.toml` extends it.
+
+| Check | Where it runs | Blocks on | Bypass |
+|---|---|---|---|
+| actionlint | base-checks | any finding | a `# shellcheck disable=SCnnnn` comment on the line (shellcheck findings); an `actionlint.yaml` config for the rest |
+| yamllint | base-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line; the repo-owned `.yamllint` |
+| gitleaks | base-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
+| typography | base-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
+| file-size | base-checks | nothing (advisory) | a `comment-cap: ignore <reason>` line inside or above the block |
+| commit-names | base-checks | a non-conventional subject | none: reword the commit |
+| typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (`[default.extend-words]`, `[default.extend-identifiers]`, `[files] extend-exclude`), or `# typos: ignore` on the line |
+| zizmor | zizmor | a high finding | a `# zizmor: ignore[rule] reason` comment on the finding; a `rules.<rule>.ignore` entry in the repo-owned `.github/zizmor.yml` |
+| knip | knip (bun or node repos) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
+| semgrep | semgrep (public repos) | an ERROR finding | a `// nosemgrep: rule-id` comment on the line above the finding |
+| dependency-review | dependency-review | a vulnerable dependency at or above low | none: upgrade or drop the dependency |
+| CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |
+
+- Enforced by: review of the diff that carries the bypass; the sync overwrites a managed file, so a bypass in one is lost on the next sync PR.
