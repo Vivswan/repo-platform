@@ -1,8 +1,11 @@
 // The typos action's contract: one pinned upstream step, the fleet
 // allowlist passed as --config (typos layers it over the file it discovers
 // at the checkout root, so a repository's _typos.toml extends it), and a
-// fleet allowlist that excludes only generated files and hashes - proved
-// on the patterns themselves, and end to end when a typos binary is on PATH.
+// fleet allowlist that excludes only generated files and hashes and accepts
+// one spelling variant - proved on the patterns themselves, and end to end
+// with a typos binary on PATH: skipped without one locally, mandatory under
+// TYPOS_REQUIRED=1 (the ci.yml script-tests job installs the action's
+// pinned release and sets it).
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,6 +18,8 @@ const temp = tempDirs();
 const action = loadAction("actions/typos/action.yml");
 const FLEET_CONFIG = join(REPO_ROOT, "actions/typos/_typos.toml");
 const typosBinary = Bun.which("typos");
+const typosRequired = process.env.TYPOS_REQUIRED === "1";
+const endToEnd = typosBinary === null && !typosRequired ? test.skip : test;
 
 describe("actions/typos", () => {
   test("a composite of exactly the pinned typos step with the fleet config, no inputs to loosen it", () => {
@@ -31,7 +36,7 @@ describe("actions/typos", () => {
     expect(pinLine).toMatch(/ # v\d+\.\d+\.\d+$/);
   });
 
-  test("the fleet allowlist: generated-file excludes and two ignore patterns, no words allowlisted", () => {
+  test("the fleet allowlist: generated-file excludes, two ignore patterns, and one spelling variant", () => {
     const config = Bun.TOML.parse(readFileSync(FLEET_CONFIG, "utf8")) as Record<
       string,
       Record<string, unknown>
@@ -40,7 +45,9 @@ describe("actions/typos", () => {
     expect(Object.keys(config.files)).toEqual(["extend-exclude"]);
     const excludes = config.files["extend-exclude"] as string[];
     expect(excludes).toContain("*.lock");
-    // Exactly these: lockfiles, minified bundles, and SVGs, never a source glob.
+    // Exactly these: lockfiles, minified bundles, SVGs, installed packages,
+    // and a root dist/, never a source glob (a root lib/ is source in a Node
+    // repository; one that generates it excludes it itself).
     expect(excludes).toEqual([
       "*.lock",
       "*.lockb",
@@ -48,8 +55,12 @@ describe("actions/typos", () => {
       "*.min.js",
       "*.min.css",
       "*.svg",
+      "/dist/",
+      "node_modules/",
     ]);
-    expect(Object.keys(config.default)).toEqual(["extend-ignore-re"]);
+    expect(Object.keys(config.default).sort()).toEqual(["extend-ignore-re", "extend-words"]);
+    // The only accepted word: a variant typos corrects to unparsable.
+    expect(config.default["extend-words"]).toEqual({ unparseable: "unparseable" });
     // The patterns as regexes (the (?Rm) prefix is typos' CRLF+multiline
     // flag): the hex ignore must cover a sha and leave an ordinary word
     // alone, the inline marker must cover only a line carrying it, under
@@ -75,6 +86,18 @@ describe("actions/typos", () => {
     expect(own.files["extend-exclude"]).toEqual(["tests/actions/typos/typos_action.test.ts"]);
   });
 
+  test.skipIf(!typosRequired)(
+    "TYPOS_REQUIRED: the binary on PATH is the release the action pins",
+    () => {
+      expect(typosBinary).not.toBeNull();
+      const pinned = /uses: crate-ci\/typos@[0-9a-f]{40} # v(\d+\.\d+\.\d+)$/m.exec(
+        readFileSync(join(REPO_ROOT, "actions/typos/action.yml"), "utf8"),
+      );
+      const version = boundedSpawnSync([typosBinary ?? "typos", "--version"]);
+      expect(version.stdout.trim()).toBe(`typos-cli ${pinned?.[1]}`);
+    },
+  );
+
   // End to end with the installed binary (brew install typos-cli): typos
   // exits 2 on findings, 0 when clean.
   const typos = (repo: string) =>
@@ -82,31 +105,52 @@ describe("actions/typos", () => {
       cwd: repo,
     });
 
-  test.skipIf(typosBinary === null)(
-    "end to end: an ordinary typo fails under the fleet config",
-    () => {
-      const repo = temp.dir("typos-e2e-");
-      writeFileSync(join(repo, "a.md"), "teh quick fox\n");
-      const run = typos(repo);
-      expect([run.exitCode, run.stdout.includes("`teh`")]).toEqual([2, true]);
-    },
-  );
+  endToEnd("end to end: an ordinary typo fails under the fleet config", () => {
+    const repo = temp.dir("typos-e2e-");
+    writeFileSync(join(repo, "a.md"), "teh quick fox\n");
+    const run = typos(repo);
+    expect([run.exitCode, run.stdout.includes("`teh`")]).toEqual([2, true]);
+  });
 
-  test.skipIf(typosBinary === null)(
-    "end to end: the repository's _typos.toml extends the fleet allowlist; a sha is ignored",
+  endToEnd(
+    "end to end: the repository's _typos.toml extends the fleet allowlist (words and fixture paths); a sha is ignored",
     () => {
       const repo = temp.dir("typos-e2e-own-");
       mkdirSync(join(repo, "src"));
-      writeFileSync(join(repo, "_typos.toml"), '[default.extend-words]\nteh = "teh"\n');
+      mkdirSync(join(repo, "test/fixtures"), { recursive: true });
+      writeFileSync(
+        join(repo, "_typos.toml"),
+        '[default.extend-words]\nteh = "teh"\n\n[files]\nextend-exclude = ["test/fixtures/"]\n',
+      );
       writeFileSync(
         join(repo, "src/a.md"),
-        "teh quick fox at 598b829d7f507749e4e05469a31ddcfc9a7404c7 and recieve\n",
+        "teh quick fox at 598b829d7f507749e4e05469a31ddcfc9a7404c7, unparseable and recieve\n",
       );
+      writeFileSync(join(repo, "test/fixtures/negative.txt"), "permision DELET entires\n");
       const run = typos(repo);
-      // `teh` allowed by the repository, the sha by the fleet; `recieve` still found.
+      // `teh` and the fixture folder allowed by the repository, the sha and
+      // `unparseable` by the fleet; `recieve` still found.
       expect(run.exitCode).toBe(2);
       expect(run.stdout).toContain("`recieve`");
       expect(run.stdout).not.toContain("`teh`");
+      expect(run.stdout).not.toContain("`unparseable`");
+      expect(run.stdout).not.toContain("`permision`");
+    },
+  );
+
+  endToEnd(
+    "end to end: a root dist/ is committed build output and skipped; a root lib/ and a nested one are source and scanned",
+    () => {
+      const repo = temp.dir("typos-e2e-built-");
+      for (const dir of ["dist", "lib", "src/lib"]) mkdirSync(join(repo, dir), { recursive: true });
+      writeFileSync(join(repo, "dist/index.js"), "recieve\n");
+      writeFileSync(join(repo, "lib/index.js"), "permision\n");
+      writeFileSync(join(repo, "src/lib/a.ts"), "// teh\n");
+      const run = typos(repo);
+      expect(run.exitCode).toBe(2);
+      expect(run.stdout).toContain("`teh`");
+      expect(run.stdout).toContain("`permision`");
+      expect(run.stdout).not.toContain("`recieve`");
     },
   );
 });

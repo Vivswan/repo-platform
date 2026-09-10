@@ -115,12 +115,17 @@ Conventions every managed repository follows, whether the file is managed by syn
 | typography | base-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
 | file-size | base-checks | nothing (advisory) | a `comment-cap: ignore <reason>` line inside or above the block |
 | commit-names | base-checks | a non-conventional subject | none: reword the commit |
-| typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (`[default.extend-words]`, `[default.extend-identifiers]`, `[files] extend-exclude`), or `# typos: ignore` or `// typos: ignore` at the end of the line |
+| typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (or `typos.toml`, `.typos.toml`), which typos layers under the fleet config: `[default.extend-words]` for the repository's vocabulary, `[files] extend-exclude` for fixture paths spelled wrong on purpose, `[default.extend-identifiers]` for one identifier; or `# typos: ignore` or `// typos: ignore` at the end of the line for a one-off |
 | zizmor | zizmor | a high finding | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it; a `rules.<rule>.ignore` entry naming the file in the repo-owned `.github/zizmor.yml` |
 | knip | knip (bun or node repos with a package.json to install from; `npm ci` also needs package-lock.json or npm-shrinkwrap.json, and a repo without them stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
-| semgrep | semgrep (public repos) | an ERROR finding, or a scan that did not complete (its exit status is named) | a `// nosemgrep: rule-id` comment on the finding's line or the line above it; the registry's mutable-action-tag rule is excluded from the scan, as zizmor's `unpinned-uses` owns action pinning (one tool per finding class) |
+| semgrep | semgrep (public repos) | an ERROR finding, or a scan that did not complete (its exit status is named) | a `// nosemgrep: rule-id` comment (`# nosemgrep: rule-id` in YAML) on the finding's line or the line above it, with the reason beside it |
 | dependency-review | dependency-review | a vulnerable dependency at or above low | none: upgrade or drop the dependency |
 | Trivy | trivy (every event but the schedule; `trivy-nightly` on the schedule reports without blocking) | a CRITICAL vulnerability with a fix available, or any CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
 | CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |
 
+- What the fleet configs settle before a repository's bypass applies:
+  - typos accepts `unparseable` everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
+  - semgrep excludes `mutable-action-tag` permanently: zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
+  - semgrep excludes `secrets-inherit` until the fleet cutover: managed repositories still run the old rendered ci.yml and release.yml, whose `secrets: inherit` lines carry no marker. The writer's ci.yml marks each of its three with its reason (the called workflows are the repository's own), so the exclusion is lifted once the writer has replaced them.
+  - WARNING and INFO findings (`detect-non-literal-regexp` among them) reach code scanning without blocking; what to mark there is the repository's own call.
 - Enforced by: review of the diff that carries the bypass; the sync overwrites a managed file, so a bypass in one is lost on the next sync PR.

@@ -16,7 +16,7 @@
     ".github/settings.yml": {"class": "starter"},
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "124f1ba526667d01b455ced947ae3265e8901bdc0ddd7d644b95c89dc0a810a7"},
     ".github/workflows/checks.yml": {"class": "starter"},
-    ".github/workflows/ci.yml": {"class": "managed", "hash": "08e26f36de6a3faba6778d805f046e4752b08d2f0da2ed19877966cca318a462"},
+    ".github/workflows/ci.yml": {"class": "managed", "hash": "60bad5758383817ad717e2573974fa05e93f93acf101c7899464e9043f53bbae"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".github/workflows/update-release-pr.yml": {"class": "starter"},

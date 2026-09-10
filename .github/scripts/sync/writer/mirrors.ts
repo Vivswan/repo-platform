@@ -90,6 +90,8 @@ export function expandPattern(root: string, pattern: string): string[] {
     const dir = join(root, prefix);
     if (lstatOrNull(dir)?.isDirectory() !== true) return;
     const final = index === segments.length - 1;
+    // A mirror glob segment from the repository's .repo-platform.yml, escaped.
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     const re = new RegExp(`^${segment.split("*").map(escapeRe).join("[^/]*")}$`);
     for (const name of readdirSync(dir).sort()) {
       if (!re.test(name)) continue;
