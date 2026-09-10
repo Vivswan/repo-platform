@@ -260,7 +260,7 @@ describe("the action's reporting script", () => {
   const notJudged = (reason: string) =>
     `#### Integrity\n\nNot judged: ${reason}. See the [run log](${RUN_URL}). This FAILS the check.`;
   const findingsOf = (findings: string) =>
-    `#### Integrity\n\n${findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+    `#### Integrity\n\n${findings}\nManaged content changed outside a sync. Restore the file from git history, or re-run the sync, which replaces platform files whole. This FAILS the check.`;
   const FRESH = "#### Freshness\n\nUp to date with the build branch.";
   const behind = (distance: string) =>
     `#### Freshness\n\nThis repository is behind the build branch${distance}. The next sync PR updates the managed files; nothing to do here.`;

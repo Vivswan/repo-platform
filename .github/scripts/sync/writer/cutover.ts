@@ -172,7 +172,7 @@ export function cutover(
   const check = parseRegistration(rendered);
   if ("errors" in check) {
     throw new Error(
-      `the derived ${REGISTRATION_PATH} is invalid:\n  - ${check.errors.join("\n  - ")}`,
+      `the ${REGISTRATION_PATH} derived from ${ANSWERS_FILE} is invalid:\n  - ${check.errors.join("\n  - ")}`,
     );
   }
   writeFile(target, REGISTRATION_PATH, Buffer.from(rendered));

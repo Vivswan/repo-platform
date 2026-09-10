@@ -318,6 +318,8 @@ class Delivery {
     );
   }
 
+  /** The target's own open PR from the automation branch. `--head` matches
+   *  the branch name in forks too, and a fork's PR is never the sync's. */
   openPr(): { number: string } | null {
     const list = this.run(
       [
@@ -331,15 +333,19 @@ class Delivery {
         "--state",
         "open",
         "--json",
-        "number",
-        "--jq",
-        ".[0].number // empty",
+        "number,isCrossRepository",
       ],
       "gh pr list",
     );
     if (list.exitCode !== 0) this.fileFailure("listing the sync pull request failed");
-    const number = list.stdout.trim();
-    return number === "" ? null : { number };
+    let listed: { number: number; isCrossRepository: boolean }[];
+    try {
+      listed = JSON.parse(list.stdout);
+    } catch {
+      this.fileFailure("listing the sync pull request failed");
+    }
+    const own = listed.find((pr) => !pr.isCrossRepository);
+    return own === undefined ? null : { number: String(own.number) };
   }
 
   /** Turns auto-merge off on the sync PR when it is on; a failed read or
@@ -491,6 +497,8 @@ class Delivery {
       number = created.stdout.trim().split("/").pop() ?? "";
       outcome = "opened";
     } else {
+      // The base follows the checkout: the default branch may have been
+      // renamed while the PR was open.
       const edited = this.run(
         [
           "gh",
@@ -499,6 +507,8 @@ class Delivery {
           existing.number,
           "-R",
           this.target,
+          "--base",
+          base,
           "--title",
           prTitle(this.build),
           "--body-file",

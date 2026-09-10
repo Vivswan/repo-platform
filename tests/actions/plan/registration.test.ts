@@ -123,6 +123,11 @@ describe("parseRegistration", () => {
       error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
     },
     {
+      reason: "a copyright holder with a double quote",
+      text: 'modules: []\nproject:\n  name: X\n  slug: x\n  description: d\n  copyright_holder: Acme "Labs"\n',
+      error: `${FILE}: project.copyright_holder: project.copyright_holder must not contain double quotes, backslashes, or control characters`,
+    },
+    {
       reason: "a description with a control character",
       text: 'modules: []\nproject:\n  name: X\n  slug: x\n  description: "bell\\u0007"\n',
       error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,

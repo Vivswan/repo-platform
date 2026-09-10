@@ -2,8 +2,9 @@
 // the three clean outcomes and the failure path each write their verdict,
 // the PR is armed only for a clean report on a non-manual run, an armed PR
 // is disarmed before the branch moves, an unchanged tree closes the PR it
-// makes obsolete, the failure issue carries the log tails, and nothing
-// ever reaches stdout or stderr.
+// makes obsolete, a fork's PR from a same-named branch is never taken for
+// the sync's, the failure issue carries the log tails, and nothing ever
+// reaches stdout or stderr.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -36,8 +37,9 @@ const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
 
 // git answers the tree, branch, lease, and push questions from STUB_*
-// knobs; gh answers the issue lookup, the PR lookup, the arm state, and
-// the create.
+// knobs; gh answers the issue lookup, the PR lookup (STUB_PR is the
+// target's own open PR, STUB_PR_LIST the whole listing), the arm state,
+// and the create.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
   'case "$*" in',
@@ -55,7 +57,7 @@ const GH_LINES = [
   '  "api user "*) echo token-bot ;;',
   '  *"/issues --method GET"*) printf "%s" "${STUB_ISSUE:-}" ;;',
   '  *"/issues --method POST"*|*"/issues/"*" --method PATCH"*) if [ "${STUB_ISSUE_FAIL:-}" = 1 ]; then echo "gh: Forbidden (HTTP 403)" >&2; exit 1; fi ;;',
-  '  "pr list "*) printf "%s" "${STUB_PR:-}" ;;',
+  '  "pr list "*) if [ -n "${STUB_PR_LIST:-}" ]; then printf "%s" "$STUB_PR_LIST"; elif [ -n "${STUB_PR:-}" ]; then printf \'[{"number":%s,"isCrossRepository":false}]\' "$STUB_PR"; else echo "[]"; fi ;;',
   '  "pr view "*) echo "${STUB_ARMED:-false}" ;;',
   `  "pr create "*) echo "${PR_URL}" ;;`,
   "esac",
@@ -179,6 +181,36 @@ describe("deliver.ts", () => {
     expect(result.log).toContain("closed the obsolete sync pull request #12");
   });
 
+  test("a fork's PR from a same-named branch is skipped: the target's own PR is the one closed", () => {
+    const list = JSON.stringify([
+      { number: 9, isCrossRepository: true },
+      { number: 12, isCrossRepository: false },
+    ]);
+    const result = run({ stub: { STUB_PR_LIST: list, STUB_ARMED: "true" } });
+    silent(result);
+    expect(result.verdict).toBe("unchanged");
+    expect(calls(result.gh, "pr", "list")[0]).toContain("number,isCrossRepository");
+    expect(calls(result.gh, "pr", "view")[0][3]).toBe("12");
+    expect(calls(result.gh, "pr", "close")[0][3]).toBe("12");
+    expect(result.sequence.some((line) => line.includes(" 9 "))).toBe(false);
+  });
+
+  test("a fork's PR alone is no sync PR: a change opens the target's own", () => {
+    const list = JSON.stringify([{ number: 9, isCrossRepository: true }]);
+    const result = run({ stub: { STUB_DIRTY: "1", STUB_PR_LIST: list } });
+    silent(result);
+    expect(result.verdict).toBe("opened");
+    expect(calls(result.gh, "pr", "edit")).toEqual([]);
+    expect(calls(result.gh, "pr", "view")).toEqual([]);
+  });
+
+  test("a listing gh returns unparsed files the failure instead of crashing", () => {
+    const result = run({ stub: { STUB_PR_LIST: "not json" } });
+    silent(result);
+    expect(result.verdict).toBe("failed");
+    expect(result.issueBody).toContain("listing the sync pull request failed");
+  });
+
   test("an unchanged tree closes an open PR that was never armed without a disarm call", () => {
     const result = run({ stub: { STUB_PR: "12" } });
     expect(result.verdict).toBe("unchanged");
@@ -228,7 +260,7 @@ describe("deliver.ts", () => {
     expect(body).toContain(REPORT.trimEnd());
   });
 
-  test("an existing armed PR is disarmed before the push, refreshed, and left disarmed when the report holds", () => {
+  test("an existing armed PR is disarmed before the push, refreshed onto the checkout's branch, and left disarmed when the report holds", () => {
     const result = run({
       hold: true,
       stub: {
@@ -247,7 +279,13 @@ describe("deliver.ts", () => {
     expect(calls(result.git, "push")[0]).toContain(
       "--force-with-lease=automation/repo-platform:0123456789012345678901234567890123456789",
     );
-    expect(calls(result.gh, "pr", "edit")[0].slice(3, 6)).toEqual(["12", "-R", TARGET]);
+    expect(calls(result.gh, "pr", "edit")[0].slice(3, 8)).toEqual([
+      "12",
+      "-R",
+      TARGET,
+      "--base",
+      "main",
+    ]);
     expect(result.gh.some((argv) => argv.includes("--auto"))).toBe(false);
     expect(result.log).toContain("holds the PR for review");
   });

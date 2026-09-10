@@ -51,7 +51,7 @@ switch (verdict.kind) {
     integrity = "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
     break;
   case "findings":
-    integrity = `#### Integrity\n\n${verdict.findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+    integrity = `#### Integrity\n\n${verdict.findings}\nManaged content changed outside a sync. Restore the file from git history, or re-run the sync, which replaces platform files whole. This FAILS the check.`;
     break;
   case "not-judged":
     integrity = `#### Integrity\n\nNot judged: ${verdict.reason}. See the [run log](${runUrl}). This FAILS the check.`;

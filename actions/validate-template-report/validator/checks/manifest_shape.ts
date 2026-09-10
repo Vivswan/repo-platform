@@ -3,7 +3,9 @@ import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { coveredPaths } from "../ownership.ts";
 
-const RECOVERY = "run a recovery sync (recover=recopy)";
+/** The one repair for a damaged managed file: the operator has no recovery mode. */
+export const RESYNC =
+  "re-run the sync (gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name>), which replaces platform files whole";
 
 /** The ownership manifest's shape and trust model. The manifest is itself
  *  a managed render, so clients carry it and the template repo must NOT
@@ -29,7 +31,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
       return [
         error(
           `${MANIFEST_NAME} is missing - every build ships it, so this is ` +
-            `deletion or damage; restore it from git history or ${RECOVERY}`,
+            `deletion or damage; restore it from git history or ${RESYNC}`,
         ),
       ];
     case "conflicted":
@@ -38,7 +40,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
       return [
         error(
           `${MANIFEST_NAME}: ${ctx.manifest.problem} - the file is managed; revert ` +
-            `the edit (git history has the stamped original) or ${RECOVERY}`,
+            `the edit (git history has the stamped original) or ${RESYNC}`,
         ),
       ];
     case "parsed":
@@ -85,7 +87,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
       error(
         `${MANIFEST_NAME}: its provenance stamp is null but the render ` +
           `records _commit ${answersCommit}, which the stamper always ` +
-          `writes - tampering or a failed stamp; revert the edit or ${RECOVERY}`,
+          `writes - tampering or a failed stamp; revert the edit or ${RESYNC}`,
       ),
     );
     absenceCaveat = "its provenance stamp is unusable (error above)";
@@ -95,7 +97,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
         `${MANIFEST_NAME}: its stamped provenance (self-entry commit ` +
           `'${manifestCommit}') does not match the recorded render ${answersCommit} - ` +
           "the stamper always writes the recorded value, so this is " +
-          `tampering or a failed stamp; revert the edit or ${RECOVERY}`,
+          `tampering or a failed stamp; revert the edit or ${RESYNC}`,
       ),
     );
     absenceCaveat = "its provenance stamp is unusable (error above)";
@@ -110,8 +112,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
         `ownership tables declare it ${declared} - a hand edit here would ` +
         "silently disable or skew byte parity, and sync baselines manifest " +
         "edits instead of healing them; revert the entry (git history has " +
-        `the stamped original) or ${RECOVERY}, ` +
-        "which re-renders the manifest without a merge",
+        `the stamped original) or ${RESYNC}`,
     );
   for (const { path, kind, begin, end } of ctx.ownership) {
     const entry = files[path];
@@ -123,7 +124,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
               `${MANIFEST_NAME} does not list '${path}', which ${declaredBy} - the ` +
                 `stamper writes every entry of its render (${answersCommit}), so ` +
                 "the entry was deleted by hand, and sync baselines manifest edits; " +
-                `revert it (git history has the stamped original) or ${RECOVERY}`,
+                `revert it (git history has the stamped original) or ${RESYNC}`,
             )
           : advisory(
               `${MANIFEST_NAME} does not list '${path}', which ${declaredBy} - ` +
@@ -177,7 +178,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
           `${MANIFEST_NAME}: entry '${rel}' should not exist for this render ` +
             "(its module is unselected or its render condition is off) - " +
             "manifest drift, which sync baselines rather than heals; revert " +
-            `the entry or ${RECOVERY}`,
+            `the entry or ${RESYNC}`,
         ),
       );
     }

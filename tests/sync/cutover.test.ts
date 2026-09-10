@@ -248,23 +248,33 @@ describe("cutover", () => {
     expect(() => cutover(target, CONFIG, REPOSITORY)).toThrow("mirrors");
   });
 
-  test("a derivation the registration schema refuses is an error, and the file is untouched", () => {
-    const target = seed({
-      ".repo-platform.yml": v1Text,
-      [ANSWERS_FILE]: answersText.replace("project_slug: demo", "project_slug: Not Kebab"),
-    });
-    expect(() => cutover(target, CONFIG, REPOSITORY)).toThrow("project.slug");
-    expect(readFileSync(join(target, ".repo-platform.yml"), "utf-8")).toBe(v1Text);
-  });
-
-  test("a repository name with nothing to slugify fails the schema check naming the field", () => {
-    const target = seed({
-      ".repo-platform.yml": v1Text,
-      [ANSWERS_FILE]: answersText.replace("project_slug: demo\n", ""),
-    });
-    expect(() => cutover(target, CONFIG, { owner: "Vivswan", name: "___" })).toThrow(
-      "project.slug",
-    );
+  // The old Copier questions accepted text the registration grammar refuses
+  // (a holder with a double quote breaks the quoted scalars the writer
+  // substitutes it into), so the refusal comes here, naming the field and
+  // the answers file, before any file is written.
+  test.each([
+    {
+      reason: "a slug that is not kebab-case",
+      answers: answersText.replace("project_slug: demo", "project_slug: Not Kebab"),
+      repository: REPOSITORY,
+      error: /is invalid[\s\S]*project\.slug/,
+    },
+    {
+      reason: "a copyright holder with a double quote",
+      answers: answersText.replace(/^copyright_holder: .*$/m, "copyright_holder: 'Acme \"Labs\"'"),
+      repository: REPOSITORY,
+      error:
+        /derived from \.github\/\.copier-answers\.yml is invalid[\s\S]*project\.copyright_holder must not contain double quotes/,
+    },
+    {
+      reason: "no recorded slug and a repository name with nothing to slugify",
+      answers: answersText.replace("project_slug: demo\n", ""),
+      repository: { owner: "Vivswan", name: "___" },
+      error: /is invalid[\s\S]*project\.slug/,
+    },
+  ])("$reason fails the schema check naming the field, and the file is untouched", (row) => {
+    const target = seed({ ".repo-platform.yml": v1Text, [ANSWERS_FILE]: row.answers });
+    expect(() => cutover(target, CONFIG, row.repository)).toThrow(row.error);
     expect(readFileSync(join(target, ".repo-platform.yml"), "utf-8")).toBe(v1Text);
   });
 });

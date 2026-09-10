@@ -105,8 +105,8 @@ describe("checkManifestParity", () => {
         message:
           ".github/repo-platform-manifest.json: entry 'docs/no-grammar.md' lacks the split grammar " +
           "field every render stamps - a hand edit, and sync baselines manifest edits instead of " +
-          "healing them; revert the entry (git history has the stamped original) or run a recovery " +
-          "sync (recover=recopy)",
+          "healing them; revert the entry (git history has the stamped original) or re-run the sync " +
+          "(gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name>), which replaces platform files whole",
       },
       {
         severity: "error",
@@ -136,12 +136,16 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          "docs/deleted.md: listed as managed in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
+          "docs/deleted.md: listed as managed in .github/repo-platform-manifest.json but missing from the repo" +
+          " - a managed file deleted outside a sync; restore it from git history or re-run the sync " +
+          "(gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name>), which replaces platform files whole",
       },
       {
         severity: "error",
         message:
-          ".github/workflows/gone-unstamped.yml: listed as managed in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
+          ".github/workflows/gone-unstamped.yml: listed as managed in .github/repo-platform-manifest.json but missing from the repo" +
+          " - a managed file deleted outside a sync; restore it from git history or re-run the sync " +
+          "(gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name>), which replaces platform files whole",
       },
       {
         severity: "error",
@@ -162,7 +166,9 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          "docs/link-gone.md: listed as link in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
+          "docs/link-gone.md: listed as link in .github/repo-platform-manifest.json but missing from the repo" +
+          " - a managed file deleted outside a sync; restore it from git history or re-run the sync " +
+          "(gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name>), which replaces platform files whole",
       },
     ]);
   });
