@@ -1,22 +1,28 @@
 # Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
 # pages-site action (actions/pages-site@build) from a mount list (the
-# contract: docs/pages.md). Per versioned mount: <mount>latest/ builds from
-# the default branch head, <mount><tag>/ from each served version tag
-# (newest vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot
-# build is skipped with a notice), and the mount root serves the newest
-# served version, or the default branch head while none serve. An
-# unversioned mount is one build of the default branch head. Command mounts
-# run the caller's build under the PAGES_* contract; vitepress mounts render
-# the caller's docs tree under the central fleet theme (docs/docs-site.md).
-# A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN variable
-# together; when set, the root moves from /<repo>/ to / and the artifact
-# carries CNAME. On scheduled runs with link_rot_label set, the assembled
+# contract: docs/pages.md). Two configurations. Registration-configured: a
+# caller passing no `mounts` has the config job run the plan action
+# (actions/plan@build, mode pages) over its registration, which yields the
+# mounts, setup, commands, output directory, site title, and link-rot label.
+# Caller-configured: a caller passing `mounts` sets the rest through the other
+# inputs, published unchanged after the setup grammar check (this repository's
+# own docs-site.yml: it has no registration). The config job stands alone so
+# the action's bun never reaches the PATH the caller's build commands run on.
+# Per versioned mount: <mount>latest/ builds from the default branch head,
+# <mount><tag>/ from each served version tag (newest vars.PAGES_MAX_VERSIONS
+# or 5; a tag that structurally cannot build is skipped with a notice), and
+# the mount root serves the newest served version, or the default branch head
+# while none serve. An unversioned mount is one build of the default branch
+# head. Command mounts run the caller's build under the PAGES_* contract;
+# vitepress mounts render the caller's docs tree under the central fleet theme
+# (docs/docs-site.md). A custom domain needs DNS + Pages settings + the
+# CUSTOM_DOMAIN variable together; when set, the root moves from /<repo>/ to /
+# and the artifact carries CNAME. On scheduled runs with a link-rot label, the
 # site's external links are checked after the deploy and findings ride the
-# fleet's tracking-issue stream (fuzz-issue@build) under that label.
-# Callers own `concurrency: pages`; this workflow declares none. The commit
-# built: the sha input when the caller passes one (the managed pages.yml
-# hands over the commit ci.yml's all-green gate judged), else a push builds
-# its own commit and every other event the default branch head.
+# fleet's tracking-issue stream (fuzz-issue@build) under that label. Callers
+# own `concurrency: pages`; this workflow declares none. The commit built: the
+# caller's sha input when passed (the judged commit), else a push's own
+# commit, else the default branch head.
 
 name: Reusable Pages
 
@@ -29,36 +35,37 @@ on:
         type: string
         default: ""
       mounts:
-        description: 'JSON mount list for the pages-site action: [{"path", "source": command|vitepress, "versioned"}]'
-        required: true
+        description: 'Caller-configured deploys only: the JSON mount list [{"path", "source": command|vitepress, "versioned"}]; empty resolves the whole configuration from the registration'
+        required: false
         type: string
+        default: ""
       setup:
-        description: Toolchain(s) installed on the build runner (comma-separated bun/node/deno/uv/rust, or none)
+        description: Caller-configured deploys only; toolchain(s) installed on the build runner (comma-separated bun/node/deno/uv/rust, or none)
         required: false
         type: string
         default: none
       install_command:
-        description: Dependency install command run before each command-mount build ("" skips)
+        description: Caller-configured deploys only; dependency install command run before each command-mount build ("" skips)
         required: false
         type: string
         default: ""
       build_command:
-        description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION/PAGES_TIER are exported (docs/pages.md)
+        description: Caller-configured deploys only; build command for command mounts (PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION/PAGES_TIER are exported, docs/pages.md)
         required: false
         type: string
         default: ""
       dist_dir:
-        description: Command-mount build output directory, relative to the repo root
+        description: Caller-configured deploys only; command-mount build output directory, relative to the repo root
         required: false
         type: string
         default: dist
       site_title:
-        description: Site title for vitepress mounts (empty = the repository name)
+        description: Caller-configured deploys only; site title for vitepress mounts (empty = the repository name)
         required: false
         type: string
         default: ""
       docs_dir:
-        description: The docs tree a vitepress mount renders
+        description: Caller-configured deploys only; the docs tree a vitepress mount renders
         required: false
         type: string
         default: docs
@@ -68,7 +75,7 @@ on:
         type: string
         default: ""
       link_rot_label:
-        description: Tracking label for the nightly external-link check ("" disables it)
+        description: Caller-configured deploys only; tracking label for the nightly external-link check ("" disables it)
         required: false
         type: string
         default: ""
@@ -77,7 +84,47 @@ permissions:
   contents: read
 
 jobs:
+  # The one owner of the deploy configuration: the plan resolves it from
+  # the registration, or publishes the caller's inputs when mounts is set.
+  # The commit it read is an output too: the deploy builds THAT commit, so
+  # a default branch moving between the two jobs cannot split them.
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.checkout.outputs.commit }}
+      mounts: ${{ steps.plan.outputs.mounts }}
+      setup: ${{ steps.plan.outputs.setup }}
+      install_command: ${{ steps.plan.outputs.install_command }}
+      build_command: ${{ steps.plan.outputs.build_command }}
+      dist_dir: ${{ steps.plan.outputs.dist_dir }}
+      site_title: ${{ steps.plan.outputs.site_title }}
+      docs_dir: ${{ steps.plan.outputs.docs_dir }}
+      link_rot_label: ${{ steps.plan.outputs.link_rot_label }}
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+        with:
+          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}
+          sparse-checkout: |
+            .repo-platform.yml
+            .github/.copier-answers.yml
+          sparse-checkout-cone-mode: false
+      - uses: Vivswan/repo-platform/actions/plan@build
+        id: plan
+        with:
+          mode: pages
+          mounts: ${{ inputs.mounts }}
+          setup: ${{ inputs.setup }}
+          install_command: ${{ inputs.install_command }}
+          build_command: ${{ inputs.build_command }}
+          dist_dir: ${{ inputs.dist_dir }}
+          site_title: ${{ inputs.site_title }}
+          docs_dir: ${{ inputs.docs_dir }}
+          link_rot_label: ${{ inputs.link_rot_label }}
+
   deploy:
+    needs: config
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment:
@@ -88,66 +135,42 @@ jobs:
       pages: write
       id-token: write
     steps:
-      # The setup grammar is validated here because the setup steps below
-      # consume it; the mount list, build command, dist dir, and docs dir
-      # are the pages-site action's inputs and it validates them itself.
-      - name: Validate inputs
-        env:
-          SETUP: ${{ inputs.setup }}
-        run: |
-          # $* joins the message pieces with a space even inside the IFS=',' loop.
-          fail() { local IFS=' '; echo "::error::$* Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1; }
-          case "$SETUP" in
-            ''|*[!a-z,]*|,*|*,|*,,*)
-              fail "invalid setup input '$SETUP': it must be a comma-separated list of bun/node/deno/uv/rust, or none" \
-                "(no spaces or empty tokens)." ;;
-          esac
-          seen=,
-          IFS=','
-          for tool in $SETUP; do
-            case "$tool" in
-              bun|node|deno|uv|rust|none) ;;
-              *)
-                fail "invalid setup token '$tool': setup selects the build toolchain(s)" \
-                  "and each token must be bun, node, deno, uv, rust, or none." ;;
-            esac
-            case "$seen" in
-              *",$tool,"*) fail "duplicate setup token '$tool'." ;;
-            esac
-            seen="$seen$tool,"
-          done
-          unset IFS
-          case ",$SETUP," in
-            *,none,*)
-              if [ "$SETUP" != "none" ]; then
-                fail "setup 'none' cannot be combined with toolchain tokens."
-              fi ;;
-          esac
-
       # One full checkout serves every tier: the action reads version tags
       # and per-ref trees from history (git archive), which needs
-      # fetch-depth 0. The caller's sha input wins (the judged commit);
-      # without one a push builds its own commit and schedule and dispatch
-      # pin to the default branch head.
+      # fetch-depth 0. The commit is the one the config job planned from.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}
+          ref: ${{ needs.config.outputs.sha }}
 
-      # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
-      # a hypothetical bunx) cannot false-positive a plain contains().
+      # One output per toolchain token, so each setup step below gates on a
+      # positive `== 'true'` (an absent output never passes as a match).
+      - name: Resolve the toolchain setup
+        id: tools
+        env:
+          SETUP: ${{ needs.config.outputs.setup }}
+        run: |
+          IFS=,
+          for tool in $SETUP; do
+            case "$tool" in
+              bun|node|deno|uv|rust|none) ;;
+              *) echo "::error::invalid setup token '$tool': each token must be bun, node, deno, uv, rust, or none"; exit 1 ;;
+            esac
+            echo "$tool=true" >> "$GITHUB_OUTPUT"
+          done
+
       # Every tier builds with the toolchain the checkout's version dotfile
       # pins (historical tags build with today's pin, deliberately - one
       # toolchain per run); without the dotfile the setup action's default
       # floats.
       - name: Setup bun
-        if: contains(format(',{0},', inputs.setup), ',bun,')
+        if: steps.tools.outputs.bun == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
 
       - name: Cache bun dependencies
-        if: contains(format(',{0},', inputs.setup), ',bun,')
+        if: steps.tools.outputs.bun == 'true'
         uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
@@ -160,20 +183,20 @@ jobs:
       # on, and when package.json declares a package manager it hard-fails
       # unless the lockfile sits at the workspace root.
       - name: Setup node
-        if: contains(format(',{0},', inputs.setup), ',node,')
+        if: steps.tools.outputs.node == 'true'
         uses: actions/setup-node@v7
         with:
           node-version-file: ${{ hashFiles('.node-version') != '' && '.node-version' || '' }}
           package-manager-cache: false
 
       - name: Setup deno
-        if: contains(format(',{0},', inputs.setup), ',deno,')
+        if: steps.tools.outputs.deno == 'true'
         uses: denoland/setup-deno@v2
         with:
           deno-version-file: ${{ hashFiles('.dvmrc') != '' && '.dvmrc' || '' }}
 
       - name: Setup uv
-        if: contains(format(',{0},', inputs.setup), ',uv,')
+        if: steps.tools.outputs.uv == 'true'
         uses: astral-sh/setup-uv@v10.0.1
 
       # Stable as the rustup default only: the action sets no override, so
@@ -183,11 +206,11 @@ jobs:
       # with the .crates metadata that lets cargo install recognise a
       # restored binary as its own instead of refusing to overwrite it.
       - name: Setup rust
-        if: contains(format(',{0},', inputs.setup), ',rust,')
+        if: steps.tools.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        if: contains(format(',{0},', inputs.setup), ',rust,')
+        if: steps.tools.outputs.rust == 'true'
         uses: actions/cache@v6
         with:
           path: |
@@ -203,12 +226,12 @@ jobs:
         id: site
         uses: Vivswan/repo-platform/actions/pages-site@build
         with:
-          mounts: ${{ inputs.mounts }}
-          docs-dir: ${{ inputs.docs_dir }}
-          site-title: ${{ inputs.site_title }}
-          install-command: ${{ inputs.install_command }}
-          build-command: ${{ inputs.build_command }}
-          dist-dir: ${{ inputs.dist_dir }}
+          mounts: ${{ needs.config.outputs.mounts }}
+          docs-dir: ${{ needs.config.outputs.docs_dir }}
+          site-title: ${{ needs.config.outputs.site_title }}
+          install-command: ${{ needs.config.outputs.install_command }}
+          build-command: ${{ needs.config.outputs.build_command }}
+          dist-dir: ${{ needs.config.outputs.dist_dir }}
           max-versions: ${{ vars.PAGES_MAX_VERSIONS || '5' }}
           custom-domain: ${{ inputs.custom_domain }}
 
@@ -229,8 +252,8 @@ jobs:
   link-rot:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: deploy
-    if: github.event_name == 'schedule' && inputs.link_rot_label != ''
+    needs: [config, deploy]
+    if: github.event_name == 'schedule' && needs.config.outputs.link_rot_label != ''
     permissions:
       contents: read
       issues: write
@@ -273,7 +296,7 @@ jobs:
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         with:
           mode: report
-          label: ${{ inputs.link_rot_label }}
+          label: ${{ needs.config.outputs.link_rot_label }}
           title: Docs site link rot
           artifacts-dir: ${{ steps.links.outputs.report-dir }}
           artifact-name: link-rot-${{ github.run_attempt }}
@@ -288,5 +311,5 @@ jobs:
         uses: Vivswan/repo-platform/actions/fuzz-issue@build
         with:
           mode: resolve
-          label: ${{ inputs.link_rot_label }}
+          label: ${{ needs.config.outputs.link_rot_label }}
           stream: generic

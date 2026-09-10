@@ -12,8 +12,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { readModules } from "../../../actions/plan/registration.ts";
 import { env, error, hideDetails, requireEnv } from "../shared/gha.ts";
-import { filterModules, readModuleChoices, readModules } from "./modules.ts";
+import { filterModules, readModuleChoices } from "./modules.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const display = env("TARGET_DISPLAY");

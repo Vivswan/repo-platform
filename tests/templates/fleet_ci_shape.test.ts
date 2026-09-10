@@ -24,12 +24,14 @@ interface Step {
   run?: string;
   if?: string;
   id?: string;
-  with?: Record<string, string | number>;
+  with?: Record<string, string | number | boolean>;
   env?: Record<string, string>;
   "continue-on-error"?: boolean;
 }
 interface Job {
   if?: string;
+  needs?: string[];
+  outputs?: Record<string, string>;
   uses?: string;
   permissions?: Record<string, string>;
   steps?: Step[];
@@ -38,9 +40,68 @@ interface Job {
 }
 
 const source = readFileSync(join(import.meta.dir, "../../.github/workflows/fleet-ci.yml"), "utf8");
-const fleetCi = parseYaml(source) as { jobs: Record<string, Job> };
+const fleetCi = parseYaml(source) as {
+  on: {
+    workflow_call: {
+      inputs: Record<string, { required?: boolean }>;
+      outputs: Record<string, { value: string }>;
+    };
+  };
+  jobs: Record<string, Job>;
+};
 
 describe("fleet-ci.yml", () => {
+  // The plan job is the one read of the registration: everything a call
+  // used to pass as inputs is resolved there, so it runs first and every
+  // other job keys on its outputs (a job reading inputs.* would silently
+  // read the ignored legacy defaults).
+  const PLAN_OUTPUTS = ["modules", "private", "skills-dir", "codeql-languages", "tracking-labels"];
+
+  test("plan is the first job: a sparse checkout of the registration files, then the plan action at @build", () => {
+    const [first, ...rest] = Object.keys(fleetCi.jobs);
+    expect(first).toBe("plan");
+    expect(rest.length).toBeGreaterThan(0);
+    const job = fleetCi.jobs.plan;
+    expect(job?.if).toBeUndefined();
+    const steps = job?.steps ?? [];
+    expect(steps.map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/plan@build"),
+    ]);
+    expect(steps[0]?.with).toEqual({
+      "sparse-checkout": ".repo-platform.yml\n.github/.copier-answers.yml\n",
+      "sparse-checkout-cone-mode": false,
+    });
+    expect(steps[1]?.id).toBe("plan");
+    expect(steps[1]?.with).toEqual({ private: "${{ github.event.repository.private }}" });
+    expect(steps[1]?.env).toEqual({ GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" });
+    expect(job?.outputs).toEqual(
+      Object.fromEntries(PLAN_OUTPUTS.map((name) => [name, `\${{ steps.plan.outputs.${name} }}`])),
+    );
+  });
+
+  test("every other job needs plan and reads no input", () => {
+    for (const [name, job] of Object.entries(fleetCi.jobs)) {
+      if (name === "plan") continue;
+      expect([name, job.needs]).toEqual([name, ["plan"]]);
+    }
+    const jobsText = source.slice(source.indexOf("\njobs:"));
+    expect(jobsText).not.toContain("inputs.");
+  });
+
+  test("the call declares the plan's modules and tracking-labels as outputs; every input is optional", () => {
+    const { inputs, outputs } = fleetCi.on.workflow_call;
+    expect(outputs).toEqual({
+      "modules": expect.objectContaining({ value: "${{ jobs.plan.outputs.modules }}" }),
+      "tracking-labels": expect.objectContaining({
+        value: "${{ jobs.plan.outputs.tracking-labels }}",
+      }),
+    });
+    for (const [name, input] of Object.entries(inputs)) {
+      expect([name, input.required]).toEqual([name, false]);
+    }
+  });
+
   test("validate-template is a thin caller of the report action at @build", () => {
     const job = fleetCi.jobs["validate-template"];
     const steps = job?.steps ?? [];
@@ -245,7 +306,9 @@ describe("fleet-ci.yml", () => {
 
   test("dependency-review is public-PR-only and calls the wrapper at @build", () => {
     const job = fleetCi.jobs["dependency-review"];
-    expect(job?.if).toBe("${{ !inputs.private && github.event_name == 'pull_request' }}");
+    expect(job?.if).toBe(
+      "${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}",
+    );
     expect((job?.steps ?? []).map((step) => step.uses ?? "")).toContainEqual(
       expect.stringContaining("repo-platform/actions/dependency-review@build"),
     );
@@ -253,11 +316,11 @@ describe("fleet-ci.yml", () => {
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {
     const GUARDS = {
-      "validate-skills": "contains(fromJSON(inputs.modules), 'skills')",
+      "validate-skills": "contains(fromJSON(needs.plan.outputs.modules), 'skills')",
       "release-freshness":
-        "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
+        "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
       "release-health":
-        "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
+        "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
     };
     for (const [job, guard] of Object.entries(GUARDS)) {
       expect(fleetCi.jobs[job]?.if).toBe(guard);
@@ -269,7 +332,7 @@ describe("fleet-ci.yml", () => {
     const action = steps.find((step) =>
       (step.uses ?? "").includes("repo-platform/actions/validate-skills@build"),
     );
-    expect(action?.with?.["skills-dir"]).toBe("${{ inputs.skills-dir }}");
+    expect(action?.with?.["skills-dir"]).toBe("${{ needs.plan.outputs.skills-dir }}");
   });
 
   test("release-health calls its action at @build in pull-request mode, labels forwarded", () => {
@@ -278,16 +341,18 @@ describe("fleet-ci.yml", () => {
       (step.uses ?? "").includes("repo-platform/actions/release-health@build"),
     );
     expect(action?.with?.mode).toBe("pull-request");
-    expect(action?.with?.["tracking-labels"]).toBe("${{ inputs.tracking-labels }}");
+    expect(action?.with?.["tracking-labels"]).toBe("${{ needs.plan.outputs.tracking-labels }}");
   });
 
-  test("codeql is a matrix over the codeql-languages input, skipped when empty", () => {
+  test("codeql is a matrix over the plan's codeql-languages output, skipped when empty", () => {
     const job = fleetCi.jobs.codeql;
-    expect(job?.if).toContain("inputs.codeql-languages != '[]'");
+    expect(job?.if).toContain("needs.plan.outputs.codeql-languages != '[]'");
     expect(job?.uses).toBe("./.github/workflows/reusable-codeql.yml");
     // The matrix and the forwarding are the wiring the test name claims:
     // either expression breaking would silently scan nothing.
-    expect(job?.strategy?.matrix?.language).toBe("${{ fromJSON(inputs.codeql-languages) }}");
+    expect(job?.strategy?.matrix?.language).toBe(
+      "${{ fromJSON(needs.plan.outputs.codeql-languages) }}",
+    );
     expect(job?.with?.language).toBe("${{ matrix.language }}");
     expect(job?.permissions?.["security-events"]).toBe("write");
   });

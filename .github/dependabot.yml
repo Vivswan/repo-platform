@@ -21,6 +21,7 @@ updates:
       - "/actions/fuzz-issue"
       - "/actions/module-render"
       - "/actions/pages-site"
+      - "/actions/plan"
       - "/actions/release-health"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
@@ -125,6 +126,19 @@ updates:
   # plugin, mermaid, linkinator, vue) and its dev-only typing manifest.
   - package-ecosystem: "bun"
     directory: "/actions/pages-site"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # The plan action: its yaml and zod runtime dependencies plus its dev-only
+  # typing manifest. It commits bun.lock, so the bun ecosystem keeps both
+  # manifest and lockfile current.
+  - package-ecosystem: "bun"
+    directory: "/actions/plan"
     schedule:
       interval: "monthly"
     cooldown:

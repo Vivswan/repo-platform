@@ -1,0 +1,86 @@
+# The fleet's release publish, called by every managed ci.yml after
+# fleet-release.yml cut the draft and the repository's own update-release
+# hook ran: attests the draft's assets (public repositories only: the
+# attestation needs a public repository, so non-public releases publish
+# unattested) and flips the release live. Gates are runtime on purpose:
+# the assets are only knowable at run time.
+
+name: Fleet Release Publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The draft release's tag, as fleet-release.yml reported it.
+        required: true
+        type: string
+    secrets:
+      REPO_PLATFORM_TOKEN:
+        description: The fleet PAT; the publish falls back to github.token without it.
+        required: false
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+      # One Sigstore bundle covering every asset, under the attest action's
+      # own file name.
+      BUNDLE_NAME: attestation.json
+    steps:
+      # A stale bundle from a prior attempt is deleted from the RELEASE, so
+      # no later skip path can publish it.
+      - name: Inspect the draft release's assets
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          present=false
+          while IFS= read -r name; do
+            case "$name" in
+              "$BUNDLE_NAME") gh release delete-asset "$TAG" "$name" --yes ;;
+              ?*) present=true ;;
+            esac
+          done <<< "$names"
+          if [ "$present" = true ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the release has no assets; nothing to attest"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the assets for attestation
+        id: download
+        if: >-
+          steps.assets.outputs.present == 'true'
+          && github.event.repository.visibility == 'public'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          gh release download "$TAG" --dir assets
+      - uses: actions/attest-build-provenance@v4
+        id: attest
+        if: steps.download.outcome == 'success'
+        with:
+          subject-path: assets/*
+      # bundle-path is empty when download/attest skipped: a no-asset or
+      # non-public release publishes without a bundle.
+      - name: Attach the attestation bundle to the draft
+        if: steps.attest.outputs.bundle-path != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" "$BUNDLE_NAME"
+          gh release upload "$TAG" "$BUNDLE_NAME" --clobber
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+        run: gh release edit "$TAG" --draft=false

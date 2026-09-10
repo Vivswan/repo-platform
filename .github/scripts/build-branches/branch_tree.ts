@@ -35,6 +35,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { build, writeOutput } from "../../../scripts/compose/compose.ts";
+import { reservedLabelNames } from "../../../scripts/generate/copier_questions.ts";
+import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
 import { MIGRATIONS_DIR, RUNG_FILE_RE } from "../sync/run_migrations.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -58,18 +60,30 @@ export function canonicalize(path: string): string {
 /** The fleet-facing reusable workflows the build branch must carry - every
  *  reusable workflow a RENDERED workflow calls `@build`: the rendered
  *  ci.yml calls fleet-ci.yml (whose codeql job calls ./reusable-codeql.yml,
- *  resolving at fleet-ci's own ref - this branch), pages.yml and
- *  docs-site.yml call reusable-pages.yml, and auto-assign.yml calls the
- *  reusable-auto-assign pair. A reusable-workflow `uses:` fetches the FILE
- *  at the named ref, so a build branch missing one 404s every fleet run
- *  that calls it. */
+ *  resolving at fleet-ci's own ref - this branch) and the release pair,
+ *  pages.yml and docs-site.yml call reusable-pages.yml, and auto-assign.yml
+ *  calls the reusable-auto-assign pair. A reusable-workflow `uses:` fetches
+ *  the FILE at the named ref, so a build branch missing one 404s every
+ *  fleet run that calls it. */
 export const FLEET_WORKFLOWS = [
   "fleet-ci.yml",
+  "fleet-release-publish.yml",
+  "fleet-release.yml",
   "reusable-auto-assign-alerts.yml",
   "reusable-auto-assign.yml",
   "reusable-codeql.yml",
   "reusable-pages.yml",
 ];
+
+/** Where the module manifests land on the branch: modules/<name>.yml, one
+ *  byte copy per module, read at run time by the plan action beside them. */
+export const MODULE_DATA_DIR = "modules";
+
+/** The labels the template manages (every settings layer's roster), which
+ *  no tracking stream may reuse: copier.yml's validators carry the same
+ *  list inline; the plan action reads this file to refuse a registration
+ *  label the same way. */
+export const RESERVED_LABELS_FILE = "reserved-labels.yml";
 
 const README = `\
 # repo-platform build branch
@@ -83,7 +97,10 @@ sources in \`actions/\`.
 branch ships only green main commits). It carries the composed copier tree
 under \`template/\`, the composite actions under \`actions/\`, the
 fleet-facing reusable workflows (${FLEET_WORKFLOWS.join(", ")})
-under \`.github/workflows/\`, and the migration ladder's rungs under
+under \`.github/workflows/\`, the module manifests under \`modules/\` (one
+\`<name>.yml\` per module) with \`reserved-labels.yml\` beside them (the
+data the plan action resolves each repository's CI from at run time), and
+the migration ladder's rungs under
 \`migrations/\` (self-contained scripts; the sync runs the ones that
 appeared after a repository's recorded build) - every path is
 extraction-safe (no jinja-expression filenames), so
@@ -262,17 +279,37 @@ export function copyMigrations(repoRoot: string, dest: string): void {
   }
 }
 
+/** Copies every module manifest verbatim to `<dest>/modules/<name>.yml`.
+ *  loadManifests validates the set (MODULE_ORDER <-> templates/ integrity,
+ *  the schema), so a broken manifest fails the assembly here rather than
+ *  every fleet plan step at run time. */
+export function copyModuleData(repoRoot: string, dest: string): void {
+  const outDir = join(dest, MODULE_DATA_DIR);
+  mkdirSync(outDir, { recursive: true });
+  const templatesDir = join(repoRoot, "templates");
+  const manifests = loadManifests(templatesDir);
+  for (const manifest of manifests) {
+    writeFileSync(
+      join(outDir, `${manifest.module}.yml`),
+      readFileSync(join(templatesDir, manifest.module, "module.yml")),
+    );
+  }
+  const reserved = reservedLabelNames(manifests).map((name) => `- ${JSON.stringify(name)}\n`);
+  writeFileSync(join(dest, RESERVED_LABELS_FILE), reserved.join(""));
+}
+
 /** Assemble the whole branch tree at `dest` (which must exist and be
  *  empty): the composed template/, actions/ (the stamp hook rides inside
- *  actions/shared/), the fleet-facing reusable workflows, the migration
- *  rungs, copier.yml, and the README. Exported for the extraction-safety
- *  regression, which asserts no assembled path carries a jinja
- *  expression. */
+ *  actions/shared/), the fleet-facing reusable workflows, the module
+ *  manifests, the migration rungs, copier.yml, and the README. Exported
+ *  for the extraction-safety regression, which asserts no assembled path
+ *  carries a jinja expression. */
 export function assembleBranchTree(dest: string): void {
   const composed = build();
   writeOutput(composed, join(dest, "template"));
   copyActions(REPO_ROOT, dest);
   copyFleetWorkflows(REPO_ROOT, dest);
+  copyModuleData(REPO_ROOT, dest);
   copyMigrations(REPO_ROOT, dest);
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
   writeFileSync(join(dest, "README.md"), README);

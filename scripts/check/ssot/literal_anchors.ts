@@ -442,7 +442,7 @@ export const literalAnchorRules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const fleetCi = ".github/workflows/fleet-ci.yml";
       const releaseGateIf =
-        "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')";
+        "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')";
       const fleetJobs = ciJobs(asRecord(parseYaml(read(fleetCi)), fleetCi), fleetCi);
       for (const job of ["release-freshness", "release-health"]) {
         const actual = String(asRecord(fleetJobs[job] ?? {}, job).if ?? "").trim();
