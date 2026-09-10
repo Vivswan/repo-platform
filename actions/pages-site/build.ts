@@ -47,6 +47,7 @@ import {
   reservedRootEntries,
   type Tier,
   urlBase,
+  type VitepressMount,
   validateRelPath,
   versionLinks,
   versionsIndex,
@@ -333,15 +334,23 @@ function stageIncludes(
   tier: Tier,
   root: string,
   srcDir: string,
-  includes: IncludeRoot[],
+  includes: readonly IncludeRoot[],
 ): IncludeRoot[] {
   const staged: IncludeRoot[] = [];
   for (const include of includes) {
+    // The tag's own tree decides first: a tag from before the root existed
+    // is skipped whatever its docs tree carries at the mount's name.
+    if (tier.ref !== "HEAD" && !treeHas(cfg, tier.ref, include.path)) {
+      console.log(
+        `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
+      );
+      continue;
+    }
     const target = join(srcDir, include.mount);
     if (existsSync(target)) {
       throw new Error(
         `the include root '${include.path}' mounts at '${include.mount}/', which ${cfg.docsDir}/ ` +
-          "already carries - two sources would claim one URL; mount the root under another name",
+          `already carries at ${tier.ref} - two sources would claim one URL; mount the root under another name`,
       );
     }
     if (tier.ref === "HEAD") {
@@ -355,12 +364,6 @@ function stageIncludes(
       mkdirSync(dirname(target), { recursive: true });
       cpSync(tree, target, { recursive: true });
     } else {
-      if (!treeHas(cfg, tier.ref, include.path)) {
-        console.log(
-          `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
-        );
-        continue;
-      }
       const staging = join(root, ".src");
       extractTree(cfg, tier.ref, staging, include.path);
       mkdirSync(dirname(target), { recursive: true });
@@ -406,7 +409,7 @@ function buildVitepressTier(
   cfg: Config,
   tier: Tier,
   versions: { label: string; link: string }[],
-  includes: IncludeRoot[],
+  includes: readonly IncludeRoot[],
   opts: { base?: string } = {},
 ): { dist: string; buildDir: string } {
   const fromWorkspace = tier.ref === "HEAD";
@@ -578,7 +581,7 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): TierScope[] {
     const { dist, buildDir } =
       mount.source === "command"
         ? buildCommandTier(cfg, tier)
-        : buildVitepressTier(cfg, tier, links, mount.include ?? []);
+        : buildVitepressTier(cfg, tier, links, mount.include);
     copyInto(
       dist,
       join(cfg.site, tier.rel),
@@ -623,7 +626,8 @@ async function main(): Promise<void> {
     const includes =
       mountsJson === ""
         ? []
-        : (parseMounts(mountsJson).find((m) => m.source === "vitepress")?.include ?? []);
+        : (parseMounts(mountsJson).find((m): m is VitepressMount => m.source === "vitepress")
+            ?.include ?? []);
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
     const { dist } = buildVitepressTier(cfg, tier, [], includes, { base: "/" });
     const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], cfg.scratch);

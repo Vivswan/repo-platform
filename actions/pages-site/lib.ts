@@ -17,11 +17,6 @@
 
 import { isLocaleDir } from "./.vitepress/derive.ts";
 
-/** What builds a mount's content: the caller's own build command (the pages
- *  module) or the bundled VitePress build over the caller's docs tree (the
- *  docs-site module). */
-export type MountSource = "command" | "vitepress";
-
 /** Another root of the repository rendered inside a vitepress mount
  *  (docs/docs-site.md, "Other roots on the site"): the tree at `path` is
  *  staged under `<mount>/` in the docs tree, and in each of its child
@@ -35,15 +30,25 @@ export interface IncludeRoot {
   page: string;
 }
 
-export interface Mount {
+interface MountBase {
   /** Site-root-relative URL prefix: "/" or "/<segment>/..." with plain
    *  segments. */
   path: string;
-  source: MountSource;
   versioned: boolean;
-  /** Vitepress mounts only; absent means the docs tree alone. */
-  include?: IncludeRoot[];
 }
+
+export interface CommandMount extends MountBase {
+  source: "command";
+}
+
+export interface VitepressMount extends MountBase {
+  source: "vitepress";
+  /** The other roots rendered inside the docs tree; [] for the docs tree
+   *  alone. Only a vitepress mount can carry them, by type. */
+  include: readonly IncludeRoot[];
+}
+
+export type Mount = CommandMount | VitepressMount;
 
 /** One build of one ref, landing at one artifact path. */
 export interface Tier {
@@ -166,13 +171,20 @@ export function parseMounts(json: string): Mount[] {
     if (typeof versioned !== "boolean") {
       throw new Error(`mounts[${index}].versioned must be a boolean`);
     }
-    if (include === undefined) return { path, source, versioned };
-    if (source !== "vitepress") {
-      throw new Error(
-        `mounts[${index}].include is set on a command mount - only a vitepress mount renders other roots of the repository`,
-      );
+    if (source === "command") {
+      if (include !== undefined) {
+        throw new Error(
+          `mounts[${index}].include is set on a command mount - only a vitepress mount renders other roots of the repository`,
+        );
+      }
+      return { path, source, versioned };
     }
-    return { path, source, versioned, include: parseIncludes(include, `mounts[${index}].include`) };
+    return {
+      path,
+      source,
+      versioned,
+      include: include === undefined ? [] : parseIncludes(include, `mounts[${index}].include`),
+    };
   });
   for (const source of ["command", "vitepress"] as const) {
     if (mounts.filter((m) => m.source === source).length > 1) {
