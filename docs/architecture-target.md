@@ -48,6 +48,8 @@ every job after all-green also requires needs.all-green.result == 'success' and 
   checks:            uses ./.github/workflows/checks.yml         repo hook, static; skipped on the schedule
   ci:                uses fleet-ci.yml@build                     the plan job reads .repo-platform.yml and outputs modules,
                                                                  tracking-labels, ...; every platform check keys its `if` on them
+  nightly:           uses fleet-nightly.yml@build                if schedule; permissions contents read / issues write / security-events write;
+                                                                 outside all-green
   all-green:         needs [checks, ci], if always()             THE gate: the ruleset's required check
   post-green:        uses ./.github/workflows/post-green.yml     repo hook, static; needs [all-green]
   release:           needs [ci, all-green, post-green]           if post-green succeeded and contains(needs.ci.outputs.modules, '"release-please"')

@@ -280,9 +280,10 @@ export function weekly(now: Date): boolean {
 }
 
 /** The fleet-wide nightly security stream's label (docs/security-scans.md):
- *  fleet-ci files every repository's Trivy findings under it, so it joins
- *  the tracking labels release-health blocks on without a module or an
- *  answer; the settings baseline declares it on every repository. */
+ *  fleet-nightly.yml's trivy-nightly job files every repository's Trivy
+ *  findings under it, so it joins the tracking labels release-health
+ *  blocks on without a module or an answer; the settings baseline
+ *  declares it on every repository. */
 export const SECURITY_LABEL = "security-nightly";
 
 /** CodeQL is off for a private repository (personal-account code scanning

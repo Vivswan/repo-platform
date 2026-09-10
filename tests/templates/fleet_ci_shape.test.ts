@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { callerCeilingMismatches } from "../../scripts/check/ssot/all_green.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -488,31 +489,42 @@ describe("fleet-ci.yml", () => {
     expect(trivy?.steps?.[1]?.with).toBeUndefined();
   });
 
-  // The skeleton's `ci` caller grants exactly these; GitHub rejects the
-  // whole call when any nested job asks for a scope above them, before
-  // the job's condition runs, so no job here may (the nightly scan's
-  // issues: write is why fleet-nightly.yml exists).
-  const CI_CALLER_CEILING: Record<string, string> = {
-    "contents": "read",
-    "pull-requests": "write",
-    "security-events": "write",
-    "actions": "read",
-    "issues": "read",
-    "vulnerability-alerts": "read",
+  // The grant the skeleton's `ci` caller carried before the nightly scan
+  // split out; GitHub rejects the whole call when any nested job asks for
+  // a scope above the caller's, before the job's condition runs, so no
+  // job here may (the nightly scan's issues: write is why
+  // fleet-nightly.yml exists). The check-ssot rule judges the live
+  // skeleton; this pins the old grant so a widened caller cannot let a
+  // job's grant grow unnoticed.
+  const CI_CALLER = {
+    rel: "ci.yml",
+    job: "ci",
+    permissions: {
+      "contents": "read",
+      "pull-requests": "write",
+      "security-events": "write",
+      "actions": "read",
+      "issues": "read",
+      "vulnerability-alerts": "read",
+    },
   };
+  const called = (text: string) => ({ rel: "fleet-ci.yml", text });
 
   test("no job's permissions exceed the skeleton ci caller's ceiling", () => {
-    const rank = { read: 1, write: 2 } as Record<string, number>;
-    for (const [name, job] of Object.entries(fleetCi.jobs)) {
-      for (const [scope, level] of Object.entries(job.permissions ?? {})) {
-        const ceiling = CI_CALLER_CEILING[scope];
-        expect([name, scope, ceiling !== undefined && rank[level] <= rank[ceiling]]).toEqual([
-          name,
-          scope,
-          true,
-        ]);
-      }
-    }
+    expect(callerCeilingMismatches(called(source), CI_CALLER)).toEqual([]);
+  });
+
+  test("the ceiling check forces: a job over it is named", () => {
+    const text = `${source}
+  over-ceiling:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+`;
+    const got = callerCeilingMismatches(called(text), CI_CALLER);
+    expect(got.map((m) => [m.file, m.got])).toEqual([
+      ["fleet-ci.yml job 'over-ceiling'", "issues: write"],
+    ]);
   });
 
   test("nothing sleeps: the gate waits by failing fast", () => {
