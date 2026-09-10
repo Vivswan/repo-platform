@@ -430,32 +430,16 @@ export const literalAnchorRules: Rule[] = [
     },
   },
   {
-    // The release-freshness ancestor check exists twice: the shell-checked
-    // .github/scripts/ci/release_freshness.sh copy this repo lints, and the
-    // fleet-ci.yml job inlining the same logic (a reusable workflow runs in
-    // the CALLER's checkout, where this repo's scripts do not exist). Pin
-    // the core lines so a fix to one side cannot silently leave the other
-    // behind.
-    name: "release-freshness-parity",
+    // The release-PR predicates of fleet-ci.yml's two release gates,
+    // compared on the PARSED jobs (they share the same condition text, so
+    // a whole-file grep would stay green with one of them changed or
+    // deleted): a renamed release-please branch prefix would make the job
+    // skip and the gate stand down; a dropped module clause would run the
+    // release gates in repositories without release-please.
+    name: "release-gate-predicates",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const script = ".github/scripts/ci/release_freshness.sh";
       const fleetCi = ".github/workflows/fleet-ci.yml";
-      const pins: { line: string; files: string[] }[] = [
-        {
-          line: 'tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"',
-          files: [script, fleetCi],
-        },
-        {
-          line: 'if git merge-base --is-ancestor "$tip" HEAD; then',
-          files: [script, fleetCi],
-        },
-      ];
-      // The release-PR predicates, compared on the PARSED jobs (the two
-      // release gates share the same condition text, so a whole-file grep
-      // would stay green with one of them changed or deleted): a renamed
-      // release-please branch prefix or a dropped module clause would make
-      // the job skip and the gate silently stand down.
       const releaseGateIf =
         "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')";
       const fleetJobs = ciJobs(asRecord(parseYaml(read(fleetCi)), fleetCi), fleetCi);
@@ -467,22 +451,6 @@ export const literalAnchorRules: Rule[] = [
             expected: `the pinned release-PR condition ${releaseGateIf}`,
             got: actual === "" ? "no condition" : actual,
           });
-        }
-      }
-      for (const pin of pins) {
-        for (const rel of pin.files) {
-          // Whole-line (trimmed) equality: a decorated copy ("|| true") or
-          // a commented-out line must not satisfy the pin.
-          const hit = read(rel)
-            .split("\n")
-            .some((l) => l.trim() === pin.line);
-          if (!hit) {
-            mismatches.push({
-              file: rel,
-              expected: `the pinned release-freshness line ${JSON.stringify(pin.line)}`,
-              got: "missing - the twin copies drifted",
-            });
-          }
         }
       }
       return mismatches;

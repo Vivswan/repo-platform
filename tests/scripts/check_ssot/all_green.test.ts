@@ -4,11 +4,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import {
+  ALL_GREEN_ACTION,
   ALL_GREEN_ROSTER,
   allGreenGateMismatches,
+  bannedSubstitutions,
   CHECK_RUN_LOOKUP,
   declaredCheckName,
   expandCheckChain,
+  judgeRunBlock,
+  judgeSubstitutionMismatches,
   rosterMismatches,
 } from "../../../scripts/check/ssot/all_green.ts";
 import { templateCarries } from "../../../scripts/lib/ts_extract.ts";
@@ -325,5 +329,48 @@ jobs:
         ALL_GREEN_ROSTER,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the judge's substitution ban", () => {
+  // The ban's own controls: a regex regression that let a bracketed
+  // probe through, or refused the assignment shapes the judge is
+  // written in, would blind the rule silently.
+  test.each([
+    { line: 'if [ "$(probe)" -gt 0 ]; then', caught: true },
+    { line: 'if test "$(probe)" = x; then', caught: true },
+    { line: 'case "$(probe)" in', caught: true },
+    { line: 'x="$(probe)" trailing_command', caught: true },
+    { line: 'x="$(a)$(b)"', caught: true },
+    { line: 'count="$(jq length <<<"$x")"', caught: false },
+    { line: 'if ! parsed="$(jq -ce . <<<"$x")"; then', caught: false },
+    { line: 'x="$(probe)" || exit 1', caught: false },
+    // A `)"` inside the jq program is not the substitution's close.
+    { line: 'total="$(jq \'error("got \\(type)") end\' <<<"$NEEDS")"', caught: false },
+    { line: "n=$((count + 1))", caught: false },
+    { line: '# if [ "$(probe)" -gt 0 ]; then', caught: false },
+  ])("$line", ({ line, caught }) => {
+    expect(bannedSubstitutions(`echo first\n${line}\n`)).toEqual(caught ? [`2:${line}`] : []);
+  });
+
+  test("the live judge block is clean; a probe moved into a test bracket, a dropped errexit, or a renamed step goes red", () => {
+    const text = readFileSync(ALL_GREEN_ACTION, "utf-8");
+    expect(judgeSubstitutionMismatches(text)).toEqual([]);
+    const bracketed = text.replace(
+      'if [ "$total" -eq 0 ]; then',
+      'if [ "$(jq length <<<"$NEEDS")" -eq 0 ]; then',
+    );
+    expect(bracketed).not.toBe(text);
+    const moved = judgeSubstitutionMismatches(bracketed);
+    expect(moved).toHaveLength(1);
+    expect(moved[0].got).toEndWith(':if [ "$(jq length <<<"$NEEDS")" -eq 0 ]; then');
+    const unguarded = text.replace("        set -euo pipefail\n", "");
+    expect(judgeRunBlock(unguarded)).not.toContain("set -euo pipefail");
+    const dropped = judgeSubstitutionMismatches(unguarded);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].expected).toContain("set -euo pipefail");
+    expect(() =>
+      judgeSubstitutionMismatches(text.replace("Judge every needed result", "Judge")),
+    ).toThrow("anchor lost");
   });
 });

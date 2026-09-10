@@ -32,6 +32,79 @@ export function declaredCheckName(source: string): string {
   });
 }
 
+export const ALL_GREEN_ACTION = "actions/all-green/action.yml";
+const JUDGE_STEP = "Judge every needed result";
+
+/** The judge step's run block, off the parsed action: the one bash the
+ *  gate executes and the substitution ban audits. A renamed or reshaped
+ *  step throws anchor-lost rather than auditing nothing. */
+export function judgeRunBlock(actionText: string): string {
+  const action = asRecord(parseYaml(actionText), ALL_GREEN_ACTION);
+  const steps = asRecord(action.runs ?? {}, `${ALL_GREEN_ACTION} runs`).steps;
+  const judge = (Array.isArray(steps) ? steps : [])
+    .map((step) => asRecord(step, `${ALL_GREEN_ACTION} step`))
+    .find((step) => step.name === JUDGE_STEP);
+  if (judge === undefined || typeof judge.run !== "string") {
+    throw new Error(`${ALL_GREEN_ACTION}: no '${JUDGE_STEP}' step with a run block - anchor lost`);
+  }
+  return judge.run;
+}
+
+/** The lines of a bash script whose command substitution sits anywhere
+ *  but opening a plain assignment (`var="$(...)"`, or `if ! var="$(...)";
+ *  then`, where the status IS the tested thing), as `line:text`. Inside
+ *  [ ], [[ ]], test, or case words a substitution is errexit-exempt, so
+ *  a crashing probe reads as empty and the guard falls OPEN; `$((...))`
+ *  runs no command. Comment lines are skipped. */
+export function bannedSubstitutions(script: string): string[] {
+  const offenders: string[] = [];
+  script.split("\n").forEach((line, index) => {
+    if (/^[ \t]*#/.test(line)) return;
+    const count = line.replaceAll("$((", "").split("$(").length - 1;
+    if (count === 0) return;
+    let bad = count > 1 || !/^[ \t]*(if ! )?[A-Za-z_][A-Za-z0-9_]*="\$\(/.test(line);
+    const close = line.lastIndexOf(')"');
+    if (
+      close >= 0 &&
+      !/^( \|\| (return|exit) [1-9][0-9]*)?(; then)?$/.test(line.slice(close + 2))
+    ) {
+      bad = true;
+    }
+    if (bad) offenders.push(`${index + 1}:${line}`);
+  });
+  return offenders;
+}
+
+/** The judge block's errexit discipline: `set -euo pipefail` first (the
+ *  ban below assumes errexit), then no substitution outside a plain
+ *  assignment. Pure, for the forcing tests. */
+export function judgeSubstitutionMismatches(actionText: string): Mismatch[] {
+  const file = `${ALL_GREEN_ACTION} step '${JUDGE_STEP}'`;
+  const run = judgeRunBlock(actionText);
+  const mismatches: Mismatch[] = [];
+  const first = run
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "" && !line.startsWith("#"));
+  if (first !== "set -euo pipefail") {
+    mismatches.push({
+      file,
+      expected:
+        "`set -euo pipefail` as the first command (a crashed jq must fail the step, not read as empty)",
+      got: first ?? "an empty run block",
+    });
+  }
+  for (const offender of bannedSubstitutions(run)) {
+    mismatches.push({
+      file,
+      expected:
+        "command substitution only opening a plain assignment (errexit-exempt inside [ ], [[ ]], test, or case words, where a crashed jq reads as empty and the gate falls open)",
+      got: offender,
+    });
+  }
+  return mismatches;
+}
+
 /** Transitively expand a package.json script through its `bun run X` calls;
  *  returns the concatenated bodies and every script name reached. */
 export function expandCheckChain(
@@ -439,6 +512,12 @@ export const allGreenRules: Rule[] = [
     // This is where a deleted or un-needed gate goes loud.
     name: "all-green-roster",
     run: () => allGreenGateMismatches(repoCi(), ALL_GREEN_ROSTER),
+  },
+  {
+    // Every judge probe is a jq call under errexit; a substitution outside
+    // a plain assignment is where a crashed jq would read as empty.
+    name: "all-green-judge-substitutions",
+    run: () => judgeSubstitutionMismatches(read(ALL_GREEN_ACTION)),
   },
   {
     // fleet-ci.yml's jobs against FLEET_CI_ROSTER, both directions. Job-level

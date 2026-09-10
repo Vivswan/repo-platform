@@ -87,8 +87,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
       - name: Judge the gate scenarios through the real run block
-        run: .github/scripts/ci/verify_allgreen_judgment.sh
+        run: bun run test tests/actions/all_green_judgment.test.ts
 
   yamllint:
     runs-on: ubuntu-latest
