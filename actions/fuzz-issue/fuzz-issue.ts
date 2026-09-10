@@ -4,7 +4,9 @@
  * from failure reports laid out per docs/fuzzer.md ("The failure-report
  * contract (v1)"); the producer writes the replay command and this script
  * only assembles the issue. With ARTIFACTS_DIR empty the body is the
- * generic nightly-failure report the plain-CI starter uses.
+ * generic nightly-failure report the plain-CI starter uses. STREAM picks
+ * the wording: fuzz speaks of failure reports and crashing inputs, generic
+ * of reports only.
  *
  * MODE=report comments on the open labeled issue or creates it (one open
  * issue per label, owner assigned at creation; see assignOwner).
@@ -145,17 +147,62 @@ export function blockTitle(dir: string, report: string): string {
   return report ? basename(dir) : `${basename(dir)} (no report.md)`;
 }
 
+/** Which nightly stream an issue tracks; it picks the report body's and the
+ *  resolve comment's wording. The default must stay fuzz: fleet fuzzer
+ *  starters predate the input and pass nothing. */
+export type Stream = "fuzz" | "generic";
+
+/** The report body's nouns per stream: the fuzz stream reports crashes the
+ *  fuzzer wrote, the generic stream reports whatever the producer wrote. */
+const BODY_WORDS: Record<
+  Stream,
+  {
+    run: string;
+    report: string;
+    artifacts: string;
+    artifactsDetail: string;
+    noReport: string[];
+  }
+> = {
+  fuzz: {
+    run: "Nightly fuzz run",
+    report: "failure report",
+    artifacts: "failure artifacts",
+    artifactsDetail: " (crashing inputs, logs)",
+    noReport: [
+      "Nothing wrote a report: the failure may sit outside the fuzz step",
+      "(setup, cache, artifact upload), or the fuzzer died before it could",
+      "write one. See the run log.",
+    ],
+  },
+  generic: {
+    run: "Nightly run",
+    report: "report",
+    artifacts: "reports",
+    artifactsDetail: "",
+    noReport: [
+      "Nothing wrote a report: the failure may sit outside the reporting step",
+      "(setup, cache, artifact upload), or the producer died before it could",
+      "write one. See the run log.",
+    ],
+  },
+};
+
 /** Build the issue/comment body from every failure directory. */
-export function buildBody(dirs: string[], env: NodeJS.ProcessEnv, artifactName: string): string {
+export function buildBody(
+  dirs: string[],
+  env: NodeJS.ProcessEnv,
+  artifactName: string,
+  stream: Stream = "fuzz",
+): string {
+  const words = BODY_WORDS[stream];
   const date = new Date().toISOString().slice(0, 10);
   const url = runUrl(env);
   if (dirs.length === 0) {
     const parts = [
-      `Nightly fuzz run on ${date} failed with no failure report.`,
+      `${words.run} on ${date} failed with no ${words.report}.`,
       "",
-      "Nothing wrote a report: the failure may sit outside the fuzz step",
-      "(setup, cache, artifact upload), or the fuzzer died before it could",
-      "write one. See the run log.",
+      ...words.noReport,
     ];
     if (url) {
       parts.push("", `Run: ${url}`);
@@ -163,16 +210,16 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv, artifactName: 
     return parts.join("\n");
   }
 
-  const header = `Nightly fuzz run on ${date} produced ${dirs.length} failure report(s).\n`;
+  const header = `${words.run} on ${date} produced ${dirs.length} ${words.report}(s).\n`;
   const footer = url ? `\nRun: ${url}` : "";
   const artifactsNote = artifactName
-    ? `\nThe full failure artifacts (crashing inputs, logs) are attached to the run as \`${artifactName}\`.`
-    : "\nThe full failure artifacts are attached to the run; see its artifacts list.";
+    ? `\nThe full ${words.artifacts}${words.artifactsDetail} are attached to the run as \`${artifactName}\`.`
+    : `\nThe full ${words.artifacts} are attached to the run; see its artifacts list.`;
   // The omission notice is only present when some blocks are dropped, but its
   // length is reserved up front so the running total stays a real character
   // budget whether or not it ends up shown. Padded for the count digits.
   const omissionNotice = (count: number) =>
-    `\n${count} more failure report(s) omitted to stay under the GitHub body limit; see the attached artifacts.`;
+    `\n${count} more ${words.report}(s) omitted to stay under the GitHub body limit; see the attached artifacts.`;
   const noticeReserve = omissionNotice(dirs.length).length;
 
   // Every block (including the first) is character-capped and
@@ -393,18 +440,13 @@ export async function fileIssue(
   return number;
 }
 
-/** Which nightly stream an issue tracks. Only resolve-comment wording keys
- *  on it (report bodies key on ARTIFACTS_DIR); the default must stay fuzz -
- *  fleet fuzzer starters predate the input and pass nothing. */
-export type Stream = "fuzz" | "generic";
-
 /**
  * After a green run: comment on and close EVERY open labeled issue. The
  * release-health gate blocks while any open issue carries the label, so an
  * extra left open (a human labeling a related issue) would keep releases
- * blocked under a log saying all was resolved. The fuzz-stream comment is
- * the default because fleet fuzzer starters predate STREAM (a test pins the
- * wording); it hedges on unpinned crashes, which one green night cannot prove.
+ * blocked under a log saying all was resolved. The fuzz-stream comment
+ * hedges on unpinned crashes, which one green night cannot prove (a test
+ * pins the wording for the fleet fuzzer starters that pass no STREAM).
  */
 export async function resolveIssue(
   run: GhRunner,
@@ -478,8 +520,7 @@ async function main(): Promise<number> {
     );
     return 1;
   }
-  // Validated in every mode, symmetric with MODE itself; only resolve
-  // wording consumes it (report bodies key on ARTIFACTS_DIR).
+  // Validated in every mode, symmetric with MODE itself.
   const stream = process.env.STREAM || "fuzz";
   if (stream !== "fuzz" && stream !== "generic") {
     console.error(`error: unknown STREAM '${stream}' (expected fuzz or generic)`);
@@ -494,11 +535,12 @@ async function main(): Promise<number> {
     return 1;
   }
   const title = process.env.TITLE || DEFAULT_TITLE;
-  // An artifacts directory means the fuzz stream's failure-report contract;
-  // without one the stream is plain nightly CI and gets the generic body.
+  // An artifacts directory means the failure-report contract, worded for
+  // the stream; without one the stream is plain nightly CI and gets the
+  // generic body.
   const artifactsDir = process.env.ARTIFACTS_DIR;
   const body = artifactsDir
-    ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "")
+    ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "", stream)
     : buildGenericBody(process.env);
   const number = await fileIssue(
     gh,

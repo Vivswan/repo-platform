@@ -220,6 +220,61 @@ export const labelRules: Rule[] = [
           got: `${rotColor} / ${rotDescription}`,
         });
       }
+
+      // The fleet-wide security stream is fleet data, not a module answer:
+      // its tuple lives in the settings baseline (so every repository
+      // carries the label), fleet-ci's nightly job files under it, and the
+      // plan job appends it to the tracking labels release-health blocks on.
+      const securityLabel = constStringValue(read("actions/plan/plan.ts"), "SECURITY_LABEL", {
+        where: "plan.ts",
+        what: "the fleet security label",
+        exported: true,
+      });
+      const baselineTuple = managedLabelRoster().find((label) => label.name === securityLabel);
+      if (baselineTuple === undefined) {
+        mismatches.push({
+          file: ".github/settings-baseline.yml",
+          expected: `label '${securityLabel}' (actions/plan/plan.ts SECURITY_LABEL)`,
+          got: "missing - every repository must carry the label the nightly scan files under",
+        });
+      }
+      const fleetCi = read(".github/workflows/fleet-ci.yml");
+      const nightly = mustMatch(
+        fleetCi,
+        /^ {2}trivy-nightly:\n((?:(?!\n {2}[a-z-]+:\n)[\s\S])*)/m,
+        "fleet-ci.yml",
+        "the trivy-nightly job",
+      )[1];
+      const labels = [...nightly.matchAll(/^ {10}label: (.+)$/gm)].map((match) => match[1]);
+      if (labels.length !== 2 || labels.some((label) => label !== securityLabel)) {
+        mismatches.push({
+          file: ".github/workflows/fleet-ci.yml trivy-nightly label inputs",
+          expected: `'${securityLabel}' on both the report and the resolve step (actions/plan/plan.ts SECURITY_LABEL)`,
+          got: labels.join(", ") || "no label input",
+        });
+      }
+      const nightlyColor = mustMatch(
+        nightly,
+        /label-color: "([^"]+)"/,
+        "fleet-ci.yml trivy-nightly",
+        "label-color input",
+      )[1];
+      const nightlyDescription = mustMatch(
+        nightly,
+        /label-description: (.+)/,
+        "fleet-ci.yml trivy-nightly",
+        "label-description input",
+      )[1];
+      if (
+        baselineTuple !== undefined &&
+        (nightlyColor !== baselineTuple.color || nightlyDescription !== baselineTuple.description)
+      ) {
+        mismatches.push({
+          file: ".github/workflows/fleet-ci.yml trivy-nightly label overrides",
+          expected: `${baselineTuple.color} / ${baselineTuple.description} (.github/settings-baseline.yml '${securityLabel}')`,
+          got: `${nightlyColor} / ${nightlyDescription}`,
+        });
+      }
       return mismatches;
     },
   },

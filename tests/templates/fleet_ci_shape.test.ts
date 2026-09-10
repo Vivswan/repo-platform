@@ -371,11 +371,11 @@ describe("fleet-ci.yml", () => {
   });
 
   // Which jobs a scheduled run may reach: the plan and CodeQL on its weekly
-  // day. Every other job's condition excludes the schedule event outright
+  // day, plus the nightly security scan. Every other job's condition excludes the schedule event outright
   // (the skip clause, or a PR-only guard), so a new job must take a side.
-  const SCHEDULE_RUNS = new Set(["plan", "codeql"]);
+  const SCHEDULE_RUNS = new Set(["plan", "codeql", "trivy-nightly"]);
 
-  test("on the nightly schedule only plan and (weekly) codeql can run", () => {
+  test("on the nightly schedule only plan, (weekly) codeql, and trivy-nightly can run", () => {
     for (const [name, job] of Object.entries(fleetCi.jobs)) {
       const condition = job.if ?? "";
       const skips = condition.split("&&").some((clause) => clause.trim() === SKIP_ON_SCHEDULE);
@@ -390,6 +390,68 @@ describe("fleet-ci.yml", () => {
     expect(fleetCi.jobs.codeql?.if).toContain(
       "(github.event_name != 'schedule' || needs.plan.outputs.weekly == 'true')",
     );
+  });
+
+  // The two halves of the security scan split on the schedule event: the
+  // blocking scan runs on every other event, the nightly one on the
+  // schedule alone, so neither runs twice.
+  test("trivy is the thin blocking scan at @build, standing down on the schedule", () => {
+    const trivy = fleetCi.jobs.trivy;
+    expect(trivy?.if).toBe("github.event_name != 'schedule'");
+    expect(trivy?.permissions).toBeUndefined();
+    expect((trivy?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/trivy@build"),
+    ]);
+    // No inputs: the blocking mode is the action's default, and the gate
+    // is the same for every repository.
+    expect(trivy?.steps?.[1]?.with).toBeUndefined();
+  });
+
+  test("trivy-nightly runs on the schedule alone, files or closes the security-nightly issue, and uploads SARIF for public repositories", () => {
+    const job = fleetCi.jobs["trivy-nightly"];
+    expect(job?.if).toBe("github.event_name == 'schedule'");
+    expect(job?.permissions).toEqual({
+      "contents": "read",
+      "issues": "write",
+      "security-events": "write",
+    });
+    const steps = job?.steps ?? [];
+    expect(steps.map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/trivy@build"),
+      expect.stringContaining("actions/upload-artifact@"),
+      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
+      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
+      expect.stringContaining("github/codeql-action/upload-sarif@"),
+    ]);
+    const [, scan, artifact, report, resolve, sarif] = steps;
+    expect(scan.id).toBe("scan");
+    expect(scan.with).toEqual({ mode: "nightly" });
+    // Findings and the report ride the scan's outputs: found is the exact
+    // literal either way, so an absent output fires neither step.
+    expect(artifact.if).toBe("steps.scan.outputs.found == 'true'");
+    expect(artifact.with?.path).toBe("${{ steps.scan.outputs.report-dir }}");
+    expect(report.if).toBe("steps.scan.outputs.found == 'true'");
+    expect(report.with).toEqual({
+      "mode": "report",
+      "label": "security-nightly",
+      "title": "Nightly security scan findings",
+      "artifacts-dir": "${{ steps.scan.outputs.report-dir }}",
+      "artifact-name": String(artifact.with?.name),
+      "label-color": "1d76db",
+      "label-description": "Automated nightly security scan findings",
+      "stream": "generic",
+    });
+    expect(resolve.if).toBe("steps.scan.outputs.found == 'false'");
+    expect(resolve.with).toEqual({ mode: "resolve", label: "security-nightly", stream: "generic" });
+    // Personal-account code scanning is public-only: the exact literal
+    // 'false', so an empty visibility output uploads nothing.
+    expect(sarif.if).toBe("needs.plan.outputs.private == 'false'");
+    expect(sarif.with).toEqual({
+      sarif_file: "${{ steps.scan.outputs.sarif }}",
+      category: "trivy",
+    });
   });
 
   test("nothing sleeps: the gate waits by failing fast", () => {

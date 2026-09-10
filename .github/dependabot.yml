@@ -23,6 +23,7 @@ updates:
       - "/actions/pages-site"
       - "/actions/plan"
       - "/actions/release-health"
+      - "/actions/trivy"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
       - "/actions/validate-template-report"
@@ -150,6 +151,17 @@ updates:
   # Dev-only manifest (@types/bun, typescript) for the release-health action.
   - package-ecosystem: "bun"
     directory: "/actions/release-health"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the trivy action.
+  - package-ecosystem: "bun"
+    directory: "/actions/trivy"
     schedule:
       interval: "monthly"
     cooldown:

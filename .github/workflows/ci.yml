@@ -614,6 +614,15 @@ jobs:
         # shared install path); the judge reads recorded outputs only.
         run: bun .github/scripts/ci/bun_setup_smoke.ts judge
 
+  # The same blocking scan the fleet runs, by local path: a fixable
+  # CRITICAL finding in any committed lockfile fails here first.
+  trivy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./actions/trivy
+
   # THE gate: this job's own check run (named all-green, created by the
   # GitHub Actions app) is the ruleset's required check. `needs` must list
   # every gating job above - ALL_GREEN_ROSTER (scripts/check/ssot/all_green.ts) is that list's
@@ -648,6 +657,7 @@ jobs:
       - rehearse-fleet
       - codeql-javascript
       - bun-setup-smoke
+      - trivy
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -157,6 +157,7 @@ export const ALL_GREEN_ROSTER = [
   "rehearse-fleet",
   "codeql-javascript",
   "bun-setup-smoke",
+  "trivy",
 ];
 
 /** Set comparison between an authored roster and a gating-job list.
@@ -392,6 +393,8 @@ export const FLEET_CI_ROSTER = [
   "validate-skills",
   "release-freshness",
   "release-health",
+  "trivy",
+  "trivy-nightly",
 ];
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */

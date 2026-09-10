@@ -47,10 +47,11 @@ inputs:
     default: Automated nightly fuzz failure
   stream:
     description: >-
-      Which nightly stream the issue tracks - shapes the resolve comment's
-      wording only (report bodies key on artifacts-dir). fuzz (the default,
-      what pre-existing fuzz starters get) hedges on unpinned regression
-      seeds; generic carries no fuzz notions.
+      Which nightly stream the issue tracks - shapes the wording of the
+      report body and the resolve comment. fuzz (the default, what
+      pre-existing fuzz starters get) speaks of failure reports and crashing
+      inputs and hedges on unpinned regression seeds; generic carries no
+      fuzz notions.
     required: false
     default: fuzz
   token:

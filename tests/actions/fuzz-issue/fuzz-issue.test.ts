@@ -218,6 +218,28 @@ describe("buildBody", () => {
       ].join("\n"),
     );
   });
+
+  test("the generic stream words the same body without fuzz notions", () => {
+    const body = buildBody(failureDirs(root), env, "trivy-findings-1", "generic");
+    expect(body).toStartWith(`Nightly run on ${date} produced 2 report(s).\n`);
+    expect(body).toContain("## fuzz: nm_frame crashed");
+    expect(body).toContain(
+      "\nThe full reports are attached to the run as `trivy-findings-1`.\nRun: ",
+    );
+    expect(body).not.toContain("crashing inputs");
+    expect(body).not.toContain("failure report");
+    expect(buildBody([], env, "a", "generic")).toBe(
+      [
+        `Nightly run on ${date} failed with no report.`,
+        "",
+        "Nothing wrote a report: the failure may sit outside the reporting step",
+        "(setup, cache, artifact upload), or the producer died before it could",
+        "write one. See the run log.",
+        "",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("buildGenericBody", () => {
