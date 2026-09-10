@@ -35,6 +35,7 @@ const RELEASE_EDITED = "name: release (hand tuned)\n";
 const OLD_SECURITY = "# Security policy (old home)\n";
 const STARTER = "name: my fuzz\non: workflow_dispatch\n";
 const OLD_STARTER = "name: an old starter, still mine\n";
+const OLD_NOTES = "# Notes (old home)\n";
 
 /** The old pipeline's manifest layout for the seeded files. */
 function oldManifest(): string {
@@ -45,6 +46,7 @@ function oldManifest(): string {
     ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha256(OLD_ANSWERS)}"}`,
     ".github/workflows/release.yml": `{"class": "managed", "hash": "${sha256("name: release\n")}"}`,
     "SECURITY.md": `{"class": "managed", "hash": "${sha256(OLD_SECURITY)}"}`,
+    "OLD_NOTES.md": `{"class": "managed", "hash": "${sha256(OLD_NOTES)}"}`,
     ".github/workflows/nightly-fuzz.yml": `{"class": "starter"}`,
     ".github/workflows/old-starter.yml": `{"class": "starter"}`,
     ".github/workflows/deselected-starter.yml": `{"class": "starter"}`,
@@ -65,7 +67,7 @@ function seedTarget(): string {
       "modules: [bun, docs-site, fuzzer, uv]",
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "mirrors:",
-      "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md]}",
+      "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, .github/repo-platform-manifest.json]}",
       "",
     ].join("\n"),
     ".github/workflows/ci.yml": LOCAL_CI,
@@ -74,6 +76,7 @@ function seedTarget(): string {
     ".github/.copier-answers.yml": OLD_ANSWERS,
     ".github/workflows/release.yml": RELEASE_EDITED,
     "SECURITY.md": OLD_SECURITY,
+    "OLD_NOTES.md": OLD_NOTES,
     ".github/workflows/nightly-fuzz.yml": STARTER,
     ".github/workflows/old-starter.yml": OLD_STARTER,
     ".github/workflows/deselected-starter.yml": OLD_STARTER,
@@ -229,8 +232,16 @@ describe("sync.ts end to end", () => {
         outcome: "kept",
         detail: "a starter is repo-owned",
       },
+      {
+        path: "OLD_NOTES.md",
+        outcome: "deleted",
+        detail: "retired (its new home docs/NOTES.md is not selected here)",
+      },
     ]);
     expect(existsSync(join(target, ".github/.copier-answers.yml"))).toBe(false);
+    // The destination is gated on an unselected module: nothing moves there.
+    expect(existsSync(join(target, "OLD_NOTES.md"))).toBe(false);
+    expect(existsSync(join(target, "docs/NOTES.md"))).toBe(false);
     expect(read(".github/workflows/release.yml")).toBe(RELEASE_EDITED);
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
     expect(read(".github/SECURITY.md")).toContain("Report issues to OwnerOrg privately.");
@@ -238,6 +249,11 @@ describe("sync.ts end to end", () => {
 
   test("mirrors the written license into each skill, refusing the foreign copies", () => {
     expect(summary.mirrors).toEqual([
+      expect.objectContaining({
+        target: MANIFEST,
+        outcome: "refused",
+        detail: "the pattern is a path files.yml writes",
+      }),
       expect.objectContaining({ target: "skills/alpha/LICENSE.md", outcome: "written" }),
       expect.objectContaining({ target: "skills/beta/LICENSE.md", outcome: "refused" }),
       expect.objectContaining({ target: "skills/gamma/LICENSE.md", outcome: "refused" }),
@@ -285,6 +301,7 @@ describe("sync.ts end to end", () => {
       class: "starter",
     });
     expect(read(".github/workflows/deselected-starter.yml")).toBe(OLD_STARTER);
+    expect(manifest.files["docs/NOTES.md"]).toBeUndefined();
     expect(manifest.files["skills/gamma/LICENSE.md"]).toEqual({
       class: "mirror",
       hash: sha256(OLD_LICENSE),
@@ -327,6 +344,7 @@ describe("sync.ts end to end", () => {
     expect(summary.holdReasons).toEqual([
       "local edits replaced in .github/workflows/ci.yml",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
+      `mirror ${MANIFEST} refused: the pattern is a path files.yml writes`,
       "mirror skills/beta/LICENSE.md refused: the target holds content that is not the previous mirror",
       "mirror skills/gamma/LICENSE.md refused: the target holds content that is not the previous mirror",
       "registration: dropped unknown module `uv` (files.yml does not know it)",

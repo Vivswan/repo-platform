@@ -59,12 +59,15 @@ function gitMove(target: string, from: string, to: string): void {
 }
 
 /** Retires the listed entries and the `stale` recorded paths (written by an
- *  earlier sync, selected by nothing now). Records move with a moved file
- *  and leave with a deleted one. Rows are emitted only for files present. */
+ *  earlier sync, selected by nothing now). A `moved_to` whose destination
+ *  is not among the `selected` paths is a plain retirement: the platform no
+ *  longer wants the file here at all. Records move with a moved file and
+ *  leave with a deleted one. Rows are emitted only for files present. */
 export function retire(
   target: string,
   entries: RetiredEntry[],
   stale: string[],
+  selected: ReadonlySet<string>,
   records: Records,
 ): RetireRow[] {
   const rows: RetireRow[] = [];
@@ -82,6 +85,10 @@ export function retire(
   };
   for (const entry of entries) {
     if (existingFile(target, entry.path) === null) continue;
+    if (entry.moved_to !== undefined && !selected.has(entry.moved_to)) {
+      dispose(entry.path, `retired (its new home ${entry.moved_to} is not selected here)`);
+      continue;
+    }
     if (entry.moved_to !== undefined) {
       if (existingFile(target, entry.moved_to) === null) {
         gitMove(target, entry.path, entry.moved_to);

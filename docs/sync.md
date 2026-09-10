@@ -130,6 +130,7 @@ Retirement runs before writing. Rows appear only for files present.
 | recorded as `starter` | `kept` (repo-owned) |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
+| `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: `deleted` on a hash match, else `held` |
 
 A recorded `managed` or `split` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, and a refused mirror target, keep their records in the new manifest so a later sync can still match them.
 

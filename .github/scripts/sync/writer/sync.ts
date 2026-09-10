@@ -141,7 +141,7 @@ export function runSync(options: SyncOptions): SyncReport {
     if (problem === null) stale.push(path);
     else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
   }
-  const retired = retire(options.target, config.retired, stale, records);
+  const retired = retire(options.target, config.retired, stale, entryPaths, records);
 
   const next: Record<string, ManifestRecord> = {};
   // A carried record never displaces one this run wrote.
@@ -185,7 +185,13 @@ export function runSync(options: SyncOptions): SyncReport {
   const mirrors =
     registration.mirrors === undefined
       ? []
-      : applyMirrors(options.target, registration.mirrors, written, entryPaths, records);
+      : applyMirrors(
+          options.target,
+          registration.mirrors,
+          written,
+          new Set([...entryPaths, MANIFEST_NAME]),
+          records,
+        );
   for (const row of mirrors) {
     const bytes = written.get(row.source);
     if (row.outcome === "refused") carry(row.target);

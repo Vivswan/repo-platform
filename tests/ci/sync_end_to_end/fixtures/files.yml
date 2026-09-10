@@ -43,9 +43,14 @@ files:
   - path: .github/workflows/private-only.yml
     class: managed
     when: {private: true}
+  - path: docs/NOTES.md
+    class: managed
+    when: {modules: [pages]}
 retired:
   - path: .github/.copier-answers.yml
   - path: .github/workflows/release.yml
   - path: SECURITY.md
     moved_to: .github/SECURITY.md
   - path: .github/workflows/old-starter.yml
+  - path: OLD_NOTES.md
+    moved_to: docs/NOTES.md

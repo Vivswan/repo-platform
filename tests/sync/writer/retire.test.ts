@@ -79,6 +79,7 @@ describe("retire", () => {
       target,
       [{ path: "same" }, { path: "edited" }, { path: "starter" }, { path: "absent" }],
       [],
+      new Set(),
       records,
     );
     expect(rows).toEqual([
@@ -91,16 +92,26 @@ describe("retire", () => {
     expect(records.same).toBeUndefined();
   });
 
-  test("moves through git mv with the record, and holds when the new path exists", () => {
-    const target = checkout({ "SECURITY.md": "policy\n", "old.md": "o\n", "new.md": "n\n" });
-    const records: Records = { "SECURITY.md": { class: "managed", hash: sha256("policy\n") } };
+  test("moves through git mv with the record, holds when the new path exists, retires when the new path is not selected", () => {
+    const target = checkout({
+      "SECURITY.md": "policy\n",
+      "old.md": "o\n",
+      "new.md": "n\n",
+      "notes.md": "notes\n",
+    });
+    const records: Records = {
+      "SECURITY.md": { class: "managed", hash: sha256("policy\n") },
+      "notes.md": { class: "managed", hash: sha256("notes\n") },
+    };
     const rows = retire(
       target,
       [
         { path: "SECURITY.md", moved_to: ".github/SECURITY.md" },
         { path: "old.md", moved_to: "new.md" },
+        { path: "notes.md", moved_to: "docs/notes.md" },
       ],
       [],
+      new Set([".github/SECURITY.md", "new.md"]),
       records,
     );
     expect(rows).toEqual([
@@ -110,10 +121,17 @@ describe("retire", () => {
         outcome: "held",
         detail: "new.md already exists, so the file was not moved over it",
       },
+      {
+        path: "notes.md",
+        outcome: "deleted",
+        detail: "retired (its new home docs/notes.md is not selected here)",
+      },
     ]);
+    expect(existsSync(join(target, "notes.md"))).toBe(false);
+    expect(existsSync(join(target, "docs/notes.md"))).toBe(false);
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
     expect(fixtureGit(target, ["status", "--porcelain"])).toBe(
-      "R  SECURITY.md -> .github/SECURITY.md",
+      "R  SECURITY.md -> .github/SECURITY.md\n D notes.md",
     );
     expect(records[".github/SECURITY.md"]).toEqual({ class: "managed", hash: sha256("policy\n") });
     expect(records["SECURITY.md"]).toBeUndefined();
@@ -122,7 +140,7 @@ describe("retire", () => {
   test("stale recorded paths retire the same way, labelled as no longer selected", () => {
     const target = checkout({ "docs.yml": "d\n" });
     const records: Records = { "docs.yml": { class: "managed", hash: sha256("d\n") } };
-    expect(retire(target, [], ["docs.yml", "gone.yml"], records)).toEqual([
+    expect(retire(target, [], ["docs.yml", "gone.yml"], new Set(), records)).toEqual([
       { path: "docs.yml", outcome: "deleted", detail: "no longer selected" },
     ]);
   });
@@ -131,7 +149,7 @@ describe("retire", () => {
     const target = checkout({ "shared/x": "v\n" });
     symlinkSync("shared", join(target, "docs"));
     const records: Records = { "docs/x": { class: "managed", hash: sha256("v\n") } };
-    expect(() => retire(target, [], ["docs/x"], records)).toThrow(
+    expect(() => retire(target, [], ["docs/x"], new Set(), records)).toThrow(
       "ancestor 'docs' is a symbolic link",
     );
     expect(existsSync(join(target, "shared/x"))).toBe(true);
