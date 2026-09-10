@@ -96,7 +96,7 @@ export function skillModuleRosterRows(manifests: ModuleManifest[]): string[] {
   return manifests.map((m) => `| \`${m.module}\` | ${m.description} |`);
 }
 
-/** skills/repo-platform-new-project/references/questions.md "Module
+/** skills/repo-platform-new-project/references/registration.md "Module
  *  roster": the blank line after the marker's sentence, then one bullet
  *  per module with the manifest description verbatim. */
 export function skillModuleRosterBullets(manifests: ModuleManifest[]): string[] {

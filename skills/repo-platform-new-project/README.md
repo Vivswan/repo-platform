@@ -1,6 +1,6 @@
 # repo-platform: New Project
 
-`repo-platform-new-project` walks the creation of a repository managed by [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform): native scaffold, copier template, publish, enrollment, and settings.
+`repo-platform-new-project` walks the creation or adoption of a repository managed by [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform): create the repo, write the registration, grant the fleet token, run the first sync, review its report, watch the first CI run.
 
 ## Install
 
@@ -10,10 +10,10 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 
 ## What It Does
 
-- Applies the copier template from the generated `build` branch
-- Walks the copier questions: modules multiselect, per-module follow-ups (pages, docs-site, fuzzer, nightly, skills), the settings identity keys, visibility
-- Publishes the repo and enrolls it (fleet PAT access is the enrollment); its settings are managed from then on (adoption is the opt-in; the baseline assembles each module's labels automatically)
-- Explains what runs on the first PR (the all-green gate) and which files are managed vs repo-owned
+- Writes `.repo-platform.yml`: the module list plus only the keys whose defaults are wrong, with a minimal and a full example and the key reference
+- Enrolls the repo (the fleet token's write grant is the membership) and dispatches the first sync with `manual=true`
+- Reads the sync PR's report section by section (Written, Replaced local edits, Retired, Registration notes, Mirrors, Review) before merging
+- Names the repo-owned starters to fill in, the CI jobs every repo shares, and the owner actions (token grant, Pages, the bun Dependabot secret)
 
 ## Plugin-Ready Layout
 
