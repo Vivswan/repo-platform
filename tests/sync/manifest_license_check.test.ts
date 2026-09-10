@@ -7,19 +7,19 @@ const NPM_LICENSE = (claim: string) =>
   `\`package.json\`: \`"license": ${claim}\` - set it to \`"SEE LICENSE IN LICENSE.md"\``;
 const NPM_LEGACY =
   '`package.json`: the legacy `"licenses"` field claims a license - delete it and set `"license": "SEE LICENSE IN LICENSE.md"`';
-const NPM_UNPARSEABLE = "`package.json`: unparseable, license claim unknown";
+const NPM_UNPARSABLE = "`package.json`: unparsable, license claim unknown";
 const CARGO_LICENSE_KEY = (section: string) =>
   `\`Cargo.toml\`: \`[${section}]\` has a \`license\` key - delete it and set \`license-file = "LICENSE.md"\``;
 const CARGO_LICENSE_FILE = (section: string, file: string) =>
   `\`Cargo.toml\`: \`[${section}] license-file\` points at "${file}" - point it at \`"LICENSE.md"\``;
-const CARGO_UNPARSEABLE = "`Cargo.toml`: unparseable, license claim unknown";
+const CARGO_UNPARSABLE = "`Cargo.toml`: unparsable, license claim unknown";
 const PY_SPDX =
   '`pyproject.toml`: `license =` claims an SPDX license - use a single `LicenseRef-` expression or `{ file = "LICENSE.md" }`';
 const PY_TABLE =
   '`pyproject.toml`: the `license` table claims something other than the LICENSE.md file - use `{ file = "LICENSE.md" }`';
 const PY_CLASSIFIER =
   "`pyproject.toml`: a `License ::` trove classifier claims a listed license - delete it (no classifier exists for the fleet license)";
-const PY_UNPARSEABLE = "`pyproject.toml`: unparseable, license claim unknown";
+const PY_UNPARSABLE = "`pyproject.toml`: unparsable, license claim unknown";
 
 describe("checkManifests", () => {
   test("clean when no manifests exist", () => {
@@ -44,8 +44,8 @@ describe("checkManifests", () => {
     ]);
   });
 
-  test("flags unparseable package.json instead of skipping it", () => {
-    expect(checkManifests({ packageJson: "{nope" })).toEqual([NPM_UNPARSEABLE]);
+  test("flags unparsable package.json instead of skipping it", () => {
+    expect(checkManifests({ packageJson: "{nope" })).toEqual([NPM_UNPARSABLE]);
   });
 
   test("flags a Cargo.toml license key but accepts license-file = LICENSE", () => {
@@ -84,14 +84,14 @@ describe("checkManifests", () => {
     ).toEqual([]);
   });
 
-  test("flags unparseable Cargo.toml instead of skipping it", () => {
+  test("flags unparsable Cargo.toml instead of skipping it", () => {
     expect(checkManifests({ cargoToml: '[package]\nlicense = "unterminated' })).toEqual([
-      CARGO_UNPARSEABLE,
+      CARGO_UNPARSABLE,
     ]);
   });
 
   test("parses CRLF manifests", () => {
-    // The exact message matters here: an "unparseable" problem would also
+    // The exact message matters here: an "unparsable" problem would also
     // be one problem, and would mean CRLF broke the parse.
     expect(checkManifests({ cargoToml: '[package]\r\nlicense = "MIT"\r\n' })).toEqual([
       CARGO_LICENSE_KEY("package"),
@@ -150,9 +150,9 @@ describe("checkManifests", () => {
     ).toEqual([]);
   });
 
-  test("flags unparseable pyproject.toml instead of skipping it", () => {
+  test("flags unparsable pyproject.toml instead of skipping it", () => {
     expect(checkManifests({ pyprojectToml: '[project]\nlicense = "unterminated' })).toEqual([
-      PY_UNPARSEABLE,
+      PY_UNPARSABLE,
     ]);
   });
 

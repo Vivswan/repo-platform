@@ -68,7 +68,7 @@ function labelsFromValue(value: unknown): string[] {
 }
 
 /** The top-level `labels:` of one issue form. A form GitHub cannot parse
- *  applies no labels either, so unparseable YAML reads as no references. */
+ *  applies no labels either, so unparsable YAML reads as no references. */
 export function issueFormLabels(text: string): string[] {
   let data: unknown;
   try {

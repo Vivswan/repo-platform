@@ -56,7 +56,7 @@ export function checkManifests(texts: ManifestTexts): string[] {
     try {
       manifest = table(JSON.parse(texts.packageJson));
     } catch {
-      problems.push("`package.json`: unparseable, license claim unknown");
+      problems.push("`package.json`: unparsable, license claim unknown");
     }
     const license = manifest?.license;
     if (license !== undefined && license !== FLEET_NPM_LICENSE) {
@@ -74,7 +74,7 @@ export function checkManifests(texts: ManifestTexts): string[] {
   if (texts.cargoToml !== undefined) {
     const cargo = parseToml(texts.cargoToml);
     if (!cargo) {
-      problems.push("`Cargo.toml`: unparseable, license claim unknown");
+      problems.push("`Cargo.toml`: unparsable, license claim unknown");
     } else {
       const sections: [string, TomlTable | undefined][] = [
         ["package", table(cargo.package)],
@@ -100,7 +100,7 @@ export function checkManifests(texts: ManifestTexts): string[] {
   if (texts.pyprojectToml !== undefined) {
     const pyproject = parseToml(texts.pyprojectToml);
     if (!pyproject) {
-      problems.push("`pyproject.toml`: unparseable, license claim unknown");
+      problems.push("`pyproject.toml`: unparsable, license claim unknown");
     } else {
       const project = table(pyproject.project);
       const license = project?.license;

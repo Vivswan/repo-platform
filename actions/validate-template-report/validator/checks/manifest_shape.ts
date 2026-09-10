@@ -7,7 +7,7 @@ const RECOVERY = "run a recovery sync (recover=recopy)";
 
 /** The ownership manifest's shape and trust model. The manifest is itself
  *  a managed render, so clients carry it and the template repo must NOT
- *  (self mode inverts); absence, unparseable text, and a provenance stamp
+ *  (self mode inverts); absence, unparsable text, and a provenance stamp
  *  differing from the recorded _commit are errors. Ownership METADATA is
  *  not trusted for roster paths: the sync BASELINES local manifest edits,
  *  so a hand-flipped class would disable parity permanently and invisibly;

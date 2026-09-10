@@ -235,7 +235,7 @@ describe("mergeOutcome", () => {
     });
   });
 
-  test("a mis-shaped name-keyed section is REFUSED, never a wholesale replace", () => {
+  test("a malformed name-keyed section is REFUSED, never a wholesale replace", () => {
     // End to end through the apply's own merge path. A mapping `labels:`
     // used to fall out of the union into wholesale replace: the managed
     // roster was silently GONE, and the action's delete-undeclared pass

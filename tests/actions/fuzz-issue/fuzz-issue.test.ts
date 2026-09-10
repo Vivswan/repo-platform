@@ -425,7 +425,7 @@ describe("fileIssue", () => {
     expect(logs.some((line) => line.startsWith("::notice::could not assign @o to #7"))).toBe(true);
   });
 
-  test("an unparseable create URL logs a notice, skips assignment, never fails the filing", async () => {
+  test("an unparsable create URL logs a notice, skips assignment, never fails the filing", async () => {
     const calls: string[][] = [];
     const run: GhRunner = async (args) => {
       calls.push(args);

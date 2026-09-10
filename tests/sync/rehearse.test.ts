@@ -121,8 +121,8 @@ describe("manifestStatus", () => {
   test.each([
     { reason: "not JSON", manifest: "{ not json" },
     { reason: "JSON without a files mapping", manifest: '{"other": 1}' },
-  ])("a manifest that is $reason reports unparseable", ({ manifest }) => {
-    expect(manifestStatus(tree(manifest))).toBe("unparseable");
+  ])("a manifest that is $reason reports unparsable", ({ manifest }) => {
+    expect(manifestStatus(tree(manifest))).toBe("unparsable");
   });
 
   test("a manifest whose hashes match the tree reports stamped", () => {

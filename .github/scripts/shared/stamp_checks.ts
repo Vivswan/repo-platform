@@ -3,7 +3,7 @@
 // provenance proof"), shared with the publisher so the two can never
 // drift: verify_build_provenance.ts fails the sync on any reason here, and
 // publish.ts's no-change skip guard treats a reason as "do not skip", so a
-// dispatch can always heal a tampered, unparseable, or orphaned stamp with
+// dispatch can always heal a tampered, unparsable, or orphaned stamp with
 // a freshly stamped commit instead of wedging every sync until the next
 // content change.
 //

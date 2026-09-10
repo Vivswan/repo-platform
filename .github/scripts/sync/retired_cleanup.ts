@@ -45,7 +45,7 @@ function main(): void {
 
   // Dropping the custom-license module leaves the repo's own license file
   // behind (see customLicenseFlipError); the guard needs the pre-update
-  // module answer, so an unparseable answers file falls through to
+  // module answer, so an unparsable answers file falls through to
   // render_data.ts's canonical error inside ensureRenders (or, on the
   // already-materialized path, to the fallthrough below).
   const newModules = parseModules(requireEnv("MODULES"));

@@ -119,13 +119,13 @@ describe("discover_repos.ts", () => {
     expect(existsSync(r.discoveredPath)).toBe(false);
   });
 
-  test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
+  test("an unparsable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
     // A bare identifier is the leaking form: Bun's raw JSON.parse error
     // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
     // that parseJsonWith's fixed diagnostic replaces it.
-    const payload = join(root, "unparseable.json");
+    const payload = join(root, "unparsable.json");
     writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
-    const r = run("unparseable", { STUB_PAYLOAD: payload });
+    const r = run("unparsable", { STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discover_repos: user/repos response: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");

@@ -350,7 +350,7 @@ describe("compareHalves", () => {
     expect(
       compareHalves(regionSplit(), headRegion("AGENTS.md", oldB, oldE), head, delivered),
     ).toBeNull();
-    // Splitting HEAD with the NEW markers instead would be the mis-split
+    // Splitting HEAD with the NEW markers instead would be the wrong split
     // this design rules out: the old copy has no such lines.
     expect(compareHalves(regionSplit(), headRegion(), head, delivered)?.kind).toBe("unverifiable");
   });
@@ -607,7 +607,7 @@ describe("tail_tripwire script", () => {
     [
       { reason: "that is absent", head: {} },
       {
-        reason: "that is unparseable (treated like a missing one)",
+        reason: "that is unparsable (treated like a missing one)",
         head: { [MANIFEST_NAME]: "{ not json" },
       },
       {
@@ -663,7 +663,7 @@ describe("tail_tripwire script", () => {
     expect(spawn.exitCode).toBe(0);
   });
 
-  test("a marker rename cannot mis-split HEAD's copy (HEAD manifest wins there)", () => {
+  test("a marker rename cannot wrongly split HEAD's copy (HEAD manifest wins there)", () => {
     const oldB = "<!-- OLD BEGIN -->";
     const oldE = "<!-- OLD END -->";
     const head = `${oldB}\nold managed\n${oldE}\nrepo tail line\n`;

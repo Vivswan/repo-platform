@@ -556,7 +556,7 @@ function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
   // entry there proves the command resolves through the scripts table at
   // all. A command that works another way (a dependency bin, a PATH
   // executable) declares nothing at HEAD, and an inconclusive HEAD (a
-  // symlinked cwd, an unparseable package.json) proves nothing either; both
+  // symlinked cwd, an unparsable package.json) proves nothing either; both
   // keep every tag building. An install command that rewrites package.json
   // at build time stays the documented residual (docs/pages.md).
   if (judgeAt("HEAD").kind !== "declared") return kept;
