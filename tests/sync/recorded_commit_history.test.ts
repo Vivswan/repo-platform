@@ -1,10 +1,10 @@
-// The recorded-commit resolver judges ancestry against origin/build and
-// the ladder walks the build commits from the recorded base, so every
-// checkout they run over must carry the FULL build history: a shallow
-// clone makes every honest recording read as not-ancestor and blocks every
-// fleet sync. The wiring is pinned structurally here - the checkout steps'
-// `fetch-depth: 0` and the rehearsal's whole-ref fetch - with a control
-// showing the check reds when a depth is dropped.
+// The build's provenance check walks main for the stamped source and
+// rebuilds the tree from that commit, and the recorded-commit resolver the
+// rehearsal still runs judges ancestry against origin/build: every checkout
+// they run over must carry the FULL history, or a shallow clone blocks
+// every fleet sync. The wiring is pinned structurally here - the checkout
+// steps' `fetch-depth: 0` and the rehearsal's whole-ref fetch - with a
+// control showing the check reds when a depth is dropped.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -32,15 +32,14 @@ export function checkoutSteps(workflowText: string): Map<string, Record<string, 
   return found;
 }
 
-/** Every checkout of each workflow the resolver runs in, by `<job>#<index>`,
- * and whether the resolver's history lives there: `full` checkouts must
- * declare `fetch-depth: 0`; `shallow` ones are read for other reasons and
- * the resolver never runs over them. */
+/** Every checkout of the sync operator, by `<job>#<index>`, and whether
+ * the history-walking check runs over it: `full` checkouts must declare
+ * `fetch-depth: 0`; `shallow` ones are read for other reasons. */
 const CHECKOUTS: Record<string, Record<string, "full" | "shallow">> = {
-  ".github/workflows/reusable-template-sync.yml": {
-    "sync#0": "full", // repo-platform: origin/build for the recorded base and the ladder's walk
-    "sync#5": "full", // the target: copier's own update base
-    "sync#26": "shallow", // the version-aligned validator, a single ref
+  ".github/workflows/sync-repos.yml": {
+    "plan#1": "full", // repo-platform: main's history and origin/build for the provenance check
+    "sync#0": "shallow", // repo-platform: the scripts alone
+    "sync#3": "shallow", // the build at the plan's verified commit; the target is a captured clone
   },
 };
 
@@ -59,7 +58,7 @@ function assertHistory(workflowText: string, roster: Record<string, "full" | "sh
   }
 }
 
-describe("full history under the recorded-commit resolver", () => {
+describe("full history under the provenance check and the recorded-commit resolver", () => {
   test.each(Object.entries(CHECKOUTS))(
     "%s: every checkout is rostered, and the full ones declare fetch-depth: 0",
     (rel, roster) => {
@@ -68,7 +67,7 @@ describe("full history under the recorded-commit resolver", () => {
   );
 
   test("the control: dropping a fetch-depth reds the same assertion path", () => {
-    const rel = ".github/workflows/reusable-template-sync.yml";
+    const rel = ".github/workflows/sync-repos.yml";
     const shallowed = read(rel).replace(/^\s*fetch-depth: 0\n/m, "");
     expect(shallowed).not.toBe(read(rel));
     expect(() => assertHistory(shallowed, CHECKOUTS[rel])).toThrow();
