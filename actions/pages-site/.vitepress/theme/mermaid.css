@@ -1,0 +1,42 @@
+/* Mermaid diagrams: the mount ../mermaid.ts emits for a ```mermaid fence,
+ * a code-ground panel in the block radius. The source shows until the
+ * diagram renders (mermaid-render.ts) and stays in view beside an error;
+ * the SVG is centered and scales down to the column, never past its own
+ * size. Not scoped to .vp-doc: a `layout: page` article has no such
+ * wrapper and its mounts render the same way. */
+
+.fleet-mermaid {
+  margin: 0 0 1.25em;
+  padding: 20px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--fleet-radius-md);
+  background: var(--vp-c-bg-code);
+  overflow-x: auto;
+  & > .fleet-mermaid-source {
+    margin: 0;
+    padding: 0;
+    background: none;
+    font-family: var(--vp-font-family-mono);
+    font-size: var(--vp-code-font-size);
+    line-height: var(--vp-code-line-height);
+    color: var(--vp-c-text-1);
+    white-space: pre;
+  }
+  &[data-state="rendered"] > .fleet-mermaid-source {
+    display: none;
+  }
+  & > .fleet-mermaid-diagram {
+    display: flex;
+    justify-content: center;
+    & > svg {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+  & > .fleet-mermaid-error {
+    margin: 12px 0 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--vp-c-text-2);
+  }
+}

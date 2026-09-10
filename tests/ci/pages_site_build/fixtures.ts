@@ -115,14 +115,22 @@ export function readSite(site: string, rel: string): string {
   return readFileSync(join(site, rel), "utf-8");
 }
 
-/** Every file under `site/rel` as one text: the built CSS and JS land as
- *  hashed names, so an assertion on a rule or an inlined index scans the
- *  whole assets directory. */
-export function readAssets(site: string, rel: string): string {
+/** Every file under `site/rel` by name with its text: the built CSS and JS
+ *  land as hashed names, so an assertion on a rule, an inlined index, or
+ *  which chunk holds what scans the whole assets directory. */
+export function assetFiles(site: string, rel: string): { name: string; text: string }[] {
   const dir = join(site, rel);
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
-    .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf-8"))
+    .map((entry) => ({
+      name: entry.name,
+      text: readFileSync(join(entry.parentPath, entry.name), "utf-8"),
+    }));
+}
+
+export function readAssets(site: string, rel: string): string {
+  return assetFiles(site, rel)
+    .map((file) => file.text)
     .join("\n");
 }
 
@@ -135,8 +143,10 @@ const ESC = "\x1b";
 
 /** Every custom-block kind the theme styles, both syntaxes: GitHub alerts
  *  (retitled in sentence case by custom-blocks.ts) and ::: containers,
- *  plus a highlighted code block and an ansi fence (the one language shiki
- *  colors from the theme's terminal palette, not its token colors). */
+ *  plus a highlighted code block, an ansi fence (the one language shiki
+ *  colors from the theme's terminal palette, not its token colors), and a
+ *  mermaid fence whose `{{ }}` hexagon would fail the build as a Vue
+ *  interpolation without the mount's v-pre. */
 const ALERTS_MD = [
   "# Alerts",
   "",
@@ -176,7 +186,19 @@ const ALERTS_MD = [
   `${ESC}[31mERROR${ESC}[0m plain`,
   "```",
   "",
+  "```mermaid",
+  "graph TD",
+  '  A["x <b>& y</b>"] -->|"go"| B{{done}}',
+  "```",
+  "",
 ].join("\n");
+
+/** The built mermaid mount: the source once, HTML-escaped, inside the
+ *  fallback pre (the client reads it back as text). */
+export const MERMAID_MOUNT_HTML =
+  '<div class="fleet-mermaid"><pre class="fleet-mermaid-source">' +
+  "graph TD\n  A[&quot;x &lt;b&gt;&amp; y&lt;/b&gt;&quot;] --&gt;|&quot;go&quot;| B{{done}}" +
+  "</pre></div>";
 
 const SETUP_MD =
   "# Setup\n\nInstall things.\n\n| Step | Command |\n|---|---|\n| One | run it |\n\n" +

@@ -33,6 +33,7 @@ import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
 import { landingTableRule } from "./landing-table.ts";
+import { mermaidRule } from "./mermaid.ts";
 import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
 import { tableWrapRule } from "./table-wrap.ts";
 import { headersRule } from "./theme/page-index.ts";
@@ -110,6 +111,7 @@ const markdown: MarkdownOptions = {
     tableWrapRule(md);
     headersRule(md);
     alertTitlesRule(md);
+    mermaidRule(md);
   },
   container: CUSTOM_BLOCK_LABELS,
 };
