@@ -52,7 +52,7 @@ How a staged root renders:
 
 The SKILL.md convention:
 
-- A page with neither a `title` frontmatter key nor an h1 is titled by its `name` frontmatter key, and its `description` key is the page's meta description, so a skill's own frontmatter is enough.
+- A page with neither a `title` frontmatter key nor an h1 is titled by its `name` frontmatter key (else by its file name, when the key is missing or blank), in the document title and the sidebar alike, and its `description` key is the page's meta description, so a skill's own frontmatter is enough.
 - Such a page is an article with its outline, not a landing page.
 - The sidebar groups the root under its mount name with each word capitalized (`skills/` reads as Skills), and the search launcher lists its pages.
 - The page's "Edit this page" link and provenance line name the real source path (`skills/<name>/SKILL.md`, never a path under `docs/`).
@@ -67,6 +67,7 @@ Links resolve the way they read on GitHub, from the page's own repository path:
 | `[sync PRs](../skills/repo-platform-sync-pr/SKILL.md)` on a docs page | the skill's page, across the two roots |
 | `[plugin metadata](.codex-plugin/plugin.json)` on a skill page | the file on GitHub at the tier's ref: the site never publishes it |
 | `[the workflow](../.github/workflows/ci.yml)` on a docs page | the same, for anything outside the staged roots |
+| `[the actions](../actions/)` or `[the repository](../)` on a docs page | that directory's tree on GitHub at the tier's ref: a directory is known by its trailing slash, or by being the repository root |
 | `[logo](public/logo.svg)` on a docs page | the file at the site base, where VitePress copies `public/` |
 
 A `.md`, extensionless, or directory link to nothing stays on the site, so the strict build's dead-link check reports it; only a target with another file extension is read on GitHub.

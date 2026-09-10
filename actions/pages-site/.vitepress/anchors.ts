@@ -9,10 +9,12 @@ import { slug } from "github-slugger";
 import type { Token } from "markdown-it";
 
 /** The heading text GitHub slugs, from the heading's inline tokens: text
- *  with its entities decoded (VitePress hands `&amp;` over as written;
- *  GitHub slugs the `&`) and code spans literal (a `&amp;` inside
- *  backticks IS the text "&amp;" on GitHub). The anchor plugin's
- *  getTokensText hook. */
+ *  decoded ONCE and code spans literal (a `&amp;` inside backticks IS the
+ *  text "&amp;" on GitHub). VitePress's text_join (restoreEntities) joins
+ *  an entity back as its markup and an escaped `\&` as `&amp;`, so a text
+ *  token spells `&amp;` exactly as the author wrote it and one decode is
+ *  the text GitHub slugs: `## Use &amp;amp;` is `use-amp` on both. The
+ *  anchor plugin's getTokensText hook. */
 export function headingText(tokens: Token[]): string {
   return tokens
     .map((token) =>

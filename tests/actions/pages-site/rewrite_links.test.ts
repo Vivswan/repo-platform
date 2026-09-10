@@ -79,7 +79,22 @@ describe("rewriteLink", () => {
     ["../README.md#usage", "guide/x.md", "../index.md#usage"],
     ["../../README.md#usage", "guide/x.md", "https://github.com/o/r/blob/v1.2.0/README.md#usage"],
     ["../../LICENSE.md", "skills/alpha/SKILL.md", "https://github.com/o/r/blob/v1.2.0/LICENSE.md"],
-    ["../../actions/", "guide/x.md", "https://github.com/o/r/blob/v1.2.0/actions/"],
+    // A repository directory, known by its slash or as the root itself, is
+    // its tree on GitHub (the file route 404s on a directory); a fragment
+    // or query rides along.
+    ["../../actions/", "guide/x.md", "https://github.com/o/r/tree/v1.2.0/actions"],
+    ["../../actions/#readme", "guide/x.md", "https://github.com/o/r/tree/v1.2.0/actions#readme"],
+    [
+      "../../.github/workflows/",
+      "guide/x.md",
+      "https://github.com/o/r/tree/v1.2.0/.github/workflows",
+    ],
+    ["../../", "guide/x.md", "https://github.com/o/r/tree/v1.2.0"],
+    ["../..", "guide/x.md", "https://github.com/o/r/tree/v1.2.0"],
+    ["../../#readme", "guide/x.md", "https://github.com/o/r/tree/v1.2.0#readme"],
+    ["../../", "skills/alpha/SKILL.md", "https://github.com/o/r/tree/v1.2.0"],
+    ["../", "index.md", "https://github.com/o/r/tree/v1.2.0"],
+    ["../../actions", "guide/x.md", "https://github.com/o/r/blob/v1.2.0/actions"],
     // A file inside a staged root that the site never publishes (not a
     // page, not under public/) is read on GitHub too, as the three real
     // skill READMEs link their plugin metadata.

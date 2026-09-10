@@ -635,13 +635,15 @@ describe("strict check build", () => {
 });
 
 describe("link-rot reporting", () => {
-  test("walkHtml enumerates every page, so unlinked version tiers still get crawled", () => {
+  test("walkHtml enumerates every page, .htm included, so unlinked version tiers still get crawled", () => {
     const dir = temp.dir("site-");
     mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
     writeFileSync(join(dir, "index.html"), "<html></html>");
+    writeFileSync(join(dir, "about.htm"), "<html></html>");
     writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
     writeFileSync(join(dir, "v1.0.0", "assets", "app.js"), "js");
-    expect(walkHtml(dir)).toEqual(["index.html", "v1.0.0/index.html"]);
+    writeFileSync(join(dir, "v1.0.0", "assets", "html.txt"), "not a page");
+    expect(walkHtml(dir)).toEqual(["about.htm", "index.html", "v1.0.0/index.html"]);
   });
 
   test("collects distinct broken external links with their local parents", () => {

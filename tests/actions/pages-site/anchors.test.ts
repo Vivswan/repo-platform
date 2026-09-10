@@ -41,6 +41,11 @@ describe("headingText", () => {
       "caf\u00e9-a--b",
     );
   });
+
+  test("decodes once: a doubly encoded entity is the once-decoded text GitHub slugs", () => {
+    expect(headingText([token("text", "Use &amp;amp;")])).toBe("Use &amp;");
+    expect(githubSlug(headingText([token("text", "Use &amp;amp;")]))).toBe("use-amp");
+  });
 });
 
 describe("heading ids through VitePress's renderer", () => {
@@ -56,5 +61,18 @@ describe("heading ids through VitePress's renderer", () => {
     expect(html).toContain('<h2 id="use-amp"');
     expect(html).toContain('<h2 id="same"');
     expect(html).toContain('<h2 id="same-1"');
+  });
+
+  test("an entity is decoded exactly once: VitePress joins it back as written, so `&amp;amp;` reads as `&amp;` and `\\&` as `&`, both as on GitHub", async () => {
+    const md = await vitepressRenderer();
+    const html = md.render("## Use &amp;amp;\n\n## A \\& B\n\n## Caf&eacute; &#38; bar\n", {
+      path: "/x/index.md",
+      relativePath: "index.md",
+    });
+    expect(html).toContain('<h2 id="use-amp"');
+    expect(html).toContain('<h2 id="a--b"');
+    expect(html).toContain('<h2 id="caf\u00e9--bar"');
+    expect(html).not.toContain('id="use-"');
+    expect(html).not.toContain('id="use-ampamp"');
   });
 });

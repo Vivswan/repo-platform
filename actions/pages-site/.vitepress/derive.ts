@@ -145,15 +145,27 @@ export function readPage(srcDir: string, file: string): PageMeta {
  *  malformed key raises, so a fleet repo's docs PR check points at it. */
 export function pageMeta(file: string, source: string): PageMeta {
   const { data, content } = matter(source);
-  const text = (value: unknown) =>
-    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
   const heading = /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? null;
-  const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
   return {
-    title: text(data.title) ?? heading ?? text(data.name) ?? stem.replace(/[-_]/g, " "),
+    title: text(data.title) ?? heading ?? untitledPageTitle(file, data.name),
     order: frontmatterOrder(file, data.order),
     group: frontmatterGroup(file, data.group),
   };
+}
+
+/** The title of a page with neither a `title` key nor an h1: its `name`
+ *  frontmatter when that is a non-blank string (trimmed), else its
+ *  filename humanized. The sidebar row (pageMeta) and the document title
+ *  (config.mts's transformPageData) both read it, so they agree. */
+export function untitledPageTitle(file: string, name: unknown): string {
+  const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
+  return text(name) ?? stem.replace(/[-_]/g, " ");
+}
+
+/** A frontmatter string that says something: trimmed, or null when the
+ *  key is absent, not a string, or blank. */
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
 function frontmatterOrder(file: string, value: unknown): number | null {

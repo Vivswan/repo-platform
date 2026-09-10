@@ -36,7 +36,7 @@ import type { ProjectFacts } from "../facts.ts";
 import type { IncludeRoot } from "../lib.ts";
 import { githubSlug, headingText } from "./anchors.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
-import { deriveRewrites, includeIndexPages, walkMarkdown } from "./derive.ts";
+import { deriveRewrites, includeIndexPages, untitledPageTitle, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
 import { landingTableRule } from "./landing-table.ts";
 import { mermaidRule } from "./mermaid.ts";
@@ -216,13 +216,14 @@ export default async () => {
     // site's front matter, not an article: the theme lays them out from the
     // flag and they carry no outline. An include root's page serves at its
     // directory URL too but stays an article. A page with neither a title
-    // key nor an h1 is titled by its `name` key (the SKILL.md convention),
-    // as derive.ts titles it for the sidebar.
+    // key nor an h1 is titled the way derive.ts titles its sidebar row: by
+    // its `name` key (the SKILL.md convention) when that says something,
+    // else by its file name.
     transformPageData(pageData) {
       const source = {
         filePath: sourcePathOf(facts.docsDir, includes, pageData.filePath),
-        ...(pageData.title === "" && typeof pageData.frontmatter.name === "string"
-          ? { title: pageData.frontmatter.name }
+        ...(pageData.title === ""
+          ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
           : {}),
       };
       if (!isLandingFile(pageData.filePath)) return source;

@@ -43,17 +43,18 @@ export function sitePath(url: string): string | null {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-/** Every HTML page in the assembled site, as server-root-relative paths.
- *  Each one seeds the crawl directly: a crawl from the root alone only
- *  reaches pages the root LINKS to, and version tiers are navigated
- *  through a <select>, not anchors, so they would never be checked. */
+/** Every HTML page (`.html` or `.htm`, as Pages serves both) in the
+ *  assembled site, as server-root-relative paths. Each one seeds the crawl
+ *  directly: a crawl from the root alone only reaches pages the root LINKS
+ *  to, and version tiers are navigated through a <select>, not anchors, so
+ *  they would never be checked. */
 export function walkHtml(dir: string, prefix = ""): string[] {
   const pages: string[] = [];
   for (const name of readdirSync(join(dir, prefix)).sort()) {
     const rel = prefix === "" ? name : `${prefix}/${name}`;
     if (statSync(join(dir, rel)).isDirectory()) {
       pages.push(...walkHtml(dir, rel));
-    } else if (name.endsWith(".html")) {
+    } else if (/\.html?$/i.test(name)) {
       pages.push(rel);
     }
   }

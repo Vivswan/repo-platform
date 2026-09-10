@@ -4,6 +4,7 @@ import {
   includeIndexPages,
   pageMeta,
   routeOf,
+  untitledPageTitle,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import { isLandingFile, sourcePathOf } from "../../../actions/pages-site/.vitepress/source-path.ts";
 import { parseMounts } from "../../../actions/pages-site/lib.ts";
@@ -145,6 +146,18 @@ describe("include root routes", () => {
       order: null,
       group: null,
     });
+  });
+
+  test("untitledPageTitle, which the document title shares with the sidebar row: a non-blank name trimmed, else the file name humanized", () => {
+    expect(untitledPageTitle("skills/beta/SKILL.md", "beta")).toBe("beta");
+    expect(untitledPageTitle("skills/beta/SKILL.md", "  beta  ")).toBe("beta");
+    expect(untitledPageTitle("skills/beta/SKILL.md", "")).toBe("SKILL");
+    expect(untitledPageTitle("skills/beta/SKILL.md", "   ")).toBe("SKILL");
+    expect(untitledPageTitle("skills/beta/SKILL.md", undefined)).toBe("SKILL");
+    expect(untitledPageTitle("skills/beta/SKILL.md", 3)).toBe("SKILL");
+    expect(untitledPageTitle("guide/getting_started-now.md", undefined)).toBe(
+      "getting started now",
+    );
   });
 });
 

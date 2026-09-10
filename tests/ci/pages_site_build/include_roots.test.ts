@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
@@ -74,6 +74,10 @@ const ALPHA_SKILL = [
  *  titled by its name and described by its description. */
 const BETA_SKILL = "---\nname: beta\ndescription: Beta does things.\n---\n\nBody of beta.\n";
 
+/** A skill whose name says nothing (blank) and no h1: titled by its file
+ *  name, in the document title and the sidebar alike. */
+const GAMMA_SKILL = "---\nname: '   '\n---\n\nBody of gamma.\n";
+
 const DOCS_README =
   "# Fixture\n\nSee the [skills](skills/), the [alpha skill](skills/alpha/), " +
   "and how to [install it](skills/alpha/#install).\n";
@@ -103,6 +107,8 @@ function includeFixture(repo: string): void {
 
   mkdirSync(join(repo, "skills", "beta"));
   writeFileSync(join(repo, "skills", "beta", "SKILL.md"), BETA_SKILL);
+  mkdirSync(join(repo, "skills", "gamma"));
+  writeFileSync(join(repo, "skills", "gamma", "SKILL.md"), GAMMA_SKILL);
   writeFileSync(
     join(repo, "skills", "README.md"),
     "# Skills\n\n| Skill | Purpose |\n|---|---|\n| [alpha](alpha/) | Alpha |\n| [beta](beta/) | Beta |\n",
@@ -151,6 +157,10 @@ describe("include roots in the assembled site", () => {
         "Beta does things.",
       ]);
       expect(texts(alpha, "title")).toEqual(["Alpha skill | Inc Docs"]);
+      // A blank name says nothing: the file name titles the document, as
+      // it titles the sidebar row below.
+      const gamma = readSite(site, "docs/latest/skills/gamma/index.html");
+      expect(texts(gamma, "title")).toEqual(["SKILL | Inc Docs"]);
       expect(alpha).toContain("Source: skills/alpha/SKILL.md");
       // A file the site never publishes reads on GitHub at the tier's ref;
       // a directory link without its slash is the directory URL.
@@ -193,6 +203,8 @@ describe("include roots in the assembled site", () => {
         "Alpha reference",
         "Beta",
         "beta",
+        "Gamma",
+        "SKILL",
       ]);
       const assets = readAssets(site, "docs/latest/assets");
       expect(assets).toContain('"url":"/inc-repo/docs/latest/skills/beta/"');
@@ -268,7 +280,7 @@ describe("include root staging refusals", () => {
         mkdirSync(join(repo, "docs", "skills"));
         writeFileSync(join(repo, "docs", "skills", "README.md"), "# Hand-written\n");
       },
-      "the include root 'skills' mounts at 'skills/', which docs/ already carries at HEAD - two sources would claim one URL; mount the root under another name",
+      "the include root 'skills' mounts at 'skills/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
     ],
     [
       "a child carrying both the page and index.md",
@@ -283,6 +295,77 @@ describe("include root staging refusals", () => {
       const result = buildSite(workspace, REPO, runnerTemp(temp), CHECK_ENV);
       expect(result.exitCode, describeRun(result)).not.toBe(0);
       expect(result.stderr).toContain(`::error::${message}`);
+      expect(result.stdout).not.toContain("vitepress");
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+/** The agents/ root mounted INSIDE the skills root's mount, listed child
+ *  first: staging order is the mount's depth, never the list's. */
+const NESTED_CHECK_ENV = {
+  CHECK: "true",
+  MOUNTS:
+    '[{"path": "/", "source": "vitepress", "versioned": true, "include": [' +
+    '{"path": "agents", "mount": "skills/agents", "page": "AGENT.md"},' +
+    ' {"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]',
+};
+
+/** The skill links the agent in repository space; the agent links back. */
+function nestedFixture(repo: string): void {
+  refusalFixture(repo, () => {});
+  writeFileSync(
+    join(repo, "skills", "alpha", "SKILL.md"),
+    `${ALPHA_SKILL.replace(/ and the \[beta.*$/m, ".")}\nSee the [one agent](../../agents/one/AGENT.md).\n`,
+  );
+  writeFileSync(join(repo, "skills", "alpha", "reference.md"), "# Alpha reference\n");
+  mkdirSync(join(repo, "agents", "one"), { recursive: true });
+  writeFileSync(
+    join(repo, "agents", "one", "AGENT.md"),
+    "---\nname: one\n---\n\nUses the [alpha skill](../../skills/alpha/SKILL.md#install).\n",
+  );
+  initRepo(repo);
+  commitAll(repo, "nested roots");
+}
+
+describe("nested include mounts", () => {
+  test(
+    "a root mounted inside another's mount stages whichever is listed first, and links cross between them",
+    () => {
+      const workspace = temp.dir("pages-site-include-nested-");
+      nestedFixture(workspace);
+      const runner = runnerTemp(temp);
+      const result = buildSite(workspace, REPO, runner, NESTED_CHECK_ENV);
+      expect(result.exitCode, describeRun(result)).toBe(0);
+      expect(result.stdout).toMatch(
+        /docs build check passed \(\d+ links judged across \d+ pages\)/,
+      );
+      // Both roots rendered, the child inside the parent's mount, and each
+      // page's link to the other is an on-site route (a missing root would
+      // have sent it to GitHub, which the gate never judges).
+      const dist = join(dirname(runner.site), "build-0", ".vitepress", "dist");
+      const skill = readSite(dist, "skills/alpha/index.html");
+      const agent = readSite(dist, "skills/agents/one/index.html");
+      expect(select(skill, ".vp-doc a").map((a) => a.attrs.href)).toContain("./../agents/one/");
+      expect(select(agent, ".vp-doc a").map((a) => a.attrs.href)).toContain(
+        "./../../alpha/#install",
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "refuses the child mount when the parent's own source carries that directory",
+    () => {
+      const workspace = temp.dir("pages-site-include-nested-collision-");
+      nestedFixture(workspace);
+      mkdirSync(join(workspace, "skills", "agents"));
+      writeFileSync(join(workspace, "skills", "agents", "README.md"), "# Hand-written agents\n");
+      const result = buildSite(workspace, REPO, runnerTemp(temp), NESTED_CHECK_ENV);
+      expect(result.exitCode, describeRun(result)).not.toBe(0);
+      expect(result.stderr).toContain(
+        "::error::the include root 'agents' mounts at 'skills/agents/', which the docs tree (docs/, or a root mounted above it) already carries at HEAD - two sources would claim one URL; mount the root under another name",
+      );
       expect(result.stdout).not.toContain("vitepress");
     },
     TEST_TIMEOUT_MS,

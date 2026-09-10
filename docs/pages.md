@@ -67,7 +67,7 @@ Selecting `docs-site` alongside `pages` renders ONE Pages workflow: the website 
 
 ## Internal links are checked across mounts
 
-Once every mount is in place, the assembled artifact is crawled as one site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page built from the default branch head must resolve, wherever the target lives:
+Once every mount is in place, the assembled artifact is crawled as one site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page (`.html` or `.htm`) built from the default branch head must resolve, wherever the target lives:
 
 - a website page linking into `/<docs_site_path>/`
 - a docs page linking to a skill rendered from another root

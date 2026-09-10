@@ -9,7 +9,8 @@
 // the docs tree's public/ becomes its URL at the base, and anything the
 // site never publishes (a file elsewhere in the repository, a plugin.json
 // or a script beside a SKILL.md) becomes a link to that file on GitHub at
-// the tier's own ref. Without this, `../.github/workflows/ci.yml` and
+// the tier's own ref, a directory (written with its slash, or the
+// repository root) to its tree there. Without this, `../.github/workflows/ci.yml` and
 // `guide/README.md` both read fine on GitHub and 404 on the site, while
 // VitePress's own dead-link check passes them.
 
@@ -129,8 +130,13 @@ export function rewriteLink(href: string, relativePath: string, scope: LinkScope
   const staged = stagedPath(repoTarget === "." ? "" : repoTarget, scope);
   const route = staged === null ? null : servedRoute(staged, trailing === "/", scope);
   if (route === null) {
+    // GitHub's file route 404s on a directory; a directory is known here
+    // by its trailing slash or by being the repository root itself.
+    if (repoTarget === ".")
+      return { href: `${scope.repoUrl}/tree/${scope.ref}${suffix}`, verbatim: false };
+    const view = trailing === "/" ? "tree" : "blob";
     return {
-      href: `${scope.repoUrl}/blob/${scope.ref}/${encodePathSegments(repoTarget)}${trailing}${suffix}`,
+      href: `${scope.repoUrl}/${view}/${scope.ref}/${encodePathSegments(repoTarget)}${suffix}`,
       verbatim: false,
     };
   }

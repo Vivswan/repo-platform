@@ -229,8 +229,10 @@ describe("checkSiteLinks", () => {
         ' <a href="/r/docs/latest/setup">clean</a> <a href="/r/docs/latest/setup#install">clean fragment</a>' +
         // Another repository's site on the same origin is external here.
         ' <a href="https://o.github.io/other-repo/">sibling</a>' +
-        ' <a href="manual.pdf#page=2">pdf</a>',
+        ' <a href="manual.pdf#page=2">pdf</a> <a href="about.htm#who">htm</a>',
       "manual.pdf": "%PDF-1.4 not html",
+      // A .htm page is a page: seeded, crawled, and a fragment target.
+      "about.htm": '<h2 id="who">Who</h2> <a href="docs/latest/setup.html#install">s</a>',
       "docs/index.html": '<a href="latest/">latest</a> <a href="../">home</a>',
       "docs/latest/index.html": '<a href="setup.html">setup</a> <a href="#TOP">up</a>',
       "docs/latest/setup.html": '<h2 id="install">Install</h2><a href="#install">top</a>',
@@ -246,7 +248,7 @@ describe("checkSiteLinks", () => {
       { rel: "", strict: true },
     ];
     const result = await checkSiteLinks(dir, "/r/", tiers, "https://o.github.io");
-    expect(result.pages).toBe(7);
+    expect(result.pages).toBe(8);
     expect(result.judged).toBeGreaterThan(0);
   });
 
@@ -262,6 +264,9 @@ describe("checkSiteLinks", () => {
         ' <a href="/r/docs/latest/100%a%23b.html#missing">mixed in one name</a>',
       "docs/index.html": '<a href="nowhere.html">sealed rot in the tag build</a>',
       "docs/latest/index.html": '<a href="setup.html#nope">n</a>',
+      // A .htm page seeds like any other, so rot reachable only through
+      // it (index -> about.htm -> missing) is judged.
+      "docs/latest/about.htm": '<a href="missing.html">m</a> <a href="setup.html#absent">a</a>',
       "docs/latest/setup.html": '<h2 id="install">Install</h2>',
       "docs/latest/100%.html": '<a href="gone.html">g</a>',
       "docs/latest/a#b.html": '<a href="#missing">m</a>',
@@ -277,7 +282,7 @@ describe("checkSiteLinks", () => {
     let printed = "";
     try {
       await expect(checkSiteLinks(dir, "/r/", tiers, "https://o.github.io")).rejects.toThrow(
-        "10 broken internal links in the current content",
+        "12 broken internal links in the current content",
       );
       printed = log.mock.calls.map((call) => call.join(" ")).join("\n");
     } finally {
@@ -296,6 +301,12 @@ describe("checkSiteLinks", () => {
     );
     expect(printed).toContain(
       "/r/docs/latest/100%25.html -> /r/docs/latest/gone.html (status 404)",
+    );
+    expect(printed).toContain(
+      "/r/docs/latest/about.htm -> /r/docs/latest/missing.html (status 404)",
+    );
+    expect(printed).toContain(
+      "/r/docs/latest/about.htm -> /r/docs/latest/setup.html#absent (no element with id 'absent' on that page)",
     );
     // The fragment pass addresses the base and delimiter-named pages the way
     // the crawl does.

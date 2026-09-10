@@ -326,9 +326,13 @@ export function tierStrictLinks(tier: Tier): boolean {
 
 /** Materialize each include root under `<srcDir>/<mount>/` the way the
  *  docs tree was (the workspace tree at HEAD, an extract at a tag) and
- *  return the roots this tier carries. At HEAD a missing root is a
- *  configuration error, like a missing docs directory; at a tag it is
- *  skipped with a notice, since history cannot be fixed. */
+ *  return the roots this tier carries, in the order given. Shallower
+ *  mounts stage first, so a root mounted inside another's mount
+ *  (`skills/agents` under `skills`) lands in the parent's tree whichever
+ *  order the caller listed them; a parent whose own source carries the
+ *  child's directory is still the collision it is. At HEAD a missing root
+ *  is a configuration error, like a missing docs directory; at a tag it
+ *  is skipped with a notice, since history cannot be fixed. */
 function stageIncludes(
   cfg: Config,
   tier: Tier,
@@ -336,8 +340,9 @@ function stageIncludes(
   srcDir: string,
   includes: readonly IncludeRoot[],
 ): IncludeRoot[] {
-  const staged: IncludeRoot[] = [];
-  for (const include of includes) {
+  const staged = new Set<IncludeRoot>();
+  const depth = (include: IncludeRoot) => include.mount.split("/").length;
+  for (const include of [...includes].sort((a, b) => depth(a) - depth(b))) {
     // The tag's own tree decides first: a tag from before the root existed
     // is skipped whatever its docs tree carries at the mount's name.
     if (tier.ref !== "HEAD" && !treeHas(cfg, tier.ref, include.path)) {
@@ -349,8 +354,9 @@ function stageIncludes(
     const target = join(srcDir, include.mount);
     if (existsSync(target)) {
       throw new Error(
-        `the include root '${include.path}' mounts at '${include.mount}/', which ${cfg.docsDir}/ ` +
-          `already carries at ${tier.ref} - two sources would claim one URL; mount the root under another name`,
+        `the include root '${include.path}' mounts at '${include.mount}/', which the docs tree ` +
+          `(${cfg.docsDir}/, or a root mounted above it) already carries at ${tier.ref} - two ` +
+          "sources would claim one URL; mount the root under another name",
       );
     }
     if (tier.ref === "HEAD") {
@@ -376,9 +382,9 @@ function stageIncludes(
       );
     }
     assertIncludePages(target, include);
-    staged.push(include);
+    staged.add(include);
   }
-  return staged;
+  return includes.filter((include) => staged.has(include));
 }
 
 /** A child directory carrying both the include's page and an index.md is
