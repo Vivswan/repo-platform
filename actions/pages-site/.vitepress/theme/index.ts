@@ -32,6 +32,7 @@ import FleetLauncher from "./launcher.ts";
 import MermaidDiagrams from "./mermaid.ts";
 import NavLauncher from "./nav-launcher.ts";
 import Provenance from "./provenance.ts";
+import { tierRouteGuard } from "./tier-routes.ts";
 import VersionSwitcher from "./version-switcher.ts";
 
 export default {
@@ -59,6 +60,12 @@ export default {
       const facts: ProjectFacts | undefined = ctx.siteData.value.themeConfig.docsSiteFacts;
       const root = document.documentElement;
       if (facts && root.dataset.fleetHue === undefined) root.dataset.fleetHue = String(facts.hue);
+      const versions: { link: string }[] = ctx.siteData.value.themeConfig.docsSiteVersions ?? [];
+      ctx.router.onBeforeRouteChange = tierRouteGuard(
+        ctx.siteData.value.base,
+        versions.map((version) => version.link),
+        { here: () => window.location.pathname, leave: (to) => window.location.assign(to) },
+      );
       return;
     }
     // Vue's production SSR renderer catches a page's render error, logs

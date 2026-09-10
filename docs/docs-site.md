@@ -54,7 +54,7 @@ Both modules selected render ONE Pages deployment (`pages.yml`): the repo's own 
 
 - Local full-text search and per-page "Edit this page" links (default-branch tiers only, where an edit can still change the content).
 - `llms.txt` and `llms-full.txt` per tier (the [llms.txt](https://llmstxt.org) convention), covering every locale.
-- The version dropdown in the nav, fed from the same tag set as `versions.json`.
+- The version dropdown in the nav, fed from the same tag set as `versions.json`. Every version is its own build, so a link into another version (the dropdown, the facts card, a markdown link) is a full page load, never a client-side route.
 - The project facts card on the landing page: description, repository link, homepage and topics when set, toolchain versions, the served docs versions, and the license, read from the repository itself at build time.
 - A provenance line under every page naming the ref and commit the tier was built from (linking to that commit) and the markdown file the page rendered from.
 
