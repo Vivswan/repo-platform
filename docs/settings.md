@@ -77,7 +77,7 @@ Edge cases, all deliberate:
 - A target with no `.github/settings.yml` yet is SKIPPED with a warning: absence of the repo layer means not-yet-onboarded, never an empty layer, and applying the baseline alone would delete every label that repo declares for itself. The starter seeds the file on the repo's next template sync; the apply after that picks it up.
 - A repo whose selection probes keep failing (after retries) is skipped for the run with a warning and picked up again the next night.
 - A stream module (fuzzer, nightly, docs-site) is selected in `.repo-platform.yml` one PR before the sync PR that renders it records its label answer in `.github/.copier-answers.yml`. In that window the apply renders the module's default label and continues, with a `::notice::` naming the repo, the module, and the assumed default; the first apply after the sync PR merges reads the recorded answer, so a label customized in that PR takes effect then (the default label is deleted as undeclared and the customized one created). A default that collides with another stream's recorded label fails the apply like any label collision, until that sync PR records a distinct name.
-- A private target shows up as a name hint (`apply (h**-s**r)`), and its details stay out of the public log; the full report is a marker-labelled issue on the repository itself - [private-repos.md](private-repos.md#the-settings-report-issue).
+- A private target shows up as a name hint (`apply (h**-s**r)`), and its details stay out of the public log; the full report is a marker-labelled issue on the repository itself - [private-repos.md](private-repos.md#settings).
 
 ## What the baseline contains
 

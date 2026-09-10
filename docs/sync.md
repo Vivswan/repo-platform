@@ -244,3 +244,54 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
 `hold` is true on any held or `region added` written row, any replaced local edit, any held or `region removed` retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns. Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own. A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
+
+## The operator
+
+[sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private-repos.md](private-repos.md)).
+
+| Step | Script | What it does |
+| --- | --- | --- |
+| plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the build tip, proven the builder's output of a green main commit ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
+| plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)) |
+| plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows`; the matrix is the indexes `0..N-1` |
+| row 1: check out | actions/checkout | repo-platform, then the build at the plan's commit under `build/` |
+| row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | discovery and selection re-run with the plan's inputs (their output in `$RUNNER_TEMP` files), the row count checked against the plan, the index mapped to a repository; every form of the name is registered with the masker before anything else prints, and the name rides `GITHUB_ENV` (which the runner never echoes) from here |
+| row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
+| row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) `--cutover true` | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
+| row 6: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
+
+The vocabulary, complete (`tests/fleet/verdict.test.ts` pins it):
+
+```text
+plan: <N> rows
+row <i>: unchanged
+row <i>: PR opened
+row <i>: PR refreshed
+row <i>: failed, report filed in the target repository
+row <i>: failed before the target was resolved; re-run the workflow
+```
+
+- A row is red only when a step before or at the resolve failed (the install, the build checkout, the re-run selection, the resolve itself): the printer then prints the unresolved line, and the failed step's exit status is the whole public signal (its output sits in the runner's `$RUNNER_TEMP` file, gone with the runner); the plan job ran the same code moments earlier in the clear, so re-running the workflow is the remedy. From the checkout on, the steps continue on error and the failure is delivered to the target; the row stays green with its verdict line. The one exception is a target that cannot take the failure report (no Issues grant): that row prints nothing and is red.
+- Where the detail is: a delivered row's PR body; a failed row's issue (the tails of the checkout, writer, and delivery logs).
+- The `operator-verdict-only` rule (`scripts/check/ssot/sync_operator.ts`) pins the shape: an index-only matrix, every row `run:` step one bun command redirected to a `$RUNNER_TEMP` file except the resolver and the printer, only the checkout and setup-bun actions and never a checkout of another repository, no target name in a step's declared env, the target clone after the resolver, and the row job's selector carrying the plan's exact env.
+- Rows are re-derived, not carried: a repository renamed, enrolled, or archived between the plan and a row shifts the indexes. The row count guard catches a changed count; a same-count change is the residual, and its worst case is one repository synced twice (two rows rewrite the same branch and PR, the later one winning) or once too few (the next run heals it).
+
+### Cutover
+
+A repository still registered the old way (`.repo-platform.yml` holding only `modules`, its render recorded in `.github/.copier-answers.yml`) is converted by the writer's `--cutover true` flag ([sync/writer/cutover.ts](../.github/scripts/sync/writer/cutover.ts)) before the registration is read, once:
+
+| Written | From |
+| --- | --- |
+| `project.name`, `project.slug`, `project.description` | `project_name`, `project_slug`, `description`; the repository name and an empty description when absent |
+| `project.copyright_holder` | `copyright_holder`, only when it differs from the owner login |
+| `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the `pages_*` answers, only where they differ from the defaults the plan action derives: the selected modules carrying `pages` data joined by commas (`none` when there are none); the `install` and `build` of the first module, in `files.yml` order, that the resolved setup names; `modules.pages.dist` (else `dist`) |
+| `docs_site.path` | `docs_site_path`, when it differs from `modules.docs-site.path` (else `docs`) |
+| `skills.dir` | `skills_dir`, when it differs from `modules.skills.dir` (else `skills`) |
+| `labels.<key>` | `<key>_label` for each selected module carrying `tracking_label: {key, default}`, when it differs from the default |
+| `mirrors` | carried from the old file |
+
+- The module list is the old file's selection in `files.yml` order (the order the writer selects in); an unknown name is dropped and noted.
+- The derived document must pass the registration schema, or the writer fails (the row files its issue).
+- The answers file leaves through the `retired` entry for `.github/.copier-answers.yml`; the cutover notes hold the PR for review.
+- A repository whose registration already carries `project`, or that has no answers file, is left alone.

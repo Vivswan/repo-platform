@@ -10,7 +10,7 @@ Sources on `main`, a generated build branch, sync PRs into each repo:
 
 - `templates/` holds the sources: `base/` plus one folder per module. Shared files take module contributions at `{# compose:<anchor> #}` anchors, spliced from per-module `fragments/` or generated from the `module.yml` manifests.
 - Every green `main` commit rebuilds the orphan `build` branch - the one generated delivery channel: `template/` is the composed tree copier renders, `actions/` carries the composite actions the rendered workflows pin `@build`, and every path is extraction-safe. `main` itself is not copier-consumable.
-- [sync-repos.yml](.github/workflows/sync-repos.yml) runs `copier update` against each managed repo on a weekly cron or a dispatch, then pushes a branch and PR into it with the fleet PAT. Clean updates arm squash auto-merge and land on their own once the repo's `all-green` check passes; anything a human should see (auto-resolved conflicts, failed validation, recovery runs) stays for review.
+- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the published build's files into each managed repo on a weekly cron or a dispatch, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
 Repository settings are not part of that render: for every managed repo (one with a `.repo-platform.yml`), [settings-repos.yml](.github/workflows/settings-repos.yml) computes each repo's settings at apply time as a six-layer merge of plain YAML documents - fleet baseline, fleet visibility overlay, the selected modules' layers and their visibility overlays, the repo's own `.github/settings.yml`, then a fleet override layer no repo can weaken - and applies the result ([docs/settings.md](docs/settings.md)).
 
@@ -42,7 +42,6 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | `all` or empty | the whole fleet |
 
 - A module name outside `templates/` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning (by hint when private) and left out, and the plan prints how many repos the filter left out.
-- `-f branch=<branch>` beside a single `repo=Vivswan/a` renders that repository's selection as found on the branch and pushes the commit onto it instead of opening a sync PR: the way a PR that changes `.repo-platform.yml` gets its render ([docs/new-repo.md](docs/new-repo.md#the-branch-dispatch)). Refused with a list, a token, `all`, the default branch, or `recover=recopy`.
 - The filter is dispatch-only: a `[fleet-sync: ...]` directive carrying it turns the read-directives leg red, since the leg unions the entries of every commit in its range and an intersecting token would misread there.
 - Deriving the filter from the template paths a build publish changed, so a merge targets its own repos without naming modules, is a possible follow-up.
 

@@ -35,7 +35,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
-| Find where a private repo's failure details land | [Private repos: seeing the full detail](private-repos.md#seeing-the-full-detail) |
+| Find where a private repo's failure details land | [Private repos: details in the target repository](private-repos.md) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
