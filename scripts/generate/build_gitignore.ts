@@ -9,7 +9,8 @@
 // sharing rule (a source several modules declare is emitted plain by the
 // first and gate-negated by the rest) and the topology gate are
 // docs/compose.md. The template and self outputs open their managed block
-// with one section that has no upstream source: agent local state.
+// with two sections that have no upstream source: agent local state and
+// the CI workspace paths.
 //
 // Every regeneration resolves github/gitignore's current HEAD and fetches
 // every section from that one commit; nothing records the SHA, so the
@@ -72,6 +73,22 @@ const AGENT_SECTION =
   ".codex/worktrees/\n" +
   ".worktrees/\n" +
   ".claude/settings.local.json\n";
+
+// Not from github/gitignore: the paths the fleet's workflows create inside
+// the caller's checkout (the pages deploy's site extraction, the release
+// publish's asset download, the secret scan's SARIF report, the fuzz
+// starter's failure reports). Ignored so a local folder of the same name
+// can never be committed and later collide with the CI step that creates
+// it; anchored to the root so a nested source folder of the same name is
+// not swallowed.
+export const CI_WORKSPACE_SECTION =
+  "## CI workspace paths (repo-platform)\n" +
+  "/_site/\n" +
+  "/artifact.tar\n" +
+  "/assets/\n" +
+  "/attestation.json\n" +
+  "/results.sarif\n" +
+  "/.fuzz-failures/\n";
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
@@ -209,11 +226,11 @@ export function existingLocalSides(output: string): { above: string; below: stri
 }
 
 /** The skeleton's region body up to the compose anchor: the header
- *  comment, the agent section, and the OS sections. The template carries
+ *  comment, the agent and CI workspace sections, and the OS sections. The template carries
  *  it between BEGIN and the anchor; files/base/.gitignore IS it (the
  *  writer adds the markers and appends the module blocks). */
 export function buildFilesBase(sections: Record<string, string>): string {
-  const parts = [HEADER_COMMENT, AGENT_SECTION, "\n"];
+  const parts = [HEADER_COMMENT, AGENT_SECTION, "\n", CI_WORKSPACE_SECTION, "\n"];
   for (const path of ALWAYS) {
     parts.push(sections[path], "\n");
   }
@@ -421,7 +438,7 @@ function buildSelf(
   sources: string[],
   sides: { above: string; below: string },
 ): string {
-  const parts = [sides.above, managedHeader(), AGENT_SECTION, "\n"];
+  const parts = [sides.above, managedHeader(), AGENT_SECTION, "\n", CI_WORKSPACE_SECTION, "\n"];
   for (const path of [...ALWAYS, ...sources]) {
     parts.push(sections[path], "\n");
   }

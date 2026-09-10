@@ -9,6 +9,14 @@
 .worktrees/
 .claude/settings.local.json
 
+## CI workspace paths (repo-platform)
+/_site/
+/artifact.tar
+/assets/
+/attestation.json
+/results.sarif
+/.fuzz-failures/
+
 ## Windows (github/gitignore Global/Windows.gitignore)
 # Windows thumbnail cache files
 Thumbs.db

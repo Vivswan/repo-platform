@@ -15,7 +15,8 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { capture } from "../../../.github/scripts/shared/proc.ts";
 import {
   blockName,
   blockRel,
@@ -23,6 +24,7 @@ import {
   buildFilesBase,
   buildFragment,
   buildTemplate,
+  CI_WORKSPACE_SECTION,
   filesSideProblems,
   fragmentGuardExpressions,
   fragmentPlans,
@@ -431,5 +433,48 @@ describe("the files/ side", () => {
     writeFileSync(join(dir, "uv", ".gitignore.block.Node"), "## Node\n");
     writeFileSync(join(dir, "base", ".gitignore.block.Node"), "## Node\n");
     expect(strayBlockFiles(entries, dir)).toEqual(["files/uv/.gitignore.block.Node"]);
+  });
+});
+
+// The CI workspace section judged by git itself: every path a fleet
+// workflow creates in the checkout is ignored at the root, a plain file
+// of a directory pattern's name is not, and a nested source folder of the
+// same name is never swallowed.
+describe("CI workspace section", () => {
+  /** A fresh repository whose .gitignore is exactly the section, holding
+   *  one path of the given kind; returns git's ignore verdict for it. */
+  function ignoredByGit(rel: string, kind: "dir" | "file"): boolean {
+    const repo = temp.dir("gitignore-ci-workspace-");
+    expect(capture(["git", "-C", repo, "init", "-q"], {}).exitCode).toBe(0);
+    writeFileSync(join(repo, ".gitignore"), CI_WORKSPACE_SECTION);
+    const abs = join(repo, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    if (kind === "dir") mkdirSync(abs);
+    else writeFileSync(abs, "");
+    const probe = capture(
+      ["git", "-C", repo, "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", rel],
+      {},
+    );
+    // 0 ignored, 1 not ignored; anything else is a broken probe, never a verdict.
+    expect([0, 1]).toContain(probe.exitCode);
+    return probe.exitCode === 0;
+  }
+
+  const cases: [string, "dir" | "file", boolean][] = [
+    ["_site", "dir", true],
+    ["artifact.tar", "file", true],
+    ["assets", "dir", true],
+    ["attestation.json", "file", true],
+    ["results.sarif", "file", true],
+    [".fuzz-failures", "dir", true],
+    ["assets", "file", false],
+    ["docs/_site", "dir", false],
+    ["crate/assets", "dir", false],
+    ["src/attestation.json", "file", false],
+    ["scan/results.sarif", "file", false],
+  ];
+
+  test.each(cases)("%s (%s) ignored: %p", (rel, kind, ignored) => {
+    expect(ignoredByGit(rel, kind)).toBe(ignored);
   });
 });

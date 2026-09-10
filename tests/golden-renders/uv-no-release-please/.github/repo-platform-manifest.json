@@ -22,7 +22,7 @@
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".github/workflows/update-release-pr.yml": {"class": "starter"},
     ".github/workflows/update-release.yml": {"class": "starter"},
-    ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "4a88eda2f17368f4d63bb8f69513e17f6870d76173b051e8da682dfe61ee3738"},
+    ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "42c6703714d6364bdae5d09c2b78d85e87e89451f6ccc8b55204509e044d8ca0"},
     ".gitleaks.toml": {"class": "starter"},
     ".repo-platform.yml": {"class": "starter"},
     ".typography-allow": {"class": "managed", "hash": "5a4acd862164b9a19980ec9a0fa0048b3f81e1d2de02ded2d15b0f78401a07b3"},
