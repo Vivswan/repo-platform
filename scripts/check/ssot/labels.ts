@@ -1,21 +1,16 @@
-// Rules over the label rosters: the managed labels' sites, issue-form
-// labels, the release guard's literals, dependabot's tuples, and the
-// tracking-label validators.
+// Rules over the label rosters: the managed labels' sites, the release
+// guard's literals, dependabot's tuples, and the tracking-label validators.
 
-import { parse as parseYaml } from "yaml";
 import { loadLayer } from "../../../.github/scripts/fleet/render_managed_settings.ts";
-import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
 import { constRegexSource, constStringValue, propertyRegexSource } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
 import {
   asRecord,
   copierConfig,
-  jinjaVars,
   loadManifests,
   managedLabelRoster,
   read,
   trackingManifests,
-  walkFiles,
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -275,37 +270,6 @@ export const labelRules: Rule[] = [
           got: `${nightlyColor} / ${nightlyDescription}`,
         });
       }
-      return mismatches;
-    },
-  },
-  {
-    name: "issue-labels",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const rosterNames = new Set(managedLabelRoster().map((label) => label.name));
-      const forms = walkFiles("templates/issue-templates").map((f) => f.path);
-      let sawLabels = false;
-      for (const rel of forms) {
-        const text = read(rel);
-        if (!/^labels:/m.test(text)) continue;
-        // Parse the whole form so block-style lists count too; a labels key
-        // that stops parsing must fail loudly, not drop out of the check.
-        const doc = asRecord(parseYaml(placeholderJinja(normalizeJinja(text, jinjaVars()))), rel);
-        if (!Array.isArray(doc.labels)) {
-          throw new Error(`${rel}: labels key present but not a parsable list`);
-        }
-        sawLabels = true;
-        for (const name of doc.labels.map(String)) {
-          if (!rosterNames.has(name)) {
-            mismatches.push({
-              file: rel,
-              expected: `label '${name}' declared in the managed settings roster (render_managed_settings.ts)`,
-              got: "missing - the label sync would delete what the issue form applies",
-            });
-          }
-        }
-      }
-      if (!sawLabels) throw new Error("no issue form declares labels - anchor lost");
       return mismatches;
     },
   },

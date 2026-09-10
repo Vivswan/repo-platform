@@ -249,9 +249,11 @@ describe("scanMarkdown", () => {
 describe("scan scope", () => {
   test("rendersToMarkdown handles plain, template, and gated names", () => {
     expect(rendersToMarkdown("docs/guide.md")).toBe(true);
-    expect(rendersToMarkdown("templates/base/.github/SECURITY.md.jinja")).toBe(true);
+    expect(rendersToMarkdown("templates/base/AGENTS.md.jinja")).toBe(true);
     expect(
-      rendersToMarkdown("templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja"),
+      rendersToMarkdown(
+        "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
+      ),
     ).toBe(true);
     expect(rendersToMarkdown("scripts/generate.ts")).toBe(false);
     expect(rendersToMarkdown("templates/base/.gitignore.jinja")).toBe(false);

@@ -1,8 +1,8 @@
 // Visibility flip (public -> private): a flip between syncs is carried by
-// the update itself. It must drop the conditional-filename CONTRIBUTING.md
-// render, leave the repo-owned settings.yml starter alone (the managed
-// baseline follows live visibility centrally), and strip the codeql
-// machinery from ci.yml. Runs on a fresh public fixture (selected on the
+// the update itself. It must leave the repo-owned settings.yml starter
+// alone (the managed baseline follows live visibility centrally) and strip
+// the codeql machinery from ci.yml; the old build's community health files
+// retire with the same update. Runs on a fresh public fixture (selected on the
 // pre-fold build with settings-sync, the fleet's real shape; the fold rung
 // drops the name) through the same workflow scripts as the main update -
 // only the visibility changes. The fixture also owns a workflow at the path
@@ -45,6 +45,7 @@ import {
 const harness = upgradePathHarness();
 
 const DESCRIPTION = "Visibility-flip project";
+const BUG_FORM = ".github/ISSUE_TEMPLATE/bug_report.yml";
 const OWN_POST_GREEN =
   "name: Own Hook\non: push\njobs:\n  own:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo own\n";
 
@@ -75,11 +76,14 @@ describeLeg("03 visibility flip", () => {
       "chore: init",
     );
 
+    // The old fixture renders the community health files the new build dropped.
     expect(existsSync(join(project, "SECURITY.md"))).toBe(true);
-    // The old fixture is synthetic (built from the current tree), so the
-    // newer public-only artifacts are always present.
     expect(existsSync(join(project, "CONTRIBUTING.md"))).toBe(true);
-    expect(existsSync(join(project, "CODE_OF_CONDUCT.md"))).toBe(true);
+    expect(existsSync(join(project, ".github/CODE_OF_CONDUCT.md"))).toBe(true);
+    // The issue form was the issue-templates module's, and this fixture never
+    // selected it: no form rendered, so none can be restored later.
+    expect(lexists(join(project, BUG_FORM))).toBe(false);
+    expect(manifestEntry(project, BUG_FORM)).toBeUndefined();
     // The identity starter (repo-owned; the managed settings baseline is
     // computed centrally, so no rulesets or labels render here).
     const settings = readYaml(join(project, ".github/settings.yml")) as SettingsFile;
@@ -107,10 +111,9 @@ describeLeg("03 visibility flip", () => {
     syncScript("apply_update", env);
     syncScript("resolve_copier_conflicts", env, resolveConflictsArgs(project, work, false));
 
-    // Current copier already deletes the de-rendered CONTRIBUTING.md during
-    // the update; resurrect it so retired_cleanup's data-driven old/new
-    // render diff (old render private=false from the recorded answers, new
-    // render private=true from the live data) must really flag and delete it.
+    // Current copier already deletes the retired CONTRIBUTING.md during the
+    // update; resurrect it so retired_cleanup's data-driven old/new render
+    // diff must really flag and delete it.
     writeText(join(project, "CONTRIBUTING.md"), "# Contributing\n");
     syncScript("retired_cleanup", {
       ...env,
@@ -134,7 +137,10 @@ describeLeg("03 visibility flip", () => {
     expect(hold).toContain("named by `.github/workflows/ci.yml`");
     expect(hold).toContain("        sha:");
 
+    // No form was ever rendered here, so the starter restore has nothing to
+    // bring back: the repository inherits the account defaults.
     syncScript("preserve_repo_owned", env);
+    expect(lexists(join(project, BUG_FORM))).toBe(false);
     stampManifest(project);
     // Deleting a split-classed file takes its repository-owned half with
     // it, so the removal must raise the removed-splits hold that keeps the
@@ -153,10 +159,11 @@ describeLeg("03 visibility flip", () => {
   legTest(
     "the flipped project retires the public-only files and keeps the repo-owned starter",
     () => {
-      // SECURITY.md is visibility-independent since the ungating: it survives
-      // the flip, at its new home.
+      // SECURITY.md rode the rung's move; the update renders no security
+      // policy, so the moved file stays as the repository's own.
       expect(existsSync(join(project, ".github/SECURITY.md"))).toBe(true);
       expect(lexists(join(project, "SECURITY.md"))).toBe(false);
+      expect(manifestEntry(project, ".github/SECURITY.md")).toBeUndefined();
 
       const ciYml = join(project, ".github/workflows/ci.yml");
       const ciText = readText(ciYml);
@@ -164,10 +171,12 @@ describeLeg("03 visibility flip", () => {
       // plan's modules output, so a selection without release-please skips it.
       expect(String(workflowJob(ciYml, "release")?.if)).toContain('"release-please"');
 
-      // The public-only base files and gates retire on the flip, the
-      // manifest's visibility-gated entries with them.
+      // The retired community health files leave with the update, their
+      // manifest entries with them; the never-selected issue form stays absent
+      // (the account defaults serve one) and unlisted.
+      expect(lexists(join(project, BUG_FORM))).toBe(false);
+      expect(manifestEntry(project, BUG_FORM)).toBeUndefined();
       expect(lexists(join(project, "CONTRIBUTING.md"))).toBe(false);
-      expect(lexists(join(project, "CODE_OF_CONDUCT.md"))).toBe(false);
       expect(lexists(join(project, ".github/CODE_OF_CONDUCT.md"))).toBe(false);
       expect(manifestEntry(project, "CONTRIBUTING.md")).toBeUndefined();
 

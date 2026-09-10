@@ -39,12 +39,9 @@ export const BASELINE: Record<string, string> = {
   ".editorconfig": `${HB}\nroot = true\n${HE}\n`,
   ".gitattributes": `${HB}\n* text=auto eol=lf\n${HE}\n`,
   ".github/CODEOWNERS": `${HB}\n* @vivswan\n${HE}\n`,
-  ".github/SECURITY.md": `${B}\n# Security policy\n${E}\n`,
-  ".github/CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
   ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
   ".typography-allow": MANAGED_HEADER,
   ".yamllint": `${MANAGED_HEADER}extends: default\n`,
-  "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
   "LICENSE.md": `${B}\n# License\n${E}\n`,
   "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
   "CLAUDE.md": "AGENTS.md\n",
@@ -121,10 +118,7 @@ export const MIRROR_BASE: MirrorEntry[] = [
   { path: ".gitignore", kind: "region", begin: HB, end: HE },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
-  { path: ".github/CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
-  { path: "CONTRIBUTING.md", kind: "region", begin: B, end: E, publicOnly: true },
   { path: "LICENSE.md", kind: "region", begin: B, end: E, withoutModule: "custom-license" },
-  { path: ".github/SECURITY.md", kind: "region", begin: B, end: E },
 ];
 export const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   bun: [

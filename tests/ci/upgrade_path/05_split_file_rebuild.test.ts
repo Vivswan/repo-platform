@@ -3,7 +3,7 @@
 // rebuilds it structurally, the managed half from the clean render at the
 // new ref, the repository-owned sides byte-for-byte from HEAD. The fixture
 // plants a local AGENTS.md tail, a local .gitignore entry above the managed
-// BEGIN, and a hand edit INSIDE SECURITY.md's managed region, then updates
+// BEGIN, and a hand edit INSIDE CODEOWNERS's managed region, then updates
 // to a build whose template changed each file's managed region. Sides must
 // ride through byte-preserved, managed regions must equal render-new
 // byte-for-byte, the managed-region edit must be reset and flagged for
@@ -52,10 +52,10 @@ const harness = upgradePathHarness();
 
 const DESCRIPTION = "Split-rebuild project";
 const AGENTS_TAIL = "## Local agent docs\n\nsplit-local agents tail";
-const SECURITY_HAND_EDIT = "split-local hand edit inside the managed region";
+const CODEOWNERS_HAND_EDIT = "# split-local hand edit inside the managed region";
 const LICENSE_TAIL = "split-local license tail";
 const MIRRORS = ["template/LICENSE.md", "skills/alpha/LICENSE.md", "skills/beta/LICENSE.md"];
-const SPLIT_FILES = ["AGENTS.md", ".github/SECURITY.md", ".gitignore"];
+const SPLIT_FILES = ["AGENTS.md", ".github/CODEOWNERS", ".gitignore"];
 
 /** The lines above the first managed BEGIN line (the repository-owned above-side). */
 function aboveManaged(text: string): string[] {
@@ -105,14 +105,14 @@ describeLeg("05 split file rebuild", () => {
     );
     gitignoreAboveExpected = aboveManaged(readText(gitignore));
     expect(gitignoreAboveExpected).toContain("split-local-cache/");
-    const security = join(project, ".github/SECURITY.md");
-    editText(security, (text) => {
+    const codeowners = join(project, ".github/CODEOWNERS");
+    editText(codeowners, (text) => {
       const lines = linesOf(text);
-      if (lines.length < 2) throw new Error("SECURITY.md renders fewer than two lines");
-      lines.splice(1, 0, SECURITY_HAND_EDIT);
+      if (lines[0] !== MARKERS.hash.begin) throw new Error("CODEOWNERS does not open on BEGIN");
+      lines.splice(1, 0, CODEOWNERS_HAND_EDIT);
       return `${lines.join("\n")}\n`;
     });
-    expect(readText(security)).toContain(SECURITY_HAND_EDIT);
+    expect(readText(codeowners)).toContain(CODEOWNERS_HAND_EDIT);
 
     // The mirror fixture: a repo-owned tail below LICENSE.md's END marker,
     // stale copies in template/ and one skill folder, a second skill folder
@@ -164,14 +164,15 @@ describeLeg("05 split file rebuild", () => {
     expect(agents).toBe(`${readText(join(renderNew, "AGENTS.md"))}\n${AGENTS_TAIL}\n`);
     expect(agents).toContain(SPLIT_MANAGED_LINES.agents);
 
-    // SECURITY.md: the hand edit inside the managed region is RESET and the
+    // CODEOWNERS: the hand edit inside the managed region is RESET and the
     // reset is flagged for review, loudly.
-    const security = readText(join(project, ".github/SECURITY.md"));
-    expect(security).toBe(readText(join(renderNew, ".github/SECURITY.md")));
-    expect(security).not.toContain(SECURITY_HAND_EDIT);
+    const codeowners = readText(join(project, ".github/CODEOWNERS"));
+    expect(codeowners).toBe(readText(join(renderNew, ".github/CODEOWNERS")));
+    expect(codeowners).not.toContain(CODEOWNERS_HAND_EDIT);
+    expect(codeowners).toContain(SPLIT_MANAGED_LINES.codeowners);
     const review = linesOf(readText(join(work, "carry-review.txt")));
     expect(
-      review.some((line) => line.startsWith(".github/SECURITY.md: managed-region edits reset")),
+      review.some((line) => line.startsWith(".github/CODEOWNERS: managed-region edits reset")),
     ).toBe(true);
     expect(readText(join(work, "local-carryover.md"))).toContain("RESET to the fresh render");
     // The clean carries stay auto-merge-eligible (LICENSE.md's tail is a
@@ -215,19 +216,19 @@ describeLeg("05 split file rebuild", () => {
     if (modulesLines.length === 0) throw new Error(".repo-platform.yml carries no modules: line");
     writeText(
       declaration,
-      `${modulesLines.join("\n")}\nmirrors:\n  - source: LICENSE.md\n    targets:\n      - ../mirror-escape.md\n      - .github/SECURITY.md\n`,
+      `${modulesLines.join("\n")}\nmirrors:\n  - source: LICENSE.md\n    targets:\n      - ../mirror-escape.md\n      - .github/CODEOWNERS\n`,
     );
     git(project, "add", ".repo-platform.yml");
     git(project, ...CI_IDENTITY, "commit", "-q", "-m", "chore: hostile mirror fixture");
     syncScript("materialize_mirrors", { ...env, RUNNER_TEMP: hostileWork }, ["--root", project]);
 
     expect(lexists(join(fx.runDir, "mirror-escape.md"))).toBe(false);
-    expect(readText(join(project, ".github/SECURITY.md"))).toBe(
-      readText(join(renderNew, ".github/SECURITY.md")),
+    expect(readText(join(project, ".github/CODEOWNERS"))).toBe(
+      readText(join(renderNew, ".github/CODEOWNERS")),
     );
     const refusal = join(hostileWork, "mirrors-review.md");
     expect(existsSync(refusal)).toBe(true);
     expect(isEmptyFile(refusal)).toBe(false);
-    expect(readText(refusal)).toContain("SECURITY.md");
+    expect(readText(refusal)).toContain("CODEOWNERS");
   });
 });

@@ -49,8 +49,14 @@ const MOVE_NOTE =
   "> from `.github/` exactly as it did from the root. One-time transition:\n" +
   "> the repository root keeps only repo content plus `.repo-platform.yml`;\n" +
   "> community health files live under `.github/`.";
+// The advice names no replacement source: this template renders no
+// security policy at any path, so repointing could not clear the hold.
 const MIRROR_ADVICE =
-  "> This repository's `.repo-platform.yml` declares a `mirrors` source at the\n> retired path: change `source: SECURITY.md` to\n> `source: .github/SECURITY.md`. Until then the mirror step refuses that entry\n> and holds the PR.";
+  "> This repository's `.repo-platform.yml` declares a `mirrors` source at the\n" +
+  "> retired path `SECURITY.md`, and this template renders no security policy\n" +
+  "> at any path: remove that mirror declaration, or point its `source` at a\n" +
+  "> file this template still renders. Until then the mirror step refuses that\n" +
+  "> entry and holds the PR.";
 const STALE_MIRROR =
   "modules: [bun]\nmirrors:\n  - source: SECURITY.md\n    targets: [copies/SECURITY.md]\n";
 
@@ -111,7 +117,7 @@ describe("m0001_security_policy_to_github", () => {
       note: null,
     },
     {
-      label: "at neither path (the update renders it fresh): nothing to say",
+      label: "at neither path (the template renders none): nothing to say",
       files: { "README.md": "readme\n" },
       kind: "missing",
       note: null,

@@ -20,6 +20,7 @@ import {
   ANY_TOOLCHAIN,
   ENABLE_CODEQL,
   EXPECTATIONS,
+  FILELESS_MODULES,
   GATED_MODULES,
   MANIFEST_CLASSES,
   MERGED_SETTINGS,
@@ -37,8 +38,9 @@ const EVERYTHING =
   "[bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, fuzzer, nightly, custom-license]";
 
 describe("the expectation tables", () => {
-  test("every module is conditioned by at least one row", () => {
-    expect([...GATED_MODULES].sort()).toEqual([...MODULES].sort());
+  test("every module is conditioned by at least one row, or declared fileless, never both", () => {
+    expect([...GATED_MODULES, ...FILELESS_MODULES].sort()).toEqual([...MODULES].sort());
+    expect([...FILELESS_MODULES].filter((module) => GATED_MODULES.has(module))).toEqual([]);
   });
 
   // Rows are [modules, private, extra data, the derived selection facts]
@@ -279,7 +281,7 @@ if (smokeDir === undefined || smokeDir === "") {
       expect(mismatches, `manifest classes ${hint}`).toEqual([]);
     });
 
-    test("the stamp hashes ci.yml whole and SECURITY.md's managed region, never itself, and records the render's commit", () => {
+    test("the stamp hashes ci.yml whole and AGENTS.md's managed region, never itself, and records the render's commit", () => {
       const files = manifest();
       const sha256 = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 
@@ -293,18 +295,18 @@ if (smokeDir === undefined || smokeDir === "") {
       // and a marker line matches by trimmed equality. The file is read as
       // latin1 so each byte is one character and trim() strips \xa0 like
       // the stamper's trim on latin1 bytes.
-      const security = files[".github/SECURITY.md"];
-      if (security === undefined) throw new Error(".github/SECURITY.md has no manifest entry");
-      const data = readFileSync(join(smokeDir, ".github/SECURITY.md")).toString("latin1");
+      const agents = files["AGENTS.md"];
+      if (agents === undefined) throw new Error("AGENTS.md has no manifest entry");
+      const data = readFileSync(join(smokeDir, "AGENTS.md")).toString("latin1");
       const lines = data.split(/(?<=\n)/);
-      const beginAt = lines.findIndex((line) => line.trim() === String(security.begin));
+      const beginAt = lines.findIndex((line) => line.trim() === String(agents.begin));
       const endAt = lines.findIndex(
-        (line, index) => index > beginAt && line.trim() === String(security.end),
+        (line, index) => index > beginAt && line.trim() === String(agents.end),
       );
       expect(beginAt, "BEGIN marker line").toBeGreaterThanOrEqual(0);
       expect(endAt, "END marker line after BEGIN").toBeGreaterThan(beginAt);
       const region = Buffer.from(lines.slice(beginAt, endAt + 1).join(""), "latin1");
-      expect(security.hash, "SECURITY.md managed-region hash").toBe(sha256(region));
+      expect(agents.hash, "AGENTS.md managed-region hash").toBe(sha256(region));
 
       const self = files[manifestPath];
       expect(self?.hash, "the manifest's own hash (a self-hash would be circular)").toBeNull();

@@ -502,14 +502,19 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    name: "issue-templates lands the chooser config",
-    when: has("issue-templates"),
-    checks: () => [{ kind: "exists", path: ".github/ISSUE_TEMPLATE/config.yml" }],
-  },
-  {
-    name: "no issue templates without the module",
-    when: not(has("issue-templates")),
-    checks: () => [{ kind: "missing", path: ".github/ISSUE_TEMPLATE" }],
+    // The community health files (contributing guide, security policy, code
+    // of conduct, issue forms) are served by the account's Vivswan/.github
+    // defaults; the template renders none, whatever the visibility.
+    name: "no community health files render",
+    when: ALWAYS,
+    checks: () => [
+      { kind: "missing", path: ".github/ISSUE_TEMPLATE" },
+      { kind: "missing", path: ".github/SECURITY.md" },
+      { kind: "missing", path: "SECURITY.md" },
+      { kind: "missing", path: "CONTRIBUTING.md" },
+      { kind: "missing", path: ".github/CODE_OF_CONDUCT.md" },
+      { kind: "missing", path: "CODE_OF_CONDUCT.md" },
+    ],
   },
   {
     // The deploy workflow: the nightly rebuild and the dispatch only (the
@@ -845,33 +850,6 @@ export const EXPECTATIONS: Row[] = [
     checks: () => [{ kind: "exists", path: "LICENSE.md" }],
   },
   {
-    // SECURITY.md is visibility-independent; the contributor-facing files
-    // are public-only.
-    name: "the security policy renders under .github for every visibility",
-    when: ALWAYS,
-    checks: () => [
-      { kind: "exists", path: ".github/SECURITY.md" },
-      { kind: "missing", path: "SECURITY.md" },
-      { kind: "missing", path: "CODE_OF_CONDUCT.md" },
-    ],
-  },
-  {
-    name: "the contributor-facing community files render on a public repo",
-    when: PUBLIC,
-    checks: () => [
-      { kind: "exists", path: "CONTRIBUTING.md" },
-      { kind: "exists", path: ".github/CODE_OF_CONDUCT.md" },
-    ],
-  },
-  {
-    name: "no contributor-facing community files render on a private repo",
-    when: PRIVATE,
-    checks: () => [
-      { kind: "missing", path: "CONTRIBUTING.md" },
-      { kind: "missing", path: ".github/CODE_OF_CONDUCT.md" },
-    ],
-  },
-  {
     // bun, node, and deno share upstream Node.gitignore: the section
     // renders exactly once under any co-selection (each later module's
     // fragment suppresses its copy when an earlier declarer is selected).
@@ -1181,7 +1159,6 @@ export const MANIFEST_CLASSES: ManifestClassRow[] = [
   { when: ALWAYS, path: ".github/workflows/update-release-pr.yml", class: "starter" },
   { when: ALWAYS, path: ".github/workflows/release.yml", class: "absent" },
   { when: ALWAYS, path: ".repo-platform.yml", class: "starter" },
-  { when: ALWAYS, path: ".github/SECURITY.md", class: "split" },
   { when: ALWAYS, path: ".gitignore", class: "split" },
   { when: ALWAYS, path: ".github/repo-platform-manifest.json", class: "managed" },
   { when: ALWAYS, path: "AGENTS.md", class: "split" },
@@ -1409,3 +1386,8 @@ export const GATED_MODULES: ReadonlySet<Module> = new Set(
     (row) => row.when.modules,
   ),
 );
+
+/** Modules whose selection changes nothing in a render, so no row can
+ * condition on them: issue-templates stays a valid choice while the
+ * account's .github defaults serve the forms. */
+export const FILELESS_MODULES: ReadonlySet<Module> = new Set<Module>(["issue-templates"]);

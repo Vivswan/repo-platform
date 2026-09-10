@@ -63,8 +63,6 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       // exemptions file, and commit: this is the pre-recovery repo state.
       const tails: Record<string, string> = {
         "AGENTS.md": "\n## Project docs\n\nrepo-local agent guidance\n",
-        "CONTRIBUTING.md": "\n## Local dev setup\n\nbun install && bun test\n",
-        ".github/SECURITY.md": "\n## Scope\n\nrepo-local threat model\n",
         "LICENSE.md": "\nThird-party components: repo-local notice\n",
         ".gitattributes": "*.repo-local binary\n",
         ".editorconfig": "\n[legacy/**.js]\nindent_size = 3\n",

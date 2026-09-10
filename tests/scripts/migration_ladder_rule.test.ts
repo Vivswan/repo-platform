@@ -619,7 +619,7 @@ describe("the live repository", () => {
       "actions/validate-template-report/validator/checks/manifest_parity.ts",
       "scripts/ownership/declarations.ts",
       "templates/base/ownership.yml",
-      "templates/base/.github/SECURITY.md.jinja",
+      "templates/base/AGENTS.md.jinja",
       "copier.yml",
       "tests/actions/stamp_manifest.test.ts",
     ]) {

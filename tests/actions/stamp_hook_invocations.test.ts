@@ -101,7 +101,7 @@ describe.skipIf(!hasCopier)("stamp hook invocations per render (real copier)", (
     git(dest, "init", "-q");
     git(dest, "add", "-A");
     git(dest, "commit", "-qm", "init");
-    appendFileSync(join(tree, "template/CONTRIBUTING.md.jinja"), "\n# invocation-count edit\n");
+    appendFileSync(join(tree, "template/AGENTS.md.jinja"), "\n# invocation-count edit\n");
     git(tree, "add", "-A");
     git(tree, "commit", "-qm", "b2");
     const b2 = git(tree, "rev-parse", "HEAD");
@@ -167,7 +167,7 @@ describe.skipIf(!hasCopier)("stamp hook invocations per render (real copier)", (
     // destination is stamped once by the 'after' entry alone.
     git(dest, "add", "-A");
     git(dest, "commit", "-qm", "recopied");
-    appendFileSync(join(tree, "template/CONTRIBUTING.md.jinja"), "\n# skip-tasks edit\n");
+    appendFileSync(join(tree, "template/AGENTS.md.jinja"), "\n# skip-tasks edit\n");
     git(tree, "add", "-A");
     git(tree, "commit", "-qm", "b3");
     const b3 = git(tree, "rev-parse", "HEAD");

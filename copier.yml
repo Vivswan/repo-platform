@@ -23,10 +23,6 @@ _exclude:
   - "{% if not ('skills' in modules) %}.claude-plugin/marketplace.json{% endif %}"
   - "{% if not ('skills' in modules) %}.claude-plugin/plugin.json{% endif %}"
   - "{% if not ('deno' in modules) %}/.dvmrc{% endif %}"
-  - "{% if not (not private) %}.github/CODE_OF_CONDUCT.md{% endif %}"
-  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/bug_report.yml{% endif %}"
-  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/config.yml{% endif %}"
-  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/feature_request.yml{% endif %}"
   - "{% if not (has_toolchain) %}.github/workflows/auto-format.yml{% endif %}"
   - "{% if not ('deno' in modules) %}.github/workflows/deno-audit.yml{% endif %}"
   - "{% if not ('bun' in modules) %}.github/workflows/dependabot-bun-lockfile.yml{% endif %}"
@@ -38,11 +34,9 @@ _exclude:
   - "{% if not ('skills' in modules) %}.github/workflows/validate-skills.yml{% endif %}"
   - "{% if not ('node' in modules) %}/.node-version{% endif %}"
   - "{% if not ('release-please' in modules) %}/.release-please-manifest.json{% endif %}"
-  - "{% if not (not private) %}/CONTRIBUTING.md{% endif %}"
   - "{% if not ('custom-license' not in modules) %}/LICENSE.md{% endif %}"
   - "{% if not ('release-please' in modules) %}/release-please-config.json{% endif %}"
   - "{% if not ('skills' in modules) %}/.claude-plugin{% endif %}"
-  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE{% endif %}"
   # END GENERATED: conditional-excludes
 
 # Repo-owned starters: generated when absent, never overwritten by template
@@ -52,9 +46,7 @@ _exclude:
 # attested publish (packaging, asset uploads, note edits); auto-format
 # and copilot-setup-steps run repo-specific commands; the release-please
 # config/manifest are release state (release-please bumps the manifest via
-# release PRs); issue forms and the chooser config start from the generic
-# starters and are then tailored to each repository (dropdowns for its
-# components, labels, contact links, etc.).
+# release PRs).
 _skip_if_exists:
   - .github/workflows/checks.yml
   # The repo's own green-gated work: ci.yml's post-green job calls it after
@@ -73,7 +65,6 @@ _skip_if_exists:
   # The nightly module's starter: same story for the repo's nightly checks
   # (docs/nightly.md).
   - .github/workflows/nightly.yml
-  - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
   # Repos accumulate their own allowlists in it; sync must never reset
@@ -161,7 +152,7 @@ modules:
     pages - GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main): pages
     docs-site - VitePress docs site from docs/ under the central fleet theme (repos carry only markdown): docs-site
     release-please - release-please releases through the fleet's release pipeline, plus autorelease labels: release-please
-    issue-templates - bug/feature issue forms: issue-templates
+    issue-templates - bug/feature issue forms (served by the account's .github repository; no files here): issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
     pr-title - Conventional Commit PR title check, its own required workflow: pr-title
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer

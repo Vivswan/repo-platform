@@ -36,9 +36,10 @@ const MOVE_NOTE = [
 
 const MIRROR_ADVICE = [
   "> This repository's `.repo-platform.yml` declares a `mirrors` source at the",
-  `> retired path: change \`source: ${ROOT_COPY}\` to`,
-  `> \`source: ${CURRENT}\`. Until then the mirror step refuses that entry`,
-  "> and holds the PR.",
+  `> retired path \`${ROOT_COPY}\`, and this template renders no security policy`,
+  "> at any path: remove that mirror declaration, or point its `source` at a",
+  "> file this template still renders. Until then the mirror step refuses that",
+  "> entry and holds the PR.",
 ];
 
 /** lstat, so a symlink never reads as the file it points at. ENOENT is
@@ -80,7 +81,7 @@ function lastLine(text: string): string {
 
 /** Whether HEAD's `.repo-platform.yml` names the retired path as a
  * `mirrors` source; the mirror step refuses that entry after the move, so
- * the note tells the human the replacement. Advisory only: the mirror
+ * the note tells the human what clears it. Advisory only: the mirror
  * step's stricter reader is the authority on the declaration, and a
  * declaration this probe cannot read counts as not declaring it. */
 function declaresRootMirrorSource(dir: string): boolean {

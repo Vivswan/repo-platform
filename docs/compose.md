@@ -11,7 +11,7 @@ group: Fleet operations
 
 | Source | What the composer does with it |
 |---|---|
-| `templates/base/` | Passed through verbatim. A conditional base file declares its gate in its source filename (CONTRIBUTING.md's `not private`, LICENSE.md's custom-license opt-out); the composer strips the gate from the emitted name and records it as gate data. |
+| `templates/base/` | Passed through verbatim. A conditional base file declares its gate in its source filename (LICENSE.md's custom-license opt-out); the composer strips the gate from the emitted name and records it as gate data. |
 | `templates/<module>/` | Whole files owned by that module, emitted at their plain paths, each recorded with the module's gate (the manifest `gate:` override, else plain membership). |
 | `templates/<module>/fragments/<anchor>.jinja` | An additive contribution to a shared file, spliced at the anchor of the same name. |
 | `templates/<module>/fragments/toolchain-setup.jinja` | No anchor's fragment: the module's toolchain setup steps, prepended to the module's own auto-format and copilot-setup-steps contributions so the two spliced copies can never drift apart. |

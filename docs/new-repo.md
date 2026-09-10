@@ -191,6 +191,8 @@ PR edits modules: in .repo-platform.yml
 
 ### What each module adds
 
+The community health files (contributing guide, security policy, code of conduct, issue forms) are not rendered: GitHub serves them to every repository under the account from [Vivswan/.github](https://github.com/Vivswan/.github). A repository that needs a different text commits its own file, which GitHub prefers over the default; the issue forms count as one set, so any file under a repository's own `.github/ISSUE_TEMPLATE/` replaces all of the default forms.
+
 Every render carries the agent instructions (`AGENTS.md` with its `CLAUDE.md`, `.github/agents.md`, and `.github/copilot-instructions.md` symlinks), a repo-owned `copilot-setup-steps.yml` starter prefilled with installs for the selected toolchains, a managed `.github/instructions/review.instructions.md` telling Copilot code review how to word its comments (problem first, then an example, then the fix; short plain sentences) and what earns one (a demonstrable defect in the diff; no speculative hardening, no unenforced style opinions), the managed `auto-assign.yml` (issues, PRs, and code scanning alerts assigned to the owner), and the settings starter described below. The modules add:
 
 | Module | What lands |

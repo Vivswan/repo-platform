@@ -155,27 +155,12 @@ export const twinCopyRules: Rule[] = [
     name: "dogfood-parity",
     run: () => {
       const vars = jinjaVars();
-      const pairs: DogfoodPair[] = [
-        {
-          // The template's render is the managed region (BEGIN through END
-          // markers); everything a repo appends after the END marker is its
-          // own, hence prefix semantics.
-          repo: ".github/SECURITY.md",
-          tpl: "templates/base/.github/SECURITY.md.jinja",
-          mode: "prefix",
-        },
-        {
-          // Same region semantics as SECURITY.md: repo-specific contributing
-          // docs live below the END marker.
-          repo: "CONTRIBUTING.md",
-          tpl: "templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
-          mode: "prefix",
-        },
-        // Same region semantics for every tracked copy of the license.
-        ...licenseCopies(trackedFiles()).map(
-          (repo): DogfoodPair => ({ repo, tpl: LICENSE_TEMPLATE, mode: "prefix" }),
-        ),
-      ];
+      // The template's render is the managed region (BEGIN through END
+      // markers); everything a repo appends after the END marker is its
+      // own, hence prefix semantics for every tracked copy of the license.
+      const pairs: DogfoodPair[] = licenseCopies(trackedFiles()).map(
+        (repo): DogfoodPair => ({ repo, tpl: LICENSE_TEMPLATE, mode: "prefix" }),
+      );
       return pairs.flatMap((pair) =>
         dogfoodPairMismatches(
           pair,

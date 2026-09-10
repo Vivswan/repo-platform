@@ -305,7 +305,7 @@ jobs:
           artifacts-dir: ${{ steps.links.outputs.report-dir }}
           artifact-name: link-rot-${{ github.run_attempt }}
           # The stream's create tuple, anchored to templates/docs-site/
-          # module.yml tracking_label by check_ssot's issue-labels rule.
+          # module.yml tracking_label by check_ssot's labels rule.
           label-color: "D4A72C"
           label-description: Automated docs-site link-rot report
           stream: generic

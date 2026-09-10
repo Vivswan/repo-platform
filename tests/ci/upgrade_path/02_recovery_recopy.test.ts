@@ -19,6 +19,7 @@ import {
   isCleanTree,
   isEmptyFile,
   legTest,
+  lexists,
   MARKERS,
   manifestEntry,
   REPO_ROOT,
@@ -35,7 +36,7 @@ import { LOCAL_NOTES, type MainProject, mainEnv, mainUpdate } from "./main_updat
 const harness = upgradePathHarness();
 
 const MIRRORS_DECLARATION =
-  "mirrors:\n  - source: .github/SECURITY.md\n    targets:\n      - copies/SECURITY.md\n";
+  "mirrors:\n  - source: AGENTS.md\n    targets:\n      - copies/AGENTS.md\n";
 
 /** Repo-owned content the local-content carry must bring back over the
  * re-render: tails below END markers, a .gitignore entry ABOVE the BEGIN
@@ -43,7 +44,6 @@ const MIRRORS_DECLARATION =
  * must ride whole under the recovery appendix. */
 const CARRIED: Record<string, string> = {
   "AGENTS.md": "recovery-local agents note",
-  "CONTRIBUTING.md": "recovery-local contributing note",
   ".editorconfig": "[recovery-local/**.js]",
   ".github/CODEOWNERS": "/recovery-local/ @recovery-local-owner",
   ".gitignore": "recovery-local-cache/",
@@ -80,7 +80,6 @@ describeLeg("02 recovery recopy", () => {
       appendText(at(".repo-platform.yml"), MIRRORS_DECLARATION);
       registrationBeforeRecopy = readText(at(".repo-platform.yml"));
       appendText(at("AGENTS.md"), `${CARRIED["AGENTS.md"]}\n`);
-      appendText(at("CONTRIBUTING.md"), `${CARRIED["CONTRIBUTING.md"]}\n`);
       appendText(at(".editorconfig"), `${CARRIED[".editorconfig"]}\nindent_size = 3\n`);
       appendText(at(".github/CODEOWNERS"), `${CARRIED[".github/CODEOWNERS"]}\n`);
       editText(at(".gitignore"), (text) =>
@@ -147,9 +146,8 @@ describeLeg("02 recovery recopy", () => {
       expect(recordedCommit(answersOf(mp.project))).toBe(mp.fx.new.sha);
       // _skip_if_exists must hold under recopy --overwrite.
       expect(readText(at(".github/workflows/checks.yml"))).toContain(LOCAL_NOTES.checks);
-      expect(readText(at(".github/ISSUE_TEMPLATE/bug_report.yml"))).toContain(
-        LOCAL_NOTES.issueForm,
-      );
+      // The main update dropped the issue form; the recopy renders none.
+      expect(lexists(at(".github/ISSUE_TEMPLATE/bug_report.yml"))).toBe(false);
       expect(readText(at(".repo-platform.yml"))).toBe(registrationBeforeRecopy);
       // custom-license de-renders LICENSE.md and recopy deletes nothing.
       expect(readText(at("LICENSE.md"))).toBe(`${LOCAL_NOTES.license}\n`);
@@ -159,6 +157,9 @@ describeLeg("02 recovery recopy", () => {
       expect(readText(at(".github/workflows/ci.yml"))).not.toContain(LOCAL_NOTES.ci);
       for (const [rel, content] of Object.entries(CARRIED))
         expect(readText(at(rel))).toContain(content);
+      // The main update retired CONTRIBUTING.md; the recopy renders no such
+      // file, so nothing brings it back.
+      expect(lexists(at("CONTRIBUTING.md"))).toBe(false);
       // The unsplittable previous copy rides whole under the appendix marker.
       expect(readText(at(".gitattributes"))).toContain("# repo-platform:recovery-appendix");
       const summary = readText(work("local-carryover.md"));

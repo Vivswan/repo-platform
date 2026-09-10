@@ -121,8 +121,6 @@ describe("split templates carry one ordered marker pair", () => {
   test("each split source has BEGIN before END, each exactly once", () => {
     const templatesDir = join(repoRoot, "templates");
     const templated: [string, string, string][] = [
-      [join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"), B, E],
-      [join(templatesDir, "base", ".github", "SECURITY.md.jinja"), B, E],
       [
         join(
           templatesDir,

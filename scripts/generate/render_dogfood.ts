@@ -36,10 +36,6 @@ export const ANSWERS_FILE = ".repo-platform-answers.yml";
 // (gateOfPair) decides whether the repo copy may exist at all.
 export const PAIRS: { repo: string; tpl: string }[] = [
   { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja" },
-  {
-    repo: ".github/CODE_OF_CONDUCT.md",
-    tpl: "templates/base/.github/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
-  },
   { repo: ".github/CODEOWNERS", tpl: "templates/base/.github/CODEOWNERS.jinja" },
   {
     repo: ".github/instructions/review.instructions.md",

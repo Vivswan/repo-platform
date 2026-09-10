@@ -45,7 +45,6 @@ export const RULE_ROSTER = [
   "symlink-trio",
   "settings-starter",
   "labels",
-  "issue-labels",
   "release-guard-labels",
   "all-green-roster",
   "all-green-judge-substitutions",

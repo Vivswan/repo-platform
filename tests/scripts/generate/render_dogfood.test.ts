@@ -164,10 +164,12 @@ describe("filename gates", () => {
   });
 
   test("a filename if-gate is represented and follows its condition", () => {
-    const tpl = "templates/base/.github/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja";
-    expect(gateOfPair(tpl)).toEqual({ kind: "when", condition: "not private" });
-    expect(pairIsRendered(tpl, { private: false })).toBe(true);
-    expect(pairIsRendered(tpl, { private: true })).toBe(false);
+    const tpl =
+      "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
+    const gate = "'custom-license' not in modules";
+    expect(gateOfPair(tpl)).toEqual({ kind: "when", condition: gate });
+    expect(pairIsRendered(tpl, { [gate]: true })).toBe(true);
+    expect(pairIsRendered(tpl, { [gate]: false })).toBe(false);
   });
 
   test("an unresolvable gate condition fails loudly", () => {
