@@ -153,7 +153,6 @@ export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFil
   ],
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
   "docs-site": [{ path: ".github/workflows/docs-site.yml", kind: "header" }],
-  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
   "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
 };

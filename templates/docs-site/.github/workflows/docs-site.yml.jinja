@@ -7,33 +7,26 @@
 # The check job builds docs/ strictly on every PR touching it (dead
 # internal links fail there instead of at deploy time); paths-filtered by
 # design, so it is never in the all-green roster and never a required
-# check.{% if 'pages' not in modules %} Three ways to deploy: ci.yml's `docs-site` job calls this
-# workflow downstream of the all-green gate with the judged commit (a red
-# main never deploys), the nightly rebuild and a manual dispatch build the
-# default branch head. Pages is enabled by this module's settings layer on
-# the next fleet settings apply; a deploy before that needs repo
-# Settings -> Pages -> Source: GitHub Actions.{% endif %}{% if 'pages' in modules %} The deploy itself lives in
-# pages.yml: with the pages module selected, the website rides at / and
-# the docs mount at /{{ docs_site_path }}/ in ONE Pages deployment.{% endif %}
+# check. The push deploy is ci.yml's `docs-site` job (or its `pages` job
+# where that module carries the docs as a mount), downstream of the
+# all-green gate with the judged commit; this workflow is the nightly
+# rebuild and the manual dispatch, both building the default branch head.
+# Pages is enabled by this module's settings layer on the next fleet
+# settings apply; a deploy before that needs repo Settings -> Pages ->
+# Source: GitHub Actions.
 name: Docs Site
 
 on:
   pull_request:
     paths:
       - docs/**
-{% if 'pages' not in modules %}  workflow_call:
-    inputs:
-      sha:
-        description: The green commit ci.yml's docs-site job judged - the commit this deploy builds.
-        required: true
-        type: string
   schedule:
     # Nightly rebuild: central theme updates and version tags created
     # without a push propagate, and the external-link check runs
     # (docs/docs-site.md).
     - cron: "41 4 * * *"
   workflow_dispatch:
-{% endif %}
+
 permissions:
   contents: read
 
@@ -47,26 +40,17 @@ jobs:
       - uses: {{ github_username }}/repo-platform/actions/pages-site@build
         with:
           check: "true"
-          site-title: {{ project_name | tojson }}
-{% if 'pages' not in modules %}
+
   deploy:
     if: github.event_name != 'pull_request'
-    # The nightly and dispatch runs hold the pages lane here; a called run
-    # takes a per-run group, since ci.yml's docs-site job already holds the
-    # lane and a called workflow must never wait on the lane its caller holds.
     concurrency:
-      group: {% raw %}${{ inputs.sha != '' && format('pages-called-{0}', github.run_id) || 'pages' }}{% endraw %}
+      group: pages
       cancel-in-progress: false
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@build
     with:
-      sha: {% raw %}${{ inputs.sha }}{% endraw %}
-      mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
-      site_title: {{ project_name | tojson }}
-      link_rot_label: {{ docs_site_label | tojson }}
       custom_domain: {% raw %}${{ vars.CUSTOM_DOMAIN }}{% endraw %}
     permissions:
       contents: read
       pages: write
       id-token: write
       issues: write
-{% endif %}

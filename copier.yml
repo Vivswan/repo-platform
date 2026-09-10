@@ -35,9 +35,6 @@ _exclude:
   - "{% if not ('nightly' in modules) %}.github/workflows/nightly.yml{% endif %}"
   - "{% if not ('pages' in modules) %}.github/workflows/pages.yml{% endif %}"
   - "{% if not ('pr-title' in modules) %}.github/workflows/pr-title.yml{% endif %}"
-  - "{% if not ('release-please' in modules) %}.github/workflows/release.yml{% endif %}"
-  - "{% if not ('release-please' in modules) %}.github/workflows/update-release-pr.yml{% endif %}"
-  - "{% if not ('release-please' in modules) %}.github/workflows/update-release.yml{% endif %}"
   - "{% if not ('skills' in modules) %}.github/workflows/validate-skills.yml{% endif %}"
   - "{% if not ('node' in modules) %}/.node-version{% endif %}"
   - "{% if not ('release-please' in modules) %}/.release-please-manifest.json{% endif %}"
@@ -51,7 +48,7 @@ _exclude:
 # Repo-owned starters: generated when absent, never overwritten by template
 # sync. checks.yml holds each repo's own CI jobs (the managed ci.yml calls
 # it inside the all-green gate); update-release.yml is the repo's hook in
-# the managed release.yml pipeline, called between the draft cut and the
+# the fleet's release pipeline, called between the draft cut and the
 # attested publish (packaging, asset uploads, note edits); auto-format
 # and copilot-setup-steps run repo-specific commands; the release-please
 # config/manifest are release state (release-please bumps the manifest via
@@ -63,9 +60,10 @@ _skip_if_exists:
   # The repo's own green-gated work: ci.yml's post-green job calls it after
   # the all-green gate on a push to main, before the release leg.
   - .github/workflows/post-green.yml
-  - .github/workflows/update-release.yml
-  # Its release-PR twin: release.yml calls it when release-please creates or
+  # The release hooks ci.yml's release legs call: the update hook with the
+  # draft's tag, its release-PR twin when release-please creates or
   # refreshes the release PR (files regenerated into the release commit).
+  - .github/workflows/update-release.yml
   - .github/workflows/update-release-pr.yml
   - .github/workflows/auto-format.yml
   - .github/workflows/copilot-setup-steps.yml
@@ -162,7 +160,7 @@ modules:
     rust - Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL): rust
     pages - GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main): pages
     docs-site - VitePress docs site from docs/ under the central fleet theme (repos carry only markdown): docs-site
-    release-please - gate-downstream release job in ci.yml + autorelease labels: release-please
+    release-please - release-please releases through the fleet's release pipeline, plus autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
     pr-title - Conventional Commit PR title check, its own required workflow: pr-title

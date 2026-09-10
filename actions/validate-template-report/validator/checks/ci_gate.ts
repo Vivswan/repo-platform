@@ -95,13 +95,22 @@ export function checkCiGate(ctx: Context): Finding[] {
   } else {
     const allGreen: Step = isRecord(jobs["all-green"]) ? jobs["all-green"] : {};
     const needs = jobNeeds(allGreen);
-    // Jobs downstream of the gate (post-green and release-style legs) are
-    // exempt from the needs census.
-    const downstream = new Set(
-      Object.entries(jobs)
-        .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
-        .map(([name]) => name),
-    );
+    // Jobs downstream of the gate (the post-green hook, the release legs
+    // and the hooks chained behind them) are exempt from the needs census:
+    // a job needing a downstream job is downstream too.
+    const downstream = new Set<string>();
+    for (;;) {
+      const grew = Object.entries(jobs)
+        .filter(
+          ([name, job]) =>
+            name !== "all-green" &&
+            !downstream.has(name) &&
+            jobNeeds(job).some((need) => need === "all-green" || downstream.has(need)),
+        )
+        .map(([name]) => name);
+      if (grew.length === 0) break;
+      for (const name of grew) downstream.add(name);
+    }
     const missing = Object.keys(jobs)
       .filter((name) => name !== "all-green" && !downstream.has(name) && !needs.includes(name))
       .sort();

@@ -44,6 +44,10 @@ ownership:
   - { path: .github/workflows/ci.yml, class: managed }
   - { path: .github/workflows/copilot-setup-steps.yml, class: starter }
   - { path: .github/workflows/post-green.yml, class: starter }
+  # The release hooks ci.yml calls: present in every repository because
+  # GitHub resolves a called ./ workflow at run creation, skipped job or not.
+  - { path: .github/workflows/update-release-pr.yml, class: starter }
+  - { path: .github/workflows/update-release.yml, class: starter }
   - path: .gitignore
     class: split
     grammar: managed-region

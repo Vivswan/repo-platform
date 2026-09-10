@@ -1,10 +1,7 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/lib/module_manifests.ts).
-description: gate-downstream release job in ci.yml + autorelease labels
+description: release-please releases through the fleet's release pipeline, plus autorelease labels
 ownership:
-  - { path: .github/workflows/release.yml, class: managed }
-  - { path: .github/workflows/update-release-pr.yml, class: starter }
-  - { path: .github/workflows/update-release.yml, class: starter }
   - { path: .release-please-manifest.json, class: starter }
   - { path: release-please-config.json, class: starter }
 settings_layers:

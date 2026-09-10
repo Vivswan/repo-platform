@@ -301,15 +301,21 @@ describe("the single-call gate shape", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("the post-green hook caller and a release leg needing it are both gate-downstream", () => {
+  test("the post-green hook caller, a release leg needing it, and a hook chained behind the leg are all gate-downstream", () => {
     const withHook = [
       GATE_CI,
       "  post-green:",
       "    needs: [all-green]",
       "    uses: ./.github/workflows/post-green.yml",
       "  release:",
-      "    needs: [all-green, post-green]",
-      "    uses: ./.github/workflows/release.yml",
+      "    needs: [ci, all-green, post-green]",
+      "    uses: owner/repo-platform/.github/workflows/fleet-release.yml@build",
+      "  update-release:",
+      "    needs: [release]",
+      "    uses: ./.github/workflows/update-release.yml",
+      "  publish-release:",
+      "    needs: [release, update-release]",
+      "    uses: owner/repo-platform/.github/workflows/fleet-release-publish.yml@build",
       "",
     ].join("\n");
     const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": withHook });
