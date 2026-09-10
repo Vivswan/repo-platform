@@ -11,6 +11,11 @@ import {
 
 const live = readFileSync(SYNC_WORKFLOW, "utf-8");
 
+// The operator's pinned action lines, spelled exactly as the workflow does.
+const CHECKOUT = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
+const SETUP_BUN =
+  "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0";
+
 describe("syncOperatorMismatches", () => {
   test("the live sync-repos.yml is judged clean - the control for every red case below", () => {
     expect(syncOperatorMismatches(live)).toEqual([]);
@@ -79,7 +84,7 @@ describe("syncOperatorMismatches", () => {
       reason: "a checkout action aimed at the target (git's diagnostics would print)",
       text: mutate(
         "      - name: Print the verdict\n",
-        "      - uses: actions/checkout@v7\n        with:\n          repository: ${{ env.TARGET }}\n      - name: Print the verdict\n",
+        `${CHECKOUT}\n        with:\n          repository: \${{ env.TARGET }}\n      - name: Print the verdict\n`,
       ),
       expected: "no repository: on a checkout action",
     },
@@ -94,8 +99,8 @@ describe("syncOperatorMismatches", () => {
     {
       reason: "a row timeout under the plan's (the re-run probe would die by a runner kill)",
       text: mutate(
-        "    timeout-minutes: 60\n    steps:\n      - uses: actions/checkout@v7\n\n      - uses: oven-sh/setup-bun@v2",
-        "    timeout-minutes: 30\n    steps:\n      - uses: actions/checkout@v7\n\n      - uses: oven-sh/setup-bun@v2",
+        `    timeout-minutes: 60\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
+        `    timeout-minutes: 30\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
       ),
       expected: "timeout-minutes at least the plan's (60)",
     },
