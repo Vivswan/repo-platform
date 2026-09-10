@@ -208,7 +208,7 @@ describe("ownership-manifest byte parity", () => {
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(
-      'has unknown class "bespoke" (expected managed, split, starter, or mirror)',
+      'has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)',
     );
   });
 
@@ -384,11 +384,49 @@ describe("ownership-manifest byte parity", () => {
     return root;
   };
 
-  test("a managed symlink's hash covers the link target", () => {
-    const root = agentsLinkTree(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`);
+  // The stamp before the sync recorded the aliases as managed; the sync
+  // records them as links with the same hash, so the cutover changes the
+  // class alone and both records pass on the same tree.
+  test.each(["managed", "link"])("a %s symlink's hash covers the link target", (cls) => {
+    const root = agentsLinkTree(`{"class": "${cls}", "hash": "${sha("AGENTS.md")}"}`);
     const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
+  });
+
+  test("a link record whose symlink points elsewhere fails parity", () => {
+    const root = agentsLinkTree(`{"class": "link", "hash": "${sha("docs/AGENTS.md")}"}`);
+    const result = boundedSpawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("CLAUDE.md: content does not match the sha256");
+  });
+
+  test("a link record on a regular file fails parity by class, not the roster cross-check", () => {
+    // The cross-check admits a link record on a class-only path; the
+    // parity check then demands the symlink, so the record exempts nothing.
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        "CLAUDE.md": `{"class": "link", "hash": "${sha("AGENTS.md\n")}"}`,
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `CLAUDE.md: recorded as a link in ${MANIFEST} but is not a symbolic link`,
+    );
+    expect(stderr).not.toContain("claims class");
+  });
+
+  test("a link record on a header path fails the roster cross-check", () => {
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        ".yamllint": `{"class": "link", "hash": "${sha(BASELINE[".yamllint"])}"}`,
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`entry '.yamllint' claims class "link"`);
+    expect(stderr).toContain("ownership tables declare it managed");
   });
 
   test("a symlink-classed path hand-flipped to starter fails the roster cross-check", () => {

@@ -7,6 +7,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  type AssertNever,
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
   type RegionMarkers,
@@ -17,6 +18,7 @@ import {
   MANIFEST_NAME,
   type ManifestEntryShape,
   parseManifestFiles,
+  type RecordedClass,
 } from "../../../../actions/shared/manifest.ts";
 import type { RegionKind } from "./files_config.ts";
 import { existingFile, writeFile } from "./target_files.ts";
@@ -32,6 +34,9 @@ export type ManifestRecord =
   | { class: "starter" }
   | { class: "mirror"; hash: string | null }
   | { class: "link"; hash: string | null };
+/** The union and the shared RECORDED_CLASSES table name the same classes, both ways. */
+export type RecordedClassesWritten = AssertNever<Exclude<RecordedClass, ManifestRecord["class"]>>;
+export type WrittenClassesRecorded = AssertNever<Exclude<ManifestRecord["class"], RecordedClass>>;
 
 export type Records = Record<string, ManifestEntryShape>;
 

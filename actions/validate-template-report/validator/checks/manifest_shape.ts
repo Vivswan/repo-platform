@@ -132,9 +132,19 @@ export function checkManifestShape(ctx: Context): Finding[] {
       );
       continue;
     }
+    // A class-only path may be a symlink render (the agent-file aliases),
+    // which the sync records as a link; the parity check then demands a
+    // symlink on disk, so the record cannot exempt a regular file.
     const declared = kind === "region" ? "split" : "managed";
-    if (entry.class !== declared) {
-      findings.push(metadataError(path, `claims class ${JSON.stringify(entry.class)}`, declared));
+    const accepted = kind === "class-only" ? [declared, "link"] : [declared];
+    if (!accepted.includes(entry.class)) {
+      findings.push(
+        metadataError(
+          path,
+          `claims class ${JSON.stringify(entry.class)}`,
+          kind === "class-only" ? "managed (link for a symlink render)" : declared,
+        ),
+      );
       continue;
     }
     // A present grammar must name the one grammar with the declared marker
