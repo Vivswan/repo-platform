@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
-import { MANIFEST_NAME } from "../../../shared/manifest.ts";
+import { isRecordedClass, MANIFEST_NAME, RECORDED_CLASSES } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
@@ -10,12 +10,13 @@ function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/** Ownership-manifest byte parity, entry by entry: every managed or split
- *  entry's recorded sha256 matches the file on disk (split files: the
- *  managed region alone, from the entry's BEGIN marker line through its
- *  END marker line). Drift means the file changed since the last stamp;
- *  the next sync replaces it. A listed file missing from the repo is
- *  deletion damage and errors. The roster cross-check
+/** Ownership-manifest byte parity, entry by entry: every managed, split,
+ *  mirror, or link entry's recorded sha256 matches the file on disk (split
+ *  files: the managed region alone, from the entry's BEGIN marker line
+ *  through its END marker line; links: the target string, read through
+ *  nothing). Drift means the file changed since the last stamp; the next
+ *  sync replaces it. A listed file missing from the repo is deletion
+ *  damage and errors. The roster cross-check
  *  (manifest_shape) has already judged the class metadata of every roster
  *  path; this check reads each entry's fields as they stand. */
 export function checkManifestParity(ctx: Context): Finding[] {
@@ -56,12 +57,14 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
-    if (entry.class !== "managed" && entry.class !== "split") {
+    // A mirror is a byte copy the sync wrote, its hash the whole file's,
+    // so it is verified exactly like a managed file. A link is a symlink
+    // the sync placed, its hash the target string's.
+    if (!isRecordedClass(entry.class)) {
       findings.push(
         error(
-          `${where} has unknown class ${JSON.stringify(entry.class)} (expected ` +
-            "managed, split, or starter); run a template sync to " +
-            "regenerate the manifest",
+          `${where} has unknown class ${JSON.stringify(entry.class)} (expected one of ` +
+            `${RECORDED_CLASSES.join(", ")}); run a template sync to regenerate the manifest`,
         ),
       );
       continue;
@@ -145,8 +148,20 @@ export function checkManifestParity(ctx: Context): Finding[] {
     let actual: string;
     if (stat.isSymbolicLink()) {
       // Raw link bytes: decoding a malformed-UTF-8 target would fold
-      // distinct targets onto the replacement character.
+      // distinct targets onto the replacement character. Any class hashes
+      // a link this way: the stamps before the link class recorded the
+      // agent-file aliases as managed with this same hash.
       actual = sha256(readlinkSync(join(ctx.root, rel), { encoding: "buffer" }));
+    } else if (entry.class === "link") {
+      findings.push(
+        error(
+          `${rel}: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link - ` +
+            "the sync writes a relative symlink there and never reads through one, so " +
+            "a regular file at the path is a local replacement; restore the link from " +
+            "git history or run a template sync",
+        ),
+      );
+      continue;
     } else if (!stat.isFile()) {
       findings.push(
         error(

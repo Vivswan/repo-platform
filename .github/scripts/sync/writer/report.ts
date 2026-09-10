@@ -11,6 +11,8 @@ export interface WrittenRow {
   path: string;
   class: FileClass;
   change: Change;
+  /** Why a held row was not written; empty otherwise. */
+  detail: string;
 }
 
 export interface ReplacedEdit {
@@ -37,9 +39,20 @@ export interface SyncReport extends SyncOutcome {
 /** Every reason a human must look before merging. */
 export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
+  for (const row of outcome.written) {
+    if (row.change === "held") reasons.push(`${row.path} held: ${row.detail}`);
+    if (row.change === "region added") {
+      reasons.push(`${row.path}: the managed region was added above repository-owned content`);
+    }
+  }
   for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);
   for (const row of outcome.retired) {
     if (row.outcome === "held") reasons.push(`retirement of ${row.path} held: ${row.detail}`);
+    if (row.outcome === "region removed") {
+      reasons.push(
+        `retirement of ${row.path}: the managed region was removed and the repository-owned content kept`,
+      );
+    }
   }
   for (const row of outcome.mirrors) {
     if (row.outcome === "refused") reasons.push(`mirror ${row.target} refused: ${row.detail}`);
@@ -133,8 +146,11 @@ export function unifiedDiff(
 
 const code = (text: string) => `\`${text}\``;
 
+/** A pipe inside a cell would split it; the escape keeps the column count. */
+const cell = (text: string) => text.replaceAll("|", "\\|");
+
 function table(header: string[], rows: string[][]): string {
-  const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
+  const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
   return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
@@ -160,8 +176,8 @@ export function renderReport(report: SyncReport): string {
     report.written.length === 0
       ? "Nothing selected."
       : table(
-          ["Path", "Class", "Change"],
-          report.written.map((row) => [code(row.path), row.class, row.change]),
+          ["Path", "Class", "Change", "Detail"],
+          report.written.map((row) => [code(row.path), row.class, row.change, row.detail]),
         ),
   ];
   if (report.replaced.length > 0) {

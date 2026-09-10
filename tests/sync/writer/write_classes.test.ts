@@ -3,9 +3,17 @@
 // rewriting around repository-owned text, and starters written once.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
+import { writeLink } from "../../../.github/scripts/sync/writer/write_link.ts";
 import { writeManaged } from "../../../.github/scripts/sync/writer/write_managed.ts";
 import { renderRegion, writeSplit } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { writeStarter } from "../../../.github/scripts/sync/writer/write_starter.ts";
@@ -38,12 +46,16 @@ describe("writeManaged", () => {
     expect(writeManaged(target, "x", "ours", null).change).toBe("replaced local edits");
   });
 
-  test("a symlink or directory at the path, or a symlinked ancestor, is refused loudly", () => {
+  test("a directory at the path or a symlinked ancestor is refused loudly; a symlink is held", () => {
     const target = temp.dir("writer-managed-nonfile-");
     mkdirSync(join(target, "dir"));
     symlinkSync("dir", join(target, "link"));
     expect(() => writeManaged(target, "dir", "x", null)).toThrow("not a regular file");
-    expect(() => writeManaged(target, "link", "x", null)).toThrow("not a regular file");
+    expect(writeManaged(target, "link", "x", null)).toEqual({
+      change: "held",
+      reason: "a symbolic link sits where a file is declared",
+    });
+    expect(readlinkSync(join(target, "link"))).toBe("dir");
     expect(() => writeManaged(target, "link/inside.txt", "x", null)).toThrow(
       "ancestor 'link' is a symbolic link",
     );
@@ -64,15 +76,22 @@ describe("writeSplit", () => {
     expect(() => region(`about ${markers.end} here`)).toThrow("mentions the marker text");
   });
 
-  test("a new file is the region alone; a marker-less file keeps its content below", () => {
+  test("a new file is the region alone; a marker-less file keeps its content below and is reported", () => {
     const target = temp.dir("writer-split-new-");
     expect(writeSplit(target, ".gitignore", region("a"), markers, null)).toEqual({
       change: "created",
     });
     expect(read(target, ".gitignore")).toBe(region("a"));
     writeFileSync(join(target, "plain"), "mine\n");
-    expect(writeSplit(target, "plain", region("a"), markers, null)).toEqual({ change: "updated" });
+    expect(writeSplit(target, "plain", region("a"), markers, null)).toEqual({
+      change: "region added",
+    });
     expect(read(target, "plain")).toBe(`${region("a")}mine\n`);
+    // With a record but no markers the verdict is the same: the region went above repo content.
+    writeFileSync(join(target, "unmarked"), "theirs\n");
+    expect(writeSplit(target, "unmarked", region("a"), markers, sha256(region("a")))).toEqual({
+      change: "region added",
+    });
   });
 
   test("the region is rewritten between the repository-owned halves", () => {
@@ -90,6 +109,17 @@ describe("writeSplit", () => {
     });
   });
 
+  test("a symlink at the path is held, never read through", () => {
+    const target = temp.dir("writer-split-link-");
+    writeFileSync(join(target, "real"), "mine\n");
+    symlinkSync("real", join(target, "f"));
+    expect(writeSplit(target, "f", region("a"), markers, null)).toEqual({
+      change: "held",
+      reason: "a symbolic link sits where a file is declared",
+    });
+    expect(read(target, "real")).toBe("mine\n");
+  });
+
   test.each([
     ["duplicated markers", `${region("a")}${region("b")}`],
     ["marker text buried mid-line", `the boundary is ${markers.begin} in this file\n`],
@@ -103,10 +133,54 @@ describe("writeSplit", () => {
 });
 
 describe("writeStarter", () => {
-  test("written when absent, never touched again", () => {
+  test("written when absent, never touched or rendered again (a link there counts as present)", () => {
     const target = temp.dir("writer-starter-");
-    expect(writeStarter(target, "n.yml", "one\n")).toEqual({ change: "created" });
-    expect(writeStarter(target, "n.yml", "two\n")).toEqual({ change: "unchanged" });
+    const never = () => {
+      throw new Error("rendered a present starter");
+    };
+    expect(writeStarter(target, "n.yml", () => "one\n")).toEqual({ change: "created" });
+    expect(writeStarter(target, "n.yml", never)).toEqual({ change: "unchanged" });
     expect(read(target, "n.yml")).toBe("one\n");
+    symlinkSync("n.yml", join(target, "l.yml"));
+    expect(writeStarter(target, "l.yml", never)).toEqual({ change: "unchanged" });
+    expect(readlinkSync(join(target, "l.yml"))).toBe("n.yml");
+    // An absent starter whose source lacks values is not written at all.
+    expect(writeStarter(target, "m.yml", () => ({ missing: ["description"] }))).toEqual({
+      missing: ["description"],
+    });
+    expect(existsSync(join(target, "m.yml"))).toBe(false);
+  });
+});
+
+describe("writeLink", () => {
+  test("created, unchanged, re-pointed (updated on a recorded target, replaced otherwise)", () => {
+    const target = temp.dir("writer-link-");
+    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", null)).toEqual({
+      change: "created",
+    });
+    expect(readlinkSync(join(target, ".github/agents.md"))).toBe("../AGENTS.md");
+    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", null)).toEqual({
+      change: "unchanged",
+    });
+    expect(writeLink(target, ".github/agents.md", "../CLAUDE.md", sha256("../AGENTS.md"))).toEqual({
+      change: "updated",
+    });
+    expect(writeLink(target, ".github/agents.md", "../AGENTS.md", sha256("nope"))).toEqual({
+      change: "replaced local edits",
+      replaced: "../CLAUDE.md",
+    });
+    expect(readlinkSync(join(target, ".github/agents.md"))).toBe("../AGENTS.md");
+  });
+
+  test("a regular file at the path is held with its content intact; a directory is refused", () => {
+    const target = temp.dir("writer-link-file-");
+    writeFileSync(join(target, "CLAUDE.md"), "my own notes\n");
+    mkdirSync(join(target, "dir"));
+    expect(writeLink(target, "CLAUDE.md", "AGENTS.md", null)).toEqual({
+      change: "held",
+      reason: "a regular file sits where a link is declared",
+    });
+    expect(read(target, "CLAUDE.md")).toBe("my own notes\n");
+    expect(() => writeLink(target, "dir", "AGENTS.md", null)).toThrow("not a regular file");
   });
 });

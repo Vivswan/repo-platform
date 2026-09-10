@@ -7,3 +7,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "${{ github.sha }} for {{github_username_lower}}/{{project_slug}}"
+      - run: echo "tracking {{fuzzer_label}}"

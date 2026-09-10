@@ -33,6 +33,7 @@ describe("renderManifest", () => {
         },
         "s.yml": { class: "starter" },
         "m/copy.txt": { class: "mirror", hash: HASH },
+        "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       },
       BUILD,
     );
@@ -49,17 +50,34 @@ describe("renderManifest", () => {
         hash: HASH,
       },
       "b.txt": { class: "managed", hash: HASH },
+      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       "m/copy.txt": { class: "mirror", hash: HASH },
       "s.yml": { class: "starter" },
     });
     expect(Object.keys(parsed.files ?? {})).toEqual([
       MANIFEST_NAME,
+      "CLAUDE.md",
       "a.md",
       "b.txt",
       "m/copy.txt",
       "s.yml",
     ]);
-    expect(text).toContain(`\n    "b.txt": {"class": "managed", "hash": "${HASH}"}`);
+    // The one-line wire layout, per class, exactly as the stamp hook writes it.
+    const link = sha256("AGENTS.md");
+    expect(text.split("\n")).toEqual([
+      "{",
+      expect.stringMatching(/^ {2}"\$comment": ".*",$/),
+      '  "files": {',
+      `    ${JSON.stringify(MANIFEST_NAME)}: {"class": "managed", "hash": null, "commit": "${BUILD}"},`,
+      `    "CLAUDE.md": {"class": "link", "hash": "${link}"},`,
+      `    "a.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"},`,
+      `    "b.txt": {"class": "managed", "hash": "${HASH}"},`,
+      `    "m/copy.txt": {"class": "mirror", "hash": "${HASH}"},`,
+      '    "s.yml": {"class": "starter"}',
+      "  }",
+      "}",
+      "",
+    ]);
   });
 });
 

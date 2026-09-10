@@ -32,12 +32,15 @@ function render(): string {
     "docs/unstamped.md": "content\n",
     "docs/starter.md": "repo-owned\n",
     "docs/odd.md": "content\n",
+    "docs/file-as-link.md": "intact.md",
   };
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
   symlinkSync("intact.md", join(root, "docs/link.md"));
+  symlinkSync("intact.md", join(root, "docs/linked.md"));
+  symlinkSync("drifted.md", join(root, "docs/repointed.md"));
   mkdirSync(join(root, "docs/dir.md"));
   const entries: Record<string, string> = {
     [MANIFEST_NAME]: '{"class": "managed", "hash": null, "commit": "c0ffee"}',
@@ -55,6 +58,10 @@ function render(): string {
     "docs/dir.md": `{"class": "managed", "hash": "${"e".repeat(64)}"}`,
     "docs/deleted.md": `{"class": "managed", "hash": "${"f".repeat(64)}"}`,
     ".github/workflows/gone-unstamped.yml": '{"class": "managed", "hash": null}',
+    "docs/linked.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+    "docs/repointed.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+    "docs/file-as-link.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+    "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
   };
   writeFileSync(
     join(root, MANIFEST_NAME),
@@ -114,7 +121,7 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/odd.md' has unknown class \"bespoke\" (expected managed, split, or starter); run a template sync to regenerate the manifest",
+          ".github/repo-platform-manifest.json: entry 'docs/odd.md' has unknown class \"bespoke\" (expected one of managed, split, starter, mirror, link); run a template sync to regenerate the manifest",
       },
       {
         severity: "error",
@@ -135,6 +142,27 @@ describe("checkManifestParity", () => {
         severity: "error",
         message:
           ".github/workflows/gone-unstamped.yml: listed as managed in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
+      },
+      {
+        severity: "error",
+        message:
+          "docs/repointed.md: content does not match the sha256 recorded in " +
+          ".github/repo-platform-manifest.json - the file drifted from the last stamped sync " +
+          "state; local edits to a managed file are replaced by the next template sync (move them " +
+          "to a repo-owned location), and intended template-side updates restamp on that sync",
+      },
+      {
+        severity: "error",
+        message:
+          "docs/file-as-link.md: recorded as a link in .github/repo-platform-manifest.json but is " +
+          "not a symbolic link - the sync writes a relative symlink there and never reads through " +
+          "one, so a regular file at the path is a local replacement; restore the link from git " +
+          "history or run a template sync",
+      },
+      {
+        severity: "error",
+        message:
+          "docs/link-gone.md: listed as link in .github/repo-platform-manifest.json but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)",
       },
     ]);
   });

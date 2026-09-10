@@ -4,7 +4,7 @@
 // read as an absent file (a stale mirror, a managed file reported as one
 // the render lacks).
 
-import { lstatSync, type Stats } from "node:fs";
+import { lstatSync, type Stats, statSync } from "node:fs";
 
 /** Whether a filesystem error means "nothing at this path" (ENOENT, or a
  * file where a directory was expected - ENOTDIR). Anything else (EACCES,
@@ -21,6 +21,18 @@ export function lstatOrNull(path: string): Stats | null {
     return lstatSync(path) ?? null;
   } catch (err) {
     if (absentError(err)) return null;
+    throw err;
+  }
+}
+
+/** The stat of what `path` resolves to, links followed; null when the
+ * resolution reaches nothing (an absent path, a dangling link, a link
+ * loop). Any other failure rethrows. */
+export function statOrNull(path: string): Stats | null {
+  try {
+    return statSync(path) ?? null;
+  } catch (err) {
+    if (absentError(err) || (err as { code?: string }).code === "ELOOP") return null;
     throw err;
   }
 }

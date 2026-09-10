@@ -1,3 +1,4 @@
+# {{description}}
 name: nightly fuzz
 on: workflow_dispatch
 jobs:

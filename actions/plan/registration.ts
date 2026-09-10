@@ -133,6 +133,12 @@ const relativePath = (what: string) =>
       message: `${what} must be relative path segments of letters, digits, dots, underscores, or dashes joined by single slashes (no leading ./ or /, no '..')`,
     },
   );
+// The sync substitutes these into quoted YAML scalars verbatim, so a quote,
+// a backslash, or a control character would change the document it lands in.
+const plainText = (what: string) =>
+  z.string().refine((value) => !/["\\\p{Cc}]/u.test(value), {
+    message: `${what} must not contain double quotes, backslashes, or control characters`,
+  });
 /** The label shape the fuzz-issue action and the copier validators enforce. */
 export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 const label = z
@@ -149,9 +155,9 @@ export const registrationSchema = z.strictObject({
   modules: z.array(z.unknown()),
   project: z
     .strictObject({
-      name: z.string().min(1),
+      name: plainText("project.name").pipe(z.string().min(1)),
       slug,
-      description: z.string(),
+      description: plainText("project.description"),
       copyright_holder: z.string().min(1).optional(),
     })
     .optional(),

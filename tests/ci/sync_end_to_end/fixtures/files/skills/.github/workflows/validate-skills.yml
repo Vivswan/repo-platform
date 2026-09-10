@@ -1,0 +1,4 @@
+name: validate skills
+on:
+  push:
+    paths: ["{{skills_dir}}/**"]

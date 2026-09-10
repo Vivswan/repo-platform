@@ -1,12 +1,13 @@
 // The writer's record of what it last wrote: .github/repo-platform-manifest.json
 // in the shape actions/shared/manifest.ts already emits and parses (one
 // entry per line, sha256 of the whole file for managed, of the marker-bounded
-// region for split), so a repository stamped by the previous pipeline reads
-// as already-recorded. The manifest's own entry carries the build sha in
+// region for split, of the link target for a symbolic link), so a repository
+// stamped by the previous pipeline reads as already-recorded. The manifest's own entry carries the build sha in
 // its `commit` slot and no hash (a self-hash would be circular).
 
 import { createHash } from "node:crypto";
 import {
+  type AssertNever,
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
   type RegionMarkers,
@@ -17,17 +18,25 @@ import {
   MANIFEST_NAME,
   type ManifestEntryShape,
   parseManifestFiles,
+  type RecordedClass,
 } from "../../../../actions/shared/manifest.ts";
 import type { RegionKind } from "./files_config.ts";
 import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
+/** A null hash is never written by this writer; it is carried from a
+ *  record another tool left unstamped, so the file stays held rather than
+ *  orphaned. */
 export type ManifestRecord =
-  | { class: "managed"; hash: string }
-  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }
+  | { class: "managed"; hash: string | null }
+  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string | null }
   | { class: "starter" }
-  | { class: "mirror"; hash: string };
+  | { class: "mirror"; hash: string | null }
+  | { class: "link"; hash: string | null };
+/** The union and the shared RECORDED_CLASSES table name the same classes, both ways. */
+export type RecordedClassesWritten = AssertNever<Exclude<RecordedClass, ManifestRecord["class"]>>;
+export type WrittenClassesRecorded = AssertNever<Exclude<ManifestRecord["class"], RecordedClass>>;
 
 export type Records = Record<string, ManifestEntryShape>;
 
@@ -66,7 +75,8 @@ const COMMENT =
   "BEGIN/END-bounded region is rewritten and the repository owns everything outside it; the " +
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
   "repo-owned from then on), mirror (a byte copy of a written file, declared in " +
-  ".repo-platform.yml). This file's own entry records the build commit that wrote the tree.";
+  ".repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target). This " +
+  "file's own entry records the build commit that wrote the tree.";
 
 /** The manifest text for `records` plus the self entry, entries sorted by path. */
 export function renderManifest(records: Record<string, ManifestRecord>, build: string): string {

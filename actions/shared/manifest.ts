@@ -29,6 +29,17 @@ import {
 /** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
+/** Every class a recorded entry can carry. The sync writer's record union
+ *  and the validator's class dispatch are both pinned to this table, so a
+ *  class one side learns reaches the other or the build fails. */
+export const RECORDED_CLASSES = ["managed", "split", "starter", "mirror", "link"] as const;
+export type RecordedClass = (typeof RECORDED_CLASSES)[number];
+const RECORDED_CLASS_SET: ReadonlySet<string> = new Set(RECORDED_CLASSES);
+
+export function isRecordedClass(value: string): value is RecordedClass {
+  return RECORDED_CLASS_SET.has(value);
+}
+
 /** What an entry needs to be emitted: the declared class, with the
  *  grammar fields for splits (structural twins of the ownership schema's
  *  arms - scripts/ownership/declarations.ts's ManifestOwnership is assignable). */
