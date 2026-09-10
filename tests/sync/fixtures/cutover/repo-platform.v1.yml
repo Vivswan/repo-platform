@@ -1,0 +1,7 @@
+# Generated once by Vivswan/repo-platform and repo-owned from
+# then on: the sync reads this file, it never rewrites it.
+
+modules: ["bun", "docs-site", "fuzzer", "pages", "skills", "custom-license"]
+mirrors:
+  - source: LICENSE.md
+    targets: [skills/*/LICENSE.md]
