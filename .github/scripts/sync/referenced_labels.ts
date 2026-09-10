@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // The sync-side referenced-labels warning (docs/settings.md, "Label
 // preflight"): every label the target's issue forms and workflows reference
-// must exist in the MERGED settings roster under its POST-APPLY name,
+// must exist in the settings LAYER STACK's roster under its POST-APPLY name,
 // because the apply's reconciliation deletes undeclared labels and renames
 // `new_name` sources (label_references.ts owns the extraction rule and its
-// limits). A missing label writes a PR-body section that FORCES manual
+// limits; settings_layers.ts owns the stack and its labels-only fold). A missing label writes a PR-body section that FORCES manual
 // review. WARN, never fail: a repo's own quirk must not block its sync PR,
 // and the apply side (label_preflight.ts) carries the fail-closed guard.
 //
@@ -20,18 +20,17 @@
 //   [--hide-details true|false]. --report defaults to RUNNER_TEMP/
 //   <REFERENCED_LABELS_NAME>, the section_files.ts constant open_pr.ts reads.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
 import {
   collectReferences,
-  finalLabelNames,
   type LabelReference,
   missingFromRoster,
   referenceFilesFromDir,
 } from "../fleet/label_references.ts";
-import { mergeOutcome } from "../fleet/merge_settings_layers.ts";
-import { factsFromTargetDir, managedSettings } from "../fleet/render_managed_settings.ts";
+import { factsFromTargetDir } from "../fleet/settings_facts.ts";
+import { layerLabelNames, layerStack, loadLayer } from "../fleet/settings_layers.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv, warning } from "../shared/gha.ts";
 import { REFERENCED_LABELS_NAME } from "./section_files.ts";
@@ -108,15 +107,13 @@ function writeReferencedLabelsReport(root: string, report: string, hideDetails: 
     } else if (!existsSync(settingsPath)) {
       log = "not applicable (no settings.yml to merge, so no apply reconciles labels)";
     } else {
-      const outcome = mergeOutcome(
-        managedSettings(facts, manifests),
-        { text: readFileSync(settingsPath, "utf-8"), where: settingsPath },
-        settingsPath,
+      const roster = layerLabelNames(
+        layerStack(facts, manifests, settingsPath).map((layer) =>
+          layer.kind === "file" ? loadLayer(layer.path) : { labels: layer.labels },
+        ),
       );
-      if (outcome.kind === "skip") throw new Error("unreachable: the repo layer was read above");
-      const roster = finalLabelNames(outcome.document);
       if (roster === null) {
-        log = "not applicable (the merged document declares no labels key)";
+        log = "not applicable (no layer leaves a labels key for the apply to reconcile)";
       } else {
         const references = collectReferences(referenceFilesFromDir(root));
         const missing = missingFromRoster(references, roster);

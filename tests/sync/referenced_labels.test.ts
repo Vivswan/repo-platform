@@ -171,7 +171,7 @@ describe("referenced_labels", () => {
     const r = runScript(root);
     expect(r.exitCode).toBe(0);
     expect(r.report).toBe("");
-    expect(r.output).toContain("declares no labels key");
+    expect(r.output).toContain("no layer leaves a labels key");
   });
 
   test("unreadable facts write the could-not-verify section instead of failing or passing", () => {

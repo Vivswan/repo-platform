@@ -1,15 +1,15 @@
 ---
 # Vivswan/repo-platform's OWN settings, applied by its settings-repos run
-# via Vivswan/github-settings-as-code. The managed baseline (the shared
-# repository policy block, the module-derived label roster, the fleet
-# rulesets) is computed by .github/scripts/fleet/render_managed_settings.ts
+# via Vivswan/github-settings-as-code. The fleet layers below this file
+# (the shared repository policy block, the module-derived label roster,
+# the fleet rulesets) are selected by .github/scripts/fleet/settings_layers.ts
 # - for this operator repo from .repo-platform-answers.yml, since it is not
-# generated from the template - and this file merges OVER it: keys here
-# win, a same-name label replaces the fleet one wholesale, and a same-name
-# ruleset merges field by field with its rules appended by type. Then
-# .github/settings-override.yml merges over THIS file, so what it declares
-# cannot be changed from here. Undeclared labels are deleted against the
-# MERGED roster; undeclared rulesets are left alone.
+# generated from the template - and the action's merge folds this file
+# OVER them: keys here win, a same-name label replaces the fleet one
+# wholesale, and a same-name ruleset merges field by field with its rules
+# unioned by type. Then .github/settings-override.yml merges over THIS
+# file, so what it declares cannot be changed from here. Undeclared labels
+# are deleted against the MERGED roster; undeclared rulesets are left alone.
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories

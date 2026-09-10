@@ -88,10 +88,10 @@ _skip_if_exists:
   - .claude-plugin/plugin.json
   - .claude-plugin/marketplace.json
   # The settings starter: identity keys plus local overrides, repo-owned
-  # after the first render. The managed baseline (policy block,
-  # labels, rulesets) is computed centrally at apply time and merged UNDER
-  # this file (.github/scripts/fleet/render_managed_settings.ts), so sync
-  # never rewrites it.
+  # after the first render. The fleet layers (policy block, labels,
+  # rulesets) are selected centrally at apply time and merged UNDER this
+  # file (.github/scripts/fleet/settings_layers.ts), so sync never
+  # rewrites it.
   - .github/settings.yml
   # The registration file: generated once when a repo onboards, repo-owned
   # from then on. Module selection and the optional `mirrors` declaration

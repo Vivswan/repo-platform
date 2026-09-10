@@ -5,7 +5,7 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { allLayerLabels } from "../../../.github/scripts/fleet/render_managed_settings.ts";
+import { allLayerLabels } from "../../../.github/scripts/fleet/settings_layers.ts";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
 import { trackingStreams } from "../../generate/copier_questions.ts";
 import type { JinjaVars } from "../../lib/jinja_subset.ts";

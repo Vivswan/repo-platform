@@ -154,7 +154,7 @@ describe("labelPreflightArgvMismatches", () => {
 describe("labelPreflightJobMismatches", () => {
   const MODE = "${{ inputs.check_only && 'check' || 'apply' }}";
   const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
-  const PINNED = "${{ steps.render.outputs.ref }}";
+  const PINNED = "${{ steps.layers.outputs.ref }}";
   type Job = { steps: Record<string, unknown>[]; [key: string]: unknown };
   const operatorJob = (): Job => ({
     "runs-on": "ubuntu-latest",
@@ -174,7 +174,7 @@ describe("labelPreflightJobMismatches", () => {
       {
         id: "apply",
         if: "steps.freshness.outputs.moved == 'false'",
-        uses: "Vivswan/github-settings-as-code@sha",
+        uses: "Vivswan/github-settings-as-code@latest",
         with: {
           token: TOKEN,
           mode: MODE,
@@ -198,6 +198,32 @@ describe("labelPreflightJobMismatches", () => {
       applies: 1,
       mismatches: [],
     });
+  });
+
+  test("the action's merge-mode step before the preflight is not an apply", () => {
+    // The fold of the layer list uses the same action but reaches no
+    // repository, so it sits outside the preflight-to-apply pin: neither a
+    // second apply nor a gap step.
+    const job = operatorJob();
+    job.steps.unshift({
+      id: "merge",
+      if: "steps.freshness.outputs.moved == 'false'",
+      uses: "Vivswan/github-settings-as-code@latest",
+      with: {
+        mode: "merge",
+        "settings-file": "${{ steps.layers.outputs.layers }}",
+        "merged-file": "${{ runner.temp }}/merged-settings.yml",
+      },
+    });
+    expect(labelPreflightJobMismatches(OPERATOR, "apply", job)).toEqual({
+      applies: 1,
+      mismatches: [],
+    });
+    // The same step AFTER the preflight is inside the guarded gap, and
+    // the gap pin refuses it like any other intervening step.
+    const late = operatorJob();
+    late.steps.splice(1, 0, { ...job.steps[0] });
+    expect(judged(OPERATOR, late)).toContain("between the preflight and the apply");
   });
 
   test("a `|| true` suppression appended to the run line fires the byte pin", () => {
@@ -435,7 +461,7 @@ describe("labelPreflightJobMismatches", () => {
 
   test("a drifted condition fires the trim-normalized equality", () => {
     const job = operatorJob();
-    job.steps[0].if = "steps.render.outputs.skipped == 'false'";
+    job.steps[0].if = "steps.layers.outputs.skipped == 'false'";
     expect(judged(OPERATOR, job)).toContain("identical (after trimming) to the apply step's");
   });
 

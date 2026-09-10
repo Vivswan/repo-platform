@@ -318,8 +318,7 @@ export const literalAnchorRules: Rule[] = [
       const roster = new Map(managedLabelRoster().map((label) => [label.name, label]));
       for (const name of ["dependencies", "github_actions"]) {
         const label = roster.get(name);
-        if (!label)
-          throw new Error(`render_managed_settings.ts: label '${name}' vanished - anchor lost`);
+        if (!label) throw new Error(`settings_layers.ts: label '${name}' vanished - anchor lost`);
         const joint = new RegExp(`\`${name}\` \\((?:color )?\`${label.color}\`\\)`);
         if (!joint.test(settingsProse)) {
           mismatches.push({

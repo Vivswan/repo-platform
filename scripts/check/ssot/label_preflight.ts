@@ -3,7 +3,8 @@
 // keys, env, the gap to the apply, the apply's input census) and the
 // argv settings_layer_step.ts builds for its labels leg (deep-equal for
 // the operator row and a fetched row). tests/fleet/settings_layer_step.test.ts
-// proves the script runs exactly that argv.
+// proves the script runs exactly that argv. The action's merge step (mode:
+// merge, before the preflight) is not an apply and sits outside the pin.
 
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -32,6 +33,16 @@ function asMapping(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+/** A step that runs the settings action against a repository: the
+ *  action's merge-mode step folds files and touches nothing, so it is not
+ *  the apply the preflight guards. */
+export function isApplyStep(step: Record<string, unknown>): boolean {
+  return (
+    String(step.uses ?? "").includes("github-settings-as-code") &&
+    String(asMapping(step.with).mode ?? "").trim() !== "merge"
+  );
 }
 
 /** The preflight step's run block, byte-for-byte: a textual rule cannot
@@ -219,11 +230,11 @@ export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpect
 };
 
 // The preflight step's env vars that mirror no apply input, value-pinned:
-// PINNED is the commit the render published, which a fetched row's
+// PINNED is the commit the layers step published, which a fetched row's
 // preflight reads its reference files at (a drifted expression would judge
 // the labels against some other revision's files).
 export const PREFLIGHT_STEP_ENV_PINS: Record<string, Record<string, string>> = {
-  ".github/workflows/settings-repos.yml": { PINNED: "${{ steps.render.outputs.ref }}" },
+  ".github/workflows/settings-repos.yml": { PINNED: "${{ steps.layers.outputs.ref }}" },
 };
 
 /** The env names the preflight step may carry: the mirrored census names
@@ -324,9 +335,7 @@ export function labelPreflightJobMismatches(
   const raw = job.steps;
   if (!Array.isArray(raw)) return { applies: 0, mismatches };
   const steps = raw.map(asMapping);
-  const applyAts = steps.flatMap((step, index) =>
-    String(step.uses ?? "").includes("github-settings-as-code") ? [index] : [],
-  );
+  const applyAts = steps.flatMap((step, index) => (isApplyStep(step) ? [index] : []));
   if (applyAts.length === 0) return { applies: 0, mismatches };
   // Exactly ONE apply step: the gap pin below guards the stretch from
   // the preflight to THE apply, and a second invocation of the settings

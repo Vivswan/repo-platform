@@ -3,7 +3,7 @@
 // check chain that mirrors CI.
 
 import { parse as parseYaml } from "yaml";
-import { loadOverrideLayer } from "../../../.github/scripts/fleet/merge_settings_layers.ts";
+import { loadOverrideLayer } from "../../../.github/scripts/fleet/settings_layers.ts";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";

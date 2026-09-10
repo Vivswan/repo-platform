@@ -1,6 +1,6 @@
 // Pins this repository's OWN build-branch protection in
-// .github/settings.yml, the same way merge_settings_layers.test.ts pins
-// the override layer's protection policy. The `build` ref is executable
+// .github/settings.yml, the same way settings_layers.test.ts pins the
+// override layer's protection policy. The `build` ref is executable
 // fleet-wide - rendered workflows pin `uses: ...@build` and run its
 // actions/ subtree directly - so a settings edit that drops it from the
 // append-only ruleset must fail here, loudly. (The retired

@@ -13,7 +13,7 @@
 // repos (a readable .repo-platform.yml). --self appends the operator
 // repository itself: it is not adopted (no .repo-platform.yml), but its
 // settings are managed by the same run (its baseline facts come from
-// .repo-platform-answers.yml - see render_managed_settings.ts). Prints a
+// .repo-platform-answers.yml - see settings_layers.ts). Prints a
 // JSON array of {repo, name, private, verify} entries sorted by the
 // emitted repo; a private row's `repo`/`name` carry its display hint so
 // the matrix, the job name it becomes, and the called steps never see the
@@ -24,8 +24,8 @@ import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { type EnrichedRow, parseEnrichedRows, type RedactionState } from "./redact.ts";
 
-// `private` rides the matrix so the render and merge steps, which run BEFORE the
-// settings action and quote repo-owned content, can hide it via run_hidden.ts.
+// `private` rides the matrix so the layers step, which runs BEFORE the
+// settings action and quotes repo-owned content, can hide it via run_hidden.ts.
 // Derived from EnrichedRow's union, so a tagless private row is unrepresentable.
 export type Target = { repo: string; name: string } & RedactionState;
 

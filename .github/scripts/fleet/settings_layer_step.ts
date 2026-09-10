@@ -1,21 +1,22 @@
 #!/usr/bin/env bun
-// One leg of the settings apply job - render, merge, or labels - behind
-// run_hidden.ts: all three run BEFORE the settings action, so its own
-// private-repos redaction cannot cover what they print, and all three
-// quote repo-owned content when they fail. The operator repository IS
-// this checkout, so its facts and its layer are read from disk (the
-// render took its facts from the same working tree, and fetching would
-// reintroduce the race the pin removes); every other target is fetched,
-// pinned to the commit the render published (PINNED).
+// The label preflight leg of the settings apply job behind run_hidden.ts:
+// it runs BEFORE the settings action applies, so the action's own
+// private-repos redaction cannot cover what it prints, and it quotes
+// repo-owned content (label names, file paths) when it fails. The operator
+// repository IS this checkout, so its reference files are read from disk;
+// every other target is fetched, pinned to the commit the layers step
+// published (PINNED). The argv is a function of the workflow-provided env
+// only, never of repository content (the settings-label-preflight ssot
+// rule pins it).
 //
-// Usage: settings_layer_step.ts render|merge|labels
-// Env: TARGET, GITHUB_REPOSITORY, RUNNER_TEMP; PINNED (merge, labels); MODE (labels).
+// Usage: settings_layer_step.ts labels
+// Env: TARGET, GITHUB_REPOSITORY, RUNNER_TEMP, PINNED, MODE.
 
 import { join } from "node:path";
 import { env, error, requireEnv } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
 
-export const LAYER_STEPS = ["render", "merge", "labels"] as const;
+export const LAYER_STEPS = ["labels"] as const;
 export type LayerStep = (typeof LAYER_STEPS)[number];
 
 export function isLayerStep(value: string | undefined): value is LayerStep {
@@ -25,10 +26,10 @@ export function isLayerStep(value: string | undefined): value is LayerStep {
 export interface LayerStepFacts {
   /** The resolved slug (already registered with the masker for a redacted row). */
   target: string;
-  /** The target is this repository: facts and layer come from the checkout. */
+  /** The target is this repository: the reference files come from the checkout. */
   operator: boolean;
   runnerTemp: string;
-  /** The commit the render published; the fetched legs pin to it. */
+  /** The commit the layers step published; the fetched leg pins to it. */
   pinned: string;
   /** apply or check, mirrored from the settings action's mode input. */
   mode: string;
@@ -37,32 +38,6 @@ export interface LayerStepFacts {
 const SCRIPTS = join(import.meta.dir, "..");
 
 const LEGS: Record<LayerStep, (facts: LayerStepFacts) => { label: string; command: string[] }> = {
-  render: (facts) => ({
-    label: "settings render",
-    command: [
-      "bun",
-      join(SCRIPTS, "fleet", "render_managed_settings.ts"),
-      "--repo",
-      facts.target,
-      ...(facts.operator ? ["--operator-answers", ".repo-platform-answers.yml"] : []),
-      "--out",
-      `${facts.runnerTemp}/managed-settings.yml`,
-    ],
-  }),
-  merge: (facts) => ({
-    label: "settings merge",
-    command: [
-      "bun",
-      join(SCRIPTS, "fleet", "merge_settings_layers.ts"),
-      "--managed",
-      `${facts.runnerTemp}/managed-settings.yml`,
-      ...(facts.operator
-        ? ["--repo-file", ".github/settings.yml"]
-        : ["--repo-fetch", facts.target, "--repo-ref", facts.pinned]),
-      "--out",
-      `${facts.runnerTemp}/merged-settings.yml`,
-    ],
-  }),
   labels: (facts) => ({
     label: "settings labels",
     command: [
@@ -88,8 +63,8 @@ export function layerStepArgv(step: LayerStep, facts: LayerStepFacts): string[] 
 }
 
 /** PINNED and MODE pass through as given (empty when unset): the called
- *  scripts own their validation and refuse an unpinned fetch or a bad
- *  mode with their own diagnostics. */
+ *  script owns their validation and refuses an unpinned fetch or a bad
+ *  mode with its own diagnostics. */
 export function factsFromEnv(): LayerStepFacts {
   const target = requireEnv("TARGET");
   return {

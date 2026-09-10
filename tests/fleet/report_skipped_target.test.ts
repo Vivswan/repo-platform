@@ -11,7 +11,7 @@ const script = join(import.meta.dir, "../../.github/scripts/fleet/report_skipped
 
 function run(env: Record<string, string | undefined>) {
   const proc = boundedSpawnSync(["bun", script], {
-    env: { ...process.env, HINT: "h**-s**r", RENDER_SKIPPED: "", MERGE_SKIPPED: "", ...env },
+    env: { ...process.env, HINT: "h**-s**r", SKIP_REASON: "", ...env },
   });
   return { exitCode: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr };
 }
@@ -19,30 +19,30 @@ function run(env: Record<string, string | undefined>) {
 describe("report_skipped_target.ts", () => {
   test.each([
     {
-      reason: "the render skipped (the target left management)",
-      env: { RENDER_SKIPPED: "true", MERGE_SKIPPED: "" },
+      reason: "the target left management",
+      env: { SKIP_REASON: "left-management" },
       notice:
         "settings apply skipped for h**-s**r: it carries no .repo-platform.yml at the revision this run read (it left management), so its settings are not managed here any more.",
     },
     {
-      reason: "the merge skipped (no settings.yml yet)",
-      env: { RENDER_SKIPPED: "false", MERGE_SKIPPED: "true" },
+      reason: "the target is not onboarded (no settings.yml yet)",
+      env: { SKIP_REASON: "not-onboarded" },
       notice:
         "settings apply skipped for h**-s**r: it has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings starter seeds the file on its next template sync.",
     },
     {
-      reason: "neither skipped (the branch moved)",
-      env: { RENDER_SKIPPED: "false", MERGE_SKIPPED: "false" },
+      reason: "no reason published (the branch moved)",
+      env: { SKIP_REASON: "" },
       notice:
         "settings apply skipped for h**-s**r: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision.",
     },
     {
-      // The render's skip wins when both read true: the first branch of the
-      // workflow's chain, kept in that order.
-      reason: "both skipped reads as the render's skip",
-      env: { RENDER_SKIPPED: "true", MERGE_SKIPPED: "true" },
+      // An unknown category is never echoed: the notice is public and the
+      // reason rides a step output, so only the fixed sentences print.
+      reason: "an unknown reason reads as the moved skip",
+      env: { SKIP_REASON: "something-else" },
       notice:
-        "settings apply skipped for h**-s**r: it carries no .repo-platform.yml at the revision this run read (it left management), so its settings are not managed here any more.",
+        "settings apply skipped for h**-s**r: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision.",
     },
   ])("$reason prints exactly one public notice", ({ env, notice }) => {
     expect(run(env)).toEqual({ exitCode: 0, stdout: `::notice::${notice}\n`, stderr: "" });

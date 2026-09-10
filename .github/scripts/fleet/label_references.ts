@@ -21,7 +21,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { isMapping } from "./settings_document.ts";
+import { isMapping } from "./settings_facts.ts";
+import { labelEntries } from "./settings_layers.ts";
 
 export type ReferenceKind = "issue-form" | "workflow";
 
@@ -160,17 +161,18 @@ export function missingFromRoster(
 
 /** A merged settings document's POST-APPLY label names, or null when it
  *  declares no `labels` key (the apply never touches an undeclared key, so
- *  no reconciliation happens). Post-apply means a STRING `new_name` when
- *  declared, else `name`; the rename's source is deliberately absent, since
- *  after the apply a reference to it breaks exactly like a deletion. A
- *  DEGENERATE rename target (empty, a collision) fails the action before its
- *  deletion pass, so treating the source as removed anyway is the
- *  conservative read: it blocks an apply that could not have succeeded. */
+ *  no reconciliation happens). The section arrives in either of the
+ *  action's forms, the plain list or the `{_undeclared, entries}` wrapper
+ *  its merge writes; the policy key is not read, since no fleet layer sets
+ *  `keep`. Post-apply means a STRING `new_name` when declared, else
+ *  `name`; the rename's source is deliberately absent, since after the
+ *  apply a reference to it breaks exactly like a deletion. A DEGENERATE
+ *  rename target (empty, a collision) fails the action before its deletion
+ *  pass, so treating the source as removed anyway is the conservative
+ *  read: it blocks an apply that could not have succeeded. */
 export function finalLabelNames(merged: Record<string, unknown>): string[] | null {
-  const labels = merged.labels;
-  if (labels === undefined) return null;
-  if (!Array.isArray(labels)) return [];
-  return labels.flatMap((entry) => {
+  if (merged.labels === undefined) return null;
+  return labelEntries(merged.labels).flatMap((entry) => {
     if (!isMapping(entry)) return [];
     const final = typeof entry.new_name === "string" ? entry.new_name : entry.name;
     return typeof final === "string" ? [final] : [];

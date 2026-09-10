@@ -49,21 +49,23 @@ describe("collectRefs", () => {
       ],
     },
     {
-      reason: "quoted uses values and SHA refs parse, sorted by repo",
+      reason: "quoted uses values, branch refs, and SHA refs parse, sorted by repo",
       files: [
-        {
-          path: "g.yml",
-          text: '      - uses: "Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3"\n',
-        },
+        { path: "g.yml", text: '      - uses: "Vivswan/github-settings-as-code@latest"\n' },
         { path: "h.yml", text: "      - uses: 'actions/checkout@v7'\n" },
+        {
+          path: "i.yml",
+          text: "      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n",
+        },
       ],
       expected: [
         { repo: "actions/checkout", ref: "v7", sources: ["h.yml"] },
         {
-          repo: "Vivswan/github-settings-as-code",
-          ref: "ac83fb48219309e2249294ef37fb55310bd45fb3",
-          sources: ["g.yml"],
+          repo: "actions/upload-artifact",
+          ref: "ea165f8d65b6e75b540449e92b4886f43607fa02",
+          sources: ["i.yml"],
         },
+        { repo: "Vivswan/github-settings-as-code", ref: "latest", sources: ["g.yml"] },
       ],
     },
   ])("$reason", ({ files, expected }) => {

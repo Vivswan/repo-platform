@@ -16,7 +16,7 @@
 //   [--sections <allowlist>] [--required-sections <list>]
 //   [--mode apply|check] [--on-missing-permission fail|warn]
 // --ref fetches the reference files via gh api (env: GH_TOKEN) at the SAME
-// pinned commit the merged document's facts were read at. The optional
+// pinned commit the merged document's layers were selected at. The optional
 // flags mirror the ACTION's inputs so the preflight is never stricter OR
 // looser than the apply it guards; everything else fails closed.
 
@@ -34,8 +34,7 @@ import {
   referenceFilesFromDir,
   referenceFilesFromFetch,
 } from "./label_references.ts";
-import { fetchRepoFile } from "./render_managed_settings.ts";
-import { isMapping, parseSettingsDoc } from "./settings_document.ts";
+import { fetchRepoFile, isMapping, parseYamlMapping } from "./settings_facts.ts";
 
 /** The references whose label is LIVE on the repository but absent from
  *  the post-apply names (finalLabelNames): exactly the set the apply
@@ -212,7 +211,7 @@ function main(args: string[]): void {
     fail(error instanceof Error ? error.message : String(error));
   }
   try {
-    const merged = parseSettingsDoc(readFileSync(flags["--merged"], "utf-8"), flags["--merged"]);
+    const merged = parseYamlMapping(readFileSync(flags["--merged"], "utf-8"), flags["--merged"]);
     const finalNames = finalLabelNames(merged);
     if (!sectionsSelectLabels(flags["--sections"])) {
       standDown(

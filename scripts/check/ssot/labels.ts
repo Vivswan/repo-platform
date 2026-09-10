@@ -3,7 +3,7 @@
 // tracking-label validators.
 
 import { parse as parseYaml } from "yaml";
-import { loadLayer } from "../../../.github/scripts/fleet/render_managed_settings.ts";
+import { loadLayer } from "../../../.github/scripts/fleet/settings_layers.ts";
 import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
 import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
@@ -30,11 +30,11 @@ export const labelRules: Rule[] = [
     name: "labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // The baseline generator is the label roster's single home; this
+      // The layer files are the label roster's single home; this
       // regression tripwire keeps the hand-maintained tuples from quietly
       // losing a member the fleet's tools recreate (dependabot, the
       // release machinery) - losing one restarts the nightly
-      // delete/recreate loop the generator exists to kill.
+      // delete/recreate loop the roster exists to kill.
       const rosterNames = new Set(managedLabelRoster().map((label) => label.name));
       const required = [
         "dependencies",
@@ -61,8 +61,8 @@ export const labelRules: Rule[] = [
 
       // Tracking-label streams: each manifest's tracking_label block is the
       // single source; the hand-written copier question is anchored back to
-      // it here (the baseline generator renders the stream labels from the
-      // same manifest tuples, so it cannot drift), and the create-tuple
+      // it here (the tracking scratch layer renders the stream labels from
+      // the same manifest tuples, so it cannot drift), and the create-tuple
       // carriers (the action's defaults for the fuzz stream, the starter's
       // overrides for the nightly stream) below.
       for (const { module, tracking } of trackingManifests()) {
@@ -204,7 +204,7 @@ export const labelRules: Rule[] = [
           if (!rosterNames.has(name)) {
             mismatches.push({
               file: rel,
-              expected: `label '${name}' declared in the managed settings roster (render_managed_settings.ts)`,
+              expected: `label '${name}' declared in the managed settings roster (settings_layers.ts)`,
               got: "missing - the label sync would delete what the issue form applies",
             });
           }

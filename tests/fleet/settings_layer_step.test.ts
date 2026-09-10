@@ -1,4 +1,4 @@
-// settings_layer_step.ts: the three settings apply legs behind run_hidden.
+// settings_layer_step.ts: the label preflight leg behind run_hidden.
 // A stub bun on PATH records every argv the leg spawns (the script itself
 // runs under the real bun, by path), so each row's WHOLE call list is
 // asserted against argv typed here from the workflow's landed shape - one
@@ -39,86 +39,16 @@ function run(leg: string | undefined, env: Record<string, string | undefined>) {
 }
 
 const WRAP = ["bun", join(SCRIPTS, "sync/run_hidden.ts")];
-const RENDER = ["bun", join(SCRIPTS, "fleet/render_managed_settings.ts")];
-const MERGE = ["bun", join(SCRIPTS, "fleet/merge_settings_layers.ts")];
 const LABELS = ["bun", join(SCRIPTS, "fleet/label_preflight.ts")];
 const OPERATOR = "Vivswan/repo-platform";
 const MANAGED = "Vivswan/managed";
 
 describe("settings_layer_step.ts", () => {
-  // One row per leg and per row kind; the operator row is the checkout,
-  // every other target is fetched at the pinned commit. The labels leg is
-  // judged in both modes: a leg that folded apply into check would let an
-  // apply delete referenced labels behind a warning.
+  // One row per row kind and mode; the operator row is the checkout,
+  // every other target is fetched at the pinned commit. Both modes are
+  // judged: a leg that folded apply into check would let an apply delete
+  // referenced labels behind a warning.
   test.each<{ leg: string; target: string; mode: string; argv: string[] }>([
-    {
-      leg: "render",
-      target: OPERATOR,
-      mode: "apply",
-      argv: [
-        ...WRAP,
-        "settings render",
-        "--",
-        ...RENDER,
-        "--repo",
-        OPERATOR,
-        "--operator-answers",
-        ".repo-platform-answers.yml",
-        "--out",
-        "/rt/managed-settings.yml",
-      ],
-    },
-    {
-      leg: "render",
-      target: MANAGED,
-      mode: "apply",
-      argv: [
-        ...WRAP,
-        "settings render",
-        "--",
-        ...RENDER,
-        "--repo",
-        MANAGED,
-        "--out",
-        "/rt/managed-settings.yml",
-      ],
-    },
-    {
-      leg: "merge",
-      target: OPERATOR,
-      mode: "apply",
-      argv: [
-        ...WRAP,
-        "settings merge",
-        "--",
-        ...MERGE,
-        "--managed",
-        "/rt/managed-settings.yml",
-        "--repo-file",
-        ".github/settings.yml",
-        "--out",
-        "/rt/merged-settings.yml",
-      ],
-    },
-    {
-      leg: "merge",
-      target: MANAGED,
-      mode: "apply",
-      argv: [
-        ...WRAP,
-        "settings merge",
-        "--",
-        ...MERGE,
-        "--managed",
-        "/rt/managed-settings.yml",
-        "--repo-fetch",
-        MANAGED,
-        "--repo-ref",
-        SHA,
-        "--out",
-        "/rt/merged-settings.yml",
-      ],
-    },
     {
       leg: "labels",
       target: OPERATOR,
@@ -208,20 +138,24 @@ describe("settings_layer_step.ts", () => {
   );
 
   test("the wrapped command's exit code is the step's", () => {
-    expect(run("render", { TARGET: MANAGED, STUB_EXIT: "3" })).toEqual({
+    expect(run("labels", { TARGET: MANAGED, STUB_EXIT: "3" })).toEqual({
       exitCode: 3,
       stdout: "",
       stderr: "",
       calls: [
         [
           ...WRAP,
-          "settings render",
+          "settings labels",
           "--",
-          ...RENDER,
+          ...LABELS,
+          "--merged",
+          "/rt/merged-settings.yml",
           "--repo",
           MANAGED,
-          "--out",
-          "/rt/managed-settings.yml",
+          "--ref",
+          SHA,
+          "--mode",
+          "check",
         ],
       ],
     });
@@ -256,18 +190,17 @@ describe("settings_layer_step.ts", () => {
       reason: "an unknown leg",
       leg: "apply",
       env: {},
-      stdout:
-        "::error::settings_layer_step.ts: expected one of render, merge, labels, got 'apply'\n",
+      stdout: "::error::settings_layer_step.ts: expected one of labels, got 'apply'\n",
     },
     {
       reason: "no leg at all",
       leg: undefined,
       env: {},
-      stdout: "::error::settings_layer_step.ts: expected one of render, merge, labels, got ''\n",
+      stdout: "::error::settings_layer_step.ts: expected one of labels, got ''\n",
     },
     {
       reason: "a missing TARGET",
-      leg: "render",
+      leg: "labels",
       env: { TARGET: "" },
       stdout: "::error::TARGET must be set\n",
     },

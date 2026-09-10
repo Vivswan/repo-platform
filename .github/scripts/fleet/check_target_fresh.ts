@@ -11,15 +11,15 @@
 // managed", so a push landing inside the remaining window still applies. A moved head is not an error - the next run reads the new
 // revision - so this reports and lets the caller gate.
 //
-// Env: GH_TOKEN, TARGET (owner/name), PINNED (the render's sha).
+// Env: GH_TOKEN, TARGET (owner/name), PINNED (the layers step's sha).
 //
 // The output here quotes commit shas, and the resolver's failure strings
 // name the target's default BRANCH - so settings-repos.yml runs this step
-// behind the same run_hidden.ts boundary as the render and the merge for
-// a hide-details target (docs/private-repos.md).
+// behind the same run_hidden.ts boundary as the layers step for a
+// hide-details target (docs/private-repos.md).
 
 import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
-import { resolveTargetRef } from "./render_managed_settings.ts";
+import { resolveTargetRef } from "./settings_facts.ts";
 
 const target = requireEnv("TARGET");
 // Read UNSET rather than required: an absent pin is a specific failure
@@ -33,9 +33,9 @@ const pinned = env("PINNED", "");
 // the one path that reaches a mutation unchecked.
 if (pinned === "") {
   fail(
-    `${target}: no pinned commit to check freshness against. The render publishes one for every ` +
-      "fact source; an empty value means it did not run, or ran against a directory that is not " +
-      "a git checkout.",
+    `${target}: no pinned commit to check freshness against. The layers step publishes one for ` +
+      "every fact source; an empty value means it did not run, or ran against a directory that is " +
+      "not a git checkout.",
   );
 }
 

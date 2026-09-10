@@ -1,21 +1,18 @@
 // Rules over the settings layers and settings-repos.yml: the starter's
-// identity keys, the pinned read and apply steps, hide-details wiring, and
-// step-output gates across every workflow.
+// identity keys, the pinned read, merge, and apply steps, hide-details
+// wiring, and step-output gates across every workflow.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Node } from "ts-morph";
 import { parse as parseYaml } from "yaml";
 import {
-  identityKeyIssues,
-  loadOverrideLayer,
-} from "../../../.github/scripts/fleet/merge_settings_layers.ts";
-import {
   LAYER_STEPS,
   type LayerStep,
   type LayerStepFacts,
   layerStepArgv,
 } from "../../../.github/scripts/fleet/settings_layer_step.ts";
+import { loadOverrideLayer } from "../../../.github/scripts/fleet/settings_layers.ts";
 import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
 import {
   intersectionCarriesType,
@@ -26,7 +23,15 @@ import {
 } from "../../lib/ts_extract.ts";
 import type { Mismatch } from "./comparison.ts";
 import { asRecord, jinjaVars, REPO_ROOT, read } from "./inputs.ts";
+import { isApplyStep } from "./label_preflight.ts";
 import type { Rule } from "./rule_roster.ts";
+
+/** The merged document both settings-action steps meet at: the merge step
+ *  writes it, the apply step reads it. */
+export const MERGED_SETTINGS_FILE = "${{ runner.temp }}/merged-settings.yml";
+
+/** The merge step's settings-file input: the layers step's published list. */
+export const LAYERS_INPUT = "${{ steps.layers.outputs.layers }}";
 
 interface WorkflowStep {
   id?: string;
@@ -34,6 +39,7 @@ interface WorkflowStep {
   uses?: string;
   if?: string;
   env?: Record<string, unknown>;
+  with?: Record<string, unknown>;
   run?: string;
   "continue-on-error"?: boolean | string;
 }
@@ -165,11 +171,6 @@ export function hiddenStepNoticeMismatches(
   return { wrapped, mismatches };
 }
 
-/** Whether `argv` carries `run` as consecutive elements. */
-function argvCarries(argv: string[], run: string[]): boolean {
-  return argv.some((_, at) => run.every((word, offset) => argv[at + offset] === word));
-}
-
 /** Placeholder facts for judging a layer leg's argv, every value distinct. */
 const LEG_FACTS: LayerStepFacts = {
   target: "o/r",
@@ -238,17 +239,115 @@ export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mi
   return mismatches;
 }
 
-/** The identity keys the settings starter seeds (description,
- *  homepage, topics, private); the key list lives with the merge dialect
- *  (identityKeyIssues) - this wrapper applies the same contract to
- *  repo-platform's own .github/settings.yml so the two checkers cannot
- *  drift apart. */
+export interface IdentityIssue {
+  key: string;
+  expected: string;
+  got: string;
+}
+
+/** Shape hygiene for the identity keys a repo layer declares (the
+ *  settings.yml starter seeds all four; the apply never touches an
+ *  undeclared key, so drift in a missing one is never healed). */
+export function identityKeyIssues(repository: Record<string, unknown>): IdentityIssue[] {
+  const issues: IdentityIssue[] = [];
+  const got = (value: unknown) => (value === undefined ? "missing" : JSON.stringify(value));
+  if (typeof repository.description !== "string" || repository.description === "") {
+    issues.push({
+      key: "description",
+      expected: "a non-empty description string",
+      got: got(repository.description),
+    });
+  }
+  if (typeof repository.homepage !== "string") {
+    issues.push({
+      key: "homepage",
+      expected: 'a homepage string ("" declares-and-clears)',
+      got: got(repository.homepage),
+    });
+  }
+  const topics = repository.topics;
+  if (
+    typeof topics !== "string" &&
+    !(Array.isArray(topics) && topics.every((t) => typeof t === "string"))
+  ) {
+    issues.push({
+      key: "topics",
+      expected: "a declared topics value (string or string list)",
+      got: got(topics),
+    });
+  }
+  if (typeof repository.private !== "boolean") {
+    issues.push({
+      key: "private",
+      expected: "an explicit boolean, so the apply manages visibility",
+      got: got(repository.private),
+    });
+  }
+  return issues;
+}
+
+/** identityKeyIssues over repo-platform's own .github/settings.yml. */
 export function settingsIdentityMismatches(repository: Record<string, unknown>): Mismatch[] {
   return identityKeyIssues(repository).map((issue) => ({
     file: `.github/settings.yml repository.${issue.key}`,
     expected: issue.expected,
     got: issue.got,
   }));
+}
+
+/** The settings-apply-merged-input judgment over every step that uses the
+ *  settings action, pure so the suite can prove each comparison fires:
+ *  exactly one merge step (mode: merge, settings-file = the layers step's
+ *  list, merged-file = the merged document, no token or repository), and
+ *  every apply step reading the merged document as its settings-file. */
+export function settingsActionStepMismatches(rel: string, steps: WorkflowStep[]): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const withOf = (step: WorkflowStep) => step.with ?? {};
+  const merges = steps.filter((step) => !isApplyStep(step as Record<string, unknown>));
+  if (merges.length !== 1) {
+    mismatches.push({
+      file: rel,
+      expected: "exactly one settings-action step in mode: merge (the fold of the layer list)",
+      got: `${merges.length} merge step(s)`,
+    });
+  }
+  for (const merge of merges) {
+    const inputs = withOf(merge);
+    const expected: Record<string, string> = {
+      "settings-file": LAYERS_INPUT,
+      "merged-file": MERGED_SETTINGS_FILE,
+    };
+    for (const [key, value] of Object.entries(expected)) {
+      const actual = String(inputs[key] ?? "").trim();
+      if (actual !== value) {
+        mismatches.push({
+          file: rel,
+          expected: `the merge step's with.${key}: ${value}`,
+          got: actual === "" ? `no ${key} input` : actual,
+        });
+      }
+    }
+    for (const key of ["token", "repository"]) {
+      if (key in inputs) {
+        mismatches.push({
+          file: rel,
+          expected: `no ${key} input on the merge step (a merge folds files and reaches no repository)`,
+          got: `with.${key} present`,
+        });
+      }
+    }
+  }
+  for (const apply of steps.filter((step) => isApplyStep(step as Record<string, unknown>))) {
+    const settingsFile = String(withOf(apply)["settings-file"] ?? "").trim();
+    if (settingsFile !== MERGED_SETTINGS_FILE) {
+      mismatches.push({
+        file: rel,
+        expected: `the apply step reads settings-file: ${MERGED_SETTINGS_FILE}`,
+        got: settingsFile === "" ? "no settings-file input" : settingsFile,
+      });
+    }
+  }
+  return mismatches;
 }
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
@@ -325,59 +424,33 @@ export const settingsWorkflowRules: Rule[] = [
     name: "settings-read-pin",
     run: () => {
       // The unit tests can prove factsFromFetch forwards one ref and that
-      // the CLI refuses an unpinned fetch. They cannot see the TRANSPORT
-      // or the workflow, so those are pinned here: the ref has to reach
-      // the API URL, and the fetch call has to carry the render's output.
+      // the layers script refuses an unpinned fetch. They cannot see the
+      // TRANSPORT or the workflow, so those are pinned here: the ref has to
+      // reach the API URL, and every later step that reads the target has
+      // to carry the layers step's published ref.
       const mismatches: Mismatch[] = [];
-      const render = read(".github/scripts/fleet/render_managed_settings.ts");
-      if (!templateCarries(render, "contents/${path}?ref=${ref}")) {
+      const facts = read(".github/scripts/fleet/settings_facts.ts");
+      if (!templateCarries(facts, "contents/${path}?ref=${ref}")) {
         mismatches.push({
-          file: ".github/scripts/fleet/render_managed_settings.ts",
+          file: ".github/scripts/fleet/settings_facts.ts",
           expected: "the contents URL carries ?ref=, or every fact reads the moving branch",
           got: "no ?ref= on the fetch URL",
         });
       }
-      const merge = read(".github/scripts/fleet/merge_settings_layers.ts");
-      if (!templateCarries(merge, "contents/.github/settings.yml?ref=${ref}")) {
-        mismatches.push({
-          file: ".github/scripts/fleet/merge_settings_layers.ts",
-          expected: "the repo-layer URL carries ?ref=",
-          got: "no ?ref= on the repo-layer fetch",
-        });
-      }
-      // The merge step hands the layer step the render's published ref,
-      // and the fetched row's argv pins its fetch to it.
       const rel = ".github/workflows/settings-repos.yml";
-      const mergeStep = workflowSteps(rel).find((step) => step.id === "merge");
-      const pinnedEnv = String(mergeStep?.env?.PINNED ?? "").trim();
-      if (pinnedEnv !== "${{ steps.render.outputs.ref }}") {
-        mismatches.push({
-          file: rel,
-          expected: "the merge step's PINNED env carrying the render step's published ref",
-          got: pinnedEnv === "" ? "no PINNED env on the merge step" : pinnedEnv,
-        });
-      }
-      const fetched = layerStepArgv("merge", LEG_FACTS);
-      if (!argvCarries(fetched, ["--repo-fetch", "o/r", "--repo-ref", "REF"])) {
-        mismatches.push({
-          file: ".github/scripts/fleet/settings_layer_step.ts",
-          expected: "the fetched row's merge leg passes --repo-fetch with the pinned --repo-ref",
-          got: fetched.join(" "),
-        });
-      }
-      // The operator row reads its own checkout; fetching it would race
-      // against the facts the render took from that same working tree.
-      const own = layerStepArgv("merge", { ...LEG_FACTS, operator: true });
-      if (
-        !argvCarries(own, ["--repo-file", ".github/settings.yml"]) ||
-        own.includes("--repo-fetch")
-      ) {
-        mismatches.push({
-          file: ".github/scripts/fleet/settings_layer_step.ts",
-          expected:
-            "the operator row's merge leg reads its checkout (--repo-file .github/settings.yml, no fetch)",
-          got: own.join(" "),
-        });
+      const steps = workflowSteps(rel);
+      const layersStep = steps.find((step) => step.id === "layers");
+      if (layersStep === undefined) throw new Error(`${rel}: no layers step - anchor lost`);
+      for (const id of ["freshness", "labels"]) {
+        const step = steps.find((candidate) => candidate.id === id);
+        const pinnedEnv = String(step?.env?.PINNED ?? "").trim();
+        if (pinnedEnv !== "${{ steps.layers.outputs.ref }}") {
+          mismatches.push({
+            file: rel,
+            expected: `the ${id} step's PINNED env carrying the layers step's published ref`,
+            got: pinnedEnv === "" ? `no PINNED env on the ${id} step` : pinnedEnv,
+          });
+        }
       }
       return mismatches;
     },
@@ -385,14 +458,14 @@ export const settingsWorkflowRules: Rule[] = [
   {
     name: "settings-hide-details",
     run: () => {
-      // The layer render and the merge run BEFORE the settings action, so
-      // the action's own redaction cannot cover their output, and both
-      // quote repo-owned content on their diagnostic paths. The row's
-      // private flag must therefore reach them: it has to ride the matrix
-      // AND be handed to both steps, which pass it to run_hidden.ts. This
-      // was dropped once already, with a comment explaining why it was
-      // safe - it was not, so the invariant is pinned rather than
-      // commented.
+      // The layers step and the label preflight run BEFORE the settings
+      // action applies, so the action's own redaction cannot cover their
+      // output, and both quote repo-owned content on their diagnostic
+      // paths. The row's private flag must therefore reach them: it has to
+      // ride the matrix AND be handed to both steps, which pass it to
+      // run_hidden.ts. This was dropped once already, with a comment
+      // explaining why it was safe - it was not, so the invariant is pinned
+      // rather than commented.
       const mismatches: Mismatch[] = [];
       const matrix = read(".github/scripts/fleet/build_settings_matrix.ts");
       if (
@@ -408,18 +481,16 @@ export const settingsWorkflowRules: Rule[] = [
         });
       }
       const workflow = read(".github/workflows/settings-repos.yml");
-      // Per LEG and per row: the render, merge, and labels legs get their
-      // argv from layerStepArgv, whose one return applies the wrapper, so
-      // each leg's argv is read for both rows and must open with the
-      // wrapper, a "settings <leg>" label, and the leg's own script. The
-      // workflow runs each leg through the layer step, never a fleet script
-      // directly (a direct call is an unwrapped one). The freshness recheck
-      // stays an inline call and is matched textually: its moved warning
-      // quotes commit shas and its resolver errors name the target's
-      // default branch.
+      // Per LEG and per row: the labels leg gets its argv from
+      // layerStepArgv, whose one return applies the wrapper, so the argv is
+      // read for both rows and must open with the wrapper, a "settings
+      // <leg>" label, and the leg's own script. The workflow runs the leg
+      // through the layer step, never the fleet script directly (a direct
+      // call is an unwrapped one). The layers step and the freshness
+      // recheck are inline calls matched textually: the first quotes a
+      // fetched file's parse error, the second's moved warning quotes
+      // commit shas and its resolver errors name the target's default branch.
       const LEG_SCRIPTS: Record<LayerStep, string> = {
-        render: "render_managed_settings.ts",
-        merge: "merge_settings_layers.ts",
         labels: "label_preflight.ts",
       };
       for (const leg of LAYER_STEPS) {
@@ -462,16 +533,18 @@ export const settingsWorkflowRules: Rule[] = [
           });
         }
       }
-      {
-        const calls = flat.match(/bun \.github\/scripts\/fleet\/check_target_fresh\.ts/g) ?? [];
+      for (const script of ["settings_layers.ts", "check_target_fresh.ts"]) {
+        const call = new RegExp(
+          `bun \\.github\\/scripts\\/fleet\\/${script.replace(".", "\\.")}`,
+          "g",
+        );
+        const calls = flat.match(call) ?? [];
         const wrapped =
-          flat.match(
-            /run_hidden\.ts "settings [a-z]+" -- bun \.github\/scripts\/fleet\/check_target_fresh\.ts/g,
-          ) ?? [];
+          flat.match(new RegExp(`run_hidden\\.ts "settings [a-z]+" -- ${call.source}`, "g")) ?? [];
         if (calls.length === 0 || wrapped.length !== calls.length) {
           mismatches.push({
             file: ".github/workflows/settings-repos.yml",
-            expected: `every check_target_fresh.ts call wrapped in run_hidden.ts (${calls.length} call(s))`,
+            expected: `every ${script} call wrapped in run_hidden.ts (${calls.length} call(s))`,
             got: `${wrapped.length} wrapped`,
           });
         }
@@ -539,7 +612,7 @@ export const settingsWorkflowRules: Rule[] = [
       // OUTSIDE the hidden capture, or a hide-details target is skipped
       // with a green job and no signal at all.
       step("Report a skipped target", [
-        [/steps\.merge\.outputs\.skipped == 'true'/, "a condition on the merge step's output"],
+        [/steps\.layers\.outputs\.skipped == 'true'/, "a condition on the layers step's output"],
       ]);
       const skipStep = steps.get("Report a skipped target");
       if (skipStep !== undefined && !printsNotice(skipStep, read)) {
@@ -566,26 +639,24 @@ export const settingsWorkflowRules: Rule[] = [
     run: () => {
       // The apply DELETES labels the merged document does not declare, so
       // every step condition guarding it is load-bearing: a target that
-      // dropped the module writes no baseline, one with no settings.yml of
-      // its own writes no merged document, and a target whose branch moved
-      // has a stale one. No unit test can see a workflow, so the shape is
-      // asserted here - on the parsed steps, not on the file's text, so a
-      // matching string in a comment or an unrelated step cannot satisfy it.
+      // dropped the module or has no settings.yml of its own publishes no
+      // layer list, and a target whose branch moved has a stale one. No
+      // unit test can see a workflow, so the shape is asserted here - on
+      // the parsed steps, not on the file's text, so a matching string in
+      // a comment or an unrelated step cannot satisfy it.
       const mismatches: Mismatch[] = [];
       const expected: Record<string, string> = {
-        merge: "steps.render.outputs.skipped == 'false'",
-        freshness:
-          "steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'",
-        apply: "steps.freshness.outputs.moved == 'false'",
+        freshness: "steps.layers.outputs.skipped == 'false'",
+        action: "steps.freshness.outputs.moved == 'false'",
       };
       {
         const rel = ".github/workflows/settings-repos.yml";
         const steps = workflowSteps(rel);
         for (const [id, condition] of Object.entries(expected)) {
-          // EVERY apply step, not the first: a second, ungated
-          // invocation of the settings action would otherwise pass.
+          // EVERY settings-action step (the merge and the apply), not the
+          // first: a second, ungated invocation would otherwise pass.
           const matched =
-            id === "apply"
+            id === "action"
               ? steps.filter((s) => String(s.uses ?? "").includes("github-settings-as-code"))
               : steps.filter((s) => s.id === id);
           if (matched.length === 0) {
@@ -619,51 +690,22 @@ export const settingsWorkflowRules: Rule[] = [
         .flatMap((rel) => stepOutputGateMismatches(rel, workflowSteps(rel))),
   },
   {
-    // The apply must hand github-settings-as-code the MERGED document. A
-    // one-line regression to managed-settings.yml ships a baseline-only
-    // apply - the exact document the merge pipeline exists to never
-    // produce, because the action's label reconciliation would delete
-    // every label the repository declares for itself - and every other
-    // gate stays green while it does. Self-contained on purpose: the
-    // workflow is parsed right here, leaning on no shared workflow
-    // helpers.
+    // The two settings-action steps meet at ONE file: the merge step folds
+    // the layers step's published list into it (no token, no target), and
+    // the apply step reads it. A one-line regression - the apply reading a
+    // single layer, the merge folding a list from anywhere else - ships a
+    // document the layer pipeline exists to never produce, because the
+    // action's label reconciliation would delete every label the repository
+    // declares for itself, and every other gate stays green while it does.
     name: "settings-apply-merged-input",
     run: () => {
-      const mismatches: Mismatch[] = [];
-      const wanted = "${{ runner.temp }}/merged-settings.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      {
-        const rel = ".github/workflows/settings-repos.yml";
-        const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
-        const applySteps: Record<string, unknown>[] = [];
-        for (const job of Object.values(jobs)) {
-          const steps = mapping(job).steps;
-          if (!Array.isArray(steps)) continue;
-          for (const raw of steps) {
-            const step = mapping(raw);
-            if (String(step.uses ?? "").includes("github-settings-as-code")) {
-              applySteps.push(step);
-            }
-          }
-        }
-        if (applySteps.length === 0) {
-          throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
-        }
-        for (const step of applySteps) {
-          const settingsFile = String(mapping(step.with)["settings-file"] ?? "");
-          if (settingsFile !== wanted) {
-            mismatches.push({
-              file: rel,
-              expected: `the apply step reads settings-file: ${wanted}`,
-              got: settingsFile === "" ? "no settings-file input" : settingsFile,
-            });
-          }
-        }
-      }
-      return mismatches;
+      const rel = ".github/workflows/settings-repos.yml";
+      const steps = workflowSteps(rel).filter((step) =>
+        String(step.uses ?? "").includes("github-settings-as-code"),
+      );
+      if (steps.length === 0)
+        throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
+      return settingsActionStepMismatches(rel, steps);
     },
   },
   {

@@ -2,7 +2,7 @@
 // excludes, has_toolchain, tracking-label validators) and the tracking-labels
 // workflow input; bodies are full lines in the target file's own indentation.
 
-import { managedLabelNames } from "../../.github/scripts/fleet/render_managed_settings.ts";
+import { managedLabelNames } from "../../.github/scripts/fleet/settings_layers.ts";
 import { compose } from "../compose/compose.ts";
 import { excludePatterns } from "../compose/exclude.ts";
 import type { ModuleManifest } from "../lib/module_manifests.ts";
@@ -87,7 +87,7 @@ export function trackingLabelsInput(manifests: ModuleManifest[], indent: number)
 
 /** Every managed label name, lowercased (GitHub deduplicates label names
  *  case-insensitively) and deduped, in declaration order, from the settings
- *  baseline generator (render_managed_settings.ts), the roster's single home.
+ *  layer files (settings_layers.ts reads them), the roster's single home.
  *  The tracking streams' labels are excluded there: they render from the very
  *  answers the validators check. A tracking-label answer equal to a managed
  *  name would corrupt the roster's owner: settings applies would fight over

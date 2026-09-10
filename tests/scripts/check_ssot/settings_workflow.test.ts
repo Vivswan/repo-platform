@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   hiddenStepNoticeMismatches,
+  LAYERS_INPUT,
+  MERGED_SETTINGS_FILE,
   printsNoticeAtTopLevel,
+  settingsActionStepMismatches,
   settingsIdentityMismatches,
   stepOutputGateMismatches,
   unsafeStepCondition,
@@ -430,5 +433,53 @@ jobs:
       const rel = `${WORKFLOWS}/${name}`;
       expect(stepOutputGateMismatches(rel, stepsOf(readFileSync(rel, "utf-8")))).toEqual([]);
     }
+  });
+});
+
+describe("settingsActionStepMismatches", () => {
+  const REL = "settings.yml";
+  const merge = () => ({
+    id: "merge",
+    uses: "Vivswan/github-settings-as-code@latest",
+    with: { mode: "merge", "settings-file": LAYERS_INPUT, "merged-file": MERGED_SETTINGS_FILE },
+  });
+  const apply = () => ({
+    id: "apply",
+    uses: "Vivswan/github-settings-as-code@latest",
+    with: { token: "t", mode: "apply", repository: "o/r", "settings-file": MERGED_SETTINGS_FILE },
+  });
+  const judged = (steps: Record<string, unknown>[]) =>
+    settingsActionStepMismatches(REL, steps)
+      .map((m) => `${m.expected} => ${m.got}`)
+      .join("\n");
+
+  test("the landed shape judges clean (positive control)", () => {
+    expect(settingsActionStepMismatches(REL, [merge(), apply()])).toEqual([]);
+  });
+
+  test("an apply reading anything but the merged document fires", () => {
+    const drifted = apply();
+    drifted.with["settings-file"] = ".github/settings.yml";
+    expect(judged([merge(), drifted])).toContain(`reads settings-file: ${MERGED_SETTINGS_FILE}`);
+  });
+
+  test("a merge folding anything but the layers step's list, or writing elsewhere, fires", () => {
+    const list = merge();
+    list.with["settings-file"] = ".github/settings-baseline.yml";
+    expect(judged([list, apply()])).toContain(`with.settings-file: ${LAYERS_INPUT}`);
+    const elsewhere = merge();
+    elsewhere.with["merged-file"] = "${{ runner.temp }}/other.yml";
+    expect(judged([elsewhere, apply()])).toContain(`with.merged-file: ${MERGED_SETTINGS_FILE}`);
+  });
+
+  test("a merge step handed a token or a repository fires", () => {
+    const tokened = merge();
+    (tokened.with as Record<string, string>).token = "t";
+    expect(judged([tokened, apply()])).toContain("no token input on the merge step");
+  });
+
+  test("no merge step, or two, fires the exactly-one pin", () => {
+    expect(judged([apply()])).toContain("=> 0 merge step(s)");
+    expect(judged([merge(), merge(), apply()])).toContain("=> 2 merge step(s)");
   });
 });

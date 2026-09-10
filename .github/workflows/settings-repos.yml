@@ -1,14 +1,14 @@
-# Central settings apply: merges each target's settings LAYERS
-# (docs/settings.md). render_managed_settings.ts selects and merges layers
-# 1 to 4 - the fleet baseline, the fleet visibility overlay, and each
-# selected module's own layer and visibility overlay - driven by the
-# target's .repo-platform.yml module selection and its effective
-# visibility. merge_settings_layers.ts then adds the repo's own
-# .github/settings.yml and the fleet override on top, and runs
-# Vivswan/github-settings-as-code in
-# single-repo mode once per repository in a fail-fast-free matrix. Targets
-# are enrolled, adopted repos (a readable .repo-platform.yml is the
-# opt-in) plus this repository itself (its baseline facts come from
+# Central settings apply: one document per target, merged by
+# Vivswan/github-settings-as-code's `mode: merge` from the LAYER LIST this
+# repository owns (docs/settings.md). settings_layers.ts selects the
+# layers for the target - the fleet baseline, the fleet visibility overlay,
+# each selected module's layer and overlay, the tracking-labels scratch
+# layer, the target's own .github/settings.yml, the fleet override on top -
+# driven by its .repo-platform.yml module selection and its effective
+# visibility; the action folds them and applies the result in single-repo
+# mode, once per repository in a fail-fast-free matrix. Targets are
+# enrolled, adopted repos (a readable .repo-platform.yml is the opt-in)
+# plus this repository itself (its facts come from
 # .repo-platform-answers.yml). Repos heal independently: one target's
 # failure is its own red "apply (<repo>)" job and never blocks the others.
 #
@@ -208,33 +208,23 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
-      # The managed baseline for THIS repository's facts, then the repo's own
-      # settings.yml merged over it (settings_layer_step.ts: the operator
-      # row reads its checkout, every other target is fetched at the pinned
-      # commit). Scratch filenames are fixed and neutral: a redacted slug
-      # reaches the scripts only through env (already masked); the operator
-      # repo has no .repo-platform.yml to fetch, so its facts come from its
-      # recorded answers in this checkout. Both run BEFORE the settings
-      # action, so its own private-repos redaction cannot cover what they
-      # print, and both quote repo-owned content when they fail;
+      # The layer list for THIS target (settings_layers.ts): the operator
+      # row reads its checkout, every other target is fetched at its
+      # default-branch head, and the pinned commit is published for the
+      # freshness and preflight steps. Scratch filenames are fixed and
+      # neutral: a redacted slug reaches the script only through env
+      # (already masked). Runs BEFORE the settings action, so the action's
+      # own private-repos redaction cannot cover what it prints, and it
+      # quotes repo-owned content when a fetched file fails to parse;
       # run_hidden.ts captures that for a private target.
-      - name: Render the managed settings baseline
-        id: render
+      - name: Assemble the settings layers
+        id: layers
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-        run: bun .github/scripts/fleet/settings_layer_step.ts render
-
-      - name: Merge the repository's settings.yml over the baseline
-        id: merge
-        # No baseline was written when the target turned settings off at
-        # the pinned revision, so there is nothing to merge.
-        if: steps.render.outputs.skipped == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          TARGET: ${{ steps.resolve.outputs.repo }}
-          PINNED: ${{ steps.render.outputs.ref }}
-        run: bun .github/scripts/fleet/settings_layer_step.ts merge
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "settings layers" -- \
+            bun .github/scripts/fleet/settings_layers.ts
 
       # The opt-in was rechecked at the pinned commit, but the apply runs
       # later and the branch keeps moving; re-resolving the head narrows that
@@ -246,40 +236,53 @@ jobs:
       # this step's env still echoes into the log header, an accepted opaque id.
       - name: Check the target has not moved
         id: freshness
-        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
+        if: steps.layers.outputs.skipped == 'false'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-          PINNED: ${{ steps.render.outputs.ref }}
+          PINNED: ${{ steps.layers.outputs.ref }}
         run: |
           bun .github/scripts/sync/run_hidden.ts "settings freshness" -- \
             bun .github/scripts/fleet/check_target_fresh.ts
 
       # Outside the hidden capture on purpose: for a hide-details target
-      # the capture swallows the merge step's SUCCESS output (its
-      # not-onboarded warning) and the freshness step's moved warning
-      # alike, so each of these skips would otherwise be a green job with
-      # no signal at all. matrix.repo is the masked hint for a redacted
-      # row, so this says WHICH target without saying anything about its
-      # contents.
+      # the capture swallows the layers step's skip warning and the
+      # freshness step's moved warning alike, so each of these skips would
+      # otherwise be a green job with no signal at all. matrix.repo is the
+      # masked hint for a redacted row, and the reason is one of the
+      # script's fixed categories, so this says WHICH target skipped and
+      # why without saying anything about its contents.
       - name: Report a skipped target
-        if: >-
-          steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true' ||
-          steps.freshness.outputs.moved == 'true'
+        if: steps.layers.outputs.skipped == 'true' || steps.freshness.outputs.moved == 'true'
         env:
           HINT: ${{ matrix.repo }}
-          RENDER_SKIPPED: ${{ steps.render.outputs.skipped }}
-          MERGE_SKIPPED: ${{ steps.merge.outputs.skipped }}
+          SKIP_REASON: ${{ steps.layers.outputs.skip_reason }}
         run: bun .github/scripts/fleet/report_skipped_target.ts
+
+      # The action folds the layer list into the one document the apply
+      # step reads: no token, no API call. The dialect (objects merge key by
+      # key, null deletes the lower key, labels and rulesets union by name,
+      # every other list replaces) is the action's; docs/settings.md links
+      # its reference. `latest` is the action's packaged moving branch (its
+      # main is source-only and cannot be a uses: ref).
+      - name: Merge the settings layers
+        id: merge
+        if: steps.freshness.outputs.moved == 'false'
+        uses: Vivswan/github-settings-as-code@latest
+        with:
+          mode: merge
+          settings-file: ${{ steps.layers.outputs.layers }}
+          merged-file: ${{ runner.temp }}/merged-settings.yml
 
       # Referenced-label invariant, FAIL-CLOSED side (docs/settings.md, "Label
       # preflight"): the apply's reconciliation deletes and renames labels the
-      # target's files may still reference, so before the action runs the
-      # preflight fails THIS repo's apply naming the label and file. Facts
-      # come from this checkout for the operator, from the target at the
-      # pinned ref otherwise (the render's split); the action's mode is
-      # mirrored so a check_only run warns (a check deletes nothing). Same
-      # moved-target gate and hidden-capture boundary as the render and merge.
+      # target's files may still reference, so before the action applies the
+      # preflight fails THIS repo's apply naming the label and file. It reads
+      # the action's merged document; the reference files come from this
+      # checkout for the operator, from the target at the pinned ref
+      # otherwise. The action's mode is mirrored so a check_only run warns (a
+      # check deletes nothing). Same moved-target gate and hidden-capture
+      # boundary as the layers step.
       - name: Preflight labels the target still references
         id: labels
         if: steps.freshness.outputs.moved == 'false'
@@ -287,7 +290,7 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
           MODE: ${{ inputs.check_only && 'check' || 'apply' }}
-          PINNED: ${{ steps.render.outputs.ref }}
+          PINNED: ${{ steps.layers.outputs.ref }}
         run: bun .github/scripts/fleet/settings_layer_step.ts labels
 
       # Outside the hidden capture, like the skip notices above: for a
@@ -302,19 +305,14 @@ jobs:
 
       - name: Apply repository settings
         id: apply
-        # Skipped for a target that has no settings.yml yet: the merge
-        # step writes no document, because
-        # applying the baseline alone would delete the repo's own labels.
         if: steps.freshness.outputs.moved == 'false'
-        # Pinned to an immutable commit; bump to @v1 once the action cuts
-        # its first release.
-        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
+        uses: Vivswan/github-settings-as-code@latest
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
           # Single-repo mode, scoped by the resolved slug (already masked
           # when the row is redacted, so this with: line renders *** in
-          # the log); the merged scratch document is the settings source.
+          # the log); the merged document is the settings source.
           repository: ${{ steps.resolve.outputs.repo }}
           settings-file: ${{ runner.temp }}/merged-settings.yml
           private-repos: redact
@@ -327,9 +325,9 @@ jobs:
           # not hide behind a green run.
           on-missing-permission: fail
 
-      # run_hidden.ts keeps a hide-details target's render/merge output out
-      # of this public log, which means the detail only exists in
-      # RUNNER_TEMP. Without this step it would die with the runner and
+      # run_hidden.ts keeps a hide-details target's layers and freshness
+      # output out of this public log, which means the detail only exists
+      # in RUNNER_TEMP. Without this step it would die with the runner and
       # the operator would see an exit code and nothing else, breaking the
       # private-detail contract in docs/private-repos.md. TARGET comes
       # from the resolve step via GITHUB_ENV.
@@ -352,8 +350,7 @@ jobs:
       - name: Resolve the settings failure report
         if: >-
           success() && env.HIDE_DETAILS == 'true' && env.TARGET != '' &&
-          (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true' ||
-          steps.merge.outputs.skipped == 'true')
+          (steps.apply.outcome == 'success' || steps.layers.outputs.skipped == 'true')
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

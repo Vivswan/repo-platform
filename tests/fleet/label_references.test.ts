@@ -191,6 +191,22 @@ describe("collectReferences and the roster comparisons", () => {
     expect(finalLabelNames({ labels: [{ name: "bug" }, { color: "nameless" }] })).toEqual(["bug"]);
   });
 
+  test("finalLabelNames: the action's merged document wraps the list in {_undeclared, entries}", () => {
+    // github-settings-as-code's mode: merge writes every list section in
+    // its wrapped form with the policy resolved; the preflight reads that
+    // document, so a wrapper read as "no labels" would empty the roster
+    // and block every live referenced label.
+    expect(
+      finalLabelNames({
+        labels: { _undeclared: "delete", entries: [{ name: "bug" }, { name: "a", new_name: "b" }] },
+      }),
+    ).toEqual(["bug", "b"]);
+    // A wrapper without entries, or a shape that is neither, declares no
+    // names but is still a declared key (the apply reconciles against it).
+    expect(finalLabelNames({ labels: { _undeclared: "keep" } })).toEqual([]);
+    expect(finalLabelNames({ labels: "bug" })).toEqual([]);
+  });
+
   test("finalLabelNames: a new_name rename contributes the POST-APPLY name, not the source", () => {
     // The action upserts by name and renames via new_name, so after the
     // apply the label exists only under the new name: a reference to the
