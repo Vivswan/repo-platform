@@ -17,9 +17,9 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    # Weekly CodeQL re-scan with refreshed query packs; fleet-ci skips the
-    # analysis where CodeQL is off.
-    - cron: "3 8 * * 1"
+    # Nightly: the scheduled run is fleet-ci's, and its plan output
+    # decides what the run carries.
+    - cron: "3 4 * * *"
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   # Repo-owned: edit checks.yml, not this file (no secrets; permissions
-  # cap at contents: read). The weekly rescan is CodeQL's alone.
+  # cap at contents: read). The nightly run is fleet-ci's alone.
   checks:
     if: github.event_name != 'schedule'
     uses: ./.github/workflows/checks.yml
@@ -46,8 +46,10 @@ jobs:
       # The ceiling for the CodeQL analysis calls.
       security-events: write
       actions: read
-      # The ceiling for release-health's issue and Dependabot-alert reads.
-      issues: read
+      # The ceiling for called jobs that file issues (a called job's grant
+      # must fit the caller's) and for release-health's issue reads.
+      issues: write
+      # The ceiling for release-health's Dependabot-alert reads.
       vulnerability-alerts: read
 
   # THE gate: this job's own check run (named all-green, created by the

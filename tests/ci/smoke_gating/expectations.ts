@@ -321,7 +321,8 @@ export const EXPECTATIONS: Row[] = [
           "pull-requests": "write",
           "security-events": "write",
           actions: "read",
-          issues: "read",
+          // The ceiling for called jobs that file issues.
+          issues: "write",
           "vulnerability-alerts": "read",
         },
       },
@@ -780,13 +781,13 @@ export const EXPECTATIONS: Row[] = [
   },
   {
     // The analysis jobs live in fleet-ci, which decides the languages from
-    // the registration; every render carries the weekly re-scan trigger
+    // the registration; every render carries fleet-ci's nightly trigger
     // and no CodeQL workflow of its own.
-    name: "CodeQL rides fleet-ci: the weekly schedule renders and no codeql.yml does",
+    name: "CodeQL rides fleet-ci: the nightly schedule renders and no codeql.yml does",
     when: ALWAYS,
     checks: () => [
       { kind: "missing", path: `${WF}/codeql.yml` },
-      { kind: "yaml-equals", path: CI, at: ["on", "schedule"], equals: [{ cron: "3 8 * * 1" }] },
+      { kind: "yaml-equals", path: CI, at: ["on", "schedule"], equals: [{ cron: "3 4 * * *" }] },
     ],
   },
   {
