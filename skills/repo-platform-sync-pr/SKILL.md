@@ -1,6 +1,6 @@
 ---
 name: repo-platform-sync-pr
-description: 'Handle an automated template sync PR from Vivswan/repo-platform - triage the PR body, resolve conflicts, restore dropped local lines, and recover a broken sync. Use when a PR titled "chore: update repo-platform template to ..." arrives on branch automation/repo-platform, for "the repo-platform bot PR", "the template update PR", "the automation branch PR", "the copier update PR", when a sync PR warns about merge conflicts or dropped local lines, when "the sync PR deleted my local section", or when a sync run fails with "no base to update from".'
+description: 'Handle an automated sync PR from Vivswan/repo-platform - read its report, clear every row, keep local content in its owned place, and follow the failure path. Use when a PR from repo-platform arrives on branch automation/repo-platform, for "the repo-platform bot PR", "the sync PR", "the automation branch PR", when a sync PR says "Hold for review: yes", reports "replaced local edits", a held retirement, or a refused mirror, when "the sync PR deleted my local section", or when a "[repo-platform] sync failed" issue appears in the repository.'
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -8,27 +8,28 @@ metadata:
 
 # repo-platform: Handling a Sync PR
 
-repo-platform pushes template updates into managed repos: a sync run opens (or refreshes) one PR per repo from a rolling automation branch. This skill is how to review that PR, fix conflicts correctly, and escalate when the sync itself is broken.
+repo-platform writes its files into managed repos from the outside: a sync run opens (or refreshes) one PR per repo on the `automation/repo-platform` branch, and the PR body is the writer's report. This skill is how to read that report, decide every row, and escalate when the sync itself failed.
 
 Work in this order, always:
 
-1. Read the PR body top to bottom (the triage table below).
-2. Run the mandatory per-file review pass - every changed file classified and cleared.
-3. Resolve: restore dropped lines, hand-edit unresolved files.
-4. Disposition every bot review comment (the section below) - none may be left unaddressed.
-5. Merge (or let auto-merge fire on a clean PR) - unless a human does the merging, in which case stop at green and report with a verdict line (see "Resolving on a human's behalf").
+1. Read the report top to bottom (the section table below).
+2. Clear every row: each Written, Retired, and Mirrors row explained; every Replaced local edits diff decided.
+3. Move local content the sync replaced into its owned place (below), on the PR branch or in a follow-up PR.
+4. Disposition every bot review comment; none may be left unaddressed.
+5. Merge (or let auto-merge fire) unless a human does the merging, in which case stop at green and report with a verdict line.
 
 ## When to Apply
 
-- A PR titled `chore: update repo-platform template to build@<sha>` appeared, head branch `automation/repo-platform`
-- The PR body warns about merge conflicts, dropped local lines, retired files, a new starter at a path the repo already owns, settings drift, or failed validation
-- A sync run failed with "recorded _commit ... does not resolve" / "no base to update from" (see [references/recovery.md](references/recovery.md))
+- A PR from repo-platform appeared, head branch `automation/repo-platform`
+- Its Review section says `Hold for review: yes`
+- A `[repo-platform] sync failed` issue appeared in the repository
 
 ## What the PR is
 
-- A three-way `copier update`: the template's render at the repo's recorded base (`_commit` in `.github/.copier-answers.yml`, quoted as "Previous:" in the PR body) is diffed against the render at the new ref ("New:"), and that diff is merged onto the repo's current state. Local edits to non-split files survive unless they overlap a template change. Split-class files (a `BEGIN/END REPO-PLATFORM MANAGED` marker pair bounds the managed region; the repo owns everything outside it, above and below) never ride that merge: after the update they are REBUILT structurally - the managed region from a clean render at the new ref, the repository-owned sides byte-for-byte from the repo's last commit. Content outside the region always survives; local edits INSIDE the managed region are reset on every sync (they used to survive by merge luck) - the PR body flags each reset and the PR stays manual-review. The one-time conversion of the RETIRED split shapes (the old `repo-platform:local-section` tail marker, the old `.gitignore` LOCAL region) is finished and its machinery deleted: a straggler repo still carrying an old shape gets NO conversion - the sync refuses its old-vintage manifest loudly, the old copy is preserved in full under a recovery-appendix comment, the tail tripwire reports every split file unverifiable with `recover=recopy` as the named fix, and the PR stays manual-review.
-- The head branch `automation/repo-platform` is REGENERATED on every sync run (weekly cron or dispatch) with a lease-guarded force-push. Manual commits sitting on it when the next run starts are overwritten by design; the PR body says so.
-- Clean updates arm squash auto-merge: the PR merges itself once every required check passes - the fleet ruleset requires `all-green`, the ci.yml gate job's own check run posted by the PR's own CI run (plus `pr-title` where that module is selected; Copilot reviews are advisory and block nothing). A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), a tripped tail tripwire, failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, a new starter at a path the repo already owns, or out-of-band settings drift.
+- A copy, not a merge. The writer copies each selected file from repo-platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. Nothing is three-way merged and no conflict marker ever lands in the branch.
+- The writer tells its own previous write from a local edit through `.github/repo-platform-manifest.json`, which records a hash per managed file and per split region. A managed file, or a split region, whose content is neither the recorded hash nor the new content is replaced and reported with a diff.
+- The head branch is rewritten on every sync run (weekly cron or dispatch). Commits parked on it between runs are replaced; fix-then-merge promptly.
+- A PR whose report holds nothing arms auto-merge and lands once the required check passes (`all-green`, plus `pr-title` where selected). A run dispatched with `manual=true`, or any hold reason, waits for a human.
 
 Find and open the PR from the repo:
 
@@ -37,110 +38,106 @@ gh pr list --head automation/repo-platform --json number,title,url
 gh pr view <number>
 ```
 
-Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing - a missing PR usually means the last sync run failed or delivered nothing, and a duplicate means something opened a PR out of band.
+Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing.
 
-## Triage: read the PR body top to bottom
+## Read the report
 
-Each block tells you what to verify before anything merges:
-
-| Block | Meaning | What to verify |
+| Section | Content | What to verify |
 |---|---|---|
-| Settings drift (at the very top) | Live visibility/description differ from the recorded copier answers; merging ratifies the live values | Decide: accept the live values, or revert the out-of-band change first (the block says how) |
-| RECOVERY RE-RENDER warning | Dispatched with recover=recopy; no three-way merge happened | See [references/recovery.md](references/recovery.md); review the whole diff and the carry summary |
-| "The template retired these files; this update deletes them" | Paths rendered by the old template version but not the new one | Check none were repurposed locally; deletions of repurposed files DO happen and are listed exactly for this review |
-| Migration notes (a block naming a one-time transition from repo-platform's migration ladder) | A ladder rung judged the repo before copier ran; the note names the postcondition it established (a file moved byte-for-byte, a rewrite) or the follow-up it needs (a stale `mirrors` source to repoint). A rung that changed files has its own `chore: run migration <id>` commit on the branch | Verify the postcondition the note names: for a move, the file's commit shows a pure rename (`R100`) and the repo-owned content is intact; for a rewrite, read the diff. Follow any advice the note gives. A migration note in the PR's review section keeps the PR manual-review: do what it asks before merging |
-| NEW STARTER warning | The template introduced a generated-once starter (post-green.yml on its rollout, say) at a path this repo already owns a file at; copier kept the repo's copy with no conflict and no diff, so the template's callers may now expect an interface (workflow_call inputs, keys) the kept file lacks | Compare the kept file with the template's starter quoted in the section (the callers are named): add the missing interface, or replace the file with the starter and re-apply the local work, then merge. The PR stays manual-review until you do |
-| License metadata / license deletion warnings | Manifest license claim conflicts, or the update deletes a license file (repo-owned content outside the managed region does not survive a delete-vs-modify merge) | Fix the manifest claim; check the old license file for local notices worth moving |
-| Split-files carry summary ("rebuilt structurally" / "carried over the recovery re-render") | Split-class files were rebuilt: managed regions from the fresh render, the repo-owned sides from the repo's last commit; each bullet names a file whose carry changed it | Verify each listed file's diff. A "managed-region edits reset" bullet means someone edited the template-owned region - the edit is gone from the tree by design; move it outside the BEGIN/END markers or upstream if it must live. An appendix bullet needs manual deduplication |
-| TAIL TRIPWIRE warning | A split file's repository-owned content lost lines the previous commit held (or could not be verified); the structural rebuild should make this impossible, so it doubles as a sync-bug report | For a shrink finding: restore the listed lines on the PR branch (they are quoted in the section; the previous commit holds the full copy), or confirm the shrink was intended (you deleted them yourself), then merge. For an UNVERIFIABLE finding there are no quoted lines: diff the file's repo-owned sides (outside the BEGIN/END managed region) against the previous commit's copy by hand - `git diff origin/<base>...HEAD -- <file>` - then merge if intact, escalate if not. Either way, report the trip on Vivswan/repo-platform - the wire firing at all is a sync bug |
-| Merge conflicts warning + per-file summary | Copier hit conflicts; see the conflicts section | Restore dropped lines that should stay; hand-edit files marked unresolved |
-| Validation failed warning | The updated tree fails the template validator; the sync run is red | Fix the tree in the PR |
+| header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
+| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` names why nothing was written (a symbolic link at the path, a placeholder with no value). A starter is only ever `created`, `unchanged`, or `held` (nothing written) |
+| Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
+| Retired | one row per file the platform no longer writes: `deleted`, `held`, `kept`, `moved` | `deleted` removed the platform's own content; `held` left a file with content it did not write, for your decision; `kept` is a starter (yours); `moved` is a git rename |
+| Registration notes | a module name `files.yml` does not know (dropped for this sync), an unreadable manifest, or a `cutover:` note: `.repo-platform.yml` was derived from `.github/.copier-answers.yml` | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A cutover note means the sync rewrote `.repo-platform.yml`: review the derived keys in the diff |
+| Mirrors | one row per declared target: `written`, `current`, `refused` with the reason | `refused` names the fix (a source the sync did not write, a `**` pattern, a target under `.github/workflows/`, a target with foreign content) |
+| Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
 
-Something that matches none of the above: do not merge - the branch regenerates on the next run, so nothing is lost by waiting. Read the sync run's log (`gh run list -R Vivswan/repo-platform --workflow sync-repos.yml`, then `gh run view <id> -R Vivswan/repo-platform --log-failed`), check repo-platform's `docs/`, and escalate with an issue on Vivswan/repo-platform.
+The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `mirror <target> refused: <detail>`, `registration: <note>`.
 
-## Review every changed file (mandatory, before anything merges)
+## Check the diff against the report
 
-Do not resolve, approve, or merge until every file in the diff is accounted for. Warnings in the body cover what the sync KNOWS about; this pass catches what it does not.
+The report lists what the writer did; the diff is what lands. Compare them before pushing any repair commit of your own (afterwards, diff the sync's own commit instead: `git diff origin/main...<sync commit>`):
 
-1. Enumerate the changed files:
+```bash
+gh pr diff <number> --name-only
+```
 
-   ```bash
-   gh pr diff <number> --name-only
-   gh pr view <number> --json files --jq '.files[]|[.path,.additions,.deletions]|@tsv'
-   ```
+Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted` or `moved`, a Mirrors row reading `written`, `.github/repo-platform-manifest.json` (rewritten every sync, no row), or `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either). Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying the warning `The report was cut here to fit GitHub's body limit` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
 
-2. Classify each path against the file-class table ([references/file-ownership.md](references/file-ownership.md)): fully managed, generated-once starter, split (managed-region) file, or repo-owned.
-3. Inspect any file you cannot clear from the stats alone. `gh pr diff` takes no pathspec, so use git:
+```bash
+git fetch origin main automation/repo-platform
+git diff origin/main...origin/automation/repo-platform -- <path>
+```
 
-   ```bash
-   git fetch origin main automation/repo-platform
-   git diff origin/main...origin/automation/repo-platform -- <path>
-   ```
+## The manual review cases
 
-4. For each file, verify no repository-local content is being removed. Tell-tale patterns:
-   - `+0/-N` (or any large-deletion-dominant diff) on AGENTS.md, `.gitignore`, CONTRIBUTING.md, `.github/SECURITY.md`, LICENSE.md, `.gitattributes`, `.editorconfig`, or `.github/CODEOWNERS` means repo-owned content loss - read the full diff for that file and restore what sits outside the BEGIN/END managed region (above or below it) before merging.
-   - A generated-once starter (checks.yml, post-green.yml, update-release.yml, update-release-pr.yml, nightly-fuzz.yml, nightly.yml, issue forms, release-please config, .gitleaks.toml, the `.claude-plugin/` manifests, ...) being MODIFIED or DELETED is suspicious: `_skip_if_exists` files are never touched once they exist. A first-time ADDITION is expected when the same PR's `.repo-platform.yml` diff adds the owning module, or when repo-platform introduced a new BASE starter (post-green.yml on its rollout) - "does the modules diff or the template's own change explain it?" is the check. Stop and investigate anything neither explains.
-   - A `.bun-version`, `.node-version`, or `.dvmrc` addition or version bump is EXPECTED: toolchain pin dotfiles are fully managed, and the fleet shares one pinned version per toolchain - sync PRs deliver pin advances. Do not "restore" the old version; divergence belongs in the repo-owned workflows' version inputs, not the dotfile.
-   - A `.github/repo-platform-manifest.json` diff is EXPECTED whenever the update changes any rendered content: the ownership map's recorded template ref and per-file hashes move with the render (the stamper is idempotent, so a no-op update leaves it byte-identical). It needs a look when anything OTHER than hashes and the recorded ref moves: a path's class changing, a path appearing or disappearing, or split-marker metadata changing - and then the modules diff, a new base starter in repo-platform, or the PR body's retired-files list should explain it.
-5. Only when every file is classified and cleared, proceed to conflict resolution and merging.
+| Case | What happened | What to do |
+|---|---|---|
+| Replaced local edits | Someone edited a managed file (`ci.yml`, a module workflow, a pin dotfile) or the managed region of a split file | Read the diff; move the need (below). The platform version stays |
+| Held retirement | A retired path holds content the platform did not write, or a split file has a repo-owned tail | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
+| Refused mirror | The `mirrors` declaration in `.repo-platform.yml` names something the writer will not copy | Fix the declaration; nothing was written |
+| Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
+| Cutover | The first sync after the platform changed shape: `.repo-platform.yml` rewritten from `.github/.copier-answers.yml` (a `cutover:` Registration note holds the PR; the file has no Written row), a Written row for every managed file whose content changed (`updated` where the manifest recorded the old content, `replaced local edits` with a diff where it did not; `ci.yml` among them), a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`). The issue forms were starters: nothing retires them, they stay in place with no row | Review the derived registration key by key; check every `held` retirement; expect the CI job list to change on the next push to main |
 
-Worked examples of what this pass catches, from live incidents, are in [references/worked-examples.md](references/worked-examples.md).
+Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
 
-## Conflicts: what actually lands in the branch
+## The repo-owned tail
 
-Copier renders overlapping edits as git-style inline conflict blocks (markers reading `before updating` for the local side and `after updating` for the template side) - no `.rej` files, ever. The sync then post-processes everything before pushing, so what you see is:
+A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`, `.github/dependabot.yml`) has one managed region between `BEGIN REPO-PLATFORM MANAGED` and `END REPO-PLATFORM MANAGED`. Everything above BEGIN and below END is the repository's own and rides through every sync byte-for-byte. A file that never mentions the markers gets the region placed above its content, so its whole prior content becomes the tail.
 
-- Split-class files (AGENTS.md, .github/SECURITY.md, CONTRIBUTING.md, fleet LICENSE.md, .gitattributes, .editorconfig, .github/CODEOWNERS, .gitignore) never carry conflicts into the branch: copier's merged result for them - conflict blocks included - is discarded and the file is rebuilt structurally. Their dispositions live in the PR body's split-files carry summary (sides restored / recovery-appendix / managed-region edits reset), not in the conflict summary.
-- Normal case for everything else - NO markers in the branch. The template side was kept in place and the local side dropped; the PR body lists every dropped hunk per file: "Conflict N: dropped local lines (template version kept)". The sync run stays green with a warning (auto-resolution is normal operation).
-- Malformed case - markers still in the file. When the marker sequence is broken (nested/out-of-order), the file is left untouched, the body says "Malformed or out-of-order conflict markers; left unresolved for manual editing", validation fails, and the sync run goes red. Edit the file on the branch and resolve each block by hand.
-- The body's conflict summary is byte-limited: past ~20 KB whole file sections are omitted with a count; the full list is in the sync run's log (public repos) or reproducible locally (private repos).
+- For override-by-position formats (`.editorconfig`, `CODEOWNERS`, `.gitignore`) put overrides below END, where later entries win.
+- Content inside the region is the platform's; an edit there is replaced on the next sync and reported under Replaced local edits, exactly like a managed file.
+- Marker text duplicated in a file, or buried mid-line, fails the run: the sync cannot tell which region is meant.
 
-## Decide per file class
+## Keeping a local change
 
-What "restore the dropped lines" means depends on who owns the file (the full table is in [references/file-ownership.md](references/file-ownership.md)):
-
-- Fully managed (ci.yml, dependabot.yml, callers, .github/.copier-answers.yml, the toolchain pin dotfiles, ...): accept the template side. These files are template-owned: overlapping local edits lose to the template (an edit the template happens not to touch can survive a given sync, but it is living on borrowed time). Move the need upstream (a template change in repo-platform) or into a repo-owned file: checks.yml for CI jobs; post-green.yml for work that runs after the all-green gate on a push to main; update-release.yml and update-release-pr.yml for release-time logic (asset uploads, release-note edits, publish-time side effects). One carve-out: changing a module parameter (nightly_label, skills_dir, pages_*, fuzzer_label, ...) is done by editing that question's VALUE key in .github/.copier-answers.yml via a normal default-branch PR - never the underscore keys.
-- Generated-once starters (checks.yml, post-green.yml, update-release.yml, update-release-pr.yml, nightly-fuzz.yml, nightly.yml, issue forms, release-please config, .gitleaks.toml, the .claude-plugin manifests, ...): never touched once they exist, so they do not conflict. Additions are explained by the modules diff or by a new base starter in repo-platform; modifications or deletions are not - stop and look.
-- Split files (AGENTS.md, .github/SECURITY.md, CONTRIBUTING.md, LICENSE.md, .gitattributes, .editorconfig, .github/CODEOWNERS, .gitignore): local content belongs OUTSIDE the BEGIN/END REPO-PLATFORM MANAGED markers - above BEGIN or below END - and the rebuild carries both sides byte-for-byte every sync. For override-by-position formats (.editorconfig, CODEOWNERS, .gitignore) put overrides BELOW END, where later entries win. Content INSIDE the region is reset every sync (the carry summary flags each reset); re-add anything durable outside the markers, never in place.
-- `.github/settings.yml`: a repo-owned starter (identity keys + local overrides); the managed baseline is computed centrally and merged under it, so sync never touches the file.
+| The change was in | Move it to |
+|---|---|
+| `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
+| the managed region of a split file | above BEGIN or below END of the same file |
+| a module workflow or a pin dotfile | repo-platform's `files/` (a PR there reaches the whole fleet), or a repo-owned workflow beside it |
+| a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `pages.*`, `docs_site.*`, `skills.dir`) |
 
 ## Fix the PR
 
-The branch name is constant and force-pushed every run, so a stale local copy of it bites - always reset to the remote:
+The branch is rewritten every run, so a stale local copy of it bites; always reset to the remote:
 
 ```bash
 git fetch origin
 git checkout -B automation/repo-platform origin/automation/repo-platform
-# restore hunks / hand-resolve malformed files
-git commit -am "fix: restore repository-local lines after template sync"
+# move content into its owned place
+git add -A && git commit -m "fix: keep repository-local lines after the sync"
 git push origin automation/repo-platform
 ```
 
-- Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Needs-review PRs are never auto-merged, so merge manually when green.
-- Merge PROMPTLY. The PR body's "manual commits pushed to it are overwritten" and this workflow are both true: commits parked on the branch BETWEEN runs are replaced by the next run's force-push, so fix-then-merge before the next release, weekly cron, or dispatch. A push that lands while a sync run is already in flight trips that run's lease and turns the run red (loud, not lost) - the silent overwrite is only the between-runs case.
-- Do not rebase the automation branch onto the default branch or force-push it yourself - the next run replaces it wholesale anyway, and an out-of-band force-push just trips the lease.
+- Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Held PRs are never auto-merged, so merge manually when green.
+- Do not rebase the branch onto the default branch or force-push it; the next run replaces it wholesale anyway.
 
 ## Disposition every bot review comment
 
-Copilot and other bots leave review comments on sync PRs; do not resolve or merge with any of them unaddressed. Read them all - `gh pr view <number> --comments` for the conversation, plus the inline review comments via `gh api repos/{owner}/{repo}/pulls/<number>/comments`. For each one: fix the valid ones on the branch, reply on the thread explaining why an invalid or inapplicable one is rejected, and resolve the thread. When reporting to a human, include the disposition per comment.
+Copilot and other bots leave review comments on sync PRs; do not merge with any of them unaddressed. Read them all (`gh pr view <number> --comments`, plus `gh api repos/{owner}/{repo}/pulls/<number>/comments` for inline ones). Fix the valid ones on the branch, reply on the thread explaining why an invalid one is rejected, and resolve the thread.
 
 ## Resolving on a human's behalf
 
 When a human does the merging, your job ends with the branch resolved, pushed, and green:
 
 - NEVER merge, enable auto-merge, or approve reviews.
-- Never rebase or force-push the automation branch (check it out fresh and commit on top, per "Fix the PR"); never edit the `.github/.copier-answers.yml` underscore keys (`_commit`, `_src_path`).
-- Work fast once resolved: commits parked on the branch between runs are overwritten by the next sync.
-- Green means the repo's required checks pass on the branch - under the fleet ruleset that is `all-green` (plus `pr-title` where selected); a red validate-template check flags drift to fix, but where it is not required it does not gate the merge.
-- End the report with an explicit verdict line: "READY TO MERGE" when every changed file is classified and cleared, dropped local content is restored to its owned location, and every bot comment is fixed or answered - or "NOT READY: <what blocks it>".
-- Also report what local content you restored and where, the disposition of each bot comment, and anything unexplained you left open (anything the PR body and the modules diff do not explain is a stop-and-report, not a guess).
+- Never rebase or force-push the automation branch; never edit `.github/repo-platform-manifest.json` by hand.
+- Green means the required checks pass on the branch: `all-green`, plus `pr-title` where selected.
+- End the report with a verdict line: "READY TO MERGE" when every row is explained, local content sits in its owned place, and every bot comment is fixed or answered, or "NOT READY: <what blocks it>".
+
+## The failure path
+
+A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name. Fix what the issue names (usually the registration or a split file's markers), then dispatch again:
+
+```bash
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true
+```
+
+A row reading `failed before the target was resolved; re-run the workflow` means the run broke before reaching the repo: re-run it, and escalate on Vivswan/repo-platform when it repeats.
 
 ## Closing instead of fixing
 
-Closing the PR is not an opt-out: the next sync run pushes the branch again and opens a fresh PR, with the same conflicts (the local edits that caused them are still there). Close-and-wait only makes sense when you know the conflicting local edit is about to move to its proper home or land in the template itself.
+Closing the PR is not an opt-out: the next run rewrites the branch and opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see repo-platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
 
-To actually pause sync PRs: revoke the fleet PAT's access to the repo (the grant is the only membership fact), or delete `.repo-platform.yml` from the repo (sync skips repos without it, with a notice). Both also pause the nightly settings heal for in-repo settings. To detach permanently, see repo-platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
-
-## Recovery: the recorded base is unusable
-
-When a sync run fails with "recorded _commit ... does not resolve ... there is no base to update from", the fix is a `recover=recopy` dispatch that delivers a full re-render through a manual-review PR. Symptoms and where they surface, causes, the exact dispatch command, what the recovery PR contains (including how repository-local content is carried over and the one WRONG way to restore a file), and how to repair a pre-carry-fix recovery PR are in [references/recovery.md](references/recovery.md).
+Worked examples of report rows and their resolutions are in [references/worked-examples.md](references/worked-examples.md); the class of every path is in [references/file-ownership.md](references/file-ownership.md).

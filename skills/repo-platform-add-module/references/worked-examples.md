@@ -4,89 +4,77 @@ Two end-to-end module additions, with the checks that matter at each step.
 
 ## 1. Adding `nightly` to a repo that already has `fuzzer`
 
-Goal: the repo's slow suites (full end-to-end runs, docker builds, live integration tests) move off the PR path into a nightly stream with automatic issue filing, alongside the existing fuzz stream.
+Goal: the repo's slow suites move off the PR path into a nightly stream with automatic issue filing, next to the existing fuzz stream.
 
 ### Label distinctness first
 
-Both streams dedup AND auto-close their tracking issue by label, so `nightly_label` must differ from `fuzzer_label` (case-insensitive - GitHub deduplicates label names that way). The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label collision is rejected by the copier validator at render time and by the settings assembly in recorded answers.
+Both streams dedup and auto-close their tracking issue by label, so the nightly label must differ from the fuzzer label (case-insensitively). The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label goes under `labels.nightly`.
 
 ### The edit
 
 ```bash
 git checkout -b add-nightly
-# .repo-platform.yml: add "nightly" to the top-level modules list.
-# .github/.copier-answers.yml: only for a custom label (the render records
-# the default):
-#   nightly_label: slow-suite-failure
+# .repo-platform.yml: add "nightly" to modules; a custom label only if wanted:
+#   labels:
+#     nightly: slow-suite-failure
 git commit -am "chore: add the nightly module"
 gh pr create
-# module-render is red on the PR until the render lands; push it onto the branch:
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=add-nightly
+# the plan job validates the file; merge when green, then:
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
 ```
 
-### The render commit
+### The sync PR
 
-One commit, `chore: render the nightly module`, lands on the PR; `module-render` goes green. Every file in it should be explained by the modules diff:
+The run's job log ends `row 0: PR opened`. In the report:
 
-- `.github/workflows/nightly.yml` - NEW, the starter (repo-owned from now on).
-- `.github/.copier-answers.yml` - records `nightly` and `nightly_label`.
-- No settings.yml diff: the managed baseline declares the `nightly-failure` label automatically at apply time, read from the recorded `nightly_label` answer (below).
+- Written: `.github/workflows/nightly.yml` as `starter`, `created`. Every other row `unchanged`.
+- Review: `Hold for review: no`; `manual=true` keeps it waiting for you.
+- No `.github/settings.yml` diff from the sync. Declare the label there yourself: the settings apply never reads `labels.*`, and it fails for a repo that selects `nightly` without the retired `.github/.copier-answers.yml`.
 
 ### The starter, and moving real checks in
 
-Two jobs: `checks` (yours - the placeholder is a green no-op that prints a warning and never files issues) and `report` (the machinery - `needs: [checks]`, `if: always()`, treats a cancelled checks job as red so a timeout-hang still files). Cron is 06:59 UTC, offset from the fuzzer starter's 09:11 UTC; pick the repo's own minute.
+Two jobs: `checks` (yours; the placeholder is a green no-op that never files issues) and `report` (the machinery: `needs: [checks]`, `if: always()`, a cancelled checks job counts as red). Pick the repo's own cron minute.
 
-Move the real checks in either way:
+- Port the slow suites' steps into `checks`, or add them as sibling jobs, list every one in `report`'s `needs`, and fold each result into the red/green conditions. Keep siblings unconditional: a job skipped by its own `if:` matches neither condition and the report does nothing that night.
+- With a custom label, change the two `label:` inputs in the starter to match `labels.nightly`.
 
-- Port their setup and run steps into the `checks` job, or
-- add them as sibling jobs, list every one in `report`'s `needs`, and fold each result into the red/green conditions. Keep siblings unconditional: a job skipped by its own `if:` matches neither condition and the report silently does nothing that night.
+### Verify
 
-Unlike the fuzz stream, the nightly issue does NOT gate releases; add `release-blocker` to a nightly issue by hand when it should block a cut.
-
-### Companion step: the label answer
-
-The settings assembly reads the module list from the repo's `.repo-platform.yml` and the label value from `.github/.copier-answers.yml`, both at the default branch, and refuses to guess a tracking label. The render commit records `nightly_label` (the default, or the custom value from the step-1 edit), so merging the PR with its render lands both at once. Merging first instead (the sync PR fallback) leaves the selection without its answer until that PR merges; record `nightly_label` in the selection PR to close that window.
+- The first scheduled run is green, or files one issue carrying the label.
+- The label exists on the repo: `gh label list -R Vivswan/<repo>`. Create it with `gh label create` when no settings apply has declared it yet.
 
 ## 2. Adding `skills`
 
-Goal: the repo hosts installable agent skills with centrally-managed validation.
+Goal: the repo hosts agent skills other repositories install with `npx skills add`.
 
 ### The edit
 
-`skills_dir` defaults to `skills`. For a different directory, record it in the same PR (`.github/.copier-answers.yml`: `skills_dir: lib/skills`) - the value is baked into the managed workflow's trigger paths and the gate job's input, which is why it is an answer, not a starter edit.
-
 ```bash
 git checkout -b add-skills
-# .repo-platform.yml: add "skills" to the top-level modules list.
-# Non-default directory? Also add to .github/.copier-answers.yml:
-#   skills_dir: lib/skills
-git commit -am "chore: add the skills module"
+# .repo-platform.yml: add "skills" to modules. Keep the default skills/ directory:
+# the managed validate-skills.yml is written for it.
+# .claude-plugin/plugin.json: a minimal manifest, because the validate-skills
+# gate job runs on this PR and reads it:
+#   { "name": "<slug>-skills", "description": "Agent skills for <name>", "skills": [] }
+git add -A && git commit -m "chore: add the skills module"
 gh pr create
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=add-skills
+# merge, then:
+gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
 ```
 
-### The render commit
+### The sync PR
 
-`chore: render the skills module`, pushed onto the PR by the dispatch:
+- Written: `.claude-plugin/plugin.json` as `starter`, `unchanged` (you committed it; an existing starter is never rewritten), `.claude-plugin/marketplace.json` as `starter`, `created`, `.github/workflows/validate-skills.yml` as `managed`, `created`.
+- The plugin name is `<project.slug>-skills`: use the same slug in the manifest you committed and in the registration's `project` block (`name`, `slug`, `description` together) when the repository name is not the slug you want.
 
-- `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` - starters, seeded from the repo identity with an empty `skills` catalog, repo-owned from now on. A repo that already carries them (an existing skills repo adopting the module) sees NO diff here - `_skip_if_exists` files are never re-rendered.
-- `.github/workflows/validate-skills.yml` - managed, the advisory discovery workflow (runs the real `npx -y skills add . --list`; network-dependent, deliberately outside the gate).
-- `.github/workflows/ci.yml` - gains the `validate-skills` structure job, gating through all-green (offline: manifests parse, `skills` paths are real direct children of the skills directory, every skill folder has a `SKILL.md` with a matching kebab-case `name` and a nonempty `description`, no symlinks on validated paths).
+### Publishing a skill
 
-An empty catalog passes both checks; a freshly adopted repo publishes nothing yet.
+1. Create `skills/<name>/SKILL.md` with frontmatter `name: <name>` (equal to the folder, kebab-case) and a nonempty `description`.
+2. Add `./skills/<name>` to `plugin.json`'s `skills` array. Unlisted folders validate and never ship.
+3. Keep an index `README.md` at the root of the skills directory.
+4. Per-skill license copies: declare `mirrors: [{source: LICENSE.md, targets: ["skills/*/LICENSE.md"]}]` in the registration; every sync refreshes them and a new folder is picked up by the glob.
 
-### Publishing the first skill
+### Verify
 
-```
-skills/
-  my-skill/
-    SKILL.md      # frontmatter: name (= folder, kebab-case), description
-```
-
-Then list it in `plugin.json` - the manifest, not the disk, is what installers and the discovery check read. Structure validation checks every direct child folder either way (an invalid unlisted folder fails the gate), but a valid unlisted folder passes and silently never ships:
-
-```json
-"skills": ["./skills/my-skill"]
-```
-
-Verify locally before pushing: `npx -y skills add . --list` from the repo root shows the skill under the plugin's title.
+- The `validate-skills` job inside `ci` is green on the next PR (structure), and the advisory `validate-skills.yml` run lists every published skill (discovery).
+- `npx skills add Vivswan/<repo> --list` names the skill.

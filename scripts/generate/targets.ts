@@ -181,7 +181,7 @@ export function targets(manifests: ModuleManifest[]): Target[] {
       regions: [["module-roster", ({ manifests }) => skillModuleRosterRows(manifests)]],
     },
     {
-      file: "skills/repo-platform-new-project/references/questions.md",
+      file: "skills/repo-platform-new-project/references/registration.md",
       syntax: "markdown",
       regions: [["module-roster", ({ manifests }) => skillModuleRosterBullets(manifests)]],
     },

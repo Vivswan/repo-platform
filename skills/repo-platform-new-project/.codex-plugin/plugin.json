@@ -1,6 +1,6 @@
 {
   "name": "repo-platform-new-project",
-  "description": "Create or adopt a repository managed by Vivswan/repo-platform: scaffold, apply the copier template, publish, enroll, and register settings.",
+  "description": "Create or adopt a repository managed by Vivswan/repo-platform: write the registration, grant the fleet token, run the first sync, review its report, and watch the first CI run.",
   "author": {
     "name": "Vivswan Shah",
     "email": "58091053+Vivswan@users.noreply.github.com",
@@ -9,12 +9,12 @@
   "homepage": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-new-project",
   "repository": "https://github.com/Vivswan/repo-platform",
   "license": "SEE LICENSE IN LICENSE.md",
-  "keywords": ["agent-skills", "repo-platform", "copier", "scaffolding", "plugin-ready"],
+  "keywords": ["agent-skills", "repo-platform", "registration", "scaffolding", "plugin-ready"],
   "skills": "./",
   "interface": {
     "displayName": "Repo Platform: New Project",
     "shortDescription": "Bring a repository under repo-platform fleet management.",
-    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: native scaffold, copier template from the generated build ref, the questions that matter, publishing, PAT enrollment, and the managed settings every enrolled repository gets.",
+    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: the native scaffold, the .repo-platform.yml registration (modules plus the keys whose defaults are wrong), the fleet token grant that enrolls it, the first sync dispatch, the sync PR report, and the CI jobs every managed repository shares.",
     "developerName": "Vivswan",
     "category": "Developer Tools",
     "capabilities": ["Read", "Edit", "Scaffold"],

@@ -296,14 +296,14 @@ export const literalAnchorRules: Rule[] = [
       const skillsDefault = String(asRecord(copierConfig().skills_dir, "skills_dir").default);
       const skillsCell = mustMatch(
         handProse("docs/skills.md"),
-        /^\| `skills_dir` \|.+\| ([^|]+) \|$/m,
+        /^\| `skills\.dir` \|.+\| ([^|]+) \|$/m,
         "docs/skills.md",
-        "the skills_dir table row",
+        "the skills.dir table row",
       )[1].trim();
       if (skillsCell !== `\`${skillsDefault}\``) {
         mismatches.push({
           file: "docs/skills.md",
-          expected: `the skills_dir Default cell \`${skillsDefault}\``,
+          expected: `the skills.dir Default cell \`${skillsDefault}\``,
           got: skillsCell,
         });
       }
