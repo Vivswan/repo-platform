@@ -76,15 +76,22 @@ describe("writeSplit", () => {
     expect(() => region(`about ${markers.end} here`)).toThrow("mentions the marker text");
   });
 
-  test("a new file is the region alone; a marker-less file keeps its content below", () => {
+  test("a new file is the region alone; a marker-less file keeps its content below and is reported", () => {
     const target = temp.dir("writer-split-new-");
     expect(writeSplit(target, ".gitignore", region("a"), markers, null)).toEqual({
       change: "created",
     });
     expect(read(target, ".gitignore")).toBe(region("a"));
     writeFileSync(join(target, "plain"), "mine\n");
-    expect(writeSplit(target, "plain", region("a"), markers, null)).toEqual({ change: "updated" });
+    expect(writeSplit(target, "plain", region("a"), markers, null)).toEqual({
+      change: "region added",
+    });
     expect(read(target, "plain")).toBe(`${region("a")}mine\n`);
+    // With a record but no markers the verdict is the same: the region went above repo content.
+    writeFileSync(join(target, "unmarked"), "theirs\n");
+    expect(writeSplit(target, "unmarked", region("a"), markers, sha256(region("a")))).toEqual({
+      change: "region added",
+    });
   });
 
   test("the region is rewritten between the repository-owned halves", () => {

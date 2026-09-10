@@ -42,6 +42,7 @@ describe("holdReasons", () => {
           change: "held",
           detail: "a regular file sits where a link is declared",
         },
+        { path: ".gitignore", class: "split", change: "region added", detail: "" },
       ],
       replaced: [{ path: "ci.yml", diff: "" }],
       retired: [
@@ -54,6 +55,7 @@ describe("holdReasons", () => {
     };
     expect(holdReasons(loud)).toEqual([
       "CLAUDE.md held: a regular file sits where a link is declared",
+      ".gitignore: the managed region was added above repository-owned content",
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",
       "mirror s/L refused: the pattern uses '**'",
@@ -109,6 +111,26 @@ describe("renderReport", () => {
     expect(text).not.toContain("### Replaced local edits");
     expect(text).not.toContain("### Registration notes");
     expect(text).toContain("Hold for review: no");
+  });
+
+  test("a pipe inside a cell is escaped so the table keeps its columns", () => {
+    const text = renderReport(
+      buildReport({
+        ...QUIET,
+        written: [{ path: "a|b.md", class: "managed", change: "held", detail: "x | y" }],
+        retired: [{ path: "r.md", outcome: "held", detail: "a | b" }],
+        mirrors: [{ source: "s|t", target: "u", outcome: "refused", detail: "p|q" }],
+      }),
+    );
+    expect(text).toContain("| `a\\|b.md` | managed | held | x \\| y |");
+    expect(text).toContain("| `r.md` | held | a \\| b |");
+    expect(text).toContain("| `s\\|t` | `u` | refused | p\\|q |");
+    expect(
+      text
+        .split("\n")
+        .filter((line) => line.startsWith("| `a"))[0]
+        .split("|").length,
+    ).toBe("| `a\\|b.md` | managed | held | x \\| y |".split("|").length);
   });
 
   test("a held report lists its reasons and the replaced diffs", () => {

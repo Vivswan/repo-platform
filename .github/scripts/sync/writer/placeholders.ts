@@ -82,6 +82,18 @@ export function spliceBlocks(text: string, blocks: string[]): string {
   return `${above}${joined}${lines.slice(at + 1).join("\n")}`;
 }
 
+/** The placeholder names in `text` whose value is absent or empty, once
+ *  each in order: an empty value is never written (a license line without
+ *  its holder is wrong, not blank). */
+export function missingPlaceholders(text: string, values: PlaceholderValues): string[] {
+  const missing: string[] = [];
+  for (const name of placeholderTokens(text)) {
+    const value = isPlaceholderName(name) ? values[name] : undefined;
+    if ((value === undefined || value === "") && !missing.includes(name)) missing.push(name);
+  }
+  return missing;
+}
+
 /** `text` with every placeholder token replaced; throws on a token outside
  *  `values` (the loader rejects such sources first, so this is the writer's
  *  own guard, not a user-facing message) and on a value that would break

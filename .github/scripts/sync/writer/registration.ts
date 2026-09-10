@@ -23,6 +23,22 @@ export function readRegistration(target: string): Registration {
   return read.registration;
 }
 
+/** Where the registration sets each placeholder the writer cannot fall
+ *  back for, named in the report when the value is missing. */
+export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
+  project_name: "project.name",
+  project_slug: "project.slug",
+  description: "project.description",
+  github_username: "the repository slug",
+  github_username_lower: "the repository slug",
+  copyright_holder: "project.copyright_holder",
+  year: "the clock",
+  skills_dir: "skills.dir (or the skills module's skills_dir default)",
+  fuzzer_label: "labels.fuzzer (or the fuzzer module's tracking_label default)",
+  nightly_label: "labels.nightly (or the nightly module's tracking_label default)",
+  docs_site_label: "labels.docs_site (or the docs-site module's tracking_label default)",
+};
+
 export interface RepositorySlug {
   owner: string;
   name: string;

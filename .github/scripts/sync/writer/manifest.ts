@@ -23,12 +23,15 @@ import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
+/** A null hash is never written by this writer; it is carried from a
+ *  record another tool left unstamped, so the file stays held rather than
+ *  orphaned. */
 export type ManifestRecord =
-  | { class: "managed"; hash: string }
-  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }
+  | { class: "managed"; hash: string | null }
+  | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string | null }
   | { class: "starter" }
-  | { class: "mirror"; hash: string }
-  | { class: "link"; hash: string };
+  | { class: "mirror"; hash: string | null }
+  | { class: "link"; hash: string | null };
 
 export type Records = Record<string, ManifestEntryShape>;
 

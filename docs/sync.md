@@ -109,6 +109,7 @@ The loader refuses, all problems at once:
 - A `$` before the braces marks a GitHub Actions expression, left untouched.
 - Substitution runs on source files only. A literal double brace in a repository-owned tail is never touched.
 - A value lands inside quoted YAML scalars verbatim, so a value carrying a double quote, a backslash, or a control character is refused twice: the registration grammar (`actions/plan/registration.ts`) rejects such a `project.name` or `project.description`, and `substitute` fails the run on any such value.
+- An absent or empty value is never written: an entry whose text needs it is `held` with `no value for <token>`, a Registration note names the registration key to set, and the PR holds. A registration carrying only `modules:` (no `project:` block) holds every entry that uses `description`.
 
 ## Selection
 
@@ -127,21 +128,21 @@ The loader refuses, all problems at once:
 | Class | Written | Existing local content | Manifest record |
 | --- | --- | --- | --- |
 | `managed` | whole file, every sync | replaced and reported (`replaced local edits`, with a diff), holds the PR | `hash` = sha256 of the file |
-| `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
+| `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content and the verdict `region added`, which holds the PR; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
 | `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string, the hash the previous pipeline already recorded for its symlinks |
 
-Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there.
+Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there.
 
 ## Class flips
 
-A path whose record the writer can carry (one of `managed`, `split`, `starter`, `mirror`, `link`, with the fields that class records) that `files.yml` now declares under another class is a class flip. A record the writer cannot carry (a `managed` entry without a hash) counts as no record. The recorded content is the platform's own previous write, so:
+A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`, `link`) that `files.yml` now declares under another is a class flip. The recorded content is the platform's own previous write, so:
 
 | State | Outcome |
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class (how a symlink the previous pipeline recorded as managed becomes a `link` record) |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record included (it carries no hash) | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
+| anything else, a `starter` record or a record without a hash included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
@@ -163,17 +164,17 @@ Retirement runs before writing. Rows appear only for files present.
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: `deleted` on a hash match, else `held` |
 
-A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, and a refused mirror target, keep their records in the new manifest so a later sync can still match them.
+A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, a held entry, and a refused mirror target keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note.
 
 ## Mirrors
 
-The registration's `mirrors` list (`source`, `targets`) copies a file this sync wrote to each target. Single-segment `*` globs: a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory.
+The registration's `mirrors` list (`source`, `targets`) copies a file this sync wrote to each target. Single-segment `*` globs: a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory. Literal targets are written before any glob expands, so a directory a literal creates is matched in the same run; a target a literal claims stays the literal's.
 
 | Outcome | When |
 | --- | --- |
 | `written` | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record; a record of another class does not vouch for the bytes) |
 | `current` | the target already holds the new content |
-| `refused` | the source is not a file this sync wrote; the pattern uses `**`; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes; the target is a symbolic link; the target holds content that is not the previous mirror |
+| `refused` | the source is not a file this sync wrote, or was held this run; the pattern uses `**`, matches nothing, or has a symlinked literal ancestor; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes or retires (listed or stale); the target is a symbolic link; the target holds content that is not the previous mirror (only a `mirror` record vouches for the bytes) |
 
 ## The manifest
 
@@ -187,8 +188,8 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparseable manifest |
+| Registration notes | dropped unknown modules; an unparseable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
-`hold` is true on any held written row, any replaced local edit, any held retirement, any refused mirror, or any registration note.
+`hold` is true on any held or `region added` written row, any replaced local edit, any held retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns.

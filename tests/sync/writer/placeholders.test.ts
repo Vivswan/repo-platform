@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   blocksAnchorProblem,
+  missingPlaceholders,
   PLACEHOLDER_NAMES,
   type PlaceholderValues,
   placeholderTokens,
@@ -70,6 +71,17 @@ describe("placeholders", () => {
     expect(() => substitute("{{description}}", { ...VALUES, description: value })).toThrow(
       "placeholder {{description}}: its value carries a double quote, backslash, or control character",
     );
+  });
+});
+
+describe("missingPlaceholders", () => {
+  test("names the tokens whose value is absent or empty, once each", () => {
+    const values = { ...VALUES, description: "" };
+    const { skills_dir: _, ...without } = values;
+    expect(
+      missingPlaceholders("{{description}} {{skills_dir}} {{description}} {{year}}", without),
+    ).toEqual(["description", "skills_dir"]);
+    expect(missingPlaceholders("{{year}} ${{ github.sha }}", VALUES)).toEqual([]);
   });
 });
 

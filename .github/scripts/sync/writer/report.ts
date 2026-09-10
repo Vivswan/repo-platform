@@ -41,6 +41,9 @@ export function holdReasons(outcome: SyncOutcome): string[] {
   const reasons: string[] = [];
   for (const row of outcome.written) {
     if (row.change === "held") reasons.push(`${row.path} held: ${row.detail}`);
+    if (row.change === "region added") {
+      reasons.push(`${row.path}: the managed region was added above repository-owned content`);
+    }
   }
   for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);
   for (const row of outcome.retired) {
@@ -138,8 +141,11 @@ export function unifiedDiff(
 
 const code = (text: string) => `\`${text}\``;
 
+/** A pipe inside a cell would split it; the escape keeps the column count. */
+const cell = (text: string) => text.replaceAll("|", "\\|");
+
 function table(header: string[], rows: string[][]): string {
-  const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
+  const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
   return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n");
 }
 

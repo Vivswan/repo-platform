@@ -8,7 +8,7 @@ import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
 
 export type WriteOutcome =
-  | { change: "created" | "updated" | "unchanged" }
+  | { change: "created" | "updated" | "unchanged" | "region added" }
   | { change: "replaced local edits"; replaced: string }
   | { change: "held"; reason: string };
 

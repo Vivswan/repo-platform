@@ -114,7 +114,7 @@ describe("checkManifestParity", () => {
       {
         severity: "error",
         message:
-          ".github/repo-platform-manifest.json: entry 'docs/odd.md' has unknown class \"bespoke\" (expected managed, split, or starter); run a template sync to regenerate the manifest",
+          ".github/repo-platform-manifest.json: entry 'docs/odd.md' has unknown class \"bespoke\" (expected managed, split, starter, or mirror); run a template sync to regenerate the manifest",
       },
       {
         severity: "error",

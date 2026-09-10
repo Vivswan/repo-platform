@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { REGISTRATION_PATH } from "../../../../actions/plan/registration.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { fail } from "../../shared/gha.ts";
 import {
@@ -33,8 +34,19 @@ import {
   writeManifest,
 } from "./manifest.ts";
 import { applyMirrors } from "./mirrors.ts";
-import { type PlaceholderValues, spliceBlocks, substitute } from "./placeholders.ts";
-import { parseRepositorySlug, placeholderValues, readRegistration } from "./registration.ts";
+import {
+  missingPlaceholders,
+  type PlaceholderName,
+  type PlaceholderValues,
+  spliceBlocks,
+  substitute,
+} from "./placeholders.ts";
+import {
+  PLACEHOLDER_SOURCE,
+  parseRepositorySlug,
+  placeholderValues,
+  readRegistration,
+} from "./registration.ts";
 import {
   buildReport,
   renderReport,
@@ -61,21 +73,17 @@ export interface SyncOptions {
 }
 
 /** A previous record carried into the new manifest when its file stays (a
- *  held or kept retirement, a refused mirror), so the next run can still
- *  tell the platform's last write from an edit; null when its shape is not
- *  one the writer emits. */
+ *  held or kept retirement, a held entry, a refused mirror), so the next
+ *  run still holds the file instead of judging it unrecorded; a missing
+ *  hash rides along as null. Null when the class is not one the writer
+ *  records or a split names no markers. */
 function carriedRecord(entry: Records[string]): ManifestRecord | null {
   const hash = typeof entry.hash === "string" ? entry.hash : null;
   if (entry.class === "starter") return { class: "starter" };
-  if (entry.class === "managed" && hash !== null) return { class: "managed", hash };
-  if (entry.class === "mirror" && hash !== null) return { class: "mirror", hash };
-  if (entry.class === "link" && hash !== null) return { class: "link", hash };
-  if (
-    entry.class === "split" &&
-    hash !== null &&
-    typeof entry.begin === "string" &&
-    typeof entry.end === "string"
-  ) {
+  if (entry.class === "managed") return { class: "managed", hash };
+  if (entry.class === "mirror") return { class: "mirror", hash };
+  if (entry.class === "link") return { class: "link", hash };
+  if (entry.class === "split" && typeof entry.begin === "string" && typeof entry.end === "string") {
     return { class: "split", grammar: "managed-region", begin: entry.begin, end: entry.end, hash };
   }
   return null;
@@ -88,14 +96,16 @@ interface Rendered {
   write: (recorded: string | null) => WriteOutcome;
 }
 
-/** The entry's content and record, and its class writer bound to them. */
+/** The entry's content and record, and its class writer bound to them; or
+ *  the placeholders its text needs that have no value, in which case
+ *  nothing is rendered (an empty value is never written). */
 function render(
   options: SyncOptions,
   config: FilesConfig,
   entry: FileEntry,
   modules: string[],
   values: PlaceholderValues,
-): Rendered {
+): Rendered | { missing: string[] } {
   const { target } = options;
   if (entry.class === "link") {
     return {
@@ -106,7 +116,10 @@ function render(
   }
   const raw = (rel: string) => readFileSync(join(options.tree, rel), "utf-8");
   const blocks = blockSources(config, entry, modules, options.tree).map(raw);
-  const body = substitute(spliceBlocks(raw(entry.source), blocks), values);
+  const text = spliceBlocks(raw(entry.source), blocks);
+  const missing = missingPlaceholders(text, values);
+  if (missing.length > 0) return { missing };
+  const body = substitute(text, values);
   if (entry.class === "split") {
     const markers = regionMarkers(entry.region);
     const region = renderRegion(body, markers);
@@ -136,8 +149,15 @@ function alreadyWritten(found: Found, entry: FileEntry, content: string): boolea
   return found.kind === "file" && found.bytes.equals(Buffer.from(content, "utf-8"));
 }
 
-/** One entry written by its class: the outcome, the new record, and the
- *  content a mirror would copy or a replaced edit is diffed against. A path
+interface Written {
+  outcome: WriteOutcome;
+  record: ManifestRecord;
+  /** What a mirror would copy, or a replaced edit is diffed against. */
+  content: string;
+}
+
+/** One entry written by its class, or the placeholders it lacks a value
+ *  for (nothing is written then). A path
  *  whose record the writer can carry names another class than the entry
  *  declares is a class flip: the recorded content is the platform's own
  *  previous write, so it is replaced whole when it still matches its record
@@ -150,8 +170,9 @@ function writeEntry(
   modules: string[],
   values: PlaceholderValues,
   records: Records,
-): { outcome: WriteOutcome; record: ManifestRecord; content: string } {
+): Written | { missing: string[] } {
   const rendered = render(options, config, entry, modules, values);
+  if ("missing" in rendered) return rendered;
   const record = records[entry.path];
   const previous = record === undefined ? null : carriedRecord(record)?.class;
   const flipped = previous != null && previous !== entry.class && entry.class !== "starter";
@@ -213,8 +234,14 @@ export function runSync(options: SyncOptions): SyncReport {
   // when its path is one the writer could have written.
   const stale: string[] = [];
   for (const [path, entry] of Object.entries(records)) {
-    if (entry.class !== "managed" && entry.class !== "split" && entry.class !== "link") continue;
     if (path === MANIFEST_NAME || entryPaths.has(path) || retiredPaths.has(path)) continue;
+    if (carriedRecord(entry) === null) {
+      notes.push(
+        `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
+      );
+      continue;
+    }
+    if (entry.class !== "managed" && entry.class !== "split" && entry.class !== "link") continue;
     const problem = pathProblem(path);
     if (problem === null) stale.push(path);
     else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
@@ -243,14 +270,23 @@ export function runSync(options: SyncOptions): SyncReport {
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];
   for (const entry of entries) {
-    const { outcome, record, content } = writeEntry(
-      options,
-      config,
-      entry,
-      selected,
-      values,
-      records,
-    );
+    const result = writeEntry(options, config, entry, selected, values, records);
+    if ("missing" in result) {
+      for (const name of result.missing) {
+        const note = `placeholder \`{{${name}}}\` has no value: set ${PLACEHOLDER_SOURCE[name as PlaceholderName]} in ${REGISTRATION_PATH}`;
+        if (!notes.includes(note)) notes.push(note);
+      }
+      carry(entry.path);
+      const tokens = result.missing.map((name) => `{{${name}}}`).join(", ");
+      rows.push({
+        path: entry.path,
+        class: entry.class,
+        change: "held",
+        detail: `no value for ${tokens}`,
+      });
+      continue;
+    }
+    const { outcome, record, content } = result;
     // A held path keeps its previous record: the file is still that write.
     if (outcome.change === "held") carry(entry.path);
     else next.set(entry.path, record);
@@ -279,6 +315,7 @@ export function runSync(options: SyncOptions): SyncReport {
           written,
           new Set([...entryPaths, MANIFEST_NAME]),
           records,
+          new Set([...retiredPaths, ...stale]),
         );
   for (const row of mirrors) {
     const bytes = written.get(row.source);

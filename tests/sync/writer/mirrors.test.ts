@@ -8,6 +8,7 @@ import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import {
   applyMirrors,
   expandPattern,
+  linkedPrefix,
   type MirrorRow,
   mirrorPathProblem,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
@@ -50,9 +51,26 @@ describe("mirrorPathProblem", () => {
     [".github/workflows/x.yml", "sits under .github/workflows/"],
     ["LICENSE.md", "is a path files.yml writes"],
     ["nightly.yml", "is a path files.yml writes"],
+    ["SECURITY.md", "is a path files.yml retires"],
   ])("%s -> %p", (path, problem) => {
-    // The selected set carries every selected path, a starter included.
-    expect(mirrorPathProblem(path, new Set(["LICENSE.md", "nightly.yml"]))).toBe(problem);
+    // The selected set carries every selected path, a starter included; the
+    // retired set every listed or stale retirement.
+    expect(
+      mirrorPathProblem(path, new Set(["LICENSE.md", "nightly.yml"]), new Set(["SECURITY.md"])),
+    ).toBe(problem);
+  });
+});
+
+describe("linkedPrefix", () => {
+  test("names the first symlinked literal directory before the star, or null", () => {
+    const root = tree({ "outside/secret.txt": "", "real/a/x": "" });
+    symlinkSync("outside", join(root, "docs"));
+    expect(linkedPrefix(root, "docs/*")).toBe("docs");
+    expect(linkedPrefix(root, "docs/sub/*/x")).toBe("docs");
+    expect(linkedPrefix(root, "docs/file.md")).toBe("docs");
+    expect(linkedPrefix(root, "real/*/x")).toBeNull();
+    expect(linkedPrefix(root, "*/x")).toBeNull();
+    expect(linkedPrefix(root, "missing/*")).toBeNull();
   });
 });
 
@@ -74,6 +92,7 @@ describe("applyMirrors", () => {
     });
     symlinkSync("../../LICENSE.md", join(root, "skills/f/LICENSE.md"));
     const written = new Map([["LICENSE.md", Buffer.from("v2\n")]]);
+    symlinkSync("skills", join(root, "linked"));
     const rows = applyMirrors(
       root,
       [
@@ -82,6 +101,7 @@ describe("applyMirrors", () => {
         { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md", "starter.yml"] },
         { source: "LICENSE.md", targets: ["shared/copy.txt"] },
         { source: "NOTICE.md", targets: ["shared/copy.txt"] },
+        { source: "LICENSE.md", targets: ["nowhere/*/LICENSE.md", "linked/*/LICENSE.md"] },
       ],
       written,
       new Set(["LICENSE.md", "starter.yml"]),
@@ -137,6 +157,18 @@ describe("applyMirrors", () => {
       },
       {
         source: "LICENSE.md",
+        target: "nowhere/*/LICENSE.md",
+        outcome: "refused",
+        detail: "the pattern matches nothing",
+      },
+      {
+        source: "LICENSE.md",
+        target: "linked/*/LICENSE.md",
+        outcome: "refused",
+        detail: "the pattern's ancestor 'linked' is a symbolic link",
+      },
+      {
+        source: "LICENSE.md",
         target: "LICENSE.md",
         outcome: "refused",
         detail: "the pattern is a path files.yml writes",
@@ -166,5 +198,79 @@ describe("applyMirrors", () => {
     expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
     expect(readFileSync(join(root, "skills/c/LICENSE.md"), "utf-8")).toBe("hand edited\n");
     expect(readFileSync(join(root, "skills/d/LICENSE.md"), "utf-8")).toBe("v2\n");
+  });
+
+  test("literal targets are written before globs expand, so a new directory is matched in one run", () => {
+    const root = tree({ "skills/old/README.md": "" });
+    const written = new Map([
+      ["LICENSE.md", Buffer.from("L\n")],
+      ["AGENTS.md", Buffer.from("A\n")],
+    ]);
+    const rows = applyMirrors(
+      root,
+      [
+        { source: "AGENTS.md", targets: ["skills/*/AGENTS.md"] },
+        { source: "LICENSE.md", targets: ["skills/new/LICENSE.md"] },
+      ],
+      written,
+      new Set(["LICENSE.md", "AGENTS.md"]),
+      {},
+    );
+    expect(rows).toEqual([
+      { source: "LICENSE.md", target: "skills/new/LICENSE.md", outcome: "written", detail: "" },
+      { source: "AGENTS.md", target: "skills/new/AGENTS.md", outcome: "written", detail: "" },
+      { source: "AGENTS.md", target: "skills/old/AGENTS.md", outcome: "written", detail: "" },
+    ]);
+    expect(readFileSync(join(root, "skills/new/AGENTS.md"), "utf-8")).toBe("A\n");
+  });
+
+  test("a target two literals contest stays refused when a glob of one of them matches it too", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "B\n" });
+    const written = new Map([
+      ["A.md", Buffer.from("A\n")],
+      ["B.md", Buffer.from("B\n")],
+    ]);
+    const rows = applyMirrors(
+      root,
+      [
+        { source: "A.md", targets: ["skills/a/COPY.md", "skills/*/COPY.md"] },
+        { source: "B.md", targets: ["skills/a/COPY.md"] },
+      ],
+      written,
+      new Set(),
+      { "skills/a/COPY.md": { class: "mirror", hash: sha256("B\n") } },
+    );
+    expect(rows.map((row) => [row.source, row.outcome])).toEqual([
+      ["A.md", "refused"],
+      ["B.md", "refused"],
+      ["A.md", "refused"],
+    ]);
+    expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("B\n");
+  });
+
+  test("a literal target a glob of another source also matches stays the literal's", () => {
+    const root = tree({ "skills/a/README.md": "" });
+    const written = new Map([
+      ["LICENSE.md", Buffer.from("L\n")],
+      ["NOTICE.md", Buffer.from("N\n")],
+    ]);
+    const declared = [
+      { source: "NOTICE.md", targets: ["skills/*/LICENSE.md"] },
+      { source: "LICENSE.md", targets: ["skills/a/LICENSE.md"] },
+    ];
+    const first = applyMirrors(root, declared, written, new Set(), {});
+    expect(first).toEqual([
+      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+      {
+        source: "NOTICE.md",
+        target: "skills/a/LICENSE.md",
+        outcome: "refused",
+        detail: "the target is claimed by more than one source",
+      },
+    ]);
+    const records = { "skills/a/LICENSE.md": { class: "mirror", hash: sha256("L\n") } };
+    const second = applyMirrors(root, declared, written, new Set(), records);
+    expect(second.map((row) => row.outcome)).toEqual(["current", "refused"]);
+    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
   });
 });

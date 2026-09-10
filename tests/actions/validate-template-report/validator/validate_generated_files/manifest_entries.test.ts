@@ -207,7 +207,29 @@ describe("ownership-manifest byte parity", () => {
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('has unknown class "bespoke" (expected managed, split, or starter)');
+    expect(stderr).toContain(
+      'has unknown class "bespoke" (expected managed, split, starter, or mirror)',
+    );
+  });
+
+  test("a mirror entry is verified like a managed file: byte parity, presence", () => {
+    const copy = "mirrored license text\n";
+    const entries = {
+      ...stampedBaseline(),
+      "skills/a/LICENSE.md": `{"class": "mirror", "hash": "${sha(copy)}"}`,
+    };
+    const good = runValidator({ [MANIFEST]: manifestOf(entries), "skills/a/LICENSE.md": copy });
+    expect(good.stderr).toBe("");
+    expect(good.exitCode).toBe(0);
+    const drifted = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "skills/a/LICENSE.md": "edited copy\n",
+    });
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.stderr).toContain("skills/a/LICENSE.md: content does not match the sha256");
+    const missing = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain("skills/a/LICENSE.md: listed as mirror in");
   });
 
   // The self entry's one invariant, judged before any class dispatch:

@@ -66,6 +66,9 @@ files:
     region: hash
   - path: constructor
     class: managed
+  - path: .dockerignore
+    class: split
+    region: hash
   - path: .github/workflows/docs-site.yml
     class: managed
     when: {modules: [docs-site], without: [pages]}

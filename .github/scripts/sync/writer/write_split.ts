@@ -1,14 +1,11 @@
 // Split files: the writer owns the marker-bounded region and the repository
 // owns everything above and below it. A file without markers keeps its
-// whole content below the new region; a file whose markers are duplicated
-// or out of order is refused loudly, since no slice of it is honest. A
-// symbolic link at the path is held, like a managed file's.
+// whole content below the new region and is reported for review; a file
+// whose markers are duplicated or out of order is refused loudly, since no
+// slice of it is honest. A symbolic link at the path is held, like a
+// managed file's.
 
-import {
-  cleanManagedRegion,
-  type RegionMarkers,
-  substringCount,
-} from "../../../../actions/shared/grammar.ts";
+import { cleanManagedRegion, type RegionMarkers } from "../../../../actions/shared/grammar.ts";
 import { mentionsMarkers } from "./files_config.ts";
 import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
@@ -47,10 +44,9 @@ export function writeSplit(
   // latin1 round-trips every byte, so slicing and reassembly never alter
   // the repository-owned parts.
   const text = existing.toString("latin1");
-  const mentions = [markers.begin, markers.end].some((m) => substringCount(text, m) > 0);
-  if (!mentions) {
+  if (!mentionsMarkers(text, markers)) {
     writeFile(target, path, Buffer.concat([regionBytes, existing]));
-    return { change: "updated" };
+    return { change: "region added" };
   }
   // Marker text anywhere but as one clean line each (a duplicate, a
   // mid-line mention) leaves no honest slice, now or on the next run.

@@ -56,11 +56,13 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
-    if (entry.class !== "managed" && entry.class !== "split") {
+    // A mirror is a byte copy the sync wrote, its hash the whole file's,
+    // so it is verified exactly like a managed file.
+    if (entry.class !== "managed" && entry.class !== "split" && entry.class !== "mirror") {
       findings.push(
         error(
           `${where} has unknown class ${JSON.stringify(entry.class)} (expected ` +
-            "managed, split, or starter); run a template sync to " +
+            "managed, split, starter, or mirror); run a template sync to " +
             "regenerate the manifest",
         ),
       );
