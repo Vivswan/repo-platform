@@ -5,7 +5,7 @@ group: Modules
 
 # Pages
 
-Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout. The shared workflow's `config` job ([actions/plan](../actions/plan/action.yml), mode `pages`) owns the deploy configuration: a caller that passes no `mounts` gets the mount list, toolchain setup, commands, output directory, site title, and link-rot label resolved from the repository's registration and recorded answers; today's rendered pages.yml still passes them as inputs, which the step publishes unchanged.
+Selecting the `pages` module arms the managed ci.yml's `pages` leg and lands a managed `pages.yml` workflow; both deploy ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout. Callers pass only the commit to build and `vars.CUSTOM_DOMAIN`: the shared workflow's `config` job ([actions/plan](../actions/plan/action.yml), mode `pages`) reads the mounts, the toolchain setup, the build commands, the output directory, the site title, and the link-rot label from the repository's registration and recorded answers.
 
 | URL | Built from | Content changes when |
 |---|---|---|
@@ -16,9 +16,9 @@ Selecting the `pages` module gives a repository a managed `pages.yml` workflow t
 
 Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build: the newest served tag, or the default branch head while none serve).
 
-The deploy runs three ways. On every push to the default branch it rides the managed ci.yml's run downstream of the `all-green` gate: a `pages` job calls pages.yml with the judged commit, so a red main never reaches the site ([all-green.md](all-green.md#after-the-gate)). The nightly rebuild (04:23 UTC) and a manual dispatch build the default branch head. There is no tag trigger: a tag created without a push (a manual tag) lands on the nightly rebuild, or immediately via dispatch.
+The deploy runs three ways. On every push to the default branch it rides the managed ci.yml's run downstream of the `all-green` gate: the `pages` job calls reusable-pages.yml with the judged commit, so a red main never reaches the site ([all-green.md](all-green.md#after-the-gate)). pages.yml's nightly rebuild (04:23 UTC) and its manual dispatch build the default branch head. There is no tag trigger: a tag created without a push (a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
-With the `release-please` module selected too, the `pages` job is ordered behind the `release` leg in the same run: it waits for the whole leg (release-please, the repo-owned release hooks, the publish) and then deploys whatever that leg's result. When a version tag appears:
+The `pages` job is ordered behind the release legs in the same run: it waits for the whole chain (release-please, the repo-owned release hooks, the publish) and then deploys whatever their result. When a version tag appears:
 
 | What the release leg did on that push | The deploy | When the `vX.Y.Z/` tier and the new root appear |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ With the `release-please` module selected too, the `pages` job is ordered behind
 | Failed before tagging, or was skipped (a red repo-owned post-green hook skips it) | Runs after it, no tag to serve | With the tag, once one exists: the next push, the nightly rebuild, or a dispatch. |
 | No release leg (a tag pushed by hand, or no release-please module) | Unchanged | The nightly rebuild, or a dispatch. |
 
-The ordering is an order, not a gate: the `pages` job carries `!cancelled()` beside the gate condition, so it never skips behind a failed or skipped release leg, and a repository without release-please renders the plain gate-only job.
+The ordering is an order, not a gate: the `pages` job carries `!cancelled()` beside the gate condition, so it never skips behind a failed or skipped release leg; without the release-please module the release legs skip and the deploy runs right after the gate.
 
 ## Pages enablement
 

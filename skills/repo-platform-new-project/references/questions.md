@@ -27,7 +27,7 @@ One line each, generated from the module manifests:<!-- BEGIN GENERATED: module-
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 - `pages`: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
 - `docs-site`: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
-- `release-please`: gate-downstream release job in ci.yml + autorelease labels
+- `release-please`: release-please releases through the fleet's release pipeline, plus autorelease labels
 - `issue-templates`: bug/feature issue forms
 - `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check, its own required workflow

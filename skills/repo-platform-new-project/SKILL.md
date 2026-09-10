@@ -88,7 +88,7 @@ Some files are generated once and then owned by the repo (sync never overwrites 
 
 - `.github/workflows/checks.yml`: the repo's own test/lint jobs. The managed `ci.yml` calls it inside the all-green gate.
 - `.github/workflows/post-green.yml`: the repo's own green-gated work. The managed `ci.yml` calls it after the all-green gate on a push to main, with the judged sha, before the release leg; seeded as a no-op.
-- `.github/workflows/update-release.yml` (release-please module): the repo's hook in the managed `release.yml` pipeline - release-please cuts a draft, this hook mutates it (assets, notes), then the publish stage attests every asset into a single `attestation.json` and flips it live.
+- `.github/workflows/update-release.yml` (seeded in every repository; called only with the release-please module): the repo's hook in the fleet's release pipeline - release-please cuts a draft, this hook mutates it (assets, notes), then the publish stage attests every asset into a single `attestation.json` and flips it live.
 - `.github/workflows/update-release-pr.yml` (release-please module): the repo's hook on release-PR creation/refresh - regenerated files and version references that must ride in the release commit go there.
 - `.github/workflows/nightly-fuzz.yml` (fuzzer module): replace the placeholder fuzz step with your fuzzer.
 - `.github/workflows/nightly.yml` (nightly module): replace the placeholder step with the repo's own nightly checks.

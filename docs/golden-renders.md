@@ -21,8 +21,8 @@ CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fai
 | `all-modules` | every module except `custom-license` | Covers every module's rendered files at once (no module pair conflicts). `custom-license` is left out: its whole effect is opting out of the fleet license render, which would hide the default path every other selection exercises. The list derives from the module manifests, so a new module joins automatically and trips the drift check. |
 | `minimal` | none (`modules=[]`) | The smallest selection copier.yml's validators allow: the unconditional base render alone. |
 | `uv-no-release-please` | `uv` | The dotfiles shape that exposed the compose anchor blank-line bug; its `.typography-allow` must end with exactly one newline (the composer's collapse guard). |
-| `pages-no-release-please` | `bun`, `pages` | The pages leg's plain arm: without release-please the rendered ci.yml `pages` job needs the gate alone under the gate condition, with no ordering edge (the `pages-leg` rule parses it; `all-modules` covers the ordered arm). bun supplies the build command copier's pages validator requires. |
-| `docs-site-release-please` | `docs-site`, `release-please` | The docs-site leg's three-edge arm (needs the gate, the hook, and the release leg) and the standalone docs-site.yml with its workflow_call; `all-modules` carries pages too, where the leg and that call render nothing. The `docs-site-leg` ssot rule reads both arms. |
+
+ci.yml renders identically in every selection (it carries no module- or visibility-conditioned text), so no golden exists for a CI shape: the `minimal` golden's ci.yml is the reference every smoke-matrix render is byte-compared against (tests/ci/smoke_gating/expectations.ts).
 
 ## Determinism contract
 

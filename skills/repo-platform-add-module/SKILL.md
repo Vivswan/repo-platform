@@ -38,7 +38,7 @@ One line each, generated from the module manifests (`templates/<module>/module.y
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
 | `pages` | GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main) |
 | `docs-site` | VitePress docs site from docs/ under the central fleet theme (repos carry only markdown) |
-| `release-please` | gate-downstream release job in ci.yml + autorelease labels |
+| `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
 | `issue-templates` | bug/feature issue forms |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
@@ -117,7 +117,7 @@ The render commit is an ordinary sync delivery: before the PR merges, classify a
 What the render delivers, in two classes:
 
 - Managed files: arrive now and keep updating on every future sync (workflow callers, ci.yml jobs, dependabot entries, gitignore sections). Do not edit them.
-- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`update-release.yml`, `update-release-pr.yml`, `release-please-config.json`, `.release-please-manifest.json`), `issue-templates` (issue forms + chooser), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
+- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`release-please-config.json`, `.release-please-manifest.json`; the `update-release.yml` and `update-release-pr.yml` hooks are base starters), `issue-templates` (issue forms + chooser), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
 
 ### 4. Finish the companion steps
 
