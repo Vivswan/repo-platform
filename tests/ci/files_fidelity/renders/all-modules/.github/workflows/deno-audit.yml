@@ -1,0 +1,55 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# Dependabot's deno ecosystem does version updates only, so this run is
+# the advisory coverage (GitHub Advisory Database via `deno audit`).
+
+name: Deno Audit
+
+on:
+  pull_request:
+    paths: ["**/deno.lock"]
+  push:
+    branches: [main]
+    paths: ["**/deno.lock"]
+  schedule:
+    - cron: "37 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Newest audit per ref wins; a superseded run's verdict is stale anyway.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DENO_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
+      # Every tracked lockfile ('*/deno.lock' is a git pathspec; '*'
+      # crosses '/'). The no-lockfile guard keeps the weekly run from
+      # going green having audited nothing; --frozen fails loudly when a
+      # lockfile disagrees with its manifest.
+      - name: Audit dependencies (deno)
+        shell: bash
+        run: |
+          # Listing into a file: a git failure must abort the step under
+          # -e, not read as "no lockfiles" and go green.
+          git ls-files -z -- 'deno.lock' '*/deno.lock' > "$RUNNER_TEMP/deno-locks"
+          if [ ! -s "$RUNNER_TEMP/deno-locks" ]; then
+            echo "::notice::no deno.lock tracked - nothing to audit; commit a lockfile to enable advisory coverage"
+            exit 0
+          fi
+          while IFS= read -r -d '' lock; do
+            echo "auditing $lock"
+            (cd "$(dirname -- "$lock")" && deno audit --frozen)
+          done < "$RUNNER_TEMP/deno-locks"

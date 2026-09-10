@@ -1,0 +1,7 @@
+# Generated once by Vivswan/repo-platform and never
+# overwritten by template sync; tailor this chooser freely to the repository.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/vivswan/golden-render/security/advisories/new
+    about: Please report vulnerabilities privately via a GitHub security advisory, not a public issue.
