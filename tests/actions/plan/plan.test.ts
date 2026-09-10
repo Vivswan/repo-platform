@@ -804,7 +804,8 @@ describe("plan.ts as a child", () => {
         "private=false",
         "skills-dir=agents",
         "codeql-languages=[]",
-        "tracking-labels=docs-link-rot",
+        "tracking-labels=docs-link-rot,security-nightly",
+        `weekly=${new Date().getUTCDay() === 1}`,
         "",
       ].join("\n"),
     );
