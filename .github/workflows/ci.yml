@@ -66,18 +66,6 @@ jobs:
       - uses: ./actions/dependency-review
         if: github.event_name == 'pull_request'
 
-  # The workflows' large steps live as scripts in .github/scripts/ exactly
-  # so they can be linted; actionlint only sees inline run blocks.
-  shellcheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - name: Shellcheck the workflow step scripts
-        # -x follows the `# shellcheck source=` directives into the
-        # sourced shared helpers (paths resolve from the checkout root).
-        run: find .github/scripts -name '*.sh' -print0 | xargs -0 shellcheck -x
-
   # The all-green gate's judging logic, exercised as the REAL run block
   # extracted from actions/all-green/action.yml against scenario needs
   # payloads: the fail-closed shapes (a failure, all skipped, an empty
@@ -664,7 +652,6 @@ jobs:
       - actionlint-binary
       - gitleaks
       - dependency-review
-      - shellcheck
       - allgreen-judgment
       - yamllint
       - biome

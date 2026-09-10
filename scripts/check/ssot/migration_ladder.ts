@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { type CallExpression, Node, SyntaxKind } from "ts-morph";
 import { RUNG_FILE_RE, RUNG_ID_BODY } from "../../../.github/scripts/sync/run_migrations.ts";
 import { PENDING_RUNGS } from "../../../tests/ci/upgrade_path/rungs.ts";
-import { parseTs, unwrapExpression } from "../../lib/ts_extract.ts";
+import { moduleSpecifiers, parseTs, unwrapExpression } from "../../lib/ts_extract.ts";
 import type { Mismatch } from "./comparison.ts";
 import { REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
@@ -479,54 +479,27 @@ export function selfContainedMismatches(rungFiles: Record<string, string>): Mism
   const mismatches: Mismatch[] = [];
   const expected =
     "imports of node:/bun: specifiers only (a rung runs from its build commit, where nothing else exists)";
-  const literalOf = (node: Node | undefined): string | null =>
-    node !== undefined && (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node))
-      ? node.getLiteralValue()
-      : null;
   for (const [name, source] of Object.entries(rungFiles)) {
     const rel = `${MIGRATIONS_DIR_REL}/${name}`;
-    const file = parseTs(source);
-    const specifiers: string[] = [
-      ...file.getImportDeclarations().map((decl) => decl.getModuleSpecifierValue()),
-      ...file
-        .getExportDeclarations()
-        .map((decl) => decl.getModuleSpecifierValue())
-        .filter((value): value is string => value !== undefined),
-    ];
-    const nonLiteral = (what: string) =>
+    const { literal, nonLiteral } = moduleSpecifiers(source);
+    for (const what of nonLiteral) {
       mismatches.push({ file: rel, expected, got: `${what} of a non-literal specifier` });
-    for (const decl of file.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
-      const reference = decl.getModuleReference();
-      const literal = Node.isExternalModuleReference(reference)
-        ? literalOf(reference.getExpression())
-        : null;
-      if (literal === null) nonLiteral("import-equals");
-      else specifiers.push(literal);
     }
-    for (const node of file.getDescendantsOfKind(SyntaxKind.ImportType)) {
-      const argument = node.getArgument();
-      const literal = Node.isLiteralTypeNode(argument) ? literalOf(argument.getLiteral()) : null;
-      if (literal === null) nonLiteral("import type");
-      else specifiers.push(literal);
-    }
-    const inspectedCallees = new Set<Node>();
-    for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-      const callee = call.getExpression();
-      const dynamic =
-        callee.getKind() === SyntaxKind.ImportKeyword ||
-        (Node.isIdentifier(callee) && callee.getText() === "require");
-      if (!dynamic) continue;
-      inspectedCallees.add(callee);
-      const literal = literalOf(call.getArguments()[0]);
-      if (literal === null) nonLiteral(`${callee.getText()}()`);
-      else specifiers.push(literal);
-    }
-    for (const identifier of file.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    for (const identifier of parseTs(source).getDescendantsOfKind(SyntaxKind.Identifier)) {
       const text = identifier.getText();
-      if ((text !== "require" && text !== "module") || inspectedCallees.has(identifier)) continue;
+      if (text !== "require" && text !== "module") continue;
+      const parent = identifier.getParent();
+      // A `require(...)` callee is the inspected specifier site above.
+      if (
+        text === "require" &&
+        Node.isCallExpression(parent) &&
+        parent.getExpression() === identifier
+      ) {
+        continue;
+      }
       mismatches.push({ file: rel, expected, got: `a reach for the loader through \`${text}\`` });
     }
-    for (const specifier of specifiers) {
+    for (const specifier of literal) {
       if (!SELF_CONTAINED_SPECIFIER_RE.test(specifier)) {
         mismatches.push({ file: rel, expected, got: `an import of "${specifier}"` });
       }

@@ -25,6 +25,7 @@ import { allGreenRules } from "./check/ssot/all_green.ts";
 import { type Mismatch, RECORDED_DIVERGENCES, usedDivergences } from "./check/ssot/comparison.ts";
 import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
 import { fleetCiRenderRules } from "./check/ssot/fleet_ci_render.ts";
+import { harnessImportRules } from "./check/ssot/harness_imports.ts";
 import { labelPreflightRules } from "./check/ssot/label_preflight.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
@@ -55,6 +56,7 @@ const rules: Rule[] = [
   ...postGreenRules,
   ...labelPreflightRules,
   ...processDisciplineRules,
+  ...harnessImportRules,
 ];
 
 function main(): number {
