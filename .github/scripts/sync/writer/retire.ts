@@ -4,14 +4,14 @@
 // absent, and its record travels with it so the following write sees the
 // moved file as the writer's own.
 
-import { mkdirSync, unlinkSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { capture } from "../../shared/proc.ts";
 import type { RetiredEntry } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
-import { existingFile } from "./write_managed.ts";
+import { existingFile, insideTarget, removeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "moved" | "held" | "kept";
 
@@ -49,7 +49,8 @@ export function keepReason(target: string, path: string, records: Records): stri
 }
 
 function gitMove(target: string, from: string, to: string): void {
-  mkdirSync(dirname(join(target, to)), { recursive: true });
+  insideTarget(target, from);
+  mkdirSync(dirname(insideTarget(target, to)), { recursive: true });
   const result = capture(["git", "-C", target, "mv", "--", from, to]);
   if (result.exitCode !== 0) {
     throw new Error(
@@ -71,7 +72,7 @@ export function retire(
   const dispose = (path: string, detail: string) => {
     const reason = keepReason(target, path, records);
     if (reason === null) {
-      unlinkSync(join(target, path));
+      removeFile(target, path);
       delete records[path];
       rows.push({ path, outcome: "deleted", detail });
     } else if (records[path]?.class === "starter") {
@@ -81,9 +82,9 @@ export function retire(
     }
   };
   for (const entry of entries) {
-    if (lstatOrNull(join(target, entry.path)) === null) continue;
+    if (existingFile(target, entry.path) === null) continue;
     if (entry.moved_to !== undefined) {
-      if (lstatOrNull(join(target, entry.moved_to)) === null) {
+      if (existingFile(target, entry.moved_to) === null) {
         gitMove(target, entry.path, entry.moved_to);
         if (records[entry.path] !== undefined) {
           records[entry.moved_to] = records[entry.path];
@@ -102,7 +103,7 @@ export function retire(
     dispose(entry.path, "retired");
   }
   for (const path of stale) {
-    if (lstatOrNull(join(target, path)) !== null) dispose(path, "no longer selected");
+    if (existingFile(target, path) !== null) dispose(path, "no longer selected");
   }
   return rows;
 }

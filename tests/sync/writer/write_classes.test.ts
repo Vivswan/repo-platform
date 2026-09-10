@@ -3,7 +3,7 @@
 // rewriting around repository-owned text, and starters written once.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { writeManaged } from "../../../.github/scripts/sync/writer/write_managed.ts";
@@ -38,12 +38,16 @@ describe("writeManaged", () => {
     expect(writeManaged(target, "x", "ours", null).change).toBe("replaced local edits");
   });
 
-  test("a symlink or directory at the path is refused loudly", () => {
+  test("a symlink or directory at the path, or a symlinked ancestor, is refused loudly", () => {
     const target = temp.dir("writer-managed-nonfile-");
     mkdirSync(join(target, "dir"));
     symlinkSync("dir", join(target, "link"));
     expect(() => writeManaged(target, "dir", "x", null)).toThrow("not a regular file");
     expect(() => writeManaged(target, "link", "x", null)).toThrow("not a regular file");
+    expect(() => writeManaged(target, "link/inside.txt", "x", null)).toThrow(
+      "ancestor 'link' is a symbolic link",
+    );
+    expect(existsSync(join(target, "dir/inside.txt"))).toBe(false);
   });
 });
 

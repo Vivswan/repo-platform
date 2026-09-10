@@ -73,9 +73,12 @@ const retiredSchema = z.strictObject({
   moved_to: z.string().min(1).optional(),
 });
 
+/** A module name is one path segment of the files/ tree. */
+const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
+
 const configSchema = z.strictObject({
   placeholders: z.array(z.string().min(1)),
-  modules: z.record(z.string().min(1), z.record(z.string(), z.unknown())).default({}),
+  modules: z.record(moduleName, z.record(z.string(), z.unknown())).default({}),
   files: z.array(fileSchema),
   retired: z.array(retiredSchema).default([]),
 });

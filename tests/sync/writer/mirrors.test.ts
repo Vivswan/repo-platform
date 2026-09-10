@@ -73,7 +73,7 @@ describe("applyMirrors", () => {
       root,
       [
         { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] },
-        { source: "README.md", targets: ["docs/README.md"] },
+        { source: "README.md", targets: ["docs/README.md", "skills/*/README.md"] },
         { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md", "starter.yml"] },
       ],
       written,
@@ -96,6 +96,12 @@ describe("applyMirrors", () => {
         outcome: "refused",
         detail: "the source is not a file this sync writes",
       },
+      ...["a", "b", "c", "d"].map((skill) => ({
+        source: "README.md",
+        target: `skills/${skill}/README.md`,
+        outcome: "refused" as const,
+        detail: "the source is not a file this sync writes",
+      })),
       {
         source: "LICENSE.md",
         target: "skills/**/LICENSE.md",

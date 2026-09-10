@@ -6,8 +6,6 @@
 // its `commit` slot and no hash (a self-hash would be circular).
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import {
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
@@ -21,6 +19,7 @@ import {
   parseManifestFiles,
 } from "../../../../actions/shared/manifest.ts";
 import type { RegionKind } from "./files_config.ts";
+import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };
 
@@ -44,9 +43,9 @@ export function regionMarkers(kind: RegionKind): RegionMarkers {
  *  problem string for one whose manifest cannot be trusted (the caller
  *  reports it and treats every file as unrecorded). */
 export function readRecords(target: string): { records: Records; problem: string | null } {
-  const path = join(target, MANIFEST_NAME);
-  if (!existsSync(path)) return { records: {}, problem: null };
-  const parsed = parseManifestFiles(readFileSync(path, "utf-8"));
+  const bytes = existingFile(target, MANIFEST_NAME);
+  if (bytes === null) return { records: {}, problem: null };
+  const parsed = parseManifestFiles(bytes.toString("utf-8"));
   if (parsed.problem !== null)
     return { records: {}, problem: `${MANIFEST_NAME} ${parsed.problem}` };
   return { records: parsed.files, problem: null };
@@ -92,7 +91,5 @@ export function writeManifest(
   records: Record<string, ManifestRecord>,
   build: string,
 ): void {
-  const path = join(target, MANIFEST_NAME);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, renderManifest(records, build));
+  writeFile(target, MANIFEST_NAME, Buffer.from(renderManifest(records, build)));
 }

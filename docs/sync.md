@@ -34,7 +34,7 @@ bun .github/scripts/sync/writer/sync.ts \
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the name is the fallback project name and slug.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a non-regular file at a written path, a split file with duplicated markers.
+- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a directory, symlink, or symlinked ancestor at a path the writer touches, a split file whose marker text is duplicated or buried mid-line.
 
 ## files.yml
 

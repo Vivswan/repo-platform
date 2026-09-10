@@ -8,7 +8,7 @@ import type { Registration } from "../../../../actions/shared/registration.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { pathProblem } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
-import { existingFile, writeFile } from "./write_managed.ts";
+import { existingFile, writeFile } from "./target_files.ts";
 
 export interface MirrorRow {
   source: string;
@@ -83,17 +83,6 @@ export function applyMirrors(
   const rows: MirrorRow[] = [];
   for (const { source, targets } of mirrors) {
     const bytes = written.get(source);
-    if (bytes === undefined) {
-      for (const pattern of targets) {
-        rows.push({
-          source,
-          target: pattern,
-          outcome: "refused",
-          detail: "the source is not a file this sync writes",
-        });
-      }
-      continue;
-    }
     for (const pattern of targets) {
       const patternProblem = pattern.includes("**")
         ? "uses '**'"
@@ -111,6 +100,16 @@ export function applyMirrors(
         const problem = mirrorPathProblem(path, selected);
         if (problem !== null) {
           rows.push({ source, target: path, outcome: "refused", detail: `the target ${problem}` });
+          continue;
+        }
+        // Refused per concrete target, so each keeps its previous record.
+        if (bytes === undefined) {
+          rows.push({
+            source,
+            target: path,
+            outcome: "refused",
+            detail: "the source is not a file this sync writes",
+          });
           continue;
         }
         const existing = existingFile(target, path);

@@ -9,7 +9,8 @@ import {
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
 import { sha256 } from "./manifest.ts";
-import { existingFile, type WriteOutcome, writeFile } from "./write_managed.ts";
+import { existingFile, writeFile } from "./target_files.ts";
+import type { WriteOutcome } from "./write_managed.ts";
 
 /** `text` ending in exactly the newline it needs to be followed by more. */
 export function terminated(text: string): string {

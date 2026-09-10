@@ -2,7 +2,7 @@
 // already wrote, read back as records, and the hash lookup's refusals.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   MANIFEST_NAME,
@@ -38,6 +38,20 @@ describe("renderManifest", () => {
     );
     const parsed = parseManifestFiles(text);
     expect(parsed.problem).toBeNull();
+    // toEqual on the whole mapping pins key order (sorted) and every record.
+    expect(parsed.files).toEqual({
+      [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
+      "a.md": {
+        class: "split",
+        grammar: "managed-region",
+        begin: "<!-- B -->",
+        end: "<!-- E -->",
+        hash: HASH,
+      },
+      "b.txt": { class: "managed", hash: HASH },
+      "m/copy.txt": { class: "mirror", hash: HASH },
+      "s.yml": { class: "starter" },
+    });
     expect(Object.keys(parsed.files ?? {})).toEqual([
       MANIFEST_NAME,
       "a.md",
@@ -45,7 +59,6 @@ describe("renderManifest", () => {
       "m/copy.txt",
       "s.yml",
     ]);
-    expect(parsed.files?.[MANIFEST_NAME]).toEqual({ class: "managed", hash: null, commit: BUILD });
     expect(text).toContain(`\n    "b.txt": {"class": "managed", "hash": "${HASH}"}`);
   });
 });
@@ -70,5 +83,15 @@ describe("readRecords and recordedHash", () => {
       records: {},
       problem: `${MANIFEST_NAME} does not parse as a manifest (invalid JSON)`,
     });
+  });
+
+  test("a symlink at the manifest path is refused for reading and writing", () => {
+    const target = temp.dir("writer-manifest-link-");
+    mkdirSync(join(target, ".github"), { recursive: true });
+    writeFileSync(join(target, "notes.json"), '{"files": {}}');
+    symlinkSync("../notes.json", join(target, MANIFEST_NAME));
+    expect(() => readRecords(target)).toThrow("not a regular file");
+    expect(() => writeManifest(target, {}, BUILD)).toThrow("not a regular file");
+    expect(readFileSync(join(target, "notes.json"), "utf-8")).toBe('{"files": {}}');
   });
 });

@@ -3,7 +3,7 @@
 // with the record travelling, and stale records treated like retirements.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Records, sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { keepReason, retire } from "../../../.github/scripts/sync/writer/retire.ts";
@@ -125,5 +125,15 @@ describe("retire", () => {
     expect(retire(target, [], ["docs.yml", "gone.yml"], records)).toEqual([
       { path: "docs.yml", outcome: "deleted", detail: "no longer selected" },
     ]);
+  });
+
+  test("a path under a symlinked directory is refused, never unlinked through the link", () => {
+    const target = checkout({ "shared/x": "v\n" });
+    symlinkSync("shared", join(target, "docs"));
+    const records: Records = { "docs/x": { class: "managed", hash: sha256("v\n") } };
+    expect(() => retire(target, [], ["docs/x"], records)).toThrow(
+      "ancestor 'docs' is a symbolic link",
+    );
+    expect(existsSync(join(target, "shared/x"))).toBe(true);
   });
 });

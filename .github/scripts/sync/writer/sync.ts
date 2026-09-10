@@ -44,7 +44,8 @@ import {
 } from "./report.ts";
 import { retire } from "./retire.ts";
 import { resolveModules, selectEntries } from "./select.ts";
-import { existingFile, type WriteOutcome, writeManaged } from "./write_managed.ts";
+import { existingFile } from "./target_files.ts";
+import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { renderRegion, terminated, writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
 
@@ -143,10 +144,11 @@ export function runSync(options: SyncOptions): SyncReport {
   const retired = retire(options.target, config.retired, stale, records);
 
   const next: Record<string, ManifestRecord> = {};
+  // A carried record never displaces one this run wrote.
   const carry = (path: string) => {
     const previous = records[path];
     const record = previous === undefined ? null : carriedRecord(previous);
-    if (record !== null) next[path] = record;
+    if (record !== null && next[path] === undefined) next[path] = record;
   };
   for (const row of retired) {
     if (row.outcome === "held" || row.outcome === "kept") carry(row.path);

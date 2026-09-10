@@ -129,6 +129,11 @@ describe("parseFilesConfig", () => {
       "under files/",
     ],
     [
+      "a module name that is not one path segment",
+      "files: []\nmodules:\n  ../bun: {}\nplaceholders: []",
+      "modules.../bun: Invalid key in record",
+    ],
+    [
       "a path both written and retired",
       "files:\n  - { path: a, class: managed }\nretired:\n  - { path: a }\nplaceholders: []",
       "written or retired, not both",

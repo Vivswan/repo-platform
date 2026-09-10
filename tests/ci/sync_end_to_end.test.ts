@@ -282,11 +282,17 @@ describe("sync.ts end to end", () => {
       class: "mirror",
       hash: sha256(OLD_LICENSE),
     });
-    expect(manifest.files[".gitignore"]).toMatchObject({
+    const gitignore = read(".gitignore");
+    const region = gitignore.slice(
+      gitignore.indexOf(HASH_BEGIN),
+      gitignore.indexOf(HASH_END) + HASH_END.length + 1,
+    );
+    expect(manifest.files[".gitignore"]).toEqual({
       class: "split",
       grammar: "managed-region",
       begin: HASH_BEGIN,
       end: HASH_END,
+      hash: sha256(region),
     });
     expect(manifest.files[".github/workflows/release.yml"]).toEqual({
       class: "managed",
