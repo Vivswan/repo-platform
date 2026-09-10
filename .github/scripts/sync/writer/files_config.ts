@@ -105,7 +105,7 @@ export function mutuallyExclusive(a: When | null, b: When | null): boolean {
   if (a === null || b === null) return false;
   if (a.private !== undefined && b.private !== undefined && a.private !== b.private) return true;
   const forbidsAll = (list: string[] | undefined, other: When) =>
-    list !== undefined && list.every((name) => other.without?.includes(name));
+    list?.every((name) => other.without?.includes(name)) ?? false;
   return (
     forbidsAll(a.modules, b) ||
     forbidsAll(b.modules, a) ||

@@ -112,7 +112,7 @@ export function applyMirrors(
           continue;
         }
         const existing = existingFile(target, path);
-        if (existing !== null && existing.equals(bytes)) {
+        if (existing?.equals(bytes) === true) {
           rows.push({ source, target: path, outcome: "current", detail: "" });
           continue;
         }
