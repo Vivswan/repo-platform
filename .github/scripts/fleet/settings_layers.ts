@@ -22,7 +22,7 @@
 // applying the fleet layers alone would delete every label it declares
 // for itself. Both skip, loudly.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
@@ -32,7 +32,7 @@ import {
   type SettingsLayerName,
 } from "../../../scripts/lib/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { fail, hideDetails, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import {
   factsFromFetch,
   factsFromOperatorAnswers,
@@ -159,10 +159,12 @@ export function trackingLayerYaml(labels: Label[]): string {
   );
 }
 
-/** One layer FILE as a mapping (the action validates its shape at merge
- *  time); a file that exists but declares no mapping is an authoring error. */
+/** One layer FILE as a mapping, read the way the action reads it: an empty
+ *  document is an empty layer (a repository whose settings.yml declares
+ *  nothing is still onboarded); any other non-mapping is refused. */
 export function loadLayer(path: string): Record<string, unknown> {
-  return parseYamlMapping(readFileSync(path, "utf-8"), path);
+  const text = readFileSync(path, "utf-8");
+  return parseYaml(text) == null ? {} : parseYamlMapping(text, path);
 }
 
 /** The label entries of a `labels` section in either of the action's
@@ -301,14 +303,25 @@ export function layersInput(layers: string[]): string {
 
 /** Materializes the stack: the tracking layer becomes a scratch file, and
  *  a path under the working directory (the checkout root in the apply job)
- *  is published relative to it; scratch and target paths stay absolute. */
-export function materialize(stack: LayerSource[], scratchDir: string): string[] {
-  return stack.map((source) => {
+ *  is published relative to it; scratch and target paths stay absolute.
+ *  For a hide-details target every layer is instead COPIED into the scratch
+ *  directory under a numbered name: the published list is the merge step's
+ *  settings-file input, which the runner prints in the public log, and a
+ *  module layer's path (templates/uv/settings.yml) would name the target's
+ *  module selection there. The layer count still shows. */
+export function materialize(stack: LayerSource[], scratchDir: string, neutral = false): string[] {
+  mkdirSync(scratchDir, { recursive: true });
+  return stack.map((source, index) => {
+    if (neutral) {
+      const path = join(scratchDir, `layer-${String(index + 1).padStart(2, "0")}.yml`);
+      if (source.kind === "file") copyFileSync(source.path, path);
+      else writeFileSync(path, trackingLayerYaml(source.labels));
+      return path;
+    }
     if (source.kind === "file") {
       const inside = relative(process.cwd(), source.path);
       return inside === "" || inside.startsWith("..") ? source.path : inside;
     }
-    mkdirSync(scratchDir, { recursive: true });
     const path = join(scratchDir, SCRATCH_TRACKING_LAYER);
     writeFileSync(path, trackingLayerYaml(source.labels));
     return path;
@@ -347,7 +360,7 @@ function fetchedOutcome(target: string, scratchDir: string): LayersOutcome {
   return {
     ref,
     kind: "layers",
-    layers: materialize(layerStack(facts, manifests, repoLayer), scratchDir),
+    layers: materialize(layerStack(facts, manifests, repoLayer), scratchDir, hideDetails()),
   };
 }
 

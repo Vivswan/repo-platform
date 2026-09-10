@@ -158,6 +158,23 @@ describe("referenced_labels", () => {
     expect(r.output).toContain("no settings.yml to merge");
   });
 
+  test("an EMPTY settings.yml is an onboarded empty layer, not a failed check", () => {
+    // The action reads an empty document as {}, and so must the fold: the
+    // fleet layers still declare labels, so an undeclared reference warns
+    // exactly as it would under a populated repo layer.
+    const root = makeTarget({
+      ".repo-platform.yml": REGISTRATION,
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/settings.yml": "# identity keys to come\n",
+      ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz", "bug"]\n',
+    });
+    const r = runScript(root);
+    expect(r.exitCode).toBe(0);
+    expect(r.output).not.toContain("COULD NOT RUN");
+    expect(r.report).toContain('"definitely-not-declared-xyz"');
+    expect(r.report).not.toContain('"bug"');
+  });
+
   test("not applicable when the repo layer opts labels out (no key survives the merge)", () => {
     // labels: null is the dialect's opt-out: the merged document carries
     // no labels key at all, so the apply never reconciles labels and no

@@ -16,6 +16,7 @@ import {
   layerLabelNames,
   layerStack,
   layersInput,
+  loadLayer,
   loadOverrideLayer,
   managedLabelNames,
   OVERRIDE_PATH,
@@ -310,6 +311,18 @@ describe("the override layer", () => {
   });
 });
 
+describe("loadLayer", () => {
+  test("an empty document is an empty layer, like the action reads it; a list is refused", () => {
+    const dir = temp.dir("load-layer-");
+    const empty = join(dir, "empty.yml");
+    writeFileSync(empty, "# nothing yet\n");
+    expect(loadLayer(empty)).toEqual({});
+    const list = join(dir, "list.yml");
+    writeFileSync(list, "- a\n");
+    expect(() => loadLayer(list)).toThrow("not a YAML mapping");
+  });
+});
+
 describe("layersInput", () => {
   test("joins with the action's separator and refuses a path carrying one", () => {
     expect(layersInput(["a.yml", "/tmp/b.yml"])).toBe("a.yml,/tmp/b.yml");
@@ -470,7 +483,7 @@ describe("the layers CLI on a fetched target", () => {
   // A stub gh serves the two ref-resolution calls and the raw file fetches
   // at the pin; SETTINGS_TEXT is the target's settings.yml (a 404 when empty).
   const HEAD = "a".repeat(40);
-  function runFetched(settingsText: string | null) {
+  function runFetched(settingsText: string | null, extraEnv: Record<string, string> = {}) {
     const root = temp.dir("layers-gh-");
     const bin = join(root, "bin");
     mkdirSync(bin);
@@ -503,6 +516,7 @@ describe("the layers CLI on a fetched target", () => {
         GITHUB_REPOSITORY: "Vivswan/repo-platform",
         RUNNER_TEMP: runnerTemp,
         SETTINGS_TEXT: settingsText ?? "",
+        ...extraEnv,
       },
       join(runnerTemp, "settings-layers"),
     );
@@ -525,6 +539,30 @@ describe("the layers CLI on a fetched target", () => {
     expect(readFileSync(repoLayer, "utf-8")).toBe(
       "repository:\n  private: false\n  description: mine\n",
     );
+  });
+
+  test("a hide-details target publishes only numbered scratch copies", () => {
+    // The merge step's settings-file input prints in the public log, so a
+    // module layer's path would name a private target's module selection.
+    const run = runFetched("repository:\n  private: true\n", { HIDE_DETAILS: "true" });
+    expect(run.exitCode).toBe(0);
+    const layers = run.outputs.layers.split(",");
+    expect(layers).toEqual(
+      ["01", "02", "03", "04", "05"].map((n) => join(run.scratch, `layer-${n}.yml`)),
+    );
+    // Every copy carries its source's bytes, in stack order.
+    expect(readFileSync(layers[0], "utf-8")).toBe(
+      readFileSync(join(REPO_ROOT, ".github/settings-baseline.yml"), "utf-8"),
+    );
+    expect(readFileSync(layers[1], "utf-8")).toBe(
+      readFileSync(join(REPO_ROOT, ".github/settings-private.yml"), "utf-8"),
+    );
+    expect(readFileSync(layers[2], "utf-8")).toBe(
+      readFileSync(join(REPO_ROOT, "templates/uv/settings.yml"), "utf-8"),
+    );
+    expect(readFileSync(layers[3], "utf-8")).toBe("repository:\n  private: true\n");
+    expect(readFileSync(layers[4], "utf-8")).toBe(readFileSync(OVERRIDE_PATH, "utf-8"));
+    expect(run.outputs.layers).not.toContain("templates/");
   });
 
   test("a 404 on settings.yml is the not-onboarded skip", () => {

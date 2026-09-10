@@ -472,10 +472,10 @@ describe("settingsActionStepMismatches", () => {
     expect(judged([elsewhere, apply()])).toContain(`with.merged-file: ${MERGED_SETTINGS_FILE}`);
   });
 
-  test("a merge step handed a token or a repository fires", () => {
-    const tokened = merge();
-    (tokened.with as Record<string, string>).token = "t";
-    expect(judged([tokened, apply()])).toContain("no token input on the merge step");
+  test.each(["token", "repository"])("a merge step handed a %s input fires", (key) => {
+    const handed = merge();
+    (handed.with as Record<string, string>)[key] = "x";
+    expect(judged([handed, apply()])).toContain(`no ${key} input on the merge step`);
   });
 
   test("no merge step, or two, fires the exactly-one pin", () => {

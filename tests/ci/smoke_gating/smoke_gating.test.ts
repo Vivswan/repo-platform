@@ -282,6 +282,31 @@ if (smokeDir === undefined || smokeDir === "") {
           runChecks(assembled, row.checks(selection), hint);
         });
       }
+
+      // The rows above judge membership; the ORDER is the merge's precedence,
+      // so it is pinned here on the whole list: fleet layers first, module
+      // layers before their overlays, the tracking scratch layer (when any)
+      // right below the repo layer, the override last.
+      test("the list is ordered low to high", () => {
+        const layers = readFileSync(join(assembled, SETTINGS_LAYERS), "utf-8").trim().split("\n");
+        const at = (needle: string) => layers.findIndex((line) => line.includes(needle));
+        expect(layers[0]).toBe(".github/settings-baseline.yml");
+        expect(layers[1]).toMatch(/^\.github\/settings-(public|private)\.yml$/);
+        expect(layers.at(-1)).toBe(".github/settings-override.yml");
+        expect(layers.at(-2)).toBe(join(smokeDir, ".github/settings.yml"));
+        const tracking = at("tracking-labels.yml");
+        if (tracking !== -1) expect(tracking).toBe(layers.length - 3);
+        const moduleLayers = layers.filter((line) =>
+          /^templates\/[^/]+\/settings\.yml$/.test(line),
+        );
+        const overlays = layers.filter((line) =>
+          /^templates\/[^/]+\/settings-[a-z]+\.yml$/.test(line),
+        );
+        if (moduleLayers.length > 0 && overlays.length > 0) {
+          expect(at(moduleLayers.at(-1) ?? "")).toBeLessThan(at(overlays[0]));
+        }
+        expect(layers.slice(2, tracking === -1 ? -2 : -3)).toEqual([...moduleLayers, ...overlays]);
+      });
     });
 
     // The ownership manifest is rendered for every row and stamped by the
