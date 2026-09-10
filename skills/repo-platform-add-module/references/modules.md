@@ -1,79 +1,72 @@
-# Per-module reference: files, parameters, companion steps, removal
+# Per-module reference: files, keys, companion steps, removal
 
-The authoritative roster is the `modules` question in repo-platform's `copier.yml`; the module docs (`docs/<module>.md` where one exists) are the depth. This table is the working summary.
-
-"Managed" files keep updating on every sync; "starter" files are generated once (`_skip_if_exists`) and then repo-owned.
+The roster and every file are in repo-platform's `files.yml`; the module docs (`docs/<module>.md` where one exists) are the depth. Managed files are rewritten on every sync, starters are written once and then repo-owned, split files carry the module's block inside their managed region.
 
 ## Base (every managed repo, no module needed)
 
-Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `.github/SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape), the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker) with the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`, all pointing at AGENTS.md), `.github/instructions/review.instructions.md` (how Copilot code review words its comments: problem first, then an example, then the fix), and the `auto-assign.yml` caller. Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work, called after the gate on a push to main, before the release), `copilot-setup-steps.yml` (Copilot coding agent environment setup, prefilled with installs for the toolchains selected at generation time; adding a toolchain later does not update an existing copy), `.github/settings.yml` (the settings identity starter, below), `.gitleaks.toml`, `.github/actionlint.yaml`.
-
-Repository settings are managed for every repo with a `.repo-platform.yml`: the nightly heal assembles the repo's baseline (policy block, module labels, fleet rulesets) and merges the repo's own `.github/settings.yml` over it. That starter is rendered once and repo-owned, never deleted: the identity keys (`description`, `homepage`, `topics`, `private`, seeded from the copier answers - declared-empty clears the live value, so copy UI-set values into the file before they get healed away) plus local overrides (a same-name label replaces the fleet one wholesale, a same-name ruleset merges into it; a key set to `null` opts out of that part of the fleet defaults, except where the override layer declares it). Leaving management (revoking the fleet PAT's access to the repo, or deleting its `.repo-platform.yml`) stops the heal; `settings.yml` stays as inert documentation.
+- Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.github/instructions/review.instructions.md`, `.yamllint`, `.typography-allow`, `.github/repo-platform-manifest.json` (the record of what the platform wrote).
+- Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `.github/dependabot.yml` (the github-actions ecosystem always), `AGENTS.md`, `LICENSE.md`.
+- Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.yml` (the repo's own settings over the fleet baseline).
+- Settings are applied from repo-platform for every registered repo; the labels a module needs come with its selection.
 
 ## Toolchains: bun / node / deno / uv / rust
 
-- Managed: dependabot ecosystem entry, gitignore section, CodeQL job in ci.yml (public repos; not rust), and for bun/node/deno the toolchain version dotfile (`.bun-version` / `.node-version` / `.dvmrc`, fleet-pinned; uv and rust carry none) plus, bun only, the `dependabot-bun-lockfile.yml` lockfile fixer.
-- Starter: `auto-format.yml` prefilled per selected formatter toolchain (all but rust) - only when the file does not exist yet. The same applies to every composite starter a toolchain contributes fragments to: an existing `auto-format.yml`, `checks.yml` (example jobs), `.gitleaks.toml` (lockfile allowlists), or `copilot-setup-steps.yml` (a base starter) does NOT gain a newly added toolchain's fragment - add the toolchain's piece to the existing file by hand.
-- Companion steps:
-  - Settings labels are automatic: the fleet baseline declares `dependencies` (`0366d6`) and `github_actions` (`000000`) always, and each toolchain module's own `templates/<module>/settings.yml` layer declares its label - `javascript` (`168700`) for bun/node, `deno` (`70ffaf`), `python:uv` (`2b67c6`), `rust` (`000000`). An SSOT rule pins each of those against the manifest's `dependabot` tuple, so the two cannot drift. A NEW toolchain's layer files must also be declared in its `module.yml` under `settings_layers` - the render selects layers from that declaration, and the manifest loader refuses an undeclared or missing file.
-  - bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT (human-only). Without it the lockfile fix lands but cannot re-trigger checks; each fixed Dependabot PR then needs a close/reopen.
-- Removal: the dependabot entry, gitignore section, and CodeQL job leave - except outputs another selected toolchain still contributes: bun/node/deno share the `codeql-javascript` job, and bun and node share the Node gitignore section, so those stay while any contributor remains selected. The auto-format starter stays (edit it yourself). The toolchain label leaves the managed baseline once nothing carries it, and the next apply deletes it from the repo.
+- Managed: the version dotfile for bun/node/deno (`.bun-version`, `.node-version`, `.dvmrc`, fleet-pinned), `dependabot-bun-lockfile.yml` (bun), `deno-audit.yml` (deno). Public repos with bun/node/deno/uv get the CodeQL variant of `auto-assign.yml`; fleet CI runs CodeQL for their language.
+- Split blocks: a gitignore section, a Dependabot ecosystem entry, and a Toolchain section in `AGENTS.md`.
+- Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
+- Companion, bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT. Without it the lockfile fix lands but cannot re-trigger checks.
+- Removal: the dotfile and module workflow are retired; the blocks leave the split regions. `auto-format.yml` stays. The Dependabot label leaves the baseline once no selected toolchain carries it.
 
 ## pages
 
-- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest served `vX.Y.Z` tag (the default branch head while none serve), `/latest/` = main, one directory per served tag (`PAGES_MAX_VERSIONS` repo variable, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's `docs/pages.md`).
-- Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`, `PAGES_TIER`): repo-platform's `docs/pages.md`.
-- Companion step: the module's settings layer enables Pages on the next fleet settings apply; only a deploy before that apply needs the manual toggle (Settings -> Pages -> Source: GitHub Actions).
-- With `docs-site` also selected, the website turns unversioned at `/` and the docs mount versioned at `/<docs_site_path>/`, all in this one workflow.
-- Removal: the caller leaves the render and is deleted; the live Pages site and settings stay until you turn Pages off in the repo.
+- Managed: `pages.yml` (the nightly rebuild and the dispatch). The deploy itself is the `pages` leg of `ci.yml`, which runs on a push to main once the module is selected.
+- Keys: `pages.setup` (comma-separated toolchain tokens or `none`; default: the selected toolchains), `pages.install` and `pages.build` (default: the commands of the first `pages.setup` toolchain in roster order, not in the order typed; `pages.build` must be nonempty), `pages.dist` (default `dist`). repo-platform's `docs/pages.md` has the build contract.
+- Companion: enable Pages with Source: GitHub Actions before the first deploy.
+- With `docs-site` also selected, the site build serves the docs as a mount at `/<docs_site.path>/` and the `docs-site` leg stands down.
+- Removal: `pages.yml` is retired; the leg skips; the live site stays until you turn Pages off.
 
 ## docs-site
 
-- Managed: `docs-site.yml` - the repo's `docs/` markdown deployed as a versioned VitePress site under the CENTRAL fleet theme (the repo carries only markdown; theme and config live in repo-platform's `actions/pages-site`), plus a strict docs build check on every PR touching `docs/` (dead internal links fail there; never a required check).
-- Parameters: `docs_site_path` (URL mount when `pages` is also selected; default `docs`), `docs_site_label` (the nightly link-rot tracking stream's label; default `docs-link-rot`).
-- Conventions: `docs/README.md` is the landing page; the sidebar and the search launcher derive from the file tree, each page's `title`/`order`/`group` frontmatter, and the landing's link table; translations in `docs/<lang>/` (e.g. `zh-cn/`) become locales automatically; links must resolve inside `docs/` or be absolute URLs. Details: repo-platform's `docs/docs-site.md`.
-- Companion step: same Pages enablement as the pages module, and make sure `docs/` exists with a `README.md` index - the deploy refuses an absent docs tree.
-- Removal: the managed workflow leaves the render and is deleted; the live Pages site stays until you turn Pages off.
+- Managed: `docs-site.yml` (the PR check on `docs/` changes and the nightly link-rot run). The deploy is the `docs-site` leg of `ci.yml`.
+- Keys: `docs_site.path` (URL mount under a `pages` site; default `docs`), `docs_site.include` (extra trees rendered into the site: `{path, mount, page?}`), `labels.docs_site` (link-rot tracking label; default `docs-link-rot`).
+- Conventions: `docs/README.md` is the landing page and must exist; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute. Details: repo-platform's `docs/docs-site.md`.
+- Companion: the same Pages enablement as `pages`.
+- Removal: the workflow is retired; the leg skips; the site stays until you turn Pages off.
 
 ## release-please
 
-- Managed: nothing of its own. The pipeline (draft cut -> repo-owned update hook -> attested publish with a single `attestation.json` per release) runs in repo-platform's fleet-release workflows behind ci.yml's static `release` legs, armed by the selection at run time, and the `release-freshness` and `release-health` gate jobs run in fleet-ci.
-- Starters: `release-please-config.json`, `.release-please-manifest.json`. The `update-release.yml` and `update-release-pr.yml` hooks the legs call are base starters every repository carries.
-- Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in release-please-config.json (the pin outlives its release and re-proposes the same version; validate-template rejects it).
-- Settings labels are automatic: the module's own `templates/release-please/settings.yml` layer (declared in the manifest's `settings_layers`, like every module layer file) declares `autorelease: pending`, `autorelease: tagged`, `release-blocker` (`B60205`), `release-override` (`FBCA04`), plus the `release-tags` tag-immutability ruleset.
-- With `fuzzer` also selected, the release-health gate ties releases to fuzz health (an open fuzz tracking issue blocks cuts).
-- Removal: managed pieces leave; the starters stay (delete them yourself if the repo stops releasing this way).
+- Starters: `release-please-config.json`, `.release-please-manifest.json`. The hooks `update-release.yml` and `update-release-pr.yml` are base starters and run only when this module is selected.
+- Managed: the release variant of `.typography-allow`. The `release`, `update-release`, `publish-release`, and `update-release-pr` legs of `ci.yml` run on a push to main once selected.
+- Labels (`autorelease: pending`, `autorelease: tagged`, `release-blocker`, `release-override`) and the tag-immutability ruleset come with the settings apply.
+- Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
+- Removal: the legs skip; the starters stay.
 
 ## issue-templates
 
-- Starters only: bug/feature issue forms and the chooser config - generic on first render, then tailored by the repo.
-- Removal: the forms stay (repo-owned); delete what you no longer want.
+- No files: the account's `.github` repository serves the forms to every repo without its own. Selecting the module records the choice; removing it changes nothing in the repo.
 
 ## skills
 
-- Managed: `validate-skills.yml` (advisory CLI-discovery workflow) and a `validate-skills` structure job inside ci.yml, gating through all-green.
-- Starters: `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, seeded from the repo identity with an empty `skills` catalog. A repo adopting the module with existing manifests keeps them untouched.
-- Parameter: `skills_dir` (default `skills`) - conservative charset because the value lands in the discovery workflow's `paths` filter and the gate job's action input.
-- Companion step: each published skill must be listed in `plugin.json`'s `skills` array (`./skills/<name>`, or `./<skills_dir>/<name>`). Structure validation checks every direct child folder of the skills directory, listed or not - an invalid unlisted folder fails the gate, and a valid unlisted folder passes and silently never ships (installers and the discovery check read the manifest, not the disk).
-- Removal: both validation workflows leave; the manifests and the skills directory stay (repo-owned).
+- Managed: `validate-skills.yml` (advisory CLI discovery). Fleet CI's `validate-skills` job gates the catalog structure through all-green.
+- Starters: `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, seeded from `project.name` and `project.slug` with an empty `skills` catalog. Existing manifests are kept.
+- Key: `skills.dir` (default `skills`). Fleet CI's `validate-skills` job reads it through the plan; the managed `validate-skills.yml` is written with the default directory, so a non-default value leaves discovery watching `skills/`. Keep the default until that workflow takes the directory from the registration.
+- Companion: list each published skill in `plugin.json`'s `skills` array as `./<skills.dir>/<name>`; an unlisted folder validates and never ships. A skills tree can also become part of the docs site through `docs_site.include`.
+- Removal: `validate-skills.yml` is retired; the manifests and the skills directory stay.
 
 ## fuzzer / nightly
 
-Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds the failure-report/replay-artifact contract and release gating, `nightly` is the plain-CI stream.
-
-- Starters: `nightly-fuzz.yml` (fuzzer, cron 09:11 UTC) / `nightly.yml` (nightly, cron 06:59 UTC). Placeholder step is a green no-op until customized. The action pin inside a starter is never updated by sync (it pins `main` and floats).
-- Parameters: `fuzzer_label` (default `fuzz-nightly`) / `nightly_label` (default `nightly-failure`). The two must differ (case-insensitive) when both modules are selected - both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
-- Settings labels are automatic: the managed baseline declares the tracking label - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer, read from `.github/.copier-answers.yml` at apply time. A tracking issue stripped of its label is invisible to dedup and auto-close.
-- Renaming a label: update the recorded answer AND the starter's two `label:` inputs in the same PR (the starter is repo-owned; sync never fixes it). The managed baseline picks the renamed value up on the next apply.
-- Removal: the label leaves the managed baseline and the next apply deletes it. The starter workflow keeps running - delete it yourself, or declare its label in the repo's own `.github/settings.yml` first.
-- Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md` (failure-report contract, sharding, issue lifecycle, release gating).
+- Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.
+- Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`). The two must differ when both are selected: both streams dedup and auto-close by label.
+- A custom label goes in three places: the registration key (read by fleet CI's plan), the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it), and the repo's own `.github/settings.yml` (the settings apply does not read `labels.*`). A repo that still carries the retired `.github/.copier-answers.yml` must record the same value there under `nightly_label` / `fuzzer_label`, or the plan fails: the two must agree while both files exist.
+- Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the baseline and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.yml` first.
+- Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md`.
 
 ## pr-title
 
-- A managed `pr-title.yml` workflow whose `pr-title` check the module's settings layer requires by ruleset (the baseline carries the ruleset disabled; the module flips it active). Removal deletes the workflow and the next settings apply disables the requirement.
+- Managed: `pr-title.yml`, whose `pr-title` check the module's ruleset requires. Removal retires the workflow and the next settings apply drops the requirement.
 
 ## custom-license
 
-- Effect: the fleet LICENSE.md is not rendered; the repo's LICENSE.md is its own license, repo-owned, and the `copyright_holder` question is skipped.
-- Adding it: the existing fleet LICENSE.md file is preserved in place (not deleted) - replace its content with the repo's own license.
-- Removing it is guarded: the sync fails with instructions while the repo's own license file exists. Delete the old license in the same commit that removes the module from `.repo-platform.yml`, then re-run the sync; the fleet LICENSE.md arrives in that PR (prior licensing stays in git history; third-party notices go below the END marker).
+- Effect: `LICENSE.md` is not written; the repo's own license is repo-owned.
+- Adding it: the fleet `LICENSE.md` is retired on that sync: `deleted` when it still held only the platform's region, `held` when the repo had written outside the region. Commit the repo's own `LICENSE.md` after that PR merges.
+- Removing it: the next sync writes the fleet license region into `LICENSE.md`; a file without markers gets the region above its existing content, so delete the old text in the sync PR (third-party notices go below the END marker).

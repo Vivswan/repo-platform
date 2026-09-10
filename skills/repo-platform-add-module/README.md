@@ -1,6 +1,6 @@
 # repo-platform: Add or Remove a Module
 
-`repo-platform-add-module` is the playbook for changing a managed repository's module selection under [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform): editing the `modules:` list, setting module parameters, and finishing each module's companion steps.
+`repo-platform-add-module` is the playbook for changing a managed repository's module selection under [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform): editing the `modules:` list and the module keys in `.repo-platform.yml`, running the sync that writes the module's files, and finishing each module's companion steps.
 
 ## Install
 
@@ -10,10 +10,10 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 
 ## What It Does
 
-- Locates the selection (the repo-owned `modules:` list in `.repo-platform.yml`) and walks the add flow: edit on a branch, open the PR, dispatch the branch render that pushes the module's files onto that PR, review every changed file, merge
-- Documents the module-parameter mechanism: recorded answers in `.github/.copier-answers.yml`, edited by PR (value keys only), with the ripples a tracking-label rename has on repo-owned starters
-- Carries the per-module companion checklist: recording tracking-label answers, the bun module's Dependabot secret, pages one-time setup, listing skills in the repo-owned plugin manifest
-- Covers removal: what the sync cleans up vs what stays (starters, settings.yml), label cleanup, and the custom-license flip guard
+- Walks the add flow: edit `.repo-platform.yml` on a branch, merge (the plan job validates it), dispatch the sync with `manual=true`, check that the module diff explains every row of the sync PR's report, merge
+- Lists what each module writes (path and class, from `files.yml`) and that `ci.yml` never changes with the selection
+- Documents the module keys (`pages.*`, `docs_site.*`, `skills.dir`, `labels.*`) and the ripple a tracking-label change has on the repo-owned starters
+- Carries the per-module companion checklist and what removal retires vs leaves behind
 
 ## Plugin-Ready Layout
 
