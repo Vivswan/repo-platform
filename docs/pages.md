@@ -65,6 +65,10 @@ Examples:
 
 Selecting `docs-site` alongside `pages` renders ONE Pages workflow: the website stays at `/` but becomes UNVERSIONED (one build of the default branch head - version navigation belongs to the docs), and the docs mount at `/<docs_site_path>/` (default `docs`) with the full tag rules one level down. The docs side's conventions live in [docs-site.md](docs-site.md).
 
+## Internal links are checked across mounts
+
+Once every mount is in place, the assembled artifact is crawled as one site and every same-site link on a page built from the default branch head must resolve, wherever the target lives: a website page linking into `/<docs_site_path>/`, a docs page linking to a skill rendered from another root, a `#fragment` naming a heading that exists on the target page, an asset the build emitted. A broken one fails the deploy (and the docs PR check, which runs the same gate over its one build) with a `page -> link (reason)` list, so a 404 never ships on a green run. Pages inside version-tag tiers are valid targets but are not crawled: history cannot be fixed. External links stay the nightly link-rot check's business ([docs-site.md](docs-site.md#link-rot)).
+
 ## Custom domain
 
 Three pieces have to agree; the repo variable only flips the build side:
