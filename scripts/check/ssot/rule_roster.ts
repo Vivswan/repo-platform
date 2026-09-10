@@ -63,7 +63,7 @@ export const RULE_ROSTER = [
   "docs-constants",
   "agents-recipe",
   "owner-slug",
-  "release-freshness-parity",
+  "release-gate-predicates",
   "hidden-capture-names",
   "auto-assign-codeowners-parity",
   "actions-bun-guard",
