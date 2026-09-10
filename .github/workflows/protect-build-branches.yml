@@ -7,7 +7,7 @@
 
 name: Protect Build Branches
 
-on:
+on: # zizmor: ignore[dangerous-triggers] (the PR code is never checked out or run here)
   pull_request_target:
     # edited fires when a PR is RETARGETED onto a build branch after opening.
     types: [opened, reopened, edited]
