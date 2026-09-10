@@ -1,7 +1,10 @@
-# The sync writer's data file (loader: .github/scripts/sync/writer/files_config.ts,
-# contract: docs/sync.md). Every source lives under files/; the writer copies
-# it, splices the selected modules' block files in at its {{blocks}} line,
-# substitutes the placeholders below, and nothing else.
+# The platform's module data file (grammar: actions/plan/files_config.ts;
+# the writer's tree checks: .github/scripts/sync/writer/files_config.ts;
+# contract: docs/sync.md). The fleet plan reads the modules block (its key
+# order is the canonical module order) for each repository's defaults. Every
+# source lives under files/; the writer copies it, splices the selected
+# modules' block files in at its {{blocks}} line, substitutes the
+# placeholders below, and nothing else.
 
 placeholders:
   - project_name
@@ -73,6 +76,7 @@ modules:
   docs-site:
     description: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
     settings_layers: [settings.yml]
+    path: docs
     tracking_label: {key: docs_site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}
   release-please:
     description: release-please releases through the fleet's release pipeline, plus autorelease labels

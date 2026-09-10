@@ -11,9 +11,9 @@
 
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type { RetiredEntry } from "../../../../actions/plan/files_config.ts";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { capture } from "../../shared/proc.ts";
-import type { RetiredEntry } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
 import { insideTarget, probe, removeFile, writeFile } from "./target_files.ts";
 

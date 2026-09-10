@@ -2,7 +2,7 @@
 // and as a JSON summary for the operator. `hold` is decided here alone,
 // from the rows, so no writer can forget to raise it.
 
-import type { FileClass } from "./files_config.ts";
+import type { FileClass } from "../../../../actions/plan/files_config.ts";
 import type { MirrorRow } from "./mirrors.ts";
 import type { RetireRow } from "./retire.ts";
 import type { Change } from "./write_managed.ts";

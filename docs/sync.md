@@ -9,7 +9,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 
 | Question | Owner |
 | --- | --- |
-| What does `files.yml` look like, and what does the loader refuse? | [sync/writer/files_config.ts](../.github/scripts/sync/writer/files_config.ts) |
+| What does `files.yml` look like, and what does the loader refuse? | [actions/plan/files_config.ts](../actions/plan/files_config.ts), the grammar every reader shares (the writer, the fleet plan, the checks); the writer's own checks against the `files/` tree and the placeholder defaults are in [sync/writer/files_config.ts](../.github/scripts/sync/writer/files_config.ts) |
 | Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
 | Which entries apply to one repository? | [sync/writer/select.ts](../.github/scripts/sync/writer/select.ts) |
@@ -66,7 +66,7 @@ retired:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data. Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
+| `modules.<name>` | A module and its data, the keys in canonical module order: the same names as the module manifests, in the same order (the `files-modules` ssot rule). Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
@@ -124,14 +124,15 @@ The three links carry no `when`: every repository gets them.
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
 | `pin` | `{file, version}` of the toolchain's version dotfile; equal to the manifest's `toolchain.pin` (the `files-pins` ssot rule) and bumped with it by the toolchain refresh | the toolchain refresh |
-| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others; equal to the manifest's `pages` (the `files-pages` ssot rule) | the registration cutover's derived pages defaults |
+| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others; equal to the manifest's `pages` (the `files-pages` ssot rule) | the fleet plan and the registration cutover |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
-| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder falls back to when the registration sets no `skills.dir` | the writer |
-| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist`; equal to copier.yml's `pages_dist_dir` default (the `files-pages` ssot rule) | the registration cutover's derived pages defaults |
+| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder and the plan's `skills-dir` output fall back to when the registration sets no `skills.dir`; equal to copier.yml's `skills_dir` default (the `files-defaults` ssot rule) | the writer and the fleet plan |
+| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist`; equal to copier.yml's `pages_dist_dir` default (the `files-defaults` ssot rule) | the fleet plan and the registration cutover |
+| `path` | the `docs-site` module only: the URL segment the docs mount under when the `pages` module also renders a website, unless the registration sets `docs_site.path`; equal to copier.yml's `docs_site_path` default (the `files-defaults` ssot rule) | the fleet plan and the registration cutover |
 | `settings_layers` | the settings layer files the module contributes | the settings apply |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder | the fleet plan, the settings baseline, and the writer |
 

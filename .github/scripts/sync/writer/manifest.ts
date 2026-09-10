@@ -6,6 +6,7 @@
 // its `commit` slot and no hash (a self-hash would be circular).
 
 import { createHash } from "node:crypto";
+import type { RegionKind } from "../../../../actions/plan/files_config.ts";
 import {
   type AssertNever,
   HASH_REGION_MARKERS,
@@ -20,7 +21,6 @@ import {
   parseManifestFiles,
   type RecordedClass,
 } from "../../../../actions/shared/manifest.ts";
-import type { RegionKind } from "./files_config.ts";
 import { existingFile, writeFile } from "./target_files.ts";
 
 export { MANIFEST_NAME };

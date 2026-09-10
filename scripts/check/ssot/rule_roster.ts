@@ -22,6 +22,7 @@ export interface Rule {
  *  removing its entry in the same change, deliberately. */
 export const RULE_ROSTER = [
   "module-list",
+  "files-modules",
   "dogfood-oracle-row",
   "bun-dirs",
   "action-pins",
@@ -34,6 +35,7 @@ export const RULE_ROSTER = [
   "toolchain-version-files",
   "files-pins",
   "files-pages",
+  "files-defaults",
   "local-gates",
   "dogfood-parity",
   "gitattributes-region",

@@ -7,6 +7,7 @@ import {
   escapeRegExp,
   firstDiff,
   mustMatch,
+  orderedListMismatches,
   semanticLines,
   setMismatch,
   stripGeneratedRegions,
@@ -82,6 +83,25 @@ describe("setMismatch", () => {
   test("reports both sides sorted on a difference", () => {
     const [mismatch] = setMismatch("f", ["a", "b"], ["a", "c"]);
     expect(mismatch).toEqual({ file: "f", expected: "a, b", got: "a, c" });
+  });
+});
+
+describe("orderedListMismatches", () => {
+  test("the same names in the same order pass", () => {
+    expect(orderedListMismatches("f", ["bun", "uv", "pages"], ["bun", "uv", "pages"])).toEqual([]);
+  });
+
+  test("a missing name and an extra name are each reported by name", () => {
+    expect(orderedListMismatches("f", ["bun", "uv", "nightly"], ["bun", "agents", "uv"])).toEqual([
+      { file: "f", expected: "'nightly' listed", got: "missing" },
+      { file: "f", expected: "no 'agents'", got: "listed" },
+    ]);
+  });
+
+  test("the same names out of order report the sequence", () => {
+    expect(orderedListMismatches("f", ["bun", "uv", "pages"], ["uv", "bun", "pages"])).toEqual([
+      { file: "f", expected: "the order bun, uv, pages", got: "uv, bun, pages" },
+    ]);
   });
 });
 

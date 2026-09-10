@@ -22,7 +22,6 @@ import {
   FILES_DIR,
   FLEET_WORKFLOWS,
   MIGRATIONS_SRC_REL,
-  MODULE_DATA_DIR,
   parseArgs,
   RESERVED_LABELS_FILE,
   SHARED_DIR,
@@ -276,7 +275,6 @@ describe("assembleBranchTree", () => {
       "files",
       "files.yml",
       "migrations",
-      "modules",
       "reserved-labels.yml",
       "template",
     ]);
@@ -316,28 +314,11 @@ describe("assembleBranchTree", () => {
     }
   });
 
-  test("modules/ is every module manifest, byte for byte, under its module name", () => {
-    // The plan action reads these at run time beside itself on the branch:
-    // a missing or altered manifest would plan every fleet run wrongly.
-    const templates = join(REPO_ROOT, "templates");
-    const moduleDirs = readdirSync(templates, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "base")
-      .map((entry) => entry.name)
-      .sort();
-    expect(moduleDirs.length).toBeGreaterThan(0);
-    expect(readdirSync(join(dest, MODULE_DATA_DIR)).sort()).toEqual(
-      moduleDirs.map((name) => `${name}.yml`),
-    );
-    for (const name of moduleDirs) {
-      expect(readFileSync(join(dest, MODULE_DATA_DIR, `${name}.yml`))).toEqual(
-        readFileSync(join(templates, name, "module.yml")),
-      );
-    }
-  });
-
   test("files.yml and files/ are the sync writer's data, byte for byte", () => {
-    // The operator reads both from the build commit it syncs: a missing or
-    // altered source would write the wrong bytes into every managed repo.
+    // The operator reads both from the build commit it syncs, and the plan
+    // action reads files.yml beside itself: a missing or altered source
+    // would write the wrong bytes into every managed repo or plan every
+    // fleet run wrongly.
     expect(readFileSync(join(dest, FILES_CONFIG))).toEqual(
       readFileSync(join(REPO_ROOT, FILES_CONFIG)),
     );

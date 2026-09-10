@@ -3,9 +3,9 @@ description: >-
   Resolves one managed repository's fleet configuration at run time, so
   every managed ci.yml can be byte-identical: reads the repository's
   registration (.repo-platform.yml) with its recorded copier answers as the
-  fallback, checks it against the template's module data shipped beside
-  this action on the build branch (modules/<name>.yml, copier.yml's module
-  order), and publishes the result as step outputs. Mode default resolves
+  fallback, checks it against the module data shipped beside this action
+  on the build branch (files.yml, whose modules block is the vocabulary in
+  canonical order), and publishes the result as step outputs. Mode default resolves
   what fleet-ci.yml's jobs key on (the module selection in canonical order,
   the visibility, the skills directory, the CodeQL languages, the tracking
   labels); mode pages resolves the deploy configuration reusable-pages.yml
@@ -127,8 +127,8 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
 
-    # The module data, the reserved label roster, and copier.yml sit at the
-    # build branch root, two levels above this action's directory.
+    # files.yml and the reserved label roster sit at the build branch root,
+    # two levels above this action's directory.
     - name: Resolve the plan
       id: plan
       shell: bash
@@ -136,8 +136,7 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         MODE: ${{ inputs.mode }}
         PRIVATE: ${{ inputs.private }}
-        MODULES_DIR: ${{ github.action_path }}/../../modules
-        COPIER_FILE: ${{ github.action_path }}/../../copier.yml
+        FILES_CONFIG: ${{ github.action_path }}/../../files.yml
         RESERVED_LABELS_FILE: ${{ github.action_path }}/../../reserved-labels.yml
         CALLER_MOUNTS: ${{ inputs.mounts }}
         CALLER_SETUP: ${{ inputs.setup }}

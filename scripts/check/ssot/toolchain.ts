@@ -1,7 +1,8 @@
 // Rules pinning the bun toolchain: package homes and lockfiles, the
 // @types/bun coupling, version-file setup steps, the composite actions' bun
 // guard, the local runtime, dependabot's action directories, and files.yml's
-// copy of every toolchain pin and of the pages defaults.
+// copy of every toolchain pin, of the pages defaults, and of the defaults
+// copier.yml still answers for.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,12 @@ import {
   EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
   EXCLUDED_DIRS,
 } from "../../../.github/scripts/build-branches/branch_tree.ts";
-import { parseFilesConfig } from "../../../.github/scripts/sync/writer/files_config.ts";
+import { type ModuleData, parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import {
+  type DefaultSource,
+  type PlanDefaults,
+  REQUIRED_DEFAULTS,
+} from "../../../actions/plan/plan.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
@@ -539,30 +545,55 @@ export function filesModuleDataMismatches(
   return mismatches;
 }
 
-/** files.yml's `modules.pages.dist` against copier.yml's `pages_dist_dir`
- *  default: the build output directory the cutover treats as the one a
- *  repository did not choose. */
-export function filesDistMismatches(
-  distDefault: string,
-  filesModules: Record<string, Record<string, unknown>>,
+/** The copier question each default the plan reads still answers for, by
+ *  PlanDefaults key: the plan and the registration cutover read files.yml,
+ *  copier's question keeps the recorded answers' default, and the two must
+ *  agree until the question goes. Keyed on the plan's own type, so a
+ *  default the plan gains without a question here fails to typecheck. */
+export const COPIER_QUESTIONS: Readonly<Record<keyof PlanDefaults, string>> = {
+  skillsDir: "skills_dir",
+  pagesDist: "pages_dist_dir",
+  docsPath: "docs_site_path",
+};
+
+/** A files.yml module-data default the plan reads, with the copier
+ *  question it mirrors. */
+export interface CopierBackedDefault extends DefaultSource {
+  question: string;
+}
+
+/** The plan's required defaults, each with its copier question. */
+export const COPIER_BACKED_DEFAULTS: readonly CopierBackedDefault[] = (
+  Object.keys(COPIER_QUESTIONS) as (keyof PlanDefaults)[]
+).map((name) => ({ ...REQUIRED_DEFAULTS[name], question: COPIER_QUESTIONS[name] }));
+
+/** files.yml's copy of one copier-backed default against the question's
+ *  default. */
+export function filesDefaultMismatches(
+  backed: CopierBackedDefault,
+  copierDefault: string,
+  filesModules: Record<string, ModuleData>,
 ): Mismatch[] {
-  const dist = filesModules.pages?.dist;
-  if (dist === distDefault) return [];
+  const module = filesModules[backed.module];
+  const declared = module === undefined ? undefined : backed.pick(module);
+  if (declared === copierDefault) return [];
   return [
     {
-      file: "files.yml modules.pages.dist",
-      expected: `${canonical(distDefault)} (copier.yml's pages_dist_dir default)`,
-      got: dist === undefined ? "no dist" : canonical(dist),
+      file: `files.yml modules.${backed.module}.${backed.key}`,
+      expected: `${canonical(copierDefault)} (copier.yml's ${backed.question} default)`,
+      got: declared === undefined ? `no ${backed.key}` : canonical(declared),
     },
   ];
 }
 
-/** copier.yml's `pages_dist_dir` default, the build output directory a
- *  pages repository publishes unless its registration names another. */
-export function copierDistDefault(copier: Record<string, unknown> = copierConfig()): string {
-  const value = asRecord(copier.pages_dist_dir, "copier.yml pages_dist_dir").default;
+/** One copier question's non-empty string default. */
+export function copierDefault(
+  question: string,
+  copier: Record<string, unknown> = copierConfig(),
+): string {
+  const value = asRecord(copier[question], `copier.yml ${question}`).default;
   if (typeof value !== "string" || value === "") {
-    throw new Error("copier.yml: pages_dist_dir has no string default");
+    throw new Error(`copier.yml: ${question} has no string default`);
   }
   return value;
 }
@@ -583,17 +614,21 @@ export const toolchainRules: Rule[] = [
   },
   {
     name: "files-pages",
+    run: () =>
+      filesModuleDataMismatches(
+        "pages",
+        "pages",
+        loadManifests().flatMap((m) => (m.pages ? [{ module: m.module, value: m.pages }] : [])),
+        parseFilesConfig(read("files.yml")).modules,
+      ),
+  },
+  {
+    name: "files-defaults",
     run: () => {
       const modules = parseFilesConfig(read("files.yml")).modules;
-      return [
-        ...filesModuleDataMismatches(
-          "pages",
-          "pages",
-          loadManifests().flatMap((m) => (m.pages ? [{ module: m.module, value: m.pages }] : [])),
-          modules,
-        ),
-        ...filesDistMismatches(copierDistDefault(), modules),
-      ];
+      return COPIER_BACKED_DEFAULTS.flatMap((backed) =>
+        filesDefaultMismatches(backed, copierDefault(backed.question), modules),
+      );
     },
   },
   {

@@ -8,11 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  type FileEntry,
-  parseFilesConfig,
-  type When,
-} from "../.github/scripts/sync/writer/files_config.ts";
+import { type FileEntry, parseFilesConfig, type When } from "../actions/plan/files_config.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 export const BEGIN =
