@@ -25,6 +25,7 @@ modules:
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
+    pages: {install: bun install --frozen-lockfile, build: bun run build}
   node:
     description: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
     codeql_language: javascript-typescript
@@ -35,6 +36,7 @@ modules:
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
+    pages: {install: npm ci, build: npm run build}
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
     codeql_language: javascript-typescript
@@ -45,6 +47,7 @@ modules:
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
+    pages: {install: deno ci, build: deno task build}
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
     codeql_language: python
@@ -54,6 +57,7 @@ modules:
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
     settings_layers: [settings.yml, settings-public.yml]
+    pages: {install: uv sync, build: uv run mkdocs build --site-dir dist}
   rust:
     description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
     dependabot_ecosystems: [cargo]
@@ -61,9 +65,11 @@ modules:
     gitignore_sources: [Rust]
     agents_toolchain: [toolchain]
     settings_layers: [settings.yml]
+    pages: {install: cargo +stable install mdbook --locked, build: mdbook build -d dist}
   pages:
     description: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
     settings_layers: [settings.yml]
+    dist: dist
   docs-site:
     description: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
     settings_layers: [settings.yml]

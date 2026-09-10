@@ -1,7 +1,7 @@
 // Rules pinning the bun toolchain: package homes and lockfiles, the
 // @types/bun coupling, version-file setup steps, the composite actions' bun
 // guard, the local runtime, dependabot's action directories, and files.yml's
-// copy of every toolchain pin.
+// copy of every toolchain pin and of the pages defaults.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -25,6 +25,7 @@ import { DELIVERY_REF } from "./delivery_pins.ts";
 import {
   asRecord,
   ciJobs,
+  copierConfig,
   jinjaVars,
   loadManifests,
   packageScripts,
@@ -496,37 +497,74 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   return mismatches;
 }
 
-/** files.yml's `modules.<m>.pin` against the manifests' toolchain pins,
- *  both directions: the manifest is the source until the cutover and the
- *  refresh bumps both, so a pin present, absent, or different on one side
- *  is a stale copy the fleet would read. */
-export function filesPinMismatches(
-  manifestPins: { module: string; file: string; version: string }[],
+/** One manifest's value for a module-data key files.yml copies. */
+export interface ManifestValue {
+  module: string;
+  value: unknown;
+}
+
+/** files.yml's `modules.<m>.<key>` against the manifests' `<twin>` values,
+ *  both directions: the manifest is the source until the cutover, so a
+ *  value present, absent, or different on one side is a stale copy the
+ *  fleet would read (a pin the refresh bumped on one side only; pages
+ *  defaults the cutover would then write into every registration as if
+ *  the repository had chosen them). */
+export function filesModuleDataMismatches(
+  key: string,
+  twin: string,
+  manifestValues: ManifestValue[],
   filesModules: Record<string, Record<string, unknown>>,
 ): Mismatch[] {
   const mismatches: Mismatch[] = [];
-  for (const pin of manifestPins) {
-    const declared = filesModules[pin.module]?.pin;
-    const expected = { file: pin.file, version: pin.version };
-    if (canonical(declared) !== canonical(expected)) {
+  for (const { module, value } of manifestValues) {
+    const declared = filesModules[module]?.[key];
+    if (canonical(declared) !== canonical(value)) {
       mismatches.push({
-        file: `files.yml modules.${pin.module}.pin`,
-        expected: `${canonical(expected)} (templates/${pin.module}/module.yml's toolchain.pin)`,
-        got: declared === undefined ? "no pin" : canonical(declared),
+        file: `files.yml modules.${module}.${key}`,
+        expected: `${canonical(value)} (templates/${module}/module.yml's ${twin})`,
+        got: declared === undefined ? `no ${key}` : canonical(declared),
       });
     }
   }
-  const pinned = new Set(manifestPins.map((pin) => pin.module));
+  const declaring = new Set(manifestValues.map(({ module }) => module));
   for (const [module, data] of Object.entries(filesModules)) {
-    if (data.pin !== undefined && !pinned.has(module)) {
+    if (data[key] !== undefined && !declaring.has(module)) {
       mismatches.push({
-        file: `files.yml modules.${module}.pin`,
-        expected: `no pin (templates/${module}/module.yml declares no toolchain.pin)`,
-        got: canonical(data.pin),
+        file: `files.yml modules.${module}.${key}`,
+        expected: `no ${key} (templates/${module}/module.yml declares no ${twin})`,
+        got: canonical(data[key]),
       });
     }
   }
   return mismatches;
+}
+
+/** files.yml's `modules.pages.dist` against copier.yml's `pages_dist_dir`
+ *  default: the build output directory the cutover treats as the one a
+ *  repository did not choose. */
+export function filesDistMismatches(
+  distDefault: string,
+  filesModules: Record<string, Record<string, unknown>>,
+): Mismatch[] {
+  const dist = filesModules.pages?.dist;
+  if (dist === distDefault) return [];
+  return [
+    {
+      file: "files.yml modules.pages.dist",
+      expected: `${canonical(distDefault)} (copier.yml's pages_dist_dir default)`,
+      got: dist === undefined ? "no dist" : canonical(dist),
+    },
+  ];
+}
+
+/** copier.yml's `pages_dist_dir` default, the build output directory a
+ *  pages repository publishes unless its registration names another. */
+export function copierDistDefault(copier: Record<string, unknown> = copierConfig()): string {
+  const value = asRecord(copier.pages_dist_dir, "copier.yml pages_dist_dir").default;
+  if (typeof value !== "string" || value === "") {
+    throw new Error("copier.yml: pages_dist_dir has no string default");
+  }
+  return value;
 }
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
@@ -534,12 +572,29 @@ export const toolchainRules: Rule[] = [
   {
     name: "files-pins",
     run: () =>
-      filesPinMismatches(
+      filesModuleDataMismatches(
+        "pin",
+        "toolchain.pin",
         loadManifests().flatMap((m) =>
-          m.toolchain?.pin ? [{ module: m.module, ...m.toolchain.pin }] : [],
+          m.toolchain?.pin ? [{ module: m.module, value: m.toolchain.pin }] : [],
         ),
         parseFilesConfig(read("files.yml")).modules,
       ),
+  },
+  {
+    name: "files-pages",
+    run: () => {
+      const modules = parseFilesConfig(read("files.yml")).modules;
+      return [
+        ...filesModuleDataMismatches(
+          "pages",
+          "pages",
+          loadManifests().flatMap((m) => (m.pages ? [{ module: m.module, value: m.pages }] : [])),
+          modules,
+        ),
+        ...filesDistMismatches(copierDistDefault(), modules),
+      ];
+    },
   },
   {
     // Lockfiles come from the bootstrap's recursive walk, the other homes

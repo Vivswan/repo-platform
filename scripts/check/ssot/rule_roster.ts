@@ -33,6 +33,7 @@ export const RULE_ROSTER = [
   "bun-types-pin",
   "toolchain-version-files",
   "files-pins",
+  "files-pages",
   "local-gates",
   "dogfood-parity",
   "gitattributes-region",

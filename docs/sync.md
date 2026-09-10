@@ -124,12 +124,14 @@ The three links carry no `when`: every repository gets them.
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
 | `pin` | `{file, version}` of the toolchain's version dotfile; equal to the manifest's `toolchain.pin` (the `files-pins` ssot rule) and bumped with it by the toolchain refresh | the toolchain refresh |
+| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others; equal to the manifest's `pages` (the `files-pages` ssot rule) | the registration cutover's derived pages defaults |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder falls back to when the registration sets no `skills.dir` | the writer |
+| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist`; equal to copier.yml's `pages_dist_dir` default (the `files-pages` ssot rule) | the registration cutover's derived pages defaults |
 | `settings_layers` | the settings layer files the module contributes | the settings apply |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder | the fleet plan, the settings baseline, and the writer |
 
