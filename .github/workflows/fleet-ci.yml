@@ -9,7 +9,11 @@
 # the design). Job names are non-gating and nothing here may be
 # name-addressed. Action refs must stay fully qualified @build: a `./`
 # ACTION path resolves against the CALLER's checkout (a `./` WORKFLOW ref
-# resolves against this repository).
+# resolves against this repository). Every job-level permission here must
+# fit the skeleton ci.yml's `ci` caller grant: GitHub checks a nested job's
+# grant against the caller's before its `if` runs, so a job needing more
+# (the nightly scan's issues: write) lives in fleet-nightly.yml behind its
+# own caller (the fleet-caller-ceilings rule pins both).
 
 name: Fleet CI
 
@@ -87,7 +91,8 @@ jobs:
   # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
   # behind the build branch) only informs. The action DEFERS the integrity
   # step so the findings comment is posted before the gate goes red. The
-  # nightly schedule carries only the jobs that ask for it.
+  # nightly schedule carries only the jobs that ask for it; the nightly
+  # scan itself rides fleet-nightly.yml.
   validate-template:
     needs: [plan]
     if: github.event_name != 'schedule'
@@ -311,57 +316,3 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: Vivswan/repo-platform/actions/trivy@build
-
-  # The nightly half: every severity, never red. The findings become the
-  # one security-nightly tracking issue (release-health blocks while it is
-  # open), closed on a clean night; the SARIF reaches code scanning where
-  # the repository is public (personal-account code scanning is public-only).
-  trivy-nightly:
-    needs: [plan]
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      issues: write
-      security-events: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/trivy@build
-        id: scan
-        with:
-          mode: nightly
-      - name: Upload the findings report
-        if: steps.scan.outputs.found == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: trivy-findings-${{ github.run_attempt }}
-          path: ${{ steps.scan.outputs.report-dir }}
-          if-no-files-found: ignore
-      - name: File or update the security issue
-        if: steps.scan.outputs.found == 'true'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
-        with:
-          mode: report
-          label: security-nightly
-          title: Nightly security scan findings
-          artifacts-dir: ${{ steps.scan.outputs.report-dir }}
-          artifact-name: trivy-findings-${{ github.run_attempt }}
-          # The stream's create tuple, anchored to the settings baseline's
-          # label by check_ssot's labels rule.
-          label-color: "1d76db"
-          label-description: Automated nightly security scan findings
-          stream: generic
-      - name: Close the security issue on a clean night
-        if: steps.scan.outputs.found == 'false'
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
-        with:
-          mode: resolve
-          label: security-nightly
-          stream: generic
-      - name: Upload the SARIF to code scanning
-        if: needs.plan.outputs.private == 'false'
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: trivy

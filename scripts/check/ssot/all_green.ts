@@ -394,8 +394,83 @@ export const FLEET_CI_ROSTER = [
   "release-freshness",
   "release-health",
   "trivy",
-  "trivy-nightly",
 ];
+
+/** Every job in fleet-nightly.yml, by job id: the schedule-only leg the
+ *  skeleton's `nightly` caller runs (fleet-ci's schedule jobs stand down
+ *  there). Not a gate - nothing here feeds all-green - but a job deleted
+ *  here stops the fleet's nightly scan with no per-repo diff. */
+export const FLEET_NIGHTLY_ROSTER = ["plan", "trivy-nightly"];
+
+/** The rendered skeleton every fleet repository runs, byte-identical across
+ *  selections (the smoke matrix proves it against this golden), so its
+ *  caller jobs' grants are the ceilings the called workflows live under. */
+export const SKELETON_RENDER = "tests/golden-renders/minimal/.github/workflows/ci.yml";
+
+/** Each fleet-facing called workflow and the skeleton job that calls it:
+ *  the caller job's permissions are the ceiling every job of the called
+ *  workflow must fit. */
+export const FLEET_CALLERS: Record<string, string> = {
+  ".github/workflows/fleet-ci.yml": "ci",
+  ".github/workflows/fleet-nightly.yml": "nightly",
+};
+
+const PERMISSION_RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
+
+/** A called workflow's job grants against its caller job's grant, judged on
+ *  the parsed documents (exported for the forcing tests). GitHub checks
+ *  every nested job's permissions against the caller's when the call is
+ *  EXPANDED, before any nested `if` runs, so one scope over the ceiling
+ *  fails every caller's run at once - a skipped job included. A job
+ *  without its own block inherits the called workflow's top-level block
+ *  (none: the caller's, which fits by definition); a scope the caller
+ *  omits is `none` there. Shorthand grants (read-all, write-all) on either
+ *  side are refused: the ceiling must be spelled out per scope. */
+export function callerCeilingMismatches(
+  called: { rel: string; text: string },
+  caller: { rel: string; job: string; permissions: unknown },
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const site = `${caller.rel} job '${caller.job}'`;
+  if (typeof caller.permissions !== "object" || caller.permissions === null) {
+    return [
+      {
+        file: site,
+        expected: `a permissions mapping spelled out per scope (the ceiling for every ${called.rel} job)`,
+        got: caller.permissions === undefined ? "no permissions block" : String(caller.permissions),
+      },
+    ];
+  }
+  const ceiling = caller.permissions as Record<string, unknown>;
+  const doc = asRecord(parseYaml(called.text), called.rel);
+  const jobs = ciJobs(doc, called.rel);
+  for (const [name, raw] of Object.entries(jobs)) {
+    const job = asRecord(raw ?? {}, name);
+    const grant = job.permissions ?? doc.permissions;
+    if (grant === undefined) continue;
+    if (typeof grant !== "object" || grant === null) {
+      mismatches.push({
+        file: `${called.rel} job '${name}'`,
+        expected:
+          "a permissions mapping spelled out per scope (a shorthand grant cannot be judged against the caller's ceiling)",
+        got: String(grant),
+      });
+      continue;
+    }
+    for (const [scope, level] of Object.entries(grant as Record<string, unknown>)) {
+      const allowed = String(ceiling[scope] ?? "none");
+      const wanted = String(level);
+      if ((PERMISSION_RANK[wanted] ?? Infinity) > (PERMISSION_RANK[allowed] ?? -1)) {
+        mismatches.push({
+          file: `${called.rel} job '${name}'`,
+          expected: `${scope}: at most ${allowed} (${site} grants that; GitHub rejects the whole call when a nested job asks for more, before its if: runs)`,
+          got: `${scope}: ${wanted}`,
+        });
+      }
+    }
+  }
+  return mismatches;
+}
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const allGreenRules: Rule[] = [
@@ -569,6 +644,40 @@ export const allGreenRules: Rule[] = [
         }
       }
       return mismatches;
+    },
+  },
+  {
+    // fleet-nightly.yml's jobs against FLEET_NIGHTLY_ROSTER, both directions:
+    // the split-off nightly leg has no caller result anyone judges, so a
+    // deleted job there would go quiet fleet-wide.
+    name: "fleet-nightly-roster",
+    run: () => {
+      const rel = ".github/workflows/fleet-nightly.yml";
+      const jobs = ciJobs(asRecord(parseYaml(read(rel)), rel), rel);
+      return rosterMismatches(FLEET_NIGHTLY_ROSTER, Object.keys(jobs), {
+        jobsFile: rel,
+        rosterName: "FLEET_NIGHTLY_ROSTER",
+      });
+    },
+  },
+  {
+    // Every called workflow's job grants under its skeleton caller's:
+    // one scope over the ceiling fails every fleet run at expansion, so
+    // the check runs here, before the build branch ships the edit.
+    name: "fleet-caller-ceilings",
+    run: () => {
+      const skeleton = asRecord(parseYaml(read(SKELETON_RENDER)), SKELETON_RENDER);
+      const callers = ciJobs(skeleton, SKELETON_RENDER);
+      return Object.entries(FLEET_CALLERS).flatMap(([rel, job]) =>
+        callerCeilingMismatches(
+          { rel, text: read(rel) },
+          {
+            rel: SKELETON_RENDER,
+            job,
+            permissions: asRecord(callers[job], `${SKELETON_RENDER} job '${job}'`).permissions,
+          },
+        ),
+      );
     },
   },
   {
