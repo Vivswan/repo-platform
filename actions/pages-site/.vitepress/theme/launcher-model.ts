@@ -8,11 +8,14 @@ import { dirTitle } from "../dir-title.ts";
 /** One row of the landing page's "I want to..." table, emitted by the
  *  landing-table markdown rule: the href is what VitePress's link rule left
  *  in the rendered page (`./new-repo.html#anchor`, `/base/abs.html`, or an
- *  external URL), resolved here against the landing URL. */
+ *  external URL), resolved here against the landing URL. `target` is the
+ *  link's target attribute where the rewrite rule set one (a public/
+ *  asset, which VitePress's router must not take as a page). */
 export interface CuratedRow {
   label: string;
   href: string;
   note: string | null;
+  target?: string;
 }
 
 export interface PageHeader {
@@ -38,6 +41,8 @@ export interface LauncherItem {
   href: string;
   note: string | null;
   source: "curated" | "page" | "heading";
+  /** The anchor's target attribute, carried from the curated row. */
+  target?: string;
 }
 
 export interface LauncherGroup {
@@ -183,10 +188,19 @@ export function buildGroups(
 
   for (const row of curated) {
     const resolved = resolveHref(row.href, landingUrl);
-    const page = resolved.key === null ? undefined : byKey.get(resolved.key);
+    // A row with a target is a public/ asset the rewrite rule made final:
+    // a page of the same stem (public/LICENSE beside LICENSE.md) is not it.
+    const page =
+      resolved.key === null || row.target !== undefined ? undefined : byKey.get(resolved.key);
     const href = page ? `${navigable(page.url)}${resolved.suffix}` : resolved.href;
     const target = page ? group(page.url, page.title, "page") : group(href, row.label, "page");
-    add(target, { label: row.label, href, note: row.note, source: "curated" });
+    add(target, {
+      label: row.label,
+      href,
+      note: row.note,
+      source: "curated",
+      ...(row.target === undefined ? {} : { target: row.target }),
+    });
   }
 
   const headings = (target: LauncherGroup, page: PageIndexEntry): void => {

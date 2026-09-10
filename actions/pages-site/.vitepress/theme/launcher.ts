@@ -284,8 +284,10 @@ export default defineComponent({
           ...shared,
           tabindex: "-1",
           href: item.href,
+          ...(item.target === undefined ? {} : { target: item.target }),
           // VitePress's own capturing click handler routes internal
-          // links; this only lets the dialog go once the link is taken.
+          // links (a link with a target is left to the browser); this only
+          // lets the dialog go once the link is taken.
           onClick: (event: MouseEvent) => {
             if (plainClick(event)) emit("close");
           },

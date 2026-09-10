@@ -57,6 +57,12 @@ const CURATED: CuratedRow[] = [
   { label: "Read the alpha limits", href: "./api/alpha.md#limits", note: null },
 ];
 
+const CURATED_TARGET: CuratedRow[] = [
+  { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
+  { label: "Raw", href: "/repo/new-repo", note: null, target: "_self" },
+  { label: "New", href: "./new-repo.html", note: null },
+];
+
 const ROOT_GROUPS: LauncherGroup[] = [
   {
     key: "/repo/new-repo.html",
@@ -593,5 +599,31 @@ describe("buildPageIndex", () => {
       { title: () => "", headers: () => [] },
     ).map((entry) => entry.url);
     expect(urls).toEqual(["/", "/all-green", "/api/overview"]);
+  });
+});
+
+describe("buildGroups row targets", () => {
+  test("a curated row's target is carried onto its item and onto nothing else, and its href is never a page's", () => {
+    const groups = buildGroups(CURATED_TARGET, PAGES, "root");
+    const items = groups.flatMap((group) => group.items);
+    expect(items.find((item) => item.href === "/repo/manual/")).toEqual({
+      label: "Manual",
+      href: "/repo/manual/",
+      note: null,
+      source: "curated",
+      target: "_self",
+    });
+    // public/new-repo beside new-repo.md: the asset keeps its own href and
+    // group, while the page link joins the page.
+    expect(groups.find((group) => group.key === "/repo/new-repo")?.items).toEqual([
+      { label: "Raw", href: "/repo/new-repo", note: null, source: "curated", target: "_self" },
+    ]);
+    expect(groups.find((group) => group.key === "/repo/new-repo.html")?.items[0]).toEqual({
+      label: "New",
+      href: "/repo/new-repo.html",
+      note: null,
+      source: "curated",
+    });
+    expect(items.filter((item) => "target" in item)).toHaveLength(2);
   });
 });

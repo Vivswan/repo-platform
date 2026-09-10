@@ -6,7 +6,8 @@
 //
 // Entry modes (env, set by action.yml): CHECK=true builds the caller's docs
 // tree once, strictly (dead internal links fatal), and emits no artifact;
-// otherwise MOUNTS drives a full _site layout and the site-dir output.
+// otherwise MOUNTS drives a full _site layout and the site-dir output. Both
+// end in the internal-link gate (site_links.ts) over what they built.
 // Both need a committed git checkout at GITHUB_WORKSPACE: each tier's
 // project facts and commit are read from the ref's tree with git, never
 // from the working files.
@@ -27,14 +28,16 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { collectFacts } from "./facts.ts";
 import {
   assemblyOrder,
+  type IncludeRoot,
   judgeCommandTag,
   type Mount,
   mountRel,
@@ -44,11 +47,13 @@ import {
   reservedRootEntries,
   type Tier,
   urlBase,
+  type VitepressMount,
   validateRelPath,
   versionLinks,
   versionsIndex,
   versionTags,
 } from "./lib.ts";
+import { checkSiteLinks, type TierScope } from "./site_links.ts";
 
 const ACTION_DIR = import.meta.dir;
 
@@ -177,7 +182,10 @@ interface Config {
   serverUrl: string;
   origin: string;
   rootBase: string;
-  editPattern: string;
+  /** The repository's edit URL up to the repo root; a page's edit link
+   *  appends its own source path (an include root's page edits at that
+   *  root, not under the docs directory). */
+  editBase: string;
   defaultBranch: string;
 }
 
@@ -218,7 +226,7 @@ function readConfig(): Config {
     origin,
     rootBase,
     defaultBranch,
-    editPattern: `${serverUrl}/${repository}/edit/${defaultBranch}/${docsDir}/:path`,
+    editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
 }
 
@@ -316,9 +324,89 @@ export function tierStrictLinks(tier: Tier): boolean {
   return tier.ref === "HEAD";
 }
 
+/** Materialize each include root under `<srcDir>/<mount>/` the way the
+ *  docs tree was (the workspace tree at HEAD, an extract at a tag) and
+ *  return the roots this tier carries, in the order given. Shallower
+ *  mounts stage first, so a root mounted inside another's mount
+ *  (`skills/agents` under `skills`) lands in the parent's tree whichever
+ *  order the caller listed them; a parent whose own source carries the
+ *  child's directory is still the collision it is. At HEAD a missing root
+ *  is a configuration error, like a missing docs directory; at a tag it
+ *  is skipped with a notice, since history cannot be fixed. */
+function stageIncludes(
+  cfg: Config,
+  tier: Tier,
+  root: string,
+  srcDir: string,
+  includes: readonly IncludeRoot[],
+): IncludeRoot[] {
+  const staged = new Set<IncludeRoot>();
+  const depth = (include: IncludeRoot) => include.mount.split("/").length;
+  for (const include of [...includes].sort((a, b) => depth(a) - depth(b))) {
+    // The tag's own tree decides first: a tag from before the root existed
+    // is skipped whatever its docs tree carries at the mount's name.
+    if (tier.ref !== "HEAD" && !treeHas(cfg, tier.ref, include.path)) {
+      console.log(
+        `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
+      );
+      continue;
+    }
+    const target = join(srcDir, include.mount);
+    if (existsSync(target)) {
+      throw new Error(
+        `the include root '${include.path}' mounts at '${include.mount}/', which the docs tree ` +
+          `(${cfg.docsDir}/, or a root mounted above it) already carries at ${tier.ref} - two ` +
+          "sources would claim one URL; mount the root under another name",
+      );
+    }
+    if (tier.ref === "HEAD") {
+      const tree = join(cfg.workspace, include.path);
+      if (!existsSync(tree)) {
+        throw new Error(
+          `${include.path}/ does not exist in the repository - the docs site includes it at ` +
+            `${include.mount}/; create it or drop the include`,
+        );
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(tree, target, { recursive: true });
+    } else {
+      const staging = join(root, ".src");
+      extractTree(cfg, tier.ref, staging, include.path);
+      mkdirSync(dirname(target), { recursive: true });
+      renameSync(join(staging, include.path), target);
+      rmSync(staging, { recursive: true, force: true });
+    }
+    if (!statSync(target).isDirectory()) {
+      throw new Error(
+        `the include root '${include.path}' is a file, not a directory, at ${tier.ref}`,
+      );
+    }
+    assertIncludePages(target, include);
+    staged.add(include);
+  }
+  return includes.filter((include) => staged.has(include));
+}
+
+/** A child directory carrying both the include's page and an index.md is
+ *  refused: both would serve at the directory URL, and shipping one
+ *  silently would hide the other. */
+function assertIncludePages(target: string, include: IncludeRoot): void {
+  for (const child of readdirSync(target, { withFileTypes: true })) {
+    if (!child.isDirectory()) continue;
+    const dir = join(target, child.name);
+    if (existsSync(join(dir, include.page)) && existsSync(join(dir, "index.md"))) {
+      throw new Error(
+        `${include.path}/${child.name}/ carries both ${include.page} and index.md - both would ` +
+          `serve at ${include.mount}/${child.name}/; remove one`,
+      );
+    }
+  }
+}
+
 /** One vitepress build: the bundled config and theme over a caller docs
  *  tree, materialized into the build root (HEAD tiers copy the workspace
- *  tree, tag tiers extract straight into the root). Dead-link strictness
+ *  tree, tag tiers extract straight into the root), with the mount's
+ *  include roots staged inside it. Dead-link strictness
  *  is DERIVED here from the tier - the one owner - so a strict-HEAD build
  *  and a lenient-tag build are the only representable states.
  *  Project facts (facts.ts) read the tier's OWN ref, so a tagged version
@@ -327,6 +415,7 @@ function buildVitepressTier(
   cfg: Config,
   tier: Tier,
   versions: { label: string; link: string }[],
+  includes: readonly IncludeRoot[],
   opts: { base?: string } = {},
 ): { dist: string; buildDir: string } {
   const fromWorkspace = tier.ref === "HEAD";
@@ -360,6 +449,7 @@ function buildVitepressTier(
     rmSync(staging, { recursive: true, force: true });
     assertCentralTheme(srcDir);
   }
+  const staged = stageIncludes(cfg, tier, root, srcDir, includes);
   // The action's own dependency set serves every build root: vitepress,
   // vue, and the llms plugin resolve through this link, so no build root
   // ever installs anything.
@@ -381,7 +471,8 @@ function buildVitepressTier(
       DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
       DOCS_SITE_VERSIONS: JSON.stringify(versions),
       DOCS_SITE_CURRENT: tier.version,
-      DOCS_SITE_EDIT_PATTERN: fromWorkspace ? cfg.editPattern : "",
+      DOCS_SITE_INCLUDES: JSON.stringify(staged),
+      DOCS_SITE_EDIT_BASE: fromWorkspace ? cfg.editBase : "",
       DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
       DOCS_SITE_FACTS: JSON.stringify(facts),
     },
@@ -477,7 +568,9 @@ function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
   });
 }
 
-function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
+/** Build and lay out one mount's tiers; returns each tier's place in the
+ *  artifact and whether its content is current, for the link gate. */
+function assembleMount(cfg: Config, mount: Mount, kept: string[]): TierScope[] {
   // Eligibility only matters (and only prints its notices) where tags are
   // served; an unversioned mount builds HEAD alone.
   const tags = !mount.versioned
@@ -494,7 +587,7 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
     const { dist, buildDir } =
       mount.source === "command"
         ? buildCommandTier(cfg, tier)
-        : buildVitepressTier(cfg, tier, links);
+        : buildVitepressTier(cfg, tier, links, mount.include);
     copyInto(
       dist,
       join(cfg.site, tier.rel),
@@ -517,9 +610,10 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
       );
     }
   }
+  return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const cfg = readConfig();
   rmSync(cfg.scratch, { recursive: true, force: true });
   mkdirSync(cfg.scratch, { recursive: true });
@@ -532,10 +626,22 @@ function main(): void {
   }
   if (check === "true") {
     // The docs PR check: one strict build of the working tree (a HEAD tier
-    // derives strict dead links), no artifact.
+    // derives strict dead links) with the same include roots the deploy
+    // stages, then the link gate over it; no artifact.
+    const mountsJson = env("MOUNTS");
+    const includes =
+      mountsJson === ""
+        ? []
+        : (parseMounts(mountsJson).find((m): m is VitepressMount => m.source === "vitepress")
+            ?.include ?? []);
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    buildVitepressTier(cfg, tier, [], { base: "/" });
-    console.log("docs build check passed");
+    const { dist } = buildVitepressTier(cfg, tier, [], includes, { base: "/" });
+    // No origin: this build sits at "/", not at the deployed layout, so a
+    // link spelled with the site's own origin stays external here.
+    const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], null);
+    console.log(
+      `docs build check passed (${checked.judged} links judged across ${checked.pages} pages)`,
+    );
     return;
   }
 
@@ -563,20 +669,25 @@ function main(): void {
   ).slice(0, cfg.maxVersions);
 
   mkdirSync(cfg.site, { recursive: true });
-  for (const mount of assemblyOrder(mounts)) assembleMount(cfg, mount, kept);
+  const scopes: TierScope[] = [];
+  for (const mount of assemblyOrder(mounts)) scopes.push(...assembleMount(cfg, mount, kept));
 
   if (cfg.customDomain !== "") {
     writeExclusive(join(cfg.site, "CNAME"), `${cfg.customDomain}\n`, "the custom-domain CNAME");
   }
+  // After every mount is in place: a link from one mount into another has
+  // no other judge, and the artifact is handed back only when all resolve.
+  const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.origin);
+  console.log(
+    `internal links resolve (${checked.judged} links judged across ${checked.pages} current pages)`,
+  );
   setOutput("site-dir", cfg.site);
   console.log(`assembled ${cfg.site}`);
 }
 
 if (import.meta.main) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
-  }
+  });
 }

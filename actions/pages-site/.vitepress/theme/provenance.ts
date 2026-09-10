@@ -18,7 +18,9 @@ export default defineComponent({
       const facts = theme.value.docsSiteFacts;
       if (facts === undefined) return null;
       const { label, sha, url } = facts.provenance;
-      const source = `${facts.docsDir}/${page.value.filePath}`;
+      // page.filePath is the repository path already: config.mts's
+      // transformPageData resolves the staged path to its source root.
+      const source = page.value.filePath;
       return h("section", { class: "fleet-provenance", "aria-label": "Page provenance" }, [
         h("a", { href: url }, `Built from ${label} at ${sha.slice(0, 7)}`),
         h("span", `Source: ${source}`),

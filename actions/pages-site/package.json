@@ -6,6 +6,8 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/wix-madefor-display": "^5.3.0",
     "@fontsource-variable/wix-madefor-text": "^5.3.0",
+    "entities": "^8.0.0",
+    "github-slugger": "^2.0.0",
     "gray-matter": "^4.0.3",
     "linkinator": "^8.1.0",
     "mermaid": "11.17.2",

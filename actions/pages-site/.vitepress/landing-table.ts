@@ -121,8 +121,9 @@ function escapeAttribute(value: string): string {
 }
 
 /** The curated rows of a table's body rows given its link column. Per
- *  row: href from that column, label from the first other cell (the link
- *  text when that cell is empty or absent), note from every remaining cell
+ *  row: href (and the link's target attribute, when the rewrite rule set
+ *  one) from that column, label from the first other cell (the link text
+ *  when that cell is empty or absent), note from every remaining cell
  *  joined by ", " (null when they are all empty). A row with no remaining
  *  cell takes the link text as its note, unless the label already spells
  *  it (then null, so nothing shows twice). */
@@ -132,10 +133,13 @@ export function curatedRows(rows: Token[][], linkColumn: number): CuratedRow[] {
     const linkText = plainTextOf(row[linkColumn]);
     const cellLabel = others.length > 0 ? plainTextOf(others[0]) : "";
     const label = cellLabel === "" ? linkText : cellLabel;
+    const link = soleLinkToken(row[linkColumn]);
+    const target = link?.attrGet("target") ?? null;
     return {
       label,
-      href: soleLinkToken(row[linkColumn])?.attrGet("href") ?? "",
+      href: link?.attrGet("href") ?? "",
       note: noteOf(others.slice(1), label, linkText),
+      ...(target === null ? {} : { target }),
     };
   });
 }

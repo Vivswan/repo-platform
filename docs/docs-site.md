@@ -26,8 +26,53 @@ Standalone, the deploy runs three ways: on every green push to the default branc
 - Sidebar order within a directory: the landing page, then pages with an `order` frontmatter key (a number, ascending, ties by title), then pages the landing's link table names in the order it first names them, then the rest in file order. Pages sharing a `group` frontmatter key (a string) sit under one heading placed where the group's first member falls, so `order: 20` and `group: Modules` on a page's frontmatter both place it and head it. A tree with neither frontmatter nor a landing table keeps its file order; the search launcher lists pages and directories in the sidebar's order too. A landing page titled exactly like the site (the `project_name` answer, which can differ from the repository name) reads Overview in the sidebar, since the nav bar right above already carries that name.
 - A table in `docs/README.md` whose one column is bare links to pages becomes the search launcher's curated rows (label from the first other cell, note from the remaining cells); without one the launcher lists every page and heading.
 - VitePress `<!-- @include: file.md -->` directives work, but a page that uses one lists no heading rows in the launcher's page index (full-text search still reaches those headings), and a landing page that uses one places no pages by its link table (they keep file order). Only a directive VitePress expands counts: one naming a missing file, which is what a mention in prose or a code span normally is, changes nothing.
-- Links must resolve INSIDE `docs/` (or be absolute URLs). A link to `../README.md` works on GitHub but is dead on the site, and dead internal links fail the build - that failure is the point, see the PR check below.
+- Links are written as they read on GitHub and resolve in repository space: a link inside `docs/` (or into another root the site renders, see below) becomes the page's route, a link to any other file in the repository (`../.github/workflows/ci.yml`, `../README.md`) becomes a link to that file on GitHub at the version being read, and absolute URLs pass through. A link to a page's source file name (`guide/README.md`) renders as the directory URL, and heading anchors are GitHub's (`#3-add-checks-to-checksyml` reaches `## 3. Add checks to checks.yml` on both). Dead internal links fail the build - that failure is the point, see the PR check below - and once the site is assembled every same-site link is checked again across the whole artifact ([pages.md](pages.md#internal-links-are-checked-across-mounts)).
 - Translations: put them in `docs/<lang>/` (a two-letter ISO 639-1 code, optionally with a region: `zh-cn/`, `zh-tw/`, `ja/`) mirroring the root structure. Detected directories become locales with the language switcher in the nav; the root tree is the default (English) locale, and a tagged version serves its own translations.
+
+## Other roots on the site
+
+The docs mount can render other directories of the repository beside `docs/`, so one artifact carries them and one link check covers them. Each root is one entry of the vitepress mount's `include` list in the pages-site action's mounts input:
+
+```json
+{"path": "skills", "mount": "skills", "page": "SKILL.md"}
+```
+
+| Key | What it names | With the example |
+|---|---|---|
+| `path` | The repository directory to stage | `skills/` |
+| `mount` | The URL directory under the docs mount | `.../<repo>/skills/`, or `.../<repo>/<docs_site_path>/skills/` beside the pages module |
+| `page` | The file that serves as each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
+
+How a staged root renders:
+
+- The other markdown files in a child directory render too, at their own paths relative to it.
+- A `README.md` at the root of the include becomes the section's landing page.
+- Every version tier stages the root from its own ref, so an old tag renders the skills it carried. A tag without the directory skips it with a notice; the default branch must carry every configured root.
+- A mount that would misplace the pages is refused: a locale-shaped name (`de`), a segment the site never walks (dot-prefixed, `node_modules`), or `public/` (copied to the site root, not rendered). A child directory carrying both the page and an `index.md` fails the build, since both would serve at one URL.
+
+The SKILL.md convention:
+
+- A page with neither a `title` frontmatter key nor an h1 is titled by its `name` frontmatter key (else by its file name, when the key is missing or blank), in the document title and the sidebar alike, and its `description` key is the page's meta description, so a skill's own frontmatter is enough.
+- Such a page is an article with its outline, not a landing page.
+- The sidebar groups the root under its mount name with each word capitalized (`skills/` reads as Skills), and the search launcher lists its pages.
+- The page's "Edit this page" link and provenance line name the real source path (`skills/<name>/SKILL.md`, never a path under `docs/`).
+
+Links resolve the way they read on GitHub, from the page's own repository path:
+
+| Written | Renders as |
+|---|---|
+| `[the sync skill](../repo-platform-sync-pr/SKILL.md)` on a skill page | that skill's directory URL, the way an `index.md` link always did |
+| `[the sync skill](../repo-platform-sync-pr)` | the same directory URL: a directory with an index page resolves to it |
+| `[guide](guide/README.md)` on a docs page | the guide's directory URL |
+| `[sync PRs](../skills/repo-platform-sync-pr/SKILL.md)` on a docs page | the skill's page, across the two roots |
+| `[plugin metadata](.codex-plugin/plugin.json)` on a skill page | the file on GitHub at the tier's ref: the site never publishes it |
+| `[the workflow](../.github/workflows/ci.yml)` on a docs page | the same, for anything outside the staged roots |
+| `[the actions](../actions/)` or `[the repository](../)` on a docs page | that directory's tree on GitHub at the tier's ref: a directory is known by its trailing slash, or by being the repository root |
+| `[logo](public/logo.svg)` on a docs page | the file at the site base, where VitePress copies `public/` |
+
+A `.md`, extensionless, or directory link to nothing stays on the site, so the strict build's dead-link check reports it; only a target with another file extension is read on GitHub.
+
+One shape of file name cannot be linked from markdown: a `%` followed by two hex digits (`100%23b.md`). VitePress decodes the rendered href once more and collapses the escape, so the link names another file. Rename the file.
 
 ## The docs PR check
 

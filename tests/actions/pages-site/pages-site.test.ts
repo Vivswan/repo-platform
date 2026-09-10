@@ -42,7 +42,7 @@ const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 describe("parseMounts", () => {
   test("accepts the single docs mount and the composed pair", () => {
     expect(parseMounts('[{"path": "/", "source": "vitepress", "versioned": true}]')).toEqual([
-      { path: "/", source: "vitepress", versioned: true },
+      { path: "/", source: "vitepress", versioned: true, include: [] },
     ]);
     expect(
       parseMounts(
@@ -51,7 +51,7 @@ describe("parseMounts", () => {
       ),
     ).toEqual([
       { path: "/", source: "command", versioned: false },
-      { path: "/docs/", source: "vitepress", versioned: true },
+      { path: "/docs/", source: "vitepress", versioned: true, include: [] },
     ]);
   });
 
@@ -103,7 +103,7 @@ describe("versionTags", () => {
 });
 
 describe("planMount", () => {
-  const docs = { path: "/docs/", source: "vitepress", versioned: true } as const;
+  const docs = { path: "/docs/", source: "vitepress", versioned: true, include: [] } as const;
 
   test("unversioned: one HEAD build at the mount root", () => {
     expect(planMount({ path: "/", source: "command", versioned: false }, ["v1.0.0"])).toEqual([
@@ -189,9 +189,11 @@ describe("layout helpers", () => {
       { label: "v2.0.0", path: "v2.0.0/" },
     ]);
     expect(
-      versionLinks("/repo/", { path: "/manual/", source: "vitepress", versioned: true }, [
-        "v2.0.0",
-      ]),
+      versionLinks(
+        "/repo/",
+        { path: "/manual/", source: "vitepress", versioned: true, include: [] },
+        ["v2.0.0"],
+      ),
     ).toEqual([
       { label: "latest", link: "/repo/manual/latest/" },
       { label: "v2.0.0", link: "/repo/manual/v2.0.0/" },
@@ -218,7 +220,7 @@ describe("layout helpers", () => {
 
   test("assembly runs deepest mounts first, so shallower copies collide loudly", () => {
     const site = { path: "/", source: "command", versioned: false } as const;
-    const docs = { path: "/docs/", source: "vitepress", versioned: true } as const;
+    const docs = { path: "/docs/", source: "vitepress", versioned: true, include: [] } as const;
     expect(assemblyOrder([site, docs]).map((m) => m.path)).toEqual(["/docs/", "/"]);
     expect(assemblyOrder([docs, site]).map((m) => m.path)).toEqual(["/docs/", "/"]);
   });
@@ -633,13 +635,15 @@ describe("strict check build", () => {
 });
 
 describe("link-rot reporting", () => {
-  test("walkHtml enumerates every page, so unlinked version tiers still get crawled", () => {
+  test("walkHtml enumerates every page, .htm included, so unlinked version tiers still get crawled", () => {
     const dir = temp.dir("site-");
     mkdirSync(join(dir, "v1.0.0", "assets"), { recursive: true });
     writeFileSync(join(dir, "index.html"), "<html></html>");
+    writeFileSync(join(dir, "about.htm"), "<html></html>");
     writeFileSync(join(dir, "v1.0.0", "index.html"), "<html></html>");
     writeFileSync(join(dir, "v1.0.0", "assets", "app.js"), "js");
-    expect(walkHtml(dir)).toEqual(["index.html", "v1.0.0/index.html"]);
+    writeFileSync(join(dir, "v1.0.0", "assets", "html.txt"), "not a page");
+    expect(walkHtml(dir)).toEqual(["about.htm", "index.html", "v1.0.0/index.html"]);
   });
 
   test("collects distinct broken external links with their local parents", () => {

@@ -65,6 +65,26 @@ Examples:
 
 Selecting `docs-site` alongside `pages` renders ONE Pages workflow: the website stays at `/` but becomes UNVERSIONED (one build of the default branch head - version navigation belongs to the docs), and the docs mount at `/<docs_site_path>/` (default `docs`) with the full tag rules one level down. The docs side's conventions live in [docs-site.md](docs-site.md).
 
+## Internal links are checked across mounts
+
+Once every mount is in place, the assembled artifact is crawled as one site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page (`.html` or `.htm`) built from the default branch head must resolve, wherever the target lives:
+
+- a website page linking into `/<docs_site_path>/`
+- a docs page linking to a skill rendered from another root
+- a `#fragment` naming a heading that exists on the target page (`#top` in any letter case always does)
+- an asset the build emitted
+- a link spelled with the site's own URL (`https://<owner>.github.io/<repo>/...`); a sibling site of the same owner is external
+
+A broken one fails the deploy (and the docs PR check, which runs the same gate over its one build) with a `page -> link (reason)` list, so a 404 never ships on a green run:
+
+```text
+broken internal links (page -> link):
+  /repo/docs/latest/index.html -> /repo/docs/latest/skills/alpha/#nope (no element with id 'nope' on that page)
+  /repo/index.html -> /repo/docs/skills/missing/ (status 404)
+```
+
+Pages inside version-tag tiers are valid targets but are not crawled: history cannot be fixed. External links stay the nightly link-rot check's business ([docs-site.md](docs-site.md#link-rot)).
+
 ## Custom domain
 
 Three pieces have to agree; the repo variable only flips the build side:
