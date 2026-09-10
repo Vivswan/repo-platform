@@ -12,6 +12,8 @@ bun run renders          # rewrite tests/golden-renders/ (also part of bun run r
 bun run renders:check    # render to temp and diff against the committed snapshots
 ```
 
+Once the templates go, the `all-modules` golden becomes a review aid rather than a gate: `bun scripts/render_golden.ts` rewrites it from the sync writer ([sync.md](sync.md)) so a `files/` change shows its rendered diff in the PR, and nothing in CI compares it. Until then, the writer's fidelity to these renders is proven by `tests/ci/files_fidelity.test.ts` against frozen copies of the three kept selections under `tests/ci/files_fidelity/renders/`.
+
 CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fails when the committed snapshots drift from a fresh render. The runner is [scripts/generate/render_goldens.ts](../scripts/generate/render_goldens.ts); it needs `copier` and `bun` on PATH, builds one scratch build tree per run, and renders each selection with `--defaults` plus fixed answers.
 
 ## The matrix
