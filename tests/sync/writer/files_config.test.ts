@@ -294,6 +294,25 @@ describe("blockSources and verifySources", () => {
       ".github/repo-platform-manifest.json is the manifest the writer itself writes and cannot be a files entry",
     );
   });
+
+  test("loadFilesConfig judges the manifest path before the tree, so a missing source does not hide it", () => {
+    const root = temp.dir("writer-files-manifest-path-no-source-");
+    writeTree(root, {
+      "files.yml":
+        "placeholders: []\nfiles:\n  - { path: .github/repo-platform-manifest.json, class: managed }\n",
+      "files/base/keep.txt": "",
+    });
+    let problems: string[] = [];
+    try {
+      loadFilesConfig(join(root, "files.yml"), join(root, "files"));
+    } catch (error) {
+      if (!(error instanceof FilesConfigError)) throw error;
+      problems = error.problems;
+    }
+    expect(problems).toEqual([
+      ".github/repo-platform-manifest.json is the manifest the writer itself writes and cannot be a files entry",
+    ]);
+  });
 });
 
 describe("checkRetirements", () => {

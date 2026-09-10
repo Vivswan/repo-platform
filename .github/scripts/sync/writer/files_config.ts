@@ -248,8 +248,10 @@ export function checkManifestPath(config: FilesConfig, label = "files.yml"): voi
 }
 
 /** The whole load: parse and derive the placeholder defaults, every problem
- *  of the document in one error; then verify against the tree, and check
- *  retirements against the previous data file when one is given. */
+ *  of the document in one error; refuse the manifest path; then verify
+ *  against the tree, and check retirements against the previous data file
+ *  when one is given. The manifest path is judged before the tree so a
+ *  forbidden entry is reported as such, not as a missing source. */
 export function loadFilesConfig(
   filesPath: string,
   tree: string,
@@ -260,8 +262,8 @@ export function loadFilesConfig(
   const { defaults, problems: placeholderProblems } = placeholderDefaults(config);
   const all = [...placeholderProblems, ...problems];
   if (all.length > 0) throw new FilesConfigError(label, all);
-  verifySources(config, tree);
   checkManifestPath(config);
+  verifySources(config, tree);
   if (previousPath !== undefined) {
     checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);
   }
