@@ -18,23 +18,37 @@ runs:
 
     # No --error: the JSON copy is judged by severity below, so WARNING and
     # INFO findings reach code scanning without blocking. The excluded rule
-    # is the one zizmor's unpinned-uses already owns.
+    # is the one zizmor's unpinned-uses already owns. The exit status is a
+    # step output, not the step's result, so a fatal scan (a config or
+    # engine error) reaches the judge and reads red with its reason.
     - name: Scan
+      id: scan
       shell: bash
-      run: semgrep scan --config p/default --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag --metrics=off --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" .
+      run: |
+        semgrep scan --config p/default --metrics=off \
+          --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag \
+          --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" . \
+          && status=0 || status=$?
+        echo "status=$status" >>"$GITHUB_OUTPUT"
 
     - name: Upload the findings to code scanning
+      if: ${{ !cancelled() }}
       uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       with:
         sarif_file: ${{ runner.temp }}/semgrep.sarif
         category: semgrep
 
-    # The verdict reads the JSON copy: ERROR-severity findings and fatal
-    # analysis errors fail; partial parses and timeouts (level warn) only
-    # annotate, so a WARNING or INFO finding reaches code scanning unblocked.
+    # The verdict: a scan that did not exit 0 fails first, naming its status.
+    # Then the JSON copy: ERROR-severity findings and fatal analysis errors
+    # fail; partial parses and timeouts (level warn) only annotate, so a
+    # WARNING or INFO finding reaches code scanning unblocked.
     - name: Fail on an ERROR finding
+      if: ${{ !cancelled() }}
       shell: bash
+      env:
+        SCAN_STATUS: ${{ steps.scan.outputs.status }}
       run: |
+        [ "${SCAN_STATUS:-none}" = "0" ] || { echo "::error::semgrep: the scan did not complete (exit status ${SCAN_STATUS:-none}), so there is no verdict; see the scan log above"; exit 1; }
         findings="$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$RUNNER_TEMP/semgrep.json")"
         fatal="$(jq '[.errors[] | select(.level == "error")] | length' "$RUNNER_TEMP/semgrep.json")"
         jq -r '[.errors[] | select(.level != "error")] | if length > 0 then "::warning::semgrep: \(length) non-fatal analysis error(s) (partial parses, timeouts); see the scan log above" else empty end' "$RUNNER_TEMP/semgrep.json"

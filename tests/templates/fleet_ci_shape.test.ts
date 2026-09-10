@@ -384,7 +384,7 @@ describe("fleet-ci.yml", () => {
       .filter(([, job]) => job.permissions?.["security-events"] === "write")
       .map(([name]) => name)
       .sort();
-    expect(granted).toEqual(["codeql", "semgrep", "trivy-nightly", "zizmor"]);
+    expect(granted).toEqual(["codeql", "semgrep", "zizmor"]);
   });
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {

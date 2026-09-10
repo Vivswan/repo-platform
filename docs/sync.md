@@ -237,7 +237,7 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparseable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a mirror record no declaration reaches |
+| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a mirror record no declaration reaches |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 

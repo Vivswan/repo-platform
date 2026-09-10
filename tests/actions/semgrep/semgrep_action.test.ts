@@ -1,9 +1,10 @@
 // The semgrep action's contract: a pinned install, one scan writing both a
-// SARIF copy (uploaded whole) and a JSON copy, and a verdict step that fails
-// on ERROR severity alone - executed here against fixture scan results.
+// SARIF copy (uploaded whole) and a JSON copy with its exit status as a step
+// output, and a verdict step that runs whatever the scan did and fails on a
+// fatal scan or an ERROR finding - executed here against fixture results.
 
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadAction, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
@@ -18,6 +19,7 @@ describe("actions/semgrep", () => {
     const [install, scan, upload, judge] = action.runs.steps;
     expect(String(install.run)).toMatch(/^python3 -m pip install --quiet semgrep==\d+\.\d+\.\d+$/);
     const command = String(scan.run);
+    expect(scan.id).toBe("scan");
     expect(command.startsWith("semgrep scan --config p/default ")).toBe(true);
     expect(command).toContain('--sarif-output="$RUNNER_TEMP/semgrep.sarif"');
     expect(command).toContain('--json-output="$RUNNER_TEMP/semgrep.json"');
@@ -38,7 +40,44 @@ describe("actions/semgrep", () => {
     expect(judge.name).toBe("Fail on an ERROR finding");
   });
 
-  const judge = (results: { severity: string }[], errors: { level: string }[] = []) => {
+  test("a fatal scan reaches the verdict: the scan's status is a step output, and the upload and judge run unless cancelled", () => {
+    const [, scan, upload, judge] = action.runs.steps;
+    expect(String(scan.run)).toContain(" . \\\n  && status=0 || status=$?\n");
+    expect(String(scan.run)).toContain('echo "status=$status" >>"$GITHUB_OUTPUT"');
+    expect(upload.if).toBe("${{ !cancelled() }}");
+    expect(judge.if).toBe("${{ !cancelled() }}");
+    expect(judge.env).toEqual({ SCAN_STATUS: "${{ steps.scan.outputs.status }}" });
+  });
+
+  // The scan step against a stand-in semgrep on PATH that exits as told.
+  const scan = (semgrepExit: number) => {
+    const root = temp.dir("semgrep-scan-");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "semgrep"), `#!/bin/bash\nexit ${semgrepExit}\n`);
+    chmodSync(join(bin, "semgrep"), 0o755);
+    return runBashStep(stepNamed(action, "Scan"), {
+      cwd: root,
+      root,
+      env: { RUNNER_TEMP: root, PATH: `${bin}:${process.env.PATH ?? ""}` },
+    });
+  };
+
+  test("scan: a clean exit records status 0", () => {
+    const run = scan(0);
+    expect([run.exitCode, run.outputs]).toEqual([0, { status: "0" }]);
+  });
+
+  test("scan: a fatal exit does not fail the step (the judge must run) and records the status", () => {
+    const run = scan(2);
+    expect([run.exitCode, run.outputs]).toEqual([0, { status: "2" }]);
+  });
+
+  const judge = (
+    results: { severity: string }[],
+    errors: { level: string }[] = [],
+    scanStatus = "0",
+  ) => {
     const root = temp.dir("semgrep-judge-");
     writeFileSync(
       join(root, "semgrep.json"),
@@ -48,11 +87,26 @@ describe("actions/semgrep", () => {
       }),
     );
     return runBashStep(stepNamed(action, "Fail on an ERROR finding"), {
+      fills: { "${{ steps.scan.outputs.status }}": scanStatus },
       cwd: root,
       root,
       env: { RUNNER_TEMP: root },
     });
   };
+
+  test("judge: a fatal scan fails naming its exit status, even when the JSON copy reads clean", () => {
+    const run = judge([], [], "2");
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout.trim()).toBe(
+      "::error::semgrep: the scan did not complete (exit status 2), so there is no verdict; see the scan log above",
+    );
+  });
+
+  test("judge: a scan that never ran (empty status) fails the same way, never as no findings", () => {
+    const run = judge([], [], "");
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout).toContain("(exit status none)");
+  });
 
   test("judge: no findings passes", () => {
     const run = judge([]);
@@ -85,19 +139,18 @@ describe("actions/semgrep", () => {
 
   test("judge: a missing or unreadable results file fails closed", () => {
     const root = temp.dir("semgrep-missing-");
-    const run = runBashStep(stepNamed(action, "Fail on an ERROR finding"), {
+    const options = {
+      fills: { "${{ steps.scan.outputs.status }}": "0" },
       cwd: root,
       root,
       env: { RUNNER_TEMP: root },
-    });
-    expect(run.exitCode).not.toBe(0);
+    };
+    expect(runBashStep(stepNamed(action, "Fail on an ERROR finding"), options).exitCode).not.toBe(
+      0,
+    );
     writeFileSync(join(root, "semgrep.json"), "{not json");
-    expect(
-      runBashStep(stepNamed(action, "Fail on an ERROR finding"), {
-        cwd: root,
-        root,
-        env: { RUNNER_TEMP: root },
-      }).exitCode,
-    ).not.toBe(0);
+    expect(runBashStep(stepNamed(action, "Fail on an ERROR finding"), options).exitCode).not.toBe(
+      0,
+    );
   });
 });
