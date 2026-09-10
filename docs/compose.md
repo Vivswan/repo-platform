@@ -45,11 +45,11 @@ Data anchors (`DATA_ANCHORS` in data_anchors.ts) are filled from manifest data i
 
 ## Gitignore fragments
 
-`scripts/generate/build_gitignore.ts` generates the `gitignore` anchor's fragments from each manifest's `gitignore_sources` (github/gitignore template names, uv mapping to Python.gitignore since upstream has no standalone uv template), plus the base skeleton's OS sections and this repository's own `.gitignore`.
+`scripts/generate/build_gitignore.ts` generates the `gitignore` anchor's fragments from each manifest's `gitignore_sources` (github/gitignore template names, uv mapping to Python.gitignore since upstream has no standalone uv template), plus the base skeleton's OS sections, the sync writer's copies (`files/base/.gitignore` is the skeleton's region body; `files/<module>/.gitignore.block.<Source>` is one section each, once per declaring module), and this repository's own `.gitignore`.
 
 - A source declared by several modules is emitted plain in the first declaring module's fragment; each later one carries the whole chunk wrapped in the negation of the earlier declarers' gates, so a repo selecting both gets the section once and a suppressed chunk renders as nothing.
 - There is no pinned upstream SHA and no offline regeneration mode: every run fetches github/gitignore's current HEAD and nothing generated records the SHA, so the outputs change only when consumed upstream content changes. That is what makes the refresh-gitignore workflow's PR diff worth reading, and that workflow is the only caller of the networked path.
-- `--topology` is the offline gate `bun run check` and CI run: every fragment must exist and encode exactly the manifests' declared sources and gate guards. A stale guard would make the next build emit duplicate shared sections; a stray fragment would abort the refresh workflow with no way to self-heal.
+- `--topology` is the offline gate `bun run check` and CI run: every fragment must exist and encode exactly the manifests' declared sources and gate guards, and the `files/` side must match the templates side (`files.yml`'s `gitignore_sources` are the manifests' sources by block name, every block file is its fragment's section, `files/base/.gitignore` is the template's region body). A stale guard would make the next build emit duplicate shared sections; a stray fragment or block file would abort the refresh workflow with no way to self-heal; a refresh that regenerated one side only cannot land.
 - Content drift inside a managed block is ungated until the next refresh regenerates over it.
 
 ## Collisions

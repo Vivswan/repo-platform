@@ -1,6 +1,7 @@
 # Weekly: bump the toolchain version pins (templates/<module>/module.yml
-# toolchain.pin) to the latest upstream releases, regenerate the pinned
-# dotfiles and dogfood copies, and open a PR when anything moved.
+# toolchain.pin and files.yml modules.<module>.pin) to the latest upstream
+# releases, regenerate the pinned dotfiles (templates/ and files/) and
+# dogfood copies, and open a PR when anything moved.
 # Merging the PR reaches the build branch automatically via the post-green publish.
 
 name: Refresh toolchains

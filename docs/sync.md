@@ -111,7 +111,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 
 | `blocks` key | Split entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` | `files/<module>/.gitignore.block.<Source>`, one github/gitignore template each (the generated text the templates carried) |
+| `gitignore_sources` | `.gitignore` | `files/<module>/.gitignore.block.<Source>`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)) |
 | `dependabot_ecosystems` | `.github/dependabot.yml` | `files/<module>/.github/dependabot.yml.block.<ecosystem>` |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant) | `files/<module>/AGENTS.md.block.toolchain`, the module's Toolchain bullets |
 
@@ -119,7 +119,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | --- | --- | --- |
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
-| `pin` | `{file, version}` of the toolchain's version dotfile | the toolchain refresh |
+| `pin` | `{file, version}` of the toolchain's version dotfile; equal to the manifest's `toolchain.pin` (the `files-pins` ssot rule) and bumped with it by the toolchain refresh | the toolchain refresh |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |

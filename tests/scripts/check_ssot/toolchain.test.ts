@@ -13,6 +13,7 @@ import {
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
   FETCHED_TREE_PIN_ANCHOR,
+  filesPinMismatches,
   lockedTypesBunVersion,
   majorMinor,
   SCRATCH_SCOPED_SCRIPTS,
@@ -622,6 +623,48 @@ ${extra}      shell: ${shell}
     expect(
       files.flatMap((file) => actionsBunGuardMismatches(file, readFileSync(file, "utf-8"))),
     ).toEqual([]);
+  });
+});
+
+describe("filesPinMismatches", () => {
+  const pins = [
+    { module: "bun", file: ".bun-version", version: "1.4.0" },
+    { module: "node", file: ".node-version", version: "24.19.0" },
+  ];
+  const agreeing = {
+    bun: { pin: { file: ".bun-version", version: "1.4.0" } },
+    node: { pin: { file: ".node-version", version: "24.19.0" } },
+    uv: { description: "no pin" },
+  };
+
+  test("files.yml pins equal to the manifests' pass", () => {
+    expect(filesPinMismatches(pins, agreeing)).toEqual([]);
+  });
+
+  test("a version the refresh bumped on one side only, a missing pin, and a pin with no manifest twin are named", () => {
+    const drifted = {
+      bun: { pin: { file: ".bun-version", version: "1.4.1" } },
+      uv: { pin: { file: ".python-version", version: "3.13.0" } },
+    };
+    expect(filesPinMismatches(pins, drifted)).toEqual([
+      {
+        file: "files.yml modules.bun.pin",
+        expected:
+          '{"file":".bun-version","version":"1.4.0"} (templates/bun/module.yml\'s toolchain.pin)',
+        got: '{"file":".bun-version","version":"1.4.1"}',
+      },
+      {
+        file: "files.yml modules.node.pin",
+        expected:
+          '{"file":".node-version","version":"24.19.0"} (templates/node/module.yml\'s toolchain.pin)',
+        got: "no pin",
+      },
+      {
+        file: "files.yml modules.uv.pin",
+        expected: "no pin (templates/uv/module.yml declares no toolchain.pin)",
+        got: '{"file":".python-version","version":"3.13.0"}',
+      },
+    ]);
   });
 });
 

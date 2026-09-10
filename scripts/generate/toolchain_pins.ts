@@ -58,20 +58,27 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
 }
 
 /** Version-dotfile-shaped files at a module's root that no manifest pin
- *  declares: a renamed or removed pin leaves the old dotfile behind, and
- *  composition would keep shipping it to every render. Returned (for the
- *  caller to throw on) rather than deleted - the file may be a pin typo
- *  to fix, not an orphan to drop. */
-export function strayPinFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
+ *  declares, in the templates tree or the sync writer's files/ tree (its
+ *  repo-relative name is `label`): a renamed or removed pin leaves the old
+ *  dotfile behind, and composition or the writer would keep shipping it
+ *  to every render. Returned (for the caller to throw on) rather than
+ *  deleted - the file may be a pin typo to fix, not an orphan to drop. A
+ *  module with no directory in the tree lands nothing there. */
+export function strayPinFiles(
+  manifests: ModuleManifest[],
+  dir: string,
+  label = "templates",
+): string[] {
   const strays: string[] = [];
   for (const m of manifests) {
-    for (const name of readdirSync(join(templatesDir, m.module)).sort()) {
+    if (!existsSync(join(dir, m.module))) continue;
+    for (const name of readdirSync(join(dir, m.module)).sort()) {
       if (!/^\.[a-z][a-z0-9.-]*$/.test(name)) continue;
-      const path = join(templatesDir, m.module, name);
+      const path = join(dir, m.module, name);
       if (!lstatSync(path).isFile()) continue;
       if (!/^\d+\.\d+\.\d+\n$/.test(readFileSync(path, "utf-8"))) continue;
       if (m.toolchain?.pin?.file === name) continue;
-      strays.push(`templates/${m.module}/${name}`);
+      strays.push(`${label}/${m.module}/${name}`);
     }
   }
   return strays;

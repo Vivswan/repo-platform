@@ -50,7 +50,7 @@ Rules that follow:
 The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-gitignore) bumps the pins when upstream moved:
 
 1. Fetch the latest upstream versions: bun's latest GitHub release, Node's newest LTS line from nodejs.org, Deno's latest stable release.
-2. Rewrite the manifests' pin version lines, then rerun `bun run generate` and `bun run dogfood`.
+2. Rewrite the manifests' pin version lines and the matching `modules.<module>.pin` entries in `files.yml`, then rerun `bun run generate` (which writes the version dotfiles under `templates/` and `files/`) and `bun run dogfood`. The `files-pins` ssot rule keeps the two pin records equal in between.
 3. Open or refresh a PR on the `automation/toolchain-refresh` branch when anything moved.
 
 Merging the PR rebuilds the build branch; the next sync rolls the pin out to the fleet.

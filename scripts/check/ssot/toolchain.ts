@@ -1,6 +1,7 @@
 // Rules pinning the bun toolchain: package homes and lockfiles, the
 // @types/bun coupling, version-file setup steps, the composite actions' bun
-// guard, the local runtime, and dependabot's action directories.
+// guard, the local runtime, dependabot's action directories, and files.yml's
+// copy of every toolchain pin.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ import {
   EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
   EXCLUDED_DIRS,
 } from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { parseFilesConfig } from "../../../.github/scripts/sync/writer/files_config.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
@@ -494,8 +496,51 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   return mismatches;
 }
 
+/** files.yml's `modules.<m>.pin` against the manifests' toolchain pins,
+ *  both directions: the manifest is the source until the cutover and the
+ *  refresh bumps both, so a pin present, absent, or different on one side
+ *  is a stale copy the fleet would read. */
+export function filesPinMismatches(
+  manifestPins: { module: string; file: string; version: string }[],
+  filesModules: Record<string, Record<string, unknown>>,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const pin of manifestPins) {
+    const declared = filesModules[pin.module]?.pin;
+    const expected = { file: pin.file, version: pin.version };
+    if (canonical(declared) !== canonical(expected)) {
+      mismatches.push({
+        file: `files.yml modules.${pin.module}.pin`,
+        expected: `${canonical(expected)} (templates/${pin.module}/module.yml's toolchain.pin)`,
+        got: declared === undefined ? "no pin" : canonical(declared),
+      });
+    }
+  }
+  const pinned = new Set(manifestPins.map((pin) => pin.module));
+  for (const [module, data] of Object.entries(filesModules)) {
+    if (data.pin !== undefined && !pinned.has(module)) {
+      mismatches.push({
+        file: `files.yml modules.${module}.pin`,
+        expected: `no pin (templates/${module}/module.yml declares no toolchain.pin)`,
+        got: canonical(data.pin),
+      });
+    }
+  }
+  return mismatches;
+}
+
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const toolchainRules: Rule[] = [
+  {
+    name: "files-pins",
+    run: () =>
+      filesPinMismatches(
+        loadManifests().flatMap((m) =>
+          m.toolchain?.pin ? [{ module: m.module, ...m.toolchain.pin }] : [],
+        ),
+        parseFilesConfig(read("files.yml")).modules,
+      ),
+  },
   {
     // Lockfiles come from the bootstrap's recursive walk, the other homes
     // from one level down: a package nested inside an action fails here.

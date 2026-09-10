@@ -2,8 +2,9 @@
 // Umbrella generator for the marker-fenced GENERATED regions derived from
 // the module manifests (templates/<module>/module.yml): copier.yml's
 // questions and validators, validate-template's ownership tables, the doc
-// and skill rosters, module.schema.json, the toolchain pin dotfiles, the
-// actions' .bun-version files (so an action never rides the CALLER's bun
+// and skill rosters, module.schema.json, the toolchain pin dotfiles (the
+// template's and the sync writer's copy under files/), the actions'
+// .bun-version files (so an action never rides the CALLER's bun
 // resolution); the per-file roster is generate/targets.ts beside this file. The .gitignore outputs are
 // NOT owned here: build_gitignore.ts fetches upstream on every run, so it
 // lives outside `bun run regen` (docs/compose.md).
@@ -44,7 +45,10 @@ function main(): number {
   let changed: { path: string; file: string; next: string; stale: string }[];
   try {
     const manifests = loadManifests();
-    const strays = strayPinFiles(manifests, join(REPO_ROOT, "templates"));
+    const strays = [
+      ...strayPinFiles(manifests, join(REPO_ROOT, "templates")),
+      ...strayPinFiles(manifests, join(REPO_ROOT, "files"), "files"),
+    ];
     if (strays.length > 0) {
       throw new Error(
         `stray toolchain version dotfile(s) not declared by any manifest pin: ` +
