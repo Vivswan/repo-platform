@@ -133,14 +133,22 @@ describe("writeSplit", () => {
 });
 
 describe("writeStarter", () => {
-  test("written when absent, never touched again (a link there counts as present)", () => {
+  test("written when absent, never touched or rendered again (a link there counts as present)", () => {
     const target = temp.dir("writer-starter-");
-    expect(writeStarter(target, "n.yml", "one\n")).toEqual({ change: "created" });
-    expect(writeStarter(target, "n.yml", "two\n")).toEqual({ change: "unchanged" });
+    const never = () => {
+      throw new Error("rendered a present starter");
+    };
+    expect(writeStarter(target, "n.yml", () => "one\n")).toEqual({ change: "created" });
+    expect(writeStarter(target, "n.yml", never)).toEqual({ change: "unchanged" });
     expect(read(target, "n.yml")).toBe("one\n");
     symlinkSync("n.yml", join(target, "l.yml"));
-    expect(writeStarter(target, "l.yml", "three\n")).toEqual({ change: "unchanged" });
+    expect(writeStarter(target, "l.yml", never)).toEqual({ change: "unchanged" });
     expect(readlinkSync(join(target, "l.yml"))).toBe("n.yml");
+    // An absent starter whose source lacks values is not written at all.
+    expect(writeStarter(target, "m.yml", () => ({ missing: ["description"] }))).toEqual({
+      missing: ["description"],
+    });
+    expect(existsSync(join(target, "m.yml"))).toBe(false);
   });
 });
 

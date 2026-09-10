@@ -35,6 +35,11 @@ const MANIFEST = ".github/repo-platform-manifest.json";
 const YEAR = String(new Date().getUTCFullYear());
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+const droppedMirrorNote = (path: string) =>
+  `manifest record for \`${path}\` dropped: no mirror in .repo-platform.yml reaches it now, so ` +
+  "the file is the repository's own (a mirror declared again adopts it while it still holds the " +
+  "source's content)";
+const LOOP_REFUSAL = "the target's ancestor 'skills/loop' is a symbolic link";
 
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
@@ -54,6 +59,7 @@ const OLD_YAMLLINT = "rules: {}\n";
 const LOCAL_CONSTRUCTOR = "local notes\n";
 const LOCAL_DOCKERIGNORE = "dist/\n";
 const LEGACY = "# legacy notes\n";
+const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
 
 /** The old pipeline's manifest layout for the seeded files. */
 function oldManifest(): string {
@@ -69,6 +75,12 @@ function oldManifest(): string {
     ".github/workflows/old-starter.yml": `{"class": "starter"}`,
     ".github/workflows/deselected-starter.yml": `{"class": "starter"}`,
     "skills/gamma/LICENSE.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
+    // A mirror record no declaration reaches any more: dropped with a note.
+    "docs/old-mirror.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
+    // A mirror record under a directory that is now a symlink loop: the
+    // globs refuse the directory by name, and the record is noted, never
+    // looked up through the loop.
+    "skills/loop/sub/x.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
     // The previous pipeline recorded its symlinks as managed, hashing the
     // link target string.
     "CLAUDE.md": `{"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
@@ -77,8 +89,8 @@ function oldManifest(): string {
     // recorded content, one edited since.
     ".editorconfig": `{"class": "managed", "hash": "${sha256(OLD_EDITORCONFIG)}"}`,
     ".gitattributes": `{"class": "managed", "hash": "${sha256("* text=auto\n")}"}`,
-    // A managed record without a hash is one the writer cannot carry, so it
-    // is no record at all, and no class flip.
+    // A managed record without a hash: the flip to split cannot be verified
+    // against it, so the file is held and the record carried as it is.
     ".yamllint": `{"class": "managed", "hash": null}`,
     // A starter flipping to managed is held; its path is named like an
     // inherited object property to keep every record lookup honest.
@@ -126,6 +138,10 @@ function seedTarget(): string {
     "skills/beta/LICENSE.md": "a hand-written license\n",
     "skills/gamma/README.md": "gamma\n",
     "skills/gamma/LICENSE.md": "an edited mirror copy\n",
+    // Holds exactly what the mirror writes, with no record: adopted as current.
+    "skills/delta/README.md": "delta\n",
+    "skills/delta/LICENSE.md": NEW_LICENSE,
+    "docs/old-mirror.md": OLD_LICENSE,
     ".editorconfig": OLD_EDITORCONFIG,
     ".gitattributes": OLD_GITATTRIBUTES,
     ".yamllint": OLD_YAMLLINT,
@@ -143,6 +159,7 @@ function seedTarget(): string {
   chmodSync(join(target, ".editorconfig"), 0o755);
   symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
   symlinkSync("../AGENTS.md", join(target, ".github/copilot-instructions.md"));
+  symlinkSync("loop", join(target, "skills/loop"));
   fixtureGit(target, ["init", "-q", "-b", "main"]);
   fixtureGit(target, ["add", "-A"]);
   fixtureGit(target, ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "-m", "seed"]);
@@ -223,8 +240,11 @@ describe("sync.ts end to end", () => {
       "dropped unknown module `uv` (files.yml does not know it)",
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
+      droppedMirrorNote("docs/old-mirror.md"),
+      droppedMirrorNote("skills/loop/sub/x.md"),
     ]);
     expect(read("BESPOKE.md")).toBe("b\n");
+    expect(read("docs/old-mirror.md")).toBe(OLD_LICENSE);
   });
 
   test("writes each class with the right change verdict", () => {
@@ -308,7 +328,7 @@ describe("sync.ts end to end", () => {
       ].join("\n"),
     );
     expect(read(".github/workflows/checks.yml")).toBe(
-      "name: checks\non: pull_request\njobs: {}\n# Examples:\n#   bun test\n",
+      "name: checks\non: pull_request\njobs: {}\n# A demo repository\n# Examples:\n#   bun test\n",
     );
   });
 
@@ -318,7 +338,7 @@ describe("sync.ts end to end", () => {
     // The registration's label wins; the skills directory falls back to the module default.
     expect(read(".github/workflows/ci.yml")).toContain('echo "tracking fuzz-me"');
     expect(read(".github/workflows/validate-skills.yml")).toContain('paths: ["skills/**"]');
-    expect(read("LICENSE.md")).toBe(`MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`);
+    expect(read("LICENSE.md")).toBe(NEW_LICENSE);
     expect(read("AGENTS.md")).toBe(
       "<!-- BEGIN REPO-PLATFORM MANAGED -->\n# Demo Project\n\nA demo repository\n<!-- END REPO-PLATFORM MANAGED -->\n",
     );
@@ -404,7 +424,9 @@ describe("sync.ts end to end", () => {
         "the source is not a file this sync writes",
       ),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "written"),
+      mirror("LICENSE.md", "skills/loop/LICENSE.md", "refused", LOOP_REFUSAL),
       mirror("LICENSE.md", "nowhere/*/LICENSE.md", "refused", "the pattern matches nothing"),
+      mirror("AGENTS.md", "skills/loop/AGENTS.md", "refused", LOOP_REFUSAL),
       mirror("LICENSE.md", "skills/alpha/LICENSE.md", "written"),
       mirror(
         "LICENSE.md",
@@ -412,6 +434,7 @@ describe("sync.ts end to end", () => {
         "refused",
         "the target holds content that is not the previous mirror",
       ),
+      mirror("LICENSE.md", "skills/delta/LICENSE.md", "current"),
       mirror(
         "LICENSE.md",
         "skills/gamma/LICENSE.md",
@@ -421,6 +444,7 @@ describe("sync.ts end to end", () => {
       mirror("LICENSE.md", "skills/new/LICENSE.md", "current"),
       mirror("AGENTS.md", "skills/alpha/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/beta/AGENTS.md", "written"),
+      mirror("AGENTS.md", "skills/delta/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/gamma/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/new/AGENTS.md", "written"),
     ]);
@@ -458,8 +482,10 @@ describe("sync.ts end to end", () => {
         "skills/new/LICENSE.md",
         "skills/alpha/AGENTS.md",
         "skills/beta/AGENTS.md",
+        "skills/delta/AGENTS.md",
         "skills/gamma/AGENTS.md",
         "skills/new/AGENTS.md",
+        "skills/delta/LICENSE.md",
         ".github/workflows/docs-site.yml",
         ".github/workflows/nightly-fuzz.yml",
         ".github/workflows/validate-skills.yml",
@@ -479,6 +505,12 @@ describe("sync.ts end to end", () => {
       class: "mirror",
       hash: sha256(read("LICENSE.md")),
     });
+    // A current copy with no record is adopted: recorded like a written one.
+    expect(manifest.files["skills/delta/LICENSE.md"]).toEqual({
+      class: "mirror",
+      hash: sha256(NEW_LICENSE),
+    });
+    expect(manifest.files["docs/old-mirror.md"]).toBeUndefined();
     expect(manifest.files[".github/workflows/nightly-fuzz.yml"]).toEqual({ class: "starter" });
     // The adopted symlink's record flips to link with the hash the previous
     // pipeline already wrote; the held flip keeps its managed record.
@@ -563,12 +595,16 @@ describe("sync.ts end to end", () => {
       `mirror ${MANIFEST} refused: the pattern is a path files.yml writes`,
       "mirror SECURITY.md refused: the pattern is a path files.yml retires",
       "mirror docs/gitattributes.txt refused: the source is not a file this sync writes",
+      `mirror skills/loop/LICENSE.md refused: ${LOOP_REFUSAL}`,
       "mirror nowhere/*/LICENSE.md refused: the pattern matches nothing",
+      `mirror skills/loop/AGENTS.md refused: ${LOOP_REFUSAL}`,
       "mirror skills/beta/LICENSE.md refused: the target holds content that is not the previous mirror",
       "mirror skills/gamma/LICENSE.md refused: the target holds content that is not the previous mirror",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
       "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
+      `registration: ${droppedMirrorNote("docs/old-mirror.md")}`,
+      `registration: ${droppedMirrorNote("skills/loop/sub/x.md")}`,
     ]);
   });
 
@@ -614,17 +650,36 @@ describe("sync.ts over a modules-only registration", () => {
   test("an entry needing a placeholder with no value is held, noted, and never written empty", () => {
     const target = temp.dir("sync-e2e-bare-target-");
     writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, fuzzer]\n");
+    // Both fixture starters need {{description}}: the present one is the
+    // repository's own and is not rendered, the absent one is held.
+    mkdirSync(join(target, ".github/workflows"), { recursive: true });
+    writeFileSync(join(target, ".github/workflows/nightly-fuzz.yml"), STARTER);
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     const { summary } = runSync(target, join(temp.dir("sync-e2e-bare-summary-"), "summary.json"));
     // project_name and copyright_holder fall back to the slug; description has no fallback.
-    const agents = summary.written.find((row) => row.path === "AGENTS.md");
-    expect(agents).toEqual({
-      path: "AGENTS.md",
-      class: "split",
+    const held = (path: string, cls: string) => ({
+      path,
+      class: cls,
       change: "held",
       detail: "no value for {{description}}",
     });
+    expect(summary.written.find((row) => row.path === "AGENTS.md")).toEqual(
+      held("AGENTS.md", "split"),
+    );
+    expect(summary.written.find((row) => row.path === ".github/workflows/checks.yml")).toEqual(
+      held(".github/workflows/checks.yml", "starter"),
+    );
+    expect(
+      summary.written.find((row) => row.path === ".github/workflows/nightly-fuzz.yml"),
+    ).toEqual({
+      path: ".github/workflows/nightly-fuzz.yml",
+      class: "starter",
+      change: "unchanged",
+      detail: "",
+    });
+    expect(readFileSync(join(target, ".github/workflows/nightly-fuzz.yml"), "utf-8")).toBe(STARTER);
     expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(target, ".github/workflows/checks.yml"))).toBe(false);
     expect(readFileSync(join(target, "LICENSE.md"), "utf-8")).toBe(
       `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`,
     );

@@ -167,7 +167,12 @@ describe("parseRegistration", () => {
     const read = parseRegistration(
       "modules: []\nproject:\n  name: Vivswan's tools\n  slug: tools\n  description: 'Tools: for things, 100%'\n",
     );
-    expect("registration" in read).toBe(true);
+    expect(read).toEqual({
+      registration: {
+        modules: [],
+        project: { name: "Vivswan's tools", slug: "tools", description: "Tools: for things, 100%" },
+      },
+    });
   });
 
   test("the schema is strict at the top level and in every section", () => {

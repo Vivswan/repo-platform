@@ -164,17 +164,17 @@ Retirement runs before writing. Rows appear only for files present.
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: `deleted` on a hash match, else `held` |
 
-A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, a held entry, and a refused mirror target keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note.
+A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, a held entry, and a refused mirror target keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note, and so is a `mirror` record no declaration reaches any more (the copy stays as the repository's own; a mirror declared again adopts it while it still holds the source's content).
 
 ## Mirrors
 
-The registration's `mirrors` list (`source`, `targets`) copies a file this sync wrote to each target. Single-segment `*` globs: a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory. Literal targets are written before any glob expands, so a directory a literal creates is matched in the same run; a target a literal claims stays the literal's.
+The registration's `mirrors` list (`source`, `targets`) copies a file this sync wrote to each target. Single-segment `*` globs: a `*` directory segment matches directories, a final `*` matches existing files, a literal final segment lands in every matched directory. Literal targets are written before any glob expands, so a directory a literal creates is matched in the same run; a target a literal claims stays the literal's. A glob never creates a directory: a matched path whose directory is missing is refused. A symbolic link a glob meets is refused by name, never skipped and never listed through: a linked file, a linked directory, or a link resolving to nothing (the rest of the pattern rides along in the refused row, as in `skills/link/sub/*.md`); a link to a file in a directory segment is no directory and is passed over like a file.
 
 | Outcome | When |
 | --- | --- |
 | `written` | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record; a record of another class does not vouch for the bytes) |
 | `current` | the target already holds the new content |
-| `refused` | the source is not a file this sync wrote, or was held this run; the pattern uses `**`, matches nothing, or has a symlinked literal ancestor; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes or retires (listed or stale); the target is a symbolic link; the target holds content that is not the previous mirror (only a `mirror` record vouches for the bytes) |
+| `refused` | the source is not a file this sync wrote, or was held this run; the pattern uses `**`, matches nothing, or has a symlinked literal ancestor; a matched path sits under a symbolic link or in a directory that does not exist; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes or retires (listed or stale); the target is a symbolic link; the target holds content that is not the previous mirror (only a `mirror` record vouches for the bytes) |
 
 ## The manifest
 
@@ -188,7 +188,7 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparseable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry |
+| Registration notes | dropped unknown modules; an unparseable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a mirror record no declaration reaches |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 

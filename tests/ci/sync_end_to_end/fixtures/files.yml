@@ -1,8 +1,8 @@
 # The end-to-end fixture's data file: one entry per class, blocks on a
 # split, a managed, and a starter entry (two modules declaring one block
 # value), a same-path pair split by module conditions, a visibility-gated
-# entry, two links, two class flips and a hash-less record that is none,
-# and three retirements.
+# entry, two links, three class flips (one from a hash-less record, which
+# is held), and three retirements.
 placeholders:
   - project_name
   - project_slug

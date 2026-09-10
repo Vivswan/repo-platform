@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { REGISTRATION_PATH } from "../../../../actions/plan/registration.ts";
 import { parseFlags } from "../../shared/flags.ts";
+import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import {
   blockSources,
@@ -33,7 +34,7 @@ import {
   sha256,
   writeManifest,
 } from "./manifest.ts";
-import { applyMirrors } from "./mirrors.ts";
+import { applyMirrors, linkedAncestor } from "./mirrors.ts";
 import {
   missingPlaceholders,
   type PlaceholderName,
@@ -90,10 +91,13 @@ function carriedRecord(entry: Records[string]): ManifestRecord | null {
 }
 
 interface Rendered {
-  /** What the entry writes: the whole file, the region, or the link target. */
+  /** What the entry writes: the whole file, the region, or the link
+   *  target. A starter's is rendered inside its writer, only when it
+   *  creates the file, so it is empty here (nothing reads it: no mirror
+   *  copies a starter and no diff is reported for one). */
   content: string;
   record: ManifestRecord;
-  write: (recorded: string | null) => WriteOutcome;
+  write: (recorded: string | null) => WriteOutcome | { missing: string[] };
 }
 
 /** The entry's content and record, and its class writer bound to them; or
@@ -115,11 +119,21 @@ function render(
     };
   }
   const raw = (rel: string) => readFileSync(join(options.tree, rel), "utf-8");
-  const blocks = blockSources(config, entry, modules, options.tree).map(raw);
-  const text = spliceBlocks(raw(entry.source), blocks);
-  const missing = missingPlaceholders(text, values);
-  if (missing.length > 0) return { missing };
-  const body = substitute(text, values);
+  const text = (): string | { missing: string[] } => {
+    const blocks = blockSources(config, entry, modules, options.tree).map(raw);
+    const spliced = spliceBlocks(raw(entry.source), blocks);
+    const missing = missingPlaceholders(spliced, values);
+    return missing.length > 0 ? { missing } : substitute(spliced, values);
+  };
+  if (entry.class === "starter") {
+    return {
+      content: "",
+      record: { class: "starter" },
+      write: () => writeStarter(target, entry.path, text),
+    };
+  }
+  const body = text();
+  if (typeof body !== "string") return body;
   if (entry.class === "split") {
     const markers = regionMarkers(entry.region);
     const region = renderRegion(body, markers);
@@ -127,13 +141,6 @@ function render(
       content: region,
       record: { class: "split", grammar: "managed-region", ...markers, hash: sha256(region) },
       write: (recorded) => writeSplit(target, entry.path, region, markers, recorded),
-    };
-  }
-  if (entry.class === "starter") {
-    return {
-      content: body,
-      record: { class: "starter" },
-      write: () => writeStarter(target, entry.path, body),
     };
   }
   return {
@@ -199,17 +206,16 @@ function writeEntry(
     }
     removeFile(options.target, entry.path);
     const outcome = rendered.write(null);
+    if ("missing" in outcome) return outcome;
     return {
       outcome: outcome.change === "created" ? { change: "updated" } : outcome,
       record: rendered.record,
       content: rendered.content,
     };
   }
-  return {
-    outcome: rendered.write(recordedHash(records, entry.path)),
-    record: rendered.record,
-    content: rendered.content,
-  };
+  const outcome = rendered.write(recordedHash(records, entry.path));
+  if ("missing" in outcome) return outcome;
+  return { outcome, record: rendered.record, content: rendered.content };
 }
 
 export function runSync(options: SyncOptions): SyncReport {
@@ -321,6 +327,24 @@ export function runSync(options: SyncOptions): SyncReport {
     const bytes = written.get(row.source);
     if (row.outcome === "refused") carry(row.target);
     else if (bytes !== undefined) next.set(row.target, { class: "mirror", hash: sha256(bytes) });
+  }
+  // A mirror record no declaration reaches now (removed from the
+  // registration, or its glob no longer matches) leaves the manifest with a
+  // note; the copy stays as the repository's own. A path under a linked
+  // directory is never looked up (the link may loop); its record is noted too.
+  for (const [path, entry] of Object.entries(records)) {
+    if (entry.class !== "mirror" || next.has(path) || pathProblem(path) !== null) continue;
+    if (
+      linkedAncestor(options.target, path) === null &&
+      lstatOrNull(join(options.target, path)) === null
+    ) {
+      continue;
+    }
+    notes.push(
+      `manifest record for \`${path}\` dropped: no mirror in ${REGISTRATION_PATH} reaches it now, so ` +
+        "the file is the repository's own (a mirror declared again adopts it while it still holds " +
+        "the source's content)",
+    );
   }
   writeManifest(options.target, Object.fromEntries(next), options.build);
   return buildReport({

@@ -8,6 +8,7 @@ import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import {
   applyMirrors,
   expandPattern,
+  linkedAncestor,
   linkedPrefix,
   type MirrorRow,
   mirrorPathProblem,
@@ -34,11 +35,32 @@ describe("expandPattern", () => {
       "other/z.txt": "",
     });
     symlinkSync("a", join(root, "skills/link"));
+    symlinkSync("c.txt", join(root, "skills/l.txt"));
+    symlinkSync("loop", join(root, "skills/loop"));
+    symlinkSync("../other", join(root, "skills/a/sub"));
+    // A symlink matches a final segment; in a directory segment one that
+    // resolves to a directory or to nothing (a loop) makes a linked prefix
+    // that the rest of the pattern rides along literally, never listed
+    // through, while a link to a file is skipped like a file. A literal
+    // segment that is a link (skills/a/sub) links the prefix the same way.
     expect(expandPattern(root, "skills/*/LICENSE.md")).toEqual([
       "skills/a/LICENSE.md",
       "skills/b/LICENSE.md",
+      "skills/link/LICENSE.md",
+      "skills/loop/LICENSE.md",
     ]);
-    expect(expandPattern(root, "skills/*/*.txt")).toEqual(["skills/a/x.txt", "skills/b/y.txt"]);
+    expect(expandPattern(root, "skills/*/*.txt")).toEqual([
+      "skills/a/x.txt",
+      "skills/b/y.txt",
+      "skills/link/*.txt",
+      "skills/loop/*.txt",
+    ]);
+    expect(expandPattern(root, "skills/*/sub/*.txt")).toEqual([
+      "skills/a/sub/*.txt",
+      "skills/link/sub/*.txt",
+      "skills/loop/sub/*.txt",
+    ]);
+    expect(expandPattern(root, "skills/*.txt")).toEqual(["skills/c.txt", "skills/l.txt"]);
     expect(expandPattern(root, "plain/path.md")).toEqual(["plain/path.md"]);
     expect(expandPattern(root, "missing/*/f")).toEqual([]);
   });
@@ -71,6 +93,18 @@ describe("linkedPrefix", () => {
     expect(linkedPrefix(root, "real/*/x")).toBeNull();
     expect(linkedPrefix(root, "*/x")).toBeNull();
     expect(linkedPrefix(root, "missing/*")).toBeNull();
+  });
+});
+
+describe("linkedAncestor", () => {
+  test("names the shallowest symlinked directory above a concrete path, or null", () => {
+    const root = tree({ "outside/secret.txt": "", "real/a/x": "" });
+    symlinkSync("outside", join(root, "docs"));
+    symlinkSync("../../outside", join(root, "real/a/sub"));
+    expect(linkedAncestor(root, "docs/sub/x")).toBe("docs");
+    expect(linkedAncestor(root, "real/a/sub/x")).toBe("real/a/sub");
+    expect(linkedAncestor(root, "real/a/x")).toBeNull();
+    expect(linkedAncestor(root, "x")).toBeNull();
   });
 });
 
@@ -198,6 +232,93 @@ describe("applyMirrors", () => {
     expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
     expect(readFileSync(join(root, "skills/c/LICENSE.md"), "utf-8")).toBe("hand edited\n");
     expect(readFileSync(join(root, "skills/d/LICENSE.md"), "utf-8")).toBe("v2\n");
+  });
+
+  test("a matched path under a linked directory is refused by name, and the pass goes on", () => {
+    const root = tree({
+      "deep/alpha/README.md": "",
+      "deep/beta/sub/README.md": "",
+      "outside/keep.md": "",
+      "outside/sub/x.md": "",
+      "skills/a/README.md": "",
+    });
+    symlinkSync("../../outside", join(root, "deep/alpha/sub"));
+    symlinkSync("../outside", join(root, "skills/link"));
+    symlinkSync("loop", join(root, "skills/loop"));
+    const rows = applyMirrors(
+      root,
+      [
+        {
+          source: "LICENSE.md",
+          targets: ["deep/*/sub/LICENSE.md", "skills/*/LICENSE.md", "skills/*/sub/*.md"],
+        },
+      ],
+      new Map([["LICENSE.md", Buffer.from("L\n")]]),
+      new Set(),
+      {},
+    );
+    const refused = (path: string, dir: string) => ({
+      source: "LICENSE.md",
+      target: path,
+      outcome: "refused" as const,
+      detail: `the target's ancestor '${dir}' is a symbolic link`,
+    });
+    // The star after a linked directory is never expanded (outside/sub/x.md
+    // is not listed), and a link loop is refused rather than followed.
+    expect(rows).toEqual([
+      refused("deep/alpha/sub/LICENSE.md", "deep/alpha/sub"),
+      refused("skills/link/LICENSE.md", "skills/link"),
+      refused("skills/loop/LICENSE.md", "skills/loop"),
+      refused("skills/link/sub/*.md", "skills/link"),
+      refused("skills/loop/sub/*.md", "skills/loop"),
+      { source: "LICENSE.md", target: "deep/beta/sub/LICENSE.md", outcome: "written", detail: "" },
+      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+    ]);
+    expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
+    expect(existsSync(join(root, "outside/sub/LICENSE.md"))).toBe(false);
+  });
+
+  test("a final star matching a symlink refuses it instead of skipping it", () => {
+    const root = tree({ "docs/a.md": "L\n" });
+    symlinkSync("a.md", join(root, "docs/b.md"));
+    const rows = applyMirrors(
+      root,
+      [{ source: "LICENSE.md", targets: ["docs/*.md"] }],
+      new Map([["LICENSE.md", Buffer.from("L\n")]]),
+      new Set(),
+      { "docs/b.md": { class: "mirror", hash: sha256("L\n") } },
+    );
+    expect(rows).toEqual([
+      { source: "LICENSE.md", target: "docs/a.md", outcome: "current", detail: "" },
+      {
+        source: "LICENSE.md",
+        target: "docs/b.md",
+        outcome: "refused",
+        detail: "the target is a symbolic link",
+      },
+    ]);
+  });
+
+  test("a glob never creates a directory: a matched path whose directory is missing is refused", () => {
+    // A directory literally named * makes the glob expand to its own text;
+    // the pass, not the spelling, says it is a glob.
+    const root = tree({ "skills/a/README.md": "", "skills/*/README.md": "" });
+    const rows = applyMirrors(
+      root,
+      [{ source: "LICENSE.md", targets: ["skills/*/nope/LICENSE.md"] }],
+      new Map([["LICENSE.md", Buffer.from("L\n")]]),
+      new Set(),
+      {},
+    );
+    const refused = (dir: string) => ({
+      source: "LICENSE.md",
+      target: `${dir}/LICENSE.md`,
+      outcome: "refused" as const,
+      detail: `the target's directory '${dir}' does not exist`,
+    });
+    expect(rows).toEqual([refused("skills/*/nope"), refused("skills/a/nope")]);
+    expect(existsSync(join(root, "skills/a/nope"))).toBe(false);
+    expect(existsSync(join(root, "skills/*/nope"))).toBe(false);
   });
 
   test("literal targets are written before globs expand, so a new directory is matched in one run", () => {
