@@ -30,8 +30,14 @@ modules:
 files:
   - { path: .github/workflows/ci.yml, class: managed }
   - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources }
-  - { path: .github/workflows/docs-site.yml, class: managed, when: { modules: [docs-site], without: [pages] }, source: files/docs-site/docs-site.standalone.yml }
-  - { path: .github/workflows/docs-site.yml, class: managed, when: { modules: [docs-site, pages] }, source: files/docs-site/docs-site.with-pages.yml }
+  - path: .github/workflows/docs-site.yml
+    class: managed
+    when: { modules: [docs-site], without: [pages] }
+    source: files/docs-site/docs-site.standalone.yml
+  - path: .github/workflows/docs-site.yml
+    class: managed
+    when: { modules: [docs-site, pages] }
+    source: files/docs-site/docs-site.with-pages.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
 retired:
   - { path: .github/.copier-answers.yml }
@@ -169,6 +175,13 @@ describe("blockSources and verifySources", () => {
       "bun/.gitignore.block.Bun",
     ]);
     expect(blockSources(config, gitignore, ["pages"])).toEqual([]);
+  });
+
+  test("a block value that is not one path-safe word is refused", () => {
+    const escaping = parseFilesConfig(BASE.replace("[Node, Bun]", "[../../outside]"));
+    expect(() => blockSources(escaping, escaping.files[1], ["bun"])).toThrow(
+      "must be a list of block names",
+    );
   });
 
   test("a missing source or an unlisted placeholder is a load error", () => {

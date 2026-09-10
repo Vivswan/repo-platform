@@ -17,13 +17,14 @@ export interface MirrorRow {
   detail: string;
 }
 
-/** Why a declared mirror path cannot be written, or null. */
-export function mirrorPathProblem(path: string, written: ReadonlySet<string>): string | null {
+/** Why a declared mirror path cannot be written, or null. `selected` is
+ *  every path files.yml writes for this repository, starters included. */
+export function mirrorPathProblem(path: string, selected: ReadonlySet<string>): string | null {
   const problem = pathProblem(path);
   if (problem !== null) return problem;
   const lower = path.toLowerCase();
   if (lower.startsWith(".github/workflows/")) return "sits under .github/workflows/";
-  if (written.has(path)) return "is a path files.yml writes";
+  if (selected.has(path)) return "is a path files.yml writes";
   return null;
 }
 
@@ -69,16 +70,17 @@ function escapeRe(text: string): string {
 }
 
 /** Copies every declared mirror whose source this sync wrote. `written`
- *  maps the paths written this run to their bytes; `records` are the
- *  previous sync's, read for the last mirror hash. */
+ *  maps the managed and split paths written this run to their bytes,
+ *  `selected` is every selected entry path (no mirror may land on one),
+ *  and `records` are the previous sync's, read for the last mirror hash. */
 export function applyMirrors(
   target: string,
   mirrors: NonNullable<Registration["mirrors"]>,
   written: ReadonlyMap<string, Buffer>,
+  selected: ReadonlySet<string>,
   records: Records,
 ): MirrorRow[] {
   const rows: MirrorRow[] = [];
-  const writtenPaths = new Set(written.keys());
   for (const { source, targets } of mirrors) {
     const bytes = written.get(source);
     if (bytes === undefined) {
@@ -95,7 +97,7 @@ export function applyMirrors(
     for (const pattern of targets) {
       const patternProblem = pattern.includes("**")
         ? "uses '**'"
-        : mirrorPathProblem(pattern, writtenPaths);
+        : mirrorPathProblem(pattern, selected);
       if (patternProblem !== null) {
         rows.push({
           source,
@@ -106,7 +108,7 @@ export function applyMirrors(
         continue;
       }
       for (const path of expandPattern(target, pattern)) {
-        const problem = mirrorPathProblem(path, writtenPaths);
+        const problem = mirrorPathProblem(path, selected);
         if (problem !== null) {
           rows.push({ source, target: path, outcome: "refused", detail: `the target ${problem}` });
           continue;

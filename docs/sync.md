@@ -43,6 +43,8 @@ placeholders: [project_name, project_slug, description, github_username, github_
 modules:
   bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly}}
+  pages: {}
+  docs-site: {}
 files:
   - {path: .github/workflows/ci.yml, class: managed}
   - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
@@ -110,7 +112,7 @@ The loader refuses, all problems at once:
 | Class | Written | Existing local content | Manifest record |
 | --- | --- | --- | --- |
 | `managed` | whole file, every sync | replaced and reported (`replaced local edits`, with a diff), holds the PR | `hash` = sha256 of the file |
-| `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file without markers gets the region above its content | `hash` = sha256 of the region, marker lines included |
+| `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
 | `starter` | once, when the path is absent | never touched again | no hash |
 
 Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither).
@@ -129,7 +131,7 @@ Retirement runs before writing. Rows appear only for files present.
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
 
-A recorded `managed` or `split` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`. A held file keeps its record in the new manifest so a later sync can still match it.
+A recorded `managed` or `split` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, and a refused mirror target, keep their records in the new manifest so a later sync can still match them.
 
 ## Mirrors
 

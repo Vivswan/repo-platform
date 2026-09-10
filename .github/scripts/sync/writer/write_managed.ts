@@ -8,13 +8,11 @@ import { dirname, join } from "node:path";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { sha256 } from "./manifest.ts";
 
-export type Change = "created" | "updated" | "unchanged" | "replaced local edits";
+export type WriteOutcome =
+  | { change: "created" | "updated" | "unchanged" }
+  | { change: "replaced local edits"; replaced: string };
 
-export interface WriteOutcome {
-  change: Change;
-  /** The text a "replaced local edits" write overwrote. */
-  replaced?: string;
-}
+export type Change = WriteOutcome["change"];
 
 /** The bytes at `path` under `target`, null when nothing is there; a
  *  directory or symlink is refused loudly rather than written over. */

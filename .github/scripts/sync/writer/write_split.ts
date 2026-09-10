@@ -5,8 +5,8 @@
 
 import {
   cleanManagedRegion,
-  markerLineCount,
   type RegionMarkers,
+  substringCount,
 } from "../../../../actions/shared/grammar.ts";
 import { sha256 } from "./manifest.ts";
 import { existingFile, type WriteOutcome, writeFile } from "./write_managed.ts";
@@ -37,15 +37,17 @@ export function writeSplit(
   // latin1 round-trips every byte, so slicing and reassembly never alter
   // the repository-owned parts.
   const text = existing.toString("latin1");
-  const hasMarkers = [markers.begin, markers.end].some((m) => markerLineCount(text, m) > 0);
-  if (!hasMarkers) {
+  const mentions = [markers.begin, markers.end].some((m) => substringCount(text, m) > 0);
+  if (!mentions) {
     writeFile(target, path, Buffer.concat([regionBytes, existing]));
     return { change: "updated" };
   }
+  // Marker text anywhere but as one clean line each (a duplicate, a
+  // mid-line mention) leaves no honest slice, now or on the next run.
   const slice = cleanManagedRegion(text, markers);
   if (slice === null) {
     throw new Error(
-      `${path}: the managed-region markers are duplicated or out of order; fix the file by hand`,
+      `${path}: the managed-region marker text is duplicated, out of order, or buried mid-line; fix the file by hand`,
     );
   }
   const previous = Buffer.from(slice.region, "latin1");

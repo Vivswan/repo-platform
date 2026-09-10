@@ -48,8 +48,10 @@ describe("mirrorPathProblem", () => {
     ["../LICENSE.md", "carries an empty, '.', or '..' segment"],
     [".github/workflows/x.yml", "sits under .github/workflows/"],
     ["LICENSE.md", "is a path files.yml writes"],
+    ["nightly.yml", "is a path files.yml writes"],
   ])("%s -> %p", (path, problem) => {
-    expect(mirrorPathProblem(path, new Set(["LICENSE.md"]))).toBe(problem);
+    // The selected set carries every selected path, a starter included.
+    expect(mirrorPathProblem(path, new Set(["LICENSE.md", "nightly.yml"]))).toBe(problem);
   });
 });
 
@@ -64,6 +66,7 @@ describe("applyMirrors", () => {
       "skills/c/LICENSE.md": "hand edited\n",
       "skills/d/README.md": "",
       "skills/d/LICENSE.md": "v1\n",
+      "starter.yml": "v1\n",
     });
     const written = new Map([["LICENSE.md", Buffer.from("v2\n")]]);
     const rows = applyMirrors(
@@ -71,9 +74,10 @@ describe("applyMirrors", () => {
       [
         { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] },
         { source: "README.md", targets: ["docs/README.md"] },
-        { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md"] },
+        { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md", "starter.yml"] },
       ],
       written,
+      new Set(["LICENSE.md", "starter.yml"]),
       { "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") } },
     );
     expect(rows).toEqual([
@@ -104,7 +108,14 @@ describe("applyMirrors", () => {
         outcome: "refused",
         detail: "the pattern is a path files.yml writes",
       },
+      {
+        source: "LICENSE.md",
+        target: "starter.yml",
+        outcome: "refused",
+        detail: "the pattern is a path files.yml writes",
+      },
     ]);
+    expect(readFileSync(join(root, "starter.yml"), "utf-8")).toBe("v1\n");
     expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
     expect(readFileSync(join(root, "skills/c/LICENSE.md"), "utf-8")).toBe("hand edited\n");
     expect(readFileSync(join(root, "skills/d/LICENSE.md"), "utf-8")).toBe("v2\n");

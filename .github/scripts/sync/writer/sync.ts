@@ -15,7 +15,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../../shared/flags.ts";
 import { fail } from "../../shared/gha.ts";
-import { blockSources, type FileEntry, type FilesConfig, loadFilesConfig } from "./files_config.ts";
+import {
+  blockSources,
+  type FileEntry,
+  type FilesConfig,
+  loadFilesConfig,
+  pathProblem,
+} from "./files_config.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
@@ -52,11 +58,15 @@ export interface SyncOptions {
   previousFiles?: string;
 }
 
-/** A previous record carried into the new manifest when its file stays
- *  (a held retirement), or null when its shape is not one the writer emits. */
+/** A previous record carried into the new manifest when its file stays (a
+ *  held or kept retirement, a refused mirror), so the next run can still
+ *  tell the platform's last write from an edit; null when its shape is not
+ *  one the writer emits. */
 function carriedRecord(entry: Records[string]): ManifestRecord | null {
   const hash = typeof entry.hash === "string" ? entry.hash : null;
+  if (entry.class === "starter") return { class: "starter" };
   if (entry.class === "managed" && hash !== null) return { class: "managed", hash };
+  if (entry.class === "mirror" && hash !== null) return { class: "mirror", hash };
   if (
     entry.class === "split" &&
     hash !== null &&
@@ -82,6 +92,16 @@ function writeEntry(
     substitute(readFileSync(join(options.tree, rel), "utf-8"), values);
   const body = source(entry.source);
   const recorded = recordedHash(records, entry.path);
+  if (entry.class === "split") {
+    const markers = regionMarkers(entry.region);
+    const blocks = blockSources(config, entry, modules).map(source);
+    const region = renderRegion([body, ...blocks].map(terminated).join(""), markers);
+    return {
+      outcome: writeSplit(options.target, entry.path, region, markers, recorded),
+      record: { class: "split", grammar: "managed-region", ...markers, hash: sha256(region) },
+      content: region,
+    };
+  }
   if (entry.class === "starter") {
     return {
       outcome: writeStarter(options.target, entry.path, body),
@@ -89,20 +109,10 @@ function writeEntry(
       content: body,
     };
   }
-  if (entry.class === "managed") {
-    return {
-      outcome: writeManaged(options.target, entry.path, body, recorded),
-      record: { class: "managed", hash: sha256(body) },
-      content: body,
-    };
-  }
-  const markers = regionMarkers(entry.region ?? "hash");
-  const blocks = blockSources(config, entry, modules).map(source);
-  const region = renderRegion([body, ...blocks].map(terminated).join(""), markers);
   return {
-    outcome: writeSplit(options.target, entry.path, region, markers, recorded),
-    record: { class: "split", grammar: "managed-region", ...markers, hash: sha256(region) },
-    content: region,
+    outcome: writeManaged(options.target, entry.path, body, recorded),
+    record: { class: "managed", hash: sha256(body) },
+    content: body,
   };
 }
 
@@ -120,22 +130,26 @@ export function runSync(options: SyncOptions): SyncReport {
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
   const retiredPaths = new Set(config.retired.map((entry) => entry.path));
-  const stale = Object.entries(records)
-    .filter(
-      ([path, entry]) =>
-        (entry.class === "managed" || entry.class === "split") &&
-        path !== MANIFEST_NAME &&
-        !entryPaths.has(path) &&
-        !retiredPaths.has(path),
-    )
-    .map(([path]) => path);
+  // Manifest keys are target-repo content: a stale record is retired only
+  // when its path is one the writer could have written.
+  const stale: string[] = [];
+  for (const [path, entry] of Object.entries(records)) {
+    if (entry.class !== "managed" && entry.class !== "split") continue;
+    if (path === MANIFEST_NAME || entryPaths.has(path) || retiredPaths.has(path)) continue;
+    const problem = pathProblem(path);
+    if (problem === null) stale.push(path);
+    else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+  }
   const retired = retire(options.target, config.retired, stale, records);
 
   const next: Record<string, ManifestRecord> = {};
+  const carry = (path: string) => {
+    const previous = records[path];
+    const record = previous === undefined ? null : carriedRecord(previous);
+    if (record !== null) next[path] = record;
+  };
   for (const row of retired) {
-    const carried = row.outcome === "held" ? records[row.path] : undefined;
-    const record = carried === undefined ? null : carriedRecord(carried);
-    if (record !== null) next[row.path] = record;
+    if (row.outcome === "held" || row.outcome === "kept") carry(row.path);
   }
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];
@@ -151,7 +165,7 @@ export function runSync(options: SyncOptions): SyncReport {
     );
     next[entry.path] = record;
     rows.push({ path: entry.path, class: entry.class, change: outcome.change });
-    if (outcome.replaced !== undefined) {
+    if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });
     }
     if (entry.class !== "starter") {
@@ -163,12 +177,11 @@ export function runSync(options: SyncOptions): SyncReport {
   const mirrors =
     registration.mirrors === undefined
       ? []
-      : applyMirrors(options.target, registration.mirrors, written, records);
+      : applyMirrors(options.target, registration.mirrors, written, entryPaths, records);
   for (const row of mirrors) {
     const bytes = written.get(row.source);
-    if (row.outcome !== "refused" && bytes !== undefined) {
-      next[row.target] = { class: "mirror", hash: sha256(bytes) };
-    }
+    if (row.outcome === "refused") carry(row.target);
+    else if (bytes !== undefined) next[row.target] = { class: "mirror", hash: sha256(bytes) };
   }
   writeManifest(options.target, next, options.build);
   return buildReport({

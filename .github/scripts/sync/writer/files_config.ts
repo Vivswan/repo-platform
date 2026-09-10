@@ -20,16 +20,21 @@ export interface When {
   private?: boolean;
 }
 
-export interface FileEntry {
+interface EntryBase {
   path: string;
-  class: FileClass;
   /** The source file, relative to the files/ tree. */
   source: string;
   when: When | null;
-  region?: RegionKind;
+}
+
+export interface SplitEntry extends EntryBase {
+  class: "split";
+  region: RegionKind;
   /** The module-data key whose values name the per-module block files. */
   blocks?: string;
 }
+
+export type FileEntry = (EntryBase & { class: "managed" | "starter" }) | SplitEntry;
 
 export interface RetiredEntry {
   path: string;
@@ -76,6 +81,9 @@ const configSchema = z.strictObject({
 });
 
 const SOURCE_PREFIX = "files/";
+
+/** A block value names a file suffix, so it is one path-safe word. */
+const BLOCK_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 export class FilesConfigError extends Error {
   constructor(
@@ -143,9 +151,6 @@ export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig
       if (!moduleNames.includes(name))
         problems.push(`${where}: when names unknown module '${name}'`);
     }
-    if (entry.class === "split" && entry.region === undefined) {
-      problems.push(`${where}: a split entry needs a region (hash or html)`);
-    }
     if (entry.class !== "split" && (entry.region !== undefined || entry.blocks !== undefined)) {
       problems.push(`${where}: region and blocks apply to split entries only`);
     }
@@ -153,12 +158,15 @@ export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig
     if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
       problems.push(`${where}: source '${source}' must be a clean path under ${SOURCE_PREFIX}`);
     }
+    const base = { path: entry.path, source: source.slice(SOURCE_PREFIX.length), when };
+    if (entry.class !== "split") return { ...base, class: entry.class };
+    if (entry.region === undefined) {
+      problems.push(`${where}: a split entry needs a region (hash or html)`);
+    }
     return {
-      path: entry.path,
-      class: entry.class,
-      source: source.slice(SOURCE_PREFIX.length),
-      when,
-      ...(entry.region === undefined ? {} : { region: entry.region }),
+      ...base,
+      class: "split",
+      region: entry.region ?? "hash",
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
     };
   });
@@ -191,14 +199,16 @@ export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig
  *  for each module in files.yml order that carries the entry's `blocks` key,
  *  one tree-relative path per listed value. */
 export function blockSources(config: FilesConfig, entry: FileEntry, modules: string[]): string[] {
-  if (entry.blocks === undefined) return [];
+  if (entry.class !== "split" || entry.blocks === undefined) return [];
   const sources: string[] = [];
   for (const module of Object.keys(config.modules)) {
     if (!modules.includes(module)) continue;
     const values = config.modules[module][entry.blocks];
     if (values === undefined) continue;
-    if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) {
-      throw new Error(`files.yml: modules.${module}.${entry.blocks} must be a list of block names`);
+    if (!Array.isArray(values) || values.some((value) => !BLOCK_NAME_RE.test(String(value)))) {
+      throw new Error(
+        `files.yml: modules.${module}.${entry.blocks} must be a list of block names (letters, digits, . _ -)`,
+      );
     }
     for (const value of values as string[]) sources.push(`${module}/${entry.path}.block.${value}`);
   }

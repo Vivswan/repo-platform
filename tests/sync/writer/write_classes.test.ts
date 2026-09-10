@@ -82,11 +82,14 @@ describe("writeSplit", () => {
     });
   });
 
-  test("duplicated markers are refused rather than sliced by guess", () => {
+  test.each([
+    ["duplicated markers", `${region("a")}${region("b")}`],
+    ["marker text buried mid-line", `the boundary is ${markers.begin} in this file\n`],
+  ])("%s are refused rather than sliced by guess", (_reason, content) => {
     const target = temp.dir("writer-split-dup-");
-    writeFileSync(join(target, "f"), `${region("a")}${region("b")}`);
+    writeFileSync(join(target, "f"), content);
     expect(() => writeSplit(target, "f", region("c"), markers, null)).toThrow(
-      "duplicated or out of order",
+      "duplicated, out of order, or buried mid-line",
     );
   });
 });

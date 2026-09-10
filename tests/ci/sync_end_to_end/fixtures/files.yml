@@ -48,3 +48,4 @@ retired:
   - path: .github/workflows/release.yml
   - path: SECURITY.md
     moved_to: .github/SECURITY.md
+  - path: .github/workflows/old-starter.yml
