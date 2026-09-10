@@ -5,9 +5,14 @@
 // treated like retirements.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Records, sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
+import {
+  type Records,
+  readRecords,
+  sha256,
+  writeManifest,
+} from "../../../.github/scripts/sync/writer/manifest.ts";
 import { keepReason, retire } from "../../../.github/scripts/sync/writer/retire.ts";
 import { renderRegion } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
@@ -16,6 +21,9 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const M = HASH_REGION_MARKERS;
+// A variable, so neither the linter nor the type checker reads the lookup
+// as the inherited property.
+const PROTO = "__proto__";
 
 function checkout(files: Record<string, string>): string {
   const target = temp.dir("writer-retire-");
@@ -165,6 +173,26 @@ describe("retire", () => {
     );
     expect(records[".github/SECURITY.md"]).toEqual({ class: "managed", hash: sha256("policy\n") });
     expect(records["SECURITY.md"]).toBeUndefined();
+  });
+
+  test("a path named __proto__ is judged, moved, and recorded like any other", () => {
+    const target = checkout({ "old.md": "o\n" });
+    // An object literal keyed __proto__ would set the fixture's prototype.
+    writeFileSync(join(target, PROTO), "mine\n");
+    writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } }, "b".repeat(40));
+    const records = readRecords(target).records;
+    // Unrecorded, so not the platform's to retire: no row, file untouched.
+    expect(retire(target, [{ path: PROTO }], [], new Set(), records)).toEqual([]);
+    expect(readFileSync(join(target, PROTO), "utf-8")).toBe("mine\n");
+    expect(keepReason(target, PROTO, records)).toBe("no record of the platform writing it");
+    // Moved onto that name, the record travels as an own entry.
+    rmSync(join(target, PROTO));
+    expect(
+      retire(target, [{ path: "old.md", moved_to: PROTO }], [], new Set([PROTO]), records),
+    ).toEqual([{ path: "old.md", outcome: "moved", detail: "to __proto__" }]);
+    expect(records["old.md"]).toBeUndefined();
+    expect(Object.hasOwn(records, PROTO)).toBe(true);
+    expect(records[PROTO]).toEqual({ class: "managed", hash: sha256("o\n") });
   });
 
   test("stale recorded paths retire the same way, labelled as no longer selected", () => {

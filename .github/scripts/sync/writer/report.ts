@@ -144,10 +144,30 @@ export function unifiedDiff(
   return `${lines.slice(0, cap).join("\n")}\n... (${lines.length - cap} more diff lines)`;
 }
 
-const code = (text: string) => `\`${text}\``;
+/** Registration values and manifest paths reach the report verbatim; a
+ *  newline inside one would end its cell, list item, or heading and let the
+ *  rest of the value open a Markdown block of its own (a heading, a fence). */
+const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
+
+const code = (text: string) => `\`${oneLine(text)}\``;
 
 /** A pipe inside a cell would split it; the escape keeps the column count. */
-const cell = (text: string) => text.replaceAll("|", "\\|");
+const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
+
+const bullet = (text: string) => `- ${oneLine(text)}`;
+
+/** A diff line quoting the target's own content may open with backticks
+ *  (a context line is its text behind one space), so the fence is one
+ *  backtick longer than any such run and the content cannot close it.
+ *  Markdown ends a line at a bare CR too, which the diff keeps inside a
+ *  line, so the scan splits on every line ending. */
+function fencedDiff(diff: string): string[] {
+  const longest = diff
+    .split(/\r\n|\r|\n/)
+    .reduce((max, line) => Math.max(max, /^ {0,3}(`+)/.exec(line)?.[1].length ?? 0), 2);
+  const fence = "`".repeat(longest + 1);
+  return [`${fence}diff`, diff, fence];
+}
 
 function table(header: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
@@ -187,7 +207,7 @@ export function renderReport(report: SyncReport): string {
       "> These files held content the platform did not write. The platform version replaced it; the text it replaced is below.",
     );
     for (const row of report.replaced) {
-      parts.push("", `#### ${code(row.path)}`, "", "```diff", row.diff, "```");
+      parts.push("", `#### ${code(row.path)}`, "", ...fencedDiff(row.diff));
     }
   }
   if (report.retired.length > 0) {
@@ -202,7 +222,7 @@ export function renderReport(report: SyncReport): string {
     );
   }
   if (report.notes.length > 0) {
-    parts.push("", "### Registration notes", "", ...report.notes.map((note) => `- ${note}`));
+    parts.push("", "### Registration notes", "", ...report.notes.map(bullet));
   }
   if (report.mirrors.length > 0) {
     parts.push(
@@ -219,7 +239,7 @@ export function renderReport(report: SyncReport): string {
   parts.push(
     "",
     report.hold
-      ? `Hold for review: **yes**\n\n${report.holdReasons.map((reason) => `- ${reason}`).join("\n")}`
+      ? `Hold for review: **yes**\n\n${report.holdReasons.map(bullet).join("\n")}`
       : "Hold for review: no",
     "",
   );

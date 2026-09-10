@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   MANIFEST_NAME,
+  type ManifestRecord,
   readRecords,
   recordedHash,
   renderManifest,
@@ -18,6 +19,10 @@ import { tempDirs } from "../../shared/temp_dir";
 const temp = tempDirs();
 const BUILD = "0123456789abcdef0123456789abcdef01234567";
 const HASH = sha256("x");
+// Spelled as variables: the linter and the type checker read a literal
+// `.__proto__` or `.constructor` member as the inherited property.
+const PROTO = "__proto__";
+const CTOR = "constructor";
 
 describe("renderManifest", () => {
   test("one entry per line, sorted, with the self entry carrying the build", () => {
@@ -101,6 +106,31 @@ describe("readRecords and recordedHash", () => {
       records: {},
       problem: `${MANIFEST_NAME} does not parse as a manifest (invalid JSON)`,
     });
+  });
+
+  test("a path named __proto__ is an ordinary key: written, read back, and absent when unrecorded", () => {
+    const target = temp.dir("writer-manifest-proto-");
+    // An object literal would set the prototype; the writer builds its
+    // records from a Map the same way.
+    const records: Record<string, ManifestRecord> = Object.fromEntries([
+      [PROTO, { class: "managed", hash: HASH }],
+      [CTOR, { class: "starter" }],
+    ]);
+    writeManifest(target, records, BUILD);
+    expect(readFileSync(join(target, MANIFEST_NAME), "utf-8")).toContain(
+      `    "__proto__": {"class": "managed", "hash": "${HASH}"},`,
+    );
+    const { records: read, problem } = readRecords(target);
+    expect(problem).toBeNull();
+    expect(Object.keys(read).sort()).toEqual([MANIFEST_NAME, PROTO, CTOR]);
+    expect(read[PROTO]).toEqual({ class: "managed", hash: HASH });
+    expect(read[CTOR]).toEqual({ class: "starter" });
+    expect(recordedHash(read, PROTO)).toBe(HASH);
+    // Unrecorded, the same paths read as absent instead of as Object.prototype.
+    const empty = readRecords(temp.dir("writer-manifest-proto-none-")).records;
+    expect(empty[PROTO]).toBeUndefined();
+    expect(empty[CTOR]).toBeUndefined();
+    expect(recordedHash(empty, PROTO)).toBeNull();
   });
 
   test("a symlink at the manifest path is refused for reading and writing", () => {

@@ -89,6 +89,7 @@ The loader refuses, all problems at once:
 - a listed `skills_dir` or `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
+- a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
 - with `--previous-files`: a path the previous `files.yml` wrote or retired that the current one neither writes nor retires
 
 ## files.yml reference
@@ -242,4 +243,4 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
-`hold` is true on any held or `region added` written row, any replaced local edit, any held or `region removed` retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns.
+`hold` is true on any held or `region added` written row, any replaced local edit, any held or `region removed` retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns. Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own. A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
