@@ -299,6 +299,20 @@ describe("landingTableRule under VitePress's renderer", () => {
     );
   });
 
+  test("a public/ asset row carries the link's target, so the launcher leaves it to the browser", async () => {
+    const md = await vitepressRenderer();
+    const html = md.render(
+      "| Goal | Read |\n|---|---|\n| Manual | [Manual](public/manual/) |\n| Guide | [Guide](other.md) |\n",
+      { relativePath: "README.md", path: "/site/README.md", cleanUrls: false },
+    );
+    expect(html).toBe(
+      launcherTag([
+        { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
+        { label: "Guide", href: "./other.html", note: null },
+      ]),
+    );
+  });
+
   test("a render stamps the launcher's headings with the page's real anchors", async () => {
     const md = await vitepressRenderer();
     const src = [
@@ -328,7 +342,8 @@ describe("landingTableRule under VitePress's renderer", () => {
     const headers = renderedHeaders(env);
     expect(headers).toEqual([
       { title: "title: Guide", anchor: "title-guide", level: 2 },
-      { title: "Caf\u00e9 a &amp; b \u26a0\ufe0f", anchor: "caf\u00e9-a-amp-b", level: 2 },
+      // The emoji leaves a trailing space GitHub slugs to a hyphen too.
+      { title: "Caf\u00e9 a &amp; b \u26a0\ufe0f", anchor: "caf\u00e9-a-amp-b-", level: 2 },
       { title: "Sub em [x]", anchor: "sub-em-x", level: 3 },
     ]);
     for (const header of headers) expect(html).toContain(`<h${header.level} id="${header.anchor}"`);

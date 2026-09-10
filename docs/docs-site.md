@@ -31,11 +31,47 @@ Standalone, the deploy runs three ways: on every green push to the default branc
 
 ## Other roots on the site
 
-The docs mount can render other directories of the repository beside `docs/`, so one artifact carries them and one link check covers them. Each root is one entry of the vitepress mount's `include` list in the pages-site action's mounts input: `{"path": "skills", "mount": "skills", "page": "SKILL.md"}` stages the repository's `skills/` tree at `/skills/` under the docs mount (`.../<repo>/skills/`, or `.../<repo>/<docs_site_path>/skills/` beside the pages module), and in each of its child directories the file named `page` serves as that directory's page (`skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/`). The other markdown files in a child directory render too, at their own paths relative to it, and a `README.md` at the root of the include becomes the section's landing page. Every version tier stages the root from its own ref, so an old tag renders the skills it carried; a tag without the directory skips it with a notice, while the default branch must carry every configured root.
+The docs mount can render other directories of the repository beside `docs/`, so one artifact carries them and one link check covers them. Each root is one entry of the vitepress mount's `include` list in the pages-site action's mounts input:
 
-The SKILL.md convention: a page with neither a `title` frontmatter key nor an h1 is titled by its `name` frontmatter key, and its `description` key is the page's meta description, so a skill's own frontmatter is enough. Such a page is an article with its outline, not a landing page. The sidebar groups the root under its mount name with each word capitalized (`skills/` reads as Skills), the search launcher lists its pages, and the page's "Edit this page" link and provenance line name the real source path (`skills/<name>/SKILL.md`, never a path under `docs/`).
+```json
+{"path": "skills", "mount": "skills", "page": "SKILL.md"}
+```
 
-A link to a page's source file name resolves to the page: `[the sync skill](../repo-platform-sync-pr/SKILL.md)` and `[guide](guide/README.md)` both render as the directory URL, the way an `index.md` link always did, and a docs page reaches a skill the way it does on GitHub (`[sync PRs](../skills/repo-platform-sync-pr/SKILL.md)`).
+| Key | What it names | With the example |
+|---|---|---|
+| `path` | The repository directory to stage | `skills/` |
+| `mount` | The URL directory under the docs mount | `.../<repo>/skills/`, or `.../<repo>/<docs_site_path>/skills/` beside the pages module |
+| `page` | The file that serves as each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
+
+How a staged root renders:
+
+- The other markdown files in a child directory render too, at their own paths relative to it.
+- A `README.md` at the root of the include becomes the section's landing page.
+- Every version tier stages the root from its own ref, so an old tag renders the skills it carried. A tag without the directory skips it with a notice; the default branch must carry every configured root.
+- A mount that would misplace the pages is refused: a locale-shaped name (`de`), a segment the site never walks (dot-prefixed, `node_modules`), or `public/` (copied to the site root, not rendered). A child directory carrying both the page and an `index.md` fails the build, since both would serve at one URL.
+
+The SKILL.md convention:
+
+- A page with neither a `title` frontmatter key nor an h1 is titled by its `name` frontmatter key, and its `description` key is the page's meta description, so a skill's own frontmatter is enough.
+- Such a page is an article with its outline, not a landing page.
+- The sidebar groups the root under its mount name with each word capitalized (`skills/` reads as Skills), and the search launcher lists its pages.
+- The page's "Edit this page" link and provenance line name the real source path (`skills/<name>/SKILL.md`, never a path under `docs/`).
+
+Links resolve the way they read on GitHub, from the page's own repository path:
+
+| Written | Renders as |
+|---|---|
+| `[the sync skill](../repo-platform-sync-pr/SKILL.md)` on a skill page | that skill's directory URL, the way an `index.md` link always did |
+| `[the sync skill](../repo-platform-sync-pr)` | the same directory URL: a directory with an index page resolves to it |
+| `[guide](guide/README.md)` on a docs page | the guide's directory URL |
+| `[sync PRs](../skills/repo-platform-sync-pr/SKILL.md)` on a docs page | the skill's page, across the two roots |
+| `[plugin metadata](.codex-plugin/plugin.json)` on a skill page | the file on GitHub at the tier's ref: the site never publishes it |
+| `[the workflow](../.github/workflows/ci.yml)` on a docs page | the same, for anything outside the staged roots |
+| `[logo](public/logo.svg)` on a docs page | the file at the site base, where VitePress copies `public/` |
+
+A `.md`, extensionless, or directory link to nothing stays on the site, so the strict build's dead-link check reports it; only a target with another file extension is read on GitHub.
+
+One shape of file name cannot be linked from markdown: a `%` followed by two hex digits (`100%23b.md`). VitePress decodes the rendered href once more and collapses the escape, so the link names another file. Rename the file.
 
 ## The docs PR check
 

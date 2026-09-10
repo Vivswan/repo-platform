@@ -56,6 +56,11 @@ describe("parseMounts include roots", () => {
       "never walks",
     ],
     [
+      "a public mount",
+      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "public/skills", "page": "SKILL.md"}]}]',
+      "starts with public/",
+    ],
+    [
       "a node_modules segment in the mount",
       '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "content/node_modules", "page": "SKILL.md"}]}]',
       "never walks",

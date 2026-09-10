@@ -98,8 +98,9 @@ function validateMountPath(value: string): void {
  *  refused where the staging would misplace it: a mount whose first
  *  segment reads as a locale directory would become a translation tree
  *  (derive.ts's convention), a mount with a segment the markdown walk
- *  skips would stage pages that never get routes, and `index.md` as the
- *  page is the directory index already. */
+ *  skips would stage pages that never get routes, `public/` is copied
+ *  rather than rendered, and `index.md` as the page is the directory
+ *  index already. */
 function parseIncludes(value: unknown, where: string): IncludeRoot[] {
   if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
   const includes = value.map((entry, index): IncludeRoot => {
@@ -126,6 +127,12 @@ function parseIncludes(value: unknown, where: string): IncludeRoot[] {
       throw new Error(
         `${at}.mount '${mount}' has a segment the site never walks (dot-prefixed or ` +
           "node_modules), so its pages would get no routes - mount the root under another name",
+      );
+    }
+    if (segments[0] === "public") {
+      throw new Error(
+        `${at}.mount '${mount}' starts with public/, which VitePress copies to the site root ` +
+          "as static files instead of rendering - mount the root under another name",
       );
     }
     if (!SEGMENT_RE.test(page as string) || !(page as string).endsWith(".md")) {

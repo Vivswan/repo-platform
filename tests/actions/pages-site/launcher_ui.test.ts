@@ -374,6 +374,16 @@ describe("the rendered list", () => {
     return stage.then((run) => run(rows, locale));
   }
 
+  test("a curated row's target reaches its anchor, and only its anchor", async () => {
+    const rows = JSON.stringify([
+      { label: "Manual", href: "/repo/manual/", note: null, target: "_self" },
+      { label: "Set things up", href: "./setup.html", note: null },
+    ]);
+    const html = await render(rows, "root");
+    expect(html).toContain('href="/repo/manual/" target="_self"');
+    expect(html).not.toMatch(/href="\/repo\/setup\.html"[^>]*target=/);
+  });
+
   test("fold rows follow a page group's page row and replace a dir group's rows; indexes and group fold states follow document order", async () => {
     const rows = JSON.stringify([{ label: "Set things up", href: "./setup.html", note: null }]);
     const html = await render(rows, "root");

@@ -121,7 +121,9 @@ const markdown: MarkdownOptions = {
     rewriteLinksRule(md, {
       docsDir: facts.docsDir,
       includes,
+      files,
       rewrites,
+      base,
       repoUrl: facts.repoUrl,
       ref: facts.provenance.label,
     });

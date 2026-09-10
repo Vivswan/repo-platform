@@ -12,7 +12,14 @@ describe("githubSlug", () => {
     ["Ubersicht uber Anderungen", "ubersicht-uber-anderungen"],
     ["snake_case stays", "snake_case-stays"],
     ["emoji :tada: gone", "emoji-tada-gone"],
-    ["Trailing space before an emoji token ", "trailing-space-before-an-emoji-token"],
+    // GitHub trims nothing: the space an emoji token leaves behind is a
+    // hyphen there too, and only a plain space becomes one.
+    ["Trailing space before an emoji token ", "trailing-space-before-an-emoji-token-"],
+    [" leading", "-leading"],
+    ["tab\tjoined", "tabjoined"],
+    ["nbsp\u00a0joined", "nbspjoined"],
+    ["1\u00bd cups", "1-cups"],
+    ["a\u203fb keeps its tie", "a\u203fb-keeps-its-tie"],
   ])("%s -> %s", (heading, slug) => {
     expect(githubSlug(heading)).toBe(slug);
   });

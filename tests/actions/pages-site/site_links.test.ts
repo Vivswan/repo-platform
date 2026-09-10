@@ -7,22 +7,32 @@ import {
   formatBroken,
   fragmentIds,
   fragmentTargets,
-  ownOriginPattern,
+  ownSitePattern,
+  resolvesFragment,
   seedPages,
+  servedFile,
 } from "../../../actions/pages-site/site_links.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 
-describe("ownOriginPattern", () => {
-  test("matches the origin's own links alone, the host's dots literal, the origin normalized", () => {
-    const own = ownOriginPattern("https://O.github.io/");
+describe("ownSitePattern", () => {
+  test("matches the site's own links alone: the origin normalized, its dots literal, the base included", () => {
+    const own = ownSitePattern("https://O.github.io/", "/r/");
     expect(own.test("https://o.github.io/r/docs/")).toBe(true);
-    expect(own.test("https://o.github.io#top")).toBe(true);
-    expect(own.test("https://o.github.io")).toBe(true);
+    expect(own.test("https://o.github.io/r#top")).toBe(true);
+    expect(own.test("https://o.github.io/r")).toBe(true);
+    // A sibling site on the same origin is another repository's.
+    expect(own.test("https://o.github.io/other-repo/")).toBe(false);
+    expect(own.test("https://o.github.io/r2/")).toBe(false);
+    expect(own.test("https://o.github.io/")).toBe(false);
     expect(own.test("https://oxgithub.io/r/")).toBe(false);
-    expect(own.test("https://o.github.io.evil.test/")).toBe(false);
-    expect(own.test("https://o.github.io:8443/")).toBe(false);
+    expect(own.test("https://o.github.io.evil.test/r/")).toBe(false);
+    expect(own.test("https://o.github.io:8443/r/")).toBe(false);
+    const domain = ownSitePattern("https://docs.example.test", "/");
+    expect(domain.test("https://docs.example.test/anything")).toBe(true);
+    expect(domain.test("https://docs.example.test")).toBe(true);
+    expect(domain.test("https://docs-example.test/")).toBe(false);
   });
 });
 
@@ -101,12 +111,15 @@ describe("fragment reads", () => {
     ]);
   });
 
-  test("fragmentIds collects element ids and anchor names as the browser reads them, and top always resolves", () => {
-    expect(
-      fragmentIds(
-        '<h2 id="install">I</h2><a name="legacy"></a><div id="">x</div><p id="VPContent"><h3 id="a&amp;b">',
-      ),
-    ).toEqual(new Set(["top", "install", "legacy", "VPContent", "a&b"]));
+  test("fragmentIds collects element ids and anchor names as the browser reads them; top resolves in any case", () => {
+    const ids = fragmentIds(
+      '<h2 id="install">I</h2><a name="legacy"></a><div id="">x</div><p id="VPContent"><h3 id="a&amp;b">',
+    );
+    expect(ids).toEqual(new Set(["install", "legacy", "VPContent", "a&b"]));
+    expect(resolvesFragment(ids, "install")).toBe(true);
+    expect(resolvesFragment(ids, "Install")).toBe(false);
+    for (const top of ["top", "TOP", "Top"]) expect(resolvesFragment(ids, top)).toBe(true);
+    expect(resolvesFragment(ids, "top-")).toBe(false);
     // The href side decodes the same way, so the two meet.
     expect(
       fragmentTargets(
@@ -180,42 +193,80 @@ describe("checkSiteLinks", () => {
     return dir;
   };
 
-  test("passes a site whose absolute (based), relative, directory, fragment, and own-origin links all resolve", async () => {
+  test("serves the file, a directory's index with or without the slash, and an extensionless page, as Pages does", () => {
+    const dir = site({
+      "index.html": "<p>root</p>",
+      "docs/index.html": "<p>docs</p>",
+      "docs/setup.html": "<p>setup</p>",
+      "docs/a b.html": "<p>space</p>",
+      "manual.pdf": "%PDF",
+    });
+    const served = (path: string) => servedFile(dir, path)?.slice(dir.length + 1) ?? null;
+    expect(served("")).toBe("index.html");
+    expect(served("/")).toBe("index.html");
+    expect(served("docs")).toBe("docs/index.html");
+    expect(served("docs/")).toBe("docs/index.html");
+    expect(served("docs/setup.html")).toBe("docs/setup.html");
+    expect(served("docs/setup")).toBe("docs/setup.html");
+    expect(served("docs/a b")).toBe("docs/a b.html");
+    expect(served("manual.pdf")).toBe("manual.pdf");
+    expect(served("docs/missing")).toBeNull();
+    expect(served("docs/setup/")).toBeNull();
+    expect(served("../outside.html")).toBeNull();
+  });
+
+  test("passes a site whose based, relative, directory, extensionless, fragment, and own-site links all resolve, sibling sites and delimiter-named pages included", async () => {
     const dir = site({
       "index.html":
         '<a href="/r/docs/">docs</a> <a href="/r/docs/latest/setup.html#install">i</a>' +
         ' <a href="https://example.test/">out</a> <a href="https://o.github.io/r/docs/latest/">own</a>' +
         ' <a href="https://o.github.io/r/docs/latest/setup.html#install">own fragment</a>' +
+        ' <a href="https://o.github.io/r">own root</a> <a href="/r/docs/latest">dir, no slash</a>' +
+        ' <a href="/r#top">root top</a> <a href="/r/docs/latest/100%/a%23b.html#x">mixed</a>' +
+        ' <a href="/r/docs/latest/100%a%23b.html#y">mixed in one name</a>' +
+        // Pages serves an extensionless path as its .html; the fragment
+        // pass must read it the same way.
+        ' <a href="/r/docs/latest/setup">clean</a> <a href="/r/docs/latest/setup#install">clean fragment</a>' +
+        // Another repository's site on the same origin is external here.
+        ' <a href="https://o.github.io/other-repo/">sibling</a>' +
         ' <a href="manual.pdf#page=2">pdf</a>',
       "manual.pdf": "%PDF-1.4 not html",
       "docs/index.html": '<a href="latest/">latest</a> <a href="../">home</a>',
-      "docs/latest/index.html": '<a href="setup.html">setup</a>',
+      "docs/latest/index.html": '<a href="setup.html">setup</a> <a href="#TOP">up</a>',
       "docs/latest/setup.html": '<h2 id="install">Install</h2><a href="#install">top</a>',
+      // Pages named with URL delimiters seed and are crawled as themselves.
+      "docs/latest/100%.html": '<a href="setup#install">s</a>',
+      "docs/latest/a#b.html": '<a href="setup.html">s</a> <a href="#Top">own top</a>',
+      "docs/latest/100%/a#b.html": '<h2 id="x">x</h2>',
+      "docs/latest/100%a#b.html": '<h2 id="y">y</h2>',
     });
     const tiers = [
       { rel: "docs/latest/", strict: true },
       { rel: "docs/", strict: false },
       { rel: "", strict: true },
     ];
-    const result = await checkSiteLinks(
-      dir,
-      "/r/",
-      tiers,
-      temp.dir("site-links-scratch-"),
-      "https://o.github.io",
-    );
-    expect(result.pages).toBe(3);
+    const result = await checkSiteLinks(dir, "/r/", tiers, "https://o.github.io");
+    expect(result.pages).toBe(7);
     expect(result.judged).toBeGreaterThan(0);
   });
 
-  test("fails on a missing target or fragment from a current page, own-origin links included, and ignores history's", async () => {
+  test("fails on a missing target or fragment from a current page, own-site and extensionless links and delimiter-named pages included, and ignores history's", async () => {
     const dir = site({
       "index.html":
         '<a href="/r/docs/skills/missing/">m</a> <a href="https://o.github.io/r/gone.html">g</a>' +
-        ' <a href="https://o.github.io/r/docs/latest/setup.html#absent">a</a>',
+        ' <a href="https://o.github.io/r/docs/latest/setup.html#absent">a</a>' +
+        ' <a href="/r/docs/latest/setup#gone-too">c</a> <a href="/r#gone-root">r</a>' +
+        // A literal percent beside an encoded delimiter, as VitePress
+        // renders a link into 100%/a#b.md.
+        ' <a href="/r/docs/latest/100%/a%23b.html#missing">mixed</a>' +
+        ' <a href="/r/docs/latest/100%a%23b.html#missing">mixed in one name</a>',
       "docs/index.html": '<a href="nowhere.html">sealed rot in the tag build</a>',
       "docs/latest/index.html": '<a href="setup.html#nope">n</a>',
       "docs/latest/setup.html": '<h2 id="install">Install</h2>',
+      "docs/latest/100%.html": '<a href="gone.html">g</a>',
+      "docs/latest/a#b.html": '<a href="#missing">m</a>',
+      "docs/latest/100%/a#b.html": '<h2 id="x">x</h2>',
+      "docs/latest/100%a#b.html": '<h2 id="y">y</h2>',
     });
     const tiers = [
       { rel: "docs/latest/", strict: true },
@@ -225,9 +276,9 @@ describe("checkSiteLinks", () => {
     const log = spyOn(console, "log").mockImplementation(() => {});
     let printed = "";
     try {
-      await expect(
-        checkSiteLinks(dir, "/r/", tiers, temp.dir("site-links-scratch-"), "https://o.github.io"),
-      ).rejects.toThrow("4 broken internal links in the current content");
+      await expect(checkSiteLinks(dir, "/r/", tiers, "https://o.github.io")).rejects.toThrow(
+        "10 broken internal links in the current content",
+      );
       printed = log.mock.calls.map((call) => call.join(" ")).join("\n");
     } finally {
       log.mockRestore();
@@ -240,19 +291,33 @@ describe("checkSiteLinks", () => {
     expect(printed).toContain(
       "/r/index.html -> /r/docs/latest/setup.html#absent (no element with id 'absent' on that page)",
     );
+    expect(printed).toContain(
+      "/r/index.html -> /r/docs/latest/setup#gone-too (no element with id 'gone-too' on that page)",
+    );
+    expect(printed).toContain(
+      "/r/docs/latest/100%25.html -> /r/docs/latest/gone.html (status 404)",
+    );
+    // The fragment pass addresses the base and delimiter-named pages the way
+    // the crawl does.
+    expect(printed).toContain(
+      "/r/index.html -> /r#gone-root (no element with id 'gone-root' on that page)",
+    );
+    expect(printed).toContain(
+      "/r/docs/latest/a%23b.html -> /r/docs/latest/a%23b.html#missing (no element with id 'missing' on that page)",
+    );
+    expect(printed).toContain(
+      "/r/index.html -> /r/docs/latest/100%/a%23b.html#missing (no element with id 'missing' on that page)",
+    );
+    expect(printed).toContain(
+      "/r/index.html -> /r/docs/latest/100%a%23b.html#missing (no element with id 'missing' on that page)",
+    );
     expect(printed).not.toContain("nowhere.html");
   });
 
   test("a site without a current page is failed-to-look", async () => {
     const dir = site({ "v1/index.html": "<p>old</p>" });
-    await expect(
-      checkSiteLinks(
-        dir,
-        "/",
-        [{ rel: "v1/", strict: false }],
-        temp.dir("site-links-scratch-"),
-        null,
-      ),
-    ).rejects.toThrow("no page built from HEAD");
+    await expect(checkSiteLinks(dir, "/", [{ rel: "v1/", strict: false }], null)).rejects.toThrow(
+      "no page built from HEAD",
+    );
   });
 });

@@ -31,7 +31,9 @@ export const SITE = { base: "/repo/", cleanUrls: false };
 export const LINK_SCOPE = {
   docsDir: "docs",
   includes: [],
+  files: ["README.md", "other.md", "ja/README.md"],
   rewrites: REWRITES,
+  base: SITE.base,
   repoUrl: "https://github.com/fixture-owner/fixture-repo",
   ref: "main",
 };

@@ -29,6 +29,20 @@ function setOutput(name: string, value: string): void {
   appendFileSync(out, `${name}=${value}\n`);
 }
 
+/** linkinator's local static server and the site gate's own: links back
+ *  into either are the site's; every other http(s) URL is external. */
+const LOCAL_SERVER = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?=[/?#]|$)/;
+
+/** A crawl result URL as a site path ("/docs/x.html#id"), or null for an
+ *  external one. linkinator reports its own server's URLs relative to the
+ *  server root in one version and loopback-absolute in another, so both
+ *  spellings are read and neither is depended on. */
+export function sitePath(url: string): string | null {
+  if (/^https?:\/\//.test(url) && !LOCAL_SERVER.test(url)) return null;
+  const path = url.replace(LOCAL_SERVER, "");
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
 /** Every HTML page in the assembled site, as server-root-relative paths.
  *  Each one seeds the crawl directly: a crawl from the root alone only
  *  reaches pages the root LINKS to, and version tiers are navigated
@@ -56,13 +70,11 @@ interface Broken {
 export function collectBroken(
   links: { url: string; state: string; status?: number; parent?: string }[],
 ): Broken[] {
-  const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?=[/?#]|$)/;
   const byUrl = new Map<string, Broken>();
   for (const link of links) {
-    if (link.state !== "BROKEN") continue;
-    if (!/^https?:\/\//.test(link.url) || local.test(link.url)) continue;
+    if (link.state !== "BROKEN" || sitePath(link.url) !== null) continue;
     const entry = byUrl.get(link.url) ?? { url: link.url, status: link.status ?? 0, parents: [] };
-    const parent = (link.parent ?? "").replace(local, "");
+    const parent = link.parent === undefined ? "" : (sitePath(link.parent) ?? link.parent);
     if (parent !== "" && !entry.parents.includes(parent)) entry.parents.push(parent);
     byUrl.set(link.url, entry);
   }

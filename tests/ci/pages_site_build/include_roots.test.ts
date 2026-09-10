@@ -36,6 +36,10 @@ function siteScript(extra: string): string {
   const links = [
     '<a href=\\"${PAGES_BASE_PATH}docs/\\">docs</a>',
     '<a href=\\"${PAGES_BASE_PATH}docs/skills/alpha/\\">alpha</a>',
+    // Extensionless, as Pages serves it; and a sibling site of the same
+    // owner, which is not this artifact's to judge.
+    '<a href=\\"${PAGES_BASE_PATH}docs/skills/alpha/reference\\">reference</a>',
+    '<a href=\\"https://fixture-owner.github.io/other-repo/\\">sibling</a>',
     extra.replace(/[\\"`]/g, "\\$&"),
   ].join(" ");
   return `mkdir -p dist && echo "<html><body>${links}</body></html>" > dist/index.html`;
@@ -56,7 +60,9 @@ const ALPHA_SKILL = [
   "",
   "# Alpha skill",
   "",
-  "Read the [reference](reference.md) and the [beta skill](../beta/).",
+  "Read the [reference](reference.md) and the [beta skill](../beta).",
+  "",
+  "Plugin metadata sits in [plugin.json](.codex-plugin/plugin.json).",
   "",
   "## Install",
   "",
@@ -89,6 +95,8 @@ function includeFixture(repo: string): void {
   mkdirSync(join(repo, "skills", "alpha"), { recursive: true });
   writeFileSync(join(repo, "skills", "alpha", "SKILL.md"), ALPHA_SKILL);
   writeFileSync(join(repo, "skills", "alpha", "reference.md"), "# Alpha reference\n\nDetails.\n");
+  mkdirSync(join(repo, "skills", "alpha", ".codex-plugin"));
+  writeFileSync(join(repo, "skills", "alpha", ".codex-plugin", "plugin.json"), "{}\n");
   writeFileSync(join(repo, "docs", "README.md"), DOCS_README.replace(/ and the \[beta.*$/m, ""));
   commitAll(repo, "alpha skill");
   fixtureGit(repo, ["tag", "v0.1.0"]);
@@ -144,6 +152,20 @@ describe("include roots in the assembled site", () => {
       ]);
       expect(texts(alpha, "title")).toEqual(["Alpha skill | Inc Docs"]);
       expect(alpha).toContain("Source: skills/alpha/SKILL.md");
+      // A file the site never publishes reads on GitHub at the tier's ref;
+      // a directory link without its slash is the directory URL.
+      const alphaLinks = select(alpha, ".vp-doc a").map((a) => a.attrs.href);
+      expect(alphaLinks).toContain(
+        "https://github.com/fixture-owner/inc-repo/blob/main/skills/alpha/.codex-plugin/plugin.json",
+      );
+      expect(alphaLinks).toContain("./../beta/");
+      expect(
+        select(readSite(site, "docs/v0.1.0/skills/alpha/index.html"), ".vp-doc a").map(
+          (a) => a.attrs.href,
+        ),
+      ).toContain(
+        "https://github.com/fixture-owner/inc-repo/blob/v0.1.0/skills/alpha/.codex-plugin/plugin.json",
+      );
       expect(
         select(alpha, ".VPDocFooter a.edit-link-button, a.edit-link-button").map(
           (a) => a.attrs.href,
@@ -203,6 +225,65 @@ describe("include roots in the assembled site", () => {
         "  /inc-repo/docs/latest/index.html -> /inc-repo/docs/latest/skills/alpha/#nope (no element with id 'nope' on that page)",
       );
       expect(result.stderr).toContain("::error::2 broken internal links in the current content");
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+/** The docs PR check's single build over a HEAD tree with the skills
+ *  root, before `mutate` breaks the layout. */
+function refusalFixture(repo: string, mutate: (repo: string) => void): void {
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  mkdirSync(join(repo, "skills", "alpha"), { recursive: true });
+  writeFileSync(join(repo, "docs", "README.md"), "# Fixture\n");
+  writeFileSync(join(repo, "skills", "alpha", "SKILL.md"), ALPHA_SKILL);
+  mutate(repo);
+}
+
+const CHECK_ENV = {
+  CHECK: "true",
+  MOUNTS:
+    '[{"path": "/", "source": "vitepress", "versioned": true,' +
+    ' "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]',
+};
+
+describe("include root staging refusals", () => {
+  test.each<[string, (repo: string) => void, string]>([
+    [
+      "HEAD without the root",
+      (repo) => rmSync(join(repo, "skills"), { recursive: true }),
+      "skills/ does not exist in the repository - the docs site includes it at skills/; create it or drop the include",
+    ],
+    [
+      "the root a file",
+      (repo) => {
+        rmSync(join(repo, "skills"), { recursive: true });
+        writeFileSync(join(repo, "skills"), "not a directory\n");
+      },
+      "the include root 'skills' is a file, not a directory, at HEAD",
+    ],
+    [
+      "the docs tree already carrying the mount",
+      (repo) => {
+        mkdirSync(join(repo, "docs", "skills"));
+        writeFileSync(join(repo, "docs", "skills", "README.md"), "# Hand-written\n");
+      },
+      "the include root 'skills' mounts at 'skills/', which docs/ already carries at HEAD - two sources would claim one URL; mount the root under another name",
+    ],
+    [
+      "a child carrying both the page and index.md",
+      (repo) => writeFileSync(join(repo, "skills", "alpha", "index.md"), "# Also alpha\n"),
+      "skills/alpha/ carries both SKILL.md and index.md - both would serve at skills/alpha/; remove one",
+    ],
+  ])(
+    "refuses %s before any build",
+    (_, mutate, message) => {
+      const workspace = temp.dir("pages-site-include-refusal-");
+      refusalFixture(workspace, mutate);
+      const result = buildSite(workspace, REPO, runnerTemp(temp), CHECK_ENV);
+      expect(result.exitCode, describeRun(result)).not.toBe(0);
+      expect(result.stderr).toContain(`::error::${message}`);
+      expect(result.stdout).not.toContain("vitepress");
     },
     TEST_TIMEOUT_MS,
   );
