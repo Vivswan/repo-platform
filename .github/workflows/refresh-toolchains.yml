@@ -45,10 +45,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun .github/scripts/refresh-toolchains/refresh_toolchains.ts
 
-      # The body's optional MAJOR banner is composed here (expressions
-      # cannot build multiline strings) and exported over the script's env.
-      # REFRESH_TITLE: a later run can bump different versions onto the
-      # same branch, so an existing PR's title is refreshed too.
+      # open_refresh_pr.ts composes the body (its optional MAJOR banner is
+      # a multiline string, which expressions cannot build) and hands it
+      # to open_automation_pr.ts. REFRESH_TITLE: a later run can bump
+      # different versions onto the same branch, so an existing PR's title
+      # is refreshed too.
       - name: Commit, push, and open PR
         if: steps.refresh.outputs.bumps != ''
         env:
@@ -59,13 +60,4 @@ jobs:
           BRANCH: automation/toolchain-refresh
           PR_TITLE: "fix(templates): bump ${{ steps.refresh.outputs.bumps }}"
           REFRESH_TITLE: "true"
-        run: |
-          body="Automated toolchain pin refresh: bump $BUMPS (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this rebuilds the build branch; the next sync pushes it to the fleet."
-          if [ -n "$MAJOR" ]; then
-            body="**MAJOR VERSION JUMP: $MAJOR - review before merging.**
-
-          $body"
-          fi
-          export PR_BODY="$body"
-          export COMMIT_MESSAGE="$PR_TITLE"
-          bun .github/scripts/shared/open_automation_pr.ts
+        run: bun .github/scripts/refresh-toolchains/open_refresh_pr.ts

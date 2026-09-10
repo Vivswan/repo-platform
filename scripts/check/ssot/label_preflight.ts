@@ -1,124 +1,28 @@
-// The label-preflight invocation grammar and the rule pinning the
-// fail-closed preflight's landed shape in settings-repos.yml.
+// The rule pinning the fail-closed label preflight's landed shape: the
+// settings-repos.yml step that runs it (byte-identical run line, step
+// keys, env, the gap to the apply, the apply's input census) and the
+// argv settings_layer_step.ts builds for its labels leg (deep-equal for
+// the operator row and a fetched row). tests/fleet/settings_layer_step.test.ts
+// proves the script runs exactly that argv.
 
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  type LayerStepFacts,
+  layerStepArgv,
+} from "../../../.github/scripts/fleet/settings_layer_step.ts";
 import { firstDiff, type Mismatch } from "./comparison.ts";
-import { asRecord, read } from "./inputs.ts";
+import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The preflight script's path stem, the token the invocation grammar
- *  and the settings-label-preflight rule key on. */
+/** The preflight script's path stem, and the layer step that runs it. */
 export const PREFLIGHT_SCRIPT = "fleet/label_preflight.ts";
+export const LAYER_STEP_SCRIPT = "fleet/settings_layer_step.ts";
 
-/** A run block's executable shell command segments: heredoc BODIES dropped
- *  (text fed to a command, not commands), continuations joined, then one
- *  quote-aware split at unquoted newlines, `;`, `&&`, `||`, with an unquoted
- *  word-start `#` commenting out its line. Text inside quotes stays segment
- *  text, so quoted data can neither split into a phantom command nor
- *  truncate a real one. Still textual, not a shell: `$(...)`, quotes spanning
- *  lines, and a `<<` inside a quoted string are not modeled, and each degrades
- *  toward dropped lines (a FALSE MISMATCH), never toward reading data as a command. */
-export function shellSegments(run: string): string[] {
-  // Pass 1, line-wise: every heredoc opener on a non-comment line
-  // queues its terminator (POSIX order for multiple heredocs on one
-  // line); body lines are dropped until each closes - at an EXACT
-  // terminator line for <<WORD (an indented look-alike is still body),
-  // with leading TABS stripped for <<-WORD. Bare delimiters are any
-  // unquoted-word characters, not just \w; quoted and backslashed
-  // spellings are covered.
-  const lines: string[] = [];
-  const pending: { terminator: string; dashed: boolean }[] = [];
-  for (const line of run.split("\n")) {
-    if (pending.length > 0) {
-      const head = pending[0];
-      if ((head.dashed ? line.replace(/^\t+/, "") : line) === head.terminator) pending.shift();
-      continue;
-    }
-    if (!line.trimStart().startsWith("#")) {
-      const opener = /<<(-?)\s*(?:"([^"]+)"|'([^']+)'|\\?([^\s;&|<>()'"\\]+))/g;
-      for (const match of line.matchAll(opener)) {
-        pending.push({ terminator: match[2] ?? match[3] ?? match[4], dashed: match[1] === "-" });
-      }
-    }
-    lines.push(line);
-  }
-  // Pass 2: the quote-aware sweep.
-  const text = lines.join("\n").replaceAll("\\\n", " ");
-  const segments: string[] = [];
-  let current = "";
-  let quote: string | null = null;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (quote !== null) {
-      if (quote === '"' && ch === "\\" && i + 1 < text.length) {
-        current += ch + text[++i];
-        continue;
-      }
-      if (ch === quote) quote = null;
-      current += ch;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === "\\" && i + 1 < text.length) {
-      current += ch + text[++i];
-      continue;
-    }
-    if (ch === "\n" || ch === ";") {
-      segments.push(current);
-      current = "";
-      continue;
-    }
-    if ((ch === "&" && text[i + 1] === "&") || (ch === "|" && text[i + 1] === "|")) {
-      segments.push(current);
-      current = "";
-      i++;
-      continue;
-    }
-    if (ch === "#" && (current === "" || /\s$/.test(current))) {
-      while (i + 1 < text.length && text[i + 1] !== "\n") i++;
-      continue;
-    }
-    current += ch;
-  }
-  segments.push(current);
-  return segments.filter((segment) => segment.trim() !== "");
-}
-
-/** How a segment RUNS the preflight at command position: 'direct' (`bun
- *  <...>fleet/label_preflight.ts` opens the segment), 'hidden' (the command
- *  run_hidden.ts executes after one closed double-quoted capture-name
- *  argument and `--`, anchored so text INSIDE the quoted label never reads
- *  as the wrapped command), or null for everything else (an echoed or
- *  argument-position token, a quoted path, an inline `VAR=x bun` prefix), so
- *  a spoof fails the invocation count loudly. EXECUTION is not proven here:
- *  `false && bun ...` and `|| true` pass the grammar; the run byte pin owns those. */
-export function preflightInvocation(segment: string): "direct" | "hidden" | null {
-  // The path stems carry a path-segment boundary: a stem glued to ANY
-  // preceding non-separator character (not-sync/, my.fleet/) is a
-  // DIFFERENT tree's file merely ending in the expected name, which
-  // must not read as the wrapper or the script - only a fresh token or
-  // a parent directory's `/` may precede the stem.
-  const direct = /^\s*bun\s+\S*?(?<![^\s/])fleet\/label_preflight\.ts(?=\s|$)/;
-  const hidden =
-    /^\s*bun\s+\S*?(?<![^\s/])sync\/run_hidden\.ts\s+"[^"]*"\s+--\s+bun\s+\S*?(?<![^\s/])fleet\/label_preflight\.ts(?=\s|$)/;
-  if (hidden.test(segment)) return "hidden";
-  if (direct.test(segment)) return "direct";
-  return null;
-}
-
-/** An invocation segment's argument text, whitespace-normalized - the
- *  shape the settings-label-preflight rule's argument allowlist
- *  compares exactly, so an extra, missing, drifted, or repeated flag
- *  is visible rather than merely "present". */
-export function preflightArgs(segment: string): string {
-  return segment
-    .slice(segment.indexOf(PREFLIGHT_SCRIPT) + PREFLIGHT_SCRIPT.length)
-    .replace(/\s+/g, " ")
-    .trim();
+/** Whether a run block invokes the layer step's labels leg somewhere in
+ *  its text. Recognition only: the byte pin below judges the block. */
+export function invokesPreflightLeg(run: string): boolean {
+  return /settings_layer_step\.ts\s+labels(?=\s|$)/.test(run);
 }
 
 /** Lenient mapping view of parsed YAML for the preflight judge; a
@@ -130,41 +34,156 @@ function asMapping(value: unknown): Record<string, unknown> {
     : {};
 }
 
-/** The terminal backstop: each preflight step's run block, byte-for-byte.
- *  The invocation grammar names WHICH facet drifted for ordinary edits, but
- *  a textual parser cannot prove EXECUTION, and each reviewer-built smuggle
- *  (heredoc bodies, quoted-label text, quoted-data splits, exotic delimiters)
- *  needed another refinement; this pin ends the class: ANY deviation
- *  mismatches, and a deliberate edit updates this constant in the same
- *  change. Exported so the suite can prove each comparison fires. */
+/** The preflight step's run block, byte-for-byte: a textual rule cannot
+ *  prove EXECUTION of anything looser (a `|| true`, a rerouted shell, a
+ *  substituted script), so ANY deviation mismatches, and a deliberate
+ *  edit updates this constant in the same change. Exported so the suite
+ *  can prove the comparison fires. */
 export const PREFLIGHT_EXPECTED_RUN: Record<string, string> = {
-  ".github/workflows/settings-repos.yml":
-    'if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then\n' +
-    '  bun .github/scripts/sync/run_hidden.ts "settings labels" -- \\\n' +
-    "    bun .github/scripts/fleet/label_preflight.ts \\\n" +
-    '    --merged "$RUNNER_TEMP/merged-settings.yml" \\\n' +
-    '    --repo "$TARGET" --target-dir . --mode "$MODE"\n' +
-    "else\n" +
-    '  bun .github/scripts/sync/run_hidden.ts "settings labels" -- \\\n' +
-    "    bun .github/scripts/fleet/label_preflight.ts \\\n" +
-    '    --merged "$RUNNER_TEMP/merged-settings.yml" \\\n' +
-    '    --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"\n' +
-    "fi\n",
+  ".github/workflows/settings-repos.yml": "bun .github/scripts/fleet/settings_layer_step.ts labels",
 };
 
-// The exact argument lists the invocations may carry, whitespace-
-// normalized: an ALLOWLIST, not a presence test. label_preflight.ts
-// stands down or re-scopes on flags a presence test would never look
-// at (--sections, --target-dir, a repeated --mode's last value wins),
-// so anything but an exact match is a stood-down guard. The multiset
-// also pins the COUNT: a gutted if/else branch is a missing
-// invocation, not a surviving step.
-const PREFLIGHT_EXPECTED_ARGS: Record<string, string[]> = {
-  ".github/workflows/settings-repos.yml": [
-    '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"',
-    '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"',
+/** The rows the labels leg is judged on: both target kinds in both
+ *  modes, so a builder that folds one mode into the other (the regression
+ *  that would let a normal apply delete referenced labels after a warning)
+ *  cannot pass. Every placeholder value is distinct, so a swapped, dropped,
+ *  or repeated flag value is visible. */
+export const PREFLIGHT_ARGV_ROWS = [
+  "operator-apply",
+  "operator-check",
+  "target-apply",
+  "target-check",
+] as const;
+export type PreflightArgvRow = (typeof PREFLIGHT_ARGV_ROWS)[number];
+
+const PINNED_SHA = "0123456789abcdef0123456789abcdef01234567";
+export const PREFLIGHT_ARGV_FACTS: Record<PreflightArgvRow, LayerStepFacts> = {
+  "operator-apply": {
+    target: "Vivswan/repo-platform",
+    operator: true,
+    runnerTemp: "/runner/_temp",
+    pinned: PINNED_SHA,
+    mode: "apply",
+  },
+  "operator-check": {
+    target: "Vivswan/repo-platform",
+    operator: true,
+    runnerTemp: "/runner/_temp",
+    pinned: PINNED_SHA,
+    mode: "check",
+  },
+  "target-apply": {
+    target: "Vivswan/managed",
+    operator: false,
+    runnerTemp: "/runner/_temp",
+    pinned: PINNED_SHA,
+    mode: "apply",
+  },
+  "target-check": {
+    target: "Vivswan/managed",
+    operator: false,
+    runnerTemp: "/runner/_temp",
+    pinned: PINNED_SHA,
+    mode: "check",
+  },
+};
+
+// The exact argv per row - an ALLOWLIST, not a presence test:
+// label_preflight.ts stands down or re-scopes on flags a presence test
+// would never look at (--sections, --target-dir, a repeated --mode's last
+// value wins), so anything but an exact match is a stood-down guard. The
+// wrapper is part of the pin: label names and referencing file paths are
+// target content a hide-details log may not carry.
+const SCRIPTS = join(REPO_ROOT, ".github/scripts");
+const PINNED_HEAD = [
+  "bun",
+  join(SCRIPTS, "sync/run_hidden.ts"),
+  "settings labels",
+  "--",
+  "bun",
+  join(SCRIPTS, "fleet/label_preflight.ts"),
+  "--merged",
+  "/runner/_temp/merged-settings.yml",
+];
+export const PREFLIGHT_EXPECTED_ARGV: Record<PreflightArgvRow, string[]> = {
+  "operator-apply": [
+    ...PINNED_HEAD,
+    "--repo",
+    "Vivswan/repo-platform",
+    "--target-dir",
+    ".",
+    "--mode",
+    "apply",
+  ],
+  "operator-check": [
+    ...PINNED_HEAD,
+    "--repo",
+    "Vivswan/repo-platform",
+    "--target-dir",
+    ".",
+    "--mode",
+    "check",
+  ],
+  "target-apply": [
+    ...PINNED_HEAD,
+    "--repo",
+    "Vivswan/managed",
+    "--ref",
+    PINNED_SHA,
+    "--mode",
+    "apply",
+  ],
+  "target-check": [
+    ...PINNED_HEAD,
+    "--repo",
+    "Vivswan/managed",
+    "--ref",
+    PINNED_SHA,
+    "--mode",
+    "check",
   ],
 };
+
+/** The trust boundary the argv pin rests on: the layer step's argv is a
+ *  function of the workflow-provided mode and env ONLY, never of repository
+ *  content, so the source may import no file reader (node:fs, Bun.file) -
+ *  a builder that read the checkout could be steered by the target repo. */
+export function layerStepReadsNoFiles(source: string): boolean {
+  return !/from\s+"node:fs(\/promises)?"|require\("node:fs|\bBun\.file\(/.test(source);
+}
+
+/** The labels leg's argv for every pinned row against the pinned lists.
+ *  The builder is injected so the suite can prove the comparison fires on
+ *  a drifted argv; the rule passes the live one. */
+export function labelPreflightArgvMismatches(
+  argvOf: (facts: LayerStepFacts) => string[] = (facts) => layerStepArgv("labels", facts),
+  source: string = read(`.github/scripts/${LAYER_STEP_SCRIPT}`),
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  if (!layerStepReadsNoFiles(source)) {
+    mismatches.push({
+      file: `.github/scripts/${LAYER_STEP_SCRIPT}`,
+      expected:
+        "no file reader in the layer step (its argv is a function of the workflow-provided mode and env only, never of repository content)",
+      got: "a node:fs import or Bun.file call",
+    });
+  }
+  for (const row of PREFLIGHT_ARGV_ROWS) {
+    const expected = PREFLIGHT_EXPECTED_ARGV[row];
+    const actual = argvOf(PREFLIGHT_ARGV_FACTS[row]);
+    const at = firstDiff(expected, actual);
+    if (at !== -1) {
+      mismatches.push({
+        file: `.github/scripts/${LAYER_STEP_SCRIPT} (labels leg, ${row} row)`,
+        expected:
+          `the pinned argv [${expected.join(" ")}] - an extra, missing, or drifted flag stands ` +
+          "the guard down at runtime while every pinned flag still reads present",
+        got: `[${actual.join(" ")}] (first difference at element ${at})`,
+      });
+    }
+  }
+  return mismatches;
+}
 
 /** One apply input's expectation in the census below: mirrored from a
  *  preflight env var AND pinned to one expected expression (text parity alone
@@ -183,9 +202,10 @@ export type ApplyWithExpectation =
 // the apply runs with, both sides pinned to one context-stable expression),
 // is a fixed literal, or is value-pinned by another rule; a key outside the
 // census fails outright, which is what makes the mirrored-input class
-// CLOSED. The parity env names double as the preflight's env-key ALLOWLIST:
-// an env var outside the census (BASH_ENV) can inject execution the run pin
-// cannot see. Exported so the suite can mutation-test every entry.
+// CLOSED. The parity env names, with PREFLIGHT_STEP_ENV_PINS, double as the
+// preflight's env-key ALLOWLIST: an env var outside it (BASH_ENV) can inject
+// execution the run pin cannot see. Exported so the suite can mutation-test
+// every entry.
 export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpectation>> = {
   ".github/workflows/settings-repos.yml": {
     token: { parity: "GH_TOKEN", value: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
@@ -198,13 +218,23 @@ export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpect
   },
 };
 
-/** The mirrored env names per file - the preflight's env-key allowlist. */
-function preflightParityEnvNames(rel: string): Set<string> {
-  return new Set(
-    Object.values(PREFLIGHT_APPLY_WITH[rel]).flatMap((expectation) =>
+// The preflight step's env vars that mirror no apply input, value-pinned:
+// PINNED is the commit the render published, which a fetched row's
+// preflight reads its reference files at (a drifted expression would judge
+// the labels against some other revision's files).
+export const PREFLIGHT_STEP_ENV_PINS: Record<string, Record<string, string>> = {
+  ".github/workflows/settings-repos.yml": { PINNED: "${{ steps.render.outputs.ref }}" },
+};
+
+/** The env names the preflight step may carry: the mirrored census names
+ *  plus the value-pinned extras. */
+function preflightEnvNames(rel: string): Set<string> {
+  return new Set([
+    ...Object.values(PREFLIGHT_APPLY_WITH[rel]).flatMap((expectation) =>
       "parity" in expectation ? [expectation.parity] : [],
     ),
-  );
+    ...Object.keys(PREFLIGHT_STEP_ENV_PINS[rel]),
+  ]);
 }
 
 // Job-level env keys the apply job may carry (workflow-level env is
@@ -244,9 +274,10 @@ export const PREFLIGHT_APPLY_RUNS_ON = "ubuntu-latest";
 // `exit 0` there skips the guard green) or prepend a counterfeit bun via
 // GITHUB_PATH. No landed apply-job step touches these, so ANY mention in a
 // run block mismatches. Recorded residuals: the called scripts are this
-// repo's own CI-gated code (the trust boundary is the WORKFLOW FILE), and the
-// scan catches LITERAL spellings; an obfuscated write is adversarial code in
-// a reviewed file, outside any textual rule's reach, and stays review's.
+// repo's own CI-gated code (the trust boundary is the WORKFLOW FILE plus
+// the argv pin above), and the scan catches LITERAL spellings; an
+// obfuscated write is adversarial code in a reviewed file, outside any
+// textual rule's reach, and stays review's.
 export const PREFLIGHT_FORBIDDEN_RUN_TOKENS = ["GITHUB_ENV", "BASH_ENV", "GITHUB_PATH"] as const;
 
 // The steps strictly BETWEEN the preflight and the apply, byte-pinned
@@ -383,19 +414,19 @@ export function labelPreflightJobMismatches(
       }
     }
   }
-  const segments = (step: Record<string, unknown>): string[] =>
-    shellSegments(String(step.run ?? ""));
-  const invokes = (segment: string) => preflightInvocation(segment) !== null;
   const preflightAts = steps.flatMap((step, index) =>
-    segments(step).some(invokes) ? [index] : [],
+    invokesPreflightLeg(String(step.run ?? "")) ? [index] : [],
   );
   if (preflightAts.length === 0) {
-    const mentioned = steps.some((step) => String(step.run ?? "").includes(PREFLIGHT_SCRIPT));
+    const mentioned = steps.some((step) => {
+      const run = String(step.run ?? "");
+      return run.includes(LAYER_STEP_SCRIPT) || run.includes(PREFLIGHT_SCRIPT);
+    });
     mismatches.push({
       file: rel,
-      expected: `a fleet/label_preflight.ts step in job '${jobName}' before its settings apply`,
+      expected: `a step running the ${LAYER_STEP_SCRIPT} labels leg in job '${jobName}' before its settings apply`,
       got: mentioned
-        ? "a mention, but no recognized command-position invocation - an unexpected invocation form does not satisfy the pin; use the landed shape"
+        ? "a mention, but no labels-leg invocation - an unexpected invocation form does not satisfy the pin; use the landed shape"
         : "no such step - the apply would delete labels the target still references, unchecked",
     });
     return { applies: applyAts.length, mismatches };
@@ -410,7 +441,6 @@ export function labelPreflightJobMismatches(
   const preflight = steps[preflightAts[0]];
   const preflightIf = String(preflight.if ?? "").trim();
   const preflightEnv = asMapping(preflight.env);
-  const invocations = segments(preflight).filter(invokes);
   // The gap between the preflight and the apply is part of the guarded
   // shape: the verdict is only as good as the merged document staying
   // untouched until the apply reads it.
@@ -461,15 +491,25 @@ export function labelPreflightJobMismatches(
       });
     }
   }
-  const allowedEnv = preflightParityEnvNames(rel);
+  const allowedEnv = preflightEnvNames(rel);
   for (const key of Object.keys(preflightEnv)) {
     if (!allowedEnv.has(key)) {
       mismatches.push({
         file: rel,
         expected:
-          `only the mirrored env keys [${[...allowedEnv].join(", ")}] on the preflight step - ` +
+          `only the pinned env keys [${[...allowedEnv].join(", ")}] on the preflight step - ` +
           "an env var outside the census (BASH_ENV) can inject execution the run pin cannot see",
         got: `env key '${key}'`,
+      });
+    }
+  }
+  for (const [key, value] of Object.entries(PREFLIGHT_STEP_ENV_PINS[rel])) {
+    const actual = String(preflightEnv[key] ?? "").trim();
+    if (actual !== value) {
+      mismatches.push({
+        file: rel,
+        expected: `preflight env ${key}: ${JSON.stringify(value)} (the render's published commit - the fetched row's reference files are read at it)`,
+        got: actual === "" ? "no such env value" : actual,
       });
     }
   }
@@ -555,18 +595,6 @@ export function labelPreflightJobMismatches(
       }
     }
   }
-  const expectedArgs = [...PREFLIGHT_EXPECTED_ARGS[rel]].sort();
-  const actualArgs = invocations.map(preflightArgs).sort();
-  if (firstDiff(expectedArgs, actualArgs) !== -1) {
-    mismatches.push({
-      file: rel,
-      expected:
-        `exactly ${PREFLIGHT_EXPECTED_ARGS[rel].length} preflight invocation(s) carrying the pinned ` +
-        `argument lists [${PREFLIGHT_EXPECTED_ARGS[rel].join("] [")}] - an extra, missing, or drifted ` +
-        "flag stands the guard down at runtime while every pinned flag still reads present",
-      got: actualArgs.length === 0 ? "none" : `[${actualArgs.join("] [")}]`,
-    });
-  }
   if (String(preflight.run ?? "") !== PREFLIGHT_EXPECTED_RUN[rel]) {
     mismatches.push({
       file: rel,
@@ -576,23 +604,13 @@ export function labelPreflightJobMismatches(
       got: "a drifted run block",
     });
   }
-  if (rel === ".github/workflows/settings-repos.yml") {
-    if (invocations.some((segment) => preflightInvocation(segment) === "direct")) {
-      mismatches.push({
-        file: rel,
-        expected:
-          "every label-preflight invocation wrapped in run_hidden.ts (label names and referencing file paths are target content a hide-details log may not carry)",
-        got: "an unwrapped invocation",
-      });
-    }
-    if (String(preflight.id ?? "") !== "labels") {
-      mismatches.push({
-        file: rel,
-        expected:
-          "id: labels on the preflight step (the stood-down notice reads steps.labels.outputs.*)",
-        got: preflight.id === undefined ? "no id" : `id: ${String(preflight.id)}`,
-      });
-    }
+  if (rel === ".github/workflows/settings-repos.yml" && String(preflight.id ?? "") !== "labels") {
+    mismatches.push({
+      file: rel,
+      expected:
+        "id: labels on the preflight step (the stood-down notice reads steps.labels.outputs.*)",
+      got: preflight.id === undefined ? "no id" : `id: ${String(preflight.id)}`,
+    });
   }
   return { applies: applyAts.length, mismatches };
 }
@@ -624,14 +642,19 @@ export const labelPreflightRules: Rule[] = [
     // github-settings-as-code's reconciliation DELETES labels. Dropping,
     // reordering, softening, or re-aiming the step is silent (the apply stays
     // green while referenced-label deletions go unchecked, or checked against
-    // the WRONG repository), so the whole landed shape is pinned, down to the
-    // byte-identical run block and gap: every earlier textual refinement was
-    // smuggled past. labelPreflightJobMismatches is the judgment, pure over a parsed
-    // job; settings-hidden-step-notices pins the notice compensating for this step's hidden output.
+    // the WRONG repository), so the whole landed shape is pinned: the
+    // workflow step down to its byte-identical run line and gap, and the
+    // argv the layer step builds for the guard - a function of the
+    // workflow-provided mode and env only, never of repository content.
+    // settings-hidden-step-notices pins the notice compensating for this
+    // step's hidden output.
     name: "settings-label-preflight",
     run: () => {
       const rel = ".github/workflows/settings-repos.yml";
-      return labelPreflightFileMismatches(rel, asRecord(parseYaml(read(rel)), rel));
+      return [
+        ...labelPreflightFileMismatches(rel, asRecord(parseYaml(read(rel)), rel)),
+        ...labelPreflightArgvMismatches(),
+      ];
     },
   },
 ];

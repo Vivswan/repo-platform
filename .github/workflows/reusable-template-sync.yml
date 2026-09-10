@@ -233,17 +233,7 @@ jobs:
       - name: Rebuild split files structurally
         env:
           RECOVER: ${{ inputs.recover }}
-        run: |
-          flags=(--summary "$RUNNER_TEMP/local-carryover.md" --root target
-                 --hide-details "$HIDE_DETAILS"
-                 --needs-review "$RUNNER_TEMP/carry-review.txt"
-                 --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt")
-          if [ "$RECOVER" != "recopy" ]; then
-            flags+=(--render-dir "$RUNNER_TEMP/render-new"
-                    --old-render-dir "$RUNNER_TEMP/render-old")
-          fi
-          bun .github/scripts/sync/run_hidden.ts "split-file rebuild" -- \
-            bun .github/scripts/sync/preserve_local_content.ts "${flags[@]}"
+        run: bun .github/scripts/sync/rebuild_split_files.ts
 
       # Conflicts resolve in the template's favor so the tree stays valid;
       # the rebuilt split files are --skip'd (a carried half may
@@ -252,16 +242,7 @@ jobs:
       # there.
       - name: Resolve copier conflicts toward the template
         id: conflicts
-        run: |
-          bun .github/scripts/sync/resolve_copier_conflicts.ts \
-            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target \
-            --skip "$RUNNER_TEMP/split-rebuilt-paths.txt" \
-            --hide-details "$HIDE_DETAILS"
-          if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
-            echo "resolved=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "resolved=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: bun .github/scripts/sync/resolve_conflicts_step.ts
 
       # Managed files are delivered WHOLE from the clean render, the class's
       # contract (docs/compose.md): copier's three-way merge keeps a local
@@ -392,20 +373,7 @@ jobs:
           # The ref the checkout started from: the default branch, or the
           # dispatched branch in branch mode.
           UPSTREAM: ${{ steps.target.outputs.checkout_ref }}
-        run: |
-          # Uncommitted copier output OR commits already on the branch (a
-          # migration rung's commit and the _src_path normalization commit
-          # themselves) both count as changes.
-          ahead="$(git -C target rev-list --count "origin/${UPSTREAM}..HEAD")"
-          # Exit code first: a failed status prints nothing, which a bare
-          # emptiness test would read as a clean tree.
-          porcelain="$(git -C target status --porcelain)" || { echo "::error::git status failed in the target checkout"; exit 1; }
-          if [ -z "$porcelain" ] && [ "$ahead" -eq 0 ]; then
-            echo "::notice::${TARGET_DISPLAY}: already matches ${DISPLAY}; nothing to deliver."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: bun .github/scripts/sync/detect_changes.ts
 
       # The push authenticates with the PAT at push time. This
       # disarm is unconditional and BEFORE the push: whatever this run
