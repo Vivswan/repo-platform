@@ -115,8 +115,11 @@ jobs:
 
   # Repo-owned: edit update-release.yml, not this file. Packaging, asset
   # uploads, and note edits for the draft; publishing waits for every job
-  # in it. Both hooks get the release ceiling the retired release.yml
-  # passed through, so a hook that narrows it keeps working.
+  # in it. The ceiling here and on update-release-pr is the contract with
+  # the repo-owned hooks: a hook may need up to these grants and narrows
+  # itself per job. A narrower caller ceiling rejects an existing hook
+  # that asks for more (a hook requesting packages: read failed against
+  # a ceiling without it).
   update-release:
     needs: [release]
     if: needs.release.outputs.release_created == 'true'
@@ -148,7 +151,8 @@ jobs:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
   # Repo-owned: edit update-release-pr.yml, not this file. Regenerates the
-  # files that ride in the release commit; independent of the publish.
+  # files that ride in the release commit; independent of the publish. The
+  # ceiling is update-release's, under the same contract.
   update-release-pr:
     needs: [release]
     if: needs.release.outputs.prs_created == 'true'
