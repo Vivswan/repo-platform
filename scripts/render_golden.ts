@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { canonicalize } from "../.github/scripts/build-branches/branch_tree.ts";
+import { canonicalize, destOverlapsRepo } from "../.github/scripts/build-branches/branch_tree.ts";
 import { capture } from "../.github/scripts/shared/proc.ts";
 import { parseFilesConfig } from "../.github/scripts/sync/writer/files_config.ts";
 
@@ -38,10 +38,25 @@ const REGISTRATION = (modules: string[]) =>
     "",
   ].join("\n");
 
-/** The destination, refused when it is the checkout itself or an ancestor
- *  (both would be removed with it) or when the value is empty (resolve("")
- *  is the working directory). Compared canonically, so a case or symlink
- *  alias of the checkout is still the checkout; "/" gets no second slash. */
+/** Why `dest` cannot be replaced whole, or null: the golden directory is
+ *  the one path inside the checkout the script may remove, so any other
+ *  path that is the checkout, an ancestor, or a descendant (`.git`,
+ *  `.github`) is refused. Compared canonically, so a symlink alias of the
+ *  checkout is still the checkout. */
+export function destProblem(dest: string, repoRoot: string, goldenDir: string): string | null {
+  const canonical = canonicalize(dest);
+  if (canonical === canonicalize(goldenDir)) return null;
+  if (destOverlapsRepo(canonical, canonicalize(repoRoot))) {
+    return (
+      `--dest ${dest} is inside the checkout (or is the checkout or an ancestor) and would be ` +
+      "removed; the only destination inside the checkout is the default golden directory"
+    );
+  }
+  return null;
+}
+
+/** The destination from argv; an empty value is refused before resolve()
+ *  turns it into the working directory. */
 function parseDest(argv: string[]): string {
   if (argv.length === 0) return DEFAULT_DEST;
   if (argv.length !== 2 || argv[0] !== "--dest" || argv[1] === "") {
@@ -49,11 +64,9 @@ function parseDest(argv: string[]): string {
     process.exit(2);
   }
   const dest = resolve(argv[1]);
-  const repo = canonicalize(REPO_ROOT);
-  const canonical = canonicalize(dest);
-  const prefix = canonical.endsWith("/") ? canonical : `${canonical}/`;
-  if (canonical === repo || repo.startsWith(prefix)) {
-    console.error(`error: --dest ${dest} is the checkout or one of its ancestors`);
+  const problem = destProblem(dest, REPO_ROOT, DEFAULT_DEST);
+  if (problem !== null) {
+    console.error(`error: ${problem}`);
     process.exit(2);
   }
   return dest;
