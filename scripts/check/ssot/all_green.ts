@@ -404,9 +404,10 @@ export const FLEET_CI_ROSTER = [
 ];
 
 /** Every job in fleet-nightly.yml, by job id: the schedule-only leg the
- *  skeleton's `nightly` caller runs (fleet-ci's schedule jobs stand down
- *  there). Not a gate - nothing here feeds all-green - but a job deleted
- *  here stops the fleet's nightly scan with no per-repo diff. */
+ *  skeleton's `nightly` caller runs beside fleet-ci's schedule run (where
+ *  only plan and, on the weekly day, codeql run). Not a gate - nothing
+ *  here feeds all-green - but a job deleted here stops the fleet's nightly
+ *  scan with no per-repo diff. */
 export const FLEET_NIGHTLY_ROSTER = ["plan", "trivy-nightly"];
 
 /** The rendered skeleton every fleet repository runs, byte-identical across
