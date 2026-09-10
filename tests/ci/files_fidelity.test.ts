@@ -124,7 +124,8 @@ const KNOWN: Record<string, Known> = {
   "AGENTS.md": {
     selections: SELECTIONS,
     reason:
-      "the three module-conditional phrases are worded unconditionally; the Toolchain section moves to the end of the region (blocks append); the Repository-specific guidance heading and its comment go (the opening paragraph already says where guidance goes)",
+      "the three module-conditional phrases are worded unconditionally; the Toolchain section moves to the end of the region (blocks append);" +
+      " the Repository-specific guidance heading and its comment go (the opening paragraph already says where guidance goes)",
     expected: (golden) => {
       const toolchain = /\n## Toolchain\n\n(?:- .*\n)+/.exec(golden);
       let out = toolchain === null ? golden : golden.replace(toolchain[0], "");
@@ -139,7 +140,8 @@ const KNOWN: Record<string, Known> = {
       );
       out = out.replace(
         /^- Repo-owned, never overwritten by sync:.*$/m,
-        "- Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region, `.typography-allow.local`, the release hooks, and the module starters (the release-please JSON files, the `.claude-plugin/` manifests, the nightly workflows).",
+        "- Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region," +
+          " `.typography-allow.local`, the release hooks, and the module starters (the release-please JSON files, the `.claude-plugin/` manifests, the nightly workflows).",
       );
       out = out.replace(
         "\n## Repository-specific guidance\n\n<!-- Add project-specific instructions below the END marker; they are this repository's own and survive template updates. -->\n",
