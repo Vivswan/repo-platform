@@ -17,7 +17,7 @@ const SLUG = { owner: "OwnerOrg", name: "my-repo" };
 
 describe("placeholderValues", () => {
   test("a v1 registration falls back to the repository slug", () => {
-    expect(placeholderValues({ modules: ["bun"] }, SLUG, NOW)).toEqual({
+    expect(placeholderValues({ modules: ["bun"] }, SLUG, {}, NOW)).toEqual({
       project_name: "my-repo",
       project_slug: "my-repo",
       description: "",
@@ -38,11 +38,41 @@ describe("placeholderValues", () => {
         copyright_holder: "Owner Inc",
       },
     };
-    expect(placeholderValues(registration, SLUG, NOW)).toMatchObject({
+    expect(placeholderValues(registration, SLUG, {}, NOW)).toMatchObject({
       project_name: "My Repo",
       project_slug: "myrepo",
       description: "Does things",
       copyright_holder: "Owner Inc",
+    });
+  });
+});
+
+describe("placeholderValues: the registration-backed names", () => {
+  const defaults = {
+    skills_dir: "skills",
+    fuzzer_label: "fuzz-nightly",
+    nightly_label: "nightly-failure",
+    docs_site_label: "docs-link-rot",
+  };
+
+  test("absent from both sides, the name has no value; a module default fills it", () => {
+    const bare = placeholderValues({ modules: [] }, SLUG, {}, NOW);
+    expect(Object.keys(bare)).not.toContain("skills_dir");
+    expect(Object.keys(bare)).not.toContain("fuzzer_label");
+    expect(placeholderValues({ modules: [] }, SLUG, defaults, NOW)).toMatchObject(defaults);
+  });
+
+  test("the registration's own skills.dir and labels win over the defaults", () => {
+    const registration = {
+      modules: [],
+      skills: { dir: "lib/skills" },
+      labels: { fuzzer: "fuzz", docs_site: "rot" },
+    };
+    expect(placeholderValues(registration, SLUG, defaults, NOW)).toMatchObject({
+      skills_dir: "lib/skills",
+      fuzzer_label: "fuzz",
+      nightly_label: "nightly-failure",
+      docs_site_label: "rot",
     });
   });
 });

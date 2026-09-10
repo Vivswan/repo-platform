@@ -16,7 +16,7 @@ const QUIET: SyncOutcome = {
   build: BUILD,
   modules: ["bun"],
   private: false,
-  written: [{ path: "ci.yml", class: "managed", change: "updated" }],
+  written: [{ path: "ci.yml", class: "managed", change: "updated", detail: "" }],
   replaced: [],
   retired: [{ path: "old.yml", outcome: "deleted", detail: "retired" }],
   notes: [],
@@ -34,6 +34,15 @@ describe("holdReasons", () => {
   test("each hold source raises one reason", () => {
     const loud: SyncOutcome = {
       ...QUIET,
+      written: [
+        ...QUIET.written,
+        {
+          path: "CLAUDE.md",
+          class: "link",
+          change: "held",
+          detail: "a regular file sits where a link is declared",
+        },
+      ],
       replaced: [{ path: "ci.yml", diff: "" }],
       retired: [
         { path: "r.yml", outcome: "held", detail: "the content differs from the last write" },
@@ -44,6 +53,7 @@ describe("holdReasons", () => {
       ],
     };
     expect(holdReasons(loud)).toEqual([
+      "CLAUDE.md held: a regular file sits where a link is declared",
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",
       "mirror s/L refused: the pattern uses '**'",

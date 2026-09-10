@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Sync writer
 
-The sync writer copies the platform's files into a managed repository. It reads one data file, `files.yml`, and one tree of plain files, `files/`. There is no template language and no merge: managed content is copied whole, split regions are copied between the repository-owned halves, and starters are copied once. Code is the source of truth; this page is the map.
+The sync writer copies the platform's files into a managed repository. It reads one data file, `files.yml`, and one tree of plain files, `files/`. There is no template language and no merge: managed content is copied whole, split regions are copied between the repository-owned halves, starters are copied once, and links are relative symlinks the writer places and repairs. Code is the source of truth; this page is the map.
 
 | Question | Owner |
 | --- | --- |
@@ -13,7 +13,9 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
 | Which entries apply to one repository? | [sync/writer/select.ts](../.github/scripts/sync/writer/select.ts) |
-| How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts) |
+| How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
+| Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
+| What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
 | When does a retired file leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../.github/scripts/sync/writer/report.ts) |
@@ -34,20 +36,25 @@ bun .github/scripts/sync/writer/sync.ts \
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the name is the fallback project name and slug.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a directory, symlink, or symlinked ancestor at a path the writer touches, a split file whose marker text is duplicated or buried mid-line.
+- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a directory or a symlinked ancestor at a path the writer touches, a symlink at the manifest or registration path, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character.
 
 ## files.yml
 
 ```yaml
-placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year]
+placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, skills_dir, fuzzer_label]
 modules:
-  bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun]}
+  bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
+  node: {gitignore_sources: [Node], dependabot_ecosystems: [npm]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly}}
+  skills: {skills_dir: {default: skills}}
   pages: {}
   docs-site: {}
 files:
   - {path: .github/workflows/ci.yml, class: managed}
   - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}
+  - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
+  - {path: CLAUDE.md, class: link, target: AGENTS.md}
+  - {path: .github/agents.md, class: link, target: ../AGENTS.md}
   - {path: .github/workflows/docs-site.yml, class: managed, when: {modules: [docs-site], without: [pages]}, source: files/docs-site/docs-site.standalone.yml}
   - {path: .github/workflows/docs-site.yml, class: managed, when: {modules: [docs-site, pages]}, source: files/docs-site/docs-site.with-pages.yml}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
@@ -59,22 +66,27 @@ retired:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data. Any key is allowed; `blocks` entries name one of these keys. |
+| `modules.<name>` | A module and its data. Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
-| `files[].class` | `managed`, `split`, or `starter` (below). |
-| `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. |
+| `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
+| `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
 | `files[].when` | The selection condition (below). Absent means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Split entries only: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path>.block.<value>`, appended to the region body. |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path>.block.<value>`. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `retired[].path` | A path the platform no longer writes. |
 | `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
+
+Blocks land at the anchor line: the word `blocks` inside double braces, alone on its line, spelled like a placeholder. A source without one gets them appended at the end. Every piece is newline-terminated first, so the seams never merge two lines. The anchor appears at most once and only as a whole line, in sources of entries that declare `blocks` (for a split entry, inside the region body). A starter's blocks are rendered once, at creation.
 
 The loader refuses, all problems at once:
 
 - a placeholder the writer cannot derive, or a source file using a token outside `placeholders`
 - a `when` naming a module absent from `modules`
-- a `split` without `region`; `region` or `blocks` on a non-split entry
+- a `split` without `region`; `region` on a non-split entry; `target` on a non-link entry; a link with a `source` or `blocks`, without a `target`, or with a target that is absolute, leaves the repository, or is the link itself
 - a `source` outside `files/`, or one missing from the tree (block files included)
+- a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
+- a listed `skills_dir` or `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - with `--previous-files`: a path the previous `files.yml` wrote or retired that the current one neither writes nor retires
@@ -90,10 +102,13 @@ The loader refuses, all problems at once:
 | `github_username_lower` | the owner, lower-cased |
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
+| `skills_dir` | `skills.dir` from the registration, else `modules.<m>.skills_dir.default` |
+| `fuzzer_label`, `nightly_label`, `docs_site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `docs_site` |
 
 - A token is the name inside double braces with no spaces; spaces inside the braces make it plain text.
 - A `$` before the braces marks a GitHub Actions expression, left untouched.
 - Substitution runs on source files only. A literal double brace in a repository-owned tail is never touched.
+- A value lands inside quoted YAML scalars verbatim, so a value carrying a double quote, a backslash, or a control character is refused twice: the registration grammar (`actions/plan/registration.ts`) rejects such a `project.name` or `project.description`, and `substitute` fails the run on any such value.
 
 ## Selection
 
@@ -113,9 +128,23 @@ The loader refuses, all problems at once:
 | --- | --- | --- | --- |
 | `managed` | whole file, every sync | replaced and reported (`replaced local edits`, with a diff), holds the PR | `hash` = sha256 of the file |
 | `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
-| `starter` | once, when the path is absent | never touched again | no hash |
+| `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
+| `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string, the hash the previous pipeline already recorded for its symlinks |
 
-Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither).
+Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there.
+
+## Class flips
+
+A path whose record the writer can carry (one of `managed`, `split`, `starter`, `mirror`, `link`, with the fields that class records) that `files.yml` now declares under another class is a class flip. A record the writer cannot carry (a `managed` entry without a hash) counts as no record. The recorded content is the platform's own previous write, so:
+
+| State | Outcome |
+| --- | --- |
+| the path already holds exactly what the entry writes | `unchanged`; the record takes the new class (how a symlink the previous pipeline recorded as managed becomes a `link` record) |
+| what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
+| anything else, a `starter` record included (it carries no hash) | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
+| the new class is `starter` | a handover: the file is the repository's own, nothing is held |
+
+Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
 
 ## Retirement
 
@@ -126,13 +155,15 @@ Retirement runs before writing. Rows appear only for files present.
 | `managed`, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
 | `split`, region equals the recorded hash, repository-owned content outside it | `held` |
+| a symlink whose target hashes to the recorded hash, whatever class the record names | `deleted` (the link goes; what it points at is never touched) |
+| a symlink with another target; a regular file where a `link` was recorded | `held` |
 | content differs, no record, or a record without a hash | `held` |
 | recorded as `starter` | `kept` (repo-owned) |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: `deleted` on a hash match, else `held` |
 
-A recorded `managed` or `split` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, and a refused mirror target, keep their records in the new manifest so a later sync can still match them.
+A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, and a refused mirror target, keep their records in the new manifest so a later sync can still match them.
 
 ## Mirrors
 
@@ -140,24 +171,24 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 
 | Outcome | When |
 | --- | --- |
-| `written` | the target was absent, or held exactly the previous mirror (its recorded hash) |
+| `written` | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record; a record of another class does not vouch for the bytes) |
 | `current` | the target already holds the new content |
-| `refused` | the source is not a file this sync wrote; the pattern uses `**`; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes; the target holds content that is not the previous mirror |
+| `refused` | the source is not a file this sync wrote; the pattern uses `**`; the target is unsafe, sits under `.github/workflows/`, or is a path `files.yml` writes; the target is a symbolic link; the target holds content that is not the previous mirror |
 
 ## The manifest
 
-`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the build sha in `commit` and no hash. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror`. The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
+`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the build sha in `commit` and no hash. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror`, `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
 ## The report
 
 | Section | Content |
 | --- | --- |
 | header | Build, Modules, Visibility |
-| Written | path, class, change for every selected entry |
+| Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
 | Registration notes | dropped unknown modules; an unparseable manifest |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
-`hold` is true on any replaced local edit, any held retirement, any refused mirror, or any registration note.
+`hold` is true on any held written row, any replaced local edit, any held retirement, any refused mirror, or any registration note.

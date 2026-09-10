@@ -1,8 +1,8 @@
 // The writer's record of what it last wrote: .github/repo-platform-manifest.json
 // in the shape actions/shared/manifest.ts already emits and parses (one
 // entry per line, sha256 of the whole file for managed, of the marker-bounded
-// region for split), so a repository stamped by the previous pipeline reads
-// as already-recorded. The manifest's own entry carries the build sha in
+// region for split, of the link target for a symbolic link), so a repository
+// stamped by the previous pipeline reads as already-recorded. The manifest's own entry carries the build sha in
 // its `commit` slot and no hash (a self-hash would be circular).
 
 import { createHash } from "node:crypto";
@@ -27,7 +27,8 @@ export type ManifestRecord =
   | { class: "managed"; hash: string }
   | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string }
   | { class: "starter" }
-  | { class: "mirror"; hash: string };
+  | { class: "mirror"; hash: string }
+  | { class: "link"; hash: string };
 
 export type Records = Record<string, ManifestEntryShape>;
 
@@ -66,7 +67,8 @@ const COMMENT =
   "BEGIN/END-bounded region is rewritten and the repository owns everything outside it; the " +
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
   "repo-owned from then on), mirror (a byte copy of a written file, declared in " +
-  ".repo-platform.yml). This file's own entry records the build commit that wrote the tree.";
+  ".repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target). This " +
+  "file's own entry records the build commit that wrote the tree.";
 
 /** The manifest text for `records` plus the self entry, entries sorted by path. */
 export function renderManifest(records: Record<string, ManifestRecord>, build: string): string {

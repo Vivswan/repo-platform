@@ -1,6 +1,7 @@
 // Mirrors: byte copies of files this sync wrote, declared in the target's
 // registration. A target that holds anything but the previous mirror (the
-// recorded hash) or the new content is refused, never overwritten.
+// recorded hash) or the new content is refused, never overwritten; so is a
+// symbolic link, which a byte copy would write through.
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import type { Registration } from "../../../../actions/plan/registration.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { pathProblem } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
-import { existingFile, writeFile } from "./target_files.ts";
+import { probe, writeFile } from "./target_files.ts";
 
 export interface MirrorRow {
   source: string;
@@ -116,12 +117,19 @@ export function applyMirrors(
       refuse(source, path, "the source is not a file this sync writes");
       continue;
     }
-    const existing = existingFile(target, path);
-    if (existing?.equals(bytes) === true) {
+    const found = probe(target, path);
+    if (found.kind === "link") {
+      refuse(source, path, "the target is a symbolic link");
+      continue;
+    }
+    if (found.kind === "file" && found.bytes.equals(bytes)) {
       rows.push({ source, target: path, outcome: "current", detail: "" });
       continue;
     }
-    if (existing !== null && sha256(existing) !== recordedHash(records, path)) {
+    // Only a mirror record vouches for the bytes: another class's hash
+    // covers something else (a region, a link target).
+    const previous = records[path]?.class === "mirror" ? recordedHash(records, path) : null;
+    if (found.kind === "file" && sha256(found.bytes) !== previous) {
       refuse(source, path, "the target holds content that is not the previous mirror");
       continue;
     }

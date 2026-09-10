@@ -1,0 +1,4 @@
+name: checks
+on: pull_request
+jobs: {}
+# Examples:

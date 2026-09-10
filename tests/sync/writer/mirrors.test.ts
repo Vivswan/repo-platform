@@ -67,8 +67,12 @@ describe("applyMirrors", () => {
       "skills/c/LICENSE.md": "hand edited\n",
       "skills/d/README.md": "",
       "skills/d/LICENSE.md": "v1\n",
+      "skills/e/README.md": "",
+      "skills/e/LICENSE.md": "AGENTS.md",
+      "skills/f/README.md": "",
       "starter.yml": "v1\n",
     });
+    symlinkSync("../../LICENSE.md", join(root, "skills/f/LICENSE.md"));
     const written = new Map([["LICENSE.md", Buffer.from("v2\n")]]);
     const rows = applyMirrors(
       root,
@@ -81,7 +85,11 @@ describe("applyMirrors", () => {
       ],
       written,
       new Set(["LICENSE.md", "starter.yml"]),
-      { "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") } },
+      {
+        "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") },
+        // A link record's hash covers a target string, so it vouches for no file bytes.
+        "skills/e/LICENSE.md": { class: "link", hash: sha256("AGENTS.md") },
+      },
     );
     const byTarget = (
       a: { source: string; target: string },
@@ -98,12 +106,24 @@ describe("applyMirrors", () => {
       },
       { source: "LICENSE.md", target: "skills/d/LICENSE.md", outcome: "written", detail: "" },
       {
+        source: "LICENSE.md",
+        target: "skills/e/LICENSE.md",
+        outcome: "refused",
+        detail: "the target holds content that is not the previous mirror",
+      },
+      {
+        source: "LICENSE.md",
+        target: "skills/f/LICENSE.md",
+        outcome: "refused",
+        detail: "the target is a symbolic link",
+      },
+      {
         source: "README.md",
         target: "docs/README.md",
         outcome: "refused",
         detail: "the source is not a file this sync writes",
       },
-      ...["a", "b", "c", "d"].map((skill) => ({
+      ...["a", "b", "c", "d", "e", "f"].map((skill) => ({
         source: "README.md",
         target: `skills/${skill}/README.md`,
         outcome: "refused" as const,

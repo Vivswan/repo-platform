@@ -10,7 +10,7 @@ import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { capture } from "../../shared/proc.ts";
 import type { RetiredEntry } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
-import { existingFile, insideTarget, removeFile } from "./target_files.ts";
+import { insideTarget, probe, removeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "moved" | "held" | "kept";
 
@@ -20,21 +20,28 @@ export interface RetireRow {
   detail: string;
 }
 
-/** Why the file at `path` is not exactly the writer's last write, or null
- *  when it is (and may be deleted). */
+/** Why what sits at `path` is not exactly the writer's last write, or null
+ *  when it is (and may be deleted). A symbolic link is judged by its target
+ *  string, never read through, whatever class the record names. */
 export function keepReason(target: string, path: string, records: Records): string | null {
   const entry = records[path];
   if (entry === undefined) return "no record of the platform writing it";
   if (entry.class === "starter") return "a starter is repo-owned";
   const hash = recordedHash(records, path);
   if (hash === null) return "the record carries no hash";
-  const bytes = existingFile(target, path);
-  if (bytes === null) return null;
+  const found = probe(target, path);
+  if (found.kind === "absent") return null;
+  if (found.kind === "link") {
+    return sha256(found.target) === hash
+      ? null
+      : "the path is a symbolic link whose target is not the recorded one";
+  }
+  if (entry.class === "link") return "a regular file sits where the platform wrote a link";
   if (entry.class === "split") {
     if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
       return "the split record names no markers";
     }
-    const text = bytes.toString("latin1");
+    const text = found.bytes.toString("latin1");
     const slice = cleanManagedRegion(text, { begin: entry.begin, end: entry.end });
     if (slice === null) return "the managed-region markers are missing or malformed";
     if (sha256(Buffer.from(slice.region, "latin1")) !== hash)
@@ -44,7 +51,7 @@ export function keepReason(target: string, path: string, records: Records): stri
     }
     return null;
   }
-  return sha256(bytes) === hash ? null : "the content differs from the last write";
+  return sha256(found.bytes) === hash ? null : "the content differs from the last write";
 }
 
 function gitMove(target: string, from: string, to: string): void {
@@ -83,14 +90,15 @@ export function retire(
       rows.push({ path, outcome: "held", detail: reason });
     }
   };
+  const present = (path: string) => probe(target, path).kind !== "absent";
   for (const entry of entries) {
-    if (existingFile(target, entry.path) === null) continue;
+    if (!present(entry.path)) continue;
     if (entry.moved_to !== undefined && !selected.has(entry.moved_to)) {
       dispose(entry.path, `retired (its new home ${entry.moved_to} is not selected here)`);
       continue;
     }
     if (entry.moved_to !== undefined) {
-      if (existingFile(target, entry.moved_to) === null) {
+      if (!present(entry.moved_to)) {
         gitMove(target, entry.path, entry.moved_to);
         if (records[entry.path] !== undefined) {
           records[entry.moved_to] = records[entry.path];
@@ -109,7 +117,7 @@ export function retire(
     dispose(entry.path, "retired");
   }
   for (const path of stale) {
-    if (existingFile(target, path) !== null) dispose(path, "no longer selected");
+    if (present(path)) dispose(path, "no longer selected");
   }
   return rows;
 }

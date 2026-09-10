@@ -113,6 +113,21 @@ describe("parseRegistration", () => {
       error: `${FILE}: project.slug: must be kebab-case (lowercase letters and digits, dash-separated)`,
     },
     {
+      reason: "a project name with a double quote",
+      text: 'modules: []\nproject:\n  name: Say "hi"\n  slug: hi\n  description: d\n',
+      error: `${FILE}: project.name: project.name must not contain double quotes, backslashes, or control characters`,
+    },
+    {
+      reason: "a description with a backslash",
+      text: "modules: []\nproject:\n  name: X\n  slug: x\n  description: 'C:\\\\tools'\n",
+      error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+    },
+    {
+      reason: "a description with a control character",
+      text: 'modules: []\nproject:\n  name: X\n  slug: x\n  description: "bell\\u0007"\n',
+      error: `${FILE}: project.description: project.description must not contain double quotes, backslashes, or control characters`,
+    },
+    {
       reason: "a docs path with a slash",
       text: "modules: []\ndocs_site:\n  path: a/b\n",
       error: `${FILE}: docs_site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
@@ -146,6 +161,13 @@ describe("parseRegistration", () => {
     const read = parseRegistration(text);
     expect("errors" in read).toBe(true);
     if ("errors" in read) expect(read.errors[0]).toStartWith(error);
+  });
+
+  test("a name and description of plain text with apostrophes and colons pass", () => {
+    const read = parseRegistration(
+      "modules: []\nproject:\n  name: Vivswan's tools\n  slug: tools\n  description: 'Tools: for things, 100%'\n",
+    );
+    expect("registration" in read).toBe(true);
   });
 
   test("the schema is strict at the top level and in every section", () => {

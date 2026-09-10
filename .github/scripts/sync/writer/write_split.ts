@@ -1,7 +1,8 @@
 // Split files: the writer owns the marker-bounded region and the repository
 // owns everything above and below it. A file without markers keeps its
 // whole content below the new region; a file whose markers are duplicated
-// or out of order is refused loudly, since no slice of it is honest.
+// or out of order is refused loudly, since no slice of it is honest. A
+// symbolic link at the path is held, like a managed file's.
 
 import {
   cleanManagedRegion,
@@ -10,8 +11,8 @@ import {
 } from "../../../../actions/shared/grammar.ts";
 import { mentionsMarkers } from "./files_config.ts";
 import { sha256 } from "./manifest.ts";
-import { existingFile, writeFile } from "./target_files.ts";
-import type { WriteOutcome } from "./write_managed.ts";
+import { probe, writeFile } from "./target_files.ts";
+import { LINK_IN_THE_WAY, type WriteOutcome } from "./write_managed.ts";
 
 /** `text` ending in exactly the newline it needs to be followed by more. */
 export function terminated(text: string): string {
@@ -36,11 +37,13 @@ export function writeSplit(
   recorded: string | null,
 ): WriteOutcome {
   const regionBytes = Buffer.from(region, "utf-8");
-  const existing = existingFile(target, path);
-  if (existing === null) {
+  const found = probe(target, path);
+  if (found.kind === "link") return { change: "held", reason: LINK_IN_THE_WAY };
+  if (found.kind === "absent") {
     writeFile(target, path, regionBytes);
     return { change: "created" };
   }
+  const existing = found.bytes;
   // latin1 round-trips every byte, so slicing and reassembly never alter
   // the repository-owned parts.
   const text = existing.toString("latin1");
