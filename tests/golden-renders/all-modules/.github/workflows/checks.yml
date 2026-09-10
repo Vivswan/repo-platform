@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Example bun checks; replace the placeholder below with real ones.
-      # - uses: oven-sh/setup-bun@v2
+      # - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       #   with:
       #     bun-version-file: .bun-version
       # - run: bun install --frozen-lockfile
@@ -26,7 +26,7 @@ jobs:
       # - run: bun test
 
       # Example node checks; replace the placeholder below with real ones.
-      # - uses: actions/setup-node@v7
+      # - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       #   with:
       #     node-version-file: .node-version
       # - run: npm ci
@@ -34,7 +34,7 @@ jobs:
       # - run: npm test
 
       # Example deno checks; replace the placeholder below with real ones.
-      # - uses: denoland/setup-deno@v2
+      # - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
       #   with:
       #     deno-version-file: .dvmrc
       # - run: deno ci
@@ -43,7 +43,7 @@ jobs:
       # - run: deno test
 
       # Example uv checks; replace the placeholder below with real ones.
-      # - uses: astral-sh/setup-uv@v10.0.1
+      # - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       # - run: uv sync
       # - run: uv run pytest
 

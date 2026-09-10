@@ -151,8 +151,8 @@ const KNOWN: Record<string, Known> = {
       "one blank line between the checkout step and the placeholder step: the seam the toolchain example blocks land in stays when no toolchain is selected",
     expected: (golden) =>
       golden.replace(
-        "      - uses: actions/checkout@v7\n      - name: No repository checks yet",
-        "      - uses: actions/checkout@v7\n\n      - name: No repository checks yet",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n      - name: No repository checks yet",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n\n      - name: No repository checks yet",
       ),
   },
   "AGENTS.md": {

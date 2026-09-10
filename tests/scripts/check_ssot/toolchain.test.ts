@@ -4,9 +4,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { type PlanDefaults, REQUIRED_DEFAULTS } from "../../../actions/plan/plan.ts";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
+import { actionManifestFiles } from "../../../scripts/check/ssot/delivery_pins.ts";
 import {
   ACTION_BUN_PIN,
-  actionManifestFiles,
   actionsBunGuardMismatches,
   BUN_SETUP_USES,
   type BunDirsInputs,

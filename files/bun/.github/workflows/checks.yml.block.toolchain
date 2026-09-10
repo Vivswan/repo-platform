@@ -1,6 +1,6 @@
 
       # Example bun checks; replace the placeholder below with real ones.
-      # - uses: oven-sh/setup-bun@v2
+      # - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       #   with:
       #     bun-version-file: .bun-version
       # - run: bun install --frozen-lockfile

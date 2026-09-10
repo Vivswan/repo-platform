@@ -69,14 +69,14 @@ jobs:
       # No token presence check: the secret is required above, and
       # sync-repos.yml's plan job fails loudly when it is unset.
       - name: Check out repo-platform
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: the recorded _commit is judged against the build
           # branch and the migration ladder walks the build commits
           # between it and the delivered tip.
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 
@@ -109,7 +109,7 @@ jobs:
       # checked-out commit is the branch-mode push's lease (commit_push.ts).
       - name: Check out the target repo
         id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ env.TARGET }}
           ref: ${{ steps.target.outputs.checkout_ref }}
@@ -347,7 +347,7 @@ jobs:
       # the source commit its build was assembled from, never by main's
       # newer rules when main moved since.
       - name: Check out the version-aligned validator
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.versions.outputs.validate_ref }}
           path: validator

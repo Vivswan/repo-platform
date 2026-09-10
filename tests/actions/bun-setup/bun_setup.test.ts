@@ -103,7 +103,7 @@ describe("actions/bun-setup", () => {
         id: "setup-bun",
         if: "steps.probe.outputs.pinned != 'true'",
         "continue-on-error": true,
-        uses: "oven-sh/setup-bun@v2",
+        uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
         with: { "bun-version-file": "${{ inputs.pin }}" },
       },
       {
@@ -111,7 +111,7 @@ describe("actions/bun-setup", () => {
         id: "setup-bun-retry",
         if: "steps.setup-bun.outcome == 'failure'",
         "continue-on-error": true,
-        uses: "oven-sh/setup-bun@v2",
+        uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
         with: { "bun-version-file": "${{ inputs.pin }}" },
       },
     ]);

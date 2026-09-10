@@ -75,7 +75,7 @@ jobs:
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
       weekly: ${{ steps.plan.outputs.weekly }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .repo-platform.yml
@@ -103,7 +103,7 @@ jobs:
       # Only for the sticky comment, and only on this job.
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/validate-template-report@build
         id: template
         with:
@@ -133,7 +133,7 @@ jobs:
       # The PR's file listing (a private repository answers 403 without it).
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/module-render@build
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -153,7 +153,7 @@ jobs:
     steps:
       # One checkout serves every check: fetch-depth 0 because
       # commit-names walks history and gitleaks scans the event's range.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       # Step ids are the check names the judge reports.
@@ -171,7 +171,7 @@ jobs:
         uses: Vivswan/repo-platform/actions/validate-commit-names@build
       - id: actionlint
         if: ${{ !cancelled() }}
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
       - id: yamllint
         if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/yamllint@build
@@ -183,7 +183,7 @@ jobs:
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
         if: ${{ !cancelled() }}
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
@@ -221,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
 
@@ -322,7 +322,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/validate-skills@build
         with:
           skills-dir: ${{ needs.plan.outputs.skills-dir }}
@@ -336,7 +336,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: the ancestor check needs origin/main.
           fetch-depth: 0
@@ -390,5 +390,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/trivy@build

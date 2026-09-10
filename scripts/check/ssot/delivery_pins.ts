@@ -1,7 +1,7 @@
 // Rules pinning what the fleet executes from: upstream action refs, every
 // self-reference riding the build branch, and copier.yml's stamp hooks.
 
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -13,22 +13,13 @@ import { canonical, type Mismatch, mustMatch, sortedSet } from "./comparison.ts"
 import { asRecord, jinjaVars, REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-// Actions allowed to be pinned at more than one ref, with the full expected
-// ref set. Record any intentional split here with a comment. The splits
-// below are the sha pins of the lint legs beside the moving major tags the
-// rest of the repository still carries; the repo-wide sha-pin sweep
-// collapses each and removes its entry (a stale entry fails the rule).
-export const ALLOWED_MULTI_REFS: Record<string, string[]> = {
-  "actions/checkout": ["3d3c42e5aac5ba805825da76410c181273ba90b1", "v7"],
-  "actions/setup-node": ["820762786026740c76f36085b0efc47a31fe5020", "v7"],
-  "github/codeql-action": ["b96794f015dfd88f77b49b1c93e0fa7110f94c63", "v4"],
-  "oven-sh/setup-bun": ["0c5077e51419868618aeaa5fe8019c62421857d6", "v2"],
-};
-
 export interface Pin {
   file: string;
   action: string;
   ref: string;
+  /** The trailing `# <tag>` comment naming what the ref was pinned from,
+   *  or null when the line carries none. */
+  version: string | null;
 }
 
 /** `uses: <owner>/<action>@<ref>` pins in a file, commented examples
@@ -41,16 +32,113 @@ export function extractUsesPins(text: string, file: string): Pin[] {
     // valid owner/action or ref: a line can carry BOTH a real pin and
     // unrelated jinja, so skipping the whole line would drop the pin.
     const line = rawLine.replace(/\{\{[^}]*\}\}/g, "<JINJA>");
-    const match = line.match(/uses:\s*['"]?([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)@([^\s'"]+)/);
+    const match = line.match(
+      /uses:\s*['"]?([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)@([^\s'"]+)['"]?(?:[ \t]+#[ \t]*(\S+))?/,
+    );
     if (!match) continue;
     if (match[2].includes("<JINJA>")) continue;
     const action = match[1].split("/").slice(0, 2).join("/");
-    pins.push({ file, action, ref: match[2] });
+    pins.push({ file, action, ref: match[2], version: match[3] ?? null });
   }
   return pins;
 }
 
-export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): Mismatch[] {
+/** Every composite action manifest under actions/, in either spelling the
+ *  runner reads (action.yml or action.yaml), nested ones included
+ *  (actions/pages-site/check-links is a manifest of its own), from a
+ *  walkFiles listing; symlinks are not manifests, and the directories
+ *  publication excludes never reach the fleet. */
+export function actionManifests(files: { path: string; symlink: boolean }[]): string[] {
+  return files
+    .filter(
+      (f) =>
+        !f.symlink &&
+        /(^|\/)action\.ya?ml$/.test(f.path) &&
+        !f.path.split("/").some((segment) => EXCLUDED_ACTION_DIRS.has(segment)),
+    )
+    .map((f) => f.path)
+    .sort();
+}
+
+/** The checked-out actions/ tree's manifests: the one walk every rule over
+ *  action manifests and their forcing tests share, so no two judge
+ *  different rosters. */
+export function actionManifestFiles(): string[] {
+  return actionManifests(walkFiles("actions"));
+}
+
+/** Third-party actions pinned to a BRANCH commit rather than a release: the
+ *  value is the branch the trailing comment must name. Record the reason
+ *  with each entry. dtolnay/rust-toolchain publishes no version tags (its
+ *  branches name toolchains), so its pin is a master commit and the
+ *  toolchain travels as the step's explicit input. */
+export const BRANCH_PINNED: Record<string, string> = {
+  "dtolnay/rust-toolchain": "master",
+};
+
+const SHA_RE = /^[0-9a-f]{40}$/;
+const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
+
+/** Every action outside `owner`'s account is pinned by full commit sha with
+ *  the tag it came from as a trailing comment (`@<sha> # vX.Y.Z`, the shape
+ *  Dependabot bumps), one comment per sha repo-wide. A moving tag or branch
+ *  would let upstream change what the fleet runs without a PR here; the
+ *  owner's own actions ride their own delivery channels and are judged by
+ *  the fleet-refs-ride-build rule instead. */
+export function pinShapeMismatches(
+  pins: Pin[],
+  owner: string,
+  branchPinned: Record<string, string>,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const thirdParty = pins.filter(
+    (pin) => pin.action.split("/")[0].toLowerCase() !== owner.toLowerCase(),
+  );
+  const shape = (action: string) =>
+    action in branchPinned
+      ? `${action}@<full 40-hex commit sha> # ${branchPinned[action]}`
+      : `${action}@<full 40-hex commit sha> # v<major>.<minor>.<patch>`;
+  for (const pin of thirdParty) {
+    const versionOk =
+      pin.action in branchPinned
+        ? pin.version === branchPinned[pin.action]
+        : pin.version !== null && VERSION_COMMENT_RE.test(pin.version);
+    if (SHA_RE.test(pin.ref) && versionOk) continue;
+    mismatches.push({
+      file: pin.file,
+      expected: shape(pin.action),
+      got: `@${pin.ref}${pin.version === null ? "" : ` # ${pin.version}`}`,
+    });
+  }
+  const commentsBySha = new Map<string, Set<string>>();
+  for (const pin of thirdParty) {
+    if (!SHA_RE.test(pin.ref) || pin.version === null) continue;
+    const key = `${pin.action}@${pin.ref}`;
+    commentsBySha.set(key, new Set([...(commentsBySha.get(key) ?? []), pin.version]));
+  }
+  for (const [key, versions] of [...commentsBySha.entries()].sort()) {
+    if (versions.size === 1) continue;
+    mismatches.push({
+      file: key,
+      expected: "one version comment per pinned sha",
+      got: [...versions].sort().join(", "),
+    });
+  }
+  for (const action of Object.keys(branchPinned).sort()) {
+    if (!thirdParty.some((pin) => pin.action === action)) {
+      mismatches.push({
+        file: action,
+        expected: "an action still pinned somewhere (branch-pinned allowlist)",
+        got: "no uses: pins found (stale allowlist entry - remove it)",
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** One ref per action repo-wide: two sites pinning different refs of the
+ *  same action would run two versions of it across the fleet. */
+export function pinMismatches(pins: Pin[]): Mismatch[] {
   const byAction = new Map<string, Pin[]>();
   for (const pin of pins) {
     byAction.set(pin.action, [...(byAction.get(pin.action) ?? []), pin]);
@@ -58,18 +146,6 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
   const mismatches: Mismatch[] = [];
   for (const [action, actionPins] of [...byAction.entries()].sort()) {
     const refs = [...new Set(actionPins.map((p) => p.ref))].sort();
-    // An allowlisted action must match its declared split exactly, so a
-    // stale entry (split collapsed back to one ref) is flagged for removal.
-    if (action in allowed) {
-      if (sortedSet(allowed[action]) !== refs.join(", ")) {
-        mismatches.push({
-          file: action,
-          expected: `the allowlisted refs [${sortedSet(allowed[action])}]`,
-          got: refs.join(", "),
-        });
-      }
-      continue;
-    }
     if (refs.length === 1) continue;
     const sites = refs
       .map(
@@ -78,15 +154,6 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
       )
       .join("; ");
     mismatches.push({ file: action, expected: "a single pinned ref", got: sites });
-  }
-  for (const action of Object.keys(allowed).sort()) {
-    if (!byAction.has(action)) {
-      mismatches.push({
-        file: action,
-        expected: "an action still pinned somewhere (allowlisted)",
-        got: "no uses: pins found (stale allowlist entry - remove it)",
-      });
-    }
   }
   return mismatches;
 }
@@ -329,15 +396,20 @@ export const deliveryPinRules: Rule[] = [
         ...walkFiles("templates")
           .filter((f) => !f.symlink)
           .map((f) => f.path),
-        ...readdirSync(join(REPO_ROOT, "actions"))
-          .sort()
-          .map((name) => `actions/${name}/action.yml`)
-          .filter((rel) => existsSync(join(REPO_ROOT, rel))),
+        // The sync writer's sources, workflow block files included: what
+        // the fleet runs after a sync.
+        ...walkFiles("files")
+          .filter((f) => !f.symlink)
+          .map((f) => f.path),
+        ...actionManifestFiles(),
       ];
       const pins = files.flatMap((rel) => extractUsesPins(read(rel), rel));
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
-      return pinMismatches(pins, ALLOWED_MULTI_REFS);
+      return [
+        ...pinMismatches(pins),
+        ...pinShapeMismatches(pins, jinjaVars().username, BRANCH_PINNED),
+      ];
     },
   },
   {

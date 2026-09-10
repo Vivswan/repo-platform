@@ -4,13 +4,10 @@
 // copy of every toolchain pin, of the pages defaults, and of the defaults
 // copier.yml still answers for.
 
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
-  EXCLUDED_DIRS,
-} from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { type ModuleData, parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import {
   type DefaultSource,
@@ -27,7 +24,7 @@ import {
 } from "../../generate/toolchain_pins.ts";
 import { normalizeJinja } from "../../lib/jinja_subset.ts";
 import { canonical, type Mismatch, mustMatch } from "./comparison.ts";
-import { DELIVERY_REF } from "./delivery_pins.ts";
+import { actionManifestFiles, DELIVERY_REF } from "./delivery_pins.ts";
 import {
   asRecord,
   ciJobs,
@@ -256,20 +253,6 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
     if (line.trim().startsWith(key)) return true;
   }
   return false;
-}
-
-/** Every action manifest under actions/, nested actions included - one
- *  walk shared by the actions-bun-guard rule and its forcing test, so
- *  the two can never judge different rosters; branch_tree.ts's
- *  EXCLUDED_DIRS bounds it to the tree publication ships. */
-export function actionManifestFiles(): string[] {
-  return walkFiles("actions")
-    .map((f) => f.path)
-    .filter(
-      (path) =>
-        path.endsWith("/action.yml") &&
-        !path.split("/").some((segment) => EXCLUDED_DIRS.has(segment)),
-    );
 }
 
 /** The runner scratch root a setup-bun pin may sit under instead of the
@@ -800,13 +783,12 @@ export const toolchainRules: Rule[] = [
     name: "dependabot-action-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // Only action.yml-bearing directories carry upstream `uses:` pins to
-      // bump; actions/shared/ is the dependency-free library zone with
-      // nothing for dependabot to see.
-      const dirs = readdirSync(join(REPO_ROOT, "actions")).filter(
-        (name) =>
-          lstatSync(join(REPO_ROOT, "actions", name)).isDirectory() &&
-          existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
+      // Only manifest-bearing directories carry upstream `uses:` pins to
+      // bump, nested manifests included (dependabot reads the manifest at a
+      // listed directory's root only); actions/shared/ is the
+      // dependency-free library zone with nothing for dependabot to see.
+      const dirs = actionManifestFiles().map((rel) =>
+        rel.slice("actions/".length, rel.lastIndexOf("/")),
       );
       const doc = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
       const updates = (doc.updates as Record<string, unknown>[] | undefined) ?? [];
