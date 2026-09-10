@@ -612,7 +612,7 @@ describe("the live repository", () => {
       ]),
     );
     for (const covered of [
-      ".github/workflows/reusable-template-sync.yml",
+      ".github/workflows/sync-repos.yml",
       ".github/scripts/sync/head_manifest.ts",
       MIGRATIONS_HARNESS_REL,
       "actions/shared/grammar.ts",

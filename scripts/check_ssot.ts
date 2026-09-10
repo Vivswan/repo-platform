@@ -37,6 +37,7 @@ import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
+import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
 import { toolchainRules } from "./check/ssot/toolchain.ts";
 import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
@@ -59,6 +60,7 @@ const rules: Rule[] = [
   ...labelPreflightRules,
   ...processDisciplineRules,
   ...harnessImportRules,
+  ...syncOperatorRules,
 ];
 
 function main(): number {

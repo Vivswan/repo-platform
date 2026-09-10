@@ -66,7 +66,6 @@ export const RULE_ROSTER = [
   "agents-recipe",
   "owner-slug",
   "release-gate-predicates",
-  "hidden-capture-names",
   "auto-assign-codeowners-parity",
   "actions-bun-guard",
   "stamp-hook-path",
@@ -82,6 +81,7 @@ export const RULE_ROSTER = [
   "local-bun-runtime",
   "skill-ownership-tables",
   "ci-harness-imports",
+  "operator-verdict-only",
   "pages-callers-parity",
 ] as const;
 
