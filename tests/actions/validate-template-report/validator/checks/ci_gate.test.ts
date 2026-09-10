@@ -111,6 +111,27 @@ describe("checkCiGate", () => {
       expected: [NO_JUDGMENT, NO_FLEET_CALLER],
     },
     {
+      reason: "a schedule-only job outside the needs list is no finding: it runs on no merge",
+      ci: SINGLE_CALL.replace(
+        "  all-green:\n",
+        "  nightly:\n    if: github.event_name == 'schedule'\n    uses: Vivswan/repo-platform/.github/workflows/fleet-nightly.yml@build\n  all-green:\n",
+      ),
+      expected: [],
+    },
+    {
+      reason: "a job with any looser condition outside the needs list is an un-gated job",
+      ci: SINGLE_CALL.replace(
+        "  all-green:\n",
+        "  nightly:\n    if: github.event_name == 'schedule' || github.event_name == 'push'\n    uses: Vivswan/repo-platform/.github/workflows/fleet-nightly.yml@build\n  all-green:\n",
+      ),
+      expected: [
+        error(
+          "ci.yml: all-green `needs:` is missing job(s): nightly - those jobs cannot gate merges; " +
+            "add them to the all-green job's needs list",
+        ),
+      ],
+    },
+    {
       reason: "a run: step beside the action step is no finding: the action judges",
       ci: SINGLE_CALL.replace(
         "    steps:\n",

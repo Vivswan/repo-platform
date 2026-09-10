@@ -23,6 +23,15 @@ function jobNeeds(job: unknown): string[] {
   return Array.isArray(needs) ? needs.map(String) : [];
 }
 
+/** A job that runs on the nightly schedule alone (the skeleton's fleet-nightly
+ *  caller): no push or pull request ever runs it, so it can gate no merge
+ *  and stays outside the all-green needs census. Exactly this clause; a
+ *  looser condition would run on merges and must gate. */
+function scheduleOnly(job: unknown): boolean {
+  const condition = isRecord(job) && typeof job.if === "string" ? job.if.trim() : "";
+  return condition === "github.event_name == 'schedule'";
+}
+
 function jobSteps(job: unknown): Step[] {
   const steps = isRecord(job) ? job.steps : null;
   if (!Array.isArray(steps)) return [];
@@ -97,7 +106,8 @@ export function checkCiGate(ctx: Context): Finding[] {
     const needs = jobNeeds(allGreen);
     // Jobs downstream of the gate (the post-green hook, the release legs
     // and the hooks chained behind them) are exempt from the needs census:
-    // a job needing a downstream job is downstream too.
+    // a job needing a downstream job is downstream too. So is a
+    // schedule-only job: it runs on no merge.
     const downstream = new Set<string>();
     for (;;) {
       const grew = Object.entries(jobs)
@@ -112,7 +122,13 @@ export function checkCiGate(ctx: Context): Finding[] {
       for (const name of grew) downstream.add(name);
     }
     const missing = Object.keys(jobs)
-      .filter((name) => name !== "all-green" && !downstream.has(name) && !needs.includes(name))
+      .filter(
+        (name) =>
+          name !== "all-green" &&
+          !downstream.has(name) &&
+          !scheduleOnly(jobs[name]) &&
+          !needs.includes(name),
+      )
       .sort();
     if (missing.length > 0) {
       findings.push(

@@ -9,11 +9,14 @@ import {
   allGreenGateMismatches,
   bannedSubstitutions,
   CHECK_RUN_LOOKUP,
+  callerCeilingMismatches,
   declaredCheckName,
   expandCheckChain,
+  FLEET_CALLERS,
   judgeRunBlock,
   judgeSubstitutionMismatches,
   rosterMismatches,
+  SKELETON_RENDER,
 } from "../../../scripts/check/ssot/all_green.ts";
 import { templateCarries } from "../../../scripts/lib/ts_extract.ts";
 
@@ -372,5 +375,92 @@ describe("the judge's substitution ban", () => {
     expect(() =>
       judgeSubstitutionMismatches(text.replace("Judge every needed result", "Judge")),
     ).toThrow("anchor lost");
+  });
+});
+
+describe("callerCeilingMismatches", () => {
+  const caller = {
+    rel: "ci.yml",
+    job: "ci",
+    permissions: { "contents": "read", "issues": "read", "pull-requests": "write" },
+  };
+  const called = (jobs: string) => ({
+    rel: "fleet-ci.yml",
+    text: `on: workflow_call\njobs:\n${jobs}`,
+  });
+
+  test("grants at or under the ceiling pass; a job with no block inherits the caller's", () => {
+    const text = [
+      "  a:",
+      "    permissions:",
+      "      contents: read",
+      "      pull-requests: write",
+      "  b:",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+    expect(callerCeilingMismatches(called(text), caller)).toEqual([]);
+  });
+
+  test("a scope above the ceiling, or one the caller omits, goes red naming job and scope", () => {
+    const text = [
+      "  nightly:",
+      "    if: github.event_name == 'schedule'",
+      "    permissions:",
+      "      contents: read",
+      "      issues: write",
+      "      security-events: write",
+      "",
+    ].join("\n");
+    const mismatches = callerCeilingMismatches(called(text), caller);
+    expect(mismatches.map((m) => [m.file, m.got])).toEqual([
+      ["fleet-ci.yml job 'nightly'", "issues: write"],
+      ["fleet-ci.yml job 'nightly'", "security-events: write"],
+    ]);
+    expect(mismatches[0].expected).toContain("issues: at most read");
+    expect(mismatches[1].expected).toContain("security-events: at most none");
+  });
+
+  test("the called workflow's top-level block is every blockless job's grant", () => {
+    const text = "  a:\n    runs-on: ubuntu-latest\n";
+    const doc = {
+      rel: "fleet-ci.yml",
+      text: `on: workflow_call\npermissions:\n  issues: write\njobs:\n${text}`,
+    };
+    expect(callerCeilingMismatches(doc, caller).map((m) => m.got)).toEqual(["issues: write"]);
+  });
+
+  test("a shorthand grant on either side is refused rather than judged", () => {
+    expect(
+      callerCeilingMismatches(called("  a:\n    permissions: write-all\n"), caller).map(
+        (m) => m.got,
+      ),
+    ).toEqual(["write-all"]);
+    expect(
+      callerCeilingMismatches(called("  a:\n    runs-on: x\n"), {
+        ...caller,
+        permissions: "read-all",
+      }).map((m) => m.got),
+    ).toEqual(["read-all"]);
+    expect(
+      callerCeilingMismatches(called("  a:\n    runs-on: x\n"), {
+        ...caller,
+        permissions: undefined,
+      }).map((m) => m.got),
+    ).toEqual(["no permissions block"]);
+  });
+
+  test("the live called workflows fit their skeleton callers; raising one scope goes red", () => {
+    const skeleton = parseYaml(readFileSync(SKELETON_RENDER, "utf-8")) as {
+      jobs: Record<string, { permissions?: unknown }>;
+    };
+    for (const [rel, job] of Object.entries(FLEET_CALLERS)) {
+      const text = readFileSync(rel, "utf-8");
+      const site = { rel: SKELETON_RENDER, job, permissions: skeleton.jobs[job].permissions };
+      expect(callerCeilingMismatches({ rel, text }, site)).toEqual([]);
+      const raised = text.replace("      contents: read\n", "      contents: write\n");
+      expect(raised).not.toBe(text);
+      expect(callerCeilingMismatches({ rel, text: raised }, site).length).toBeGreaterThan(0);
+    }
   });
 });

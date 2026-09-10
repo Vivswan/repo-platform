@@ -46,6 +46,8 @@ export const RULE_ROSTER = [
   "all-green-roster",
   "all-green-judge-substitutions",
   "fleet-ci-roster",
+  "fleet-nightly-roster",
+  "fleet-caller-ceilings",
   "all-green-name",
   "pr-title-workflow",
   "dependabot-label-tuples",

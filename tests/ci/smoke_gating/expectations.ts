@@ -321,12 +321,43 @@ export const EXPECTATIONS: Row[] = [
           "pull-requests": "write",
           "security-events": "write",
           actions: "read",
-          // The ceiling for called jobs that file issues.
-          issues: "write",
+          // release-health's issue reads; every fleet repository's caller
+          // already grants exactly this, so fleet-ci fits under it.
+          issues: "read",
           "vulnerability-alerts": "read",
         },
       },
       { kind: "text", path: CI, lacks: ["base-checks", "check-typography"] },
+    ],
+  },
+  {
+    // The nightly scan files an issue, a grant above the ci caller's
+    // ceiling, so it rides its own schedule-only caller of fleet-nightly.yml
+    // at @build with no inputs; not a gate (the all-green row pins the
+    // needs list without it).
+    name: "the nightly caller runs fleet-nightly at @build on the schedule alone, outside the gate",
+    when: ALWAYS,
+    checks: () => [
+      {
+        kind: "yaml-matches",
+        path: CI,
+        at: ["jobs", "nightly", "uses"],
+        matches: includes("repo-platform/.github/workflows/fleet-nightly.yml@build"),
+      },
+      {
+        kind: "yaml-equals",
+        path: CI,
+        at: ["jobs", "nightly", "if"],
+        equals: "github.event_name == 'schedule'",
+      },
+      { kind: "yaml-absent", path: CI, at: ["jobs", "nightly", "with"] },
+      { kind: "yaml-absent", path: CI, at: ["jobs", "nightly", "needs"] },
+      {
+        kind: "yaml-equals",
+        path: CI,
+        at: ["jobs", "nightly", "permissions"],
+        equals: { contents: "read", issues: "write", "security-events": "write" },
+      },
     ],
   },
   {
@@ -371,9 +402,10 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    // The gate needs BOTH caller jobs, runs on always() so a failed caller
-    // fails it rather than skipping it, and judges through the shared
-    // action; the retired verdict wrapper must not render.
+    // The gate needs BOTH gating caller jobs (never the nightly one), runs
+    // on always() so a failed caller fails it rather than skipping it, and
+    // judges through the shared action; the retired verdict wrapper must
+    // not render.
     name: "the all-green gate needs both callers, runs always, judges through the action",
     when: ALWAYS,
     checks: () => [

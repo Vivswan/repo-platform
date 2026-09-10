@@ -371,11 +371,12 @@ describe("fleet-ci.yml", () => {
   });
 
   // Which jobs a scheduled run may reach: the plan and CodeQL on its weekly
-  // day, plus the nightly security scan. Every other job's condition excludes the schedule event outright
-  // (the skip clause, or a PR-only guard), so a new job must take a side.
-  const SCHEDULE_RUNS = new Set(["plan", "codeql", "trivy-nightly"]);
+  // day (the nightly security scan rides fleet-nightly.yml). Every other
+  // job's condition excludes the schedule event outright (the skip clause,
+  // or a PR-only guard), so a new job must take a side.
+  const SCHEDULE_RUNS = new Set(["plan", "codeql"]);
 
-  test("on the nightly schedule only plan, (weekly) codeql, and trivy-nightly can run", () => {
+  test("on the nightly schedule only plan and (weekly) codeql can run", () => {
     for (const [name, job] of Object.entries(fleetCi.jobs)) {
       const condition = job.if ?? "";
       const skips = condition.split("&&").some((clause) => clause.trim() === SKIP_ON_SCHEDULE);
@@ -393,8 +394,8 @@ describe("fleet-ci.yml", () => {
   });
 
   // The two halves of the security scan split on the schedule event: the
-  // blocking scan runs on every other event, the nightly one on the
-  // schedule alone, so neither runs twice.
+  // blocking scan runs on every other event, the nightly one (in
+  // fleet-nightly.yml) on the schedule alone, so neither runs twice.
   test("trivy is the thin blocking scan at @build, standing down on the schedule", () => {
     const trivy = fleetCi.jobs.trivy;
     expect(trivy?.if).toBe("github.event_name != 'schedule'");
@@ -408,50 +409,31 @@ describe("fleet-ci.yml", () => {
     expect(trivy?.steps?.[1]?.with).toBeUndefined();
   });
 
-  test("trivy-nightly runs on the schedule alone, files or closes the security-nightly issue, and uploads SARIF for public repositories", () => {
-    const job = fleetCi.jobs["trivy-nightly"];
-    expect(job?.if).toBe("github.event_name == 'schedule'");
-    expect(job?.permissions).toEqual({
-      "contents": "read",
-      "issues": "write",
-      "security-events": "write",
-    });
-    const steps = job?.steps ?? [];
-    expect(steps.map((step) => step.uses ?? "run")).toEqual([
-      expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/trivy@build"),
-      expect.stringContaining("actions/upload-artifact@"),
-      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
-      expect.stringContaining("repo-platform/actions/fuzz-issue@build"),
-      expect.stringContaining("github/codeql-action/upload-sarif@"),
-    ]);
-    const [, scan, artifact, report, resolve, sarif] = steps;
-    expect(scan.id).toBe("scan");
-    expect(scan.with).toEqual({ mode: "nightly" });
-    // Findings and the report ride the scan's outputs: found is the exact
-    // literal either way, so an absent output fires neither step.
-    expect(artifact.if).toBe("steps.scan.outputs.found == 'true'");
-    expect(artifact.with?.path).toBe("${{ steps.scan.outputs.report-dir }}");
-    expect(report.if).toBe("steps.scan.outputs.found == 'true'");
-    expect(report.with).toEqual({
-      "mode": "report",
-      "label": "security-nightly",
-      "title": "Nightly security scan findings",
-      "artifacts-dir": "${{ steps.scan.outputs.report-dir }}",
-      "artifact-name": String(artifact.with?.name),
-      "label-color": "1d76db",
-      "label-description": "Automated nightly security scan findings",
-      "stream": "generic",
-    });
-    expect(resolve.if).toBe("steps.scan.outputs.found == 'false'");
-    expect(resolve.with).toEqual({ mode: "resolve", label: "security-nightly", stream: "generic" });
-    // Personal-account code scanning is public-only: the exact literal
-    // 'false', so an empty visibility output uploads nothing.
-    expect(sarif.if).toBe("needs.plan.outputs.private == 'false'");
-    expect(sarif.with).toEqual({
-      sarif_file: "${{ steps.scan.outputs.sarif }}",
-      category: "trivy",
-    });
+  // The skeleton's `ci` caller grants exactly these; GitHub rejects the
+  // whole call when any nested job asks for a scope above them, before
+  // the job's condition runs, so no job here may (the nightly scan's
+  // issues: write is why fleet-nightly.yml exists).
+  const CI_CALLER_CEILING: Record<string, string> = {
+    "contents": "read",
+    "pull-requests": "write",
+    "security-events": "write",
+    "actions": "read",
+    "issues": "read",
+    "vulnerability-alerts": "read",
+  };
+
+  test("no job's permissions exceed the skeleton ci caller's ceiling", () => {
+    const rank = { read: 1, write: 2 } as Record<string, number>;
+    for (const [name, job] of Object.entries(fleetCi.jobs)) {
+      for (const [scope, level] of Object.entries(job.permissions ?? {})) {
+        const ceiling = CI_CALLER_CEILING[scope];
+        expect([name, scope, ceiling !== undefined && rank[level] <= rank[ceiling]]).toEqual([
+          name,
+          scope,
+          true,
+        ]);
+      }
+    }
   });
 
   test("nothing sleeps: the gate waits by failing fast", () => {

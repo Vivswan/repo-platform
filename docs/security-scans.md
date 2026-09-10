@@ -5,12 +5,12 @@ group: Fleet operations
 
 # Security scans
 
-Every managed repository is scanned by [Trivy](https://trivy.dev) through fleet-ci.yml, with zero Trivy files in the repository: the configuration lives in the [trivy action](../actions/trivy/action.yml), and the jobs live in [fleet-ci.yml](../.github/workflows/fleet-ci.yml). Two halves:
+Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository: the configuration lives in the [trivy action](../actions/trivy/action.yml), the blocking job in [fleet-ci.yml](../.github/workflows/fleet-ci.yml), and the nightly job in [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml). Two halves:
 
-| Half | fleet-ci job | Runs on | Scans | Blocking? | Findings go to |
+| Half | Job | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | `trivy` | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), CRITICAL severity, fixable only | yes: the job fails, so `all-green` fails | the job log |
-| Nightly | `trivy-nightly` | the `schedule` trigger | the same plus secrets, every severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+| Blocking | `trivy` in fleet-ci.yml | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), CRITICAL severity, fixable only | yes: the job fails, so `all-green` fails | the job log |
+| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger | the same plus secrets, every severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
 
@@ -41,7 +41,7 @@ misconfigurations:
 
 ## The nightly half
 
-- Trigger: the managed ci.yml's `schedule` event, on which fleet-ci runs `trivy-nightly` in place of `trivy`. The cron's cadence, and which other jobs stand down on it, belong to the skeleton ci.yml and fleet-ci's per-job conditions, not to the scan.
+- Trigger: the managed ci.yml's `schedule` event, on which its `nightly` job calls fleet-nightly.yml and fleet-ci's `trivy` stands down. The nightly job lives in its own reusable workflow because it files an issue: `issues: write` exceeds the `ci` caller's permission ceiling, and GitHub checks a called job's grant before its condition runs, so a job asking for more inside fleet-ci.yml would fail every fleet run. The `nightly` caller carries exactly the scan's grant and is not in all-green's needs. The cron's cadence, and which other jobs stand down on it, belong to the skeleton ci.yml and the per-job conditions, not to the scan.
 - Findings: the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job files or updates the one open issue labeled `security-nightly`; a clean night closes it ([tracking-issues.md](tracking-issues.md)). The full JSON rides the run's artifact.
 - Code scanning: the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
 - Release gating: `security-nightly` is fleet data, not a module answer. The [settings baseline](../.github/settings-baseline.yml) declares the label on every repository, [actions/plan](../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
