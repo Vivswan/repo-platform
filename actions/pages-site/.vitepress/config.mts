@@ -12,8 +12,12 @@
 //   DOCS_SITE_FACTS         JSON ProjectFacts (facts.ts) for the theme's
 //                           facts card, provenance line, and per-repo hue
 //                           (required)
-//   DOCS_SITE_EDIT_PATTERN  editLink pattern (set only where editing the
-//                           source can change THIS content: latest tiers)
+//   DOCS_SITE_INCLUDES      JSON IncludeRoot[] (lib.ts): the other roots
+//                           staged inside the docs tree, each child
+//                           directory's page file serving like a README
+//   DOCS_SITE_EDIT_BASE     the repository's edit URL up to the repo root,
+//                           set only where editing can change THIS content
+//                           (latest tiers); a page appends its source path
 //   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead
 //                           internal links are fatal on current content
 //                           (that failure is the docs PR check's value),
@@ -29,12 +33,16 @@ import type { ThemeConfig } from "vitepress-carbon";
 // documents.
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
+import type { IncludeRoot } from "../lib.ts";
+import { githubSlug } from "./anchors.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
-import { deriveRewrites, walkMarkdown } from "./derive.ts";
+import { deriveRewrites, includeIndexPages, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
 import { landingTableRule } from "./landing-table.ts";
 import { mermaidRule } from "./mermaid.ts";
+import { rewriteLinksRule } from "./rewrite-links.ts";
 import { deriveSidebar, fileSource, sidebarTrees } from "./sidebar.ts";
+import { isLandingFile, sourcePathOf } from "./source-path.ts";
 import { tableWrapRule } from "./table-wrap.ts";
 import { headersRule } from "./theme/page-index.ts";
 
@@ -57,7 +65,9 @@ function required(name: string): string {
 
 const srcDir = required("DOCS_SITE_SRC");
 const files = walkMarkdown(srcDir);
-const rewrites = deriveRewrites(files);
+const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRoot[];
+const indexPages = includeIndexPages(files, includes);
+const rewrites = deriveRewrites(files, indexPages);
 const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
   link: string;
@@ -65,6 +75,7 @@ const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
 const facts = JSON.parse(required("DOCS_SITE_FACTS")) as ProjectFacts;
 const title = process.env.DOCS_SITE_TITLE || "Documentation";
 const base = process.env.DOCS_SITE_BASE || "/";
+const editBase = process.env.DOCS_SITE_EDIT_BASE || "";
 // An icon link only for an icon the docs tree ships (VitePress serves
 // public/ at the base): a link to a missing file would be a 404 on every
 // page, while no link lets the browser fall back to the site's favicon.ico.
@@ -86,6 +97,9 @@ const nativeName = (tag: string): string => {
 };
 
 const markdown: MarkdownOptions = {
+  // Heading ids are GitHub's (anchors.ts): the fleet writes its links for
+  // the README on GitHub, and the headers plugin reads the anchor's id.
+  anchor: { slugify: githubSlug },
   // One highlighter theme whose colors are custom properties: the theme's
   // tokens.ts owns the code palette per mode (--fleet-code-*), so token contrast is
   // a token value the contrast test can guard, not a hex baked into every
@@ -102,6 +116,15 @@ const markdown: MarkdownOptions = {
   ),
   config(md) {
     inlineTextRule(md);
+    // Before the landing rule, so the curated table's hrefs are the routes
+    // its rows attach to.
+    rewriteLinksRule(md, {
+      docsDir: facts.docsDir,
+      includes,
+      rewrites,
+      repoUrl: facts.repoUrl,
+      ref: facts.provenance.label,
+    });
     landingTableRule(md, rewrites);
     // After the landing rule: the launcher replaces its table's tokens, so
     // the panel gets no scroll wrapper (and no wrapper tab stop before its
@@ -135,6 +158,7 @@ export default async () => {
       {
         prefix: tree.prefix,
         siteTitle: title,
+        indexPages,
       },
     );
     if (tree.prefix === "") continue;
@@ -183,12 +207,27 @@ export default async () => {
       },
     },
     markdown,
-    // Landing pages (README.md, rewritten to index.md at any depth) are the
+    // Every page's filePath becomes its REPOSITORY path (docs/guide/README.md,
+    // skills/x/SKILL.md): the edit link's `:path` and the provenance line
+    // read it, and nothing on the node side reads it after this hook.
+    // Landing pages (a README.md or index.md source at any depth) are the
     // site's front matter, not an article: the theme lays them out from the
-    // flag and they carry no outline.
+    // flag and they carry no outline. An include root's page serves at its
+    // directory URL too but stays an article. A page with neither a title
+    // key nor an h1 is titled by its `name` key (the SKILL.md convention),
+    // as derive.ts titles it for the sidebar.
     transformPageData(pageData) {
-      if (!/(^|\/)index\.md$/.test(pageData.relativePath)) return;
-      return { frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false } };
+      const source = {
+        filePath: sourcePathOf(facts.docsDir, includes, pageData.filePath),
+        ...(pageData.title === "" && typeof pageData.frontmatter.name === "string"
+          ? { title: pageData.frontmatter.name }
+          : {}),
+      };
+      if (!isLandingFile(pageData.filePath)) return source;
+      return {
+        ...source,
+        frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },
+      };
     },
     transformHtml(code) {
       return code.replace("<html", `<html data-fleet-hue="${facts.hue}"`);
@@ -201,13 +240,17 @@ export default async () => {
       // carbon's default title is uppercase; the fleet reads sentence case
       notFound: { title: "Page not found", linkText: "Go to the front page" },
       docFooter: { prev: "Previous", next: "Next" },
+      // The translations menu goes to a locale's landing page, never to
+      // "the same page" there: a translation tree lags the root, and the
+      // corresponding page's URL is a 404 wherever it does.
+      i18nRouting: false,
       // Carbon 1.6.0's Markdown menu prefixes the site base twice (route.path
       // already carries it, then withBase()), so on every based fleet site its
       // fetch 404s; llms.txt, from the same plugin, is unaffected and ships.
       llms: { pageActions: false },
-      ...(process.env.DOCS_SITE_EDIT_PATTERN
-        ? { editLink: { pattern: process.env.DOCS_SITE_EDIT_PATTERN, text: "Edit this page" } }
-        : {}),
+      // `:path` is the page's repository path (transformPageData above), so
+      // the edit base ends at the repository root.
+      ...(editBase ? { editLink: { pattern: `${editBase}:path`, text: "Edit this page" } } : {}),
       docsSiteVersions: versions,
       docsSiteCurrent: process.env.DOCS_SITE_CURRENT || "",
       docsSiteFacts: facts,

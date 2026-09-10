@@ -15,10 +15,25 @@
 // Every versioned mount root also carries versions.json, the machine-readable
 // version index the theme's dropdown is fed from at build time.
 
+import { isLocaleDir } from "./.vitepress/derive.ts";
+
 /** What builds a mount's content: the caller's own build command (the pages
  *  module) or the bundled VitePress build over the caller's docs tree (the
  *  docs-site module). */
 export type MountSource = "command" | "vitepress";
+
+/** Another root of the repository rendered inside a vitepress mount
+ *  (docs/docs-site.md, "Other roots on the site"): the tree at `path` is
+ *  staged under `<mount>/` in the docs tree, and in each of its child
+ *  directories the file named `page` serves as that directory's page. */
+export interface IncludeRoot {
+  /** Repo-relative source directory (`skills`). */
+  path: string;
+  /** URL path under the mount root (`skills` -> `<mount>skills/`). */
+  mount: string;
+  /** The child directory's page file (`SKILL.md`). */
+  page: string;
+}
 
 export interface Mount {
   /** Site-root-relative URL prefix: "/" or "/<segment>/..." with plain
@@ -26,6 +41,8 @@ export interface Mount {
   path: string;
   source: MountSource;
   versioned: boolean;
+  /** Vitepress mounts only; absent means the docs tree alone. */
+  include?: IncludeRoot[];
 }
 
 /** One build of one ref, landing at one artifact path. */
@@ -72,6 +89,50 @@ function validateMountPath(value: string): void {
   validateRelPath(value.slice(1, -1), `mount path '${value}' interior`);
 }
 
+/** One mount's `include` list. Each root is parsed to the three keys and
+ *  refused where the staging would misplace it: a mount whose first
+ *  segment reads as a locale directory would become a translation tree
+ *  (derive.ts's convention), and `index.md` as the page is the directory
+ *  index already. */
+function parseIncludes(value: unknown, where: string): IncludeRoot[] {
+  if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
+  const includes = value.map((entry, index): IncludeRoot => {
+    const at = `${where}[${index}]`;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`${at} must be an object {path, mount, page}`);
+    }
+    const { path, mount, page, ...rest } = entry as Record<string, unknown>;
+    const extra = Object.keys(rest);
+    if (extra.length > 0) throw new Error(`${at} has unknown keys: ${extra.join(", ")}`);
+    for (const [key, text] of Object.entries({ path, mount, page })) {
+      if (typeof text !== "string") throw new Error(`${at}.${key} must be a string`);
+    }
+    validateRelPath(path as string, `${at}.path`);
+    validateRelPath(mount as string, `${at}.mount`);
+    if (isLocaleDir((mount as string).split("/")[0])) {
+      throw new Error(
+        `${at}.mount '${mount}' reads as a locale directory (docs/<lang>/ is a translation ` +
+          "tree by convention) - mount the root under another name",
+      );
+    }
+    if (!SEGMENT_RE.test(page as string) || !(page as string).endsWith(".md")) {
+      throw new Error(`${at}.page '${page}' must be a plain markdown file name (SKILL.md)`);
+    }
+    if (page === "index.md") {
+      throw new Error(
+        `${at}.page is index.md, which is a directory's page already - name the file the include renames to it`,
+      );
+    }
+    return { path: path as string, mount: mount as string, page: page as string };
+  });
+  for (const key of ["path", "mount"] as const) {
+    if (new Set(includes.map((root) => root[key])).size !== includes.length) {
+      throw new Error(`${where} lists one ${key} twice - every root needs its own ${key}`);
+    }
+  }
+  return includes;
+}
+
 /** Parse and validate the mounts input (a JSON list). Refusals are the
  *  interface: a mount list the assembler would misbuild must never reach
  *  it. At most one mount per source, because each source has exactly one
@@ -92,7 +153,7 @@ export function parseMounts(json: string): Mount[] {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new Error(`mounts[${index}] must be an object {path, source, versioned}`);
     }
-    const { path, source, versioned, ...rest } = entry as Record<string, unknown>;
+    const { path, source, versioned, include, ...rest } = entry as Record<string, unknown>;
     const extra = Object.keys(rest);
     if (extra.length > 0) {
       throw new Error(`mounts[${index}] has unknown keys: ${extra.join(", ")}`);
@@ -105,7 +166,13 @@ export function parseMounts(json: string): Mount[] {
     if (typeof versioned !== "boolean") {
       throw new Error(`mounts[${index}].versioned must be a boolean`);
     }
-    return { path, source, versioned };
+    if (include === undefined) return { path, source, versioned };
+    if (source !== "vitepress") {
+      throw new Error(
+        `mounts[${index}].include is set on a command mount - only a vitepress mount renders other roots of the repository`,
+      );
+    }
+    return { path, source, versioned, include: parseIncludes(include, `mounts[${index}].include`) };
   });
   for (const source of ["command", "vitepress"] as const) {
     if (mounts.filter((m) => m.source === source).length > 1) {

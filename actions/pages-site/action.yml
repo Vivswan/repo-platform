@@ -8,9 +8,13 @@ description: >-
   a second build of HEAD while none serve). A
   mount's content comes from the bundled VitePress build over the caller's
   docs tree (source vitepress; the config and theme live in this action, the
-  caller carries only markdown) or from the caller's own build command
-  (source command). With check true it instead builds the caller's docs tree
-  once, strictly (dead internal links fatal), as the docs PR check. Requires
+  caller carries only markdown; other roots of the repository, skills/ for
+  one, render inside it through the mount's include list) or from the
+  caller's own build command (source command). Once every mount is in place
+  the whole artifact's internal links are checked, fragments included, and
+  a broken one fails the step. With check true it instead builds the
+  caller's docs tree once, strictly (dead internal links fatal), with the
+  same include roots and link check, as the docs PR check. Requires
   a full checkout (fetch-depth 0): version tags and per-ref trees come from
   git history.
 
@@ -18,8 +22,12 @@ inputs:
   mounts:
     description: >-
       JSON list of mounts: [{"path": "/", "source": "vitepress"|"command",
-      "versioned": true|false}]. At most one mount per source. Ignored when
-      check is true.
+      "versioned": true|false, "include": [{"path": "skills", "mount":
+      "skills", "page": "SKILL.md"}]}]. At most one mount per source; include
+      (other repository roots rendered inside the docs tree, each child
+      directory's page file serving at the directory URL) on the vitepress
+      mount only. With check true only the vitepress mount's include list is
+      read.
     required: false
     default: '[{"path": "/", "source": "vitepress", "versioned": true}]'
   check:

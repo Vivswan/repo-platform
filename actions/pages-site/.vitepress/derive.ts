@@ -74,17 +74,47 @@ export function isRegularFile(path: string): boolean {
   }
 }
 
-/** README.md -> index.md route rewrites, one exact entry per README, so a
- *  docs tree indexed by READMEs (the fleet convention) serves each
- *  directory's landing page at the directory URL. A directory that carries
- *  BOTH keeps its index.md and the README stays at its own route. */
-export function deriveRewrites(files: string[]): Record<string, string> {
+/** The include roots' page files among `files`: `<mount>/<child>/<page>`,
+ *  one per child directory of a root (an IncludeRoot of lib.ts, the mounts
+ *  input's contract). These are the exact paths deriveRewrites serves at
+ *  the directory URL. */
+export function includeIndexPages(
+  files: string[],
+  includes: { mount: string; page: string }[],
+): string[] {
+  return files.filter((file) =>
+    includes.some((root) => {
+      const rest = file.startsWith(`${root.mount}/`) ? file.slice(root.mount.length + 1) : null;
+      const parts = rest?.split("/");
+      return parts?.length === 2 && parts[1] === root.page;
+    }),
+  );
+}
+
+/** Route rewrites to each directory's index.md, one exact entry per source:
+ *  the `indexPages` (an include root's pages, includeIndexPages) first, then
+ *  every README.md (the fleet convention), so a docs tree indexed by READMEs
+ *  serves each landing page at the directory URL. A directory that carries
+ *  BOTH keeps its index.md and the README stays at its own route; beside an
+ *  index page the README stays at its own route too. */
+export function deriveRewrites(
+  files: string[],
+  indexPages: readonly string[] = [],
+): Record<string, string> {
   const present = new Set(files);
   const rewrites: Record<string, string> = {};
+  const claimed = new Set<string>();
+  for (const file of indexPages) {
+    if (!present.has(file)) continue;
+    const index = file.replace(/[^/]+$/, "index.md");
+    if (present.has(index) || claimed.has(index)) continue;
+    rewrites[file] = index;
+    claimed.add(index);
+  }
   for (const file of files) {
     if (file !== "README.md" && !file.endsWith("/README.md")) continue;
     const index = file.replace(/README\.md$/, "index.md");
-    if (!present.has(index)) rewrites[file] = index;
+    if (!present.has(index) && !claimed.has(index)) rewrites[file] = index;
   }
   return rewrites;
 }
@@ -93,8 +123,9 @@ export function deriveRewrites(files: string[]): Record<string, string> {
  *  `order` and `group` are the sidebar's frontmatter keys (docs/docs-site.md
  *  documents the contract); null when the page carries none. */
 export interface PageMeta {
-  /** The `title` frontmatter, else the first `# ` heading, else the
-   *  filename humanized (dashes and underscores to spaces). */
+  /** The `title` frontmatter, else the first `# ` heading, else the `name`
+   *  frontmatter (a SKILL.md names itself there), else the filename
+   *  humanized (dashes and underscores to spaces). */
   title: string;
   order: number | null;
   group: string | null;
@@ -108,12 +139,12 @@ export function readPage(srcDir: string, file: string): PageMeta {
  *  malformed key raises, so a fleet repo's docs PR check points at it. */
 export function pageMeta(file: string, source: string): PageMeta {
   const { data, content } = matter(source);
-  const title =
-    typeof data.title === "string" && data.title.trim() !== "" ? data.title.trim() : null;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
   const heading = /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? null;
   const stem = file.split("/").pop()?.replace(/\.md$/, "") ?? file;
   return {
-    title: title ?? heading ?? stem.replace(/[-_]/g, " "),
+    title: text(data.title) ?? heading ?? text(data.name) ?? stem.replace(/[-_]/g, " "),
     order: frontmatterOrder(file, data.order),
     group: frontmatterGroup(file, data.group),
   };

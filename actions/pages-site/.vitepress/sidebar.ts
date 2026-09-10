@@ -86,6 +86,9 @@ export interface SidebarOptions {
   /** A landing row titled exactly like the site reads "Overview": the
    *  title already heads the nav bar right above the sidebar. */
   siteTitle?: string;
+  /** The include roots' page files (derive.ts's includeIndexPages), served
+   *  at their directory URLs like READMEs. */
+  indexPages?: readonly string[];
 }
 
 /** The sidebar for one tree. Each level lists its own pages in reading
@@ -99,17 +102,27 @@ export function deriveSidebar(
   site: SiteUrls,
   options: SidebarOptions = {},
 ): SidebarItem[] {
-  const context: LevelContext = { files, rewrites: deriveRewrites(files), source, site };
+  const context: LevelContext = {
+    files,
+    rewrites: deriveRewrites(files, options.indexPages),
+    source,
+    site,
+  };
   return sidebarLevel(options.prefix ?? "", context, options.siteTitle ?? null);
 }
 
 /** Every page of `files` in the order the sidebars present them: the root
  *  tree's pages depth-first, then each locale's. */
-export function sidebarOrder(files: string[], source: PageSource, site: SiteUrls): string[] {
+export function sidebarOrder(
+  files: string[],
+  source: PageSource,
+  site: SiteUrls,
+  indexPages: readonly string[] = [],
+): string[] {
   return sidebarTrees(files).flatMap((tree) => {
     const context: LevelContext = {
       files: tree.files,
-      rewrites: deriveRewrites(tree.files),
+      rewrites: deriveRewrites(tree.files, indexPages),
       source,
       site,
     };

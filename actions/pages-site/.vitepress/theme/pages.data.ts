@@ -15,7 +15,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MarkdownEnv, SiteConfig } from "vitepress";
-import { isRegularFile, readPage, walkMarkdown } from "../derive.ts";
+import type { IncludeRoot } from "../../lib.ts";
+import { includeIndexPages, isRegularFile, readPage, walkMarkdown } from "../derive.ts";
 import { fileSource, sidebarOrder } from "../sidebar.ts";
 import type { PageIndexEntry } from "./launcher-model.ts";
 import { buildPageIndex, type HeadersEnv, sourceHeaders } from "./page-index.ts";
@@ -41,8 +42,13 @@ export default {
       config.logger,
     );
     const site = { base: config.site.base, cleanUrls };
+    const files = walkMarkdown(srcDir);
+    // The same include roots config.mts read, so the index serves the
+    // include pages at the directory URLs the routes do.
+    const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRoot[];
+    const indexPages = includeIndexPages(files, includes);
     return buildPageIndex(
-      sidebarOrder(walkMarkdown(srcDir), fileSource(srcDir, md, site), site),
+      sidebarOrder(files, fileSource(srcDir, md, site), site, indexPages),
       site,
       {
         title: (file) => readPage(srcDir, file).title,

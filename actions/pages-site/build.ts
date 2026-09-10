@@ -27,14 +27,16 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { collectFacts } from "./facts.ts";
 import {
   assemblyOrder,
+  type IncludeRoot,
   judgeCommandTag,
   type Mount,
   mountRel,
@@ -177,7 +179,10 @@ interface Config {
   serverUrl: string;
   origin: string;
   rootBase: string;
-  editPattern: string;
+  /** The repository's edit URL up to the repo root; a page's edit link
+   *  appends its own source path (an include root's page edits at that
+   *  root, not under the docs directory). */
+  editBase: string;
   defaultBranch: string;
 }
 
@@ -218,7 +223,7 @@ function readConfig(): Config {
     origin,
     rootBase,
     defaultBranch,
-    editPattern: `${serverUrl}/${repository}/edit/${defaultBranch}/${docsDir}/:path`,
+    editBase: `${serverUrl}/${repository}/edit/${defaultBranch}/`,
   };
 }
 
@@ -316,9 +321,81 @@ export function tierStrictLinks(tier: Tier): boolean {
   return tier.ref === "HEAD";
 }
 
+/** Materialize each include root under `<srcDir>/<mount>/` the way the
+ *  docs tree was (the workspace tree at HEAD, an extract at a tag) and
+ *  return the roots this tier carries. At HEAD a missing root is a
+ *  configuration error, like a missing docs directory; at a tag it is
+ *  skipped with a notice, since history cannot be fixed. */
+function stageIncludes(
+  cfg: Config,
+  tier: Tier,
+  root: string,
+  srcDir: string,
+  includes: IncludeRoot[],
+): IncludeRoot[] {
+  const staged: IncludeRoot[] = [];
+  for (const include of includes) {
+    const target = join(srcDir, include.mount);
+    if (existsSync(target)) {
+      throw new Error(
+        `the include root '${include.path}' mounts at '${include.mount}/', which ${cfg.docsDir}/ ` +
+          "already carries - two sources would claim one URL; mount the root under another name",
+      );
+    }
+    if (tier.ref === "HEAD") {
+      const tree = join(cfg.workspace, include.path);
+      if (!existsSync(tree)) {
+        throw new Error(
+          `${include.path}/ does not exist in the repository - the docs site includes it at ` +
+            `${include.mount}/; create it or drop the include`,
+        );
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(tree, target, { recursive: true });
+    } else {
+      if (!treeHas(cfg, tier.ref, include.path)) {
+        console.log(
+          `::notice::docs version ${tier.version} has no ${include.mount}/: ${include.path}/ does not exist at ${tier.ref}`,
+        );
+        continue;
+      }
+      const staging = join(root, ".src");
+      extractTree(cfg, tier.ref, staging, include.path);
+      mkdirSync(dirname(target), { recursive: true });
+      renameSync(join(staging, include.path), target);
+      rmSync(staging, { recursive: true, force: true });
+    }
+    if (!statSync(target).isDirectory()) {
+      throw new Error(
+        `the include root '${include.path}' is a file, not a directory, at ${tier.ref}`,
+      );
+    }
+    assertIncludePages(target, include);
+    staged.push(include);
+  }
+  return staged;
+}
+
+/** A child directory carrying both the include's page and an index.md is
+ *  refused: both would serve at the directory URL, and shipping one
+ *  silently would hide the other. */
+function assertIncludePages(target: string, include: IncludeRoot): void {
+  for (const child of readdirSync(target, { withFileTypes: true })) {
+    if (!child.isDirectory()) continue;
+    const dir = join(target, child.name);
+    if (existsSync(join(dir, include.page)) && existsSync(join(dir, "index.md"))) {
+      throw new Error(
+        `${include.path}/${child.name}/ carries both ${include.page} and index.md - both would ` +
+          `serve at ${include.mount}/${child.name}/; remove one`,
+      );
+    }
+  }
+}
+
 /** One vitepress build: the bundled config and theme over a caller docs
  *  tree, materialized into the build root (HEAD tiers copy the workspace
- *  tree, tag tiers extract straight into the root). Dead-link strictness
+ *  tree, tag tiers extract straight into the root), with the mount's
+ *  include roots staged inside it. Dead-link strictness
  *  is DERIVED here from the tier - the one owner - so a strict-HEAD build
  *  and a lenient-tag build are the only representable states.
  *  Project facts (facts.ts) read the tier's OWN ref, so a tagged version
@@ -327,6 +404,7 @@ function buildVitepressTier(
   cfg: Config,
   tier: Tier,
   versions: { label: string; link: string }[],
+  includes: IncludeRoot[],
   opts: { base?: string } = {},
 ): { dist: string; buildDir: string } {
   const fromWorkspace = tier.ref === "HEAD";
@@ -360,6 +438,7 @@ function buildVitepressTier(
     rmSync(staging, { recursive: true, force: true });
     assertCentralTheme(srcDir);
   }
+  const staged = stageIncludes(cfg, tier, root, srcDir, includes);
   // The action's own dependency set serves every build root: vitepress,
   // vue, and the llms plugin resolve through this link, so no build root
   // ever installs anything.
@@ -381,7 +460,8 @@ function buildVitepressTier(
       DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
       DOCS_SITE_VERSIONS: JSON.stringify(versions),
       DOCS_SITE_CURRENT: tier.version,
-      DOCS_SITE_EDIT_PATTERN: fromWorkspace ? cfg.editPattern : "",
+      DOCS_SITE_INCLUDES: JSON.stringify(staged),
+      DOCS_SITE_EDIT_BASE: fromWorkspace ? cfg.editBase : "",
       DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
       DOCS_SITE_FACTS: JSON.stringify(facts),
     },
@@ -494,7 +574,7 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
     const { dist, buildDir } =
       mount.source === "command"
         ? buildCommandTier(cfg, tier)
-        : buildVitepressTier(cfg, tier, links);
+        : buildVitepressTier(cfg, tier, links, mount.include ?? []);
     copyInto(
       dist,
       join(cfg.site, tier.rel),
@@ -519,7 +599,7 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const cfg = readConfig();
   rmSync(cfg.scratch, { recursive: true, force: true });
   mkdirSync(cfg.scratch, { recursive: true });
@@ -532,9 +612,15 @@ function main(): void {
   }
   if (check === "true") {
     // The docs PR check: one strict build of the working tree (a HEAD tier
-    // derives strict dead links), no artifact.
+    // derives strict dead links) with the same include roots the deploy
+    // stages; no artifact.
+    const mountsJson = env("MOUNTS");
+    const includes =
+      mountsJson === ""
+        ? []
+        : (parseMounts(mountsJson).find((m) => m.source === "vitepress")?.include ?? []);
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    buildVitepressTier(cfg, tier, [], { base: "/" });
+    buildVitepressTier(cfg, tier, [], includes, { base: "/" });
     console.log("docs build check passed");
     return;
   }
@@ -573,10 +659,8 @@ function main(): void {
 }
 
 if (import.meta.main) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
-  }
+  });
 }

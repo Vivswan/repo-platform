@@ -5,6 +5,7 @@
 // and its one set of options.
 
 import { join, resolve } from "node:path";
+import { githubSlug } from "../../../actions/pages-site/.vitepress/anchors.ts";
 import {
   alertTitlesRule,
   CUSTOM_BLOCK_LABELS,
@@ -12,6 +13,7 @@ import {
 import { inlineTextRule } from "../../../actions/pages-site/.vitepress/inline-text.ts";
 import { landingTableRule } from "../../../actions/pages-site/.vitepress/landing-table.ts";
 import { mermaidRule } from "../../../actions/pages-site/.vitepress/mermaid.ts";
+import { rewriteLinksRule } from "../../../actions/pages-site/.vitepress/rewrite-links.ts";
 import { headersRule } from "../../../actions/pages-site/.vitepress/theme/page-index.ts";
 
 export type Md = Parameters<typeof landingTableRule>[0];
@@ -25,6 +27,15 @@ export const REWRITES = { "README.md": "index.md", "ja/README.md": "ja/index.md"
 /** The site the renderer writes links for. */
 export const SITE = { base: "/repo/", cleanUrls: false };
 
+/** The repository the docs tree comes from, for links that leave it. */
+export const LINK_SCOPE = {
+  docsDir: "docs",
+  includes: [],
+  rewrites: REWRITES,
+  repoUrl: "https://github.com/fixture-owner/fixture-repo",
+  ref: "main",
+};
+
 export async function vitepressRenderer(): Promise<Md> {
   const vitepress = (await import(
     join(ACTION_DIR, "node_modules", "vitepress", "dist", "node", "index.js")
@@ -35,10 +46,12 @@ export async function vitepressRenderer(): Promise<Md> {
     ACTION_DIR,
     {
       highlight: () => "",
+      anchor: { slugify: githubSlug },
       headers: { level: [2, 3] },
       container: CUSTOM_BLOCK_LABELS,
       config(md: Md) {
         inlineTextRule(md);
+        rewriteLinksRule(md, LINK_SCOPE);
         landingTableRule(md, REWRITES);
         headersRule(md);
         alertTitlesRule(md);

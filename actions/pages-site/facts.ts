@@ -21,7 +21,7 @@ export interface ProjectFacts {
   toolchains: { name: string; version: string }[];
   license: { name: string; path: string } | null;
   /** The docs tree the pages render from, repo-relative: the prefix that
-   *  turns a page.filePath into its repository path. */
+   *  turns a page's staged path into its repository path. */
   docsDir: string;
   /** Which commit this tier was built from: the default branch for HEAD
    *  tiers, the tag for tag tiers, and the commit it resolved to. */

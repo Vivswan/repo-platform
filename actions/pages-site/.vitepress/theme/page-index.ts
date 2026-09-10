@@ -144,9 +144,16 @@ export function headersOf(tokens: Token[]): PageHeader[] {
 }
 
 /** The index rows for `files` (relative to srcDir, as walkMarkdown lists
- *  them): locale-root landing pages first, then the rest in list order. */
-export function buildPageIndex(files: string[], site: SiteUrls, read: PageReads): PageIndexEntry[] {
-  const rewrites = deriveRewrites(files);
+ *  them): locale-root landing pages first, then the rest in list order.
+ *  `indexPages` are the include roots' page files (derive.ts's
+ *  includeIndexPages), served at their directory URLs. */
+export function buildPageIndex(
+  files: string[],
+  site: SiteUrls,
+  read: PageReads,
+  indexPages: readonly string[] = [],
+): PageIndexEntry[] {
+  const rewrites = deriveRewrites(files, indexPages);
   const locales = detectLocales(files);
   const rows = files.map((file) => {
     const relativePath = rewrites[file] ?? file;
