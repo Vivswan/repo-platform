@@ -36,7 +36,7 @@ Three files the render plants matter later:
 
 | File | Role |
 |---|---|
-| `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list in a PR and have the render pushed onto that PR ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
+| `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list in a PR; the sync PR carrying the render follows the merge ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
 | `.gitignore` | Split: the managed region carries the OS sections, the selected toolchains' github/gitignore sections, agent local state, and the CI workspace paths repo-platform's workflow steps create inside the checked-out workspace (`/results.sarif`, `/.fuzz-failures/`), so a stray local file of the same name can never be committed and later collide with the CI step that creates it. Repository-owned patterns go above the BEGIN marker or below the END marker ([split files](fleet-guidelines.md#split-files-the-managed-region)). |
 | `.github/repo-platform-manifest.json` | The ownership manifest: each platform-written path's class (`managed`, `split`, `starter`, `mirror`, or `link`) plus sha256 hashes of the managed content (a link's hash covers its target string), stamped after each render. validate-template's INTEGRITY check blocks on drift against it, judged by the validator of the template commit the repo was rendered from ([the template check](#the-template-check)): managed content changed outside a sync, a listed managed file missing from the repo, or a roster path the manifest does not list. Severity follows the recorded `_commit`: a rule newer than the repo's build arrives as a latest-validator warning until the next sync PR merges. Its freshness report never blocks. |
 
@@ -125,7 +125,7 @@ CI is split so the template can keep improving its half while each repo keeps it
 
 A `_skip_if_exists` file is generated once and never touched by a sync after that, so when the template INTRODUCES a starter at a path a repository already owns a file at (post-green.yml on its rollout), copier keeps the repository's file with no conflict and no diff. The sync then holds that repository's PR for review, naming the file, the template files that call it, and the template's starter, so the kept file can be checked against the interface the callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
-The `ci` job runs the standard checks (typography, file-size, commit-names, actionlint, gitleaks, yamllint, as the steps of one `base-checks` job whose judge step lists every failed check), `validate-template`, `module-render` ([changing the module selection](#changing-the-module-selection)), and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
+The `ci` job runs the standard checks (typography, file-size, commit-names, actionlint, gitleaks, yamllint, as the steps of one `base-checks` job whose judge step lists every failed check), `validate-template`, and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
 
 ### File size caps
 
@@ -157,12 +157,13 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 
 ### Changing the module selection
 
-A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its render. The `module-render` job in fleet-ci.yml judges the first one and stays red until the render lands, so the owner lands the registration edit past it:
+A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its render. The `plan` job in fleet-ci.yml validates the registration on the first one, and the sync writes the files once it has merged:
 
 ```text
 PR edits modules: in .repo-platform.yml
-  -> module-render RED: the tree does not match the render of the selected modules
-     the owner lands the registration edit (the render cannot precede it: the sync reads the default branch), then
+  -> plan reads the registration and checks it against the build's module data (an unknown module or a malformed file fails the job)
+  -> validate-template RED when the module adds managed files or a toolchain pin: the tree does not carry them yet
+     the owner lands the registration edit past it (the render cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
   -> the sync opens a PR carrying the render (the writer replaces platform files whole), held for review
   -> review and merge the sync PR; validate-template green
@@ -170,12 +171,9 @@ PR edits modules: in .repo-platform.yml
 
 | | |
 |---|---|
-| When it runs | Pull requests only (a push has no selection diff). A PR that changes neither `.repo-platform.yml` nor `.github/.copier-answers.yml` passes as a no-op; the managed files stand as `validate-template` judged them. |
-| What it compares | A fresh copier render of the template at the PR tree's recorded `_commit` with the PR's module selection, seeded with the PR's own answers file (the way `copier update` seeds the render it merges), against the PR tree: every managed file whole, every split file's managed region, every symlink's target, hashed the way the manifest stamp hashes. Starters are seeded once and never compared; a managed file the tree lists but the render no longer carries (a deselected module's) is a finding too, since the sync deletes it. |
-| Why the recorded `_commit` | The same principle as the template check: judged at the repository's own build commit, the render cannot go red because repo-platform published a newer build while the PR was open. The sync moves `_commit` to the build tip when it pushes, and the check follows. |
-| On a finding | The job fails with one annotation per stale path, also in the step summary. The owner lands the registration edit, runs the sync as above (the fleet PAT pushes; the managed repo's own token is read-only by design), `gh run watch`es the sync run, and the render arrives as a sync PR waiting for review. |
-| Admission | The recorded `_commit` must be a published commit of repo-platform's `build` branch before its render hooks run with `--trust`: the same admission the template check makes. A fork PR's head branch is outside the fleet PAT's grant, so the render must be pushed from a same-repository branch. |
-| Enforced by | [actions/module-render](../actions/module-render/action.yml), called by fleet-ci.yml's `module-render` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
+| What the PR check judges | The `plan` job runs on every event and reads `.repo-platform.yml` (the recorded answers are the fallback), checking it against the module data the build branch ships beside the plan action: every module name must exist and the file must parse. It fails closed, so an unknown module or a malformed registration never reaches the sync. |
+| What stays red until the sync PR lands | `validate-template` reads the edited registration too: a module that adds managed files fails the manifest check on the entries the tree lacks, and a toolchain module fails the registration check on its missing pin dotfile. Nothing on the PR compares the tree against a render of the new selection; the sync PR brings the files, and the check goes green on it. |
+| Enforced by | [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
 
 #### The manual run
 
