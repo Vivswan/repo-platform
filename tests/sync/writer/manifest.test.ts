@@ -4,7 +4,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import {
   MANIFEST_NAME,
   readRecords,
@@ -13,6 +12,7 @@ import {
   sha256,
   writeManifest,
 } from "../../../.github/scripts/sync/writer/manifest.ts";
+import { parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

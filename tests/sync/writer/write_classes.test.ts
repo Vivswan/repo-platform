@@ -5,11 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
 import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { writeManaged } from "../../../.github/scripts/sync/writer/write_managed.ts";
 import { renderRegion, writeSplit } from "../../../.github/scripts/sync/writer/write_split.ts";
 import { writeStarter } from "../../../.github/scripts/sync/writer/write_starter.ts";
+import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

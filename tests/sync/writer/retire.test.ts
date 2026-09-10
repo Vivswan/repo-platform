@@ -5,10 +5,10 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
 import { type Records, sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import { keepReason, retire } from "../../../.github/scripts/sync/writer/retire.ts";
 import { renderRegion } from "../../../.github/scripts/sync/writer/write_split.ts";
+import { HASH_REGION_MARKERS } from "../../../actions/shared/grammar.ts";
 import { fixtureGit } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
 
