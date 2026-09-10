@@ -76,6 +76,7 @@ export const RULE_ROSTER = [
   "local-bun-runtime",
   "skill-ownership-tables",
   "ci-harness-imports",
+  "pages-callers-parity",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the live

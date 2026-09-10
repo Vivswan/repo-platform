@@ -1,6 +1,6 @@
-# Target architecture, v2
+# Target architecture
 
-Status: the target the current work implements, step by step (section 11). v2 folds in three independent reviews (a fresh Claude, a second Claude session, Codex) and the owner's correction that the metric is the cost of a simple change, not past incidents.
+Status: the target the current work implements; sections are updated as phases land. The metric is the cost of a simple change, not past incidents.
 
 ## 1. The measure
 
@@ -13,7 +13,7 @@ Status: the target the current work implements, step by step (section 11). v2 fo
 | runner jobs per push here | ~42 | ~12 |
 | checker layers that pin other files' text | 56 rules, 5 goldens, smoke x15, bash harness | 0 rules; unit tests + one end-to-end test |
 
-## 2. Root cause (all three reviews agree)
+## 2. Root cause
 
 Variability is resolved at RENDER time into per-repo text, and that text is then held correct by a second hand-written model of the same text (ssot rules, smoke greps, goldens, the bash harness). Every change is written twice and can go red in each checker independently. Three choices cause it:
 
@@ -23,7 +23,7 @@ Variability is resolved at RENDER time into per-repo text, and that text is then
 | R2 | Copier's three-way merge is the transport | 14 of 36 sync steps exist to undo or police the merge; rungs; the upgrade harness |
 | R3 | a public operator pushes into private repos | redaction in 32 files, hidden reports, masked outputs |
 
-## 3. Principles, v2 (each named by the cost it removes)
+## 3. Principles (each named by the cost it removes)
 
 | # | Principle | Removes |
 |---|---|---|
@@ -31,61 +31,73 @@ Variability is resolved at RENDER time into per-repo text, and that text is then
 | P2 | Fewer derived artifacts beats a better generator. Nothing is generated that then needs a drift check; what remains is written once and copied. | the second model of the text (rules, goldens, smoke) |
 | P3 | One run, one order. Everything after the gate is a job in the same run, ordered by `needs`. | cross-workflow races, dispatch tokens |
 | P4 | Sync is copy, not merge. | R2 |
-| P5 | Private is private by where it runs. | R3 |
-| P6 | Own as few files as possible. Health files go to a `Vivswan/.github` defaults repo (works for a personal account, public and private repos); tool configs ride inside the actions that use them. | most of the 49 files |
-| P7 | TypeScript only; a workflow step is one `bun` call. | shell-specific failure classes |
+| P5 | Private is private by where it runs and by what the run can emit. | R3 |
+| P6 | Own as few files as possible. Health files go to the account's `.github` defaults repository (works for a personal account, public and private repos); tool configs ride inside the actions that use them. | most of the 49 files |
+| P7 | TypeScript only; a workflow step is one `bun` call. The shell ports are done; the shell that stays is listed in AGENTS.md. | shell-specific failure classes |
 
-Dropped from v1: "one typed model generates everything" (all three reviews: that rebuilds compose + ssot + goldens under a new name). "No migration code" (rungs that rewrite repo-owned files stay; the bash harness around them goes).
+Not a principle: "one typed model generates everything". It rebuilds compose + ssot + goldens under a new name. "No migration code" is not one either: rungs that rewrite repo-owned files stay; the bash harness around them goes.
 
-## 4. CI: the skeleton (corrected)
+## 4. CI: the skeleton
 
-Correction from review: a called workflow cannot invoke the caller's `./.github/workflows/*.yml`, so repo hooks are static jobs in the repo's own ci.yml, not inside a platform workflow.
+Decision D1: the CI shape is one managed skeleton with static jobs. A called workflow cannot invoke the caller's `./.github/workflows/*.yml`, so the repo hooks are static jobs in the repo's own ci.yml, not jobs inside a platform workflow. The skeleton is `templates/base/.github/workflows/ci.yml.jinja`; its only variable is the owner slug in the `uses:` lines.
 
 ```text
 ci.yml (managed, byte-identical fleet-wide except the owner slug)
+every job after all-green also requires needs.all-green.result == 'success' and a push to main
 
-  ci:        uses fleet-ci.yml@build      first job `plan` reads .repo-platform.yml -> outputs modules, private, ...
-                                          every platform check keys its `if` on those outputs
-  checks:    uses ./.github/workflows/checks.yml            (repo hook, static)
-  all-green: needs [ci, checks]
-
-  release:   needs all-green, if contains(needs.ci.outputs.modules, 'release-please')
-  pages:     needs [all-green, release], !cancelled(), if contains(..., 'pages')
-  docs-site: needs [all-green, release], !cancelled(), if contains(..., 'docs-site')
-  post-green: uses ./.github/workflows/post-green.yml       (repo hook, static)
+  checks:            uses ./.github/workflows/checks.yml         repo hook, static; skipped on the schedule
+  ci:                uses fleet-ci.yml@build                     the plan job reads .repo-platform.yml and outputs modules,
+                                                                 tracking-labels, ...; every platform check keys its `if` on them
+  all-green:         needs [checks, ci], if always()             THE gate: the ruleset's required check
+  post-green:        uses ./.github/workflows/post-green.yml     repo hook, static; needs [all-green]
+  release:           needs [ci, all-green, post-green]           if post-green succeeded and contains(needs.ci.outputs.modules, '"release-please"')
+  update-release:    uses ./.github/workflows/update-release.yml repo hook, static; needs [release]; if release_created; the draft's packaging
+  publish-release:   needs [release, update-release]             if release_created; attests the assets (public repos) and flips the draft live
+  update-release-pr: uses ./.github/workflows/update-release-pr.yml  repo hook, static; needs [release]; if prs_created; the release PR's files
+  pages:             needs [ci, all-green, publish-release]      !cancelled(), if contains(needs.ci.outputs.modules, '"pages"')
+  docs-site:         needs [ci, all-green, post-green, publish-release]  !cancelled(), if contains(..., '"docs-site"') and not '"pages"'
 ```
 
-- Adding a module: one line in `.repo-platform.yml`, picked up next run. No render, no `module-render` check, no branch dispatch (#145's feature is dead under P1).
+- The module test is a substring match on the plan's compact JSON array, hence the quoted token: `'"pages"'` cannot match a longer name such as `"pages-site"`.
+- Every job that tests the modules output needs `ci` directly, because a job reads outputs only from its direct dependencies.
+- The deploys sit behind `publish-release` under `!cancelled()`: a release commit's own deploy serves its new tag, and a skipped or red release still deploys.
+- Adding a module: one line in `.repo-platform.yml`, picked up next run. ci.yml does not change. The module data files (the files a module owns beyond ci.yml) still render per selection until the writer of section 6 lands, so the module-render check and the branch sync dispatch it names as the remedy remain until then.
 - Adding a leg: one static job in the skeleton plus its platform workflow; the skeleton is a managed file, so that is one sync of one identical file.
+- The release hooks' permission ceiling is the contract with the repo-owned hooks: a hook may need up to those grants and narrows itself per job; a narrower ceiling rejects an existing hook that asks for more.
 - repo-platform's own ci.yml uses the same shape (deploy = publish the build branch; verify = fleet sync).
 
 ## 5. Footprint per repo (P6)
 
+Decision D5: health files move to the account's `.github` defaults repository; tool configs move into the actions that run them; the rest stays a data file per repo.
+
 | Today (49 files) | Target (~14) |
 |---|---|
-| CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, funding, issue and PR templates | `Vivswan/.github` defaults repo; zero code, one day |
+| CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, funding, issue and PR templates | the account's `.github` defaults repository; zero code |
 | tool configs (biome, yamllint, typography lists, ...) | inside the action that runs the tool |
 | ci.yml with legs | one identical skeleton |
 | nightly, fuzzer, dependabot-lockfile, pr-title workflows | one static `fleet.yml` for the non-push triggers, or static jobs in the skeleton |
 | LICENSE, .gitignore blocks, .editorconfig, AGENTS.md, skills | stay as data files (managed, split, starter) |
 | settings.yml | stays; merged and applied by the settings action |
 
-## 6. Transport for the remaining files (D2, the real fork)
+## 6. Transport for the remaining files (P4)
 
-| Option | How a change reaches a repo | Owns | Reviews |
-|---|---|---|---|
-| copy-not-merge writer (~600 lines, no template language) | operator opens a sync PR: managed whole, split region, starter once, retired delete | continuous uniformity of ~14 files | recommended by both Claude reviews |
-| deliberate bulk PRs only (Codex, direction F) | rare, scoped bulk PRs over an explicit inventory; repos own their prose in between | nothing continuously | recommended by Codex: removes the obligation instead of re-implementing it |
-| Copier (today) | three-way merge | the merge and everything that polices it | ruled out by P4 |
-| Projen | per-repo synth on a package bump | node in every repo; `GITHUB_TOKEN` PRs need approval so the required check never lands | rejected by all three |
+Decision D2: a copy-not-merge writer, driven by one file list, `files.yml`. No template language. The operator opens a sync PR per repo: managed files are copied whole, split files have their managed region replaced, starter files are written once, retired files are deleted. A rename is one line in `files.yml`.
+
+Rejected:
+
+| Option | Why not |
+|---|---|
+| deliberate bulk PRs only over an explicit inventory | removes the obligation of uniformity instead of meeting it; the ~14 files drift between sweeps |
+| Copier (today) | the three-way merge and everything that polices it (P4) |
+| Projen | node in every repo; `GITHUB_TOKEN` PRs need approval, so the required check never lands |
 
 ## 7. Private repositories (P5)
 
-Small private ops repo holding the PAT and the two operator workflows, calling scripts from `@build`. Alternative offered by one review: run the operator from the laptop until that hurts. Either way the redaction layer is deleted.
+Decision D3: the operator stays in this repository, and privacy is a property of the job shape, not of a redaction layer. Job names carry only an index, never a repository name. Repository names and anything derived from them are masked at the boundary where they enter a step. Per-repository logs go to files, not to the console. Details live in the target repository (its sync PR, its check run), never in the public run.
 
 ## 8. Settings
 
-Settings leave repo-platform. The settings-as-code action (v3, approved, being built) owns layering: `mode: merge` takes `settings-file` as an ordered list of workspace-relative paths (low to high) and writes `merged-file` with no token and no API call; a second step applies that one document. Dialect: objects key by key, `null` deletes the lower key, `labels` and `rulesets` union by name, every other array replaces; duplicates inside one layer are errors; a `_layering: merge|replace` directive can override per section or per file.
+Settings leave repo-platform. The settings-as-code action (v3) owns layering: `mode: merge` takes `settings-file` as an ordered list of workspace-relative paths (low to high) and writes `merged-file` with no token and no API call; a second step applies that one document. Dialect: objects key by key, `null` deletes the lower key, `labels` and `rulesets` union by name, every other array replaces; duplicates inside one layer are errors; a `_layering: merge|replace` directive can override per section or per file.
 
 repo-platform keeps only: which layer paths form the list and in what order, the tracking-labels scratch layer (written after the module layers), the "no settings.yml means skip" rule, and a lint that the override layer never touches all-green or integration_id. Deleted here once v3 ships: merge_settings_layers, render_managed_settings, settings_document, build_settings_matrix, select_settings_repos, their tests, and the merge steps of settings-repos.yml.
 
@@ -100,32 +112,22 @@ repo-platform keeps only: which layer paths form the list and in what order, the
 
 Retired: 56 ssot rules, dogfood oracle, smoke x15, upgrade-path harness, rehearse, four of five goldens.
 
-## 10. Worth keeping under any direction (from the reviews)
+## 10. Kept
 
 actions/all-green (the judge), actions/pages-site (theme and build), fleet-ci.yml and the reusable workflows, build provenance (the green-gated publish), the migration rungs themselves, the manifest and ownership vocabulary (managed, split, starter, retired), module.yml as data, `shared/proc.ts` and `tests/shared/temp_dir.ts`.
 
-## 11. Order of work (each step deletes more than it adds and is reversible)
+## 11. Order of landing (each step deletes more than it adds and is reversible)
 
-| Step | What | Size | Deletes |
-|---|---|---|---|
-| 1 | skeleton ci.yml + `plan` job in fleet-ci.yml; one repo (cloud-speech) proves it | 1 week | 3 leg fragments, anchors, `fragment_conditions`, `fleet_ci_render.ts` + test, 3 rules, 2 goldens, #145's module-render and branch dispatch: over 3,000 lines |
-| 2 | `Vivswan/.github` defaults repo | 1 day | health files from every repo |
-| 3 | tool configs into actions; one static `fleet.yml` | 1 week | more rendered files, their rules |
-| 4 | decide D2; build the writer or the bulk-PR inventory | 2 weeks | copier, the sync's merge-policing steps, the upgrade harness |
-| 5 | private ops repo; delete redaction | 2 days | 32 files' worth |
-| 6 | settings action lands; delete the settings code here | with that repo | ~2,400 lines |
+| Step | What | Deletes |
+|---|---|---|
+| 1 | skeleton ci.yml + `plan` job in fleet-ci.yml; one repo (cloud-speech) proves it | 3 leg fragments, anchors, `fragment_conditions`, `fleet_ci_render.ts` + test, 3 rules, 2 goldens: over 3,000 lines |
+| 2 | the account's `.github` defaults repository | health files from every repo |
+| 3 | tool configs into actions; one static `fleet.yml` | more rendered files, their rules |
+| 4 | the writer and `files.yml` | copier, the sync's merge-policing steps, the upgrade harness, the module-render check and its branch dispatch |
+| 5 | redaction by job shape | the redaction layer's 32 files' worth |
+| 6 | settings action lands; delete the settings code here | ~2,400 lines |
 
 Pass condition for step 1: more than 3,000 lines deleted and fewer than 300 added, cloud-speech's CI green with the same jobs, and zero per-repo variance in ci.yml.
-
-## 12. Open decisions
-
-| # | Decision | Lean after review |
-|---|---|---|
-| D1 | CI shape | skeleton with static jobs (all three agree) |
-| D2 | transport for the remaining files: continuous writer vs bulk PRs | the fork to discuss; Claude reviews say writer, Codex says bulk PRs |
-| D3 | private operator: ops repo vs laptop | ops repo |
-| D4 | bash ports in flight | owner said finish all five; one review says the two harness ports are dead work under step 4 |
-| D5 | what stays a data file per repo vs moves into `.github` defaults or actions | inventory in step 2 |
 
 ## Appendix: measurements (main at 2a98abda)
 

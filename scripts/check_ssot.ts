@@ -30,6 +30,7 @@ import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
 import { migrationLadderRules } from "./check/ssot/migration_ladder.ts";
 import { moduleRules } from "./check/ssot/modules.ts";
+import { pagesCallerRules } from "./check/ssot/pages_callers.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
 import { prTitleRules } from "./check/ssot/pr_title.ts";
 import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
@@ -54,6 +55,7 @@ const rules: Rule[] = [
   ...prTitleRules,
   ...literalAnchorRules,
   ...postGreenRules,
+  ...pagesCallerRules,
   ...labelPreflightRules,
   ...processDisciplineRules,
   ...harnessImportRules,
