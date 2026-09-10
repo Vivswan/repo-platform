@@ -37,7 +37,6 @@ export const RULE_ROSTER = [
   "gitattributes-region",
   "dependabot-actions-block",
   "dependabot-action-dirs",
-  "ci-skeleton",
   "typography-allow",
   "symlink-trio",
   "settings-starter",
@@ -48,9 +47,6 @@ export const RULE_ROSTER = [
   "all-green-judge-substitutions",
   "fleet-ci-roster",
   "all-green-name",
-  "fleet-ci-render-roster",
-  "pages-leg",
-  "docs-site-leg",
   "pr-title-workflow",
   "dependabot-label-tuples",
   "settings-read-pin",
@@ -80,6 +76,7 @@ export const RULE_ROSTER = [
   "local-bun-runtime",
   "skill-ownership-tables",
   "ci-harness-imports",
+  "pages-callers-parity",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the live

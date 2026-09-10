@@ -64,9 +64,10 @@ CI is split so the template can keep improving its half while each repo keeps it
 
 | File | Owner | Contents |
 |---|---|---|
-| `.github/workflows/ci.yml` | managed - sync updates it, don't edit | a `checks` job calling checks.yml, plus a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` with the repo's module selection |
+| `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
 | `.github/workflows/checks.yml` | repo-owned (`_skip_if_exists`) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 | `.github/workflows/post-green.yml` | repo-owned (`_skip_if_exists`) | the repository's own green-gated work (applying settings, refreshing generated artifacts): the managed `post-green` job calls it on every push to main whose gate passed, with the judged sha, before the release leg ([after the gate](all-green.md#after-the-gate)). Seeded as a no-op |
+| `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (`_skip_if_exists`) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not, because GitHub resolves a called `./` workflow at run creation ([the release pipeline](#the-release-pipeline-release-please)) |
 
 A `_skip_if_exists` file is generated once and never touched by a sync after that, so when the template INTRODUCES a starter at a path a repository already owns a file at (post-green.yml on its rollout), copier keeps the repository's file with no conflict and no diff. The sync then holds that repository's PR for review, naming the file, the template files that call it, and the template's starter, so the kept file can be checked against the interface the callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
@@ -102,11 +103,11 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 
 ### Changing the module selection
 
-A module change is one PR in the managed repository, and the render lands on that same PR. The `module-render` job in fleet-ci.yml is the check that says whether it has:
+A module change is one PR in the managed repository. CI itself needs no render: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run. The module's DATA files (its workflows, starters, and the recorded answers) still render per selection, and the render lands on that same PR. The `module-render` job in fleet-ci.yml is the check that says whether it has:
 
 ```text
 PR edits .repo-platform.yml (or a recorded answer)
-  -> module-render RED: ci.yml and .copier-answers.yml do not match the render of the selected modules
+  -> module-render RED: the managed files and .copier-answers.yml do not match the render of the selected modules
      remedy: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=<pr-branch>
   -> the sync pushes one commit onto the PR branch (the render, three-way merged like every sync)
   -> module-render GREEN; validate-template green; merge
@@ -137,7 +138,7 @@ Every render carries the agent instructions (`AGENTS.md` with its `CLAUDE.md`, `
 | Module | What lands |
 | --- | --- |
 | pr-title | A managed `pr-title.yml` workflow checking the PR title is a Conventional Commit (titles become squash-commit subjects), with its own `pr-title` required check installed by the module's settings layer ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
-| release-please | A `release` leg in the managed ci.yml plus the managed `release.yml` pipeline - [the release pipeline](#the-release-pipeline-release-please) below. |
+| release-please | Arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration - [the release pipeline](#the-release-pipeline-release-please) below. |
 | bun | A managed `dependabot-bun-lockfile.yml` that calls repo-platform's `dedupe-bun-lockfile` action at `@build` to regenerate `bun.lock` from scratch on Dependabot's PRs and push the fix to the PR branch (Dependabot's own lockfile edits can leave stale nested entries that fail `bun install --frozen-lockfile`; the regeneration also refreshes every in-range pin, so most Dependabot PRs get a fix commit). [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
 | deno | A managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`, failing when any locked dependency (JSR or npm, transitive included) has a known advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included. |
 | any toolchain with a formatter (every one except rust) | A repo-owned `auto-format.yml` starter: label a PR `fix-lint` to get a formatting commit pushed to it, prefilled with each selected toolchain's formatter. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
@@ -153,15 +154,16 @@ Two of those workflows push fix commits to PR branches, and a push made with the
 
 ### The release pipeline (release-please)
 
-The `release` leg in the managed ci.yml - `needs: [all-green, post-green]`, released only by a green gate and a green repo-owned post-green hook on a push to main, with the judged commit passed through ([all-green.md](all-green.md#after-the-gate)) - calls the managed `release.yml`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
+The `release` leg in the managed ci.yml - needing the gate and the repo-owned post-green hook, released only by a green gate and a green hook on a push to main with the judged commit passed through, and armed only where `.repo-platform.yml` selects the module ([all-green.md](all-green.md#after-the-gate)) - calls repo-platform's [fleet-release.yml](../.github/workflows/fleet-release.yml)`@build`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
 
 1. release-please cuts the release as a draft with its tag already forced.
-2. The repo-owned `update-release.yml` hook is called with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
-3. The managed publish stage attests build provenance for every asset on the draft - a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
+2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
+3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@build`, which attests build provenance for every asset on the draft - a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
 
 Around the cut itself:
 
 - A run in which release-please creates or refreshes the release PR (a run finding no unreleased releasable commits triggers neither) calls the repo-owned `update-release-pr.yml` hook with the PR's number and head branch: regenerating files that must ride in the release commit and updating version references go there. Its pushes with the default `GITHUB_TOKEN` do not re-trigger the PR's checks; with `REPO_PLATFORM_TOKEN` they do.
+- Both hooks are seeded in every repository, module or not (a called `./` workflow must exist at run creation even when its job skips); without the module they are never called.
 - The `release-please-config.json` and `.release-please-manifest.json` starters are repo-owned too (release-please updates the manifest via release PRs).
 - To force a specific version, merge an empty commit with a footer: `git commit --allow-empty -m "chore: release 5.0.0" -m "Release-As: 5.0.0"`. release-please honours it once and leaves nothing behind. Never set `release-as` in release-please-config.json: the key survives the release it pinned, so the next release PR proposes the same version again, and with `force-tag-creation` it would move the published tag. The fleet's validate-template check rejects the key.
 

@@ -30,7 +30,6 @@ The composed tree carries only plain filenames because a `uses:` ref downloads t
 
 - A skeleton file carries a marker line starting with `{# compose:<anchor> #}`. Text after the closing tag is appended verbatim after the last contribution, for inline `{% endif %}<text>` junctions.
 - The composer replaces the marker line with every contribution in `MODULE_ORDER`, each fragment wrapped in its module's gate. Fragments own all whitespace between the tags; the composer adds none.
-- A fragment that renders for only a subset of its module's selections declares the extra condition in the manifest's `fragment_conditions` map, keyed by anchor name (the docs-site module's `all-green-docs-site: "'pages' not in modules"`). The composer AND-s it onto the module gate, so the fragment can never render where its module does not, and the anchor's collapse guard keys on the combined gate. A key naming no shipped fragment is an error, and so is one naming a fragment the composer never splices under a gate (a data anchor's consumed fragment, `toolchain-setup`): the condition would be ignored there.
 - Every anchor needs at least one contribution and every contribution needs its anchor. Anchors live in skeleton files only: a marker inside a contribution is an error, since it would splice through verbatim and render to nothing.
 - A `-#}` closer makes the anchor TIGHT: the marker line's newline is consumed too, so every contribution must end with a newline inside its own gate and the junction to the next line stays tight whichever gates render false. With a plain `#}` the skeleton newline terminates the block, so an all-conditional line list would leave it dangling when the last gate is off.
 - On a plain anchor whose contributions all carry a gate, the marker line's newline is wrapped in an any-gate guard (splice.ts's `collapseGuard`). With every gate false the whole line collapses instead of rendering as a stray blank line; with any gate true the guard re-emits the same newline, byte-identical to an unguarded splice.
@@ -39,7 +38,7 @@ The composed tree carries only plain filenames because a `uses:` ref downloads t
 
 ## Data anchors
 
-Data anchors (`DATA_ANCHORS` in data_anchors.ts) are filled from manifest data instead of fragment files, so the composed output carries no marker comments and list-shaped content (dependabot ecosystems, the fleet-ci call's codeql-languages input, gitleaks lockfiles) cannot drift from the manifests.
+Data anchors (`DATA_ANCHORS` in data_anchors.ts) are filled from manifest data instead of fragment files, so the composed output carries no marker comments and list-shaped content (dependabot ecosystems, gitleaks lockfiles) cannot drift from the manifests.
 
 - Sharing rule: a manifest value declared by several modules is grouped BY VALUE, emitted ONCE, and gated on the or-chain of the contributing modules in `MODULE_ORDER`. Never per-module duplicates, never precedence guards.
 - A fragment file for a data anchor is an error, with one exception: agents-toolchain consumes its fragments as generator input.

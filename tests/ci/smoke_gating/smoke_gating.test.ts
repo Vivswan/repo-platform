@@ -3,8 +3,8 @@
 // inside shared files. The expectation tables (expectations.ts) always
 // get their own unit tests; the render-backed suite runs only with
 // SMOKE_DIR set to a smoke_generate.ts render (ci.yml's smoke-generate
-// matrix passes MODULES, PRIVATE, EXPECT_IN_PAGES, and EXTRA_DATA for the
-// row that produced it) and skips loudly otherwise. The code under test is
+// matrix passes MODULES, PRIVATE, and EXTRA_DATA for the row that produced
+// it) and skips loudly otherwise. The code under test is
 // reached only through the rendered files and two settings-assembly
 // subprocesses.
 
@@ -18,7 +18,6 @@ import { tempDirs } from "../../shared/temp_dir";
 import { runChecks } from "./checks.ts";
 import {
   ANY_TOOLCHAIN,
-  codeqlLanguages,
   ENABLE_CODEQL,
   EXPECTATIONS,
   GATED_MODULES,
@@ -26,11 +25,9 @@ import {
   MERGED_SETTINGS,
   MERGED_SETTINGS_EXPECTATIONS,
   MODULES,
-  orderedModulesJson,
   type Row,
   type Selection,
   selectionFromEnv,
-  streamLabels,
 } from "./expectations.ts";
 
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
@@ -44,30 +41,15 @@ describe("the expectation tables", () => {
     expect([...GATED_MODULES].sort()).toEqual([...MODULES].sort());
   });
 
-  // Rows are [modules, private, extra data, the derived fleet-ci inputs and
-  // gates] for the matrix rows whose derivations differ.
+  // Rows are [modules, private, extra data, the derived selection facts]
+  // for the matrix rows whose derivations differ.
   test.each([
     {
       modules: EVERYTHING,
       isPrivate: "false",
       extra: "",
       derived: {
-        modules: `[${MODULES.map((m) => `"${m}"`).join(", ")}]`,
-        codeql: '["javascript-typescript", "python"]',
-        labels: "docs-link-rot,fuzz-nightly,nightly-failure",
-        skillsDir: "skills",
-        enableCodeql: true,
-        anyToolchain: true,
-      },
-    },
-    {
-      modules: "[uv, nightly, release-please]",
-      isPrivate: "false",
-      extra: "",
-      derived: {
-        modules: '["uv", "release-please", "nightly"]',
-        codeql: '["python"]',
-        labels: "nightly-failure",
+        modules: [...MODULES] as string[],
         skillsDir: "skills",
         enableCodeql: true,
         anyToolchain: true,
@@ -79,9 +61,7 @@ describe("the expectation tables", () => {
       isPrivate: "true",
       extra: "",
       derived: {
-        modules: '["bun", "pages"]',
-        codeql: "[]",
-        labels: "",
+        modules: ["bun", "pages"] as string[],
         skillsDir: "skills",
         enableCodeql: false,
         anyToolchain: true,
@@ -92,9 +72,7 @@ describe("the expectation tables", () => {
       isPrivate: "false",
       extra: "-d skills_dir=lib/skills",
       derived: {
-        modules: '["node", "skills"]',
-        codeql: '["javascript-typescript"]',
-        labels: "",
+        modules: ["node", "skills"] as string[],
         skillsDir: "lib/skills",
         enableCodeql: true,
         anyToolchain: true,
@@ -106,9 +84,7 @@ describe("the expectation tables", () => {
       isPrivate: "false",
       extra: "-d skills_dir=lib/skills -d skills_dir=agent-skills",
       derived: {
-        modules: '["node", "skills"]',
-        codeql: '["javascript-typescript"]',
-        labels: "",
+        modules: ["node", "skills"] as string[],
         skillsDir: "agent-skills",
         enableCodeql: true,
         anyToolchain: true,
@@ -120,9 +96,7 @@ describe("the expectation tables", () => {
       isPrivate: "false",
       extra: "",
       derived: {
-        modules: '["rust", "fuzzer"]',
-        codeql: "[]",
-        labels: "fuzz-nightly",
+        modules: ["rust", "fuzzer"] as string[],
         skillsDir: "skills",
         enableCodeql: false,
         anyToolchain: true,
@@ -133,20 +107,16 @@ describe("the expectation tables", () => {
       isPrivate: "false",
       extra: "",
       derived: {
-        modules: "[]",
-        codeql: "[]",
-        labels: "",
+        modules: [] as string[],
         skillsDir: "skills",
         enableCodeql: false,
         anyToolchain: false,
       },
     },
-  ])("derives the fleet-ci inputs for modules=$modules private=$isPrivate", (row) => {
+  ])("derives the selection facts for modules=$modules private=$isPrivate", (row) => {
     const selection = selectionFromEnv(row.modules, row.isPrivate, row.extra);
     expect({
-      modules: orderedModulesJson(selection),
-      codeql: codeqlLanguages(selection),
-      labels: streamLabels(selection),
+      modules: MODULES.filter((m) => selection.modules.has(m)) as string[],
       skillsDir: selection.skillsDir,
       enableCodeql: ENABLE_CODEQL.holds(selection),
       anyToolchain: ANY_TOOLCHAIN.holds(selection),
@@ -227,17 +197,6 @@ if (smokeDir === undefined || smokeDir === "") {
         "(the operator's fleet-ci.yml; fix fleet-ci.yml or this expectation)",
       );
     });
-
-    const pagesPatterns = (process.env.EXPECT_IN_PAGES ?? "").split("\n").filter((p) => p !== "");
-    if (pagesPatterns.length > 0) {
-      test("the row's expected pages.yml fragments render", () => {
-        runChecks(
-          smokeDir,
-          [{ kind: "text", path: ".github/workflows/pages.yml", has: pagesPatterns }],
-          hint,
-        );
-      });
-    }
 
     // The assembly CLI runs as a black box against the rendered repo's own
     // recorded facts; the merged document (the rendered layers plus the

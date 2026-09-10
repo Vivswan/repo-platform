@@ -37,8 +37,8 @@ Repository settings are managed for every repo with a `.repo-platform.yml`: the 
 
 ## release-please
 
-- Managed: `release.yml` (the full pipeline: draft cut -> repo-owned update hook -> attested publish with a single `attestation.json` per release), the `release` job on top of all-green, and the `release-freshness` and `release-health` gate jobs in ci.yml.
-- Starters: `update-release.yml` (the update hook release.yml calls between draft and publish), `update-release-pr.yml` (the hook release.yml calls on release-PR refreshes), `release-please-config.json`, `.release-please-manifest.json`.
+- Managed: nothing of its own. The pipeline (draft cut -> repo-owned update hook -> attested publish with a single `attestation.json` per release) runs in repo-platform's fleet-release workflows behind ci.yml's static `release` legs, armed by the selection at run time, and the `release-freshness` and `release-health` gate jobs run in fleet-ci.
+- Starters: `release-please-config.json`, `.release-please-manifest.json`. The `update-release.yml` and `update-release-pr.yml` hooks the legs call are base starters every repository carries.
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in release-please-config.json (the pin outlives its release and re-proposes the same version; validate-template rejects it).
 - Settings labels are automatic: the module's own `templates/release-please/settings.yml` layer (declared in the manifest's `settings_layers`, like every module layer file) declares `autorelease: pending`, `autorelease: tagged`, `release-blocker` (`B60205`), `release-override` (`FBCA04`), plus the `release-tags` tag-immutability ruleset.
 - With `fuzzer` also selected, the release-health gate ties releases to fuzz health (an open fuzz tracking issue blocks cuts).

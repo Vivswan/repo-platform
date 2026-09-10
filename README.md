@@ -37,7 +37,7 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | `Vivswan/a,Vivswan/b` | those repos |
 | `public` or `private` | every managed repo of that visibility |
 | `modules:pages+release-please` | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names) |
-| `modules:pages,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the pages or release legs of ci.yml renders into |
+| `modules:pages,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the pages.yml or release-please starters renders into |
 | `public,modules:pages` | the public repos selecting pages: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:pages`) adds as typed |
 | `all` or empty | the whole fleet |
 

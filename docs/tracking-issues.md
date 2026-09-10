@@ -35,7 +35,7 @@ The question's validator (it runs on `copier update` too) enforces:
 
 ## Release gating
 
-With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-health` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. The rendered workflows pass every selected stream's label in the [release-health action's](../actions/release-health/action.yml) `tracking-labels` input, and the gate blocks while ANY issue carrying one of them is open. It self-scopes to release-cut pushes, so release-PR refreshes and ordinary main runs are never blocked.
+With the release-please module also selected, an open tracking issue blocks releases twice over: the release PR's `release-health` CI job fails early and visibly, and the release pipeline's authoritative pre-flight blocks the cut itself. fleet-ci's `plan` job outputs every selected stream's label as `tracking-labels`; ci.yml passes it on to the release pipeline, both feeding the [release-health action's](../actions/release-health/action.yml) input of that name, and the gate blocks while ANY issue carrying one of them is open. It self-scopes to release-cut pushes, so release-PR refreshes and ordinary main runs are never blocked.
 
 To unblock:
 

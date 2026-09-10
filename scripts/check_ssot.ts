@@ -24,14 +24,15 @@
 import { allGreenRules } from "./check/ssot/all_green.ts";
 import { type Mismatch, RECORDED_DIVERGENCES, usedDivergences } from "./check/ssot/comparison.ts";
 import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
-import { fleetCiRenderRules } from "./check/ssot/fleet_ci_render.ts";
 import { harnessImportRules } from "./check/ssot/harness_imports.ts";
 import { labelPreflightRules } from "./check/ssot/label_preflight.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
 import { migrationLadderRules } from "./check/ssot/migration_ladder.ts";
 import { moduleRules } from "./check/ssot/modules.ts";
+import { pagesCallerRules } from "./check/ssot/pages_callers.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
+import { prTitleRules } from "./check/ssot/pr_title.ts";
 import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
@@ -51,9 +52,10 @@ const rules: Rule[] = [
   ...twinCopyRules,
   ...settingsWorkflowRules,
   ...labelRules,
-  ...fleetCiRenderRules,
+  ...prTitleRules,
   ...literalAnchorRules,
   ...postGreenRules,
+  ...pagesCallerRules,
   ...labelPreflightRules,
   ...processDisciplineRules,
   ...harnessImportRules,

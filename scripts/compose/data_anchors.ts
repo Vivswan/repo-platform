@@ -1,7 +1,7 @@
 // Data anchors: the manifest-derived contributions (dependabot
-// ecosystems, codeql languages, gitleaks lockfiles, the agents toolchain
-// block), the toolchain-setup prepend, and the rendered-separation
-// invariant every anchor's contributions must satisfy.
+// ecosystems, gitleaks lockfiles, the agents toolchain block), the
+// toolchain-setup prepend, and the rendered-separation invariant every
+// anchor's contributions must satisfy.
 
 import type { ModuleManifest } from "../lib/module_manifests.ts";
 import { FRAGMENTS_DIR, JINJA_SUFFIX, MANIFEST_NAME } from "./entries.ts";
@@ -29,22 +29,6 @@ export function ecosystemGroups(manifests: ModuleManifest[]): EcosystemGroup[] {
     const group = groups.get(ecosystem) ?? { ecosystem, modules: [] };
     group.modules.push(manifest.module);
     groups.set(ecosystem, group);
-  }
-  return [...groups.values()];
-}
-
-export type CodeqlGroup = { language: string; modules: string[] };
-
-/** Distinct CodeQL languages with their contributing modules, in
- *  MODULE_ORDER of first contributor. */
-export function codeqlGroups(manifests: ModuleManifest[]): CodeqlGroup[] {
-  const groups = new Map<string, CodeqlGroup>();
-  for (const manifest of manifests) {
-    if (!manifest.toolchain) continue;
-    const language = manifest.toolchain.codeql_language;
-    const group = groups.get(language) ?? { language, modules: [] };
-    group.modules.push(manifest.module);
-    groups.set(language, group);
   }
   return [...groups.values()];
 }
@@ -298,41 +282,6 @@ export const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         source: generatorSource("dependabot-ecosystems", "dependabot.ecosystem"),
         ...gated(orChain(group.modules, gateOf), ecosystemBlock(group.ecosystem)),
       })),
-  },
-  "codeql-languages": {
-    data: "toolchain.codeql_language",
-    kind: "reject",
-    generate: ({ manifests, gateOf }) => {
-      // The fleet-ci call's codeql-languages input: jinja that builds the
-      // selected languages list (one append per language group, gated on
-      // the or-chain of its contributing modules, inside the
-      // enable_codeql guard) and emits the quoted JSON input line. The
-      // line renders in EVERY selection - '[]' when CodeQL is off, which
-      // fleet-ci's codeql job skips on.
-      const groups = codeqlGroups(manifests);
-      if (groups.length === 0) return [];
-      const appends = groups.map(
-        (group) =>
-          `{%- if ${orChain(group.modules, gateOf)} %}{% set _ = codeql_languages.append('${group.language}') %}{% endif %}`,
-      );
-      const lines = [
-        "{%- set codeql_languages = [] %}",
-        "{%- if enable_codeql %}",
-        ...appends,
-        "{%- endif %}",
-        "      codeql-languages: '{{ codeql_languages | tojson }}'",
-      ];
-      return [
-        {
-          order: orderOf(manifests, groups[0].modules[0]),
-          source: generatorSource("codeql-languages", "toolchain.codeql_language"),
-          // The leading {%- tags manage the anchor's whitespace; the input
-          // line itself renders unconditionally, so no collapse gate.
-          gate: null,
-          text: Buffer.from(lines.join("\n")),
-        },
-      ];
-    },
   },
   "gitleaks-locks": {
     data: "lockfiles",

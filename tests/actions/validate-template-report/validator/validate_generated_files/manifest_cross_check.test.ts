@@ -84,18 +84,18 @@ describe("ownership-manifest byte parity", () => {
   });
 
   // A listed file missing from the repo is deletion damage, whatever its hash state. The
-  // workflow row selects release-please (the roster then expects release.yml); the docs row is
+  // workflow row selects pr-title (the roster then expects pr-title.yml); the docs row is
   // the baseline plus one entry the roster does not cover.
-  const RELEASE_PLEASE = BASELINE[".repo-platform.yml"].replace(
+  const PR_TITLE = BASELINE[".repo-platform.yml"].replace(
     "modules: [uv]",
-    "modules: [uv, release-please]",
+    "modules: [uv, pr-title]",
   );
   const DELETED = "but missing from the repo - a managed file deleted outside a sync";
   test.each([
     {
       reason: "a hash-null workflow entry is a deleted managed file",
-      path: ".github/workflows/release.yml",
-      registration: RELEASE_PLEASE,
+      path: ".github/workflows/pr-title.yml",
+      registration: PR_TITLE,
       entry: '{"class": "managed", "hash": null}',
     },
     {
@@ -271,12 +271,12 @@ describe("ownership-manifest byte parity", () => {
       },
     },
     {
-      reason: "an unselected module's workflow (release.yml; the baseline selects only uv)",
-      path: ".github/workflows/release.yml",
+      reason: "an unselected module's workflow (pr-title.yml; the baseline selects only uv)",
+      path: ".github/workflows/pr-title.yml",
       tree: {
         [MANIFEST]: manifestOf({
           ...stampedBaseline(),
-          ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
+          ".github/workflows/pr-title.yml": '{"class": "managed", "hash": null}',
         }),
       },
     },

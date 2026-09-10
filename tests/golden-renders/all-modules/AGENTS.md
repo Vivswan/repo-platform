@@ -24,7 +24,7 @@ Golden Render: Golden render fixture
 
 - PR titles and commit subjects are Conventional Commits; they drive release-please versioning. PRs are squash-merged, so the PR title becomes the commit subject. The `pr-title` check validates the title.
 - CI gates on the `all-green` check, required by the managed ruleset. Under `.github/workflows/`, this repository's test and lint jobs go in `checks.yml`, its green-gated work on main in `post-green.yml` (both repo-owned); `ci.yml` is managed.
-- A green push to main releases through the managed `release.yml`; this repository's release steps go in the repo-owned `update-release.yml` and `update-release-pr.yml` hooks.
+- A green push to main releases through the fleet's release pipeline; this repository's release steps go in the repo-owned `update-release.yml` and `update-release-pr.yml` hooks.
 - Plain ASCII punctuation only: no curly quotes, em-dashes, or invisible unicode. The check-typography gate enforces it.
 
 ## Managed by repo-platform

@@ -260,8 +260,7 @@ export const labelRules: Rule[] = [
     // and empty for a label that does not exist, so a literal that drifts
     // from the managed roster degrades the guard to a permanent silent
     // no-op - anchor the literals to the release-please manifest's
-    // settings layer here instead. Only the template side exists to check:
-    // repo-platform runs no release pipeline of its own.
+    // settings layer here instead.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -272,7 +271,7 @@ export const labelRules: Rule[] = [
         throw new Error("templates/release-please/settings.yml declares no labels - anchor lost");
       }
       const roster = new Set(releaseLabels.map((label) => label.name));
-      const rel = "templates/release-please/.github/workflows/release.yml.jinja";
+      const rel = ".github/workflows/fleet-release.yml";
       const text = read(rel);
       const queried = mustMatch(
         text,
