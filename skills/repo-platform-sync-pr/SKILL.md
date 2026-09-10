@@ -45,14 +45,14 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 | Section | Content | What to verify |
 |---|---|---|
 | header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
-| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below. A starter is only ever `created` or `unchanged` |
+| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` names why nothing was written (a symbolic link at the path, a placeholder with no value). A starter is only ever `created`, `unchanged`, or `held` (nothing written) |
 | Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
 | Retired | one row per file the platform no longer writes: `deleted`, `held`, `kept`, `moved` | `deleted` removed the platform's own content; `held` left a file with content it did not write, for your decision; `kept` is a starter (yours); `moved` is a git rename |
-| Registration notes | a module name `files.yml` does not know (dropped for this sync), or an unreadable manifest | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report |
+| Registration notes | a module name `files.yml` does not know (dropped for this sync), an unreadable manifest, or a `cutover:` note: `.repo-platform.yml` was derived from `.github/.copier-answers.yml` | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A cutover note means the sync rewrote `.repo-platform.yml`: review the derived keys in the diff |
 | Mirrors | one row per declared target: `written`, `current`, `refused` with the reason | `refused` names the fix (a source the sync did not write, a `**` pattern, a target under `.github/workflows/`, a target with foreign content) |
 | Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
 
-The hold reasons, exactly: `local edits replaced in <path>`, `retirement of <path> held: <detail>`, `mirror <target> refused: <detail>`, `registration: <note>`.
+The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `mirror <target> refused: <detail>`, `registration: <note>`.
 
 ## Check the diff against the report
 
@@ -62,7 +62,7 @@ The report lists what the writer did; the diff is what lands. Compare them befor
 gh pr diff <number> --name-only
 ```
 
-Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted` or `moved`, a Mirrors row reading `written`, or `.github/repo-platform-manifest.json` (rewritten every sync, no row). A path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. A replaced diff cut at 40 lines is read in full from git:
+Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted` or `moved`, a Mirrors row reading `written`, `.github/repo-platform-manifest.json` (rewritten every sync, no row), or `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either). Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying the warning `The report was cut here to fit GitHub's body limit` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
 
 ```bash
 git fetch origin main automation/repo-platform
@@ -77,7 +77,7 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Held retirement | A retired path holds content the platform did not write, or a split file has a repo-owned tail | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
 | Refused mirror | The `mirrors` declaration in `.repo-platform.yml` names something the writer will not copy | Fix the declaration; nothing was written |
 | Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
-| Cutover | The first sync after the platform changed shape: many `updated` rows, a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `SECURITY.md`, the issue forms), `ci.yml` replaced by the shared file | Check every `held` retirement; expect the CI job list to change on the next push to main |
+| Cutover | The first sync after the platform changed shape: `.repo-platform.yml` rewritten from `.github/.copier-answers.yml` (a `cutover:` Registration note holds the PR; the file has no Written row), a Written row for every managed file whose content changed (`updated` where the manifest recorded the old content, `replaced local edits` with a diff where it did not; `ci.yml` among them), a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`). The issue forms were starters: nothing retires them, they stay in place with no row | Review the derived registration key by key; check every `held` retirement; expect the CI job list to change on the next push to main |
 
 Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
 
@@ -128,7 +128,7 @@ When a human does the merging, your job ends with the branch resolved, pushed, a
 
 ## The failure path
 
-A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's summary shows the same repo as `row i: failed, report filed in the target repository`. Fix what the issue names (usually the registration or a split file's markers), then dispatch again:
+A sync leg that fails files (or refreshes) one issue in the target repository titled `[repo-platform] sync failed`, with the error. The operator run's job log (`gh run view <id> --log` on Vivswan/repo-platform) shows the row as `row <i>: failed, report filed in the target repository`; the line carries an index from 0, never the repository's name. Fix what the issue names (usually the registration or a split file's markers), then dispatch again:
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true

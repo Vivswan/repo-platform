@@ -101,7 +101,7 @@ gh run list -R Vivswan/repo-platform --workflow sync-repos.yml --limit 1
 gh run watch -R Vivswan/repo-platform <id> --exit-status
 ```
 
-The run summary reads `plan: 1 rows` and then `row 1: PR opened` (or `PR refreshed` when a sync PR was already open). The sync PR's report should be explained by the module diff:
+The run's job log (`gh run view <id> --log`) reads `plan: 1 rows` and then `row 0: PR opened` (rows are numbered from 0; `PR refreshed` when a sync PR was already open). The sync PR's report should be explained by the module diff:
 
 - Written: the module's files as `created`; a starter the repo already had reads `unchanged`; every other row `unchanged` or `updated`.
 - Split files: the diff stays inside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
@@ -110,7 +110,7 @@ The run summary reads `plan: 1 rows` and then `row 1: PR opened` (or `PR refresh
 
 Anything the module diff does not explain is reviewed with the `repo-platform-sync-pr` skill before merging.
 
-`row 1: unchanged` with no PR means the repo already holds every file of the new selection. `failed, report filed in the target repository` means the `[repo-platform] sync failed` issue in the repo has the error. The weekly sync delivers the same files if you do not dispatch.
+`row 0: unchanged` with no PR means the repo already holds every file of the new selection. `failed, report filed in the target repository` means the `[repo-platform] sync failed` issue in the repo has the error. Today the dispatch is the way to get the files: the weekly run is paused while the first repository proves the new `ci.yml`, and comes back when repo-platform lifts that guard after the cutover.
 
 ### 3. Finish the companion steps
 
@@ -128,7 +128,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 
 | Module | Keys | Default |
 |---|---|---|
-| `pages` | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the selected toolchains; the commands of the first `pages.setup` toolchain in roster order; `dist` |
+| `pages` | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the selected toolchains, or `none` when no toolchain is selected; the commands of the first `pages.setup` toolchain in roster order, empty with `none` (so `pages.build` is mandatory then, unless a surviving answers file records `pages_build_command`); `dist` |
 | `docs-site` | `docs_site.path`, `docs_site.include`, `labels.docs_site` | `docs`, none, `docs-link-rot` |
 | `skills` | `skills.dir` | `skills` |
 | `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
@@ -136,7 +136,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
 
 - A key change alone needs no sync: the pages and docs-site legs read the registration at run time. `mirrors` and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), while an existing starter (`.github/settings.yml`, the plugin manifests) keeps its content, so edit it yourself.
-- Tracking labels (`fuzzer`, `nightly`, `docs_site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan, and so does a value that disagrees with a surviving `.github/.copier-answers.yml` (the two must agree while both files exist).
+- Tracking labels (`fuzzer`, `nightly`, `docs_site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan. So does any setting that a surviving `.github/.copier-answers.yml` also records with a different value, checked where the plan resolves it: `labels.*` and `skills.dir` on every PR, `pages.*`, `docs_site.path`, and `project.name` (with `docs-site`) when the pages or docs-site leg plans the site. The two must agree while both hold a value.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 
 ## Removing a module
@@ -146,11 +146,11 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `page
 - Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `held` with the reason when someone edited it or a split file carries a repo-owned tail (decide, then delete or keep it yourself).
 - Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.yml`.
 - Labels: the module's labels leave the settings baseline and the next apply removes them from the repo.
-- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched and `held` when you had written outside its region. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content); delete the old text in the sync PR.
+- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched and `held` when you had written outside its region. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content, reported `region added`, which holds the PR); delete the old text in the sync PR.
 
 ## Verify
 
-- The sync run ends `row 1: PR opened` and every Written row is explained by the module diff.
+- The sync run's job log ends `row 0: PR opened` and every Written row is explained by the module diff.
 - After merging, the module's leg or job runs on the next push to main (`release` for release-please, `pages`, `docs-site`; `validate-skills` inside the `ci` job for skills). Many modules add no job at all.
 - For label-carrying modules, the label exists on the repo after the next settings apply: `gh label list -R Vivswan/<repo>`.
 

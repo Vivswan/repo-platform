@@ -94,7 +94,7 @@ gh run list -R Vivswan/repo-platform --workflow sync-repos.yml --limit 1
 gh run watch -R Vivswan/repo-platform <id> --exit-status
 ```
 
-`manual=true` keeps the PR waiting for a human even when the report holds nothing. The run's summary has one line per repository:
+`manual=true` keeps the PR waiting for a human even when the report holds nothing. The run's job log (`gh run view <id> --log`) carries the operator's only lines: `plan:` once, then one `row <i>:` line per repository, numbered from 0. No line names a repository: the details are in the repo's own sync PR or failure issue.
 
 | Line | Meaning |
 | --- | --- |
@@ -111,7 +111,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Section | On a first sync, expect |
 | --- | --- |
 | header | Build sha, the modules the registration selected, the visibility |
-| Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `updated` for a split file that had no markers (the region goes above its content), and `replaced local edits` for a managed file or split region it had written itself |
+| Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
 | Registration notes | a module name `files.yml` does not know, dropped |
@@ -177,10 +177,10 @@ The apply still reads the tracking labels of `fuzzer`, `nightly`, and `docs-site
 ## Private repositories
 
 - No CodeQL or dependency-review jobs; the public-only variant of `auto-assign.yml` is not written.
-- Fleet run logs are public, so the run summary names a private repo only as a hint and the details land in the repo's own sync PR and failure issue.
+- Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection log names a private one only by a hint); the details land in the repo's own sync PR and failure issue.
 
 ## Verify
 
 - The first sync PR merged with every report row explained.
 - A PR on the repo shows `all-green` as its check, posted by the PR's own CI run.
-- A second dispatch of the sync ends with `row 1: unchanged`.
+- A second dispatch of the sync ends with `row 0: unchanged` in its job log.

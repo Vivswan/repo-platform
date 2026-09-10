@@ -25,7 +25,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -
 
 ### The sync PR
 
-The run summary ends `row 1: PR opened`. In the report:
+The run's job log ends `row 0: PR opened`. In the report:
 
 - Written: `.github/workflows/nightly.yml` as `starter`, `created`. Every other row `unchanged`.
 - Review: `Hold for review: no`; `manual=true` keeps it waiting for you.

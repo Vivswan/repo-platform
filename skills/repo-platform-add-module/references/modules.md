@@ -20,7 +20,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 ## pages
 
 - Managed: `pages.yml` (the nightly rebuild and the dispatch). The deploy itself is the `pages` leg of `ci.yml`, which runs on a push to main once the module is selected.
-- Keys: `pages.setup` (comma-separated toolchain tokens or `none`; default: the selected toolchains), `pages.install` and `pages.build` (default: the commands of the first `pages.setup` toolchain in roster order, not in the order typed; `pages.build` must be nonempty), `pages.dist` (default `dist`). repo-platform's `docs/pages.md` has the build contract.
+- Keys: `pages.setup` (comma-separated toolchain tokens or `none`; default: the selected toolchains, `none` when there is no toolchain), `pages.install` and `pages.build` (default: the commands of the first `pages.setup` toolchain in roster order, not in the order typed; empty with `none`, and `pages.build` must be nonempty), `pages.dist` (default `dist`). repo-platform's `docs/pages.md` has the build contract.
 - Companion: enable Pages with Source: GitHub Actions before the first deploy.
 - With `docs-site` also selected, the site build serves the docs as a mount at `/<docs_site.path>/` and the `docs-site` leg stands down.
 - Removal: `pages.yml` is retired; the leg skips; the live site stays until you turn Pages off.
@@ -57,7 +57,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.
 - Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`). The two must differ when both are selected: both streams dedup and auto-close by label.
-- A custom label goes in three places: the registration key (read by fleet CI's plan), the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it), and the repo's own `.github/settings.yml` (the settings apply does not read `labels.*`). A repo that still carries the retired `.github/.copier-answers.yml` must record the same value there under `nightly_label` / `fuzzer_label`, or the plan fails: the two must agree while both files exist.
+- A custom label goes in three places: the registration key (read by fleet CI's plan), the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it), and the repo's own `.github/settings.yml` (the settings apply does not read `labels.*`). A repo that still carries the retired `.github/.copier-answers.yml` must not contradict it: when that file records `nightly_label` / `fuzzer_label` and the registration's `labels.*` differs, the plan fails (the same rule covers `skills.dir` on every PR, and `pages.*`, `docs_site.path`, and `project.name` (with `docs-site`) when the pages or docs-site leg plans the site); a value present in only one file is read from there.
 - Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the baseline and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.yml` first.
 - Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md`.
 
@@ -69,4 +69,4 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 
 - Effect: `LICENSE.md` is not written; the repo's own license is repo-owned.
 - Adding it: the fleet `LICENSE.md` is retired on that sync: `deleted` when it still held only the platform's region, `held` when the repo had written outside the region. Commit the repo's own `LICENSE.md` after that PR merges.
-- Removing it: the next sync writes the fleet license region into `LICENSE.md`; a file without markers gets the region above its existing content, so delete the old text in the sync PR (third-party notices go below the END marker).
+- Removing it: the next sync writes the fleet license region into `LICENSE.md`; a file without markers gets the region above its existing content (reported `region added`, which holds the PR), so delete the old text in the sync PR (third-party notices go below the END marker).
