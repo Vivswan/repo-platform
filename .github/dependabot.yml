@@ -122,7 +122,7 @@ updates:
 
   # Runtime deps of the pages-site action (vitepress - pinned EXACT while
   # 2.x is prerelease, so a bump is always a deliberate PR - plus the llms
-  # plugin, linkinator, vue) and its dev-only typing manifest.
+  # plugin, mermaid, linkinator, vue) and its dev-only typing manifest.
   - package-ecosystem: "bun"
     directory: "/actions/pages-site"
     schedule:

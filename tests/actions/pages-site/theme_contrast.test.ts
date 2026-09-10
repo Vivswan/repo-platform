@@ -8,11 +8,13 @@
 // per mode (light, dark, and the print sheet), as tokens.ts declares them.
 
 import { expect, test } from "bun:test";
+import { mermaidThemeVariables } from "../../../actions/pages-site/.vitepress/theme/mermaid-theme.ts";
 import {
   HUES,
   MODES,
   modeValues,
   type ScreenMode,
+  SHARED_TOKENS,
 } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 
 const AA_SMALL_TEXT = 4.5;
@@ -147,3 +149,41 @@ test("the pre-fix tertiary values and the github-theme token colors fail on the 
   expect(contrast("#22863a", "#eaecf0")).toBeLessThan(AA_SMALL_TEXT);
   expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
 });
+
+// The mermaid theme bakes literal colors into every diagram's SVG, so its
+// text meets the same bar on the surface it is drawn over: each text
+// variable paired with its own ground, per mode and hue (the hue is a
+// border color only, so it may not move any of these).
+const MERMAID_TEXT_PAIRS: [string, string][] = [
+  ["primaryTextColor", "primaryColor"],
+  ["secondaryTextColor", "secondaryColor"],
+  ["tertiaryTextColor", "tertiaryColor"],
+  ["textColor", "background"],
+  ["textColor", "edgeLabelBackground"],
+  ["titleColor", "background"],
+  ["lineColor", "background"],
+  ["noteTextColor", "noteBkgColor"],
+  ["actorTextColor", "actorBkg"],
+  ["signalTextColor", "background"],
+  ["labelTextColor", "labelBoxBkgColor"],
+  ["loopTextColor", "background"],
+  ["sequenceNumberColor", "lineColor"],
+];
+
+test.each(SCREEN_MODES)(
+  "every %s mermaid text variable clears 4.5:1 on its ground in every hue, in that mode's type",
+  (mode) => {
+    for (const hue of HUES) {
+      const variables = mermaidThemeVariables(mode, hue);
+      const declared = new Map(
+        Object.entries(variables).filter((entry): entry is [string, string] => {
+          return typeof entry[1] === "string";
+        }),
+      );
+      expect(failures(declared, MERMAID_TEXT_PAIRS)).toEqual([]);
+      expect(variables.darkMode).toBe(mode === "dark");
+      expect(variables.fontFamily).toBe(SHARED_TOKENS.fonts["--vp-font-family-mono"]);
+      expect(variables.nodeBorder).toBe(hue[mode].hue);
+    }
+  },
+);

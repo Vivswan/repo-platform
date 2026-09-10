@@ -5,12 +5,14 @@ import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
   appendDeadLink,
+  assetFiles,
   buildSite,
   commitAll,
   describeRun,
   docsFixture,
   initRepo,
   isFile,
+  MERMAID_MOUNT_HTML,
   type RunnerTemp,
   readAssets,
   readSite,
@@ -165,6 +167,26 @@ describe("the versioned vitepress deploy", () => {
     expect(alerts).toContain('style="color:var(--fleet-code-ansi-red);"');
     expect(alerts).not.toContain("color:#000000");
     expect(alerts).not.toContain("shiki-dark");
+  });
+
+  test("renders a mermaid fence as the mount with its escaped source, and loads mermaid only from it", () => {
+    const alerts = readSite(site, "latest/alerts.html");
+    expect(alerts).toContain(MERMAID_MOUNT_HTML);
+    expect(alerts).not.toContain("language-mermaid");
+    // The mermaid package is its own chunk (mermaidAPI is its export, in
+    // nothing else): no page's HTML preloads or scripts it, the theme chunk
+    // that owns the mount reaches it by dynamic import alone.
+    const assets = assetFiles(site, "latest/assets");
+    const scripts = assets.filter((file) => file.name.endsWith(".js"));
+    const mermaidChunks = scripts.filter((file) => file.text.includes("mermaidAPI"));
+    expect(mermaidChunks.length).toBeGreaterThan(0);
+    const themeChunk = scripts.filter((file) => file.text.includes("fleet-mermaid-diagram"));
+    expect(themeChunk).toHaveLength(1);
+    expect(mermaidChunks.some((chunk) => themeChunk[0].text.includes(chunk.name))).toBe(true);
+    for (const page of [latestIndex, alerts, readSite(site, "latest/setup.html")]) {
+      expect(mermaidChunks.filter((chunk) => page.includes(chunk.name))).toEqual([]);
+    }
+    expect(latestAssets).toContain(".fleet-mermaid{");
   });
 
   test("ships the scrollers' reduced-motion override and the print sheet's cell wrapping", () => {

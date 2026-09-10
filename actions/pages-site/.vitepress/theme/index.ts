@@ -17,6 +17,7 @@ import "./doc.css";
 import "./prose.css";
 import "./tables.css";
 import "./code.css";
+import "./mermaid.css";
 import "./custom-blocks.css";
 import "./pager.css";
 import "./provenance.css";
@@ -28,19 +29,25 @@ import "./print.css";
 import "./motion.css";
 import FactsPanel from "./facts-panel.ts";
 import FleetLauncher from "./launcher.ts";
+import MermaidDiagrams from "./mermaid.ts";
 import NavLauncher from "./nav-launcher.ts";
 import Provenance from "./provenance.ts";
 import VersionSwitcher from "./version-switcher.ts";
 
 export default {
   ...VPCarbon,
-  Layout: () =>
+  // The diagram component sits beside carbon's Layout, not in a slot: the
+  // doc slots skip `layout: page` and `home`, and `layout: false` skips
+  // every slot, while a sibling runs on every page.
+  Layout: () => [
     h(VPCarbon.Layout!, null, {
       "nav-bar-content-before": () => h(NavLauncher),
       "nav-bar-content-menu-after": () => h(VersionSwitcher),
       "aside-top": () => h(FactsPanel),
       "doc-after": () => h(Provenance),
     }),
+    h(MermaidDiagrams),
+  ],
   async enhanceApp(ctx) {
     await VPCarbon.enhanceApp?.(ctx);
     ctx.app.component("FleetLauncher", FleetLauncher);

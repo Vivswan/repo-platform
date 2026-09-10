@@ -102,4 +102,25 @@
       break-after: avoid;
     }
   }
+  /* Outside .vp-doc like mermaid.css, for the `layout: page` article. A
+   * diagram's colors are baked for the screen mode: from the light
+   * appearance it prints as drawn; from the dark one its chalk labels
+   * would sit on white paper, so the source prints in its place. */
+  .fleet-mermaid {
+    overflow: visible;
+    background: none;
+    break-inside: avoid;
+    & > .fleet-mermaid-source {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  }
+  html.dark .fleet-mermaid[data-state="rendered"] {
+    & > .fleet-mermaid-diagram {
+      display: none;
+    }
+    & > .fleet-mermaid-source {
+      display: block;
+    }
+  }
 }
