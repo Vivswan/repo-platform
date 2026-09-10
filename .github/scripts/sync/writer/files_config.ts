@@ -238,20 +238,20 @@ export function checkRetirements(previous: FilesConfig, current: FilesConfig): v
 }
 
 /** The writer writes the manifest last, over whatever sits at its path, so
- *  an entry there would be written, recorded, and then silently replaced. */
-export function checkManifestPath(config: FilesConfig, label = "files.yml"): void {
-  if (config.files.some((entry) => entry.path === MANIFEST_NAME)) {
-    throw new FilesConfigError(label, [
-      `${MANIFEST_NAME} is the manifest the writer itself writes and cannot be a files entry`,
-    ]);
-  }
+ *  an entry there would be written, recorded, and then silently replaced.
+ *  Returned rather than thrown so the load reports it beside the document's
+ *  other problems. */
+export function manifestPathProblems(config: FilesConfig): string[] {
+  return config.files.some((entry) => entry.path === MANIFEST_NAME)
+    ? [`${MANIFEST_NAME} is the manifest the writer itself writes and cannot be a files entry`]
+    : [];
 }
 
-/** The whole load: parse and derive the placeholder defaults, every problem
- *  of the document in one error; refuse the manifest path; then verify
+/** The whole load: parse, derive the placeholder defaults, and refuse the
+ *  manifest path, every problem of the document in one error; then verify
  *  against the tree, and check retirements against the previous data file
- *  when one is given. The manifest path is judged before the tree so a
- *  forbidden entry is reported as such, not as a missing source. */
+ *  when one is given. The document is judged before the tree so a forbidden
+ *  entry is reported as such, not as a missing source. */
 export function loadFilesConfig(
   filesPath: string,
   tree: string,
@@ -260,9 +260,8 @@ export function loadFilesConfig(
   const label = "files.yml";
   const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);
   const { defaults, problems: placeholderProblems } = placeholderDefaults(config);
-  const all = [...placeholderProblems, ...problems];
+  const all = [...placeholderProblems, ...problems, ...manifestPathProblems(config)];
   if (all.length > 0) throw new FilesConfigError(label, all);
-  checkManifestPath(config);
   verifySources(config, tree);
   if (previousPath !== undefined) {
     checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);

@@ -283,6 +283,18 @@ describe("blockSources and verifySources", () => {
     ]);
   });
 
+  test("loadFilesConfig reports the manifest path beside the document's other problems, in one error", () => {
+    const root = temp.dir("writer-files-batch-manifest-path-");
+    writeTree(root, {
+      "files.yml":
+        "placeholders: [owner]\nfiles:\n  - { path: .github/repo-platform-manifest.json, class: managed }\n",
+    });
+    expect(loadProblemsOf(join(root, "files.yml"), join(root, "files"))).toEqual([
+      "placeholders: 'owner' is not one the writer derives",
+      ".github/repo-platform-manifest.json is the manifest the writer itself writes and cannot be a files entry",
+    ]);
+  });
+
   test("loadFilesConfig refuses an entry at the manifest path, which the writer overwrites last", () => {
     const root = temp.dir("writer-files-manifest-path-");
     writeTree(root, {

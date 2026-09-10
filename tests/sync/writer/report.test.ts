@@ -166,6 +166,36 @@ describe("renderReport", () => {
     );
   });
 
+  test("a newline in a replaced path stays inside its heading line", () => {
+    const forged = "bad\n\n### Forged";
+    const text = renderReport(
+      buildReport({ ...QUIET, replaced: [{ path: forged, diff: "--- a\n+++ a\n@@\n-x\n+y" }] }),
+    );
+    const lines = text.split("\n");
+    expect(lines.filter((line) => line.startsWith("#"))).toEqual([
+      "## Sync report",
+      "### Written",
+      "### Replaced local edits",
+      "#### `bad ### Forged`",
+      "### Retired",
+      "### Mirrors",
+      "### Review",
+    ]);
+    expect(lines).toContain("- local edits replaced in bad ### Forged");
+  });
+
+  test("a replaced diff quoting a fence line, even behind a bare CR, stays inside its own fence", () => {
+    const diff =
+      "--- a\n+++ a\n@@\n ```\n ### Forged\n+### Kept\n-old\r````\r### Forged\n@@\n-x\n+y";
+    const text = renderReport(buildReport({ ...QUIET, replaced: [{ path: "a", diff }] }));
+    expect(text).toContain(`#### \`a\`\n\n\`\`\`\`\`diff\n${diff}\n\`\`\`\`\`\n`);
+    expect(text).not.toContain("\n```diff\n");
+    const crs = unifiedDiff("a", "\r".repeat(1_000_000), "new\n");
+    expect(renderReport(buildReport({ ...QUIET, replaced: [{ path: "a", diff: crs }] }))).toContain(
+      "```diff\n--- a",
+    );
+  });
+
   test("a held report lists its reasons and the replaced diffs", () => {
     const text = renderReport(
       buildReport({
