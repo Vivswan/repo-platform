@@ -49,12 +49,13 @@ const NOTE = (dropped: string) =>
     "> MODULE FOLD: `agents`, `auto-assign`, and `settings-sync` are no longer",
     "> modules - every managed repository renders their files unconditionally",
     "> (AGENTS.md and its agent-file symlinks, the Copilot review instructions",
-    "> and setup starter, auto-assign.yml, settings-sync.yml, and the settings.yml",
-    "> starter), and repository settings are applied centrally for every managed",
-    "> repository. This update drops the retired name(s) from `.repo-platform.yml`'s",
-    "> `modules` list - the rest of the file, comments and any `mirrors` declaration",
-    "> included, is untouched - and copier records the shorter selection in",
-    "> `.github/.copier-answers.yml`. No rendered file moves or leaves.",
+    "> and setup starter, auto-assign.yml, and the settings.yml starter), and",
+    "> repository settings are applied centrally for every managed repository",
+    "> (no settings-sync.yml workflow is rendered). This update drops the retired",
+    "> name(s) from `.repo-platform.yml`'s `modules` list - the rest of the file,",
+    "> comments and any `mirrors` declaration included, is untouched - and copier",
+    "> records the shorter selection in `.github/.copier-answers.yml`. This rung",
+    "> moves or removes no rendered file.",
     `> Dropped here: ${dropped}.`,
   ].join("\n");
 
@@ -366,6 +367,26 @@ describe("m0002_fold_base_modules", () => {
         note: { text: NOTE("`agents`, `auto-assign`, `settings-sync`"), review: false },
       },
     });
+    expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
+  });
+
+  test("a repository's own settings-sync.yml is not an arrival: the template no longer renders that path", () => {
+    // Unlisted in the manifest, so the repository's own; nothing lands or
+    // leaves there, and the rung neither refuses nor touches it.
+    const ours = "name: ours\n";
+    const dir = repo({
+      [REGISTRATION]: RENDERED,
+      [MANIFEST]: manifestOf(),
+      ".github/workflows/settings-sync.yml": ours,
+    });
+    expect(apply(dir)).toEqual({
+      kind: "verdict",
+      verdict: {
+        kind: "dropped",
+        note: { text: NOTE("`agents`, `auto-assign`, `settings-sync`"), review: false },
+      },
+    });
+    expect(readFileSync(join(dir, ".github/workflows/settings-sync.yml"), "utf-8")).toBe(ours);
     expect(git(dir, "status", "--porcelain")).toBe(`M  ${REGISTRATION}\n`);
   });
 

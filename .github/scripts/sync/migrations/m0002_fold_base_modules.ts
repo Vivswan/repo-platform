@@ -38,11 +38,11 @@ const MANIFEST = ".github/repo-platform-manifest.json";
 /** The agent-file aliases the template renders as symlinks to AGENTS.md. */
 const ALIASES = ["CLAUDE.md", ".github/agents.md", ".github/copilot-instructions.md"];
 /** The other files the fold makes managed for every repository; a
- * repository's own file there has no home the sync may choose for it. */
+ * repository's own file there has no home the sync may choose for it.
+ * settings-sync.yml is not among them: the template no longer renders it. */
 const MANAGED_ARRIVALS = [
   ".github/instructions/review.instructions.md",
   ".github/workflows/auto-assign.yml",
-  ".github/workflows/settings-sync.yml",
 ];
 
 const NOTE = [
@@ -50,12 +50,13 @@ const NOTE = [
   "> MODULE FOLD: `agents`, `auto-assign`, and `settings-sync` are no longer",
   "> modules - every managed repository renders their files unconditionally",
   "> (AGENTS.md and its agent-file symlinks, the Copilot review instructions",
-  "> and setup starter, auto-assign.yml, settings-sync.yml, and the settings.yml",
-  "> starter), and repository settings are applied centrally for every managed",
-  "> repository. This update drops the retired name(s) from `.repo-platform.yml`'s",
-  "> `modules` list - the rest of the file, comments and any `mirrors` declaration",
-  "> included, is untouched - and copier records the shorter selection in",
-  "> `.github/.copier-answers.yml`. No rendered file moves or leaves.",
+  "> and setup starter, auto-assign.yml, and the settings.yml starter), and",
+  "> repository settings are applied centrally for every managed repository",
+  "> (no settings-sync.yml workflow is rendered). This update drops the retired",
+  "> name(s) from `.repo-platform.yml`'s `modules` list - the rest of the file,",
+  "> comments and any `mirrors` declaration included, is untouched - and copier",
+  "> records the shorter selection in `.github/.copier-answers.yml`. This rung",
+  "> moves or removes no rendered file.",
 ];
 
 /** lstat, so a symlink never reads as the file it points at. ENOENT is
