@@ -6,7 +6,8 @@
 //
 // Entry modes (env, set by action.yml): CHECK=true builds the caller's docs
 // tree once, strictly (dead internal links fatal), and emits no artifact;
-// otherwise MOUNTS drives a full _site layout and the site-dir output.
+// otherwise MOUNTS drives a full _site layout and the site-dir output. Both
+// end in the internal-link gate (site_links.ts) over what they built.
 // Both need a committed git checkout at GITHUB_WORKSPACE: each tier's
 // project facts and commit are read from the ref's tree with git, never
 // from the working files.
@@ -51,6 +52,7 @@ import {
   versionsIndex,
   versionTags,
 } from "./lib.ts";
+import { checkSiteLinks, type TierScope } from "./site_links.ts";
 
 const ACTION_DIR = import.meta.dir;
 
@@ -557,7 +559,9 @@ function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
   });
 }
 
-function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
+/** Build and lay out one mount's tiers; returns each tier's place in the
+ *  artifact and whether its content is current, for the link gate. */
+function assembleMount(cfg: Config, mount: Mount, kept: string[]): TierScope[] {
   // Eligibility only matters (and only prints its notices) where tags are
   // served; an unversioned mount builds HEAD alone.
   const tags = !mount.versioned
@@ -597,6 +601,7 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
       );
     }
   }
+  return tiers.map((tier) => ({ rel: tier.rel, strict: tierStrictLinks(tier) }));
 }
 
 async function main(): Promise<void> {
@@ -613,15 +618,18 @@ async function main(): Promise<void> {
   if (check === "true") {
     // The docs PR check: one strict build of the working tree (a HEAD tier
     // derives strict dead links) with the same include roots the deploy
-    // stages; no artifact.
+    // stages, then the link gate over it; no artifact.
     const mountsJson = env("MOUNTS");
     const includes =
       mountsJson === ""
         ? []
         : (parseMounts(mountsJson).find((m) => m.source === "vitepress")?.include ?? []);
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    buildVitepressTier(cfg, tier, [], includes, { base: "/" });
-    console.log("docs build check passed");
+    const { dist } = buildVitepressTier(cfg, tier, [], includes, { base: "/" });
+    const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], cfg.scratch);
+    console.log(
+      `docs build check passed (${checked.judged} links judged across ${checked.pages} pages)`,
+    );
     return;
   }
 
@@ -649,11 +657,18 @@ async function main(): Promise<void> {
   ).slice(0, cfg.maxVersions);
 
   mkdirSync(cfg.site, { recursive: true });
-  for (const mount of assemblyOrder(mounts)) assembleMount(cfg, mount, kept);
+  const scopes: TierScope[] = [];
+  for (const mount of assemblyOrder(mounts)) scopes.push(...assembleMount(cfg, mount, kept));
 
   if (cfg.customDomain !== "") {
     writeExclusive(join(cfg.site, "CNAME"), `${cfg.customDomain}\n`, "the custom-domain CNAME");
   }
+  // After every mount is in place: a link from one mount into another has
+  // no other judge, and the artifact is handed back only when all resolve.
+  const checked = await checkSiteLinks(cfg.site, cfg.rootBase, scopes, cfg.scratch);
+  console.log(
+    `internal links resolve (${checked.judged} links judged across ${checked.pages} current pages)`,
+  );
   setOutput("site-dir", cfg.site);
   console.log(`assembled ${cfg.site}`);
 }
