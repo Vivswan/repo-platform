@@ -58,7 +58,7 @@ describe("normalizeAnswers", () => {
       expected: `_commit: ${SHA.slice(0, 12)}\n`,
     },
     {
-      reason: "a wrong full sha: untouched, so a mis-stamped render shows as drift",
+      reason: "a wrong full sha: untouched, so a wrongly stamped render shows as drift",
       text: `_commit: ${"f".repeat(40)}\n`,
       sha: SHA,
       expected: `_commit: ${"f".repeat(40)}\n`,

@@ -34,8 +34,9 @@ export type ManifestRecord =
   | { class: "starter" }
   | { class: "mirror"; hash: string | null }
   | { class: "link"; hash: string | null };
-/** The union and the shared RECORDED_CLASSES table name the same classes, both ways. */
+/** The union and the shared RECORDED_CLASSES table name the same classes, both ways. Compile-time only. @public */
 export type RecordedClassesWritten = AssertNever<Exclude<RecordedClass, ManifestRecord["class"]>>;
+/** Compile-time only. @public */
 export type WrittenClassesRecorded = AssertNever<Exclude<ManifestRecord["class"], RecordedClass>>;
 
 export type Records = Record<string, ManifestEntryShape>;

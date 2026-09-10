@@ -1,0 +1,17 @@
+name: Typos
+description: >-
+  The fleet's source spell check: the pinned typos action over the caller's
+  checkout with the fleet allowlist shipped beside this action. typos
+  layers a --config file over the one it discovers at the checkout root, so
+  a repository's own _typos.toml extends the fleet allowlist (its
+  extend-words and extend-identifiers add entries; its extend-exclude and
+  extend-ignore-re append) without replacing it. A finding fails the step;
+  the only bypass is an entry in that file, with a reason.
+
+runs:
+  using: composite
+  steps:
+    - name: Check spelling
+      uses: crate-ci/typos@d43b6c087ac471e2ea7b8af622ff15f05c0c365b # v1.50.1
+      with:
+        config: ${{ github.action_path }}/_typos.toml

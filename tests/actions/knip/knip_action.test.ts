@@ -1,0 +1,172 @@
+// The knip action's contract: the repository's own configuration is
+// discovered by knip itself and the fleet default only fills the gap, the
+// run is the pinned knip over that flag alone, and the fleet default adds
+// nothing to knip's own discovery, whose limits the end-to-end controls pin.
+
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
+import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { tempDirs } from "../../shared/temp_dir";
+
+const temp = tempDirs();
+const action = loadAction("actions/knip/action.yml");
+const FLEET_CONFIG = join(REPO_ROOT, "actions/knip/knip.json");
+const FLEET_FLAG = "--config /opt/action/knip.json";
+
+describe("actions/knip", () => {
+  test("a composite of the config resolution and the pinned knip run, no inputs to loosen it", () => {
+    expect(action.runs.using).toBe("composite");
+    expect(action.inputs).toBeUndefined();
+    const [resolve, run] = action.runs.steps;
+    expect(resolve.id).toBe("config");
+    expect(run.env).toEqual({ CONFIG_FLAG: "${{ steps.config.outputs.flag }}" });
+    // npx, not a bun runner: the caller's toolchain may be node alone.
+    expect(String(run.run).trim()).toMatch(/^npx --yes knip@\d+\.\d+\.\d+ \$CONFIG_FLAG$/);
+  });
+
+  test("the fleet runs the knip this repository tests with", () => {
+    const [, run] = action.runs.steps;
+    const pinned = /knip@(\d+\.\d+\.\d+)/.exec(String(run.run))?.[1];
+    const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+    expect(pinned).toBe(pkg.devDependencies.knip);
+  });
+
+  const resolveConfig = (repo: string) =>
+    runBashStep(stepNamed(action, "Resolve the configuration"), {
+      fills: { "${{ github.action_path }}": "/opt/action" },
+      cwd: repo,
+      root: repo,
+    });
+
+  test("resolve: the fleet default when the repository carries no knip configuration", () => {
+    const repo = temp.dir("knip-none-");
+    writeFileSync(join(repo, "package.json"), '{"name": "x"}');
+    const run = resolveConfig(repo);
+    expect([run.exitCode, run.outputs]).toEqual([0, { flag: FLEET_FLAG }]);
+  });
+
+  // knip's own discovery list (KNIP_CONFIG_LOCATIONS in the pinned release)
+  // plus the package.json key: each must win, or a repository using it would
+  // silently get the fleet default instead of its own entries and ignores.
+  const OWN_CONFIGS = [
+    "knip.json",
+    "knip.jsonc",
+    ".knip.json",
+    ".knip.jsonc",
+    "knip.ts",
+    "knip.js",
+    "knip.config.ts",
+    "knip.config.js",
+  ];
+  for (const own of OWN_CONFIGS) {
+    test(`resolve: the repository's own ${own} wins (knip discovers it; no --config)`, () => {
+      const repo = temp.dir("knip-own-");
+      writeFileSync(join(repo, own), "");
+      const run = resolveConfig(repo);
+      expect([run.exitCode, run.outputs]).toEqual([0, { flag: "" }]);
+    });
+  }
+
+  test("resolve: a knip key in package.json wins; a package.json without one does not", () => {
+    const withKey = temp.dir("knip-pkg-");
+    writeFileSync(join(withKey, "package.json"), '{"name": "x", "knip": {"entry": ["a.ts"]}}');
+    expect(resolveConfig(withKey).outputs).toEqual({ flag: "" });
+    const without = temp.dir("knip-pkg-none-");
+    writeFileSync(join(without, "package.json"), '{"name": "x"}');
+    expect(resolveConfig(without).outputs).toEqual({ flag: FLEET_FLAG });
+  });
+
+  test("the fleet default is a valid knip configuration that only relaxes same-file exports", () => {
+    const config = JSON.parse(readFileSync(FLEET_CONFIG, "utf8"));
+    expect(Object.keys(config).sort()).toEqual(["$schema", "ignoreExportsUsedInFile"]);
+    expect(config.ignoreExportsUsedInFile).toBe(true);
+  });
+
+  // End to end with the pinned knip on a repository of the fleet shape: the
+  // default finds a root cli.ts, the workflow-run script and the .github
+  // action script (github-actions plugin), and the test files (bun plugin,
+  // on the `bun test` script). The controls pin the shapes it misses, which
+  // the fleet guidelines send to a repository knip.json.
+  const knip = (repo: string) =>
+    boundedSpawnSync([join(REPO_ROOT, "node_modules/.bin/knip"), "--config", FLEET_CONFIG], {
+      cwd: repo,
+      timeoutMs: 60_000,
+      // knip loads its config through jiti, whose disk cache would land in
+      // the run's TMPDIR and read as a leaked fixture.
+      env: { ...process.env, JITI_FS_CACHE: "false", JITI_CACHE: "false" },
+    });
+  function fleetShapedRepo(options: { testScript: boolean } = { testScript: true }): string {
+    const repo = temp.dir("knip-e2e-");
+    const scripts = options.testScript ? ', "scripts": {"test": "bun test"}' : "";
+    writeFileSync(join(repo, "package.json"), `{"name": "x", "type": "module"${scripts}}`);
+    // A bun repository's tsconfig: knip resolves the .ts-suffixed imports
+    // only under allowImportingTsExtensions.
+    writeFileSync(
+      join(repo, "tsconfig.json"),
+      '{"compilerOptions": {"module": "esnext", "moduleResolution": "bundler", "allowImportingTsExtensions": true, "noEmit": true}}',
+    );
+    writeFileSync(join(repo, "cli.ts"), "console.log(3);\n");
+    mkdirSync(join(repo, ".github/actions/other"), { recursive: true });
+    writeFileSync(
+      join(repo, ".github/actions/other/action.yml"),
+      "runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: bun ${{ github.action_path }}/other.ts\n",
+    );
+    writeFileSync(join(repo, ".github/actions/other/other.ts"), "console.log(1);\n");
+    mkdirSync(join(repo, ".github/workflows"));
+    writeFileSync(
+      join(repo, ".github/workflows/ci.yml"),
+      "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: bun scripts/x.ts\n",
+    );
+    mkdirSync(join(repo, "scripts"));
+    writeFileSync(join(repo, "scripts/x.ts"), "console.log(2);\n");
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, "src/lib.ts"), "export function helper(): number {\n  return 1;\n}\n");
+    mkdirSync(join(repo, "tests"));
+    writeFileSync(
+      join(repo, "tests/lib.test.ts"),
+      'import { helper } from "../src/lib.ts";\nhelper();\n',
+    );
+    return repo;
+  }
+  const unusedFiles = (stdout: string) =>
+    stdout
+      .split("\n")
+      .slice(1)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .sort();
+
+  test("end to end: the fleet-shaped repository is clean under the fleet default", () => {
+    const run = knip(fleetShapedRepo());
+    expect([run.exitCode, run.stdout, run.stderr]).toEqual([0, "", ""]);
+  });
+
+  test("end to end, control: without a bun test script the test files, and what only they import, are unused", () => {
+    const run = knip(fleetShapedRepo({ testScript: false }));
+    expect([run.exitCode, unusedFiles(run.stdout)]).toEqual([
+      1,
+      ["src/lib.ts", "tests/lib.test.ts"],
+    ]);
+  });
+
+  test("end to end, control: a composite action outside .github is an unused file", () => {
+    const repo = fleetShapedRepo();
+    mkdirSync(join(repo, "actions/tool"), { recursive: true });
+    writeFileSync(
+      join(repo, "actions/tool/action.yml"),
+      "runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: bun ${{ github.action_path }}/tool.ts\n",
+    );
+    writeFileSync(join(repo, "actions/tool/tool.ts"), "console.log(4);\n");
+    const run = knip(repo);
+    expect([run.exitCode, unusedFiles(run.stdout)]).toEqual([1, ["actions/tool/tool.ts"]]);
+  });
+
+  test("end to end, control: a dead file still fails under the fleet default", () => {
+    const repo = fleetShapedRepo();
+    writeFileSync(join(repo, "src/dead.ts"), "export const dead = 1;\n");
+    const run = knip(repo);
+    expect([run.exitCode, unusedFiles(run.stdout)]).toEqual([1, ["src/dead.ts"]]);
+  });
+});

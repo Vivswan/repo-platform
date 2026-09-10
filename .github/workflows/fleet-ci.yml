@@ -138,7 +138,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # The six base checks in one job for every visibility (a standalone job
+  # The seven base checks in one job for every visibility (a standalone job
   # bills a rounded-up minute per push); !cancelled() keeps later checks
   # running past a failure, and the judge last names every failed check.
   base-checks:
@@ -175,6 +175,10 @@ jobs:
       - id: yamllint
         if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/yamllint@build
+      # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
+      - id: typos
+        if: ${{ !cancelled() }}
+        uses: Vivswan/repo-platform/actions/typos@build
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
@@ -220,6 +224,78 @@ jobs:
       - uses: actions/checkout@v7
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
+
+  # Actions security audit over every workflow and action.yml, under the
+  # fleet policy (actions/zizmor; a repo-owned .github/zizmor.yml replaces
+  # it). Findings reach code scanning on public repositories only (a
+  # private personal repository has none; != 'true' so an empty visibility
+  # output uploads and fails loudly); a high finding fails the job everywhere.
+  zizmor:
+    needs: [plan]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The SARIF upload only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Vivswan/repo-platform/actions/zizmor@build
+        with:
+          upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
+
+  # Unused files, exports, and dependencies, on the JavaScript toolchains
+  # only: the repository's own toolchain and lockfile install first (knip
+  # resolves imports through node_modules; bun's install serves a
+  # repository selecting both modules), then the action with the fleet
+  # default configuration unless the repository carries knip.json. Each
+  # install runs only when its inputs exist (a repository committed right
+  # after selecting the module has none yet), and setup-node's cache stays
+  # off: it hard-fails on a package.json naming a package manager with no
+  # lockfile.
+  knip:
+    needs: [plan]
+    if: (contains(fromJSON(needs.plan.outputs.modules), 'bun') || contains(fromJSON(needs.plan.outputs.modules), 'node')) && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: contains(fromJSON(needs.plan.outputs.modules), 'bun')
+        with:
+          bun-version-file: .bun-version
+      - id: bun-install
+        if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && hashFiles('package.json') != ''
+        run: bun install --frozen-lockfile
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - id: npm-install
+        if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') && hashFiles('package.json') != '' && hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' }}
+        run: npm ci
+      - uses: Vivswan/repo-platform/actions/knip@build
+        if: steps.bun-install.outcome == 'success' || steps.npm-install.outcome == 'success'
+      - if: steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'
+        run: echo "::notice::knip stood down, the install inputs are missing (package.json, plus package-lock.json or npm-shrinkwrap.json for npm ci)"
+
+  # Semgrep's default registry ruleset; every finding to code scanning, an
+  # ERROR finding fails the job. Public only: code scanning is where the
+  # findings go (!= 'true' as above).
+  semgrep:
+    needs: [plan]
+    if: needs.plan.outputs.private != 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The SARIF upload only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Vivswan/repo-platform/actions/semgrep@build
 
   # CodeQL, one call per language. On the nightly schedule it runs on the
   # week's Monday alone (the plan's weekly output).

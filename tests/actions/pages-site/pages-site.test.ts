@@ -480,7 +480,7 @@ describe("command-mount legacy tags", () => {
     });
   });
 
-  test("no affirmative proof, no skip: an unparseable package.json is inconclusive, never declared", () => {
+  test("no affirmative proof, no skip: an unparsable package.json is inconclusive, never declared", () => {
     // Inconclusive is its own verdict on purpose: the HEAD calibration
     // must not arm skipping off a tree the probe could not read.
     expect(judge(treeProbe, { "package.json": "{ not json" })).toEqual({ kind: "inconclusive" });
@@ -515,7 +515,7 @@ describe("command-mount legacy tags", () => {
       kind: "skip",
       reason: expect.stringContaining("no workspace package named 'vendored'"),
     });
-    // An unparseable candidate breaks the proof of absence.
+    // An unparsable candidate breaks the proof of absence.
     const rotten = { ...tree, "apps/web/package.json": "{ not json" };
     expect(judge(probe, rotten)).toEqual({ kind: "inconclusive" });
   });

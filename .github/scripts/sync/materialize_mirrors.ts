@@ -557,7 +557,7 @@ function main(argv: string[]): number {
 
   const { text: declText, refusal: declRefusal } = declarationSource(root);
 
-  // Unreadable or unparseable refuses (hold-for-review), never red:
+  // Unreadable or unparsable refuses (hold-for-review), never red:
   // earlier steps already consumed this file, so this is defense in depth,
   // and a red would block the PR the fix belongs in.
   let mirrors: MirrorDecl[] = [];

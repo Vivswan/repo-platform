@@ -408,11 +408,11 @@ describe("readDispatchRepo", () => {
     expect(r.stdout + r.stderr).not.toContain("hidden-server");
   });
 
-  test("an unparseable payload fails with a value-free diagnostic (no SyntaxError echo)", () => {
+  test("an unparsable payload fails with a value-free diagnostic (no SyntaxError echo)", () => {
     // A bare identifier is the leaking form: Bun's raw JSON.parse error
     // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
     // that parseJsonWith's fixed diagnostic replaces it.
-    const r = runDispatch('{"inputs": {"repo": hiddenserver}}', "unparseable");
+    const r = runDispatch('{"inputs": {"repo": hiddenserver}}', "unparsable");
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::readDispatchRepo: event payload: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
@@ -510,11 +510,11 @@ describe("discoverWritableRepos", () => {
     expect(r.stdout + r.stderr).not.toContain("shapeless");
   });
 
-  test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
+  test("an unparsable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
     // A bare identifier is the leaking form: Bun's raw JSON.parse error
     // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
     // that parseJsonWith's fixed diagnostic replaces it.
-    const payload = join(root, "unparseable.json");
+    const payload = join(root, "unparsable.json");
     writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
     const r = runDiscover({ STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);

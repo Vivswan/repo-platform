@@ -430,7 +430,7 @@ export async function fileIssue(
     await assignOwner(run, repo, number);
   } else {
     // Same best-effort rule as a failed assignment: the filing succeeded,
-    // so an unparseable create URL must not become a failure - but it must
+    // so an unparsable create URL must not become a failure - but it must
     // not be silent either (the issue stays unassigned and the caller's
     // issue-number output stays empty).
     console.log(

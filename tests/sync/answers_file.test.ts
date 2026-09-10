@@ -69,7 +69,7 @@ describe("readAnswersFile", () => {
     expect(() => read("")).toThrow("top level must be a mapping");
   });
 
-  test("unparseable YAML throws AnswersFileError naming the parse failure", () => {
+  test("unparsable YAML throws AnswersFileError naming the parse failure", () => {
     expect(() => read("a: [\n")).toThrow(AnswersFileError);
     expect(() => read("a: [\n")).toThrow("cannot read as YAML");
   });
@@ -327,7 +327,7 @@ describe("dataFileYaml", () => {
     expect(() => dataFileYaml("", null)).toThrow("top level must be a mapping");
   });
 
-  test("unparseable YAML throws AnswersFileError", () => {
+  test("unparsable YAML throws AnswersFileError", () => {
     expect(() => dataFileYaml("a: [\n", null)).toThrow("cannot read as YAML");
   });
 

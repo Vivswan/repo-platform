@@ -93,7 +93,7 @@ export interface ConflictedFile {
   hunks: number;
 }
 
-export type ManifestStatus = "stamped" | "stale" | "missing" | "unparseable";
+export type ManifestStatus = "stamped" | "stale" | "missing" | "unparsable";
 
 export interface RehearsalOutcome {
   /** The would-be sync PR is non-empty. */
@@ -262,7 +262,7 @@ export function manifestStatus(root: string): ManifestStatus {
     return "missing";
   }
   const stamped = stampManifestText(text, root);
-  if (stamped.status === "rejected") return "unparseable";
+  if (stamped.status === "rejected") return "unparsable";
   if (stamped.status === "partial") return "stale";
   return stamped.out === text ? "stamped" : "stale";
 }
@@ -425,7 +425,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     });
     // Chain the rehearsal build onto the fetched build TIP (the recorded
     // base is its ancestor, so copier's downgrade check - dunamai's
-    // commit-count fallback for unparseable refs - still sees a descendant
+    // commit-count fallback for unparsable refs - still sees a descendant
     // of the old commit). Parenting onto the base instead would drop every
     // real build commit between the two from the ladder's walk, and a rung
     // added and pruned in that span would run in production but not here.
@@ -768,7 +768,7 @@ export const fleetOutcomeSchema = z.discriminatedUnion("kind", [
       conflicts: z.array(z.object({ file: z.string(), hunks: z.number() })),
       malformed: z.array(z.string()),
       retired: z.number(),
-      manifest: z.enum(["stamped", "stale", "missing", "unparseable"]),
+      manifest: z.enum(["stamped", "stale", "missing", "unparsable"]),
       validationOk: z.boolean(),
       validationErrors: z.array(z.string()),
       tripwireReport: z.string(),

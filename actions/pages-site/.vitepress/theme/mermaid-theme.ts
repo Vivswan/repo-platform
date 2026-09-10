@@ -59,5 +59,3 @@ export function mermaidThemeVariables(mode: ScreenMode, hue: Hue) {
     sequenceNumberColor: ground,
   };
 }
-
-export type MermaidThemeVariables = ReturnType<typeof mermaidThemeVariables>;

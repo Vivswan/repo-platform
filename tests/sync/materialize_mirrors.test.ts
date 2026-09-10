@@ -75,7 +75,7 @@ describe("readMirrors", () => {
 
   test("an unknown key refuses the entry - a typo'd targets must not mirror nothing silently", () => {
     const { mirrors, problems } = readMirrors({
-      mirrors: [{ source: "LICENSE.md", tragets: ["template/LICENSE.md"] }],
+      mirrors: [{ source: "LICENSE.md", target: ["template/LICENSE.md"] }],
     });
     expect(mirrors).toEqual([]);
     expect(problems[0]).toContain("unknown key");

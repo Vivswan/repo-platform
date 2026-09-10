@@ -70,7 +70,7 @@ In normal operation a publish commits only on a content change (publish.ts owns 
 | Rerun of an already-published source | identical | healthy | Nothing published. |
 | A content change lands green | differs | any | A new stamped commit. |
 | A stale queued publisher runs after a newer main already published | any | healthy | Skip - newest-green wins (the staleness preflight reads the tip's stamp, before any compose or tree comparison). |
-| Dispatch over a tampered or unparseable stamp | identical | broken | Stamp recovery: a freshly stamped, tree-identical commit. |
+| Dispatch over a tampered or unparsable stamp | identical | broken | Stamp recovery: a freshly stamped, tree-identical commit. |
 
 No commit means no fleet `_commit` bump and no content-free sync PRs.
 

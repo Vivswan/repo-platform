@@ -575,6 +575,49 @@ jobs:
     with:
       language: javascript-typescript
 
+  # The four fleet lint actions dogfooded from the working tree, each the
+  # same call fleet-ci.yml makes at @build. This repository is public, so
+  # the SARIF uploads (zizmor, semgrep) run unconditionally.
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/zizmor
+
+  typos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/typos
+
+  # knip.jsonc at the root is this repository's own configuration.
+  knip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - uses: ./actions/knip
+
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/semgrep
+
   # The shared bun-setup action dogfooded from the working tree: the runner
   # gets the manifests' bun, then one call per planted pin (that version:
   # reused, not installed; an earlier release: installed), judged by ci/.
@@ -658,6 +701,10 @@ jobs:
       - pages-site-build
       - rehearse-fleet
       - codeql-javascript
+      - zizmor
+      - typos
+      - knip
+      - semgrep
       - bun-setup-smoke
       - trivy
     if: always()

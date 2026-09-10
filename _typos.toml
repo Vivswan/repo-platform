@@ -1,0 +1,10 @@
+# This repository's own typos allowlist; the fleet allowlist in
+# actions/typos/_typos.toml applies underneath it.
+
+[files]
+# The typos action's own tests spell their fixture words wrong on purpose.
+extend-exclude = ["tests/actions/typos/typos_action.test.ts"]
+
+[default.extend-words]
+# Test fixtures spell cafe with an escaped e-acute (caf\xe9, Caf&eacute;).
+caf = "caf"

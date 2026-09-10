@@ -846,7 +846,7 @@ describe("main", () => {
   const listA = commit(message("`[fleet-sync: Vivswan/a]`", PROSE));
   const prose1 = commit(message(PROSE));
   const prose2 = commit(message(PROSE));
-  const listBA = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
+  const listBothOwners = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
   const whole = commit(message("[fleet-sync: all] every repo's ci.yml changed", PROSE));
   const bottom = commit(message(PROSE, "[fleet-sync]"));
   const prose3 = commit(message(PROSE));
@@ -887,7 +887,7 @@ describe("main", () => {
   const unpublished = cloneWithBuild("unpublished", null);
   const publishedSeed = cloneWithBuild("published-seed", seed);
   const publishedProse2 = cloneWithBuild("published-prose2", prose2);
-  const publishedListBA = cloneWithBuild("published-list-ba", listBA);
+  const publishedListBothOwners = cloneWithBuild("published-list-both", listBothOwners);
   const publishedProse3 = cloneWithBuild("published-prose3", prose3);
   const publishedWhole = cloneWithBuild("published-whole", whole);
   const publishedMixed = cloneWithBuild("published-mixed", mixed);
@@ -940,12 +940,12 @@ describe("main", () => {
       reason:
         "two directives with overlapping repo lists: the union, in commit order, each repo once",
       cwd: publishedSeed,
-      sha: listBA,
+      sha: listBothOwners,
       output: "armed=true\nrepos=vivswan/a,vivswan/b\n",
       stdout: lines(
         directive(listA, "vivswan/a"),
-        directive(listBA, "vivswan/b,vivswan/a"),
-        syncing(seed, listBA, "vivswan/a,vivswan/b"),
+        directive(listBothOwners, "vivswan/b,vivswan/a"),
+        syncing(seed, listBothOwners, "vivswan/a,vivswan/b"),
       ),
     },
     {
@@ -954,7 +954,7 @@ describe("main", () => {
       sha: whole,
       output: "armed=true\nrepos=all\n",
       stdout: lines(
-        directive(listBA, "vivswan/b,vivswan/a"),
+        directive(listBothOwners, "vivswan/b,vivswan/a"),
         directive(whole, "all"),
         syncing(prose2, whole, "all"),
       ),
@@ -990,11 +990,11 @@ describe("main", () => {
     },
     {
       reason: "a malformed older body warns, a valid block before it still arms",
-      cwd: publishedListBA,
+      cwd: publishedListBothOwners,
       sha: prose3,
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
-      stdout: lines(directive(whole, "all"), poisoned, syncing(listBA, prose3, "all")),
+      stdout: lines(directive(whole, "all"), poisoned, syncing(listBothOwners, prose3, "all")),
     },
     {
       reason: "a malformed older body warns, and the judged commit's own bare form is red",
@@ -1048,7 +1048,7 @@ describe("main", () => {
     },
     {
       reason: "a list: repos is the folded comma list",
-      sha: listBA,
+      sha: listBothOwners,
       exitCode: 0,
       output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
       stdout: (base: string, sha: string) =>

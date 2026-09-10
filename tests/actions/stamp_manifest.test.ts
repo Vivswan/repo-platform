@@ -1,7 +1,7 @@
 // Unit tests for the manifest stamper: in-place hash substitution on the
 // rendered one-entry-per-line layout, the split-region and symlink hashing
 // rules, the self-entry exclusion, conflict-block resolution toward the
-// template side, and the warn-don't-fail contract on unparseable input.
+// template side, and the warn-don't-fail contract on unparsable input.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -498,7 +498,7 @@ describe("the hook as copier runs it", () => {
       stderr: 'expected exactly ["class","hash","commit"]',
     },
     {
-      reason: "a self entry whose slots are nested look-alikes",
+      reason: "a self entry whose slots are nested lookalikes",
       manifest: manifestText([
         `    ".github/repo-platform-manifest.json": {"class": "managed", "meta": {"hash": null, "commit": null}}`,
       ]),

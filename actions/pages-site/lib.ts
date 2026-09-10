@@ -347,7 +347,7 @@ function declaresScript(pkg: ParsedPackage, script: string): boolean {
  *  They are distinct on purpose: "declared" is the AFFIRMATIVE proof the
  *  command resolves through the scripts table (what the HEAD calibration
  *  requires), "inconclusive" is a tree the probe cannot judge (a symlink
- *  on the cwd path, an unparseable package.json) - never proof in either
+ *  on the cwd path, an unparsable package.json) - never proof in either
  *  direction - and only "skip" carries proof of absence. */
 export type CommandTagVerdict =
   | { kind: "declared" }

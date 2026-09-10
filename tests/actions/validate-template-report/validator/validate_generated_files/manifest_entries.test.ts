@@ -300,7 +300,7 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("does not list itself");
   });
 
-  test("an unparseable manifest is its own error", () => {
+  test("an unparsable manifest is its own error", () => {
     const { exitCode, stderr } = runValidator({ [MANIFEST]: "not json\n" });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`${MANIFEST}: does not parse as a manifest`);

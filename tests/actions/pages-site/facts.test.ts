@@ -108,7 +108,7 @@ describe("collectFacts", () => {
     });
   });
 
-  test("degrades every missing or unparseable file to null or empty", () => {
+  test("degrades every missing or unparsable file to null or empty", () => {
     expect(collectFacts(treeOf({}), HEAD_INPUT)).toEqual(EMPTY_FACTS);
     expect(
       collectFacts(
@@ -279,7 +279,7 @@ describe("collectFacts", () => {
       [{ name: "Rust", version: "nightly" }],
     ],
     ["no channel key", '[toolchain]\ncomponents = ["clippy"]\n', []],
-    ["unparseable TOML", "[toolchain\nchannel = \n", []],
+    ["unparsable TOML", "[toolchain\nchannel = \n", []],
   ])("reads rust-toolchain.toml with %s", (_case, toml, toolchains) => {
     expect(collectFacts(treeOf({ "rust-toolchain.toml": toml }), HEAD_INPUT).toolchains).toEqual(
       toolchains,

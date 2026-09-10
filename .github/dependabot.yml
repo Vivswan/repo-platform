@@ -19,15 +19,19 @@ updates:
       - "/actions/dedupe-bun-lockfile"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
+      - "/actions/knip"
       - "/actions/module-render"
       - "/actions/pages-site"
       - "/actions/plan"
       - "/actions/release-health"
+      - "/actions/semgrep"
       - "/actions/trivy"
+      - "/actions/typos"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
       - "/actions/validate-template-report"
       - "/actions/yamllint"
+      - "/actions/zizmor"
     groups:
       actions:
         patterns: ["*"]

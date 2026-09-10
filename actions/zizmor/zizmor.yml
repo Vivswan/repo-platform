@@ -1,0 +1,25 @@
+# The fleet's zizmor policy: actions/zizmor applies it to every managed
+# repository that carries no .github/zizmor.yml of its own.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # The build branch is the fleet's green-gated delivery channel
+        # (docs/build-provenance.md): a moving ref on purpose.
+        Vivswan/repo-platform/*: ref-pin
+        "*": hash-pin
+    # A tag pin reaches code scanning as a medium alert but does not block
+    # while the fleet still pins by tag; the gate blocks at high.
+    remap:
+      severity: medium
+  dangerous-triggers:
+    # The managed auto-assign.yml's workflow_run trigger only calls the
+    # reusable assigners, which never check out or run the triggering code.
+    ignore:
+      - auto-assign.yml
+  bot-conditions:
+    # The managed dependabot-bun-lockfile.yml checks github.actor on purpose:
+    # the pushed fix commit must not re-fire the dedupe; the job runs on
+    # same-repository heads only.
+    ignore:
+      - dependabot-bun-lockfile.yml

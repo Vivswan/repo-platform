@@ -86,7 +86,7 @@ describe("readRecords and recordedHash", () => {
     expect(readRecords(temp.dir("writer-manifest-none-"))).toEqual({ records: {}, problem: null });
   });
 
-  test("a written manifest reads back; an unparseable one is a problem", () => {
+  test("a written manifest reads back; an unparsable one is a problem", () => {
     const target = temp.dir("writer-manifest-");
     writeManifest(target, { "a.txt": { class: "managed", hash: HASH } }, BUILD);
     const { records, problem } = readRecords(target);

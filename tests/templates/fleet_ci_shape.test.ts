@@ -163,10 +163,11 @@ describe("fleet-ci.yml", () => {
     { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@build" },
     { id: "actionlint", tool: "raven-actions/actionlint@" },
     { id: "yamllint", tool: "repo-platform/actions/yamllint@build" },
+    { id: "typos", tool: "repo-platform/actions/typos@build" },
     { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
   ];
 
-  test("base-checks is one job for every visibility (skipped on the schedule): checkout, six !cancelled() steps, the judge last", () => {
+  test("base-checks is one job for every visibility (skipped on the schedule): checkout, seven !cancelled() steps, the judge last", () => {
     const job = fleetCi.jobs["base-checks"];
     expect(job?.if).toBe(SKIP_ON_SCHEDULE);
     const steps = job?.steps ?? [];
@@ -322,6 +323,84 @@ describe("fleet-ci.yml", () => {
     expect((job?.steps ?? []).map((step) => step.uses ?? "")).toContainEqual(
       expect.stringContaining("repo-platform/actions/dependency-review@build"),
     );
+  });
+
+  test("zizmor runs for every visibility, uploading SARIF only where code scanning exists", () => {
+    const job = fleetCi.jobs.zizmor;
+    // Every visibility (the high-severity gate applies to private
+    // repositories too; only the upload is visibility-keyed, on the step's
+    // input), standing down on the schedule with the other gate jobs.
+    expect(job?.if).toBe(SKIP_ON_SCHEDULE);
+    const steps = job?.steps ?? [];
+    expect(steps.map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/zizmor@build"),
+    ]);
+    // != 'true': an empty visibility output uploads and fails loudly rather
+    // than silently skipping the upload.
+    expect(steps[1]?.with).toEqual({
+      "upload-sarif": "${{ needs.plan.outputs.private != 'true' }}",
+    });
+    expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
+  });
+
+  test("knip is armed by the bun or node module; bun's install serves both, npm's only a bun-less repository", () => {
+    const job = fleetCi.jobs.knip;
+    const bun = "contains(fromJSON(needs.plan.outputs.modules), 'bun')";
+    const node = "contains(fromJSON(needs.plan.outputs.modules), 'node')";
+    const hasPackage = "hashFiles('package.json') != ''";
+    const hasNpmLock = "hashFiles('package-lock.json', 'npm-shrinkwrap.json') != ''";
+    expect(job?.if).toBe(`(${bun} || ${node}) && ${SKIP_ON_SCHEDULE}`);
+    const steps = job?.steps ?? [];
+    // A repository selecting both modules has bun.lock, not package-lock.json:
+    // the package-manager choice is resolved once, on the bun module. bun's
+    // frozen install accepts a missing lockfile, npm ci refuses; setup-node's
+    // cache is off as in every other setup-node step (it fails on a
+    // package.json naming a package manager with no lockfile).
+    expect(steps.map((step) => [step.uses ?? step.run, step.if, step.id])).toEqual([
+      [expect.stringContaining("actions/checkout@"), undefined, undefined],
+      [expect.stringContaining("oven-sh/setup-bun@"), bun, undefined],
+      ["bun install --frozen-lockfile", `${bun} && ${hasPackage}`, "bun-install"],
+      [expect.stringContaining("actions/setup-node@"), `\${{ !${bun} }}`, undefined],
+      ["npm ci", `\${{ !${bun} && ${hasPackage} && ${hasNpmLock} }}`, "npm-install"],
+      [
+        expect.stringContaining("repo-platform/actions/knip@build"),
+        "steps.bun-install.outcome == 'success' || steps.npm-install.outcome == 'success'",
+        undefined,
+      ],
+      [
+        expect.stringContaining("::notice::knip stood down"),
+        "steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'",
+        undefined,
+      ],
+    ]);
+    // The pinned version files, so the toolchain-version-files rule's
+    // contract holds here as in every other setup step.
+    expect(steps[1]?.with).toEqual({ "bun-version-file": ".bun-version" });
+    expect(steps[3]?.with).toEqual({
+      "node-version-file": ".node-version",
+      "package-manager-cache": false,
+    });
+    // No SARIF, so no security-events grant.
+    expect(job?.permissions).toBeUndefined();
+  });
+
+  test("semgrep is public-only and calls its action at @build with the SARIF grant", () => {
+    const job = fleetCi.jobs.semgrep;
+    expect(job?.if).toBe(`needs.plan.outputs.private != 'true' && ${SKIP_ON_SCHEDULE}`);
+    expect((job?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/semgrep@build"),
+    ]);
+    expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
+  });
+
+  test("security-events: write is granted only to the jobs that upload SARIF", () => {
+    const granted = Object.entries(fleetCi.jobs)
+      .filter(([, job]) => job.permissions?.["security-events"] === "write")
+      .map(([name]) => name)
+      .sort();
+    expect(granted).toEqual(["codeql", "semgrep", "zizmor"]);
   });
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {

@@ -206,7 +206,7 @@ describe("m0002_fold_base_modules", () => {
       kind: "unreadable",
     },
     {
-      label: "unparseable YAML (selection reports the parse error)",
+      label: "unparsable YAML (selection reports the parse error)",
       files: { [REGISTRATION]: "modules: [agents\n" },
       kind: "unreadable",
     },

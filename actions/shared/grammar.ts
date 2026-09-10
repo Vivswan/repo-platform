@@ -87,6 +87,7 @@ export const MANAGED_REGION_WIRE_FIELDS = ["begin", "end"] as const satisfies re
   keyof ManagedRegionSplit,
   "grammar"
 >[];
+/** Compile-time only. @public */
 export type ManagedRegionWireFieldsExhaustive = AssertNever<
   Exclude<Exclude<keyof ManagedRegionSplit, "grammar">, (typeof MANAGED_REGION_WIRE_FIELDS)[number]>
 >;
@@ -167,10 +168,6 @@ export function splitLines(content: string): Line[] {
   }
   if (start < content.length) out.push({ text: content.slice(start), end: content.length });
   return out;
-}
-
-export function stripCr(text: string): string {
-  return text.replace(/\r+$/, "");
 }
 
 /** Count of lines that are the marker per isMarkerLine. */

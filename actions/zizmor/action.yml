@@ -1,0 +1,60 @@
+name: Zizmor
+description: >-
+  The fleet's GitHub Actions security audit: zizmor over every workflow and
+  action.yml in the caller's checkout, under the fleet policy shipped
+  beside this action unless the repository carries its own
+  .github/zizmor.yml. Two passes of the pinned upstream action: the first
+  uploads every finding of medium severity or above to code scanning as
+  SARIF (public repositories only, as private personal repositories have no
+  code scanning), the second fails the step on any high finding. The only
+  bypass is zizmor's own: an inline `# zizmor: ignore[rule]` comment or a
+  config ignore entry, in the repository, with a reason.
+
+inputs:
+  upload-sarif:
+    description: >-
+      Whether to upload the findings to code scanning ("true"/"false"); pass
+      false where the repository has no code scanning.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # --config suppresses zizmor's own discovery, so the repository's file
+    # is passed explicitly when it exists. The upstream action runs zizmor
+    # in a container that mounts only the workspace, so the fleet policy
+    # (outside it, under the action path) is copied to a workspace dotfile
+    # that zizmor's collection never audits, and removed after the passes.
+    - name: Resolve the policy
+      id: policy
+      shell: bash
+      env:
+        FLEET_POLICY: ${{ github.action_path }}/zizmor.yml
+      run: |
+        if [ -f .github/zizmor.yml ]; then path=.github/zizmor.yml; else path=.zizmor-fleet-policy.yml; cp "$FLEET_POLICY" "$path"; fi
+        echo "path=$path" >>"$GITHUB_OUTPUT"
+
+    # SARIF mode never fails the step (zizmor suppresses its finding exit
+    # codes there), hence the second, judging pass below.
+    - name: Upload every finding to code scanning
+      if: inputs.upload-sarif == 'true'
+      uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      with:
+        config: ${{ steps.policy.outputs.path }}
+        version: 1.30.1
+        min-severity: medium
+        advanced-security: true
+
+    - name: Fail on a high finding
+      uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      with:
+        config: ${{ steps.policy.outputs.path }}
+        version: 1.30.1
+        min-severity: high
+        advanced-security: false
+
+    - name: Remove the copied policy
+      if: always()
+      shell: bash
+      run: rm -f .zizmor-fleet-policy.yml

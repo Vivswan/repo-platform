@@ -70,7 +70,7 @@ export function topLevelProperties(options: string): Map<string, string> | null 
  *  parentheses and type dressing unwrap first, so `(["pipe"])` is still
  *  the array it is): slot texts for a spread-free array literal (an
  *  elided slot reads as empty), unauditable for a spread-carrying array
- *  or unparseable text (a spread can shift or inject stream slots), and
+ *  or unparsable text (a spread can shift or inject stream slots), and
  *  scalar for everything else (a named constant, trusted by its key
  *  like other variable values). */
 function stdioShape(
