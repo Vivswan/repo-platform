@@ -348,23 +348,39 @@ describe("fleet-ci.yml", () => {
     const job = fleetCi.jobs.knip;
     const bun = "contains(fromJSON(needs.plan.outputs.modules), 'bun')";
     const node = "contains(fromJSON(needs.plan.outputs.modules), 'node')";
-    const noBun = "${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}";
+    const hasPackage = "hashFiles('package.json') != ''";
+    const hasNpmLock = "hashFiles('package-lock.json', 'npm-shrinkwrap.json') != ''";
     expect(job?.if).toBe(`(${bun} || ${node}) && ${SKIP_ON_SCHEDULE}`);
     const steps = job?.steps ?? [];
     // A repository selecting both modules has bun.lock, not package-lock.json:
-    // the package-manager choice is resolved once, on the bun module.
-    expect(steps.map((step) => [step.uses ?? step.run, step.if])).toEqual([
-      [expect.stringContaining("actions/checkout@"), undefined],
-      [expect.stringContaining("oven-sh/setup-bun@"), bun],
-      ["bun install --frozen-lockfile", bun],
-      [expect.stringContaining("actions/setup-node@"), noBun],
-      ["npm ci", noBun],
-      [expect.stringContaining("repo-platform/actions/knip@build"), undefined],
+    // the package-manager choice is resolved once, on the bun module. bun's
+    // frozen install accepts a missing lockfile, npm ci refuses; setup-node's
+    // cache is off as in every other setup-node step (it fails on a
+    // package.json naming a package manager with no lockfile).
+    expect(steps.map((step) => [step.uses ?? step.run, step.if, step.id])).toEqual([
+      [expect.stringContaining("actions/checkout@"), undefined, undefined],
+      [expect.stringContaining("oven-sh/setup-bun@"), bun, undefined],
+      ["bun install --frozen-lockfile", `${bun} && ${hasPackage}`, "bun-install"],
+      [expect.stringContaining("actions/setup-node@"), `\${{ !${bun} }}`, undefined],
+      ["npm ci", `\${{ !${bun} && ${hasPackage} && ${hasNpmLock} }}`, "npm-install"],
+      [
+        expect.stringContaining("repo-platform/actions/knip@build"),
+        "steps.bun-install.outcome == 'success' || steps.npm-install.outcome == 'success'",
+        undefined,
+      ],
+      [
+        expect.stringContaining("::notice::knip stood down"),
+        "steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'",
+        undefined,
+      ],
     ]);
     // The pinned version files, so the toolchain-version-files rule's
     // contract holds here as in every other setup step.
     expect(steps[1]?.with).toEqual({ "bun-version-file": ".bun-version" });
-    expect(steps[3]?.with).toEqual({ "node-version-file": ".node-version" });
+    expect(steps[3]?.with).toEqual({
+      "node-version-file": ".node-version",
+      "package-manager-cache": false,
+    });
     // No SARIF, so no security-events grant.
     expect(job?.permissions).toBeUndefined();
   });
