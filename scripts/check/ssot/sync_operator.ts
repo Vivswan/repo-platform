@@ -178,6 +178,17 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
       got: "a selector env that differs between the two jobs",
     });
   }
+  const planTimeout = Number(plan["timeout-minutes"]);
+  const rowTimeout = Number(sync["timeout-minutes"]);
+  if (!Number.isFinite(planTimeout))
+    throw new Error(`${rel}: no plan timeout-minutes - anchor lost`);
+  if (!(rowTimeout >= planTimeout)) {
+    mismatches.push({
+      file: rel,
+      expected: `the sync job's timeout-minutes at least the plan's (${planTimeout}): it re-runs the plan's probe, whose hung calls must fail by their own bound`,
+      got: `timeout-minutes: ${String(sync["timeout-minutes"] ?? "(none)")}`,
+    });
+  }
   return mismatches;
 }
 

@@ -3,8 +3,9 @@
 // into the public log: a clean writer run becomes a commit on the rolling
 // automation branch and a PR carrying the writer's report (auto-merge
 // armed only when the report holds nothing and the run is not manual);
-// a failed checkout, writer, or push becomes one reused issue in the
-// target carrying the log tails. Every line this script would say goes to
+// a tree that already matches the build closes any open sync PR as
+// obsolete; a failed checkout, writer, or push becomes one reused issue
+// in the target carrying the log tails. Every line this script would say goes to
 // $RUNNER_TEMP/deliver.log; the verdict for verdict.ts goes to
 // $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed.
 //
@@ -305,6 +306,60 @@ class Delivery {
     return number === "" ? null : { number };
   }
 
+  /** Turns auto-merge off on the sync PR when it is on; a failed read or
+   *  disarm files the failure, since an armed PR could merge on its own. */
+  disarm(number: string): void {
+    const armed = this.run(
+      [
+        "gh",
+        "pr",
+        "view",
+        number,
+        "-R",
+        this.target,
+        "--json",
+        "autoMergeRequest",
+        "--jq",
+        ".autoMergeRequest != null",
+      ],
+      "gh pr view",
+    );
+    if (armed.exitCode !== 0)
+      this.fileFailure("reading the sync pull request's auto-merge state failed");
+    if (armed.stdout.trim() !== "true") return;
+    const disarm = this.run(
+      ["gh", "pr", "merge", number, "-R", this.target, "--disable-auto"],
+      "gh pr merge --disable-auto",
+    );
+    if (disarm.exitCode !== 0)
+      this.fileFailure("disarming the sync pull request's auto-merge failed");
+  }
+
+  /** A tree that already matches the build makes any open sync PR
+   *  obsolete (a selection reverted on the default branch, say): it is
+   *  disarmed, closed, and its branch deleted so stale files never merge. */
+  closeObsoletePr(): void {
+    const existing = this.openPr();
+    if (existing === null) return;
+    this.disarm(existing.number);
+    const closed = this.run(
+      [
+        "gh",
+        "pr",
+        "close",
+        existing.number,
+        "-R",
+        this.target,
+        "--delete-branch",
+        "--comment",
+        `superseded: the target already matches build ${this.build}`,
+      ],
+      "gh pr close",
+    );
+    if (closed.exitCode !== 0) this.fileFailure("closing the obsolete sync pull request failed");
+    this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
+  }
+
   deliver(): void {
     if (env("CHECKOUT_OUTCOME") !== "success") this.fileFailure("the target checkout failed");
     if (env("WRITER_OUTCOME") !== "success") this.fileFailure("the writer exited with an error");
@@ -325,6 +380,7 @@ class Delivery {
     if (status.exitCode !== 0) this.fileFailure("reading the working tree status failed");
     if (status.stdout.trim() === "") {
       this.log("the tree already matches the build; nothing to deliver");
+      this.closeObsoletePr();
       this.closeFailureIssue();
       this.verdict("unchanged");
       return;
@@ -341,33 +397,7 @@ class Delivery {
     // An armed PR is disarmed before the branch moves: the incoming
     // revision may need review; re-arming below is the clean path's call.
     const existing = this.openPr();
-    if (existing !== null) {
-      const armed = this.run(
-        [
-          "gh",
-          "pr",
-          "view",
-          existing.number,
-          "-R",
-          this.target,
-          "--json",
-          "autoMergeRequest",
-          "--jq",
-          ".autoMergeRequest != null",
-        ],
-        "gh pr view",
-      );
-      if (armed.exitCode !== 0)
-        this.fileFailure("reading the sync pull request's auto-merge state failed");
-      if (armed.stdout.trim() === "true") {
-        const disarm = this.run(
-          ["gh", "pr", "merge", existing.number, "-R", this.target, "--disable-auto"],
-          "gh pr merge --disable-auto",
-        );
-        if (disarm.exitCode !== 0)
-          this.fileFailure("disarming the sync pull request's auto-merge failed");
-      }
-    }
+    if (existing !== null) this.disarm(existing.number);
 
     // The checkout kept no credentials; the push alone authenticates, with
     // a lease on the branch's remote tip so a concurrent writer fails loudly.

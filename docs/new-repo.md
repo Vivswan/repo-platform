@@ -157,14 +157,15 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 
 ### Changing the module selection
 
-A module change is one PR in the managed repository. CI itself needs no render: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run. The module's DATA files (its workflows, starters, and the recorded answers) still render per selection, and the render lands on that same PR. The `module-render` job in fleet-ci.yml is the check that says whether it has:
+A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its render. The `module-render` job in fleet-ci.yml judges the first one and stays red until the render lands, so the owner lands the registration edit past it:
 
 ```text
-PR edits .repo-platform.yml (or a recorded answer)
-  -> module-render RED: the managed files and .copier-answers.yml do not match the render of the selected modules
-     remedy: gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f branch=<pr-branch>
-  -> the sync pushes one commit onto the PR branch (the render, three-way merged like every sync)
-  -> module-render GREEN; validate-template green; merge
+PR edits modules: in .repo-platform.yml
+  -> module-render RED: the tree does not match the render of the selected modules
+     the owner lands the registration edit (the render cannot precede it: the sync reads the default branch), then
+             gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
+  -> the sync opens a PR carrying the render (the writer replaces platform files whole), held for review
+  -> review and merge the sync PR; validate-template green
 ```
 
 | | |
@@ -172,18 +173,17 @@ PR edits .repo-platform.yml (or a recorded answer)
 | When it runs | Pull requests only (a push has no selection diff). A PR that changes neither `.repo-platform.yml` nor `.github/.copier-answers.yml` passes as a no-op; the managed files stand as `validate-template` judged them. |
 | What it compares | A fresh copier render of the template at the PR tree's recorded `_commit` with the PR's module selection, seeded with the PR's own answers file (the way `copier update` seeds the render it merges), against the PR tree: every managed file whole, every split file's managed region, every symlink's target, hashed the way the manifest stamp hashes. Starters are seeded once and never compared; a managed file the tree lists but the render no longer carries (a deselected module's) is a finding too, since the sync deletes it. |
 | Why the recorded `_commit` | The same principle as the template check: judged at the repository's own build commit, the render cannot go red because repo-platform published a newer build while the PR was open. The sync moves `_commit` to the build tip when it pushes, and the check follows. |
-| On a finding | The job fails with one annotation per stale path and the dispatch line above, also in the step summary. Run it (the fleet PAT pushes; the managed repo's own token is read-only by design), `gh run watch` the sync run, and the commit appears on the PR. |
+| On a finding | The job fails with one annotation per stale path, also in the step summary. The owner lands the registration edit, runs the sync as above (the fleet PAT pushes; the managed repo's own token is read-only by design), `gh run watch`es the sync run, and the render arrives as a sync PR waiting for review. |
 | Admission | The recorded `_commit` must be a published commit of repo-platform's `build` branch before its render hooks run with `--trust`: the same admission the template check makes. A fork PR's head branch is outside the fleet PAT's grant, so the render must be pushed from a same-repository branch. |
-| Enforced by | [actions/module-render](../actions/module-render/action.yml), called by fleet-ci.yml's `module-render` job. The sync side is sync-repos.yml's `branch` input ([the branch dispatch](#the-branch-dispatch)). |
+| Enforced by | [actions/module-render](../actions/module-render/action.yml), called by fleet-ci.yml's `module-render` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
 
-#### The branch dispatch
+#### The manual run
 
-`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f branch=<branch>` runs the ordinary sync against `<branch>` instead of the default branch and pushes the result onto it instead of opening a sync PR:
+`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` runs the ordinary sync against the repository's default branch and delivers the render as a sync PR that waits for review:
 
-- Same code path as a weekly sync: the migration ladder, the three-way `copier update` with the branch's selection, the split-file rebuild, the retired-file cleanup, the repo-owned preserve step, the manifest stamp, and validation. Only the delivery differs: one commit on the branch, the PR-body sections posted as a comment on the branch's PR when one exists.
-- The commit subject names the change: `chore: render the fuzzer module` when the branch adds a module, `chore: remove the pages module render` when it drops one, `chore: render the module selection (+a, -b)` for both, and the ordinary `chore: update repo-platform template to build@<sha>` when the selection is unchanged (an answers-only edit, say).
-- Refused, with the reason in the run log: `branch` with `repo` empty, `all`, a visibility token, or more than one slug; `branch` naming the default branch (the default-branch flow is the sync PR); a branch that does not exist; `branch` with `recover=recopy`.
-- A failed branch dispatch surfaces where every sync failure does: the run log for a public repository, the failure-report issue on a private one ([private-repos.md](private-repos.md)). A validation failure after the push fails the run and names the branch.
+- Same code path as a weekly sync ([sync.md](sync.md#the-operator)): the writer renders the selection the registration on the default branch carries and replaces platform files whole; `manual=true` only keeps auto-merge off, so a clean render waits for a human too.
+- A broken target is re-synced the same way: re-run the workflow, and the writer replaces platform files whole. There is no recovery mode.
+- A failed run surfaces where every sync failure does: from the target checkout on, one `[repo-platform] sync failed` issue in the target repository carrying the log tails ([private-repos.md](private-repos.md)); a failure before the target is resolved (the plan job, or a row's setup) is red in the run itself, and re-running the workflow is the remedy ([sync.md](sync.md#the-operator)).
 
 ### What each module adds
 

@@ -92,6 +92,14 @@ describe("syncOperatorMismatches", () => {
       expected: "the plan's exact env",
     },
     {
+      reason: "a row timeout under the plan's (the re-run probe would die by a runner kill)",
+      text: mutate(
+        "    timeout-minutes: 60\n    steps:\n      - uses: actions/checkout@v7\n\n      - uses: oven-sh/setup-bun@v2",
+        "    timeout-minutes: 30\n    steps:\n      - uses: actions/checkout@v7\n\n      - uses: oven-sh/setup-bun@v2",
+      ),
+      expected: "timeout-minutes at least the plan's (60)",
+    },
+    {
       reason: "a second printer step",
       text: mutate(
         "        run: bun .github/scripts/sync/verdict.ts row\n",

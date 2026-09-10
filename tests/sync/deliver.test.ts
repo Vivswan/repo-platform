@@ -1,8 +1,9 @@
 // deliver.ts run as the workflow runs it, with gh and git stubbed on PATH:
 // the three clean outcomes and the failure path each write their verdict,
 // the PR is armed only for a clean report on a non-manual run, an armed PR
-// is disarmed before the branch moves, the failure issue carries the log
-// tails, and nothing ever reaches stdout or stderr.
+// is disarmed before the branch moves, an unchanged tree closes the PR it
+// makes obsolete, the failure issue carries the log tails, and nothing
+// ever reaches stdout or stderr.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,6 +45,7 @@ const GIT_LINES = [
 const GH_LINES = [
   'printf "gh %s\\n" "$*" >>"$STUB_SEQUENCE"',
   'case "$*" in',
+  '  "${STUB_GH_FAIL:-<none>}"*) echo "gh: HTTP 502" >&2; exit 1 ;;',
   '  "api user "*) echo token-bot ;;',
   '  *"/issues --method GET"*) printf "%s" "${STUB_ISSUE:-}" ;;',
   '  *"/issues --method POST"*|*"/issues/"*" --method PATCH"*) if [ "${STUB_ISSUE_FAIL:-}" = 1 ]; then echo "gh: Forbidden (HTTP 403)" >&2; exit 1; fi ;;',
@@ -138,14 +140,62 @@ const silent = (result: Run) => {
 };
 
 describe("deliver.ts", () => {
-  test("a tree the build already matches is unchanged: no push, no PR, no issue", () => {
+  test("a tree the build already matches is unchanged: no push, no issue, and with no open PR nothing beyond the lookup", () => {
     const result = run();
     silent(result);
     expect(result.exitCode).toBe(0);
     expect(result.verdict).toBe("unchanged");
     expect(calls(result.git, "push")).toEqual([]);
-    expect(calls(result.gh, "pr")).toEqual([]);
+    expect(calls(result.gh, "pr").map((argv) => argv[2])).toEqual(["list"]);
+    expect(result.gh.some((argv) => argv[4] === "POST")).toBe(false);
   });
+
+  test("an unchanged tree closes the open armed PR as obsolete: disarmed, closed with the reason, branch deleted", () => {
+    const result = run({ stub: { STUB_PR: "12", STUB_ARMED: "true" } });
+    silent(result);
+    expect(result.verdict).toBe("unchanged");
+    const disarmAt = result.sequence.findIndex((line) => line.includes("--disable-auto"));
+    const closeAt = result.sequence.findIndex((line) => line.startsWith("gh pr close"));
+    expect(disarmAt).toBeGreaterThanOrEqual(0);
+    expect(closeAt).toBeGreaterThan(disarmAt);
+    const close = calls(result.gh, "pr", "close")[0];
+    expect(close.slice(3)).toEqual([
+      "12",
+      "-R",
+      TARGET,
+      "--delete-branch",
+      "--comment",
+      `superseded: the target already matches build ${BUILD}`,
+    ]);
+    expect(calls(result.git, "push")).toEqual([]);
+    expect(calls(result.gh, "pr", "edit")).toEqual([]);
+    expect(result.gh.some((argv) => argv.includes("--auto"))).toBe(false);
+    expect(result.log).toContain("closed the obsolete sync pull request #12");
+  });
+
+  test("an unchanged tree closes an open PR that was never armed without a disarm call", () => {
+    const result = run({ stub: { STUB_PR: "12" } });
+    expect(result.verdict).toBe("unchanged");
+    expect(result.gh.some((argv) => argv.includes("--disable-auto"))).toBe(false);
+    expect(calls(result.gh, "pr", "close")[0]).toContain("12");
+  });
+
+  test.each([
+    ["pr list", "listing the sync pull request failed"],
+    ["pr view", "reading the sync pull request's auto-merge state failed"],
+    ["pr merge", "disarming the sync pull request's auto-merge failed"],
+    ["pr close", "closing the obsolete sync pull request failed"],
+  ])(
+    "an unchanged tree whose obsolete-PR cleanup fails at `gh %s` files the failure and stops there",
+    (command, reason) => {
+      const result = run({ stub: { STUB_PR: "12", STUB_ARMED: "true", STUB_GH_FAIL: command } });
+      silent(result);
+      expect(result.verdict).toBe("failed");
+      expect(result.issueBody).toContain(reason);
+      const prLines = result.sequence.filter((line) => line.startsWith("gh pr"));
+      expect(prLines.at(-1)?.startsWith(`gh ${command}`)).toBe(true);
+    },
+  );
 
   test("a clean change on a non-manual run opens the PR and arms auto-merge", () => {
     const result = run({ stub: { STUB_DIRTY: "1" } });
