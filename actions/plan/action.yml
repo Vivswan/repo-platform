@@ -25,9 +25,12 @@ inputs:
       github.event.repository.private). Empty asks the API with GH_TOKEN.
     required: false
     default: ""
-  # Mode pages only: a caller that configures the deploy itself. A non-empty
-  # mounts publishes these eight values unchanged (setup grammar-checked)
-  # and the registration is not read; they leave with the last such caller.
+  # Mode pages only, the caller-configured deploy: a non-empty mounts
+  # publishes these eight values unchanged (setup grammar-checked) and the
+  # registration is not read. A caller passing no mounts is
+  # registration-configured: the plan resolves all eight from its
+  # .repo-platform.yml. Both stay supported (repo-platform's own docs-site.yml
+  # is caller-configured: this repository carries no registration).
   mounts:
     description: Caller-configured deploys only; the JSON mount list. Empty resolves the deploy from the registration.
     required: false

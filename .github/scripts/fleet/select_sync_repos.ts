@@ -24,10 +24,10 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { declaredModules } from "../../../actions/plan/registration.ts";
 import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
 import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
-import { declaredModules } from "../sync/modules.ts";
 import {
   captureNetwork,
   notAdoptedNotice,

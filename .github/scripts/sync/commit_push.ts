@@ -9,12 +9,12 @@
 import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { readModules } from "../../../actions/plan/registration.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { parseModules } from "../shared/modules.ts";
 import { capture, must, mustCapture, redactText } from "../shared/proc.ts";
 import { branchSubject, syncSubject } from "./branch_subject.ts";
-import { readModules } from "./modules.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
 
 const target = requireEnv("TARGET");

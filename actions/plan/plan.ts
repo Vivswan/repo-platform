@@ -8,21 +8,21 @@
 // Two modes. `default` resolves what fleet-ci.yml's jobs key on: the
 // selection in canonical order, the visibility, the skills directory, the
 // CodeQL languages, and the tracking labels. `pages` resolves the deploy
-// configuration reusable-pages.yml used to take as inputs: the mount list,
-// the build toolchain, the commands, the output directory, the site title,
-// and the link-rot label. Fail closed: an unknown module, an unknown key,
-// a malformed value, or a missing registration fails the step - nothing
-// here ever defaults an invalid registration into a green run.
+// configuration reusable-pages.yml consumes (mounts, toolchain, commands,
+// output directory, site title, link-rot label), from the registration or,
+// for a caller passing `mounts`, from its own inputs (below). Fail closed:
+// an unknown module, an unknown key, a malformed value, or a missing
+// registration fails the step - nothing here ever defaults an invalid
+// registration into a green run.
 //
 // Env: MODE (default|pages), PRIVATE ("true"/"false"; empty asks the API
-// for GITHUB_REPOSITORY with GH_TOKEN), MODULES_DIR (the build branch's
-// modules/<name>.yml copies), COPIER_FILE (the build branch's copier.yml,
-// whose module choices are the vocabulary and its order),
-// RESERVED_LABELS_FILE (the labels the template manages, which no tracking
-// stream may reuse), GITHUB_OUTPUT. In pages mode a non-empty CALLER_MOUNTS
-// means the caller configured the deploy itself: the CALLER_* values are
-// published unchanged after the setup grammar check and the registration
-// is not read. Runs in the caller's checkout.
+// for GITHUB_REPOSITORY with GH_TOKEN), MODULES_DIR and COPIER_FILE (the
+// build branch's modules/<name>.yml copies and its copier.yml, whose module
+// choices are the vocabulary and its order), RESERVED_LABELS_FILE (the
+// labels the template manages, which no tracking stream may reuse), and
+// GITHUB_OUTPUT. A non-empty CALLER_MOUNTS (pages mode) is the caller-
+// configured deploy: the CALLER_* values are published unchanged after the
+// setup grammar check, the registration unread. Runs in the caller's checkout.
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeSync } from "node:fs";

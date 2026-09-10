@@ -15,7 +15,15 @@
 // empty or false and the RULE consuming them owns its anchor-lost throw
 // - exactly where the emptiness checks live today.
 
-import { type Expression, Node, Project, type SourceFile, SyntaxKind } from "ts-morph";
+import {
+  type CallExpression,
+  type PropertyAssignment,
+  type Expression,
+  Node,
+  Project,
+  type SourceFile,
+  SyntaxKind,
+} from "ts-morph";
 
 // One shared project; sources are parsed once per distinct text (rules and
 // tests re-scan the same bytes many times per run).
@@ -168,15 +176,66 @@ export function constRegexSource(source: string, name: string, anchor: ConstAnch
   if (initializer === undefined || !Node.isRegularExpressionLiteral(initializer)) {
     anchorLost(anchor.where, anchor.what, `const ${name} is not a regex literal`);
   }
-  const text = initializer.getText();
+  return regexBody(initializer.getText(), anchor, `const ${name}`);
+}
+
+/** The body between a regex literal's slashes; flags are a lost anchor. */
+function regexBody(text: string, anchor: ConstAnchor, subject: string): string {
   const close = text.lastIndexOf("/");
   if (!text.startsWith("/") || close <= 0) {
-    anchorLost(anchor.where, anchor.what, `const ${name} regex text is unreadable`);
+    anchorLost(anchor.where, anchor.what, `${subject} regex text is unreadable`);
   }
   if (text.slice(close + 1) !== "") {
-    anchorLost(anchor.where, anchor.what, `const ${name} carries regex flags`);
+    anchorLost(anchor.where, anchor.what, `${subject} carries regex flags`);
   }
   return text.slice(1, close);
+}
+
+/** The pattern body of the regex literal a zod `.regex(...)` call pins
+ *  under the object property `key` - the shape of an inline schema copy of
+ *  a regex some other file exports as a const. Read off the property's own
+ *  method chain (`z.string().regex(...).optional()`), never its arguments,
+ *  so a `.regex()` nested in `.meta({...})` or a refinement is not the
+ *  pin. Exactly one such property in the file, its chain carrying exactly
+ *  one `.regex(<literal>)`, flagless like constRegexSource; anything else
+ *  is a lost anchor. */
+export function propertyRegexSource(source: string, key: string, anchor: ConstAnchor): string {
+  const chainRegexCalls = (initializer: Expression | undefined) => {
+    const calls: CallExpression[] = [];
+    let node = initializer === undefined ? undefined : unwrapExpression(initializer);
+    while (node !== undefined && Node.isCallExpression(node)) {
+      const callee = unwrapExpression(node.getExpression());
+      if (!Node.isPropertyAccessExpression(callee)) break;
+      if (callee.getName() === "regex") calls.push(node);
+      node = unwrapExpression(callee.getExpression());
+    }
+    return calls;
+  };
+  const properties = parseTs(source)
+    .forEachDescendantAsArray()
+    .filter((node): node is PropertyAssignment => Node.isPropertyAssignment(node))
+    .filter((property) => property.getName() === key)
+    .filter((property) => chainRegexCalls(property.getInitializer()).length > 0);
+  if (properties.length !== 1) {
+    anchorLost(
+      anchor.where,
+      anchor.what,
+      `expected exactly one property ${key} whose chain carries a .regex() call, found ${properties.length}`,
+    );
+  }
+  const calls = chainRegexCalls(properties[0].getInitializer());
+  if (calls.length !== 1) {
+    anchorLost(anchor.where, anchor.what, `property ${key} carries ${calls.length} .regex() calls`);
+  }
+  const literal = calls[0].getArguments()[0];
+  if (literal === undefined || !Node.isRegularExpressionLiteral(literal)) {
+    anchorLost(
+      anchor.where,
+      anchor.what,
+      `property ${key} .regex() argument is not a regex literal`,
+    );
+  }
+  return regexBody(literal.getText(), anchor, `property ${key}`);
 }
 
 /** Whether any TEMPLATE literal in `source` carries `needle` in its RAW

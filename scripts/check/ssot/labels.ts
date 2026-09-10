@@ -5,7 +5,7 @@
 import { parse as parseYaml } from "yaml";
 import { loadLayer } from "../../../.github/scripts/fleet/render_managed_settings.ts";
 import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
-import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
+import { constRegexSource, constStringValue, propertyRegexSource } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
 import {
   asRecord,
@@ -22,6 +22,46 @@ import type { Rule } from "./rule_roster.ts";
 /** Normalize python-style \Z end anchors to $, for regex-pair comparison. */
 export function zToDollar(pattern: string): string {
   return pattern.replace(/\\Z$/, "$");
+}
+
+/** The hand-copied homes of the fuzz-issue action's LABEL_RE, each read off
+ *  its AST: the exported const twins, and the zod `.regex()` literals pinned
+ *  under a schema property. copier.yml's validators are compared in the
+ *  rule itself; the generated module.schema.json rides on module_manifests. */
+export const LABEL_RE_COPIES: readonly {
+  file: string;
+  shape: "const" | "property";
+  name: string;
+}[] = [
+  { file: "actions/plan/registration.ts", shape: "const", name: "LABEL_RE" },
+  { file: "actions/release-health/release-health.ts", shape: "const", name: "LABEL_RE" },
+  { file: "scripts/generate/render_dogfood.ts", shape: "property", name: "docs_site_label" },
+  { file: "scripts/lib/module_manifests.ts", shape: "property", name: "default" },
+];
+
+/** Each copy in LABEL_RE_COPIES whose pattern body differs from `labelRe`
+ *  (the fuzz-issue action's), sources read through `readSource`. */
+export function labelRegexCopyMismatches(
+  labelRe: string,
+  readSource: (rel: string) => string,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const copy of LABEL_RE_COPIES) {
+    const anchor = { where: copy.file, what: `the ${copy.name} label regex` };
+    const source = readSource(copy.file);
+    const got =
+      copy.shape === "const"
+        ? constRegexSource(source, copy.name, { ...anchor, exported: true })
+        : propertyRegexSource(source, copy.name, anchor);
+    if (got !== labelRe) {
+      mismatches.push({
+        file: `${copy.file} ${copy.name}`,
+        expected: `${labelRe} (actions/fuzz-issue/fuzz-issue.ts LABEL_RE)`,
+        got,
+      });
+    }
+  }
+  return mismatches;
 }
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
@@ -316,12 +356,12 @@ export const labelRules: Rule[] = [
   },
   {
     // Every tracking-label copier question (one per manifest tracking_label
-    // stream) must validate exactly the shape the fuzz-issue action
-    // enforces, and every later stream's validator must carry the
-    // case-insensitive cross-answer collision clause against each earlier
-    // answer - the validator is the collision boundary at generation
-    // time (the fleet preflight covers the applies), so deleting the
-    // clause must fail here.
+    // stream) and every hand-copied regex (LABEL_RE_COPIES) must state
+    // exactly the shape the fuzz-issue action enforces, and every later
+    // stream's validator must carry the case-insensitive cross-answer
+    // collision clause against each earlier answer - the validator is the
+    // collision boundary at generation time (the fleet preflight covers
+    // the applies), so deleting the clause must fail here.
     name: "tracking-label-regex",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -331,6 +371,7 @@ export const labelRules: Rule[] = [
         what: "LABEL_RE",
         exported: true,
       });
+      mismatches.push(...labelRegexCopyMismatches(labelRe, read));
       const streams = trackingManifests();
       for (const [index, { tracking }] of streams.entries()) {
         const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);

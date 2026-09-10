@@ -15,6 +15,7 @@ import {
   literalMatches,
   parseTs,
   propertyAssignmentCarries,
+  propertyRegexSource,
   rootIdentifier,
   templateCarries,
   unwrapExpression,
@@ -115,6 +116,58 @@ describe("constRegexSource", () => {
     expect(() => constRegexSource('const RE = new RegExp("x");\n', "RE", anchor)).toThrow(
       "not a regex literal",
     );
+  });
+});
+
+describe("propertyRegexSource", () => {
+  const schema = (pattern: string) =>
+    `const s = z.strictObject({\n  answer: z.string().regex(/^[a-z]+$/, "x"),\n  label: z.string().regex(${pattern}, "y"),\n});\n`;
+
+  test("returns the body of the .regex() literal under the named property", () => {
+    expect(propertyRegexSource(schema("/^[A-Z]+$/"), "label", anchor)).toBe("^[A-Z]+$");
+    // A .regex() call reached through a wrapping chain still belongs to the property.
+    expect(
+      propertyRegexSource("const s = { k: z.string().min(1).regex(/^a$/).optional() };\n", "k", anchor),
+    ).toBe("^a$");
+  });
+
+  test.each([
+    { reason: "no such property", key: "missing", source: schema("/^x$/") },
+    { reason: "the property carries no .regex() call", key: "k", source: "const s = { k: z.string() };\n" },
+    {
+      reason: "two properties of that name carry one",
+      key: "label",
+      source: `${schema("/^x$/")}const t = { label: z.string().regex(/^y$/) };\n`,
+    },
+  ])("$reason is a lost anchor", ({ key, source }) => {
+    expect(() => propertyRegexSource(source, key, anchor)).toThrow("whose chain carries a .regex() call");
+  });
+
+  test("a non-literal argument, two .regex() calls, or flags are lost anchors", () => {
+    expect(() =>
+      propertyRegexSource('const s = { k: z.string().regex(new RegExp("x")) };\n', "k", anchor),
+    ).toThrow("not a regex literal");
+    expect(() =>
+      propertyRegexSource("const s = { k: z.string().regex(/a/).regex(/b/) };\n", "k", anchor),
+    ).toThrow("carries 2 .regex() calls");
+    expect(() => propertyRegexSource(schema("/^x$/i"), "label", anchor)).toThrow("regex flags");
+  });
+
+  test("a .regex() nested in an argument is not the property's pin", () => {
+    // The chain is z.string().meta(...): the regex inside meta's object is an
+    // argument, so the property carries no pin and the anchor is lost.
+    const nested =
+      "const s = { k: z.string().meta({ nested: z.string().regex(/^[a-z]+$/) }) };\n";
+    expect(() => propertyRegexSource(nested, "k", anchor)).toThrow("found 0");
+    // With a pin on the chain, the nested one neither adds to nor replaces it.
+    const both =
+      "const s = { k: z.string().regex(/^x$/).meta({ n: z.string().regex(/^y$/) }) };\n";
+    expect(propertyRegexSource(both, "k", anchor)).toBe("^x$");
+  });
+
+  test("a decoy in a comment or a string is not a property", () => {
+    const source = '// label: z.string().regex(/^decoy$/)\nconst s = { note: "label: .regex(/^d$/)" };\n';
+    expect(() => propertyRegexSource(source, "label", anchor)).toThrow("found 0");
   });
 });
 

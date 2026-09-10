@@ -1,30 +1,28 @@
 # Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
 # pages-site action (actions/pages-site@build) from a mount list (the
-# contract: docs/pages.md). The deploy configures itself: the config job
-# runs the plan action (actions/plan@build, mode pages) over the caller's
-# registration and resolves the mounts, toolchain setup, commands, output
-# directory, site title, and link-rot label; its own job, so the action's
-# bun never reaches the PATH the caller's build commands run on. A caller
-# that still hands over `mounts` configures the deploy itself through the
-# remaining inputs, which the plan publishes unchanged after checking the
-# setup grammar; those inputs leave with the last such caller. Per
-# versioned mount:
-# <mount>latest/ builds from the default branch head, <mount><tag>/ from
-# each served version tag (newest vars.PAGES_MAX_VERSIONS or 5; a tag that
-# structurally cannot build is skipped with a notice), and the mount root
-# serves the newest served version, or the default branch head while none
-# serve. An unversioned mount is one build of the default branch head.
-# Command mounts run the caller's build under the PAGES_* contract;
-# vitepress mounts render the caller's docs tree under the central fleet
-# theme (docs/docs-site.md). A custom domain needs DNS + Pages settings +
-# the CUSTOM_DOMAIN variable together; when set, the root moves from
-# /<repo>/ to / and the artifact carries CNAME. On scheduled runs with a
-# link-rot label, the assembled site's external links are checked after
-# the deploy and findings ride the fleet's tracking-issue stream
-# (fuzz-issue@build) under that label. Callers own `concurrency: pages`;
-# this workflow declares none. The commit built: the sha input when the
-# caller passes one (the judged commit), else a push builds its own commit
-# and every other event the default branch head.
+# contract: docs/pages.md). Two configurations. Registration-configured: a
+# caller passing no `mounts` has the config job run the plan action
+# (actions/plan@build, mode pages) over its registration, which yields the
+# mounts, setup, commands, output directory, site title, and link-rot label.
+# Caller-configured: a caller passing `mounts` sets the rest through the other
+# inputs, published unchanged after the setup grammar check (this repository's
+# own docs-site.yml: it has no registration). The config job stands alone so
+# the action's bun never reaches the PATH the caller's build commands run on.
+# Per versioned mount: <mount>latest/ builds from the default branch head,
+# <mount><tag>/ from each served version tag (newest vars.PAGES_MAX_VERSIONS
+# or 5; a tag that structurally cannot build is skipped with a notice), and
+# the mount root serves the newest served version, or the default branch head
+# while none serve. An unversioned mount is one build of the default branch
+# head. Command mounts run the caller's build under the PAGES_* contract;
+# vitepress mounts render the caller's docs tree under the central fleet theme
+# (docs/docs-site.md). A custom domain needs DNS + Pages settings + the
+# CUSTOM_DOMAIN variable together; when set, the root moves from /<repo>/ to /
+# and the artifact carries CNAME. On scheduled runs with a link-rot label, the
+# site's external links are checked after the deploy and findings ride the
+# fleet's tracking-issue stream (fuzz-issue@build) under that label. Callers
+# own `concurrency: pages`; this workflow declares none. The commit built: the
+# caller's sha input when passed (the judged commit), else a push's own
+# commit, else the default branch head.
 
 name: Reusable Pages
 

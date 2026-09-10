@@ -23,6 +23,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { readModules } from "../../../actions/plan/registration.ts";
 import { parseAnswers } from "../../../scripts/generate/render_dogfood.ts";
 import {
   loadManifests,
@@ -34,7 +35,6 @@ import { parseFlags } from "../shared/flags.ts";
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
-import { readModules } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 import {

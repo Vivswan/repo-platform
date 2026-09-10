@@ -19,15 +19,9 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import {
-  declaredModules,
-  readModuleOrder,
-  readModules,
-} from "../../../actions/plan/registration.ts";
+import { readModuleOrder, readModules } from "../../../actions/plan/registration.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-
-export { declaredModules, readModules };
 
 /** The module choice values of parsed copier.yml data, as the set the
  *  selection is filtered against. */

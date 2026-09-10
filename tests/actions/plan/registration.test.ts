@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { parse } from "yaml";
 import {
   declaredModules,
   parseRegistration,
   readModuleOrder,
+  readModules,
   registrationSchema,
 } from "../../../actions/plan/registration.ts";
 
@@ -152,6 +154,73 @@ describe("parseRegistration", () => {
     expect(registrationSchema.safeParse({ modules: [] }).success).toBe(true);
     expect(registrationSchema.safeParse({ modules: [], pages: {} }).success).toBe(true);
     expect(registrationSchema.safeParse({ modules: [], pages: { x: 1 } }).success).toBe(false);
+  });
+});
+
+// Every case pins the whole {modules, errors} result: the builders emit
+// fixed strings, and a second spurious error must not hide behind a
+// substring or a null check.
+describe("readModules", () => {
+  test.each<{ reason: string; yaml: string; modules: string[] }>([
+    {
+      reason: "the top-level modules list",
+      yaml: "modules: [agents, uv]",
+      modules: ["agents", "uv"],
+    },
+    { reason: "an explicit empty list is valid", yaml: "modules: []", modules: [] },
+  ])("reads $reason", ({ yaml, modules }) => {
+    expect(readModules(parse(yaml))).toEqual({ modules, errors: [] });
+  });
+
+  test.each([
+    { reason: "no modules key", yaml: "other: value" },
+    { reason: "only a nested template.modules key", yaml: "template:\n  modules: [agents]" },
+  ])("fails when no top-level module selection exists ($reason; never assumes [])", ({ yaml }) => {
+    expect(readModules(parse(yaml))).toEqual({
+      modules: null,
+      errors: [
+        `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`,
+      ],
+    });
+  });
+
+  test("fails on a non-list modules value", () => {
+    expect(readModules(parse("modules: agents"))).toEqual({
+      modules: null,
+      errors: [`${FILE}: modules must be a list of module names`],
+    });
+  });
+
+  test("fails on a non-string entry", () => {
+    expect(readModules(parse("modules: [agents, 3]"))).toEqual({
+      modules: null,
+      errors: [`${FILE}: modules entry 3 is not a module name`],
+    });
+  });
+
+  test("names a nested entry by shape, so a self-referencing alias is an error, not a crash", () => {
+    expect(readModules(parse("modules: [&loop [*loop], {a: 1}, null]"))).toEqual({
+      modules: null,
+      errors: [
+        `${FILE}: modules entry (a list) is not a module name`,
+        `${FILE}: modules entry (a mapping) is not a module name`,
+        `${FILE}: modules entry null is not a module name`,
+      ],
+    });
+  });
+
+  test("fails on a duplicate entry", () => {
+    expect(readModules(parse("modules: [agents, agents]"))).toEqual({
+      modules: null,
+      errors: [`${FILE}: duplicate modules entry "agents"`],
+    });
+  });
+
+  test("fails on a non-mapping document", () => {
+    expect(readModules(parse("- just\n- a list"))).toEqual({
+      modules: null,
+      errors: [`${FILE}: top level must be a mapping`],
+    });
   });
 });
 
