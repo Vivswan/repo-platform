@@ -245,6 +245,8 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 
 `hold` is true on any held or `region added` written row, any replaced local edit, any held or `region removed` retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns. Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own. A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
 
+The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/deliver.ts](../.github/scripts/sync/deliver.ts)): the header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs; a section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
+
 ## The operator
 
 [sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private-repos.md](private-repos.md)).

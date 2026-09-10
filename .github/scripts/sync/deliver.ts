@@ -20,6 +20,7 @@ import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, type RunResult, redactText } from "../shared/proc.ts";
 import { AUTOMATION_BRANCH } from "./automation_branch.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
+import { REPLACED_HEADING, REVIEW_HEADING } from "./writer/report.ts";
 
 export const FAILURE_ISSUE_TITLE = "[repo-platform] sync failed";
 export const CHECKOUT_LOG = "checkout.log";
@@ -78,7 +79,7 @@ export function failureBody(input: {
 /** GitHub refuses a PR body past 65,536 characters, and gh would fail
  *  after the branch is pushed; the report is cut under this. */
 export const BODY_CAP = 60_000;
-const REVIEW_HEADING = "\n### Review";
+const CLOSING_FENCE = "\n```";
 
 /** `text` cut to at most `budget` characters on a line boundary. */
 export function truncatedLines(text: string, budget: number): string {
@@ -91,21 +92,56 @@ export function truncatedLines(text: string, budget: number): string {
  *  follows renders as Markdown rather than as code. */
 export function closedFences(text: string): string {
   const fences = text.split("\n").filter((line) => /^`{3,}/.test(line)).length;
-  return fences % 2 === 0 ? text : `${text}\n\`\`\``;
+  return fences % 2 === 0 ? text : `${text}${CLOSING_FENCE}`;
 }
 
-const CUT_BANNER = "\n\n> [!WARNING]\n> The report was cut here to fit GitHub's body limit.\n";
+const cutMarker = (omitted: number) =>
+  `\n\n> [!WARNING]\n> ${omitted} characters of this section were cut to fit GitHub's body limit.\n`;
 
-/** The report cut to the body cap: the part before the Review section
- *  first (a replaced local edit's diff can carry lines of any length),
- *  the Review section itself when it alone exceeds the cap. */
+/** `section` cut to fit `room`: its lines up to the room less the marker
+ *  naming the omitted count, an open fence closed; "" when its heading
+ *  line and the marker do not both fit. */
+function cutSection(section: string, room: number): string {
+  const headingEnd = section.indexOf("\n", 1);
+  const heading = headingEnd === -1 ? section : section.slice(0, headingEnd);
+  const reserve = cutMarker(section.length).length + CLOSING_FENCE.length;
+  if (room < heading.length + reserve) return "";
+  const kept = truncatedLines(section, room - reserve);
+  return `${closedFences(kept)}${cutMarker(section.length - kept.length)}`;
+}
+
+/** The report's header (up to the first H3), then one part per H3. */
+function sections(report: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let at = report.indexOf("\n### "); at !== -1; at = report.indexOf("\n### ", at + 1)) {
+    parts.push(report.slice(start, at));
+    start = at;
+  }
+  parts.push(report.slice(start));
+  return parts;
+}
+
+/** The report cut to the body cap, section by section: the header and
+ *  the Review section (the hold reasons) take their room first, then the
+ *  tables and notes, then the replaced-edit diffs (a diff can carry lines
+ *  of any length); a section the room runs out on is cut with a marker. */
 export function boundedReport(report: string, cap = BODY_CAP): string {
   if (report.length <= cap) return report;
-  const at = report.lastIndexOf(REVIEW_HEADING);
-  const [body, review] = at === -1 ? [report, ""] : [report.slice(0, at), report.slice(at)];
-  const budget = cap - review.length - CUT_BANNER.length;
-  if (budget > 0) return `${closedFences(truncatedLines(body, budget))}${CUT_BANNER}${review}`;
-  return `${closedFences(truncatedLines(report, cap - CUT_BANNER.length))}${CUT_BANNER}`;
+  const parts = sections(report);
+  const rank = (index: number): number => {
+    if (index === 0) return 0;
+    if (parts[index].startsWith(`\n${REVIEW_HEADING}`)) return 1;
+    return parts[index].startsWith(`\n${REPLACED_HEADING}`) ? 3 : 2;
+  };
+  const order = parts.map((_, index) => index).sort((a, b) => rank(a) - rank(b) || a - b);
+  const kept = new Array<string>(parts.length);
+  let room = cap;
+  for (const index of order) {
+    kept[index] = parts[index].length <= room ? parts[index] : cutSection(parts[index], room);
+    room -= kept[index].length;
+  }
+  return kept.join("");
 }
 
 export function prBody(input: {

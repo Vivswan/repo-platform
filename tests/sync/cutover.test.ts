@@ -13,7 +13,11 @@ import {
   cutover,
   deriveRegistration,
 } from "../../.github/scripts/sync/writer/cutover.ts";
-import { parseFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
+import {
+  placeholderDefaults,
+  type WriterFilesConfig,
+} from "../../.github/scripts/sync/writer/files_config.ts";
+import { parseFilesConfig } from "../../actions/plan/files_config.ts";
 import { parseRegistration } from "../../actions/plan/registration.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -22,7 +26,12 @@ const FIXTURES = join(import.meta.dir, "fixtures/cutover");
 const REPOSITORY = { owner: "Vivswan", name: "demo" };
 
 /** The module data a files.yml carries for the modules the fixture selects,
- *  parsed by the writer's own loader so the fixture tracks its shape. */
+ *  read the way the writer reads it: the grammar plus the placeholder
+ *  defaults the module data declares. */
+const load = (yaml: string): WriterFilesConfig => {
+  const config = parseFilesConfig(yaml);
+  return { ...config, defaults: placeholderDefaults(config).defaults };
+};
 const CONFIG_YAML = `
 placeholders: [skills_dir, fuzzer_label, docs_site_label]
 modules:
@@ -36,7 +45,7 @@ files: []
 retired:
   - { path: ${ANSWERS_FILE} }
 `;
-const CONFIG = parseFilesConfig(CONFIG_YAML);
+const CONFIG = load(CONFIG_YAML);
 
 const answers = () =>
   parseYaml(readFileSync(join(FIXTURES, ".copier-answers.yml"), "utf-8")) as Record<
@@ -145,7 +154,7 @@ describe("deriveRegistration", () => {
   });
 
   test("the skills directory default is the one the loader owns, not a module key of its own", () => {
-    const lib = parseFilesConfig(CONFIG_YAML.replace("default: skills", "default: lib/skills"));
+    const lib = load(CONFIG_YAML.replace("default: skills", "default: lib/skills"));
     const { document } = deriveRegistration({ modules: ["skills"] }, answers(), lib, REPOSITORY);
     expect(document.skills).toEqual({ dir: "skills" });
   });

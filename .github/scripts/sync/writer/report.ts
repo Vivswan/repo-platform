@@ -66,6 +66,9 @@ export function buildReport(outcome: SyncOutcome): SyncReport {
   return { ...outcome, hold: reasons.length > 0, holdReasons: reasons };
 }
 
+export const REPLACED_HEADING = "### Replaced local edits";
+export const REVIEW_HEADING = "### Review";
+
 export const DIFF_LINE_CAP = 40;
 const CONTEXT = 3;
 const DIFF_CELL_CAP = 4_000_000;
@@ -201,7 +204,7 @@ export function renderReport(report: SyncReport): string {
         ),
   ];
   if (report.replaced.length > 0) {
-    parts.push("", "### Replaced local edits", "");
+    parts.push("", REPLACED_HEADING, "");
     parts.push(
       "> [!WARNING]",
       "> These files held content the platform did not write. The platform version replaced it; the text it replaced is below.",
@@ -235,7 +238,7 @@ export function renderReport(report: SyncReport): string {
       ),
     );
   }
-  parts.push("", "### Review");
+  parts.push("", REVIEW_HEADING);
   parts.push(
     "",
     report.hold

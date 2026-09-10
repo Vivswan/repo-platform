@@ -7,12 +7,13 @@
 // data file's retired entry. Every note holds the PR for review.
 
 import { parse as parseYaml, stringify } from "yaml";
+import type { ModuleData } from "../../../../actions/plan/files_config.ts";
 import {
   parseRegistration,
   REGISTRATION_PATH,
   readModules,
 } from "../../../../actions/plan/registration.ts";
-import type { FilesConfig, ModuleData } from "./files_config.ts";
+import type { WriterFilesConfig } from "./files_config.ts";
 import type { RepositorySlug } from "./registration.ts";
 import { existingFile, writeFile } from "./target_files.ts";
 
@@ -70,7 +71,7 @@ export interface Derived {
 export function deriveRegistration(
   v1: Record<string, unknown>,
   answers: Record<string, unknown>,
-  config: FilesConfig,
+  config: WriterFilesConfig,
   repository: RepositorySlug,
 ): Derived {
   const modules = readModules(v1).modules;
@@ -154,7 +155,11 @@ const HEADER =
 
 /** Rewrites a v1 registration as v2 when the target still carries its
  *  answers file; returns the notes, empty when there is nothing to do. */
-export function cutover(target: string, config: FilesConfig, repository: RepositorySlug): string[] {
+export function cutover(
+  target: string,
+  config: WriterFilesConfig,
+  repository: RepositorySlug,
+): string[] {
   const answersBytes = existingFile(target, ANSWERS_FILE);
   const registrationBytes = existingFile(target, REGISTRATION_PATH);
   if (answersBytes === null || registrationBytes === null) return [];

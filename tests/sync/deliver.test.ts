@@ -17,6 +17,12 @@ import {
   prBody,
   tail,
 } from "../../.github/scripts/sync/deliver.ts";
+import {
+  buildReport,
+  holdReasons,
+  renderReport,
+  type SyncOutcome,
+} from "../../.github/scripts/sync/writer/report.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -345,24 +351,133 @@ describe("failureBody", () => {
 describe("boundedReport", () => {
   const review =
     "\n### Review\n\nHold for review: **yes**\n\n- local edits replaced in README.md\n";
+  const MARKER = "\n\n> [!WARNING]\n> ";
+  const CUT = / characters of this section were cut to fit GitHub's body limit\.\n/;
+  /** The omitted count each cut marker in `text` names, in order. */
+  const omitted = (text: string) =>
+    [...text.matchAll(/> (\d+) characters of this section were cut/g)].map((m) => Number(m[1]));
+  const longLine = `+${"x".repeat(70_000)}`;
+  const longDiff = `## Sync report\n\n### Replaced local edits\n\n\`\`\`diff\n${longLine}\n\`\`\``;
 
   test("a report under the cap is untouched", () => {
     expect(boundedReport(`## Sync report\n${review}`)).toBe(`## Sync report\n${review}`);
   });
 
   test("a report over the cap is cut on a line boundary, its Review section kept whole", () => {
-    const longLine = `+${"x".repeat(70_000)}`;
-    const report = `## Sync report\n\n### Replaced local edits\n\n\`\`\`diff\n${longLine}\n\`\`\`${review}`;
+    const report = `${longDiff}${review}`;
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
     expect(bounded.startsWith("## Sync report\n\n### Replaced local edits")).toBe(true);
     expect(bounded).not.toContain(longLine);
     // The cut fell inside the diff's fence, so the fence is closed before the
-    // banner and the Review section render as Markdown.
+    // marker and the Review section render as Markdown.
     expect(bounded).toContain("```diff\n```\n\n> [!WARNING]");
+    // The marker counts the long line and the fence line the cut removed.
+    expect(omitted(bounded)).toEqual([`\n${longLine}\n\`\`\``.length]);
     expect(bounded.endsWith(review)).toBe(true);
     const body = prBody({ operator: "o/r", build: BUILD, runUrl: "u", report });
     expect(body.length).toBeLessThan(65_536);
+  });
+
+  test("an oversized Review section behind an oversized diff keeps its heading and leading reasons", () => {
+    const reasons = Array.from(
+      { length: 1_750 },
+      (_, i) => `- mirror skills/${i}/LICENSE.md refused`,
+    );
+    const bigReview = `\n### Review\n\nHold for review: **yes**\n\n${reasons.join("\n")}\n`;
+    expect(bigReview.length).toBeGreaterThan(BODY_CAP);
+    const bounded = boundedReport(`${longDiff}${bigReview}`);
+    expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
+    expect(bounded.startsWith("## Sync report\n")).toBe(true);
+    expect(bounded).toContain(
+      "\n### Review\n\nHold for review: **yes**\n\n- mirror skills/0/LICENSE.md refused\n",
+    );
+    expect(bounded).toContain("- mirror skills/1000/LICENSE.md refused\n");
+    expect(bounded).not.toContain(longLine);
+    // The Review section took the whole room, so the diff section left no
+    // trace rather than a dangling heading; the one marker is the Review's.
+    expect(bounded).not.toContain("Replaced local edits");
+    expect(bounded).toMatch(new RegExp(`${CUT.source}$`));
+    expect(omitted(bounded)).toHaveLength(1);
+  });
+
+  test("a rendered report keeps every hold reason, table, and note whole; only the diffs are cut", () => {
+    const outcome: SyncOutcome = {
+      build: BUILD,
+      modules: ["bun"],
+      private: false,
+      written: Array.from({ length: 40 }, (_, i) => ({
+        path: `docs/page-${i}.md`,
+        class: "managed",
+        change: "updated",
+        detail: "",
+      })),
+      replaced: Array.from({ length: 3 }, (_, i) => ({
+        path: `src/file-${i}.ts`,
+        diff: `--- src/file-${i}.ts\n+++ src/file-${i}.ts\n@@\n-${"y".repeat(30_000)}\n+${"z".repeat(30_000)}`,
+      })),
+      retired: [{ path: "old.yml", outcome: "held", detail: "edited locally" }],
+      notes: ["unknown module dropped: legacy"],
+      mirrors: [],
+    };
+    const report = renderReport(buildReport(outcome));
+    expect(report.length).toBeGreaterThan(BODY_CAP);
+    const bounded = boundedReport(report);
+    expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
+    for (const reason of holdReasons(outcome)) expect(bounded).toContain(`- ${reason}\n`);
+    for (const row of outcome.written) {
+      expect(bounded).toContain(`| \`${row.path}\` | managed | updated |`);
+    }
+    expect(bounded).toContain("| `old.yml` | held | edited locally |");
+    expect(bounded).toContain("- unknown module dropped: legacy");
+    expect(bounded).toContain("#### `src/file-0.ts`");
+    expect(bounded).not.toContain("z".repeat(30_000));
+    expect(omitted(bounded)).toHaveLength(1);
+    expect(omitted(bounded)[0]).toBeGreaterThan(report.length - BODY_CAP);
+  });
+
+  test("the tables and notes take their room before the diffs when both cannot fit", () => {
+    const header = "## Sync report\n";
+    const written = "\n### Written\n\n| Path |\n| --- |\n| `a` |\n";
+    const replaced = `\n### Replaced local edits\n\n\`\`\`diff\n${"+d\n".repeat(200)}\`\`\`\n`;
+    const retired = `\n### Retired\n\n| Path |\n| --- |\n${"| `r` |\n".repeat(20)}`;
+    const cap = header.length + written.length + retired.length + review.length + 200;
+    const bounded = boundedReport(`${header}${written}${replaced}${retired}${review}`, cap);
+    expect(bounded.length).toBeLessThanOrEqual(cap);
+    expect(
+      bounded.startsWith(`${header}${written}\n### Replaced local edits\n\n\`\`\`diff\n+d\n`),
+    ).toBe(true);
+    expect(bounded.endsWith(`${retired}${review}`)).toBe(true);
+    // The kept lines, the closing fence, and the marker are all that stand
+    // for the diff section, and the marker accounts for the rest of it.
+    const section = bounded.slice(
+      header.length + written.length,
+      -(retired.length + review.length),
+    );
+    const kept = section.slice(0, section.indexOf(MARKER)).replace(/\n```$/, "");
+    expect(replaced.startsWith(kept)).toBe(true);
+    expect(omitted(bounded)).toEqual([replaced.length - kept.length]);
+  });
+
+  test("a cut section keeps its whole heading line or leaves no trace, at every cap", () => {
+    const header = "## Sync report\n";
+    const written = `\n### Written\n\n| Path |\n| --- |\n${"| `a` |\n".repeat(30)}`;
+    const report = `${header}${written}${review}`;
+    const seen = { dropped: 0, headed: 0 };
+    for (let cap = header.length + review.length; cap < report.length; cap++) {
+      const bounded = boundedReport(report, cap);
+      expect(bounded.length).toBeLessThanOrEqual(cap);
+      expect(bounded.startsWith(header)).toBe(true);
+      expect(bounded.endsWith(review)).toBe(true);
+      if (bounded === `${header}${review}`) seen.dropped++;
+      else {
+        expect(bounded.startsWith(`${header}\n### Written\n`)).toBe(true);
+        expect(omitted(bounded)).toHaveLength(1);
+        seen.headed++;
+      }
+    }
+    expect(seen.dropped).toBeGreaterThan(0);
+    expect(seen.headed).toBeGreaterThan(0);
   });
 
   test("a Review section that alone exceeds the cap is cut too", () => {
@@ -373,7 +488,9 @@ describe("boundedReport", () => {
     const report = `## Sync report\n\n### Review\n\nHold for review: **yes**\n\n${reasons.join("\n")}\n`;
     const bounded = boundedReport(report);
     expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
-    expect(bounded.startsWith("## Sync report\n\n### Review")).toBe(true);
-    expect(bounded.endsWith("cut here to fit GitHub's body limit.\n")).toBe(true);
+    expect(bounded.startsWith("## Sync report\n\n### Review\n\nHold for review: **yes**")).toBe(
+      true,
+    );
+    expect(bounded).toMatch(new RegExp(`${CUT.source}$`));
   });
 });
