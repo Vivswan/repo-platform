@@ -28,10 +28,6 @@
 .claude/settings.local.json
 
 ## CI workspace paths (repo-platform)
-/_site/
-/artifact.tar
-/assets/
-/attestation.json
 /results.sarif
 /.fuzz-failures/
 

@@ -437,9 +437,10 @@ describe("the files/ side", () => {
 });
 
 // The CI workspace section judged by git itself: every path a fleet
-// workflow creates in the checkout is ignored at the root, a plain file
-// of a directory pattern's name is not, and a nested source folder of the
-// same name is never swallowed.
+// workflow step creates inside the checked-out workspace is ignored at the
+// root, a plain file of a directory pattern's name is not, a nested source
+// folder of the same name is never swallowed, and a legitimate root folder
+// no checked-out step creates (assets/) stays visible.
 describe("CI workspace section", () => {
   /** A fresh repository whose .gitignore is exactly the section, holding
    *  one path of the given kind; returns git's ignore verdict for it. */
@@ -461,17 +462,12 @@ describe("CI workspace section", () => {
   }
 
   const cases: [string, "dir" | "file", boolean][] = [
-    ["_site", "dir", true],
-    ["artifact.tar", "file", true],
-    ["assets", "dir", true],
-    ["attestation.json", "file", true],
     ["results.sarif", "file", true],
     [".fuzz-failures", "dir", true],
-    ["assets", "file", false],
-    ["docs/_site", "dir", false],
-    ["crate/assets", "dir", false],
-    ["src/attestation.json", "file", false],
+    [".fuzz-failures", "file", false],
+    ["assets/logo.png", "file", false],
     ["scan/results.sarif", "file", false],
+    ["crate/.fuzz-failures", "dir", false],
   ];
 
   test.each(cases)("%s (%s) ignored: %p", (rel, kind, ignored) => {

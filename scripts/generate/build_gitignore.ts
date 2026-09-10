@@ -74,21 +74,14 @@ const AGENT_SECTION =
   ".worktrees/\n" +
   ".claude/settings.local.json\n";
 
-// Not from github/gitignore: the paths the fleet's workflows create inside
-// the caller's checkout (the pages deploy's site extraction, the release
-// publish's asset download, the secret scan's SARIF report, the fuzz
-// starter's failure reports). Ignored so a local folder of the same name
-// can never be committed and later collide with the CI step that creates
-// it; anchored to the root so a nested source folder of the same name is
-// not swallowed.
+// Not from github/gitignore: only the paths a fleet workflow step creates
+// INSIDE a checked-out workspace (the secret scan's SARIF report, the fuzz
+// starter's failure reports), because only those can collide with a
+// committed path of the same name; a job that never checks the repository
+// out cannot collide, so its paths are not listed. Anchored to the root so
+// a nested source folder of the same name is not swallowed.
 export const CI_WORKSPACE_SECTION =
-  "## CI workspace paths (repo-platform)\n" +
-  "/_site/\n" +
-  "/artifact.tar\n" +
-  "/assets/\n" +
-  "/attestation.json\n" +
-  "/results.sarif\n" +
-  "/.fuzz-failures/\n";
+  "## CI workspace paths (repo-platform)\n" + "/results.sarif\n" + "/.fuzz-failures/\n";
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
