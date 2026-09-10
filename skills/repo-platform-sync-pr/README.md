@@ -1,6 +1,6 @@
 # repo-platform: Sync PR
 
-`repo-platform-sync-pr` is the playbook for the automated template update PRs that [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform) pushes into managed repositories.
+`repo-platform-sync-pr` is the playbook for the sync PRs that [Vivswan/repo-platform](https://github.com/Vivswan/repo-platform) pushes into managed repositories.
 
 ## Install
 
@@ -10,10 +10,10 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 
 ## What It Does
 
-- Explains what the PR is (a three-way `copier update` on a rolling, force-pushed automation branch) and when it auto-merges vs waits
-- Mandates a per-file review pass: classify every changed file and catch local-content loss before merging
-- Gets conflicts right: the branch carries no markers in the normal case (template side kept, dropped local lines in the PR body), split files are rebuilt around their managed region, and malformed markers stay in the file for hand-editing
-- Covers fixing the PR (push to the automation branch, merge promptly), why closing is not an opt-out, and the `recover=recopy` escalation for an unresolvable recorded `_commit`
+- Explains what the PR is (a copy of the platform's files, no merge, on a branch rewritten every run) and when it auto-merges vs waits
+- Reads the report section by section: Written, Replaced local edits, Retired, Registration notes, Mirrors, Review, and the exact hold reasons
+- Covers the manual review cases (replaced local edits, held retirements, refused mirrors, registration drops, a cutover), the repo-owned tail of a split file, and where a local change lives
+- Covers fixing the PR, resolving on a human's behalf, and the failure path (the `[repo-platform] sync failed` issue in the repository)
 
 ## Plugin-Ready Layout
 

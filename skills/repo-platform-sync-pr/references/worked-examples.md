@@ -1,46 +1,44 @@
-# Worked examples from live sync incidents
+# Worked examples: report rows and their resolutions
 
-Each pattern was seen in production; each entry carries the command that diagnosed it and its resolution.
+Each entry is one row shape a sync PR's report can carry, the command that confirms it, and the resolution.
 
-## 1. Recovery PR gutted repository-local sections
+## 1. `replaced local edits` on `ci.yml`
 
-A `recover=recopy` re-render arrived with local content stripped: `copilot-env` PR #103 showed `AGENTS.md +0/-200`; `skills` PR #22 dropped 79 local AGENTS.md lines plus 7 lines from `.gitignore`'s repo-owned side. Diagnosed by the per-file stats pass:
-
-```bash
-gh pr view <number> --json files --jq '.files[]|[.path,.additions,.deletions]|@tsv'
-# AGENTS.md  0  200   <- deletion-dominant on a split file
-```
-
-Resolution: those PRs predate the recovery carry step; recoveries now splice local content back (sides restored around the fresh managed region, or a marked recovery appendix) and list each carried file's disposition in the PR body's carry summary, so this diff shape should not recur. If it ever does, do not merge. Preferred fix: re-dispatch the recovery - the force-pushed branch heals the open PR in place. Manual fix: on the automation branch, read the base copy with `git show origin/main:AGENTS.md` and re-seat ONLY the repo-owned sides (the content outside the BEGIN/END managed-region markers). Never `git checkout origin/main -- AGENTS.md`: that reverts the managed region too, undoing the update the PR exists to deliver. Details: [recovery.md](recovery.md).
-
-## 2. Hand-edits to fully-managed files reverted by sync
-
-A sync PR "undoes" edits someone made directly to ci.yml, dependabot.yml, the managed half of AGENTS.md, or another fully-managed file. Diagnosed by diffing the file between base and automation branch:
+Someone added a job directly to `.github/workflows/ci.yml`. The Written row reads `managed`, `replaced local edits`, and the Replaced local edits section shows the job as removed lines. Confirm with the diff between base and branch:
 
 ```bash
 git fetch origin main automation/repo-platform
 git diff origin/main...origin/automation/repo-platform -- .github/workflows/ci.yml
 ```
 
-Resolution: expected - overlapping edits to template-owned files lose to the template. Move the content to where it is owned: outside the BEGIN/END managed region (above or below it), or into a repo-owned file (CI jobs go in checks.yml). If the change belongs to every repo, change the template in repo-platform instead.
+Resolution: expected. `ci.yml` is the same file in every repository. Move the job into `checks.yml` (it runs inside the all-green gate) or `post-green.yml` (green-gated work on main), commit on the PR branch, merge.
 
-## 3. True three-way conflicts in a normal sync PR
+## 2. `held` retirement of a split file
 
-Local edits overlapped template changes in a non-split file; the PR body lists dropped hunks per file. Diagnosed by reading the body's conflict summary:
+The platform retired a split file (`.github/SECURITY.md` in the cutover) and the repo had written below its END marker. The Retired row reads `held` with a detail naming repository-owned content outside the region.
 
-```bash
-gh pr view <number> --json body --jq .body | grep -A20 'Conflict'
-```
+Resolution: the file is now yours. Delete the platform's region and keep your text, or delete the file; the row returns on every sync until the file is gone.
 
-Resolution: reset to the remote automation branch (`git checkout -B automation/repo-platform origin/automation/repo-platform`), restore the hunks that should stay (in their owned location, per the file-class table), push, merge when green. Resolve promptly: the next scheduled sync force-pushes the branch and replaces parked commits.
+## 3. `refused` mirror
 
-## 4. Repo-owned checks asserting content inside managed files
+`.repo-platform.yml` declares `mirrors: [{source: LICENSE.md, targets: ["docs/**/LICENSE.md"]}]`. The Mirrors row reads `refused` because `**` is not accepted; the PR holds.
 
-A repo's own test (e.g. a smoke test asserting a specific AGENTS.md section) went red on a sync PR because the template rewrote the managed half it was asserting on. Diagnosed from the failing check's log:
+Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration in an ordinary PR; the next sync writes the copies.
 
-```bash
-gh pr checks <number>
-gh run view <run-id> --log-failed
-```
+## 4. Registration note: an unknown module
 
-Resolution: point such assertions at repo-owned content only; the managed region can change on any sync and is not the repo's to pin.
+`modules:` lists `issue-forms`. The Registration notes section names it as dropped; the PR holds; the module's files were not written.
+
+Resolution: the name is `issue-templates`. Fix `.repo-platform.yml`, merge, dispatch the sync again.
+
+## 5. A first-sync `unchanged` starter at a path the repo already had
+
+An adopted repository already carried `.github/workflows/checks.yml`. Its Written row reads `starter`, `unchanged`: a starter is written only when absent, so the repo's file stays untouched.
+
+Resolution: check the kept file exposes what `ci.yml` calls (`on: workflow_call` with no inputs for `checks.yml`; a `sha` input for `post-green.yml`; `tag` for `update-release.yml`; `pr_number` and `head_branch` for `update-release-pr.yml`). A hook lacking its input fails the calling job on the first run.
+
+## 6. A split file's diff reaches outside the markers
+
+The `.gitignore` diff shows lines changing below the END marker. The writer never touches the tail, so this is a sync bug.
+
+Resolution: do not merge. Report it on Vivswan/repo-platform with the PR link; the next run rewrites the branch once fixed.

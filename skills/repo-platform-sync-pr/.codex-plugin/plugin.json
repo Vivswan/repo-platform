@@ -1,6 +1,6 @@
 {
   "name": "repo-platform-sync-pr",
-  "description": "Handle an automated repo-platform template sync PR: triage the body, review every file, resolve conflicts, and recover a broken sync.",
+  "description": "Handle an automated repo-platform sync PR: read the report, clear every row, keep local content in its owned place, and follow the failure path.",
   "author": {
     "name": "Vivswan Shah",
     "email": "58091053+Vivswan@users.noreply.github.com",
@@ -9,20 +9,20 @@
   "homepage": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-sync-pr",
   "repository": "https://github.com/Vivswan/repo-platform",
   "license": "SEE LICENSE IN LICENSE.md",
-  "keywords": ["agent-skills", "repo-platform", "template-sync", "copier", "plugin-ready"],
+  "keywords": ["agent-skills", "repo-platform", "sync", "registration", "plugin-ready"],
   "skills": "./",
   "interface": {
     "displayName": "Repo Platform: Sync PR",
-    "shortDescription": "Review and repair repo-platform template sync PRs.",
-    "longDescription": "The playbook for the automation-branch PRs repo-platform pushes into managed repos: a mandatory per-file review pass, correct conflict resolution per file class, prompt fix-and-merge on the rolling branch, and the recover=recopy escalation for an unusable recorded base.",
+    "shortDescription": "Review and repair repo-platform sync PRs.",
+    "longDescription": "The playbook for the sync PRs repo-platform pushes into managed repositories: the report sections and hold reasons, the manual review cases (replaced local edits, held retirements, refused mirrors, registration notes, a cutover), the repo-owned tail of a split file, where a local change lives, and the sync-failed issue a red run files.",
     "developerName": "Vivswan",
     "category": "Developer Tools",
     "capabilities": ["Read", "Edit", "Review"],
     "websiteURL": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-sync-pr",
     "defaultPrompt": [
       "Handle the repo-platform bot PR that just arrived.",
-      "The sync PR reports merge conflicts - resolve them.",
-      "The template update PR deleted my local section."
+      "The sync PR says hold for review - clear it.",
+      "The sync PR replaced my local edits."
     ],
     "brandColor": "#B45309"
   }
