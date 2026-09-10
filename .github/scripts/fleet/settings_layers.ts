@@ -24,7 +24,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stringify as stringifyYaml } from "yaml";
 import {
   loadManifests,
   type ModuleManifest,
@@ -40,7 +40,7 @@ import {
   fetchRepoFile,
   isMapping,
   localHeadSha,
-  parseYamlMapping,
+  parseLayerText,
   type RepoFacts,
   type RepoFileFetcher,
   resolveTargetRef,
@@ -159,12 +159,9 @@ export function trackingLayerYaml(labels: Label[]): string {
   );
 }
 
-/** One layer FILE as a mapping, read the way the action reads it: an empty
- *  document is an empty layer (a repository whose settings.yml declares
- *  nothing is still onboarded); any other non-mapping is refused. */
+/** One layer FILE as a mapping (parseLayerText: an empty file is an empty layer). */
 export function loadLayer(path: string): Record<string, unknown> {
-  const text = readFileSync(path, "utf-8");
-  return parseYaml(text) == null ? {} : parseYamlMapping(text, path);
+  return parseLayerText(readFileSync(path, "utf-8"), path);
 }
 
 /** The label entries of a `labels` section in either of the action's
@@ -333,12 +330,7 @@ export function materialize(stack: LayerSource[], scratchDir: string, neutral = 
  *  private repository's file is reported there and never reaches the
  *  action's public diagnostics. */
 function writeRepoLayer(text: string, where: string, scratchDir: string): string {
-  try {
-    parseYaml(text);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    throw new Error(`${where}: YAML parse error: ${detail}`);
-  }
+  parseLayerText(text, where);
   mkdirSync(scratchDir, { recursive: true });
   const path = join(scratchDir, SCRATCH_REPO_LAYER);
   writeFileSync(path, text);

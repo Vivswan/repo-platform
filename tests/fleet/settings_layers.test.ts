@@ -319,7 +319,10 @@ describe("loadLayer", () => {
     expect(loadLayer(empty)).toEqual({});
     const list = join(dir, "list.yml");
     writeFileSync(list, "- a\n");
-    expect(() => loadLayer(list)).toThrow("not a YAML mapping");
+    expect(() => loadLayer(list)).toThrow(`${list}: not a YAML mapping`);
+    const broken = join(dir, "broken.yml");
+    writeFileSync(broken, "labels: [unclosed\n");
+    expect(() => loadLayer(broken)).toThrow(`${broken}: YAML parse error`);
   });
 });
 

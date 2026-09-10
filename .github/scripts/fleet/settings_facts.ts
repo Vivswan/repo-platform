@@ -41,16 +41,29 @@ export function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A YAML mapping with location-carrying diagnostics; the values stay
- *  `unknown` because each caller reads one key and validates it itself. */
-export function parseYamlMapping(text: string, where: string): Record<string, unknown> {
-  let data: unknown;
+function parseYamlText(text: string, where: string): unknown {
   try {
-    data = parseYaml(text);
+    return parseYaml(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw new Error(`${where}: YAML parse error: ${detail}`);
   }
+}
+
+/** A YAML mapping with location-carrying diagnostics; the values stay
+ *  `unknown` because each caller reads one key and validates it itself. */
+export function parseYamlMapping(text: string, where: string): Record<string, unknown> {
+  const data = parseYamlText(text, where);
+  if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
+  return data;
+}
+
+/** A settings LAYER document, read the way the action reads it: an empty
+ *  document is an empty layer (a repository whose settings.yml declares
+ *  nothing is still onboarded); any other non-mapping is refused. */
+export function parseLayerText(text: string, where: string): Record<string, unknown> {
+  const data = parseYamlText(text, where);
+  if (data == null) return {};
   if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
   return data;
 }
