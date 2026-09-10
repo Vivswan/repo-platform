@@ -78,12 +78,14 @@ describe("unifiedDiff", () => {
     );
   });
 
-  test("the line cap truncates with a count of what was cut", () => {
+  test("the line cap keeps the head and counts exactly what was cut", () => {
     const before = Array.from({ length: 30 }, (_, i) => `x${i}`).join("\n");
     const after = Array.from({ length: 30 }, (_, i) => `y${i}`).join("\n");
-    const diff = unifiedDiff("f", before, after, 10);
-    expect(diff.split("\n")).toHaveLength(11);
-    expect(diff).toMatch(/\.\.\. \(\d+ more diff lines\)$/);
+    // Header (2) + hunk marker (1) + 30 deletions + 30 insertions = 63 lines.
+    expect(unifiedDiff("f", before, after, 10)).toBe(
+      ["--- f", "+++ f", "@@", "-x0", "-x1", "-x2", "-x3", "-x4", "-x5", "-x6"].join("\n") +
+        "\n... (53 more diff lines)",
+    );
   });
 });
 
