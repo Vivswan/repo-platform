@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Preserves repo-owned files after an update (reusable-template-sync.yml's
-// "Preserve repo-owned files" step and ci/upgrade_path_test.sh), and
+// "Preserve repo-owned files" step and the upgrade-path harness under
+// tests/ci/upgrade_path/), and
 // reports deleted split-class files so open_pr.ts holds the PR (the block
 // at the end of this file).
 //

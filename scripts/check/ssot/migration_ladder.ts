@@ -5,8 +5,9 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { type CallExpression, Node, SyntaxKind } from "ts-morph";
 import { RUNG_FILE_RE, RUNG_ID_BODY } from "../../../.github/scripts/sync/run_migrations.ts";
+import { PENDING_RUNGS } from "../../../tests/ci/upgrade_path/rungs.ts";
 import { parseTs, unwrapExpression } from "../../lib/ts_extract.ts";
-import { escapeRegExp, type Mismatch } from "./comparison.ts";
+import type { Mismatch } from "./comparison.ts";
 import { REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -14,11 +15,9 @@ export const MIGRATIONS_DIR_REL = ".github/scripts/sync/migrations";
 
 export const MIGRATIONS_TESTS_REL = "tests/sync/migrations";
 
-export const MIGRATIONS_HARNESS_REL = ".github/scripts/ci/upgrade_path_test.sh";
-
-/** The harness's helper and leg files, sourced by the entry above in run
- *  order; a rung's case may live in any of them. */
-export const MIGRATIONS_HARNESS_DIR_REL = ".github/scripts/ci/upgrade_path";
+/** The upgrade-path harness's table of the rungs its synthetic old build
+ *  leaves pending (PENDING_RUNGS): a rung's harness case is its entry. */
+export const MIGRATIONS_HARNESS_REL = "tests/ci/upgrade_path/rungs.ts";
 
 export const MIGRATIONS_DOC_REL = "docs/migrations.md";
 
@@ -312,9 +311,9 @@ export function migrationLadderMismatches(input: {
   rungFiles: Record<string, string>;
   /** Test file name -> source, for tests/sync/migrations/. */
   testFiles: Record<string, string>;
-  /** Repo-relative path -> source for the upgrade-path harness: the entry
-   *  (MIGRATIONS_HARNESS_REL) and every file under MIGRATIONS_HARNESS_DIR_REL. */
-  harness: Record<string, string>;
+  /** The rung ids the upgrade-path harness leaves pending in its synthetic
+   *  old build (the keys of PENDING_RUNGS in MIGRATIONS_HARNESS_REL). */
+  pendingRungs: readonly string[];
   doc: string;
 }): Mismatch[] {
   const mismatches: Mismatch[] = [];
@@ -388,43 +387,42 @@ export function migrationLadderMismatches(input: {
     prunedAt === -1
       ? input.doc
       : input.doc.slice(0, prunedAt) + (prunedEnd === -1 ? "" : input.doc.slice(prunedEnd));
-  // A rung's case may sit in the entry or in any leg the entry sources (the
-  // legs share the entry's shell). A file under the legs directory the entry
-  // never sources runs nothing: red, and its text does not count as a case.
-  const entryText = input.harness[MIGRATIONS_HARNESS_REL] ?? "";
-  const harnessTexts = [entryText];
-  for (const rel of Object.keys(input.harness).sort()) {
-    if (rel === MIGRATIONS_HARNESS_REL) continue;
-    const name = rel.slice(rel.lastIndexOf("/") + 1);
-    if (new RegExp(`^source "[^"]*/${escapeRegExp(name)}"$`, "m").test(entryText)) {
-      harnessTexts.push(input.harness[rel]);
-    } else {
+  // A rung's harness case is its PENDING_RUNGS entry: the harness removes the
+  // rung file from its synthetic old build and plants the pre-transition
+  // shape, so every update from that build runs the rung. An entry for a
+  // rung that has no file would fail the harness at build time; it is red
+  // here first.
+  for (const id of ids) {
+    if (!input.pendingRungs.includes(id)) {
       mismatches.push({
-        file: rel,
-        expected: `a source line for it in ${MIGRATIONS_HARNESS_REL} (a leg the entry never sources runs no case)`,
+        file: MIGRATIONS_HARNESS_REL,
+        expected: `an upgrade-path harness case for migration ${id} (a PENDING_RUNGS entry planting its pre-transition shape)`,
         got: "none",
       });
     }
   }
-  for (const [rel, text, what] of [
-    [
-      MIGRATIONS_HARNESS_REL,
-      harnessTexts.join("\n"),
-      `upgrade-path harness case (in the entry or a sourced file under ${MIGRATIONS_HARNESS_DIR_REL}/)`,
-    ],
-    [MIGRATIONS_DOC_REL, listedText, "docs mention"],
-  ] as const) {
-    const tokens = migrationIdTokens(text);
-    for (const id of ids) {
-      if (!tokens.has(id)) {
-        mismatches.push({ file: rel, expected: `a ${what} naming migration ${id}`, got: "none" });
-      }
+  for (const id of input.pendingRungs) {
+    if (!ids.includes(id)) {
+      mismatches.push({
+        file: MIGRATIONS_HARNESS_REL,
+        expected: `PENDING_RUNGS entries only for the rungs on the ladder [${ids.join(", ")}]`,
+        got: `an entry for ${id}, which has no rung file`,
+      });
+    }
+  }
+  const docTokens = migrationIdTokens(listedText);
+  for (const id of ids) {
+    if (!docTokens.has(id)) {
+      mismatches.push({
+        file: MIGRATIONS_DOC_REL,
+        expected: `a docs mention naming migration ${id}`,
+        got: "none",
+      });
     }
   }
   // Outside the pruned list any other id-shaped token names a rung that
   // does not exist: a typo, or a rung deleted from main without moving its
-  // line. The harness is exempt: it builds synthetic rungs of its own (the
-  // history-walk leg), and a misnamed real rung fails its own guard there.
+  // line.
   for (const token of migrationIdTokens(listedText)) {
     if (!ids.includes(token)) {
       mismatches.push({
@@ -661,16 +659,6 @@ export function rungSources(): Record<string, string> {
   );
 }
 
-/** The upgrade-path harness as repo-relative path -> source: the entry plus
- *  every file under its legs directory, so a rung's case counts wherever
- *  the harness keeps it. */
-export function harnessSources(): Record<string, string> {
-  const legs = readdirSync(join(REPO_ROOT, MIGRATIONS_HARNESS_DIR_REL))
-    .sort()
-    .map((name) => `${MIGRATIONS_HARNESS_DIR_REL}/${name}`);
-  return Object.fromEntries([MIGRATIONS_HARNESS_REL, ...legs].map((rel) => [rel, read(rel)]));
-}
-
 /** The no-retired-shapes scan set as repo-relative path -> text. */
 export function retiredShapeScanFiles(): Record<string, string> {
   const paths = [
@@ -702,7 +690,7 @@ export const migrationLadderRules: Rule[] = [
             read(`${MIGRATIONS_TESTS_REL}/${name}`),
           ]),
         ),
-        harness: harnessSources(),
+        pendingRungs: Object.keys(PENDING_RUNGS),
         doc: read(MIGRATIONS_DOC_REL),
       }),
   },
