@@ -2,15 +2,16 @@
 // placeholder values the writer derives from it plus the repository slug
 // the operator passes (the registration never names its own owner).
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseRegistration, type Registration } from "../../../../actions/shared/registration.ts";
 import type { PlaceholderValues } from "./placeholders.ts";
+import { existingFile } from "./target_files.ts";
 
 export const REGISTRATION_FILE = ".repo-platform.yml";
 
 export function readRegistration(target: string): Registration {
-  return parseRegistration(readFileSync(join(target, REGISTRATION_FILE), "utf-8"));
+  const bytes = existingFile(target, REGISTRATION_FILE);
+  if (bytes === null) throw new Error(`${REGISTRATION_FILE}: missing from the target repository`);
+  return parseRegistration(bytes.toString("utf-8"));
 }
 
 export interface RepositorySlug {

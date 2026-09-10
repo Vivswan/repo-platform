@@ -2,7 +2,7 @@
 // v2 registration plus the repository slug, and the slug grammar.
 
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseRepositorySlug,
@@ -57,9 +57,14 @@ describe("parseRepositorySlug", () => {
 });
 
 describe("readRegistration", () => {
-  test("reads .repo-platform.yml from the checkout", () => {
+  test("reads .repo-platform.yml from the checkout; a symlink or a missing file is refused", () => {
     const target = temp.dir("writer-registration-");
+    expect(() => readRegistration(target)).toThrow("missing from the target repository");
     writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, pages]\n");
     expect(readRegistration(target)).toEqual({ modules: ["bun", "pages"] });
+    const linked = temp.dir("writer-registration-link-");
+    writeFileSync(join(linked, "elsewhere.yml"), "modules: [bun]\n");
+    symlinkSync("elsewhere.yml", join(linked, ".repo-platform.yml"));
+    expect(() => readRegistration(linked)).toThrow("not a regular file");
   });
 });

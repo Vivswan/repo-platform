@@ -5,9 +5,8 @@
 // moved file as the writer's own.
 
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
-import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { capture } from "../../shared/proc.ts";
 import type { RetiredEntry } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";

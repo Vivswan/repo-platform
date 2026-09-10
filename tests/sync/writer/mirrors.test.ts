@@ -2,12 +2,13 @@
 // platform-written targets, foreign content), and the byte copies.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import {
   applyMirrors,
   expandPattern,
+  type MirrorRow,
   mirrorPathProblem,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
 import { tempDirs } from "../../shared/temp_dir";
@@ -75,12 +76,18 @@ describe("applyMirrors", () => {
         { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] },
         { source: "README.md", targets: ["docs/README.md", "skills/*/README.md"] },
         { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md", "starter.yml"] },
+        { source: "LICENSE.md", targets: ["shared/copy.txt"] },
+        { source: "NOTICE.md", targets: ["shared/copy.txt"] },
       ],
       written,
       new Set(["LICENSE.md", "starter.yml"]),
       { "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") } },
     );
-    expect(rows).toEqual([
+    const byTarget = (
+      a: { source: string; target: string },
+      b: { source: string; target: string },
+    ) => `${a.target} ${a.source}`.localeCompare(`${b.target} ${b.source}`);
+    const expected: MirrorRow[] = [
       { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
       { source: "LICENSE.md", target: "skills/b/LICENSE.md", outcome: "current", detail: "" },
       {
@@ -120,7 +127,21 @@ describe("applyMirrors", () => {
         outcome: "refused",
         detail: "the pattern is a path files.yml writes",
       },
-    ]);
+      {
+        source: "LICENSE.md",
+        target: "shared/copy.txt",
+        outcome: "refused",
+        detail: "the target is claimed by more than one source",
+      },
+      {
+        source: "NOTICE.md",
+        target: "shared/copy.txt",
+        outcome: "refused",
+        detail: "the target is claimed by more than one source",
+      },
+    ];
+    expect([...rows].sort(byTarget)).toEqual([...expected].sort(byTarget));
+    expect(existsSync(join(root, "shared/copy.txt"))).toBe(false);
     expect(readFileSync(join(root, "starter.yml"), "utf-8")).toBe("v1\n");
     expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
     expect(readFileSync(join(root, "skills/c/LICENSE.md"), "utf-8")).toBe("hand edited\n");

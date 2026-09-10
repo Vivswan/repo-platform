@@ -8,6 +8,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import {
+  HASH_REGION_MARKERS,
+  HTML_REGION_MARKERS,
+  substringCount,
+} from "../../../../actions/shared/grammar.ts";
 import { PLACEHOLDER_NAMES, unknownPlaceholders } from "./placeholders.ts";
 
 export type FileClass = "managed" | "split" | "starter";
@@ -222,23 +227,36 @@ export function blockSources(config: FilesConfig, entry: FileEntry, modules: str
  *  only listed placeholders. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
-  const sources = new Set<string>();
+  // Source -> the region markers it must not mention (the writer adds them,
+  // and a second pair leaves the file without an honest slice).
+  const sources = new Map<string, RegionKind | null>();
   for (const entry of config.files) {
-    sources.add(entry.source);
-    for (const source of blockSources(config, entry, Object.keys(config.modules)))
-      sources.add(source);
+    const region = entry.class === "split" ? entry.region : null;
+    sources.set(entry.source, region);
+    for (const source of blockSources(config, entry, Object.keys(config.modules))) {
+      sources.set(source, region);
+    }
   }
-  for (const source of [...sources].sort()) {
+  for (const [source, region] of [...sources].sort()) {
     const abs = join(tree, source);
     if (!existsSync(abs)) {
       problems.push(`source ${SOURCE_PREFIX}${source} is missing from the tree`);
       continue;
     }
-    const unknown = unknownPlaceholders(readFileSync(abs, "utf-8"), config.placeholders);
+    const text = readFileSync(abs, "utf-8");
+    const unknown = unknownPlaceholders(text, config.placeholders);
     if (unknown.length > 0) {
       problems.push(
         `source ${SOURCE_PREFIX}${source} uses unlisted placeholder(s) ${unknown.map((n) => `{{${n}}}`).join(", ")}`,
       );
+    }
+    if (region !== null) {
+      const markers = region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS;
+      if ([markers.begin, markers.end].some((marker) => substringCount(text, marker) > 0)) {
+        problems.push(
+          `source ${SOURCE_PREFIX}${source} mentions the ${region} region markers the writer adds itself`,
+        );
+      }
     }
   }
   if (problems.length > 0) throw new FilesConfigError(label, problems);

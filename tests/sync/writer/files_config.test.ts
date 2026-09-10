@@ -189,12 +189,12 @@ describe("blockSources and verifySources", () => {
     );
   });
 
-  test("a missing source or an unlisted placeholder is a load error", () => {
+  test("a missing source, an unlisted placeholder, or a marker mention is a load error", () => {
     const tree = temp.dir("writer-files-config-");
     writeTree(tree, {
       "base/.github/workflows/ci.yml": "name: {{project_name}} {{owner}}\n",
       "base/.gitignore": "node_modules\n",
-      "bun/.gitignore.block.Node": "*.log\n",
+      "bun/.gitignore.block.Node": "*.log\n# END REPO-PLATFORM MANAGED\n",
       "bun/.gitignore.block.Bun": "bun.lockb\n",
       "docs-site/docs-site.standalone.yml": "",
       "docs-site/docs-site.with-pages.yml": "",
@@ -208,6 +208,7 @@ describe("blockSources and verifySources", () => {
     }
     expect(problems).toEqual([
       "source files/base/.github/workflows/ci.yml uses unlisted placeholder(s) {{owner}}",
+      "source files/bun/.gitignore.block.Node mentions the hash region markers the writer adds itself",
       "source files/fuzzer/.github/workflows/nightly-fuzz.yml is missing from the tree",
     ]);
   });

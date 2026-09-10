@@ -61,16 +61,16 @@ type Op = { kind: " " | "-" | "+"; text: string };
 
 /** Line operations turning `a` into `b` (longest common subsequence). */
 function diffOps(a: string[], b: string[]): Op[] {
-  const table: Uint32Array[] = [];
+  const table: Uint32Array[] = new Array(a.length + 1);
   for (let i = a.length; i >= 0; i--) {
     const row = new Uint32Array(b.length + 1);
     for (let j = b.length - 1; j >= 0; j--) {
       row[j] =
         i < a.length && a[i] === b[j]
-          ? table[0][j + 1] + 1
-          : Math.max(i < a.length ? table[0][j] : 0, row[j + 1]);
+          ? table[i + 1][j + 1] + 1
+          : Math.max(i < a.length ? table[i + 1][j] : 0, row[j + 1]);
     }
-    table.unshift(row);
+    table[i] = row;
   }
   const ops: Op[] = [];
   let i = 0;
