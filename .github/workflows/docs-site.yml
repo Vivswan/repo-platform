@@ -1,9 +1,12 @@
 # This repository's own docs site: the docs-site module dogfooded by hand,
 # since repo-platform carries no registration for the fleet pipeline to
-# read its mounts from (the rendered twin passes custom_domain alone). The
-# check job builds docs/ strictly on every PR touching it (dead internal
-# links fail there instead of at deploy time); paths-filtered by design,
-# so it is never in the all-green roster and never a required check. The
+# read its mounts from (the rendered twin passes custom_domain alone, and
+# its check job resolves the same list through the plan). The check job
+# builds docs/ strictly on every PR touching it (dead internal links fail
+# there instead of at deploy time) over the mount list the deploys pass,
+# spelled out a third time and pinned equal by check_ssot's
+# pages-callers-parity rule; paths-filtered by design, so it is never in
+# the all-green roster and never a required check. The
 # push deploy is ci.yml's docs-site job, downstream of the all-green gate
 # with the judged commit; this workflow is the nightly rebuild and the
 # manual dispatch, both building the default branch head. Layout,
@@ -34,6 +37,8 @@ jobs:
       - uses: Vivswan/repo-platform/actions/pages-site@build
         with:
           check: "true"
+          mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
+          site-title: repo-platform
 
   deploy:
     if: github.event_name != 'pull_request'

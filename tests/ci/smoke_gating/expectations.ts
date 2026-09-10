@@ -567,7 +567,8 @@ export const EXPECTATIONS: Row[] = [
   {
     // The managed docs workflow: the strict PR check job plus the nightly
     // and dispatch deploy, one shape whether or not pages is selected (the
-    // composed layout is the called workflow's to derive).
+    // composed layout is the called workflow's to derive, and the check
+    // reads the same mounts through the plan).
     name: "docs-site renders the strict PR check and the nightly deploy with no baked answers",
     when: has("docs-site"),
     checks: () => [
@@ -576,7 +577,18 @@ export const EXPECTATIONS: Row[] = [
         kind: "yaml-matches",
         path: `${WF}/docs-site.yml`,
         at: ["jobs", "check", "steps"],
-        matches: [{ uses: includes("actions/pages-site@build"), with: { check: "true" } }],
+        matches: [
+          { uses: includes("actions/plan@build"), id: "plan", with: { mode: "pages" } },
+          {
+            uses: includes("actions/pages-site@build"),
+            with: {
+              check: "true",
+              mounts: "${{ steps.plan.outputs.mounts }}",
+              "docs-dir": "${{ steps.plan.outputs.docs_dir }}",
+              "site-title": "${{ steps.plan.outputs.site_title }}",
+            },
+          },
+        ],
       },
       {
         kind: "yaml-keys",
@@ -611,7 +623,7 @@ export const EXPECTATIONS: Row[] = [
       {
         kind: "text",
         path: `${WF}/docs-site.yml`,
-        lacks: ["{%", "mounts:", "site_title:", "link_rot_label:"],
+        lacks: ["{%", "site_title:", "link_rot_label:"],
       },
     ],
   },

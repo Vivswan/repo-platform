@@ -76,7 +76,7 @@ One shape of file name cannot be linked from markdown: a `%` followed by two hex
 
 ## The docs PR check
 
-`docs-site.yml`'s check job builds `docs/` strictly on every PR touching it, so a dead link fails the PR instead of the deploy. It is paths-filtered and therefore NEVER a required check and never in the all-green roster ([all-green.md](all-green.md)) - a PR that skips it merges normally; one that runs it red still merges, but the author was told exactly which link broke.
+`docs-site.yml`'s check job builds `docs/` strictly on every PR touching it, so a dead link fails the PR instead of the deploy. It reads the same mounts as the deploy, resolved from the registration by the plan action in pages mode, so a root the docs mount includes is judged on the PR too. It is paths-filtered and therefore NEVER a required check and never in the all-green roster ([all-green.md](all-green.md)) - a PR that skips it merges normally; one that runs it red still merges, but the author was told exactly which link broke.
 
 Historical version tags are gentler: a tag whose tree has no `docs/` (or carries a pre-adoption `docs/.vitepress/`) is skipped with a notice, and dead links inside old tags do not fail the deploy - history cannot be fixed.
 
