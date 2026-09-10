@@ -15,6 +15,7 @@
 
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, type RunResult, redactText } from "../shared/proc.ts";
@@ -29,6 +30,16 @@ export const DELIVER_LOG = "deliver.log";
 export const SUMMARY_FILE = "summary.json";
 /** The bytes of each log a filed issue carries, from the end. */
 export const TAIL_BYTES = 20_000;
+/** Every subprocess here is one gh call, one git network call, or one
+ *  local git call on the clone, each answering in seconds, so the fleet's
+ *  stalled-network bound applies; the row's budget (row_budget.ts) counts
+ *  it once per call of the longest delivery. */
+export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
+/** The longest delivery's subprocess calls: seven local git calls, the PR
+ *  lookup, the disarm's two, the lease and the push, the refresh, the arm,
+ *  and the three that close an open failure report (deliver.test.ts
+ *  records the chain). */
+export const DELIVERY_CALLS = 17;
 
 export function prTitle(build: string): string {
   return `chore: sync repo-platform build ${build.slice(0, 12)}`;
@@ -79,7 +90,6 @@ export function failureBody(input: {
 /** GitHub refuses a PR body past 65,536 characters, and gh would fail
  *  after the branch is pushed; the report is cut under this. */
 export const BODY_CAP = 60_000;
-const CLOSING_FENCE = "\n```";
 
 /** `text` cut to at most `budget` characters on a line boundary. */
 export function truncatedLines(text: string, budget: number): string {
@@ -88,12 +98,36 @@ export function truncatedLines(text: string, budget: number): string {
   return text.slice(0, cut <= 0 ? budget : cut);
 }
 
-/** `text` with a fence line appended when a cut left one open, so what
- *  follows renders as Markdown rather than as code. */
-export function closedFences(text: string): string {
-  const fences = text.split("\n").filter((line) => /^`{3,}/.test(line)).length;
-  return fences % 2 === 0 ? text : `${text}${CLOSING_FENCE}`;
+const FENCE_LINE = /^ {0,3}(`{3,})(.*)$/;
+
+/** The fence `text` leaves open after its last line, "" when none. A
+ *  fence line opens a block; inside one, only a run at least as long and
+ *  alone on its line closes it (a report's diff fence is longer than any
+ *  run its lines quote, so they never do). */
+export function openFence(text: string): string {
+  let open = "";
+  for (const line of text.split("\n")) {
+    const fence = FENCE_LINE.exec(line);
+    if (fence === null) continue;
+    if (open === "") open = fence[1];
+    else if (fence[1].length >= open.length && fence[2].trim() === "") open = "";
+  }
+  return open;
 }
+
+/** `text` with the fence a cut left open closed by a run of its own
+ *  length, so what follows renders as Markdown rather than as code. */
+export function closedFences(text: string): string {
+  const open = openFence(text);
+  return open === "" ? text : `${text}\n${open}`;
+}
+
+/** The longest fence line in `text`: the most a cut can owe to close one. */
+const longestFence = (text: string): string =>
+  text
+    .split("\n")
+    .map((line) => FENCE_LINE.exec(line)?.[1] ?? "")
+    .reduce((best, run) => (run.length > best.length ? run : best), "");
 
 const cutMarker = (omitted: number) =>
   `\n\n> [!WARNING]\n> ${omitted} characters of this section were cut to fit GitHub's body limit.\n`;
@@ -104,7 +138,8 @@ const cutMarker = (omitted: number) =>
 function cutSection(section: string, room: number): string {
   const headingEnd = section.indexOf("\n", 1);
   const heading = headingEnd === -1 ? section : section.slice(0, headingEnd);
-  const reserve = cutMarker(section.length).length + CLOSING_FENCE.length;
+  const fence = longestFence(section);
+  const reserve = cutMarker(section.length).length + (fence === "" ? 0 : fence.length + 1);
   if (room < heading.length + reserve) return "";
   const kept = truncatedLines(section, room - reserve);
   return `${closedFences(kept)}${cutMarker(section.length - kept.length)}`;
@@ -191,7 +226,10 @@ class Delivery {
 
   /** A subprocess whose streams land in the log, never on stdout. */
   run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): RunResult {
-    const result = capture(argv, extraEnv === undefined ? {} : { env: extraEnv });
+    const result = capture(argv, {
+      timeoutMs: DELIVERY_CALL_BOUND_MS,
+      ...(extraEnv === undefined ? {} : { env: extraEnv }),
+    });
     this.log(`$ ${label} -> exit ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
     if (result.stderr !== "") this.log(result.stderr.replace(/\n$/, ""));
     return result;

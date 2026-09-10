@@ -12,6 +12,8 @@ import { join } from "node:path";
 import {
   BODY_CAP,
   boundedReport,
+  closedFences,
+  DELIVERY_CALLS,
   FAILURE_ISSUE_TITLE,
   failureBody,
   fenceFor,
@@ -346,6 +348,14 @@ describe("deliver.ts", () => {
     expect(result.log).not.toContain(PAT);
   });
 
+  test("the longest delivery (a refresh that arms and closes an open failure report) is the chain the row budget counts", () => {
+    const result = run({
+      stub: { STUB_DIRTY: "1", STUB_PR: "7", STUB_ARMED: "true", STUB_ISSUE: "12 open" },
+    });
+    expect(result.verdict).toBe("refreshed");
+    expect(result.sequence).toHaveLength(DELIVERY_CALLS);
+  });
+
   test("a clean delivery closes an open failure report", () => {
     const result = run({ stub: { STUB_DIRTY: "1", STUB_ISSUE: "41 open" } });
     expect(result.verdict).toBe("opened");
@@ -383,6 +393,26 @@ describe("failureBody", () => {
     writeFileSync(file, `${"x".repeat(50)}END`);
     expect(tail(file, 10)).toBe("... (43 earlier bytes not shown)\nxxxxxxxEND");
     expect(tail(join(dir, "missing"))).toBe("");
+  });
+});
+
+describe("closedFences", () => {
+  test.each([
+    { text: "```\nx", closed: "```\nx\n```", reason: "a three-backtick fence left open" },
+    {
+      text: "````diff\n ```\nx",
+      closed: "````diff\n ```\nx\n````",
+      reason: "a four-backtick fence: the quoted three cannot close it",
+    },
+    { text: "```\nx\n```", closed: "```\nx\n```", reason: "a closed fence" },
+    {
+      text: "```\nx\n```diff",
+      closed: "```\nx\n```diff\n```",
+      reason: "a run carrying an info string does not close",
+    },
+    { text: "no fence", closed: "no fence", reason: "no fence" },
+  ])("$reason", ({ text, closed }) => {
+    expect(closedFences(text)).toBe(closed);
   });
 });
 
@@ -516,6 +546,32 @@ describe("boundedReport", () => {
     }
     expect(seen.dropped).toBeGreaterThan(0);
     expect(seen.headed).toBeGreaterThan(0);
+  });
+
+  test("a cut inside a four-backtick fence (a diff quoting a fence line) is closed with four backticks", () => {
+    const outcome: SyncOutcome = {
+      build: BUILD,
+      modules: ["bun"],
+      private: false,
+      written: [],
+      replaced: [
+        {
+          path: "README.md",
+          diff: `--- README.md\n+++ README.md\n@@\n \`\`\`\n-old\n+${"x".repeat(70_000)}\n \`\`\``,
+        },
+      ],
+      retired: [],
+      notes: [],
+      mirrors: [],
+    };
+    const report = renderReport(buildReport(outcome));
+    expect(report).toContain("````diff\n");
+    const bounded = boundedReport(report);
+    expect(bounded.length).toBeLessThanOrEqual(BODY_CAP);
+    // The cut fell inside the diff, whose fence is four backticks: three
+    // would leave the marker and the Review section rendering as code.
+    expect(bounded).toContain("@@\n ```\n-old\n````\n\n> [!WARNING]");
+    expect(bounded.endsWith(review)).toBe(true);
   });
 
   test("a Review section that alone exceeds the cap is cut too", () => {

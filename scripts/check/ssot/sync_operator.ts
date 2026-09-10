@@ -4,6 +4,7 @@
 // behind a mask.
 
 import { parse as parseYaml } from "yaml";
+import { rowBudgetMinutes } from "../../../.github/scripts/sync/row_budget.ts";
 import type { Mismatch } from "./comparison.ts";
 import { read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
@@ -14,6 +15,7 @@ export const RESOLVER = "bun .github/scripts/sync/resolve_row.ts";
 export const CHECKOUT = "bun .github/scripts/sync/checkout_target.ts";
 export const SELECTOR = "bun .github/scripts/fleet/select_sync_repos.ts";
 export const DISCOVERY = "bun .github/scripts/fleet/discover_repos.ts";
+export const WRITER = "bun .github/scripts/sync/writer/sync.ts";
 /** A run step that is ONE bun command (a script or the install) with plain
  *  word arguments, its whole output landing in a $RUNNER_TEMP file: no
  *  shell operator can put a second command in front of the redirect. */
@@ -180,14 +182,26 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
       got: "a selector env that differs between the two jobs",
     });
   }
-  const planTimeout = Number(plan["timeout-minutes"]);
-  const rowTimeout = Number(sync["timeout-minutes"]);
-  if (!Number.isFinite(planTimeout))
-    throw new Error(`${rel}: no plan timeout-minutes - anchor lost`);
-  if (!(rowTimeout >= planTimeout)) {
+  // The row's timeout covers the budget its steps' bounds sum to
+  // (row_budget.ts); the writer step's own timeout is the budget's writer
+  // term, so it must be declared.
+  const writer = rowSteps.find((step) => runOf(step).startsWith(WRITER));
+  if (writer === undefined) throw new Error(`${rel}: no writer step - anchor lost`);
+  const writerTimeout = Number(writer["timeout-minutes"]);
+  if (!Number.isFinite(writerTimeout)) {
     mismatches.push({
       file: rel,
-      expected: `the sync job's timeout-minutes at least the plan's (${planTimeout}): it re-runs the plan's probe, whose hung calls must fail by their own bound`,
+      expected: "the writer step carrying its own timeout-minutes (the row budget's writer term)",
+      got: `timeout-minutes: ${String(writer["timeout-minutes"] ?? "(none)")} on the writer step`,
+    });
+    return mismatches;
+  }
+  const budget = rowBudgetMinutes(writerTimeout);
+  const rowTimeout = Number(sync["timeout-minutes"]);
+  if (!(rowTimeout >= budget)) {
+    mismatches.push({
+      file: rel,
+      expected: `the sync job's timeout-minutes at least ${budget}, the row budget row_budget.ts sums from its steps' bounds and the writer step's ${writerTimeout}: a row killed at its timeout files no failure report`,
       got: `timeout-minutes: ${String(sync["timeout-minutes"] ?? "(none)")}`,
     });
   }

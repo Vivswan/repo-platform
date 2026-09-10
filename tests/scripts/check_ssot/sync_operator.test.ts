@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { rowBudgetMinutes } from "../../../.github/scripts/sync/row_budget.ts";
 import {
   SYNC_WORKFLOW,
   syncOperatorMismatches,
@@ -97,12 +98,29 @@ describe("syncOperatorMismatches", () => {
       expected: "the plan's exact env",
     },
     {
-      reason: "a row timeout under the plan's (the re-run probe would die by a runner kill)",
+      reason:
+        "a row timeout under its budget (the runner would kill the row before the failure report is filed)",
       text: mutate(
+        `    timeout-minutes: 105\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
         `    timeout-minutes: 60\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
-        `    timeout-minutes: 30\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
       ),
-      expected: "timeout-minutes at least the plan's (60)",
+      expected: `timeout-minutes at least ${rowBudgetMinutes(10)}`,
+    },
+    {
+      reason: "a writer timeout raised without the row's following it",
+      text: mutate(
+        "        timeout-minutes: 10\n        env:\n          BUILD:",
+        "        timeout-minutes: 30\n        env:\n          BUILD:",
+      ),
+      expected: `timeout-minutes at least ${rowBudgetMinutes(30)}`,
+    },
+    {
+      reason: "the writer step losing its timeout (the budget's writer term)",
+      text: mutate(
+        "        timeout-minutes: 10\n        env:\n          BUILD:",
+        "        env:\n          BUILD:",
+      ),
+      expected: "the writer step carrying its own timeout-minutes",
     },
     {
       reason: "a second printer step",

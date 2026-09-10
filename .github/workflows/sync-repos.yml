@@ -175,9 +175,11 @@ jobs:
         row: ${{ fromJSON(needs.plan.outputs.indexes) }}
     name: sync (row ${{ matrix.row }})
     runs-on: ubuntu-latest
-    # The plan's bound again: this job re-runs its discovery and selection,
-    # so a hung probe must fail by its own named bound, not a runner kill.
-    timeout-minutes: 60
+    # At least the budget row_budget.ts sums from the steps' bounds (the
+    # operator-verdict-only rule judges it): every bound a step can hit
+    # before deliver.ts files a failure counts, since a row the runner kills
+    # at its timeout files nothing.
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -237,6 +239,9 @@ jobs:
       - name: Write the build into the target
         id: write
         continue-on-error: true
+        # The writer's bound: its git calls are local to the clone, so the
+        # row budget counts this step by its timeout.
+        timeout-minutes: 10
         env:
           BUILD: ${{ needs.plan.outputs.build }}
         run: >-

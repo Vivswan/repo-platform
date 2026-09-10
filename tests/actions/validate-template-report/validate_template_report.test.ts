@@ -259,8 +259,9 @@ describe("the action's reporting script", () => {
     "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
   const notJudged = (reason: string) =>
     `#### Integrity\n\nNot judged: ${reason}. See the [run log](${RUN_URL}). This FAILS the check.`;
-  const findingsOf = (findings: string) =>
-    `#### Integrity\n\n${findings}\nManaged content changed outside a sync. Restore the file from git history, or re-run the sync, which replaces platform files whole. This FAILS the check.`;
+  const findingsOf = (findings: string) => `#### Integrity\n\n${findings}\n${REMEDY}`;
+  const REMEDY =
+    "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a file in a link's place) for this repository to restore. This FAILS the check.";
   const FRESH = "#### Freshness\n\nUp to date with the build branch.";
   const behind = (distance: string) =>
     `#### Freshness\n\nThis repository is behind the build branch${distance}. The next sync PR updates the managed files; nothing to do here.`;
