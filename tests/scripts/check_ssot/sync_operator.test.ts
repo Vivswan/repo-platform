@@ -113,6 +113,21 @@ describe("syncOperatorMismatches", () => {
     expect(got[0]).toContain(expected);
   });
 
+  test("the resolver's own env is judged too: a TARGET there names that step", () => {
+    const text = mutate(
+      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+    );
+    expect(syncOperatorMismatches(text)).toEqual([
+      {
+        file: SYNC_WORKFLOW,
+        expected:
+          "no TARGET in a sync step's env (the runner prints step env; the name rides GITHUB_ENV)",
+        got: 'sync step "Resolve the row\'s target" declares TARGET',
+      },
+    ]);
+  });
+
   test("a target checkout before the resolver is refused: the masks would not exist yet", () => {
     const resolver = live.slice(
       live.indexOf("      # The only step that sees the name in the clear"),

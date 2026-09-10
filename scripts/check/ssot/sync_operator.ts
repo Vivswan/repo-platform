@@ -80,6 +80,17 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
   rowSteps.forEach((step, index) => {
     const run = runOf(step);
     const name = String(step.name ?? step.id ?? index + 1);
+    // Every step, the resolver and the actions included: the runner prints
+    // declared env for all of them alike.
+    for (const key of Object.keys(mapping(step.env))) {
+      if (key === "TARGET" || key === "TARGET_PRIVATE") {
+        mismatches.push({
+          file: rel,
+          expected: `no ${key} in a sync step's env (the runner prints step env; the name rides GITHUB_ENV)`,
+          got: `sync step "${name}" declares ${key}`,
+        });
+      }
+    }
     if (run === "") {
       const uses = String(step.uses ?? "");
       if (!ROW_ACTIONS.some((prefix) => uses.startsWith(prefix))) {
@@ -113,15 +124,6 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
         expected: `sync step "${name}" as one bun command redirected to a $RUNNER_TEMP file (> "$RUNNER_TEMP/<name>" 2>&1), the printer, or the resolver`,
         got: "a run step that can print to the public log",
       });
-    }
-    for (const key of Object.keys(mapping(step.env))) {
-      if (key === "TARGET" || key === "TARGET_PRIVATE") {
-        mismatches.push({
-          file: rel,
-          expected: `no ${key} in a sync step's env (the runner prints step env; the name rides GITHUB_ENV)`,
-          got: `sync step "${name}" declares ${key}`,
-        });
-      }
     }
   });
   if (printers !== 1) {

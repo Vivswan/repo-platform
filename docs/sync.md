@@ -283,7 +283,7 @@ A repository still registered the old way (`.repo-platform.yml` holding only `mo
 
 | Written | From |
 | --- | --- |
-| `project.name`, `project.slug`, `project.description` | `project_name`, `project_slug`, `description`; the repository name and an empty description when absent |
+| `project.name`, `project.slug`, `project.description` | `project_name`, `project_slug`, `description`; when absent, the repository name, the repository name made kebab-case (lowercase, every run outside `[a-z0-9]` one dash, none at either end), and an empty description |
 | `project.copyright_holder` | `copyright_holder`, only when it differs from the owner login |
 | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the `pages_*` answers, only where they differ from the defaults the plan action derives: the selected modules carrying `pages` data joined by commas (`none` when there are none); the `install` and `build` of the first module, in `files.yml` order, that the resolved setup names; `modules.pages.dist` (else `dist`) |
 | `docs_site.path` | `docs_site_path`, when it differs from `modules.docs-site.path` (else `docs`) |

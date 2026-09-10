@@ -24,6 +24,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const text = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
+/** The registration schema still judges the result, so a repository name
+ *  with no usable character fails there, naming the field. */
+const slugified = (name: string): string =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
 /** A recorded answer: absent, or a string; any other type is the answers
  *  file's error, never a silently defaulted value. */
 function answer(answers: Record<string, unknown>, key: string): string | undefined {
@@ -82,7 +90,7 @@ export function deriveRegistration(
 
   const project = compact({
     name: answer(answers, "project_name") ?? repository.name,
-    slug: answer(answers, "project_slug") ?? repository.name,
+    slug: answer(answers, "project_slug") ?? slugified(repository.name),
     description: answer(answers, "description") ?? "",
     copyright_holder: differs(answer(answers, "copyright_holder"), repository.owner),
   });

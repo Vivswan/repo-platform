@@ -28,7 +28,13 @@ git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-Copier asks for project name, description, a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) --> multiselect (any combination of `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster --> Two more questions, `homepage` and `topics`, seed the settings starter. Answers are recorded in `.github/.copier-answers.yml`; never delete that file, `copier update` depends on it. Its `_commit` is the build commit the render came from, as a full 40-hex sha: validate-template rejects a short or tag-shaped value, because the fleet judges a render at exactly that template commit.
+Copier asks for project name, description, a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) --> multiselect (any combination of `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster --> Two more questions, `homepage` and `topics`, seed the settings starter.
+
+Copier records the answers in `.github/.copier-answers.yml`, the render's record only until the first sync:
+
+- The operator's cutover derives the registration `.repo-platform.yml` from it ([sync.md](sync.md#cutover)).
+- The same sync PR deletes it through the `retired` entry in `files.yml`; from then on the registration is the only record.
+- Until that PR merges, keep it: its `_commit` is the build commit the render came from, as a full 40-hex sha, and validate-template rejects a short or tag-shaped value, because the fleet judges a render at exactly that template commit.
 
 Trust assumption, stated plainly: `--trust` executes the branch tip's post-render hook on your machine, and unlike the sync pipeline (which [provenance-verifies the tip](build-provenance.md#the-provenance-proof) against a deterministic rebuild before consuming it), this local copy runs whatever the `build` tip is at that moment. The branch is MEANT to advance only through the [publish pipeline](build-provenance.md#who-can-write-refsheadsbuild), but a user-repo ruleset cannot restrict writers - so pin `--vcs-ref` to a reviewed build commit sha instead of the branch name if that matters in your setting.
 
@@ -157,7 +163,7 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 
 ### Changing the module selection
 
-A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its render. The `plan` job in fleet-ci.yml validates the registration on the first one, and the sync writes the files once it has merged:
+A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its render. CI itself needs no render: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR. The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text
 PR edits modules: in .repo-platform.yml

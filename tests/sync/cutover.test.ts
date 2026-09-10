@@ -150,13 +150,21 @@ describe("deriveRegistration", () => {
     expect(document.skills).toEqual({ dir: "skills" });
   });
 
-  test("missing answers fall back to the repository name and an empty description", () => {
-    const { document } = deriveRegistration({ modules: ["bun"] }, {}, CONFIG, REPOSITORY);
-    expect(document).toEqual({
-      modules: ["bun"],
-      project: { name: "demo", slug: "demo", description: "" },
-    });
-  });
+  test.each([
+    ["demo", "demo"],
+    ["Demo_Project", "demo-project"],
+    ["Demo_Project.v2", "demo-project-v2"],
+    ["--Weird__Name--", "weird-name"],
+  ])(
+    "missing answers fall back to the repository name %s, its kebab-case %s, and an empty description",
+    (name, slug) => {
+      const { document } = deriveRegistration({ modules: ["bun"] }, {}, CONFIG, {
+        owner: "Vivswan",
+        name,
+      });
+      expect(document).toEqual({ modules: ["bun"], project: { name, slug, description: "" } });
+    },
+  );
 
   test("a recorded answer of the wrong type is the answers file's error, never a default", () => {
     expect(() =>
@@ -237,6 +245,17 @@ describe("cutover", () => {
       [ANSWERS_FILE]: answersText.replace("project_slug: demo", "project_slug: Not Kebab"),
     });
     expect(() => cutover(target, CONFIG, REPOSITORY)).toThrow("project.slug");
+    expect(readFileSync(join(target, ".repo-platform.yml"), "utf-8")).toBe(v1Text);
+  });
+
+  test("a repository name with nothing to slugify fails the schema check naming the field", () => {
+    const target = seed({
+      ".repo-platform.yml": v1Text,
+      [ANSWERS_FILE]: answersText.replace("project_slug: demo\n", ""),
+    });
+    expect(() => cutover(target, CONFIG, { owner: "Vivswan", name: "___" })).toThrow(
+      "project.slug",
+    );
     expect(readFileSync(join(target, ".repo-platform.yml"), "utf-8")).toBe(v1Text);
   });
 });
