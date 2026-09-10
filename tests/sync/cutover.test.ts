@@ -13,7 +13,7 @@ import {
   cutover,
   deriveRegistration,
 } from "../../.github/scripts/sync/writer/cutover.ts";
-import type { FilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
+import { parseFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
 import { parseRegistration } from "../../actions/plan/registration.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -21,20 +21,22 @@ const temp = tempDirs();
 const FIXTURES = join(import.meta.dir, "fixtures/cutover");
 const REPOSITORY = { owner: "Vivswan", name: "demo" };
 
-/** The module data a files.yml carries for the modules the fixture selects. */
-const CONFIG: FilesConfig = {
-  placeholders: [],
-  files: [],
-  retired: [{ path: ANSWERS_FILE }],
-  modules: {
-    bun: { pages: { install: "bun install --frozen-lockfile", build: "bun run build" } },
-    uv: { pages: { install: "uv sync", build: "uv run mkdocs build --site-dir dist" } },
-    pages: { dist: "dist" },
-    "docs-site": { path: "docs", tracking_label: { key: "docs_site", default: "docs-link-rot" } },
-    fuzzer: { tracking_label: { key: "fuzzer", default: "fuzz-nightly" } },
-    skills: { dir: "skills" },
-  },
-};
+/** The module data a files.yml carries for the modules the fixture selects,
+ *  parsed by the writer's own loader so the fixture tracks its shape. */
+const CONFIG_YAML = `
+placeholders: [skills_dir, fuzzer_label, docs_site_label]
+modules:
+  bun: { pages: { install: bun install --frozen-lockfile, build: bun run build } }
+  uv: { pages: { install: uv sync, build: uv run mkdocs build --site-dir dist } }
+  pages: { dist: dist }
+  docs-site: { path: docs, tracking_label: { key: docs_site, default: docs-link-rot } }
+  fuzzer: { tracking_label: { key: fuzzer, default: fuzz-nightly } }
+  skills: { skills_dir: { default: skills } }
+files: []
+retired:
+  - { path: ${ANSWERS_FILE} }
+`;
+const CONFIG = parseFilesConfig(CONFIG_YAML);
 
 const answers = () =>
   parseYaml(readFileSync(join(FIXTURES, ".copier-answers.yml"), "utf-8")) as Record<
@@ -140,6 +142,12 @@ describe("deriveRegistration", () => {
       build: "uv run mkdocs build --site-dir dist",
       dist: "public",
     });
+  });
+
+  test("the skills directory default is the one the loader owns, not a module key of its own", () => {
+    const lib = parseFilesConfig(CONFIG_YAML.replace("default: skills", "default: lib/skills"));
+    const { document } = deriveRegistration({ modules: ["skills"] }, answers(), lib, REPOSITORY);
+    expect(document.skills).toEqual({ dir: "skills" });
   });
 
   test("missing answers fall back to the repository name and an empty description", () => {

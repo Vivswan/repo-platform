@@ -287,7 +287,7 @@ A repository still registered the old way (`.repo-platform.yml` holding only `mo
 | `project.copyright_holder` | `copyright_holder`, only when it differs from the owner login |
 | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the `pages_*` answers, only where they differ from the defaults the plan action derives: the selected modules carrying `pages` data joined by commas (`none` when there are none); the `install` and `build` of the first module, in `files.yml` order, that the resolved setup names; `modules.pages.dist` (else `dist`) |
 | `docs_site.path` | `docs_site_path`, when it differs from `modules.docs-site.path` (else `docs`) |
-| `skills.dir` | `skills_dir`, when it differs from `modules.skills.dir` (else `skills`) |
+| `skills.dir` | `skills_dir`, when it differs from the `skills_dir` placeholder default the module data declares (`modules.<m>.skills_dir.default`, else `skills`) |
 | `labels.<key>` | `<key>_label` for each selected module carrying `tracking_label: {key, default}`, when it differs from the default |
 | `mirrors` | carried from the old file |
 

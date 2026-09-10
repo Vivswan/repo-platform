@@ -111,7 +111,7 @@ export function deriveRegistration(
     : undefined;
   const skills = has("skills")
     ? compact({
-        dir: differs(answer(answers, "skills_dir"), text(data("skills")?.dir) ?? "skills"),
+        dir: differs(answer(answers, "skills_dir"), config.defaults.skills_dir ?? "skills"),
       })
     : undefined;
   const labels: Record<string, string | undefined> = {};
