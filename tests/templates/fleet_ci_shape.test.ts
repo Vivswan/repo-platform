@@ -163,10 +163,11 @@ describe("fleet-ci.yml", () => {
     { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@build" },
     { id: "actionlint", tool: "raven-actions/actionlint@" },
     { id: "yamllint", tool: "repo-platform/actions/yamllint@build" },
+    { id: "typos", tool: "repo-platform/actions/typos@build" },
     { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
   ];
 
-  test("base-checks is one job for every visibility (skipped on the schedule): checkout, six !cancelled() steps, the judge last", () => {
+  test("base-checks is one job for every visibility (skipped on the schedule): checkout, seven !cancelled() steps, the judge last", () => {
     const job = fleetCi.jobs["base-checks"];
     expect(job?.if).toBe(SKIP_ON_SCHEDULE);
     const steps = job?.steps ?? [];
@@ -322,6 +323,67 @@ describe("fleet-ci.yml", () => {
     expect((job?.steps ?? []).map((step) => step.uses ?? "")).toContainEqual(
       expect.stringContaining("repo-platform/actions/dependency-review@build"),
     );
+  });
+
+  test("zizmor runs for every visibility, uploading SARIF only where code scanning exists", () => {
+    const job = fleetCi.jobs.zizmor;
+    // Unconditional: the high-severity gate applies to private repositories
+    // too; only the upload is visibility-keyed, on the step's input.
+    expect(job?.if).toBeUndefined();
+    const steps = job?.steps ?? [];
+    expect(steps.map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/zizmor@build"),
+    ]);
+    // != 'true': an empty visibility output uploads and fails loudly rather
+    // than silently skipping the upload.
+    expect(steps[1]?.with).toEqual({
+      "upload-sarif": "${{ needs.plan.outputs.private != 'true' }}",
+    });
+    expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
+  });
+
+  test("knip is armed by the bun or node module; bun's install serves both, npm's only a bun-less repository", () => {
+    const job = fleetCi.jobs.knip;
+    const bun = "contains(fromJSON(needs.plan.outputs.modules), 'bun')";
+    const node = "contains(fromJSON(needs.plan.outputs.modules), 'node')";
+    const noBun = "${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}";
+    expect(job?.if).toBe(`${bun} || ${node}`);
+    const steps = job?.steps ?? [];
+    // A repository selecting both modules has bun.lock, not package-lock.json:
+    // the package-manager choice is resolved once, on the bun module.
+    expect(steps.map((step) => [step.uses ?? step.run, step.if])).toEqual([
+      [expect.stringContaining("actions/checkout@"), undefined],
+      [expect.stringContaining("oven-sh/setup-bun@"), bun],
+      ["bun install --frozen-lockfile", bun],
+      [expect.stringContaining("actions/setup-node@"), noBun],
+      ["npm ci", noBun],
+      [expect.stringContaining("repo-platform/actions/knip@build"), undefined],
+    ]);
+    // The pinned version files, so the toolchain-version-files rule's
+    // contract holds here as in every other setup step.
+    expect(steps[1]?.with).toEqual({ "bun-version-file": ".bun-version" });
+    expect(steps[3]?.with).toEqual({ "node-version-file": ".node-version" });
+    // No SARIF, so no security-events grant.
+    expect(job?.permissions).toBeUndefined();
+  });
+
+  test("semgrep is public-only and calls its action at @build with the SARIF grant", () => {
+    const job = fleetCi.jobs.semgrep;
+    expect(job?.if).toBe("${{ needs.plan.outputs.private != 'true' }}");
+    expect((job?.steps ?? []).map((step) => step.uses ?? "run")).toEqual([
+      expect.stringContaining("actions/checkout@"),
+      expect.stringContaining("repo-platform/actions/semgrep@build"),
+    ]);
+    expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
+  });
+
+  test("security-events: write is granted only to the jobs that upload SARIF", () => {
+    const granted = Object.entries(fleetCi.jobs)
+      .filter(([, job]) => job.permissions?.["security-events"] === "write")
+      .map(([name]) => name)
+      .sort();
+    expect(granted).toEqual(["codeql", "semgrep", "zizmor"]);
   });
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {

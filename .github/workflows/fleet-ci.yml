@@ -138,7 +138,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # The six base checks in one job for every visibility (a standalone job
+  # The seven base checks in one job for every visibility (a standalone job
   # bills a rounded-up minute per push); !cancelled() keeps later checks
   # running past a failure, and the judge last names every failed check.
   base-checks:
@@ -175,6 +175,10 @@ jobs:
       - id: yamllint
         if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/yamllint@build
+      # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
+      - id: typos
+        if: ${{ !cancelled() }}
+        uses: Vivswan/repo-platform/actions/typos@build
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
@@ -220,6 +224,68 @@ jobs:
       - uses: actions/checkout@v7
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
+
+  # Actions security audit over every workflow and action.yml, under the
+  # fleet policy (actions/zizmor; a repo-owned .github/zizmor.yml replaces
+  # it). Findings reach code scanning on public repositories only (a
+  # private personal repository has none; != 'true' so an empty visibility
+  # output uploads and fails loudly); a high finding fails the job everywhere.
+  zizmor:
+    needs: [plan]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The SARIF upload only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/zizmor@build
+        with:
+          upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
+
+  # Unused files, exports, and dependencies, on the JavaScript toolchains
+  # only: the repository's own toolchain and lockfile install first (knip
+  # resolves imports through node_modules; bun's install serves a
+  # repository selecting both modules), then the action with the fleet
+  # default configuration unless the repository carries knip.json.
+  knip:
+    needs: [plan]
+    if: (contains(fromJSON(needs.plan.outputs.modules), 'bun') || contains(fromJSON(needs.plan.outputs.modules), 'node')) && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        if: contains(fromJSON(needs.plan.outputs.modules), 'bun')
+        with:
+          bun-version-file: .bun-version
+      - if: contains(fromJSON(needs.plan.outputs.modules), 'bun')
+        run: bun install --frozen-lockfile
+      - uses: actions/setup-node@v7
+        if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}
+        with:
+          node-version-file: .node-version
+      - if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}
+        run: npm ci
+      - uses: Vivswan/repo-platform/actions/knip@build
+
+  # Semgrep's default registry ruleset; every finding to code scanning, an
+  # ERROR finding fails the job. Public only: code scanning is where the
+  # findings go (!= 'true' as above).
+  semgrep:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.private != 'true' && github.event_name != 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The SARIF upload only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/semgrep@build
 
   # CodeQL, one call per language. On the nightly schedule it runs on the
   # week's Monday alone (the plan's weekly output).
