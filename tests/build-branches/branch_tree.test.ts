@@ -18,6 +18,8 @@ import {
   copyFleetWorkflows,
   destOverlapsRepo,
   EXCLUDED_DIRS,
+  FILES_CONFIG,
+  FILES_DIR,
   FLEET_WORKFLOWS,
   MIGRATIONS_SRC_REL,
   MODULE_DATA_DIR,
@@ -271,6 +273,8 @@ describe("assembleBranchTree", () => {
       "README.md",
       "actions",
       "copier.yml",
+      "files",
+      "files.yml",
       "migrations",
       "modules",
       "reserved-labels.yml",
@@ -327,6 +331,22 @@ describe("assembleBranchTree", () => {
     for (const name of moduleDirs) {
       expect(readFileSync(join(dest, MODULE_DATA_DIR, `${name}.yml`))).toEqual(
         readFileSync(join(templates, name, "module.yml")),
+      );
+    }
+  });
+
+  test("files.yml and files/ are the sync writer's data, byte for byte", () => {
+    // The operator reads both from the build commit it syncs: a missing or
+    // altered source would write the wrong bytes into every managed repo.
+    expect(readFileSync(join(dest, FILES_CONFIG))).toEqual(
+      readFileSync(join(REPO_ROOT, FILES_CONFIG)),
+    );
+    const shipped = listing(join(dest, FILES_DIR));
+    expect(shipped).toEqual(listing(join(REPO_ROOT, FILES_DIR)));
+    expect(shipped.length).toBeGreaterThan(20);
+    for (const rel of shipped) {
+      expect(readFileSync(join(dest, FILES_DIR, rel))).toEqual(
+        readFileSync(join(REPO_ROOT, FILES_DIR, rel)),
       );
     }
   });
