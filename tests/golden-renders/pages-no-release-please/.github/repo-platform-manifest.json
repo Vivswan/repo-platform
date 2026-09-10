@@ -20,7 +20,7 @@
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "23ceb6d0fc8b140c5d9e62d1a1ceb534c0c1e6a1ba83d14e400f520f2ffd1dba"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},
-    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": "58f4afd023cdc773f86db2976ccff974b5f4311ba7d8b48dcf51759de4eaf3d3"},
+    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": "b2792328fd0d319e85b2b378206d5263b1cac33caf8ca20b759c4f437adace99"},
     ".github/workflows/pages.yml": {"class": "managed", "hash": "e80b5e38cddc5f31befbbb79dd9beebeafa15f578f7552c02ab15d9afcbc42f8"},
     ".github/workflows/post-green.yml": {"class": "starter"},
     ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "62cf71e8ed57fafc3fd38fef5a38c95b8f5cad32a60a95ec31802f8664eee78b"},
