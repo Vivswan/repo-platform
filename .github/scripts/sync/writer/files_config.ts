@@ -21,6 +21,7 @@ import {
   type RegionMarkers,
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
+import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
 import {
   blocksAnchorProblem,
   isPlaceholderName,
@@ -236,6 +237,16 @@ export function checkRetirements(previous: FilesConfig, current: FilesConfig): v
   if (problems.length > 0) throw new FilesConfigError("files.yml", problems);
 }
 
+/** The writer writes the manifest last, over whatever sits at its path, so
+ *  an entry there would be written, recorded, and then silently replaced. */
+export function checkManifestPath(config: FilesConfig, label = "files.yml"): void {
+  if (config.files.some((entry) => entry.path === MANIFEST_NAME)) {
+    throw new FilesConfigError(label, [
+      `${MANIFEST_NAME} is the manifest the writer itself writes and cannot be a files entry`,
+    ]);
+  }
+}
+
 /** The whole load: parse and derive the placeholder defaults, every problem
  *  of the document in one error; then verify against the tree, and check
  *  retirements against the previous data file when one is given. */
@@ -250,6 +261,7 @@ export function loadFilesConfig(
   const all = [...placeholderProblems, ...problems];
   if (all.length > 0) throw new FilesConfigError(label, all);
   verifySources(config, tree);
+  checkManifestPath(config);
   if (previousPath !== undefined) {
     checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);
   }

@@ -40,6 +40,13 @@ export type WrittenClassesRecorded = AssertNever<Exclude<ManifestRecord["class"]
 
 export type Records = Record<string, ManifestEntryShape>;
 
+/** Records on a null prototype: a path named like an inherited property
+ *  (`__proto__`, `constructor`) is then looked up, assigned, and listed
+ *  like any other, where a plain object would answer with the prototype. */
+function recordsOf(files: Record<string, ManifestEntryShape> = {}): Records {
+  return Object.assign(Object.create(null) as Records, files);
+}
+
 export function sha256(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
 }
@@ -53,11 +60,11 @@ export function regionMarkers(kind: RegionKind): RegionMarkers {
  *  reports it and treats every file as unrecorded). */
 export function readRecords(target: string): { records: Records; problem: string | null } {
   const bytes = existingFile(target, MANIFEST_NAME);
-  if (bytes === null) return { records: {}, problem: null };
+  if (bytes === null) return { records: recordsOf(), problem: null };
   const parsed = parseManifestFiles(bytes.toString("utf-8"));
   if (parsed.problem !== null)
-    return { records: {}, problem: `${MANIFEST_NAME} ${parsed.problem}` };
-  return { records: parsed.files, problem: null };
+    return { records: recordsOf(), problem: `${MANIFEST_NAME} ${parsed.problem}` };
+  return { records: recordsOf(parsed.files), problem: null };
 }
 
 const HASH_RE = /^[0-9a-f]{64}$/;

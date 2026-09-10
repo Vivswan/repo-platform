@@ -139,6 +139,33 @@ describe("renderReport", () => {
     ).toBe("| `a\\|b.md` | managed | held | x \\| y |".split("|").length);
   });
 
+  test("a newline in a registration value stays inside its list item or cell, never a heading", () => {
+    const forged = "bad\n\n### Forged";
+    const text = renderReport(
+      buildReport({
+        ...QUIET,
+        notes: [`dropped unknown module \`${forged}\` (files.yml does not know it)`],
+        mirrors: [{ source: "LICENSE.md", target: `x/${forged}`, outcome: "refused", detail: "d" }],
+      }),
+    );
+    const lines = text.split("\n");
+    expect(lines.filter((line) => line.startsWith("#"))).toEqual([
+      "## Sync report",
+      "### Written",
+      "### Retired",
+      "### Registration notes",
+      "### Mirrors",
+      "### Review",
+    ]);
+    expect(lines).toContain(
+      "- dropped unknown module `bad ### Forged` (files.yml does not know it)",
+    );
+    expect(lines).toContain("| `LICENSE.md` | `x/bad ### Forged` | refused | d |");
+    expect(lines).toContain(
+      "- registration: dropped unknown module `bad ### Forged` (files.yml does not know it)",
+    );
+  });
+
   test("a held report lists its reasons and the replaced diffs", () => {
     const text = renderReport(
       buildReport({

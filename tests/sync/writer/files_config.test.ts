@@ -282,6 +282,18 @@ describe("blockSources and verifySources", () => {
       "files: ../a: source 'files/base/../a' must be a clean path under files/",
     ]);
   });
+
+  test("loadFilesConfig refuses an entry at the manifest path, which the writer overwrites last", () => {
+    const root = temp.dir("writer-files-manifest-path-");
+    writeTree(root, {
+      "files.yml":
+        "placeholders: []\nfiles:\n  - { path: .github/repo-platform-manifest.json, class: managed }\n",
+      "files/base/.github/repo-platform-manifest.json": "{}\n",
+    });
+    expect(() => loadFilesConfig(join(root, "files.yml"), join(root, "files"))).toThrow(
+      ".github/repo-platform-manifest.json is the manifest the writer itself writes and cannot be a files entry",
+    );
+  });
 });
 
 describe("checkRetirements", () => {

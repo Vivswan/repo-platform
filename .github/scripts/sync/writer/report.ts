@@ -146,8 +146,15 @@ export function unifiedDiff(
 
 const code = (text: string) => `\`${text}\``;
 
+/** Registration values and manifest paths reach the report verbatim; a
+ *  newline inside one would end its cell or list item and let the rest of
+ *  the value open a Markdown block of its own (a heading, a fence). */
+const oneLine = (text: string) => text.replace(/[\r\n]+/g, " ");
+
 /** A pipe inside a cell would split it; the escape keeps the column count. */
-const cell = (text: string) => text.replaceAll("|", "\\|");
+const cell = (text: string) => oneLine(text).replaceAll("|", "\\|");
+
+const bullet = (text: string) => `- ${oneLine(text)}`;
 
 function table(header: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.map(cell).join(" | ")} |`;
@@ -202,7 +209,7 @@ export function renderReport(report: SyncReport): string {
     );
   }
   if (report.notes.length > 0) {
-    parts.push("", "### Registration notes", "", ...report.notes.map((note) => `- ${note}`));
+    parts.push("", "### Registration notes", "", ...report.notes.map(bullet));
   }
   if (report.mirrors.length > 0) {
     parts.push(
@@ -219,7 +226,7 @@ export function renderReport(report: SyncReport): string {
   parts.push(
     "",
     report.hold
-      ? `Hold for review: **yes**\n\n${report.holdReasons.map((reason) => `- ${reason}`).join("\n")}`
+      ? `Hold for review: **yes**\n\n${report.holdReasons.map(bullet).join("\n")}`
       : "Hold for review: no",
     "",
   );
