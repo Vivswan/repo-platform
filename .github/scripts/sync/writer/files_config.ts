@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  checkFilesConfig,
   type FileEntry,
   type FilesConfig,
   FilesConfigError,
@@ -52,11 +53,17 @@ const DEFAULTED: readonly PlaceholderName[] = [
   "docs_site_label",
 ];
 
+export interface PlaceholderDefaults {
+  defaults: PlaceholderValues;
+  problems: string[];
+}
+
 /** The placeholder defaults the module data declares, each named once, and
  *  the placeholder list checked against the writer's vocabulary: a listed
  *  name the writer cannot derive, or a defaulted one no module backs, is a
- *  problem. */
-export function placeholderDefaults(config: FilesConfig, label = "files.yml"): PlaceholderValues {
+ *  problem. Returned rather than thrown so the load reports them beside
+ *  the grammar's. */
+export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
   const problems: string[] = [];
   const defaults: PlaceholderValues = {};
   const by: Partial<Record<PlaceholderName, string>> = {};
@@ -88,8 +95,7 @@ export function placeholderDefaults(config: FilesConfig, label = "files.yml"): P
       problems.push(`placeholders: no module declares the default for {{${name}}}`);
     }
   }
-  if (problems.length > 0) throw new FilesConfigError(label, problems);
-  return defaults;
+  return { defaults, problems };
 }
 
 export interface BlockSource {
@@ -230,16 +236,19 @@ export function checkRetirements(previous: FilesConfig, current: FilesConfig): v
   if (problems.length > 0) throw new FilesConfigError("files.yml", problems);
 }
 
-/** The whole load: parse, derive the placeholder defaults, verify against
- *  the tree, and check retirements against the previous data file when one
- *  is given. */
+/** The whole load: parse and derive the placeholder defaults, every problem
+ *  of the document in one error; then verify against the tree, and check
+ *  retirements against the previous data file when one is given. */
 export function loadFilesConfig(
   filesPath: string,
   tree: string,
   previousPath?: string,
 ): WriterFilesConfig {
-  const config = parseFilesConfig(readFileSync(filesPath, "utf-8"));
-  const defaults = placeholderDefaults(config);
+  const label = "files.yml";
+  const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);
+  const { defaults, problems: placeholderProblems } = placeholderDefaults(config);
+  const all = [...placeholderProblems, ...problems];
+  if (all.length > 0) throw new FilesConfigError(label, all);
   verifySources(config, tree);
   if (previousPath !== undefined) {
     checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);

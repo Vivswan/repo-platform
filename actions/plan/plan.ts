@@ -82,28 +82,27 @@ export interface TemplateData {
   defaults: PlanDefaults;
 }
 
-/** A default the plan cannot do without: the module and key must be there,
- *  or the build tree is broken and no repository plans. */
-function requiredDefault(
-  label: string,
-  modules: Record<string, ModuleData>,
-  module: string,
-  key: string,
-  pick: (data: ModuleData) => string | undefined,
-): string {
-  const data = modules[module];
-  const value = data === undefined ? undefined : pick(data);
-  if (value === undefined) {
-    throw new PlanError([
-      `${label}: modules.${module}.${key}: missing - the plan reads it as the default`,
-    ]);
-  }
-  return value;
+/** Where files.yml declares one default the plan reads. */
+export interface DefaultSource {
+  module: string;
+  /** The key path under `modules.<module>`, dotted. */
+  key: string;
+  pick: (data: ModuleData) => string | undefined;
 }
+
+/** The defaults the plan cannot do without, by PlanDefaults key: the module
+ *  and key must be there, or the build tree is broken and no repository
+ *  plans. This repository's checks iterate the same list, so a default
+ *  added here is pinned to its copier question without a second list. */
+export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
+  skillsDir: { module: "skills", key: "skills_dir.default", pick: (d) => d.skills_dir?.default },
+  pagesDist: { module: "pages", key: "dist", pick: (d) => d.dist },
+  docsPath: { module: "docs-site", key: "path", pick: (d) => d.path },
+};
 
 /** files.yml's module data as the plan reads it: an unreadable or invalid
  *  file, or one missing a default the plan resolves from, is an error
- *  naming the file. */
+ *  naming the file and every missing default. */
 export function loadModuleData(text: string, label = "files.yml"): TemplateData {
   let modules: Record<string, ModuleData>;
   try {
@@ -112,20 +111,24 @@ export function loadModuleData(text: string, label = "files.yml"): TemplateData 
     if (!(error instanceof FilesConfigError)) throw error;
     throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
-  return {
-    modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })),
-    defaults: {
-      skillsDir: requiredDefault(
-        label,
-        modules,
-        "skills",
-        "skills_dir.default",
-        (d) => d.skills_dir?.default,
-      ),
-      pagesDist: requiredDefault(label, modules, "pages", "dist", (d) => d.dist),
-      docsPath: requiredDefault(label, modules, "docs-site", "path", (d) => d.path),
-    },
+  const missing: string[] = [];
+  const required = ({ module, key, pick }: DefaultSource): string => {
+    const data = modules[module];
+    const value = data === undefined ? undefined : pick(data);
+    if (value === undefined) {
+      missing.push(
+        `${label}: modules.${module}.${key}: missing - the plan reads it as the default`,
+      );
+    }
+    return value ?? "";
   };
+  const defaults: PlanDefaults = {
+    skillsDir: required(REQUIRED_DEFAULTS.skillsDir),
+    pagesDist: required(REQUIRED_DEFAULTS.pagesDist),
+    docsPath: required(REQUIRED_DEFAULTS.docsPath),
+  };
+  if (missing.length > 0) throw new PlanError(missing);
+  return { modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })), defaults };
 }
 
 export interface PlanInput {

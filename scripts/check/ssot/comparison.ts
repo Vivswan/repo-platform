@@ -169,6 +169,31 @@ export function setMismatch(file: string, expected: string[], got: string[]): Mi
   return [{ file, expected: sortedSet(expected), got: sortedSet(got) }];
 }
 
+/** Mismatches when `got` is not `expected` name for name in the same
+ *  order: each missing and each extra name on its own, then the sequence
+ *  of the shared names when it differs. */
+export function orderedListMismatches(file: string, expected: string[], got: string[]): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const name of expected) {
+    if (!got.includes(name))
+      mismatches.push({ file, expected: `'${name}' listed`, got: "missing" });
+  }
+  for (const name of got) {
+    if (!expected.includes(name))
+      mismatches.push({ file, expected: `no '${name}'`, got: "listed" });
+  }
+  const shared = expected.filter((name) => got.includes(name));
+  const gotShared = got.filter((name) => expected.includes(name));
+  if (shared.join(", ") !== gotShared.join(", ")) {
+    mismatches.push({
+      file,
+      expected: `the order ${shared.join(", ")}`,
+      got: gotShared.join(", "),
+    });
+  }
+  return mismatches;
+}
+
 /** First index where two line sequences differ, or -1 when equal. */
 export function firstDiff(expected: string[], got: string[]): number {
   const max = Math.max(expected.length, got.length);

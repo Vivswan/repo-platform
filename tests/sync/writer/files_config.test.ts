@@ -44,8 +44,12 @@ retired:
 `;
 
 function defaultProblemsOf(text: string): string[] {
+  return placeholderDefaults(parseFilesConfig(text)).problems;
+}
+
+function loadProblemsOf(filesPath: string, tree: string): string[] {
   try {
-    placeholderDefaults(parseFilesConfig(text));
+    loadFilesConfig(filesPath, tree);
   } catch (error) {
     if (error instanceof FilesConfigError) return error.problems;
     throw error;
@@ -74,11 +78,14 @@ describe("placeholderDefaults", () => {
       ].join("\n"),
     );
     expect(placeholderDefaults(config)).toEqual({
-      skills_dir: "skills",
-      fuzzer_label: "fuzz-nightly",
-      docs_site_label: "docs-link-rot",
+      defaults: {
+        skills_dir: "skills",
+        fuzzer_label: "fuzz-nightly",
+        docs_site_label: "docs-link-rot",
+      },
+      problems: [],
     });
-    expect(placeholderDefaults(parseFilesConfig(BASE))).toEqual({});
+    expect(placeholderDefaults(parseFilesConfig(BASE))).toEqual({ defaults: {}, problems: [] });
   });
 
   test.each([
@@ -262,6 +269,18 @@ describe("blockSources and verifySources", () => {
     expect(() =>
       loadFilesConfig(join(root, "files.yml"), join(root, "files"), join(root, "previous.yml")),
     ).toThrow("b.txt was in the previous files.yml but is neither written nor retired now");
+  });
+
+  test("loadFilesConfig names the placeholder and grammar problems of a document in one error", () => {
+    const root = temp.dir("writer-files-batch-");
+    writeTree(root, {
+      "files.yml": "placeholders: [owner]\nfiles:\n  - { path: ../a, class: managed }\n",
+    });
+    expect(loadProblemsOf(join(root, "files.yml"), join(root, "files"))).toEqual([
+      "placeholders: 'owner' is not one the writer derives",
+      "files: ../a: path carries an empty, '.', or '..' segment",
+      "files: ../a: source 'files/base/../a' must be a clean path under files/",
+    ]);
   });
 });
 

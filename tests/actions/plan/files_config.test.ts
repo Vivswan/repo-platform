@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  checkFilesConfig,
   type FileEntry,
   FilesConfigError,
   linkTargetProblem,
@@ -118,6 +119,15 @@ describe("parseFilesConfig", () => {
         ".github/workflows/docs-site.yml is listed twice with conditions that can both hold",
       ),
     ]);
+  });
+
+  test("checkFilesConfig returns the config with its problems; parseFilesConfig throws them", () => {
+    const text = "placeholders: []\nfiles:\n  - { path: ../a, class: managed }\n";
+    const checked = checkFilesConfig(text);
+    expect(checked.config.files.map((entry) => entry.path)).toEqual(["../a"]);
+    expect(checked.problems).toEqual(problemsOf(text));
+    expect(checked.problems).toHaveLength(2);
+    expect(checkFilesConfig(BASE).problems).toEqual([]);
   });
 
   test("a YAML error is a load error naming the label, not a crash", () => {

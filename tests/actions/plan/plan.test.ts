@@ -19,6 +19,7 @@ import {
   type PlanInput,
   planCi,
   planPages,
+  REQUIRED_DEFAULTS,
   readReservedLabels,
   resolvePrivate,
   selectModules,
@@ -86,23 +87,8 @@ function input(
 }
 
 describe("loadModuleData", () => {
-  test("the real files.yml in its key order, with the data and defaults the plan reads", () => {
-    expect(MODULES.map((m) => m.name)).toEqual([
-      "bun",
-      "node",
-      "deno",
-      "uv",
-      "rust",
-      "pages",
-      "docs-site",
-      "release-please",
-      "issue-templates",
-      "skills",
-      "pr-title",
-      "fuzzer",
-      "nightly",
-      "custom-license",
-    ]);
+  test("the real files.yml in its key order, which is the manifests' order, with the data and defaults the plan reads", () => {
+    expect(MODULES.map((m) => m.name)).toEqual(loadManifests().map((m) => m.module));
     const byName = new Map(MODULES.map((m) => [m.name, m]));
     expect(byName.get("bun")?.codeql_language).toBe("javascript-typescript");
     expect(byName.get("uv")?.codeql_language).toBe("python");
@@ -132,6 +118,20 @@ describe("loadModuleData", () => {
       expect(() => loadModuleData(text, "/build/files.yml")).toThrow(PlanError);
       expect(() => loadModuleData(text, "/build/files.yml")).toThrow(`/build/files.yml: ${error}`);
     }
+    // Every missing default is named at once.
+    const bare = "placeholders: []\nfiles: []\nmodules: {}\n";
+    const problems = (() => {
+      try {
+        loadModuleData(bare);
+      } catch (error) {
+        if (error instanceof PlanError) return error.problems;
+        throw error;
+      }
+      return [];
+    })();
+    expect(problems.map((problem) => problem.split(":")[1].trim())).toEqual(
+      Object.values(REQUIRED_DEFAULTS).map(({ module, key }) => `modules.${module}.${key}`),
+    );
   });
 
   test.each<[reason: string, text: string, error: string]>([

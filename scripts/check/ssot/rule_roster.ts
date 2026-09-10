@@ -22,6 +22,7 @@ export interface Rule {
  *  removing its entry in the same change, deliberately. */
 export const RULE_ROSTER = [
   "module-list",
+  "files-modules",
   "dogfood-oracle-row",
   "bun-dirs",
   "action-pins",

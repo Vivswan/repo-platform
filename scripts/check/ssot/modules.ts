@@ -1,12 +1,14 @@
 // Rules anchored on the module manifests: the hand-ordered module roster
-// sites, this repository's own smoke row, and the pages token grammar.
+// sites, files.yml's modules block, this repository's own smoke row, and
+// the pages token grammar.
 
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { MODULES as SMOKE_GATING_MODULES } from "../../../tests/ci/smoke_gating/expectations.ts";
 import { ANSWERS_FILE, parseAnswers } from "../../generate/render_dogfood.ts";
-import { type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
+import { type Mismatch, mustMatch, orderedListMismatches, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, loadManifests, REPO_ROOT, read, repoCi } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -61,6 +63,18 @@ export const moduleRules: Rule[] = [
       );
       return mismatches;
     },
+  },
+  {
+    // files.yml's modules block is the fleet plan's module vocabulary and
+    // its key order the canonical order the plan's outputs and the writer's
+    // blocks follow, so it must equal MODULE_ORDER name for name, in order.
+    name: "files-modules",
+    run: () =>
+      orderedListMismatches(
+        "files.yml modules",
+        loadManifests().map((m) => m.module),
+        Object.keys(parseFilesConfig(read("files.yml")).modules),
+      ),
   },
   {
     // ci.yml's dogfood-oracle smoke row and .repo-platform-answers.yml are

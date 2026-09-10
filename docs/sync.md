@@ -66,7 +66,7 @@ retired:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data. Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
+| `modules.<name>` | A module and its data, the keys in canonical module order: the same names as the module manifests, in the same order (the `files-modules` ssot rule). Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |

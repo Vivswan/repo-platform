@@ -2,6 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { type PlanDefaults, REQUIRED_DEFAULTS } from "../../../actions/plan/plan.ts";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
   ACTION_BUN_PIN,
@@ -13,6 +14,7 @@ import {
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
   COPIER_BACKED_DEFAULTS,
+  COPIER_QUESTIONS,
   copierDefault,
   FETCHED_TREE_PIN_ANCHOR,
   filesDefaultMismatches,
@@ -26,6 +28,15 @@ import {
   TYPECHECK_TSCONFIG_LOOP,
 } from "../../../scripts/check/ssot/toolchain.ts";
 import { actionSetsUpBun } from "../../../scripts/generate/toolchain_pins.ts";
+
+/** The PlanDefaults key whose copier question is `question`. */
+function keyOf(question: string): keyof PlanDefaults {
+  const found = (Object.keys(COPIER_QUESTIONS) as (keyof PlanDefaults)[]).find(
+    (name) => COPIER_QUESTIONS[name] === question,
+  );
+  if (found === undefined) throw new Error(`no plan default answers ${question}`);
+  return found;
+}
 
 describe("stepCarriesWithKey", () => {
   const key = "bun-version-file:";
@@ -719,6 +730,18 @@ describe("filesDefaultMismatches", () => {
     if (found === undefined) throw new Error(`no copier-backed default for ${module}`);
     return found;
   };
+
+  test("the rule pins exactly the defaults the plan requires, each under a copier question", () => {
+    const site = ({ module, key }: { module: string; key: string }) => `${module}.${key}`;
+    expect(COPIER_BACKED_DEFAULTS.map(site).sort()).toEqual(
+      Object.values(REQUIRED_DEFAULTS).map(site).sort(),
+    );
+    expect(Object.keys(COPIER_QUESTIONS).sort()).toEqual(Object.keys(REQUIRED_DEFAULTS).sort());
+    for (const backed of COPIER_BACKED_DEFAULTS) {
+      expect(backed.question).not.toBe("");
+      expect(backed.pick).toBe(REQUIRED_DEFAULTS[keyOf(backed.question)].pick);
+    }
+  });
 
   test("the three defaults the plan reads, each equal to its copier question's default, pass", () => {
     const defaults = { pages: "dist", "docs-site": "docs", skills: "skills" };

@@ -176,10 +176,19 @@ export function mutuallyExclusive(a: When | null, b: When | null): boolean {
   );
 }
 
-/** The parsed and cross-checked data file. Neither the files/ tree nor the
- *  placeholder vocabulary is consulted here: the writer checks both, so
- *  every other reader (and a previous files.yml) parses the same way. */
-export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig {
+export interface CheckedFilesConfig {
+  config: FilesConfig;
+  /** Every cross-check the document fails; the config is complete anyway. */
+  problems: string[];
+}
+
+/** The document parsed and cross-checked without throwing, so a reader
+ *  with checks of its own (the writer's placeholder vocabulary) can fold
+ *  them into the same list and report every problem at once. A YAML or
+ *  shape error leaves no config to return and throws. Neither the files/
+ *  tree nor the placeholder vocabulary is consulted here, so every reader
+ *  (and a previous files.yml) parses the same way. */
+export function checkFilesConfig(text: string, label = "files.yml"): CheckedFilesConfig {
   let raw: unknown;
   try {
     raw = parseYaml(text, { logLevel: "error" });
@@ -261,11 +270,20 @@ export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig
       );
     }
   }
-  if (problems.length > 0) throw new FilesConfigError(label, problems);
   return {
-    placeholders: data.placeholders,
-    modules: data.modules,
-    files,
-    retired: data.retired,
+    config: {
+      placeholders: data.placeholders,
+      modules: data.modules,
+      files,
+      retired: data.retired,
+    },
+    problems,
   };
+}
+
+/** The parsed and cross-checked data file, or one error naming every problem. */
+export function parseFilesConfig(text: string, label = "files.yml"): FilesConfig {
+  const { config, problems } = checkFilesConfig(text, label);
+  if (problems.length > 0) throw new FilesConfigError(label, problems);
+  return config;
 }

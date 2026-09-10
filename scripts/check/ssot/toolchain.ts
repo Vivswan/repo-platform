@@ -12,6 +12,11 @@ import {
   EXCLUDED_DIRS,
 } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { type ModuleData, parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import {
+  type DefaultSource,
+  type PlanDefaults,
+  REQUIRED_DEFAULTS,
+} from "../../../actions/plan/plan.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
@@ -540,28 +545,27 @@ export function filesModuleDataMismatches(
   return mismatches;
 }
 
-/** A files.yml module-data default that copier.yml still answers for: the
- *  plan and the registration cutover read files.yml, copier's question
- *  keeps the recorded answers' default, and the two must agree until the
- *  question goes. */
-export interface CopierBackedDefault {
-  module: string;
-  /** The key path under `modules.<module>`, dotted. */
-  key: string;
+/** The copier question each default the plan reads still answers for, by
+ *  PlanDefaults key: the plan and the registration cutover read files.yml,
+ *  copier's question keeps the recorded answers' default, and the two must
+ *  agree until the question goes. Keyed on the plan's own type, so a
+ *  default the plan gains without a question here fails to typecheck. */
+export const COPIER_QUESTIONS: Readonly<Record<keyof PlanDefaults, string>> = {
+  skillsDir: "skills_dir",
+  pagesDist: "pages_dist_dir",
+  docsPath: "docs_site_path",
+};
+
+/** A files.yml module-data default the plan reads, with the copier
+ *  question it mirrors. */
+export interface CopierBackedDefault extends DefaultSource {
   question: string;
-  pick: (data: ModuleData) => string | undefined;
 }
 
-export const COPIER_BACKED_DEFAULTS: readonly CopierBackedDefault[] = [
-  { module: "pages", key: "dist", question: "pages_dist_dir", pick: (d) => d.dist },
-  { module: "docs-site", key: "path", question: "docs_site_path", pick: (d) => d.path },
-  {
-    module: "skills",
-    key: "skills_dir.default",
-    question: "skills_dir",
-    pick: (d) => d.skills_dir?.default,
-  },
-];
+/** The plan's required defaults, each with its copier question. */
+export const COPIER_BACKED_DEFAULTS: readonly CopierBackedDefault[] = (
+  Object.keys(COPIER_QUESTIONS) as (keyof PlanDefaults)[]
+).map((name) => ({ ...REQUIRED_DEFAULTS[name], question: COPIER_QUESTIONS[name] }));
 
 /** files.yml's copy of one copier-backed default against the question's
  *  default. */
