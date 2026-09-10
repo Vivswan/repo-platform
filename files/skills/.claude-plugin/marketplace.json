@@ -1,0 +1,16 @@
+{
+  "name": "{{project_slug}}-skills",
+  "owner": {
+    "name": "{{github_username}}"
+  },
+  "metadata": {
+    "description": "Agent skills for {{project_name}}"
+  },
+  "plugins": [
+    {
+      "name": "{{project_slug}}-skills",
+      "description": "Agent skills for {{project_name}}",
+      "source": "./"
+    }
+  ]
+}
