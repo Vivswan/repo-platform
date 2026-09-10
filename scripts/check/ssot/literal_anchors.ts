@@ -25,6 +25,7 @@ import {
   read,
   trackedFiles,
   trackingManifests,
+  walkFiles,
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -459,9 +460,10 @@ export const literalAnchorRules: Rule[] = [
   {
     // open_pr.ts reads run_hidden.ts capture files by name to put hidden
     // validation diagnostics into the PR body; the names derive from the
-    // labels at the run_hidden call sites. Rewording a label would
-    // silently break that hand-off, so every referenced capture name
-    // must match a label-derived one.
+    // labels at the run_hidden call sites - inline in the sync workflow,
+    // or argv arrays in the sync scripts. Rewording a label would silently
+    // break that hand-off, so every referenced capture name must match a
+    // label-derived one.
     name: "hidden-capture-names",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -471,7 +473,9 @@ export const literalAnchorRules: Rule[] = [
             /run_hidden\.ts "([^"]+)" --/g,
           ),
         ].map((match) => match[1]),
-        ...wrappedArgvLabels(read(".github/scripts/sync/commit_push.ts"), "run_hidden.ts"),
+        ...walkFiles(".github/scripts/sync")
+          .filter((file) => file.path.endsWith(".ts") && !file.symlink)
+          .flatMap((file) => wrappedArgvLabels(read(file.path), "run_hidden.ts")),
       ];
       if (labels.length === 0) {
         throw new Error("no run_hidden labels found in the sync call sites - anchor lost");

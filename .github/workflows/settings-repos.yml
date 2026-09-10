@@ -209,29 +209,21 @@ jobs:
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The managed baseline for THIS repository's facts, then the repo's own
-      # settings.yml merged over it. Scratch filenames are fixed and neutral:
-      # a redacted slug reaches the scripts only through env (already
-      # masked); the operator repo has no .repo-platform.yml to fetch, so its
-      # facts come from its recorded answers in this checkout. Both run
-      # BEFORE the settings action, so its own private-repos redaction cannot
-      # cover what they print, and both quote repo-owned content when they
-      # fail; run_hidden.ts captures that for a private target.
+      # settings.yml merged over it (settings_layer_step.ts: the operator
+      # row reads its checkout, every other target is fetched at the pinned
+      # commit). Scratch filenames are fixed and neutral: a redacted slug
+      # reaches the scripts only through env (already masked); the operator
+      # repo has no .repo-platform.yml to fetch, so its facts come from its
+      # recorded answers in this checkout. Both run BEFORE the settings
+      # action, so its own private-repos redaction cannot cover what they
+      # print, and both quote repo-owned content when they fail;
+      # run_hidden.ts captures that for a private target.
       - name: Render the managed settings baseline
         id: render
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-        run: |
-          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
-            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
-              bun .github/scripts/fleet/render_managed_settings.ts \
-              --repo "$TARGET" --operator-answers .repo-platform-answers.yml \
-              --out "$RUNNER_TEMP/managed-settings.yml"
-          else
-            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
-              bun .github/scripts/fleet/render_managed_settings.ts \
-              --repo "$TARGET" --out "$RUNNER_TEMP/managed-settings.yml"
-          fi
+        run: bun .github/scripts/fleet/settings_layer_step.ts render
 
       - name: Merge the repository's settings.yml over the baseline
         id: merge
@@ -241,25 +233,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-        run: |
-          # The operator repository IS this checkout, so its layer is read
-          # from disk - the render took its facts from the same working
-          # tree, and fetching would reintroduce the race the pin removes.
-          # Every other target is fetched, pinned to the commit the render
-          # published.
-          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
-            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
-              bun .github/scripts/fleet/merge_settings_layers.ts \
-              --managed "$RUNNER_TEMP/managed-settings.yml" \
-              --repo-file .github/settings.yml \
-              --out "$RUNNER_TEMP/merged-settings.yml"
-          else
-            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
-              bun .github/scripts/fleet/merge_settings_layers.ts \
-              --managed "$RUNNER_TEMP/managed-settings.yml" \
-              --repo-fetch "$TARGET" --repo-ref "${{ steps.render.outputs.ref }}" \
-              --out "$RUNNER_TEMP/merged-settings.yml"
-          fi
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun .github/scripts/fleet/settings_layer_step.ts merge
 
       # The opt-in was rechecked at the pinned commit, but the apply runs
       # later and the branch keeps moving; re-resolving the head narrows that
@@ -291,17 +266,11 @@ jobs:
         if: >-
           steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true' ||
           steps.freshness.outputs.moved == 'true'
-        run: |
-          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it carries no .repo-platform.yml at the revision this run read"\
-              "(it left management), so its settings are not managed here any more."
-          elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it has no .github/settings.yml yet, so there is nothing to layer"\
-              "over the fleet defaults. The settings starter seeds the file on its next template sync."
-          else
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings,"\
-              "so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
-          fi
+        env:
+          HINT: ${{ matrix.repo }}
+          RENDER_SKIPPED: ${{ steps.render.outputs.skipped }}
+          MERGE_SKIPPED: ${{ steps.merge.outputs.skipped }}
+        run: bun .github/scripts/fleet/report_skipped_target.ts
 
       # Referenced-label invariant, FAIL-CLOSED side (docs/settings.md, "Label
       # preflight"): the apply's reconciliation deletes and renames labels the
@@ -318,18 +287,8 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
           MODE: ${{ inputs.check_only && 'check' || 'apply' }}
-        run: |
-          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
-            bun .github/scripts/sync/run_hidden.ts "settings labels" -- \
-              bun .github/scripts/fleet/label_preflight.ts \
-              --merged "$RUNNER_TEMP/merged-settings.yml" \
-              --repo "$TARGET" --target-dir . --mode "$MODE"
-          else
-            bun .github/scripts/sync/run_hidden.ts "settings labels" -- \
-              bun .github/scripts/fleet/label_preflight.ts \
-              --merged "$RUNNER_TEMP/merged-settings.yml" \
-              --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"
-          fi
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun .github/scripts/fleet/settings_layer_step.ts labels
 
       # Outside the hidden capture, like the skip notices above: for a
       # hide-details target the capture swallows the preflight's own

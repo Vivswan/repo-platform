@@ -1,252 +1,160 @@
-// The label-preflight invocation grammar (scripts/check/ssot/label_preflight.ts).
+// The label-preflight pin (scripts/check/ssot/label_preflight.ts): the
+// workflow-shape judge over synthetic jobs, and the argv pin over an
+// injected builder.
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { LayerStepFacts } from "../../../.github/scripts/fleet/settings_layer_step.ts";
 import {
+  invokesPreflightLeg,
+  labelPreflightArgvMismatches,
   labelPreflightFileMismatches,
   labelPreflightJobMismatches,
+  layerStepReadsNoFiles,
   PREFLIGHT_APPLY_JOB_KEYS,
   PREFLIGHT_APPLY_RUNS_ON,
   PREFLIGHT_APPLY_WITH,
+  PREFLIGHT_ARGV_FACTS,
+  PREFLIGHT_ARGV_ROWS,
+  PREFLIGHT_EXPECTED_ARGV,
   PREFLIGHT_EXPECTED_RUN,
   PREFLIGHT_FORBIDDEN_RUN_TOKENS,
   PREFLIGHT_JOB_ENV_KEYS,
+  PREFLIGHT_STEP_ENV_PINS,
   PREFLIGHT_STEP_KEYS,
-  preflightArgs,
-  preflightInvocation,
-  shellSegments,
+  type PreflightArgvRow,
 } from "../../../scripts/check/ssot/label_preflight.ts";
 
-describe("shellSegments", () => {
-  test("drops comment lines and trailing comments, joins continuations", () => {
-    const run = [
-      "# a lead comment naming fleet/label_preflight.ts",
-      "bun x \\",
-      "  --flag v # trailing comment",
-      "echo done",
-    ].join("\n");
-    expect(shellSegments(run)).toEqual(["bun x    --flag v ", "echo done"]);
-    // The join itself, isolated: a backslash-newline splices the next
-    // line into the same segment instead of opening a new one.
-    expect(shellSegments("a \\\nb")).toEqual(["a  b"]);
-    expect(shellSegments("a \nb")).toEqual(["a ", "b"]);
-  });
+const OPERATOR = ".github/workflows/settings-repos.yml";
+const SCRIPTS = join(import.meta.dir, "../../../.github/scripts");
 
-  test("splits compound commands at ;, &&, and ||", () => {
-    expect(shellSegments("a; b && c || d")).toEqual(["a", " b ", " c ", " d"]);
-  });
-
-  test("a commented-out continuation line breaks its command chain", () => {
-    const run = [
-      'bun run_hidden.ts "x" -- \\',
-      "# bun fleet/label_preflight.ts \\",
-      "  --merged y",
-    ].join("\n");
-    // The comment swallows the joined tail; the invocation is gone.
-    expect(shellSegments(run)).toEqual(['bun run_hidden.ts "x" --  ']);
-  });
-
-  test("quote-aware: a #, ;, &&, or || inside a quoted string is data, not a split or comment", () => {
-    expect(shellSegments('echo "a # b"')).toEqual(['echo "a # b"']);
-    expect(shellSegments('echo "a; b && c"')).toEqual(['echo "a; b && c"']);
-    expect(shellSegments('echo "a || b"')).toEqual(['echo "a || b"']);
-  });
-
-  test("heredoc bodies are dropped as text; openers stay executable", () => {
-    expect(shellSegments(["cat <<EOF", "body line", "EOF", "echo after"].join("\n"))).toEqual([
-      "cat <<EOF",
-      "echo after",
-    ]);
-    // Quoted and tab-indented delimiter spellings; content past each
-    // terminator survives, so a never-closing mutant diverges here.
-    expect(shellSegments(['cat <<"END"', "body", "END", "echo after"].join("\n"))).toEqual([
-      'cat <<"END"',
-      "echo after",
-    ]);
-    expect(shellSegments(["cat <<-EOF", "\tbody", "\tEOF", "echo after"].join("\n"))).toEqual([
-      "cat <<-EOF",
-      "echo after",
-    ]);
-  });
-
-  test("an indented terminator look-alike is still body for <<WORD; only <<- strips tabs", () => {
-    const segments = shellSegments(
-      [
-        "cat <<EOF",
-        " EOF",
-        "bun .github/scripts/fleet/label_preflight.ts --merged x",
-        "EOF",
-        "echo after",
-      ].join("\n"),
+describe("invokesPreflightLeg", () => {
+  test("recognizes the labels leg at any position; a quoted path or another leg is not it", () => {
+    expect(invokesPreflightLeg("bun .github/scripts/fleet/settings_layer_step.ts labels")).toBe(
+      true,
     );
-    expect(segments).toEqual(["cat <<EOF", "echo after"]);
-  });
-
-  test("multiple heredocs on one line close in POSIX order", () => {
-    const segments = shellSegments(
-      [
-        "cat <<A <<B",
-        "a-body",
-        "A",
-        "b-body: bun .github/scripts/fleet/label_preflight.ts --merged x",
-        "B",
-        "echo done",
-      ].join("\n"),
+    expect(
+      invokesPreflightLeg(
+        "bun x.ts && bun .github/scripts/fleet/settings_layer_step.ts labels || true",
+      ),
+    ).toBe(true);
+    expect(invokesPreflightLeg("bun .github/scripts/fleet/settings_layer_step.ts merge")).toBe(
+      false,
     );
-    expect(segments).toEqual(["cat <<A <<B", "echo done"]);
-  });
-
-  test("a non-word heredoc delimiter is still a heredoc; its body is text", () => {
-    const segments = shellSegments(
-      ["cat <<@", "bun .github/scripts/fleet/label_preflight.ts --merged x", "@"].join("\n"),
+    expect(invokesPreflightLeg('bun ".github/scripts/fleet/settings_layer_step.ts" labels')).toBe(
+      false,
     );
-    expect(segments).toEqual(["cat <<@"]);
+    expect(invokesPreflightLeg("bun .github/scripts/fleet/settings_layer_step.ts labelsx")).toBe(
+      false,
+    );
   });
 });
 
-describe("preflightInvocation", () => {
-  const direct =
-    '          bun platform/.github/scripts/fleet/label_preflight.ts --merged "$RUNNER_TEMP/merged-settings.yml"';
-  const hidden =
-    '            bun .github/scripts/sync/run_hidden.ts "settings labels" --   bun .github/scripts/fleet/label_preflight.ts   --merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"';
-
-  test("recognizes the direct and the run_hidden-wrapped shapes", () => {
-    expect(preflightInvocation(direct)).toBe("direct");
-    expect(preflightInvocation(hidden)).toBe("hidden");
+describe("labelPreflightArgvMismatches", () => {
+  // The suite's OWN copy of the pinned argv, asserted equal to the export:
+  // an edit to the rule's table breaks this equality, not just the live
+  // script's luck. Four rows: both target kinds in both modes.
+  const HEAD = [
+    "bun",
+    join(SCRIPTS, "sync/run_hidden.ts"),
+    "settings labels",
+    "--",
+    "bun",
+    join(SCRIPTS, "fleet/label_preflight.ts"),
+    "--merged",
+    "/runner/_temp/merged-settings.yml",
+  ];
+  const SHA = "0123456789abcdef0123456789abcdef01234567";
+  const OPERATOR_ROW = [...HEAD, "--repo", "Vivswan/repo-platform", "--target-dir", "."];
+  const TARGET_ROW = [...HEAD, "--repo", "Vivswan/managed", "--ref", SHA];
+  test("the exported argv pin equals the suite's copy, and the rows' facts match their keys", () => {
+    expect(PREFLIGHT_ARGV_ROWS).toEqual([
+      "operator-apply",
+      "operator-check",
+      "target-apply",
+      "target-check",
+    ]);
+    expect(PREFLIGHT_EXPECTED_ARGV).toEqual({
+      "operator-apply": [...OPERATOR_ROW, "--mode", "apply"],
+      "operator-check": [...OPERATOR_ROW, "--mode", "check"],
+      "target-apply": [...TARGET_ROW, "--mode", "apply"],
+      "target-check": [...TARGET_ROW, "--mode", "check"],
+    });
+    for (const row of PREFLIGHT_ARGV_ROWS) {
+      const [kind, mode] = row.split("-");
+      expect(PREFLIGHT_ARGV_FACTS[row].operator).toBe(kind === "operator");
+      expect(PREFLIGHT_ARGV_FACTS[row].mode).toBe(mode);
+      expect(PREFLIGHT_ARGV_FACTS[row].pinned).toBe(SHA);
+    }
   });
 
-  test("echoed and argument-position spoofs are not invocations", () => {
-    expect(
-      preflightInvocation("echo bun platform/.github/scripts/fleet/label_preflight.ts --merged x"),
-    ).toBeNull();
-    expect(
-      preflightInvocation(
-        'bun .github/scripts/sync/run_hidden.ts "settings labels" -- echo bun .github/scripts/fleet/label_preflight.ts --merged x',
-      ),
-    ).toBeNull();
+  test("the live builder judges clean (positive control)", () => {
+    expect(labelPreflightArgvMismatches()).toEqual([]);
   });
 
-  test("a quoted script path is an unrecognized form, failing closed", () => {
-    expect(
-      preflightInvocation('bun ".github/scripts/fleet/label_preflight.ts" --merged x'),
-    ).toBeNull();
+  test("a layer step that reads files fires the trust boundary; the live source passes", () => {
+    const live = readFileSync(join(SCRIPTS, "fleet/settings_layer_step.ts"), "utf-8");
+    expect(layerStepReadsNoFiles(live)).toBe(true);
+    for (const reader of [
+      'import { readFileSync } from "node:fs";\n',
+      'import { readFile } from "node:fs/promises";\n',
+      'const mode = await Bun.file(".mode").text();\n',
+    ]) {
+      const fired = labelPreflightArgvMismatches(
+        (facts) => PREFLIGHT_EXPECTED_ARGV[rowOf(facts)],
+        `${reader}${live}`,
+      );
+      expect(fired.map((m) => m.got)).toEqual(["a node:fs import or Bun.file call"]);
+    }
   });
 
-  test("a SUBSTITUTED wrapper is not the hidden form - only sync/run_hidden.ts wraps", () => {
-    // The discriminator a wrapper-regex widening (any .ts, or any
-    // run_hidden.ts path) would break: removing the wrapper is covered
-    // elsewhere, but a DIFFERENT wrapper in the same position must fail
-    // the grammar too, or a capture-less stand-in could swallow the
-    // guard's output while every other pinned fact reads intact.
-    expect(
-      preflightInvocation(
-        'bun .github/scripts/sync/other_wrapper.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
-      ),
-    ).toBeNull();
-    expect(
-      preflightInvocation(
-        'bun .github/scripts/fleet/run_hidden.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
-      ),
-    ).toBeNull();
+  const rowOf = (facts: LayerStepFacts): PreflightArgvRow =>
+    `${facts.operator ? "operator" : "target"}-${facts.mode}` as PreflightArgvRow;
+  const report = (mutate: (argv: string[], facts: LayerStepFacts) => string[]) =>
+    labelPreflightArgvMismatches((facts) =>
+      mutate([...PREFLIGHT_EXPECTED_ARGV[rowOf(facts)]], facts),
+    )
+      .map((m) => `${m.file}: ${m.expected} => ${m.got}`)
+      .join("\n");
+
+  test("an extra --sections flag fires the argv pin on every row", () => {
+    const fired = report((argv) => [
+      ...argv.slice(0, -2),
+      "--sections",
+      "issues",
+      ...argv.slice(-2),
+    ]);
+    for (const row of PREFLIGHT_ARGV_ROWS) expect(fired).toContain(`labels leg, ${row} row`);
+    expect(fired).toContain("first difference at element 12");
   });
 
-  test("a stem glued to a preceding non-separator is a different tree's file, not the wrapper or script", () => {
-    expect(
-      preflightInvocation(
-        'bun not-sync/run_hidden.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
-      ),
-    ).toBeNull();
-    expect(
-      preflightInvocation("bun .github/scripts/myfleet/label_preflight.ts --merged x"),
-    ).toBeNull();
-    expect(
-      preflightInvocation("bun .github/scripts/my.fleet/label_preflight.ts --merged x"),
-    ).toBeNull();
-    // The landed prefixed spellings still read as invocations.
-    expect(
-      preflightInvocation("bun platform/.github/scripts/fleet/label_preflight.ts --merged x"),
-    ).toBe("direct");
+  test("an unwrapped leg fires: the wrapper is part of the pin", () => {
+    expect(report((argv) => argv.slice(4))).toContain("first difference at element 1");
   });
 
-  test("an inline env-assignment prefix is an unrecognized form, failing closed", () => {
-    expect(
-      preflightInvocation("MODE=check bun .github/scripts/fleet/label_preflight.ts --merged x"),
-    ).toBeNull();
+  test("a builder folding apply into check fires only the apply rows", () => {
+    const fired = report((argv) => argv.map((word) => (word === "apply" ? "check" : word)));
+    expect(fired).toContain("operator-apply row");
+    expect(fired).toContain("target-apply row");
+    expect(fired).not.toContain("operator-check row");
+    expect(fired).not.toContain("target-check row");
   });
 
-  test("an || suffix becomes its own segment at the grammar level (labelPreflightJobMismatches proves the byte pin rejects the suppression)", () => {
-    const segments = shellSegments(
-      "bun .github/scripts/fleet/label_preflight.ts --merged x || true",
+  test("a fetched row reading the checkout fires only the target rows", () => {
+    const fired = report((argv, facts) =>
+      facts.operator ? argv : argv.map((word) => (word === "--ref" ? "--target-dir" : word)),
     );
-    expect(segments.map(preflightInvocation)).toEqual(["direct", null]);
-  });
-
-  test("the EXACT allowlisted command inside a heredoc body is not an invocation", () => {
-    const segments = shellSegments(
-      [
-        "cat <<EOF",
-        "bun platform/.github/scripts/fleet/label_preflight.ts --merged " +
-          '"$RUNNER_TEMP/merged-settings.yml" --repo "$GITHUB_REPOSITORY" --target-dir . ' +
-          '--sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" --mode "$MODE" ' +
-          '--on-missing-permission "$ON_MISSING_PERMISSION"',
-        "EOF",
-      ].join("\n"),
-    );
-    expect(segments.map(preflightInvocation)).toEqual([null]);
-  });
-
-  test("an exact command inside single-quoted data does not split into a phantom invocation", () => {
-    const segments = shellSegments(
-      "echo 'decoy; bun platform/.github/scripts/fleet/label_preflight.ts --merged x; ignored'",
-    );
-    expect(segments).toHaveLength(1);
-    expect(segments.map(preflightInvocation)).toEqual([null]);
-  });
-
-  test("an exact command smuggled into run_hidden's quoted label is not the wrapped command", () => {
-    // The label carries the full invocation text; the real separator
-    // runs `true`. The label must be one CLOSED double-quoted argument
-    // directly before `--`, so the smuggle is not an invocation.
-    const intact =
-      'bun .github/scripts/sync/run_hidden.ts "x -- bun .github/scripts/fleet/label_preflight.ts --merged x --repo y --target-dir . --mode apply" -- true';
-    expect(preflightInvocation(intact)).toBeNull();
-    // The ` #` variant: comment truncation leaves the label unterminated,
-    // which the closed-quote anchor rejects too.
-    const truncated = shellSegments(
-      'bun .github/scripts/sync/run_hidden.ts "x -- bun .github/scripts/fleet/label_preflight.ts --merged x --repo y --target-dir . --mode apply #" -- true',
-    );
-    expect(truncated.map(preflightInvocation)).toEqual([null]);
-  });
-});
-
-describe("preflightArgs", () => {
-  test("normalizes whitespace across joined continuations", () => {
-    expect(
-      preflightArgs(
-        '  bun .github/scripts/fleet/label_preflight.ts    --merged "$RUNNER_TEMP/merged-settings.yml"   --repo "$TARGET" --target-dir . --mode "$MODE"',
-      ),
-    ).toBe(
-      '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"',
-    );
-  });
-
-  test("keeps extra, repeated, and drifted flags visible in the normalized args", () => {
-    // labelPreflightJobMismatches proves the allowlist rejects them.
-    expect(preflightArgs("bun s/fleet/label_preflight.ts --merged x --sections issues")).toBe(
-      "--merged x --sections issues",
-    );
-    expect(preflightArgs('bun s/fleet/label_preflight.ts --mode "$MODE" --mode check')).toBe(
-      '--mode "$MODE" --mode check',
-    );
-    expect(preflightArgs('bun s/fleet/label_preflight.ts --target-dir "$RUNNER_TEMP"')).toBe(
-      '--target-dir "$RUNNER_TEMP"',
-    );
+    expect(fired).toContain("target-apply row");
+    expect(fired).toContain("target-check row");
+    expect(fired).not.toContain("operator-");
   });
 });
 
 describe("labelPreflightJobMismatches", () => {
-  const OPERATOR = ".github/workflows/settings-repos.yml";
   const MODE = "${{ inputs.check_only && 'check' || 'apply' }}";
   const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
+  const PINNED = "${{ steps.render.outputs.ref }}";
   type Job = { steps: Record<string, unknown>[]; [key: string]: unknown };
   const operatorJob = (): Job => ({
     "runs-on": "ubuntu-latest",
@@ -255,7 +163,7 @@ describe("labelPreflightJobMismatches", () => {
         name: "Preflight labels the target still references",
         id: "labels",
         if: "steps.freshness.outputs.moved == 'false'",
-        env: { GH_TOKEN: TOKEN, TARGET: "${{ steps.resolve.outputs.repo }}", MODE },
+        env: { GH_TOKEN: TOKEN, TARGET: "${{ steps.resolve.outputs.repo }}", MODE, PINNED },
         run: PREFLIGHT_EXPECTED_RUN[OPERATOR],
       },
       {
@@ -292,19 +200,16 @@ describe("labelPreflightJobMismatches", () => {
     });
   });
 
-  test("a `|| true` suppression appended to the run block fires the byte pin", () => {
+  test("a `|| true` suppression appended to the run line fires the byte pin", () => {
     const job = operatorJob();
-    job.steps[0].run = `${PREFLIGHT_EXPECTED_RUN[OPERATOR].trimEnd()} || true\n`;
+    job.steps[0].run = `${PREFLIGHT_EXPECTED_RUN[OPERATOR]} || true`;
     expect(judged(OPERATOR, job)).toContain("byte-identical");
   });
 
-  test("an extra --sections flag fires the argument allowlist", () => {
+  test("a run block that wraps the pinned line in other commands fires the byte pin", () => {
     const job = operatorJob();
-    job.steps[0].run = PREFLIGHT_EXPECTED_RUN[OPERATOR].replace(
-      '--mode "$MODE"',
-      '--sections issues --mode "$MODE"',
-    );
-    expect(judged(OPERATOR, job)).toContain("argument lists");
+    job.steps[0].run = `echo start\n${PREFLIGHT_EXPECTED_RUN[OPERATOR]}\n`;
+    expect(judged(OPERATOR, job)).toContain("byte-identical");
   });
 
   // The suite's OWN copies of the census and allowlist tables, asserted
@@ -324,6 +229,7 @@ describe("labelPreflightJobMismatches", () => {
 
   test("the exported census and allowlist tables equal the suite's copies", () => {
     expect(PREFLIGHT_APPLY_WITH).toEqual({ [OPERATOR]: OPERATOR_CENSUS });
+    expect(PREFLIGHT_STEP_ENV_PINS).toEqual({ [OPERATOR]: { PINNED } });
     expect<readonly string[]>(PREFLIGHT_FORBIDDEN_RUN_TOKENS).toEqual(FORBIDDEN_TOKENS);
     expect(PREFLIGHT_STEP_KEYS).toEqual({
       [OPERATOR]: new Set(["name", "id", "if", "env", "run"]),
@@ -344,6 +250,9 @@ describe("labelPreflightJobMismatches", () => {
       ]),
     });
     expect(PREFLIGHT_APPLY_RUNS_ON).toBe("ubuntu-latest");
+    expect(PREFLIGHT_EXPECTED_RUN).toEqual({
+      [OPERATOR]: "bun .github/scripts/fleet/settings_layer_step.ts labels",
+    });
   });
 
   // One mutation test per census entry and per forbidden token, driven
@@ -389,6 +298,15 @@ describe("labelPreflightJobMismatches", () => {
     }
   }
 
+  test("a drifted or dropped PINNED fires the value pin (the fetched row reads its files at it)", () => {
+    const drifted = operatorJob();
+    env(drifted).PINNED = "${{ github.sha }}";
+    expect(judged(OPERATOR, drifted)).toContain("preflight env PINNED:");
+    const dropped = operatorJob();
+    delete env(dropped).PINNED;
+    expect(judged(OPERATOR, dropped)).toContain("preflight env PINNED:");
+  });
+
   test("the same context-dependent expression on BOTH sides fires the value pin (text parity alone would pass it)", () => {
     const drifted = "${{ startsWith(github.action, '__run') && 'check' || 'apply' }}";
     const job = operatorJob();
@@ -414,10 +332,10 @@ describe("labelPreflightJobMismatches", () => {
     expect(judged(OPERATOR, softened)).toContain("pinned step keys");
   });
 
-  test("an env var outside the mirrored census fires the env-key allowlist (BASH_ENV class)", () => {
+  test("an env var outside the census and the pins fires the env-key allowlist (BASH_ENV class)", () => {
     const job = operatorJob();
     env(job).BASH_ENV = "evil.sh";
-    expect(judged(OPERATOR, job)).toContain("mirrored env keys");
+    expect(judged(OPERATOR, job)).toContain("pinned env keys");
   });
 
   test("a job-level defaults: fires (defaults.run.shell reroutes every run step)", () => {
@@ -491,13 +409,16 @@ describe("labelPreflightJobMismatches", () => {
     expect(labelPreflightFileMismatches(OPERATOR, { jobs: { apply: operatorJob() } })).toEqual([]);
   });
 
-  test("a missing preflight fires; an unrecognized form gets its own message", () => {
+  test("a missing preflight fires; a mention without the labels leg gets its own message", () => {
     const gone = operatorJob();
     gone.steps.splice(0, 1);
     expect(judged(OPERATOR, gone)).toContain("no such step");
     const quoted = operatorJob();
-    quoted.steps[0].run = 'bun ".github/scripts/fleet/label_preflight.ts" --merged x\n';
+    quoted.steps[0].run = 'bun ".github/scripts/fleet/settings_layer_step.ts" labels\n';
     expect(judged(OPERATOR, quoted)).toContain("unexpected invocation form");
+    const direct = operatorJob();
+    direct.steps[0].run = "bun .github/scripts/fleet/label_preflight.ts --merged x\n";
+    expect(judged(OPERATOR, direct)).toContain("unexpected invocation form");
   });
 
   test("a second preflight step fires exactly-one", () => {
@@ -516,15 +437,6 @@ describe("labelPreflightJobMismatches", () => {
     const job = operatorJob();
     job.steps[0].if = "steps.render.outputs.skipped == 'false'";
     expect(judged(OPERATOR, job)).toContain("identical (after trimming) to the apply step's");
-  });
-
-  test("an unwrapped operator invocation fires the run_hidden requirement", () => {
-    const job = operatorJob();
-    job.steps[0].run = String(job.steps[0].run).replaceAll(
-      /bun \.github\/scripts\/sync\/run_hidden\.ts "settings labels" -- \\\n {4}/g,
-      "",
-    );
-    expect(judged(OPERATOR, job)).toContain("wrapped in run_hidden.ts");
   });
 
   test("a renamed operator step id fires the stood-down-notice coupling", () => {

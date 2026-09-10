@@ -4,16 +4,25 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { Node } from "ts-morph";
 import { parse as parseYaml } from "yaml";
 import {
   identityKeyIssues,
   loadOverrideLayer,
 } from "../../../.github/scripts/fleet/merge_settings_layers.ts";
+import {
+  LAYER_STEPS,
+  type LayerStep,
+  type LayerStepFacts,
+  layerStepArgv,
+} from "../../../.github/scripts/fleet/settings_layer_step.ts";
 import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
 import {
   intersectionCarriesType,
+  parseTs,
   propertyAssignmentCarries,
   templateCarries,
+  unwrapExpression,
 } from "../../lib/ts_extract.ts";
 import type { Mismatch } from "./comparison.ts";
 import { asRecord, jinjaVars, REPO_ROOT, read } from "./inputs.ts";
@@ -24,9 +33,151 @@ interface WorkflowStep {
   name?: string;
   uses?: string;
   if?: string;
+  env?: Record<string, unknown>;
   run?: string;
   "continue-on-error"?: boolean | string;
 }
+
+/** The repo scripts a step's text runs (`bun .github/scripts/<path>.ts`),
+ *  as repo-relative paths: a step whose logic lives in a script is judged
+ *  on what the script does, not on the run line alone. */
+function invokedScriptRels(text: string): string[] {
+  return [...text.matchAll(/\bbun\s+(\.github\/scripts\/[\w./-]+\.ts)/g)].map((match) => match[1]);
+}
+
+/** A repo-relative path's source; injectable so the suite can judge
+ *  synthetic workflows against synthetic scripts. */
+export type SourceOf = (rel: string) => string;
+
+/** Whether a step runs run_hidden.ts: inline in its text, or through a
+ *  script that builds the wrapper's path for an argv (a script that only
+ *  IMPORTS run_hidden.ts, for the failure manifest, wraps nothing). */
+export function runsHidden(text: string, sourceOf: SourceOf): boolean {
+  return (
+    text.includes("run_hidden.ts") ||
+    invokedScriptRels(text).some((rel) => /join\([^)]*"run_hidden\.ts"\)/.test(sourceOf(rel)))
+  );
+}
+
+/** Whether a script's TOP-LEVEL action prints a notice: an expression
+ *  statement at module level, or inside its `if (import.meta.main)` block,
+ *  that IS a call of notice() or of console.log with a ::notice:: literal -
+ *  judged on the call node, so a mention inside a short-circuit, a closure,
+ *  or a bare string is not a print. A notice inside a helper the entry
+ *  point may never reach (failure_issue.ts's owner assignment) is not the
+ *  script's action and earns no credit. */
+export function printsNoticeAtTopLevel(source: string): boolean {
+  const statements = parseTs(source)
+    .getStatements()
+    .flatMap((statement) => {
+      if (!Node.isIfStatement(statement)) return [statement];
+      if (statement.getExpression().getText() !== "import.meta.main") return [statement];
+      const then = statement.getThenStatement();
+      return Node.isBlock(then) ? then.getStatements() : [then];
+    });
+  return statements.some((statement) => {
+    if (!Node.isExpressionStatement(statement)) return false;
+    const call = unwrapExpression(statement.getExpression());
+    if (!Node.isCallExpression(call)) return false;
+    const callee = unwrapExpression(call.getExpression());
+    if (Node.isIdentifier(callee)) return callee.getText() === "notice";
+    if (!Node.isPropertyAccessExpression(callee) || callee.getText() !== "console.log") {
+      return false;
+    }
+    const first = call.getArguments()[0];
+    if (first === undefined) return false;
+    const text =
+      Node.isStringLiteral(first) || Node.isNoSubstitutionTemplateLiteral(first)
+        ? first.getLiteralValue()
+        : Node.isTemplateExpression(first)
+          ? first.getHead().getLiteralText()
+          : "";
+    return text.startsWith("::notice::");
+  });
+}
+
+/** Whether a step is a PUBLIC notice step: its run text prints ::notice::
+ *  inline, or a script it runs prints one as its top-level action. */
+export function printsNotice(run: string, sourceOf: SourceOf): boolean {
+  return (
+    run.includes("::notice::") ||
+    invokedScriptRels(run).some((rel) => printsNoticeAtTopLevel(sourceOf(rel)))
+  );
+}
+
+/** The settings-hidden-step-notices judgment, pure over the parsed jobs
+ *  and a source reader so the suite can prove it fires on a synthetic
+ *  mutation: every run_hidden-wrapped step needs an id, and a later
+ *  PUBLIC notice step whose condition tests one of its outputs == 'true'
+ *  (the one output test an unrun step cannot satisfy; the id is escaped so
+ *  an exotic id cannot broaden the match). Order is part of the
+ *  requirement: a notice BEFORE the wrapped step reads outputs that do not
+ *  exist yet. Returns the wrapped-step count for the anchor check. */
+export function hiddenStepNoticeMismatches(
+  rel: string,
+  jobs: Record<string, unknown>,
+  sourceOf: SourceOf,
+): { wrapped: number; mismatches: Mismatch[] } {
+  const mismatches: Mismatch[] = [];
+  const mapping = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  let wrapped = 0;
+  for (const [jobName, job] of Object.entries(jobs)) {
+    const steps = mapping(job).steps;
+    if (!Array.isArray(steps)) continue;
+    const parsed = steps.map(mapping);
+    parsed.forEach((step, index) => {
+      if (!runsHidden(String(step.run ?? ""), sourceOf)) return;
+      wrapped++;
+      const id = String(step.id ?? "");
+      if (id === "") {
+        mismatches.push({
+          file: rel,
+          expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
+          got: "no id - a compensating notice cannot reference the step's outcome",
+        });
+        return;
+      }
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
+      const compensated = parsed.slice(index + 1).some((later) => {
+        const laterRun = String(later.run ?? "");
+        return (
+          !runsHidden(laterRun, sourceOf) &&
+          printsNotice(laterRun, sourceOf) &&
+          fires.test(String(later.if ?? ""))
+        );
+      });
+      if (!compensated) {
+        mismatches.push({
+          file: rel,
+          expected:
+            `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
+            `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
+            "step's own warnings, so its skip would otherwise be a green job with no signal",
+          got: "no such step",
+        });
+      }
+    });
+  }
+  return { wrapped, mismatches };
+}
+
+/** Whether `argv` carries `run` as consecutive elements. */
+function argvCarries(argv: string[], run: string[]): boolean {
+  return argv.some((_, at) => run.every((word, offset) => argv[at + offset] === word));
+}
+
+/** Placeholder facts for judging a layer leg's argv, every value distinct. */
+const LEG_FACTS: LayerStepFacts = {
+  target: "o/r",
+  operator: false,
+  runnerTemp: "/rt",
+  pinned: "REF",
+  mode: "apply",
+};
 
 /** Every step of every job in a workflow, parsed. Rules about step
  *  conditions read this rather than the file's text: a matching string in
@@ -194,23 +345,38 @@ export const settingsWorkflowRules: Rule[] = [
           got: "no ?ref= on the repo-layer fetch",
         });
       }
-      const workflow = read(".github/workflows/settings-repos.yml").replace(/\\[ \t]*\n\s*/g, " ");
-      if (
-        !/--repo-fetch [^\n]*--repo-ref "\$\{\{ steps\.render\.outputs\.ref \}\}"/.test(workflow)
-      ) {
+      // The merge step hands the layer step the render's published ref,
+      // and the fetched row's argv pins its fetch to it.
+      const rel = ".github/workflows/settings-repos.yml";
+      const mergeStep = workflowSteps(rel).find((step) => step.id === "merge");
+      const pinnedEnv = String(mergeStep?.env?.PINNED ?? "").trim();
+      if (pinnedEnv !== "${{ steps.render.outputs.ref }}") {
         mismatches.push({
-          file: ".github/workflows/settings-repos.yml",
-          expected: "every --repo-fetch passes the render step's published ref",
-          got: "a fetch without the pinned ref",
+          file: rel,
+          expected: "the merge step's PINNED env carrying the render step's published ref",
+          got: pinnedEnv === "" ? "no PINNED env on the merge step" : pinnedEnv,
+        });
+      }
+      const fetched = layerStepArgv("merge", LEG_FACTS);
+      if (!argvCarries(fetched, ["--repo-fetch", "o/r", "--repo-ref", "REF"])) {
+        mismatches.push({
+          file: ".github/scripts/fleet/settings_layer_step.ts",
+          expected: "the fetched row's merge leg passes --repo-fetch with the pinned --repo-ref",
+          got: fetched.join(" "),
         });
       }
       // The operator row reads its own checkout; fetching it would race
       // against the facts the render took from that same working tree.
-      if (!/--repo-file \.github\/settings\.yml/.test(workflow)) {
+      const own = layerStepArgv("merge", { ...LEG_FACTS, operator: true });
+      if (
+        !argvCarries(own, ["--repo-file", ".github/settings.yml"]) ||
+        own.includes("--repo-fetch")
+      ) {
         mismatches.push({
-          file: ".github/workflows/settings-repos.yml",
-          expected: "the operator row merges from its checkout (--repo-file)",
-          got: "the operator row fetches",
+          file: ".github/scripts/fleet/settings_layer_step.ts",
+          expected:
+            "the operator row's merge leg reads its checkout (--repo-file .github/settings.yml, no fetch)",
+          got: own.join(" "),
         });
       }
       return mismatches;
@@ -242,32 +408,70 @@ export const settingsWorkflowRules: Rule[] = [
         });
       }
       const workflow = read(".github/workflows/settings-repos.yml");
-      // Per INVOCATION, not per count: there are two render call sites
-      // (operator and target), so counting matches passed even with a
-      // wrapper removed - which is the exact regression this rule exists
-      // to catch. Fold continuations first, then require every call of
-      // either script to sit behind its own run_hidden wrapper. The
-      // freshness recheck is covered too: its moved warning quotes commit
-      // shas and its resolver errors name the target's default branch.
+      // Per LEG and per row: the render, merge, and labels legs get their
+      // argv from layerStepArgv, whose one return applies the wrapper, so
+      // each leg's argv is read for both rows and must open with the
+      // wrapper, a "settings <leg>" label, and the leg's own script. The
+      // workflow runs each leg through the layer step, never a fleet script
+      // directly (a direct call is an unwrapped one). The freshness recheck
+      // stays an inline call and is matched textually: its moved warning
+      // quotes commit shas and its resolver errors name the target's
+      // default branch.
+      const LEG_SCRIPTS: Record<LayerStep, string> = {
+        render: "render_managed_settings.ts",
+        merge: "merge_settings_layers.ts",
+        labels: "label_preflight.ts",
+      };
+      for (const leg of LAYER_STEPS) {
+        for (const operator of [true, false]) {
+          const argv = layerStepArgv(leg, { ...LEG_FACTS, operator });
+          const wrapped =
+            argv[0] === "bun" &&
+            argv[1].endsWith("/sync/run_hidden.ts") &&
+            /^settings [a-z]+$/.test(argv[2]) &&
+            argv[3] === "--" &&
+            argv[4] === "bun" &&
+            argv[5].endsWith(`/fleet/${LEG_SCRIPTS[leg]}`);
+          if (!wrapped) {
+            mismatches.push({
+              file: ".github/scripts/fleet/settings_layer_step.ts",
+              expected: `the ${leg} leg (${operator ? "operator" : "fetched"} row) wrapped in run_hidden.ts under a "settings <leg>" label, running fleet/${LEG_SCRIPTS[leg]}`,
+              got: argv.join(" "),
+            });
+          }
+        }
+        const step = workflowSteps(".github/workflows/settings-repos.yml").find(
+          (s) => s.id === leg,
+        );
+        const run = String(step?.run ?? "");
+        if (run !== `bun .github/scripts/fleet/settings_layer_step.ts ${leg}`) {
+          mismatches.push({
+            file: ".github/workflows/settings-repos.yml",
+            expected: `the ${leg} step running exactly 'bun .github/scripts/fleet/settings_layer_step.ts ${leg}'`,
+            got: run === "" ? `no step with id ${leg}` : run,
+          });
+        }
+      }
       const flat = workflow.replace(/\\[ \t]*\n/g, " ").replace(/\s+/g, " ");
-      for (const script of [
-        "render_managed_settings",
-        "merge_settings_layers",
-        "check_target_fresh",
-      ]) {
-        const calls =
-          flat.match(new RegExp(`bun \\.github/scripts/fleet/${script}\\.ts`, "g")) ?? [];
+      for (const script of Object.values(LEG_SCRIPTS)) {
+        if (flat.includes(`fleet/${script}`)) {
+          mismatches.push({
+            file: ".github/workflows/settings-repos.yml",
+            expected: `no direct ${script} call (the layer step wraps it)`,
+            got: "a direct call",
+          });
+        }
+      }
+      {
+        const calls = flat.match(/bun \.github\/scripts\/fleet\/check_target_fresh\.ts/g) ?? [];
         const wrapped =
           flat.match(
-            new RegExp(
-              `run_hidden\\.ts "settings [a-z]+" -- bun \\.github/scripts/fleet/${script}\\.ts`,
-              "g",
-            ),
+            /run_hidden\.ts "settings [a-z]+" -- bun \.github\/scripts\/fleet\/check_target_fresh\.ts/g,
           ) ?? [];
         if (calls.length === 0 || wrapped.length !== calls.length) {
           mismatches.push({
             file: ".github/workflows/settings-repos.yml",
-            expected: `every ${script}.ts call wrapped in run_hidden.ts (${calls.length} call(s))`,
+            expected: `every check_target_fresh.ts call wrapped in run_hidden.ts (${calls.length} call(s))`,
             got: `${wrapped.length} wrapped`,
           });
         }
@@ -336,12 +540,18 @@ export const settingsWorkflowRules: Rule[] = [
       // with a green job and no signal at all.
       step("Report a skipped target", [
         [/steps\.merge\.outputs\.skipped == 'true'/, "a condition on the merge step's output"],
-        [/::notice::/, "a public notice"],
       ]);
+      const skipStep = steps.get("Report a skipped target");
+      if (skipStep !== undefined && !printsNotice(skipStep, read)) {
+        mismatches.push({
+          file: '.github/workflows/settings-repos.yml step "Report a skipped target"',
+          expected: "a public notice (inline, or the top-level action of the script it runs)",
+          got: "missing",
+        });
+      }
       // The whole point of that step is being OUTSIDE the capture, so the
       // wrapper is checked as a forbidden token, not a negated pattern.
-      const skipStep = steps.get("Report a skipped target");
-      if (skipStep?.includes("run_hidden")) {
+      if (skipStep !== undefined && runsHidden(skipStep, read)) {
         mismatches.push({
           file: '.github/workflows/settings-repos.yml step "Report a skipped target"',
           expected: "the notice stays outside run_hidden, or the skip has no public signal",
@@ -467,55 +677,9 @@ export const settingsWorkflowRules: Rule[] = [
     // a notice BEFORE the wrapped step reads outputs that do not exist yet.
     name: "settings-hidden-step-notices",
     run: () => {
-      const mismatches: Mismatch[] = [];
       const rel = ".github/workflows/settings-repos.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
-      let wrapped = 0;
-      for (const [jobName, job] of Object.entries(jobs)) {
-        const steps = mapping(job).steps;
-        if (!Array.isArray(steps)) continue;
-        const parsed = steps.map(mapping);
-        parsed.forEach((step, index) => {
-          if (!String(step.run ?? "").includes("run_hidden.ts")) return;
-          wrapped++;
-          const id = String(step.id ?? "");
-          if (id === "") {
-            mismatches.push({
-              file: rel,
-              expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
-              got: "no id - a compensating notice cannot reference the step's outcome",
-            });
-            return;
-          }
-          // Positive equality against 'true', the one output test an
-          // unrun step cannot satisfy (unsafeStepCondition's rule). The
-          // id is escaped so an exotic step id cannot broaden the match.
-          const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
-          const compensated = parsed.slice(index + 1).some((later) => {
-            const laterRun = String(later.run ?? "");
-            return (
-              !laterRun.includes("run_hidden") &&
-              laterRun.includes("::notice::") &&
-              fires.test(String(later.if ?? ""))
-            );
-          });
-          if (!compensated) {
-            mismatches.push({
-              file: rel,
-              expected:
-                `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
-                `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
-                "step's own warnings, so its skip would otherwise be a green job with no signal",
-              got: "no such step",
-            });
-          }
-        });
-      }
+      const jobs = asRecord(asRecord(parseYaml(read(rel)), rel).jobs ?? {}, `${rel} jobs`);
+      const { wrapped, mismatches } = hiddenStepNoticeMismatches(rel, jobs, read);
       if (wrapped === 0) throw new Error(`${rel}: no run_hidden-wrapped steps - anchor lost`);
       return mismatches;
     },
