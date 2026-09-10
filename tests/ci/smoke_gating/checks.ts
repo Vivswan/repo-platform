@@ -3,7 +3,7 @@
 // the first, so one red row shows the whole shape it disagrees with.
 
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { type Check, type DocPath, Includes } from "./expectations.ts";
 
@@ -39,18 +39,6 @@ export function matchesPartial(actual: unknown, expected: unknown): boolean {
     );
   }
   return actual === expected;
-}
-
-/** Every key and scalar of a subtree, one per line: the text a substring
- * ban reads, with comments and quoting gone. */
-export function flatten(value: unknown): string {
-  if (Array.isArray(value)) return value.map(flatten).join("\n");
-  if (value !== null && typeof value === "object") {
-    return Object.entries(value)
-      .map(([key, inner]) => `${key}\n${flatten(inner)}`)
-      .join("\n");
-  }
-  return String(value);
 }
 
 function show(value: unknown): string {
@@ -184,7 +172,6 @@ function runCheck(root: string, check: Check, report: Reporter): void {
     }
     case "yaml-equals":
     case "yaml-matches":
-    case "yaml-json":
     case "yaml-pluck": {
       const doc = parsed(root, check.path, report);
       if (doc === MISSING) return;
@@ -199,20 +186,6 @@ function runCheck(root: string, check: Check, report: Reporter): void {
           const plucked = value.map((item) => check.pluck.map((sub) => valueAt(item, sub)));
           if (!Bun.deepEquals(plucked, check.equals, true)) {
             report.fail(where, `to project to ${show(check.equals)}`, show(plucked));
-          }
-          return;
-        }
-        case "yaml-json": {
-          let decoded: unknown = MISSING;
-          if (typeof value === "string") {
-            try {
-              decoded = JSON.parse(value);
-            } catch {
-              decoded = MISSING;
-            }
-          }
-          if (decoded === MISSING || !Bun.deepEquals(decoded, check.equals, true)) {
-            report.fail(where, `a JSON string decoding to ${show(check.equals)}`, show(value));
           }
           return;
         }
@@ -261,46 +234,35 @@ function runCheck(root: string, check: Check, report: Reporter): void {
       }
       return;
     }
-    case "yaml-text": {
-      const doc = parsed(root, check.path, report);
-      if (doc === MISSING) return;
-      const value = valueAt(doc, check.at);
-      const where = `${check.path} at ${check.at.join(".")}`;
-      if (value === MISSING) {
-        report.fail(where, "a subtree", "no value at that path");
+    case "identical": {
+      const text = readText(root, check.path, report);
+      if (text === null) return;
+      const referencePath = isAbsolute(check.reference)
+        ? check.reference
+        : join(root, check.reference);
+      let reference: string;
+      try {
+        reference = readFileSync(referencePath, "utf8");
+      } catch (error) {
+        report.fail(
+          check.reference,
+          "a readable reference file",
+          error instanceof Error ? error.message : String(error),
+        );
         return;
       }
-      const text = flatten(value);
-      for (const needle of check.has ?? []) {
-        if (!text.includes(needle)) report.fail(where, `to contain ${show(needle)}`, "absent");
-      }
-      for (const needle of check.lacks ?? []) {
-        if (text.includes(needle)) report.fail(where, `not to contain ${show(needle)}`, "present");
-      }
-      return;
-    }
-    case "outside-jobs": {
-      const doc = parsed(root, check.path, report);
-      if (doc === MISSING) return;
-      if (doc === null || typeof doc !== "object") {
-        report.fail(check.path, "a workflow mapping", show(doc));
-        return;
-      }
-      const { jobs, ...rest } = doc as Record<string, unknown>;
-      const kept = Object.fromEntries(
-        Object.entries((jobs as Record<string, unknown> | undefined) ?? {}).filter(
-          ([id]) => !check.jobs.includes(id),
-        ),
-      );
-      const text = flatten({ ...rest, jobs: kept });
-      for (const needle of check.lacks) {
-        if (text.includes(needle)) {
-          report.fail(
-            check.path,
-            `no ${show(needle)} outside the ${check.jobs.join(", ")} job(s)`,
-            "present elsewhere",
-          );
-        }
+      if (text !== reference) {
+        const lines = text.split("\n");
+        const expected = reference.split("\n");
+        const at = Array.from(
+          { length: Math.max(lines.length, expected.length) },
+          (_, index) => index,
+        ).find((index) => lines[index] !== expected[index]) as number;
+        report.fail(
+          check.path,
+          `the bytes of ${check.reference}`,
+          `a difference at line ${at + 1}: ${show(lines[at] ?? "<end of file>")} vs ${show(expected[at] ?? "<end of file>")}`,
+        );
       }
       return;
     }

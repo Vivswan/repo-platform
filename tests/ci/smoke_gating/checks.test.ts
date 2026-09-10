@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../shared/temp_dir";
-import { flatten, matchesPartial, runChecks, valueAt } from "./checks.ts";
+import { matchesPartial, runChecks, valueAt } from "./checks.ts";
 import { type Check, includes } from "./expectations.ts";
 
 const temp = tempDirs();
@@ -57,6 +57,8 @@ function fixture(): string {
   const root = temp.dir("smoke-gating-checks-");
   mkdirSync(join(root, "wf"));
   writeFileSync(join(root, "wf/ci.yml"), WORKFLOW);
+  writeFileSync(join(root, "twin.yml"), WORKFLOW);
+  writeFileSync(join(root, "other.yml"), `${WORKFLOW}# one more line\n`);
   writeFileSync(join(root, "wf/bare.yml"), "steps:\n  - run: deno fmt\n");
   writeFileSync(join(root, "dependabot.yml"), UPDATES);
   writeFileSync(join(root, "notes.md"), "## Node (x)\nline two\n## Node (x)\n1.2.3\n");
@@ -214,31 +216,6 @@ const cases: [string, Check, boolean][] = [
     false,
   ],
   [
-    "yaml equals: a JSON-string input decodes",
-    {
-      kind: "yaml-json",
-      path: CI,
-      at: ["jobs", "ci", "with", "mounts"],
-      equals: [{ path: "/", versioned: true }],
-    },
-    true,
-  ],
-  [
-    "yaml equals: a differing decode",
-    {
-      kind: "yaml-json",
-      path: CI,
-      at: ["jobs", "ci", "with", "mounts"],
-      equals: [{ path: "/", versioned: false }],
-    },
-    false,
-  ],
-  [
-    "yaml equals: a non-JSON string",
-    { kind: "yaml-json", path: CI, at: ["name"], equals: "CI" },
-    false,
-  ],
-  [
     "yaml pluck: ecosystem and prefix pairs in order",
     {
       kind: "yaml-pluck",
@@ -286,33 +263,14 @@ const cases: [string, Check, boolean][] = [
     false,
   ],
   [
-    "yaml-text: a job subtree lacks a word its comment carries",
-    { kind: "yaml-text", path: CI, at: ["jobs", "ci"], lacks: ["cancelled()"] },
+    "identical: the same bytes at another path",
+    { kind: "identical", path: CI, reference: "twin.yml" },
     true,
   ],
+  ["identical: one extra line", { kind: "identical", path: CI, reference: "other.yml" }, false],
   [
-    "yaml-text: a job subtree carrying the word",
-    { kind: "yaml-text", path: CI, at: ["jobs", "pages"], lacks: ["cancelled()"] },
-    false,
-  ],
-  [
-    "yaml-text: has a needs entry",
-    { kind: "yaml-text", path: CI, at: ["jobs", "pages"], has: ["release"] },
-    true,
-  ],
-  [
-    "outside-jobs: the word lives only in the allowed job",
-    { kind: "outside-jobs", path: CI, jobs: ["pages"], lacks: ["cancelled()"] },
-    true,
-  ],
-  [
-    "outside-jobs: allowing another job exposes it",
-    { kind: "outside-jobs", path: CI, jobs: ["ci"], lacks: ["cancelled()"] },
-    false,
-  ],
-  [
-    "outside-jobs: the header is outside every job",
-    { kind: "outside-jobs", path: CI, jobs: ["ci", "pages"], lacks: ["3 8 * * 1"] },
+    "identical: a missing reference",
+    { kind: "identical", path: CI, reference: "absent.yml" },
     false,
   ],
   [
@@ -375,11 +333,5 @@ describe("the structural helpers", () => {
     expect(matchesPartial("false", false)).toBe(false);
     expect(matchesPartial(null, {})).toBe(false);
     expect(matchesPartial([1], {})).toBe(false);
-  });
-
-  test("flatten lists keys and scalars one per line", () => {
-    expect(flatten({ jobs: { ci: { needs: ["a", "b"], if: "x" } } })).toBe(
-      "jobs\nci\nneeds\na\nb\nif\nx",
-    );
   });
 });

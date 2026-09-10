@@ -2,12 +2,14 @@
 // row names a condition on the matrix row's selection and the checks that
 // hold under it. tests/ci/smoke_gating/smoke_gating.test.ts evaluates the
 // applicable rows against a smoke_generate.ts render; the ssot module-list
-// rule imports GATED_MODULES to prove every module is conditioned here.
-// Kept free of bun:test and of the code under test so both importers stay
-// independent of it. Every literal below is hand-authored: the render is
-// the code under test, so nothing here derives from the templates.
+// rule imports MODULES to hold the tuple to the manifests. Kept free of
+// bun:test and of the code under test so both importers stay independent
+// of it. Every literal below is hand-authored: the render is the code under
+// test, so nothing here derives from the templates.
 
 import { parse as parseYaml } from "yaml";
+
+const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
 
 // Copier normalizes the multiselect to its choices order, so rendered
 // module lists are rebuilt in this order; a new module joins this tuple
@@ -131,8 +133,6 @@ export type Check =
   /** Partial match at `at`: object keys are a subset, every expected array
    * element matches some actual element, Includes matches a substring. */
   | { kind: "yaml-matches"; path: string; at: DocPath; matches: unknown }
-  /** The value at `at` is a JSON string that parses to `equals`. */
-  | { kind: "yaml-json"; path: string; at: DocPath; equals: unknown }
   /** Each element of the array at `at`, projected to the values at
    * `pluck`, in order, deep-equals `equals`. */
   | { kind: "yaml-pluck"; path: string; at: DocPath; pluck: DocPath[]; equals: unknown }
@@ -140,11 +140,9 @@ export type Check =
   | { kind: "yaml-keys"; path: string; at: DocPath; equals: string[] }
   | { kind: "yaml-defined"; path: string; at: DocPath }
   | { kind: "yaml-absent"; path: string; at: DocPath }
-  /** The subtree at `at`, flattened to its keys and scalars, contains or
-   * lacks each substring (comments never count). */
-  | { kind: "yaml-text"; path: string; at: DocPath; has?: string[]; lacks?: string[] }
-  /** The document minus the named jobs, flattened, lacks each substring. */
-  | { kind: "outside-jobs"; path: string; jobs: string[]; lacks: string[] }
+  /** The file's bytes equal the reference file's (absolute, or under the
+   * same root). */
+  | { kind: "identical"; path: string; reference: string }
   /** Every `deno fmt` in every workflow carries --prose-wrap preserve. */
   | { kind: "deno-fmt-prose-preserved"; dir: string };
 
@@ -157,44 +155,16 @@ export interface Row {
 const WF = ".github/workflows";
 const CI = `${WF}/ci.yml`;
 
-// The post-green legs' conditions, pinned whole: results are spelled out so
-// no leg depends on GitHub's implied-success() rule, and the event clauses
-// keep PR, dispatch, and schedule runs from ever deploying or releasing. The
-// !cancelled() form is the deploy legs' whose needs edges are an ORDER, not
-// a gate: a red or skipped upstream leg still deploys.
+// The post-green hook's condition, pinned whole: results are spelled out so
+// the leg never depends on GitHub's implied-success() rule, and the event
+// clauses keep PR, dispatch, and schedule runs from ever running it.
 const GREEN_PUSH_TO_MAIN =
   "needs.all-green.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'";
-const GREEN_PUSH_TO_MAIN_UNLESS_CANCELLED = `!cancelled() && ${GREEN_PUSH_TO_MAIN}`;
 
-const YAML_LIST = (modules: readonly string[]) => `[${modules.map((m) => `"${m}"`).join(", ")}]`;
-
-/** The fleet-ci `modules` input: the selection as a JSON array in MODULES order. */
-export function orderedModulesJson(selection: Selection): string {
-  return YAML_LIST(MODULES.filter((m) => selection.modules.has(m)));
-}
-
-/** The fleet-ci `codeql-languages` input: shared languages appear once. */
-export function codeqlLanguages(selection: Selection): string {
-  if (!ENABLE_CODEQL.holds(selection)) return "[]";
-  const langs: string[] = [];
-  if (anyOf("bun", "node", "deno").holds(selection)) langs.push("javascript-typescript");
-  if (selection.modules.has("uv")) langs.push("python");
-  return YAML_LIST(langs);
-}
-
-/** The tracking-labels input: the selected streams' default labels, in
- * module order; empty when no stream module is selected. */
-export function streamLabels(selection: Selection): string {
-  const streams: [Module, string][] = [
-    ["docs-site", "docs-link-rot"],
-    ["fuzzer", "fuzz-nightly"],
-    ["nightly", "nightly-failure"],
-  ];
-  return streams
-    .filter(([m]) => selection.modules.has(m))
-    .map(([, label]) => label)
-    .join(",");
-}
+/** The committed golden every smoke render's ci.yml must equal byte for
+ * byte: the file carries no module- or visibility-conditioned text, so
+ * every selection renders the same one. */
+const CI_GOLDEN = `${REPO_ROOT}tests/golden-renders/minimal/${CI}`;
 
 /** The matrix row's env as a Selection. MODULES is the YAML list string
  * ci.yml passes; EXTRA_DATA may carry `-d skills_dir=<dir>`. */
@@ -316,15 +286,16 @@ const TOOLCHAIN_STARTERS: {
  * carry the negated condition so both legs are conditioned on it. */
 export const EXPECTATIONS: Row[] = [
   {
-    // The rendered ci.yml is a thin caller of fleet-ci.yml at the
-    // green-gated @build ref: module membership in the gate IS the modules
-    // input, the caller job's permission ceiling is unconditional (GitHub
-    // validates skipped called jobs' grants too), and none of the merged
-    // base checks or the old aggregate's status-function gate may render.
-    name: "ci.yml calls fleet-ci at @build with the selection and the full permission ceiling",
+    // The rendered ci.yml is one file for every selection: a thin caller
+    // of fleet-ci.yml at the green-gated @build ref with NO inputs (the
+    // plan job there reads the registration), the caller job's permission
+    // ceiling unconditional (GitHub validates skipped called jobs' grants
+    // too), and none of the merged base checks may render.
+    name: "ci.yml is the byte-identical skeleton calling fleet-ci at @build with no inputs",
     when: ALWAYS,
-    checks: (s) => [
+    checks: () => [
       { kind: "exists", path: CI },
+      { kind: "identical", path: CI, reference: CI_GOLDEN },
       { kind: "exists", path: `${WF}/checks.yml` },
       {
         kind: "yaml-matches",
@@ -332,19 +303,14 @@ export const EXPECTATIONS: Row[] = [
         at: ["jobs", "ci", "uses"],
         matches: includes("repo-platform/.github/workflows/fleet-ci.yml@build"),
       },
+      { kind: "yaml-absent", path: CI, at: ["jobs", "ci", "with"] },
+      { kind: "yaml-absent", path: CI, at: ["jobs", "ci", "if"] },
       {
         kind: "yaml-equals",
         path: CI,
         at: ["jobs", "checks", "uses"],
         equals: "./.github/workflows/checks.yml",
       },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "ci", "with", "modules"],
-        equals: orderedModulesJson(s),
-      },
-      { kind: "yaml-equals", path: CI, at: ["jobs", "ci", "with", "private"], equals: s.isPrivate },
       { kind: "yaml-equals", path: CI, at: ["permissions"], equals: { contents: "read" } },
       {
         kind: "yaml-equals",
@@ -359,8 +325,48 @@ export const EXPECTATIONS: Row[] = [
           "vulnerability-alerts": "read",
         },
       },
-      { kind: "outside-jobs", path: CI, jobs: ["pages", "docs-site"], lacks: ["cancelled()"] },
       { kind: "text", path: CI, lacks: ["base-checks", "check-typography"] },
+    ],
+  },
+  {
+    // Every leg after the gate is a static job gating itself on the plan's
+    // modules output; the repo hooks it calls must exist in every
+    // repository, since GitHub resolves a called ./ workflow at run
+    // creation whatever the job's condition.
+    name: "the post-gate legs are static and the release hooks are universal starters",
+    when: ALWAYS,
+    checks: () => [
+      {
+        kind: "yaml-matches",
+        path: CI,
+        at: ["jobs", "release", "if"],
+        matches: includes(`contains(needs.ci.outputs.modules, '"release-please"')`),
+      },
+      {
+        kind: "yaml-matches",
+        path: CI,
+        at: ["jobs", "pages", "if"],
+        matches: includes(`contains(needs.ci.outputs.modules, '"pages"')`),
+      },
+      {
+        kind: "yaml-matches",
+        path: CI,
+        at: ["jobs", "docs-site", "if"],
+        matches: includes(`!contains(needs.ci.outputs.modules, '"pages"')`),
+      },
+      { kind: "exists", path: `${WF}/update-release.yml` },
+      { kind: "exists", path: `${WF}/update-release-pr.yml` },
+      {
+        kind: "yaml-defined",
+        path: `${WF}/update-release.yml`,
+        at: ["on", "workflow_call", "inputs", "tag"],
+      },
+      {
+        kind: "yaml-defined",
+        path: `${WF}/update-release-pr.yml`,
+        at: ["on", "workflow_call", "inputs", "pr_number"],
+      },
+      { kind: "text", path: CI, lacks: ["{%", "workflows/release.yml"] },
     ],
   },
   {
@@ -415,6 +421,12 @@ export const EXPECTATIONS: Row[] = [
       {
         kind: "yaml-equals",
         path: CI,
+        at: ["jobs", "post-green", "permissions"],
+        equals: { contents: "write" },
+      },
+      {
+        kind: "yaml-equals",
+        path: CI,
         at: ["jobs", "post-green", "with", "sha"],
         equals: "${{ github.sha }}",
       },
@@ -427,8 +439,7 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    // pr-title is its own natively-required workflow; the modules input
-    // still records the selection.
+    // pr-title is its own natively-required workflow.
     name: "pr-title renders its required workflow on every title-changing event",
     when: has("pr-title"),
     checks: () => [
@@ -440,16 +451,12 @@ export const EXPECTATIONS: Row[] = [
         equals: ["opened", "edited", "reopened", "synchronize"],
       },
       { kind: "yaml-defined", path: `${WF}/pr-title.yml`, at: ["jobs", "pr-title"] },
-      { kind: "text", path: CI, has: ['"pr-title"'] },
     ],
   },
   {
-    name: "no pr-title workflow or membership without the module",
+    name: "no pr-title workflow without the module",
     when: not(has("pr-title")),
-    checks: () => [
-      { kind: "missing", path: `${WF}/pr-title.yml` },
-      { kind: "text", path: CI, lacks: ['"pr-title"'] },
-    ],
+    checks: () => [{ kind: "missing", path: `${WF}/pr-title.yml` }],
   },
   {
     // Copilot reviews are advisory (nothing gates on them), and the gate
@@ -472,101 +479,63 @@ export const EXPECTATIONS: Row[] = [
     checks: () => [{ kind: "missing", path: ".github/ISSUE_TEMPLATE" }],
   },
   {
-    // The deploy pipeline: called by ci.yml's pages leg with the judged
-    // commit (never push: a push deploy would bypass the gate), plus the
-    // nightly rebuild and dispatch, never pull_request; a called run keys
-    // its lane per run and the caller grants the called ceiling.
-    name: "pages renders the deploy workflow and ci.yml's pages leg under the pages lane",
+    // The deploy workflow: the nightly rebuild and the dispatch only (the
+    // push deploy is ci.yml's static pages leg), never push or
+    // pull_request, calling the fleet pipeline with no baked answers: the
+    // called workflow reads the mounts and commands from the registration.
+    name: "pages renders the nightly and dispatch deploy with no baked answers",
     when: has("pages"),
     checks: () => [
       { kind: "exists", path: `${WF}/pages.yml` },
       {
-        kind: "yaml-defined",
+        kind: "yaml-keys",
         path: `${WF}/pages.yml`,
-        at: ["on", "workflow_call", "inputs", "sha"],
+        at: ["on"],
+        equals: ["schedule", "workflow_dispatch"],
       },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/pages.yml`,
-        at: ["jobs", "deploy", "with", "sha"],
-        equals: "${{ inputs.sha }}",
-      },
-      {
-        kind: "yaml-matches",
-        path: `${WF}/pages.yml`,
-        at: ["concurrency", "group"],
-        matches: includes("pages-called-"),
-      },
-      { kind: "yaml-absent", path: `${WF}/pages.yml`, at: ["on", "push"] },
       {
         kind: "yaml-equals",
         path: `${WF}/pages.yml`,
         at: ["on", "schedule"],
         equals: [{ cron: "23 4 * * *" }],
       },
-      { kind: "yaml-defined", path: `${WF}/pages.yml`, at: ["on", "workflow_dispatch"] },
+      {
+        kind: "yaml-matches",
+        path: `${WF}/pages.yml`,
+        at: ["jobs", "deploy", "uses"],
+        matches: includes("repo-platform/.github/workflows/reusable-pages.yml@build"),
+      },
+      {
+        kind: "yaml-keys",
+        path: `${WF}/pages.yml`,
+        at: ["jobs", "deploy", "with"],
+        equals: ["custom_domain"],
+      },
+      {
+        kind: "yaml-equals",
+        path: `${WF}/pages.yml`,
+        at: ["concurrency", "group"],
+        equals: "pages",
+      },
       {
         kind: "yaml-equals",
         path: `${WF}/pages.yml`,
         at: ["jobs", "deploy", "permissions", "issues"],
         equals: "write",
       },
-      { kind: "text", path: `${WF}/pages.yml`, lacks: ["pull_request"] },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "pages", "uses"],
-        equals: "./.github/workflows/pages.yml",
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "pages", "concurrency", "group"],
-        equals: "pages",
-      },
+      { kind: "text", path: `${WF}/pages.yml`, lacks: ["{%", "mounts:", "build_command:"] },
     ],
   },
   {
-    // Ordered behind the release leg: the needs edge plus !cancelled(), so
-    // a red or skipped release still deploys.
-    name: "the pages leg is ordered behind the release leg",
-    when: and(has("pages"), has("release-please")),
-    checks: () => [
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "pages", "needs"],
-        equals: ["all-green", "release"],
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "pages", "if"],
-        equals: GREEN_PUSH_TO_MAIN_UNLESS_CANCELLED,
-      },
-    ],
-  },
-  {
-    name: "the pages leg needs only the gate without release-please",
-    when: and(has("pages"), not(has("release-please"))),
-    checks: () => [
-      { kind: "yaml-equals", path: CI, at: ["jobs", "pages", "needs"], equals: ["all-green"] },
-      { kind: "yaml-equals", path: CI, at: ["jobs", "pages", "if"], equals: GREEN_PUSH_TO_MAIN },
-      { kind: "yaml-text", path: CI, at: ["jobs", "pages"], lacks: ["cancelled()", "release"] },
-    ],
-  },
-  {
-    name: "no pages workflow or leg without the module",
+    name: "no pages workflow without the module",
     when: not(has("pages")),
-    checks: () => [
-      { kind: "missing", path: `${WF}/pages.yml` },
-      { kind: "yaml-absent", path: CI, at: ["jobs", "pages"] },
-      { kind: "text", path: CI, lacks: ["workflows/pages.yml"] },
-    ],
+    checks: () => [{ kind: "missing", path: `${WF}/pages.yml` }],
   },
   {
-    // The managed docs workflow always carries the strict PR check job.
-    name: "docs-site renders the strict PR check job",
+    // The managed docs workflow: the strict PR check job plus the nightly
+    // and dispatch deploy, one shape whether or not pages is selected (the
+    // composed layout is the called workflow's to derive).
+    name: "docs-site renders the strict PR check and the nightly deploy with no baked answers",
     when: has("docs-site"),
     checks: () => [
       { kind: "exists", path: `${WF}/docs-site.yml` },
@@ -576,63 +545,11 @@ export const EXPECTATIONS: Row[] = [
         at: ["jobs", "check", "steps"],
         matches: [{ uses: includes("actions/pages-site@build"), with: { check: "true" } }],
       },
-    ],
-  },
-  {
-    // Composed with pages, the docs ride pages.yml as the versioned
-    // vitepress mount and the website mount turns unversioned; docs-site.yml
-    // renders down to the check job with no deploy call at any ref.
-    name: "docs-site composed with pages rides pages.yml as the docs mount",
-    when: and(has("docs-site"), has("pages")),
-    checks: () => [
       {
-        kind: "text",
+        kind: "yaml-keys",
         path: `${WF}/docs-site.yml`,
-        lacks: ["reusable-pages.yml@", "schedule:", "workflow_call"],
-      },
-      { kind: "yaml-absent", path: CI, at: ["jobs", "docs-site"] },
-      { kind: "text", path: CI, lacks: ["workflows/docs-site.yml"] },
-      {
-        kind: "yaml-json",
-        path: `${WF}/pages.yml`,
-        at: ["jobs", "deploy", "with", "mounts"],
-        equals: [
-          { path: "/", source: "command", versioned: false },
-          { path: "/docs/", source: "vitepress", versioned: true },
-        ],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/pages.yml`,
-        at: ["jobs", "deploy", "with", "link_rot_label"],
-        equals: "docs-link-rot",
-      },
-    ],
-  },
-  {
-    // Standalone: docs-site.yml carries the deploy (workflow_call from
-    // ci.yml's leg with the judged commit, nightly, dispatch, never push)
-    // and ci.yml's docs-site leg runs under the pages lane behind the hook.
-    name: "docs-site alone carries the deploy and ci.yml's docs-site leg",
-    when: and(has("docs-site"), not(has("pages"))),
-    checks: () => [
-      {
-        kind: "yaml-matches",
-        path: `${WF}/docs-site.yml`,
-        at: ["jobs", "deploy", "uses"],
-        matches: includes("reusable-pages.yml@build"),
-      },
-      {
-        kind: "yaml-json",
-        path: `${WF}/docs-site.yml`,
-        at: ["jobs", "deploy", "with", "mounts"],
-        equals: [{ path: "/", source: "vitepress", versioned: true }],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/docs-site.yml`,
-        at: ["jobs", "deploy", "with", "link_rot_label"],
-        equals: "docs-link-rot",
+        at: ["on"],
+        equals: ["pull_request", "schedule", "workflow_dispatch"],
       },
       {
         kind: "yaml-equals",
@@ -641,94 +558,34 @@ export const EXPECTATIONS: Row[] = [
         equals: [{ cron: "41 4 * * *" }],
       },
       {
+        kind: "yaml-matches",
+        path: `${WF}/docs-site.yml`,
+        at: ["jobs", "deploy", "uses"],
+        matches: includes("repo-platform/.github/workflows/reusable-pages.yml@build"),
+      },
+      {
+        kind: "yaml-keys",
+        path: `${WF}/docs-site.yml`,
+        at: ["jobs", "deploy", "with"],
+        equals: ["custom_domain"],
+      },
+      {
         kind: "yaml-equals",
         path: `${WF}/docs-site.yml`,
         at: ["jobs", "deploy", "permissions", "issues"],
         equals: "write",
       },
       {
-        kind: "yaml-defined",
+        kind: "text",
         path: `${WF}/docs-site.yml`,
-        at: ["on", "workflow_call", "inputs", "sha"],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/docs-site.yml`,
-        at: ["jobs", "deploy", "with", "sha"],
-        equals: "${{ inputs.sha }}",
-      },
-      {
-        kind: "yaml-matches",
-        path: `${WF}/docs-site.yml`,
-        at: ["jobs", "deploy", "concurrency", "group"],
-        matches: includes("pages-called-"),
-      },
-      { kind: "yaml-absent", path: `${WF}/docs-site.yml`, at: ["on", "push"] },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "docs-site", "uses"],
-        equals: "./.github/workflows/docs-site.yml",
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "docs-site", "concurrency", "group"],
-        equals: "pages",
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "docs-site", "if"],
-        equals: GREEN_PUSH_TO_MAIN_UNLESS_CANCELLED,
+        lacks: ["{%", "mounts:", "site_title:", "link_rot_label:"],
       },
     ],
   },
   {
-    name: "the docs-site leg is ordered behind the hook and the release leg",
-    when: and(has("docs-site"), not(has("pages")), has("release-please")),
-    checks: () => [
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "docs-site", "needs"],
-        equals: ["all-green", "post-green", "release"],
-      },
-    ],
-  },
-  {
-    name: "the docs-site leg is ordered behind the hook alone without release-please",
-    when: and(has("docs-site"), not(has("pages")), not(has("release-please"))),
-    checks: () => [
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "docs-site", "needs"],
-        equals: ["all-green", "post-green"],
-      },
-      { kind: "yaml-text", path: CI, at: ["jobs", "docs-site"], lacks: ["release"] },
-    ],
-  },
-  {
-    name: "no docs-site workflow or leg without the module",
+    name: "no docs-site workflow without the module",
     when: not(has("docs-site")),
-    checks: () => [
-      { kind: "missing", path: `${WF}/docs-site.yml` },
-      { kind: "yaml-absent", path: CI, at: ["jobs", "docs-site"] },
-    ],
-  },
-  {
-    name: "pages without docs-site mounts the versioned website alone",
-    when: and(has("pages"), not(has("docs-site"))),
-    checks: () => [
-      { kind: "text", path: `${WF}/pages.yml`, lacks: ["vitepress", "link_rot_label"] },
-      {
-        kind: "yaml-json",
-        path: `${WF}/pages.yml`,
-        at: ["jobs", "deploy", "with", "mounts"],
-        equals: [{ path: "/", source: "command", versioned: true }],
-      },
-    ],
+    checks: () => [{ kind: "missing", path: `${WF}/docs-site.yml` }],
   },
   {
     // The repo-owned nightly-fuzz starter: the fuzz-issue action in both
@@ -803,21 +660,14 @@ export const EXPECTATIONS: Row[] = [
   },
   {
     // The repo-owned plugin manifests (real JSON, an empty seeded
-    // catalog), the gating structure job's membership and dir input in
-    // ci.yml, and the standalone advisory discovery workflow.
-    name: "skills renders the plugin manifests, the skills-dir input, and the discovery workflow",
+    // catalog) and the standalone advisory discovery workflow with the
+    // skills_dir answer baked in.
+    name: "skills renders the plugin manifests and the discovery workflow",
     when: has("skills"),
     checks: (s) => [
       { kind: "json", path: ".claude-plugin/plugin.json" },
       { kind: "json", path: ".claude-plugin/marketplace.json" },
       { kind: "yaml-equals", path: ".claude-plugin/plugin.json", at: ["skills"], equals: [] },
-      { kind: "text", path: CI, has: ['"skills"'] },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "ci", "with", "skills-dir"],
-        equals: s.skillsDir,
-      },
       { kind: "exists", path: `${WF}/validate-skills.yml` },
       {
         kind: "yaml-matches",
@@ -839,12 +689,11 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    name: "no plugin manifests, skills input, or discovery workflow without the module",
+    name: "no plugin manifests or discovery workflow without the module",
     when: not(has("skills")),
     checks: () => [
       { kind: "missing", path: ".claude-plugin" },
       { kind: "missing", path: `${WF}/validate-skills.yml` },
-      { kind: "text", path: CI, lacks: ["skills-dir:", '"skills"'] },
     ],
   },
   {
@@ -930,33 +779,14 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    // The analysis jobs live in fleet-ci; the render carries the exact
-    // languages input (shared languages once) and the weekly re-scan.
-    name: "CodeQL gates ci.yml with the languages input and the weekly schedule",
-    when: ENABLE_CODEQL,
-    checks: (s) => [
-      { kind: "missing", path: `${WF}/codeql.yml` },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "ci", "with", "codeql-languages"],
-        equals: codeqlLanguages(s),
-      },
-      { kind: "yaml-equals", path: CI, at: ["on", "schedule"], equals: [{ cron: "3 8 * * 1" }] },
-    ],
-  },
-  {
-    name: "no CodeQL languages or schedule without enable_codeql",
-    when: not(ENABLE_CODEQL),
+    // The analysis jobs live in fleet-ci, which decides the languages from
+    // the registration; every render carries the weekly re-scan trigger
+    // and no CodeQL workflow of its own.
+    name: "CodeQL rides fleet-ci: the weekly schedule renders and no codeql.yml does",
+    when: ALWAYS,
     checks: () => [
       { kind: "missing", path: `${WF}/codeql.yml` },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "ci", "with", "codeql-languages"],
-        equals: "[]",
-      },
-      { kind: "text", path: CI, lacks: ["schedule:"] },
+      { kind: "yaml-equals", path: CI, at: ["on", "schedule"], equals: [{ cron: "3 8 * * 1" }] },
     ],
   },
   {
@@ -1134,144 +964,22 @@ export const EXPECTATIONS: Row[] = [
     },
   ]),
   {
-    // The tracking-labels input feeds fleet-ci's release-health job; the
-    // exact quoted list (selected streams in module order) is pinned. The
-    // legacy fuzz-label spelling must never render.
-    name: "ci.yml passes the selected streams' tracking labels",
-    when: anyOf("docs-site", "fuzzer", "nightly"),
-    checks: (s) => [
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "ci", "with", "tracking-labels"],
-        equals: streamLabels(s),
-      },
-      { kind: "text", path: CI, lacks: ["fuzz-label:"] },
-    ],
-  },
-  {
-    name: "ci.yml passes no tracking labels without a stream module",
-    when: not(anyOf("docs-site", "fuzzer", "nightly")),
-    checks: () => [{ kind: "text", path: CI, lacks: ["tracking-labels:", "fuzz-label:"] }],
-  },
-  {
-    // The release leg splices downstream of the gate AND the hook,
-    // released only by a green push to main with the judged commit; the
-    // managed release.yml carries the head gate, the release-health
-    // pre-flight, and the three-stage draft flow with the repo-owned hooks.
-    name: "release-please renders the release leg and the managed three-stage release.yml",
+    // The release pipeline runs in fleet-release.yml@build behind ci.yml's
+    // static release leg; the module lands only the repo-owned
+    // release-please configuration.
+    name: "release-please renders its repo-owned configuration starters",
     when: has("release-please"),
-    checks: (s) => [
-      { kind: "exists", path: `${WF}/release.yml` },
-      { kind: "exists", path: `${WF}/update-release.yml` },
-      { kind: "exists", path: `${WF}/update-release-pr.yml` },
+    checks: () => [
       { kind: "exists", path: "release-please-config.json" },
       { kind: "exists", path: ".release-please-manifest.json" },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "release", "uses"],
-        equals: "./.github/workflows/release.yml",
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "release", "needs"],
-        equals: ["all-green", "post-green"],
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "release", "if"],
-        equals:
-          "needs.all-green.result == 'success' && needs.post-green.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'",
-      },
-      {
-        kind: "yaml-equals",
-        path: CI,
-        at: ["jobs", "release", "with", "sha"],
-        equals: "${{ github.sha }}",
-      },
-      { kind: "text", path: CI, has: ['"release-please"'], lacks: ["info-release"] },
-      {
-        kind: "yaml-matches",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "release-please", "steps"],
-        matches: [
-          { env: { JUDGED: "${{ inputs.sha || github.sha }}" } },
-          {
-            uses: includes("release-health@build"),
-            with:
-              streamLabels(s) === ""
-                ? { mode: "release" }
-                : { mode: "release", "tracking-labels": streamLabels(s) },
-          },
-        ],
-      },
-      {
-        kind: "text",
-        path: `${WF}/release.yml`,
-        lacks: streamLabels(s) === "" ? ["fuzz-label:", "tracking-labels:"] : ["fuzz-label:"],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "update-release", "needs"],
-        equals: ["release-please"],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "update-release", "uses"],
-        equals: "./.github/workflows/update-release.yml",
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "publish-release", "needs"],
-        equals: ["release-please", "update-release"],
-      },
-      {
-        kind: "yaml-matches",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "publish-release", "permissions"],
-        matches: { attestations: "write", "id-token": "write" },
-      },
-      {
-        kind: "yaml-matches",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "publish-release", "steps"],
-        matches: [{ uses: includes("attest-build-provenance") }],
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "update-release-pr", "uses"],
-        equals: "./.github/workflows/update-release-pr.yml",
-      },
-      {
-        kind: "yaml-equals",
-        path: `${WF}/release.yml`,
-        at: ["jobs", "update-release-pr", "if"],
-        equals: "needs.release-please.outputs.prs_created == 'true'",
-      },
     ],
   },
   {
-    name: "no release workflows, leg, or config without release-please",
+    name: "no release-please configuration without the module",
     when: not(has("release-please")),
     checks: () => [
-      { kind: "missing", path: `${WF}/release.yml` },
-      { kind: "missing", path: `${WF}/update-release.yml` },
-      { kind: "missing", path: `${WF}/update-release-pr.yml` },
       { kind: "missing", path: "release-please-config.json" },
       { kind: "missing", path: ".release-please-manifest.json" },
-      { kind: "yaml-absent", path: CI, at: ["jobs", "release"] },
-      {
-        kind: "text",
-        path: CI,
-        lacks: ["uses: ./.github/workflows/release.yml", '"release-please"'],
-      },
     ],
   },
   ...TOOLCHAIN_STARTERS.flatMap((t): Row[] => [
@@ -1424,6 +1132,9 @@ export const MANIFEST_CLASSES: ManifestClassRow[] = [
   { when: ALWAYS, path: ".github/workflows/ci.yml", class: "managed" },
   { when: ALWAYS, path: ".github/workflows/checks.yml", class: "starter" },
   { when: ALWAYS, path: ".github/workflows/post-green.yml", class: "starter" },
+  { when: ALWAYS, path: ".github/workflows/update-release.yml", class: "starter" },
+  { when: ALWAYS, path: ".github/workflows/update-release-pr.yml", class: "starter" },
+  { when: ALWAYS, path: ".github/workflows/release.yml", class: "absent" },
   { when: ALWAYS, path: ".repo-platform.yml", class: "starter" },
   { when: ALWAYS, path: ".github/SECURITY.md", class: "split" },
   { when: ALWAYS, path: ".gitignore", class: "split" },
@@ -1434,9 +1145,7 @@ export const MANIFEST_CLASSES: ManifestClassRow[] = [
   { when: ALWAYS, path: ".github/workflows/settings-sync.yml", class: "absent" },
   { when: ALWAYS, path: ".github/workflows/copilot-setup-steps.yml", class: "starter" },
   { when: ALWAYS, path: ".github/settings.yml", class: "starter" },
-  { when: has("release-please"), path: ".github/workflows/release.yml", class: "managed" },
   { when: has("release-please"), path: "release-please-config.json", class: "starter" },
-  { when: not(has("release-please")), path: ".github/workflows/release.yml", class: "absent" },
   { when: not(has("release-please")), path: "release-please-config.json", class: "absent" },
   { when: has("custom-license"), path: "LICENSE.md", class: "absent" },
   { when: not(has("custom-license")), path: "LICENSE.md", class: "split" },
