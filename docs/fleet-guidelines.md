@@ -10,6 +10,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | Guideline | Enforced by |
 |---|---|
 | [Sticky PR comments](#sticky-pr-comments) | the `sticky-pr-comments` ssot rule (repo-platform templates, landing); review only in repo-owned workflows |
+| [Pinned actions](#pinned-actions) | the `action-pins` ssot rule and the `action-refs` CI job (repo-platform, landing); Dependabot bumps the pins |
 | [Conventional Commits, squash-merged](#conventional-commits-squash-merged) | the `pr-title` check; the `commit-names` job; the settings override layer (squash-only) |
 | [Plain ASCII punctuation](#plain-ascii-punctuation) | check-typography |
 | [Markdown prose is never hard-wrapped](#markdown-prose-is-never-hard-wrapped) | `wrap:check` (repo-platform); `deno fmt --prose-wrap preserve` (deno repos); review elsewhere |
@@ -34,6 +35,14 @@ Conventions every managed repository follows, whether the file is managed by syn
   ```
 
 - Enforced by: the `sticky-pr-comments` ssot rule in repo-platform's [scripts/check/ssot/sticky_comments.ts](../scripts/check/ssot/sticky_comments.ts) (landing) over every file under its `templates/`, `.github/workflows/`, and `actions/`: no hand-rolled `gh pr comment`, `gh pr close --comment`, or comments REST call anywhere in them, and every sticky step pinned with `header: repo-platform/<workflow stem or action name>`. The rule reads YAML step lists (workflows, composite actions, step fragments; jinja sources as the YAML they render) as the runner does: a step is a mapping whatever its key order, its `run` is one shell line per folded `>-` block and one per literal `|` line, and each command line is split into words, so `gh pr close` is caught by its comment option in any spelling (`--comment`, `--comment=`, `-c`, `-dc`) and `gh pr comment` or a comments REST route in a shell line, a github-script body, or an argv array alike. `gh issue comment` is not judged (the issue-tracking actions comment on issues by design). Composite actions alone may set `continue-on-error` on the step: they post under the calling job's token, which a fork PR grants no write, so their comment is a convenience sink beside the step summary. Review only in repo-owned workflows.
+
+## Pinned actions
+
+- Rule: every third-party action is pinned by full commit sha with the release tag in a trailing comment, `uses: actions/checkout@<40-hex sha> # v7.0.1`, and the same action carries the same sha everywhere repo-platform ships it.
+- Why: a moving tag lets upstream change what the fleet runs without a PR anywhere; the sha freezes the code, the comment keeps the version readable, and Dependabot bumps both together.
+- Exception: `Vivswan/repo-platform/...@build` references stay on the mutable `build` branch on purpose. It is the green-gated delivery channel ([build-provenance](build-provenance.md)), so a pinned sha there would freeze the fleet on one publish.
+- Exception: an action that publishes no version tags is pinned to a branch commit with the branch in the comment, `uses: dtolnay/rust-toolchain@<40-hex sha> # master`, and the version it installs travels as the step's explicit input (`toolchain:`). The rule's `BRANCH_PINNED` table records each such action with its reason; a moving tag is still refused.
+- Enforced by: the `action-pins` ssot rule in [scripts/check/ssot/delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts) (shape and one-sha-per-action, offline) and the `action-refs` CI job ([resolve_action_refs.ts](../.github/scripts/ci/resolve_action_refs.ts)), which asks GitHub that every sha exists and that the tag named in its comment is that commit. Template `.jinja` pins and the sync writer's `files/` copies are outside Dependabot's reach, so a bump PR here updates them by hand before all-green passes; the fleet receives them through the next sync.
 
 ## Conventional Commits, squash-merged
 

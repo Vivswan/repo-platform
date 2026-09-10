@@ -89,7 +89,7 @@ jobs:
           tracking-labels: ${{ inputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         if: steps.head.outputs.current == 'true'
         with:

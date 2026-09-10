@@ -29,7 +29,7 @@ jobs:
     outputs:
       private: ${{ steps.plan.outputs.private }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .repo-platform.yml
@@ -56,14 +56,14 @@ jobs:
       issues: write
       security-events: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: Vivswan/repo-platform/actions/trivy@build
         id: scan
         with:
           mode: nightly
       - name: Upload the findings report
         if: steps.scan.outputs.found == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-findings-${{ github.run_attempt }}
           path: ${{ steps.scan.outputs.report-dir }}
@@ -91,7 +91,7 @@ jobs:
           stream: generic
       - name: Upload the SARIF to code scanning
         if: needs.plan.outputs.private == 'false'
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: trivy

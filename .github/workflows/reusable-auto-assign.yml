@@ -49,7 +49,7 @@ jobs:
     steps:
       - name: Resolve assignees from CODEOWNERS
         id: who
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             // Users on the last `*` entry of CODEOWNERS; the repo owner when
@@ -89,7 +89,7 @@ jobs:
         if: github.event_name == 'issues'
         env:
           ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.addAssignees({
@@ -105,7 +105,7 @@ jobs:
           github.event.pull_request.head.repo.full_name == github.repository
         env:
           ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.addAssignees({
@@ -125,7 +125,7 @@ jobs:
           github.event.pull_request.head.repo.full_name == github.repository
         env:
           ASSIGNEES: ${{ steps.who.outputs.assignees }}
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const author = context.payload.pull_request.user.login.toLowerCase();
@@ -149,7 +149,7 @@ jobs:
       # so a pathological backlog cannot run away; the nightly drains the rest.
       - name: Assign the dispatched item, or sweep open unassigned items
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           ISSUE: ${{ inputs.issue }}
           ASSIGNEES: ${{ steps.who.outputs.assignees }}

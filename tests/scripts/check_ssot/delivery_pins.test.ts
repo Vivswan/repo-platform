@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
+  actionManifests,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
   extractUsesPins,
@@ -10,6 +11,7 @@ import {
   hookCommandParts,
   type Pin,
   pinMismatches,
+  pinShapeMismatches,
   renderedSelfPins,
   STAMP_HOOK_ARGV,
   STAMP_HOOK_WHEN,
@@ -17,80 +19,181 @@ import {
   templateSelfPins,
 } from "../../../scripts/check/ssot/delivery_pins.ts";
 
+const SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1";
+
 describe("extractUsesPins", () => {
   const text = [
     "      - uses: actions/checkout@v7",
-    "      # - uses: astral-sh/setup-uv@v7",
+    `      # - uses: astral-sh/setup-uv@${SHA} # v10.0.1`,
     "      - uses: ./actions/check-typography",
     "    uses: {{ github_username }}/repo-platform/actions/x@{{ uses_ref }}",
-    "    uses: github/codeql-action/init@v4",
+    `    uses: github/codeql-action/init@${SHA} # v4.38.0`,
+    `    uses: "actions/cache@${SHA}" # v6.1.0`,
   ].join("\n");
 
-  test("extracts real pins, commented examples included; local and jinja-ref lines are skipped", () => {
-    const pins = extractUsesPins(text, "f");
-    expect(pins.map((p) => `${p.action}@${p.ref}`)).toEqual([
-      "actions/checkout@v7",
-      "astral-sh/setup-uv@v7",
-      "github/codeql-action@v4",
+  test("extracts real pins with their version comment, commented examples included; local and jinja-ref lines are skipped", () => {
+    expect(extractUsesPins(text, "f")).toEqual([
+      { file: "f", action: "actions/checkout", ref: "v7", version: null },
+      { file: "f", action: "astral-sh/setup-uv", ref: SHA, version: "v10.0.1" },
+      { file: "f", action: "github/codeql-action", ref: SHA, version: "v4.38.0" },
+      { file: "f", action: "actions/cache", ref: SHA, version: "v6.1.0" },
     ]);
   });
 
   test("extracts quoted pins", () => {
     const pins = extractUsesPins('      - uses: "actions/checkout@v8"', "f");
-    expect(pins.map((p) => `${p.action}@${p.ref}`)).toEqual(["actions/checkout@v8"]);
+    expect(pins).toEqual([{ file: "f", action: "actions/checkout", ref: "v8", version: null }]);
+  });
+});
+
+describe("actionManifests", () => {
+  test("lists every action.yml and action.yaml under actions/, nested ones included, sorted; symlinks, other files, and unpublished directories are not manifests", () => {
+    expect(
+      actionManifests([
+        { path: "actions/pages-site/check-links/action.yml", symlink: false },
+        { path: "actions/spelled-long/action.yaml", symlink: false },
+        { path: "actions/pages-site/node_modules/dep/action.yml", symlink: false },
+        { path: "actions/pages-site/dist/action.yml", symlink: false },
+        { path: "actions/pages-site/action.yml", symlink: false },
+        { path: "actions/pages-site/site.ts", symlink: false },
+        { path: "actions/shared/action.yml", symlink: true },
+        { path: "actions/x/not-action.yml", symlink: false },
+        { path: "actions/bun-setup/action.yml", symlink: false },
+      ]),
+    ).toEqual([
+      "actions/bun-setup/action.yml",
+      "actions/pages-site/action.yml",
+      "actions/pages-site/check-links/action.yml",
+      "actions/spelled-long/action.yaml",
+    ]);
+  });
+});
+
+describe("pinShapeMismatches", () => {
+  const pin = (file: string, action: string, ref: string, version: string | null): Pin => ({
+    file,
+    action,
+    ref,
+    version,
+  });
+  const branchPinned = { "dtolnay/rust-toolchain": "master" };
+
+  test("passes sha pins with release comments, the owner's own refs, and the allowlisted branch pin", () => {
+    const pins = [
+      pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
+      pin("b.jinja", "actions/checkout", SHA, "v7.0.1"),
+      pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      pin("a.yml", "Vivswan/repo-platform", "build", null),
+      pin("a.yml", "vivswan/github-settings-as-code", "latest", null),
+    ];
+    expect(pinShapeMismatches(pins, "Vivswan", branchPinned)).toEqual([]);
+  });
+
+  test.each<{ reason: string; pins: Pin[]; expected: Mismatch[] }>([
+    {
+      reason: "a moving tag",
+      pins: [
+        pin("a.yml", "actions/checkout", "v7", null),
+        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      ],
+      expected: [
+        {
+          file: "a.yml",
+          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
+          got: "@v7",
+        },
+      ],
+    },
+    {
+      reason: "a sha without its version comment",
+      pins: [
+        pin("a.yml", "actions/checkout", SHA, null),
+        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      ],
+      expected: [
+        {
+          file: "a.yml",
+          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
+          got: `@${SHA}`,
+        },
+      ],
+    },
+    {
+      reason: "a sha whose comment is a moving major, and an abbreviated sha",
+      pins: [
+        pin("a.yml", "actions/checkout", SHA, "v7"),
+        pin("b.yml", "actions/cache", SHA.slice(0, 12), "v6.1.0"),
+        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      ],
+      expected: [
+        {
+          file: "a.yml",
+          expected: "actions/checkout@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
+          got: `@${SHA} # v7`,
+        },
+        {
+          file: "b.yml",
+          expected: "actions/cache@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
+          got: `@${SHA.slice(0, 12)} # v6.1.0`,
+        },
+      ],
+    },
+    {
+      reason: "one sha carrying two version comments",
+      pins: [
+        pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
+        pin("b.yml", "actions/checkout", SHA, "v7.0.0"),
+        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      ],
+      expected: [
+        {
+          file: `actions/checkout@${SHA}`,
+          expected: "one version comment per pinned sha",
+          got: "v7.0.0, v7.0.1",
+        },
+      ],
+    },
+    {
+      reason: "a branch-pinned action naming another branch, and a stale allowlist entry",
+      pins: [pin("a.yml", "dtolnay/rust-toolchain", SHA, "stable")],
+      expected: [
+        {
+          file: "a.yml",
+          expected: "dtolnay/rust-toolchain@<full 40-hex commit sha> # master",
+          got: `@${SHA} # stable`,
+        },
+      ],
+    },
+    {
+      reason: "an allowlisted branch pin no longer present anywhere",
+      pins: [pin("a.yml", "actions/checkout", SHA, "v7.0.1")],
+      expected: [
+        {
+          file: "dtolnay/rust-toolchain",
+          expected: "an action still pinned somewhere (branch-pinned allowlist)",
+          got: "no uses: pins found (stale allowlist entry - remove it)",
+        },
+      ],
+    },
+  ])("flags $reason", ({ pins, expected }) => {
+    expect(pinShapeMismatches(pins, "Vivswan", branchPinned)).toEqual(expected);
   });
 });
 
 describe("pinMismatches", () => {
   const split = [
-    { file: "a.yml", action: "x/y", ref: "v1" },
-    { file: "b.yml", action: "x/y", ref: "v2" },
+    { file: "a.yml", action: "x/y", ref: "v1", version: null },
+    { file: "b.yml", action: "x/y", ref: "v2", version: null },
   ];
 
   test("passes when every action maps to one ref", () => {
-    expect(pinMismatches([{ file: "a.yml", action: "x/y", ref: "v1" }], {})).toEqual([]);
+    expect(pinMismatches([{ file: "a.yml", action: "x/y", ref: "v1", version: null }])).toEqual([]);
   });
 
-  test("flags an action pinned at two refs, naming the sites", () => {
-    expect(pinMismatches(split, {})).toEqual([
+  test("flags an action pinned at two refs, naming the sites, with no allowance for a split", () => {
+    expect(pinMismatches(split)).toEqual([
       { file: "x/y", expected: "a single pinned ref", got: "v1 (a.yml); v2 (b.yml)" },
     ]);
-  });
-
-  test("honors an allowlisted split whose ref set matches exactly", () => {
-    expect(pinMismatches(split, { "x/y": ["v1", "v2"] })).toEqual([]);
-  });
-
-  test.each<{
-    reason: string;
-    pins: Pin[];
-    expected: Mismatch;
-    allowed: Record<string, string[]>;
-  }>([
-    {
-      reason: "the allowlisted ref set differs from the pinned one",
-      pins: split,
-      expected: { file: "x/y", expected: "the allowlisted refs [v1, v3]", got: "v1, v2" },
-      allowed: { "x/y": ["v1", "v3"] },
-    },
-    {
-      reason: "a stale allowlist entry whose split collapsed to one ref",
-      pins: [{ file: "a.yml", action: "x/y", ref: "v1" }],
-      expected: { file: "x/y", expected: "the allowlisted refs [v1, v2]", got: "v1" },
-      allowed: { "x/y": ["v1", "v2"] },
-    },
-    {
-      reason: "a stale allowlist entry whose action has no pins at all",
-      pins: [],
-      expected: {
-        file: "x/y",
-        expected: "an action still pinned somewhere (allowlisted)",
-        got: "no uses: pins found (stale allowlist entry - remove it)",
-      },
-      allowed: { "x/y": ["v1", "v2"] },
-    },
-  ])("flags $reason, naming the drift", ({ pins, allowed, expected }) => {
-    expect(pinMismatches(pins, allowed)).toEqual([expected]);
   });
 });
 

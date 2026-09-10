@@ -115,15 +115,16 @@ export function actionSetsUpBun(text: string): boolean {
   return actionSteps(text).some(usesSetupBun);
 }
 
-/** Every action.yml under `actionsDir`, nested actions included and
- *  EXCLUDED_DIRS pruned as publication prunes them: the manifest's
- *  repo-relative path, its directory's, and its text. */
+/** Every action manifest (action.yml or action.yaml) under `actionsDir`,
+ *  nested actions included and EXCLUDED_DIRS pruned as publication prunes
+ *  them: the manifest's repo-relative path, its directory's, and its text. */
 function actionManifests(actionsDir: string): { dir: string; file: string; text: string }[] {
   const found: { dir: string; file: string; text: string }[] = [];
   const walk = (dir: string, rel: string) => {
-    const manifest = join(dir, "action.yml");
-    if (existsSync(manifest)) {
-      found.push({ dir: rel, file: `${rel}/action.yml`, text: readFileSync(manifest, "utf-8") });
+    for (const name of ["action.yml", "action.yaml"]) {
+      const manifest = join(dir, name);
+      if (!existsSync(manifest)) continue;
+      found.push({ dir: rel, file: `${rel}/${name}`, text: readFileSync(manifest, "utf-8") });
     }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory() || EXCLUDED_DIRS.has(entry.name)) continue;

@@ -38,7 +38,7 @@ jobs:
             "jobs are removed. CI stays red until one of those lands."
           exit 1
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Repo-owned tuning: a .github/codeql/codeql-config.yml in the
       # calling repository is picked up automatically (the managed ci.yml
@@ -54,7 +54,7 @@ jobs:
           done
           echo "file=$file" >> "$GITHUB_OUTPUT"
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: ${{ inputs.language }}
           config: ${{ inputs.config }}
@@ -65,6 +65,6 @@ jobs:
           # per language.
           packs: "+codeql/${{ inputs.language == 'javascript-typescript' && 'javascript' || inputs.language }}-queries:AlertSuppression.ql"
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           category: "/language:${{ inputs.language }}"
