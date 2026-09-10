@@ -4,10 +4,7 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  GATED_MODULES,
-  MODULES as SMOKE_GATING_MODULES,
-} from "../../../tests/ci/smoke_gating/expectations.ts";
+import { MODULES as SMOKE_GATING_MODULES } from "../../../tests/ci/smoke_gating/expectations.ts";
 import { ANSWERS_FILE, parseAnswers } from "../../generate/render_dogfood.ts";
 import { type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, loadManifests, REPO_ROOT, read, repoCi } from "./inputs.ts";
@@ -56,22 +53,12 @@ export const moduleRules: Rule[] = [
         ...setMismatch("ci.yml smoke-generate 'everything' row", reference, everyModules),
       );
 
-      // The smoke-gating expectation table's own module tuple, and the
-      // modules its rows actually condition on (a module no row gates
-      // would render ungated for every matrix row).
-      const gatingFile = "tests/ci/smoke_gating/expectations.ts";
+      // The smoke-gating expectation table's own module tuple.
       mismatches.push(
-        ...setMismatch(`${gatingFile} MODULES`, reference, [...SMOKE_GATING_MODULES]),
+        ...setMismatch("tests/ci/smoke_gating/expectations.ts MODULES", reference, [
+          ...SMOKE_GATING_MODULES,
+        ]),
       );
-      for (const module of reference) {
-        if (!GATED_MODULES.has(module as (typeof SMOKE_GATING_MODULES)[number])) {
-          mismatches.push({
-            file: gatingFile,
-            expected: `an expectation row whose condition names '${module}'`,
-            got: "none",
-          });
-        }
-      }
       return mismatches;
     },
   },

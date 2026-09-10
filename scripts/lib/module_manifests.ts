@@ -273,13 +273,6 @@ export const manifestSchema = z.strictObject({
     })
     .optional(),
   gate: gateText.optional(),
-  // Fragments rendering under a NARROWER condition than the module gate,
-  // keyed by anchor name: the composer AND-s the condition onto the module
-  // gate for that fragment (so it can never render where its module does
-  // not), and the anchor line collapses when it renders nothing
-  // (compose.ts's header). The composer errors on a key naming no shipped
-  // fragment. Same alphabet as `gate`: the text lands inside a jinja tag.
-  fragment_conditions: z.record(z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be an anchor name"), gateText).optional(),
 });
 
 export type ModuleManifest = z.infer<typeof manifestSchema> & { module: string };

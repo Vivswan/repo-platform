@@ -31,7 +31,7 @@ import {
   tryRun,
   upgradePathHarness,
   validateGenerated,
-  workflowJobWith,
+  workflowJob,
 } from "./fixture";
 import { LOCAL_NOTES, type MainProject, mainEnv, mainUpdate } from "./main_update";
 
@@ -141,7 +141,8 @@ describeLeg("12 branch render", () => {
     "the render landed on the branch, reads FRESH, and left the default branch untouched",
     () => {
       expect(readText(at(".github/workflows/ci.yml"))).not.toContain(LOCAL_NOTES.ci);
-      expect(workflowJobWith(at(".github/workflows/ci.yml"), "ci").modules).toContain('"fuzzer"');
+      // ci.yml carries no selection; the answers file and the registration do.
+      expect(workflowJob(at(".github/workflows/ci.yml"), "ci")?.with).toBeUndefined();
       expect(answersOf(mp.project).modules).toContain("fuzzer");
       expect(existsSync(at(".github/workflows/nightly-fuzz.yml"))).toBe(true);
       expect(manifestEntry(mp.project, ".github/workflows/nightly-fuzz.yml")?.class).toBe(

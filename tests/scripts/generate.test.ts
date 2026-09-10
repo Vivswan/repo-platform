@@ -9,8 +9,6 @@ import {
   hasToolchainDefault,
   moduleChoices,
   reservedLabelNames,
-  trackingGate,
-  trackingLabelsInput,
   trackingLabelValidator,
   trackingStreams,
 } from "../../scripts/generate/copier_questions";
@@ -191,29 +189,6 @@ describe("region builders", () => {
       "nightly",
     ]);
     expect(() => trackingStreams([BUN, RUST])).toThrow("tracking_label");
-  });
-
-  test("trackingGate or-chains the tracking-stream modules", () => {
-    expect(trackingGate([BUN, FUZZER, NIGHTLY])).toBe(
-      "'fuzzer' in modules or 'nightly' in modules",
-    );
-    expect(trackingGate([FUZZER])).toBe("'fuzzer' in modules");
-  });
-
-  test("trackingLabelsInput gates the input on any stream and joins the selected answers", () => {
-    expect(trackingLabelsInput([BUN, FUZZER, NIGHTLY], 10)).toEqual([
-      "{%- if 'fuzzer' in modules or 'nightly' in modules %}",
-      "          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}",
-      "{%- endif %}",
-    ]);
-  });
-
-  test("a single stream still renders the same shape at the caller's indent (no special casing)", () => {
-    expect(trackingLabelsInput([FUZZER], 6)).toEqual([
-      "{%- if 'fuzzer' in modules %}",
-      "      tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else [])) | join(',') | tojson }}",
-      "{%- endif %}",
-    ]);
   });
 
   test("pagesManifests filters to the pages-declaring modules and refuses none", () => {

@@ -1,33 +1,20 @@
 // Rules comparing this repository's own files with their template twins
 // line for line: prefix-mode dogfood pairs, managed regions, the typography
-// allowlist, the symlink trio, ci.yml's skeleton, and the skills' twin tables.
+// allowlist, the symlink trio, and the skills' twin tables.
 
 import { existsSync, lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { cleanManagedRegion } from "../../../actions/shared/grammar.ts";
-import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
+import { normalizeJinja } from "../../lib/jinja_subset.ts";
 import {
   applyDivergences,
-  canonical,
   firstDiff,
   type Mismatch,
   semanticLines,
   setMismatch,
 } from "./comparison.ts";
-import { asRecord, jinjaVars, REPO_ROOT, read, repoCi, trackedFiles } from "./inputs.ts";
+import { jinjaVars, REPO_ROOT, read, trackedFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
-
-function templateCi(): Record<string, unknown> {
-  // The collapsed template carries no private-conditioned branches (the
-  // job shapes live in fleet-ci.yml), so no boolean context applies;
-  // unresolved jinja expressions (the fleet-ci input values) are
-  // placeholder-substituted so the skeleton parses as YAML.
-  const text = placeholderJinja(
-    normalizeJinja(read("templates/base/.github/workflows/ci.yml.jinja"), jinjaVars()),
-  );
-  return asRecord(parseYaml(text), "ci.yml.jinja");
-}
 
 function lineDiffMismatch(
   file: string,
@@ -224,54 +211,6 @@ export const twinCopyRules: Rule[] = [
         expected.region.split("\n"),
         got.region.split("\n"),
       );
-    },
-  },
-  {
-    name: "ci-skeleton",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const repo = repoCi();
-      const template = templateCi();
-      const on = (ci: Record<string, unknown>) => asRecord(ci.on, "on");
-
-      // A bare `pull_request:` (the default types) is the expected shape
-      // since pr-title - the one `edited` consumer - moved to its own
-      // workflow; a types list on either side must still match the other.
-      const pull = (ci: Record<string, unknown>) => {
-        const trigger = on(ci).pull_request;
-        return trigger == null ? null : asRecord(trigger, "pull_request").types;
-      };
-      if (canonical(pull(template)) !== canonical(pull(repo))) {
-        mismatches.push({
-          file: ".github/workflows/ci.yml on.pull_request.types",
-          expected: canonical(pull(template)),
-          got: canonical(pull(repo)),
-        });
-      }
-
-      if (canonical(template.concurrency) !== canonical(repo.concurrency)) {
-        mismatches.push({
-          file: ".github/workflows/ci.yml concurrency",
-          expected: canonical(template.concurrency),
-          got: canonical(repo.concurrency),
-        });
-      }
-
-      const cron = (ci: Record<string, unknown>, where: string) => {
-        const schedule = on(ci).schedule as Record<string, unknown>[] | undefined;
-        if (!schedule?.[0]?.cron) throw new Error(`${where}: no schedule cron - anchor lost`);
-        return String(schedule[0].cron);
-      };
-      const tplCron = cron(template, "ci.yml.jinja");
-      const repoCron = cron(repo, "ci.yml");
-      if (tplCron !== repoCron) {
-        mismatches.push({
-          file: ".github/workflows/ci.yml schedule cron",
-          expected: tplCron,
-          got: repoCron,
-        });
-      }
-      return mismatches;
     },
   },
   {

@@ -7,7 +7,6 @@ import { describe, expect, test } from "bun:test";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,
-  codeqlGroups,
   dependabotLabels,
   ecosystemGroups,
   lockfileGroups,
@@ -122,15 +121,6 @@ describe("ecosystemGroups", () => {
       { ecosystem: "bun", modules: ["bun"] },
       { ecosystem: "npm", modules: ["node"] },
       { ecosystem: "uv", modules: ["uv"] },
-    ]);
-  });
-});
-
-describe("codeqlGroups", () => {
-  test("modules sharing a language collapse into one group in order", () => {
-    expect(codeqlGroups([AGENTS, BUN, NODE, UV])).toEqual([
-      { language: "javascript-typescript", modules: ["bun", "node"] },
-      { language: "python", modules: ["uv"] },
     ]);
   });
 });

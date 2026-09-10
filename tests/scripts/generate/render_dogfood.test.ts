@@ -286,16 +286,14 @@ describe("answerMismatches", () => {
       reason: "docs_site_label missing while the docs-site module is selected",
       override: { docs_site_label: undefined },
       expected: [
-        "docs_site_label: missing - the docs-site module is selected, so the docs-site pair (and the operator settings facts) need the label copier.yml asks for",
+        "docs_site_label: missing - the docs-site module is selected, so the operator settings facts need the label copier.yml asks for",
       ],
     },
     {
-      reason:
-        "docs_site_label set while the docs-site module is deselected (its pair orphaned too)",
+      reason: "docs_site_label set while the docs-site module is deselected",
       override: { modules: without("docs-site") },
       expected: [
         "docs_site_label: set but the docs-site module is not selected - copier never asks the question then; remove the stale answer",
-        orphaned(".github/workflows/docs-site.yml", "docs-site"),
       ],
     },
     {

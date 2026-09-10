@@ -2,13 +2,12 @@
 // Compose the flat template/ tree Copier renders from the templates/ sources:
 // base/ passed through, each module's whole files at their plain paths,
 // fragments spliced at `{# compose:<anchor> #}` markers (each under its
-// module's gate, narrowed by the manifest's fragment_conditions), data anchors filled
-// from the manifests, and the ownership manifest emitted from the declared
-// classes. The contract this enforces (gates recorded as data instead of
-// filename jinja, tight and guarded anchors, the by-value sharing rule,
-// collisions as errors, declared-never-inferred ownership) is
-// docs/compose.md; the schemas are scripts/lib/module_manifests.ts and
-// scripts/ownership/declarations.ts.
+// module's gate), data anchors filled from the manifests, and the
+// ownership manifest emitted from the declared classes. The contract this
+// enforces (gates recorded as data instead of filename jinja, tight and
+// guarded anchors, the by-value sharing rule, collisions as errors,
+// declared-never-inferred ownership) is docs/compose.md; the schemas are
+// scripts/lib/module_manifests.ts and scripts/ownership/declarations.ts.
 //
 // All I/O is bytes and symlinks stay symlinks, so sources are never
 // re-encoded; sorted walks plus the fixed MODULE_ORDER keep the output
@@ -38,7 +37,6 @@ import {
   DATA_ANCHORS,
   type GateOf,
   GeneratorValidationError,
-  TOOLCHAIN_SETUP_FRAGMENT,
 } from "./data_anchors.ts";
 import {
   collectFiles,
@@ -54,8 +52,6 @@ import {
 } from "./entries.ts";
 import {
   excludePatterns,
-  fragmentConditionErrors,
-  fragmentGateExpression,
   gateExpression,
   plainTemplatePath,
   templatePathErrors,
@@ -150,14 +146,7 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
       }
       files.set(logical, { origin: "module", module, gate, entry });
     }
-    const moduleFragments = collectFragments(folder);
-    errors.push(
-      ...fragmentConditionErrors(module, manifest, moduleFragments.keys(), [
-        ...Object.keys(DATA_ANCHORS),
-        TOOLCHAIN_SETUP_FRAGMENT,
-      ]),
-    );
-    for (const [anchor, body] of moduleFragments) {
+    for (const [anchor, body] of collectFragments(folder)) {
       const contributions = fragments.get(anchor) ?? [];
       contributions.push([manifest, body]);
       fragments.set(anchor, contributions);
@@ -178,10 +167,8 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
     }
     return gate;
   };
-  // The fragment gate: the module gate, AND-ed with the condition its
-  // manifest declares for this anchor, when it declares one.
   const wrapFragment = (anchor: string, manifest: ModuleManifest, body: Buffer): Contribution => {
-    const gate = fragmentGateExpression(anchor, manifest.module, manifest);
+    const gate = gateOf(manifest.module);
     return {
       order: MODULE_ORDER.indexOf(manifest.module),
       source: `templates/${manifest.module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`,

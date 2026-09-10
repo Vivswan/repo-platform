@@ -13,7 +13,6 @@
 import { expect } from "bun:test";
 import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { linesOf } from "./edits";
 import {
   answersAtHead,
   commitAll,
@@ -40,7 +39,6 @@ import {
   upgradePathHarness,
   validateGenerated,
   workflowJob,
-  workflowJobWith,
   writeText,
 } from "./fixture";
 
@@ -86,11 +84,6 @@ describeLeg("03 visibility flip", () => {
     // computed centrally, so no rulesets or labels render here).
     const settings = readYaml(join(project, ".github/settings.yml")) as SettingsFile;
     expect(settings.repository.private).toBe(false);
-    // The CodeQL matrix is armed while public (the disarm assertion after
-    // the flip would be vacuous otherwise).
-    expect(
-      workflowJobWith(join(project, ".github/workflows/ci.yml"), "ci")["codeql-languages"],
-    ).toBe('["javascript-typescript"]');
 
     const postGreen = join(project, ".github/workflows/post-green.yml");
     expect(lexists(postGreen)).toBe(false);
@@ -165,12 +158,11 @@ describeLeg("03 visibility flip", () => {
       expect(existsSync(join(project, ".github/SECURITY.md"))).toBe(true);
       expect(lexists(join(project, "SECURITY.md"))).toBe(false);
 
-      // The release leg is release-please-gated; this fixture selects no
-      // release-please, so no leg may render next to the gate.
       const ciYml = join(project, ".github/workflows/ci.yml");
       const ciText = readText(ciYml);
-      expect(linesOf(ciText)).not.toContain("  release:");
-      expect(workflowJob(ciYml, "release")).toBeUndefined();
+      // The static release leg is present in every render and gated on the
+      // plan's modules output, so a selection without release-please skips it.
+      expect(String(workflowJob(ciYml, "release")?.if)).toContain('"release-please"');
 
       // The public-only base files and gates retire on the flip, the
       // manifest's visibility-gated entries with them.
@@ -185,8 +177,9 @@ describeLeg("03 visibility flip", () => {
       expect(fleetLicense).not.toBe("");
       expect(readText(join(project, "LICENSE.md")).startsWith(fleetLicense)).toBe(true);
 
-      const ciWith = workflowJobWith(ciYml, "ci");
-      expect(ciWith.private).toBe(true);
+      // ci.yml carries no visibility: the flip lives in the answers file
+      // and fleet-ci reads it at run time.
+      expect(workflowJob(ciYml, "ci")?.with).toBeUndefined();
 
       // settings.yml is a repo-owned starter: the flip must NOT rewrite it
       // (drift surfaces via the settings-drift report instead), and the other
@@ -196,9 +189,7 @@ describeLeg("03 visibility flip", () => {
       expect(settings.repository.homepage).toBe("");
       expect(settings.repository.topics).toBe("");
 
-      // CodeQL disarms with the flip: the fleet-ci input renders empty.
       expect(ciText).not.toContain("javascript-typescript");
-      expect(ciWith["codeql-languages"]).toBe("[]");
 
       expectNoCopierLeftovers(project);
     },

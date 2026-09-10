@@ -10,7 +10,6 @@ import {
   excludeRegion,
   hasToolchainDefault,
   moduleChoices,
-  trackingLabelsInput,
   trackingLabelValidator,
   trackingStreams,
 } from "./copier_questions.ts";
@@ -92,7 +91,6 @@ type MarkdownRegions =
 
 export type Target =
   | { file: string; syntax: "line"; prefix: string; regions: SpanRegion[] }
-  | { file: string; syntax: "jinja"; regions: SpanRegion[] }
   | ({ file: string; syntax: "markdown" } & MarkdownRegions);
 
 // The region roster is a function of the manifests and the tree: each
@@ -143,16 +141,6 @@ export function targets(manifests: ModuleManifest[]): Target[] {
           "the module.yml ownership declarations and the module templates",
         ],
       ],
-    },
-    {
-      file: "templates/base/.github/workflows/ci.yml.jinja",
-      syntax: "jinja",
-      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests, 6)]],
-    },
-    {
-      file: "templates/release-please/.github/workflows/release.yml.jinja",
-      syntax: "jinja",
-      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests, 10)]],
     },
     {
       file: "README.md",

@@ -390,6 +390,12 @@ function modelOldBuild(tree: string): void {
     join(tree, "template/.github/workflows/rerun-copilot-gate.yml"),
     "name: Rerun Copilot Gate\non: [pull_request_review]\n",
   );
+  // Before the release pipeline moved into the fleet workflows: a managed
+  // release.yml the new build renders no more, retired by the cleanup.
+  writeFileSync(
+    join(tree, "template/.github/workflows/release.yml"),
+    "name: Release\non: [workflow_call]\n",
+  );
   // Before pr-title became its own natively-required workflow (the check
   // was a fleet-ci job) and before the post-green starter existed: the
   // update must land the one and seed the other, each with its manifest

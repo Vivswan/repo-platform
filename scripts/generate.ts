@@ -4,16 +4,14 @@
 // questions and validators, validate-template's ownership tables, the doc
 // and skill rosters, module.schema.json, the toolchain pin dotfiles, the
 // actions' .bun-version files (so an action never rides the CALLER's bun
-// resolution), and the release-health tracking-labels inputs; the per-file
-// roster is generate/targets.ts beside this file. The .gitignore outputs are
+// resolution); the per-file roster is generate/targets.ts beside this file. The .gitignore outputs are
 // NOT owned here: build_gitignore.ts fetches upstream on every run, so it
 // lives outside `bun run regen` (docs/compose.md).
 //
 // A region is the content strictly between hand-placed BEGIN/END markers; a
 // hand edit inside one is drift that --check fails, and every target's output
 // is computed before anything is written so a broken marker in one file never
-// leaves another half-updated. Markers sit on lines of their own (jinja ones
-// as `{#- ... #}`, the dash folding the line away on render) EXCEPT in
+// leaves another half-updated. Markers sit on lines of their own EXCEPT in
 // markdown, where a standalone comment line is a CommonMark HTML block that
 // severs its paragraph, list, or table: there markers ride inline (BEGIN ends
 // the line before the region, END ends its last line, a table cell keeps both
@@ -82,10 +80,6 @@ function main(): number {
       if (target.syntax === "line") {
         for (const [name, body, sources] of target.regions) {
           next = spliceRegion(next, target.file, name, target.prefix, body(inputs), "", sources);
-        }
-      } else if (target.syntax === "jinja") {
-        for (const [name, body, sources] of target.regions) {
-          next = spliceRegion(next, target.file, name, "{#-", body(inputs), "#}", sources);
         }
       } else {
         for (const [name, body] of target.regions ?? []) {

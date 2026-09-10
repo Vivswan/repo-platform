@@ -1,8 +1,10 @@
 // Pages answer retirement (pages_production / pages_staging): a repo
 // rendered in the production/staging era carries that pages.yml shape and
 // records the two retired answers. The update must re-render the managed
-// pages.yml to the mounts interface and drop the retired answers from the
-// answers file while the surviving pages answers ride through. The
+// pages.yml to the self-configuring call (custom_domain alone; the
+// pipeline reads the mounts from the registration) and drop the retired
+// answers from the answers file while the surviving pages answers ride
+// through. The
 // delivery-channel pin flip rides the same managed re-render: a repo that
 // called the reusable workflows @main (the ungated tip) comes out calling
 // them @build, for pages.yml and auto-assign.yml alike.
@@ -81,14 +83,11 @@ describeLeg("09 pages answer retirement", () => {
     const pagesYml = join(project, PAGES_YML);
     const pagesText = readText(pagesYml);
     const withBlock = workflowJobWith(pagesYml, "deploy");
-    expect(pagesText).toContain("mounts:");
-    expect(typeof withBlock.mounts).toBe("string");
-    const mounts = JSON.parse(withBlock.mounts as string) as { versioned: boolean }[];
-    expect(mounts.some((mount) => mount.versioned === true)).toBe(true);
-    expect(withBlock.production).toBeUndefined();
-    expect(withBlock.staging).toBeUndefined();
+    expect(Object.keys(withBlock)).toEqual(["custom_domain"]);
+    expect(pagesText).not.toContain("production");
+    expect(pagesText).not.toContain("staging");
     const triggers = (readYaml(pagesYml) as { on: Record<string, unknown> }).on;
-    expect(triggers.release).toBeUndefined();
+    expect(Object.keys(triggers)).toEqual(["schedule", "workflow_dispatch"]);
 
     const answers = answersOf(project);
     expect(answers.pages_production).toBeUndefined();

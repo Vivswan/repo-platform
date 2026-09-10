@@ -54,10 +54,6 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
   },
   {
-    repo: ".github/workflows/docs-site.yml",
-    tpl: "templates/docs-site/.github/workflows/docs-site.yml.jinja",
-  },
-  {
     repo: ".github/workflows/pr-title.yml",
     tpl: "templates/pr-title/.github/workflows/pr-title.yml.jinja",
   },
@@ -301,7 +297,7 @@ export function answerMismatches(answers: Answers, sources: AnswerSources): stri
   if (answers.modules.has("docs-site") && answers.docs_site_label === undefined) {
     problems.push(
       "docs_site_label: missing - the docs-site module is selected, so the " +
-        "docs-site pair (and the operator settings facts) need the label " +
+        "operator settings facts need the label " +
         "copier.yml asks for",
     );
   }

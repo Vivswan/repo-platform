@@ -1,6 +1,6 @@
 // copier.yml's generated question regions (modules choices, conditional
-// excludes, has_toolchain, tracking-label validators) and the tracking-labels
-// workflow input; bodies are full lines in the target file's own indentation.
+// excludes, has_toolchain, tracking-label validators); bodies are full
+// lines in the target file's own indentation.
 
 import { managedLabelNames } from "../../.github/scripts/fleet/render_managed_settings.ts";
 import { compose } from "../compose/compose.ts";
@@ -51,38 +51,12 @@ export function trackingStreams(manifests: ModuleManifest[]): TrackingManifest[]
   const streams = manifests.filter((m): m is TrackingManifest => m.tracking_label !== undefined);
   if (streams.length === 0) {
     throw new Error(
-      "no manifest declares tracking_label, so the release-health call " +
-        "sites' tracking-labels region would be empty - declare " +
-        "tracking_label in at least one module.yml",
+      "no manifest declares tracking_label, so copier.yml's tracking-label " +
+        "validator regions would be empty - declare tracking_label in at " +
+        "least one module.yml",
     );
   }
   return streams;
-}
-
-/** The membership or-chain over the tracking-stream modules; exported so
- *  check_ssot.ts's dogfood-parity rule resolves the exact expression the
- *  tracking-labels region emits. */
-export function trackingGate(manifests: ModuleManifest[]): string {
-  return trackingStreams(manifests)
-    .map((m) => `'${m.module}' in modules`)
-    .join(" or ");
-}
-
-/** The release-health call sites' tracking-labels input: the selected
- *  tracking streams' label ANSWERS joined into one comma-separated value
- *  (labels cannot contain commas - copier.yml validates them against the
- *  same shape the action's LABEL_RE enforces). `indent` is the call
- *  site's `with:`-entry depth: 6 for the base ci.yml's fleet-ci call, 10
- *  for release.yml's action step. */
-export function trackingLabelsInput(manifests: ModuleManifest[], indent: number): string[] {
-  const listExpr = trackingStreams(manifests)
-    .map((m) => `([${m.tracking_label.answer}] if '${m.module}' in modules else [])`)
-    .join(" + ");
-  return [
-    `{%- if ${trackingGate(manifests)} %}`,
-    `${" ".repeat(indent)}tracking-labels: {{ (${listExpr}) | join(',') | tojson }}`,
-    "{%- endif %}",
-  ];
 }
 
 /** Every managed label name, lowercased (GitHub deduplicates label names

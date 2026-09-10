@@ -308,7 +308,7 @@ describeLeg("01 main update", () => {
   );
 
   legTest(
-    "the updated ci.yml carries the gate, the post-green hook, and the release leg, and the starters arrive",
+    "the updated ci.yml carries the gate, the post-green hook, and the static release legs, and the starters arrive",
     () => {
       const ciYml = at(".github/workflows/ci.yml");
       const ciText = readText(ciYml);
@@ -320,10 +320,10 @@ describeLeg("01 main update", () => {
       expect(allGreen?.needs).toEqual(["checks", "ci"]);
       expect(allGreen?.if).toBe("always()");
       expect(ciText).toContain("repo-platform/actions/all-green@build");
-      // The repo-owned post-green hook and the release leg ride downstream of
-      // the gate; the release also waits for the hook and passes the judged
-      // sha into a release.yml that declares and reads the input. Each needs
-      // list is read inside ITS job.
+      // The repo-owned post-green hook and the static release leg ride
+      // downstream of the gate; the release also waits for the hook, gates
+      // itself on the plan's modules output, and passes the judged sha to
+      // the fleet pipeline. Each needs list is read inside ITS job.
       const postGreen = workflowJob(ciYml, "post-green");
       expect(postGreen).toBeDefined();
       expect(postGreen?.needs).toEqual(["all-green"]);
@@ -341,17 +341,21 @@ describeLeg("01 main update", () => {
       ).toHaveProperty("sha");
       const release = workflowJob(ciYml, "release");
       expect(release).toBeDefined();
-      expect(release?.needs).toEqual(["all-green", "post-green"]);
+      expect(release?.needs).toEqual(["ci", "all-green", "post-green"]);
       expect(release?.if).toContain("needs.all-green.result == 'success' &&");
       expect(release?.if).toContain("needs.post-green.result == 'success' &&");
+      expect(release?.if).toContain(`contains(needs.ci.outputs.modules, '"release-please"')`);
       expect(workflowJobWith(ciYml, "release").sha).toBe("${{ github.sha }}");
-      expect(linesOf(readText(at(".github/workflows/release.yml")))).toContain(
-        "          JUDGED: ${{ inputs.sha || github.sha }}",
-      );
+      // The retired release.yml leaves with the update; the hooks it called
+      // stay at their paths as base starters.
+      expect(lexists(at(".github/workflows/release.yml"))).toBe(false);
+      expect(existsSync(at(".github/workflows/update-release.yml"))).toBe(true);
       // The update PRESERVES the repo's configuration, not resets it.
       expect(readText(at(".gitignore"))).toContain("## Python ");
       expect(readText(at(".github/dependabot.yml"))).toContain('package-ecosystem: "uv"');
-      expect(workflowJobWith(ciYml, "ci").modules).toContain('"pr-title"');
+      // The selection lives in the registration alone; ci.yml carries none of it.
+      expect(workflowJob(ciYml, "ci")?.with).toBeUndefined();
+      expect(readText(at(".repo-platform.yml"))).toContain("pr-title");
       // pr-title's own natively-required workflow ARRIVES with the update.
       const prTitleYml = at(".github/workflows/pr-title.yml");
       expect(existsSync(prTitleYml)).toBe(true);
