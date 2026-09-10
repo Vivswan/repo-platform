@@ -31,11 +31,12 @@ const MOUNTS =
  *  among them: the class of link nothing but the assembled-site gate can
  *  judge. `extra` adds a link the fail case breaks. */
 function siteScript(extra: string): string {
-  // Double-quoted for the shell, so $PAGES_BASE_PATH expands at build time.
+  // Double-quoted for the shell, so $PAGES_BASE_PATH expands at build time;
+  // the other characters the shell reads inside double quotes are escaped.
   const links = [
     '<a href=\\"${PAGES_BASE_PATH}docs/\\">docs</a>',
     '<a href=\\"${PAGES_BASE_PATH}docs/skills/alpha/\\">alpha</a>',
-    extra.replace(/"/g, '\\"'),
+    extra.replace(/[\\"`]/g, "\\$&"),
   ].join(" ");
   return `mkdir -p dist && echo "<html><body>${links}</body></html>" > dist/index.html`;
 }

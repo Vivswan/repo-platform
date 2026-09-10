@@ -15,7 +15,7 @@
 // Every versioned mount root also carries versions.json, the machine-readable
 // version index the theme's dropdown is fed from at build time.
 
-import { isLocaleDir } from "./.vitepress/derive.ts";
+import { isLocaleDir, isUnwalkedEntry } from "./.vitepress/derive.ts";
 
 /** Another root of the repository rendered inside a vitepress mount
  *  (docs/docs-site.md, "Other roots on the site"): the tree at `path` is
@@ -97,8 +97,9 @@ function validateMountPath(value: string): void {
 /** One mount's `include` list. Each root is parsed to the three keys and
  *  refused where the staging would misplace it: a mount whose first
  *  segment reads as a locale directory would become a translation tree
- *  (derive.ts's convention), and `index.md` as the page is the directory
- *  index already. */
+ *  (derive.ts's convention), a mount with a segment the markdown walk
+ *  skips would stage pages that never get routes, and `index.md` as the
+ *  page is the directory index already. */
 function parseIncludes(value: unknown, where: string): IncludeRoot[] {
   if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
   const includes = value.map((entry, index): IncludeRoot => {
@@ -114,10 +115,17 @@ function parseIncludes(value: unknown, where: string): IncludeRoot[] {
     }
     validateRelPath(path as string, `${at}.path`);
     validateRelPath(mount as string, `${at}.mount`);
-    if (isLocaleDir((mount as string).split("/")[0])) {
+    const segments = (mount as string).split("/");
+    if (isLocaleDir(segments[0])) {
       throw new Error(
         `${at}.mount '${mount}' reads as a locale directory (docs/<lang>/ is a translation ` +
           "tree by convention) - mount the root under another name",
+      );
+    }
+    if (segments.some(isUnwalkedEntry)) {
+      throw new Error(
+        `${at}.mount '${mount}' has a segment the site never walks (dot-prefixed or ` +
+          "node_modules), so its pages would get no routes - mount the root under another name",
       );
     }
     if (!SEGMENT_RE.test(page as string) || !(page as string).endsWith(".md")) {

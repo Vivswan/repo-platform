@@ -7,11 +7,24 @@ import {
   formatBroken,
   fragmentIds,
   fragmentTargets,
+  ownOriginPattern,
   seedPages,
 } from "../../../actions/pages-site/site_links.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+
+describe("ownOriginPattern", () => {
+  test("matches the origin's own links alone, the host's dots literal, the origin normalized", () => {
+    const own = ownOriginPattern("https://O.github.io/");
+    expect(own.test("https://o.github.io/r/docs/")).toBe(true);
+    expect(own.test("https://o.github.io#top")).toBe(true);
+    expect(own.test("https://o.github.io")).toBe(true);
+    expect(own.test("https://oxgithub.io/r/")).toBe(false);
+    expect(own.test("https://o.github.io.evil.test/")).toBe(false);
+    expect(own.test("https://o.github.io:8443/")).toBe(false);
+  });
+});
 
 describe("seedPages", () => {
   test("a page seeds only when the LONGEST tier prefix owning it is strict", () => {

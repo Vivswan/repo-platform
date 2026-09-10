@@ -47,12 +47,18 @@ export function detectLocales(files: string[]): string[] {
   ].sort();
 }
 
-/** Markdown files under `srcDir` as sorted relative paths, skipping dot
- *  directories and node_modules (nothing the site should ever render). */
+/** A directory entry the site never walks: dot-prefixed or node_modules
+ *  (nothing under either should ever render). */
+export function isUnwalkedEntry(name: string): boolean {
+  return name.startsWith(".") || name === "node_modules";
+}
+
+/** Markdown files under `srcDir` as sorted relative paths, skipping the
+ *  unwalked entries. */
 export function walkMarkdown(srcDir: string, prefix = ""): string[] {
   const files: string[] = [];
   for (const name of readdirSync(join(srcDir, prefix)).sort()) {
-    if (name.startsWith(".") || name === "node_modules") continue;
+    if (isUnwalkedEntry(name)) continue;
     const rel = prefix === "" ? name : `${prefix}/${name}`;
     if (statSync(join(srcDir, rel)).isDirectory()) {
       files.push(...walkMarkdown(srcDir, rel));

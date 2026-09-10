@@ -51,6 +51,16 @@ describe("parseMounts include roots", () => {
       "reads as a locale directory",
     ],
     [
+      "a dot-prefixed mount",
+      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": ".skills", "page": "SKILL.md"}]}]',
+      "never walks",
+    ],
+    [
+      "a node_modules segment in the mount",
+      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "content/node_modules", "page": "SKILL.md"}]}]',
+      "never walks",
+    ],
+    [
       "a page with a directory in it",
       '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "skills", "page": "x/SKILL.md"}]}]',
       "plain markdown file name",

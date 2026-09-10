@@ -12,6 +12,7 @@ const SCOPE = {
     "skills/README.md": "skills/index.md",
     "skills/alpha/SKILL.md": "skills/alpha/index.md",
     "100%/README.md": "100%/index.md",
+    "a#b/README.md": "a#b/index.md",
   },
   repoUrl: "https://github.com/o/r",
   ref: "v1.2.0",
@@ -34,6 +35,12 @@ describe("rewriteHref", () => {
     ["../100%25/README.md", "guide/x.md", "../100%25/index.md"],
     ["/100%25/README.md", "guide/x.md", "/100%25/index.md"],
     ["../a%20b/c.md", "guide/x.md", "../a%20b/c.md"],
+    // An encoded URL delimiter is the name's own character for the lookup
+    // and stays encoded on the way out, as path data.
+    ["a%23b/README.md", "index.md", "a%23b/index.md"],
+    ["../a%23b/README.md", "guide/x.md", "../a%23b/index.md"],
+    ["/a%23b/README.md", "guide/x.md", "/a%23b/index.md"],
+    ["../what%3F.txt", "index.md", "https://github.com/o/r/blob/v1.2.0/what%3F.txt"],
     // A link written in repository space, as it reads on GitHub, lands on
     // the staged route.
     ["../skills/alpha/SKILL.md", "index.md", "skills/alpha/index.md"],
@@ -60,12 +67,17 @@ describe("rewriteHref", () => {
     ["../", "guide/index.md"],
     // Percent escapes stay as written: VitePress decodes the href once more.
     ["100%25.md", "index.md"],
+    ["a%23b.md", "index.md"],
+    ["what%3F.md", "guide/index.md"],
     ["https://example.test/README.md", "index.md"],
     ["mailto:x@example.test", "index.md"],
     ["#readme", "index.md"],
     ["?q=1", "index.md"],
-    // Above the repository root there is nothing to resolve against.
+    // Above the repository root there is nothing to resolve against, the
+    // root's own parent included.
     ["../../../elsewhere.md", "guide/x.md"],
+    ["../..", "index.md"],
+    ["../../..", "skills/alpha/SKILL.md"],
   ])("leaves %s on %s alone", (href, page) => {
     expect(rewriteHref(href, page, SCOPE)).toBe(href);
   });

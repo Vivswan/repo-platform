@@ -47,14 +47,22 @@ function stagedPath(repoPath: string, scope: LinkScope): string | null {
   return null;
 }
 
-/** A percent-encoded href path as the file name it names; a malformed
+/** A percent-encoded href path as the file name it names, segment by
+ *  segment so an encoded `#` or `?` reads as the name's own character
+ *  (decodeURI would keep it encoded and miss the rewrite map); a malformed
  *  escape stays as written. */
 function decodedPath(path: string): string {
   try {
-    return decodeURI(path);
+    return path.split("/").map(decodeURIComponent).join("/");
   } catch {
     return path;
   }
+}
+
+/** A file path percent-encoded segment by segment, so a `#` or `?` in a
+ *  name goes out as path data rather than as the href's fragment or query. */
+function encodedPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
 }
 
 /** The href a link renders with, given the page it sits on (its rewritten
@@ -75,19 +83,19 @@ export function rewriteHref(href: string, relativePath: string, scope: LinkScope
   // the base); only the rewrite map applies.
   if (path.startsWith("/")) {
     const target = scope.rewrites[posix.normalize(path.slice(1))];
-    return target === undefined ? href : `/${encodeURI(target)}${suffix}`;
+    return target === undefined ? href : `/${encodedPath(target)}${suffix}`;
   }
   const pageRepoPath = sourcePathOf(scope.docsDir, scope.includes, relativePath);
   const repoTarget = posix.normalize(posix.join(posix.dirname(pageRepoPath), path));
-  if (repoTarget.startsWith("../")) return href;
+  if (repoTarget === ".." || repoTarget.startsWith("../")) return href;
   const staged = stagedPath(repoTarget === "." ? "" : repoTarget, scope);
   if (staged === null) {
-    return `${scope.repoUrl}/blob/${scope.ref}/${encodeURI(repoTarget)}${suffix}`;
+    return `${scope.repoUrl}/blob/${scope.ref}/${encodedPath(repoTarget)}${suffix}`;
   }
   const mapped = scope.rewrites[staged];
   const relative = posix.relative(pageDir === "." ? "" : pageDir, mapped ?? staged);
   if (relative === "") return `./${suffix}`;
-  return `${encodeURI(relative)}${mapped === undefined ? trailing : ""}${suffix}`;
+  return `${encodedPath(relative)}${mapped === undefined ? trailing : ""}${suffix}`;
 }
 
 /** Installs the rewrite on every link_open token, ahead of the renderer

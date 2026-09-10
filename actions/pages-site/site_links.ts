@@ -256,6 +256,15 @@ function freePort(): Promise<number> {
   });
 }
 
+/** The deployed origin as a prefix match on a link: the parsed URL's own
+ *  origin (host lowercased, default port and any path dropped), escaped so
+ *  the host's dots match themselves, followed by a path, query, fragment,
+ *  or nothing. */
+export function ownOriginPattern(origin: string): RegExp {
+  const escaped = new URL(origin).origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped}(?=[/?#]|$)`);
+}
+
 /** Crawl the current content of the assembled `site` (served under
  *  `rootBase`) and throw, after printing the list, on any broken same-site
  *  link. `origin` is the deployed site's (`https://owner.github.io`): a
@@ -279,10 +288,7 @@ export async function checkSiteLinks(
   }
   const { root, prefix } = servedRoot(site, rootBase, scratch);
   const port = await freePort();
-  const ownOrigin =
-    origin === null
-      ? null
-      : new RegExp(`^${origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[/?#]|$)`);
+  const ownOrigin = origin === null ? null : ownOriginPattern(origin);
   // Fragments are judged here (brokenFragments), not by linkinator: its
   // fragment check reads a target it reached with a HEAD request as an
   // empty document and reports every anchor on it missing.
