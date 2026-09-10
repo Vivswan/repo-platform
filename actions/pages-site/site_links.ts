@@ -84,32 +84,53 @@ function sortBroken(broken: BrokenLink[]): BrokenLink[] {
   return [...broken].sort((a, b) => a.page.localeCompare(b.page) || a.href.localeCompare(b.href));
 }
 
+/** A URL component decoded when it is well-formed, else as written: a
+ *  browser resolves `#100%` to the element with that literal id. */
+function decodedComponent(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /** The anchors of a page naming a fragment on this site, each resolved
- *  against the page's own URL: the target as a site path plus the
- *  fragment. Only same-origin links count (`origin` stands in for the
- *  site's); a bare `#` names nothing. */
+ *  against the page's own URL (or its `<base href>`, which precedes the
+ *  anchors in the document): the target as a site path plus the fragment.
+ *  Only same-origin links count (`origin` stands in for the site's); a
+ *  bare `#` names nothing. */
 export function fragmentTargets(
   html: string,
   pageUrl: string,
 ): { href: string; path: string; fragment: string }[] {
   const page = new URL(pageUrl);
+  let base = page;
   const rows: { href: string; path: string; fragment: string }[] = [];
   new HTMLRewriter()
+    .on("base[href]", {
+      element(element) {
+        const href = element.getAttribute("href");
+        if (href === null) return;
+        try {
+          base = new URL(href, page);
+        } catch {}
+      },
+    })
     .on("a[href]", {
       element(element) {
         const href = element.getAttribute("href");
         if (href === null || !href.includes("#")) return;
         let url: URL;
         try {
-          url = new URL(href, page);
+          url = new URL(href, base);
         } catch {
           return;
         }
         if (url.origin !== page.origin || url.hash.length < 2) return;
         rows.push({
           href: url.pathname + url.hash,
-          path: decodeURIComponent(url.pathname),
-          fragment: decodeURIComponent(url.hash.slice(1)),
+          path: decodedComponent(url.pathname),
+          fragment: decodedComponent(url.hash.slice(1)),
         });
       },
     })

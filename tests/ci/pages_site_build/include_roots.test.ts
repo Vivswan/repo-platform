@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
@@ -71,17 +71,20 @@ const DOCS_README =
   "# Fixture\n\nSee the [skills](skills/), the [alpha skill](skills/alpha/), " +
   "and how to [install it](skills/alpha/#install).\n";
 
-/** History: v0.0.1 predates skills/ (that tier skips the root with a
- *  notice), v0.1.0 carries alpha alone, HEAD adds beta and a skills
- *  landing table. */
+/** History: v0.0.1 predates skills/ and keeps its own docs/skills/README.md
+ *  at the mount's name (that tier skips the root with a notice and serves
+ *  the docs page there), v0.1.0 carries alpha alone, HEAD adds beta and a
+ *  skills landing table. */
 function includeFixture(repo: string): void {
-  mkdirSync(join(repo, "docs"), { recursive: true });
+  mkdirSync(join(repo, "docs", "skills"), { recursive: true });
   packageJson(repo);
   writeFileSync(join(repo, "docs", "README.md"), "# Fixture\n\nDocs only, so far.\n");
+  writeFileSync(join(repo, "docs", "skills", "README.md"), "# Skills, hand-written\n");
   initRepo(repo);
   commitAll(repo, "docs before skills");
   fixtureGit(repo, ["tag", "v0.0.1"]);
 
+  rmSync(join(repo, "docs", "skills"), { recursive: true });
   mkdirSync(join(repo, "skills", "alpha"), { recursive: true });
   writeFileSync(join(repo, "skills", "alpha", "SKILL.md"), ALPHA_SKILL);
   writeFileSync(join(repo, "skills", "alpha", "reference.md"), "# Alpha reference\n\nDetails.\n");
@@ -122,7 +125,10 @@ describe("include roots in the assembled site", () => {
       expect(isFile(site, "docs/skills/alpha/index.html")).toBe(true);
       expect(isFile(site, "docs/v0.1.0/skills/alpha/index.html")).toBe(true);
       expect(existsSync(join(site, "docs/v0.1.0/skills/beta"))).toBe(false);
-      expect(existsSync(join(site, "docs/v0.0.1/skills"))).toBe(false);
+      // The tag from before the root existed serves its own docs/skills page
+      // at the mount's name, and the missing root is a notice, not a collision.
+      expect(readSite(site, "docs/v0.0.1/skills/index.html")).toContain("Skills, hand-written");
+      expect(existsSync(join(site, "docs/v0.0.1/skills/alpha"))).toBe(false);
       expect(result.stdout).toContain(
         "::notice::docs version v0.0.1 has no skills/: skills/ does not exist at v0.0.1",
       );
@@ -153,7 +159,8 @@ describe("include roots in the assembled site", () => {
       expect(readSite(site, "docs/latest/skills/index.html")).toContain('class="fleet-facts');
 
       // The sidebar groups the root under its title-cased mount, and the
-      // launcher's page index carries the include pages.
+      // launcher's page index serves the include pages at their directory
+      // URLs (the sidebar carries the same URL, so the index is read alone).
       expect(texts(docsIndex, ".VPSidebar .text")).toEqual([
         "Fixture",
         "Skills",
@@ -164,9 +171,9 @@ describe("include roots in the assembled site", () => {
         "Beta",
         "beta",
       ]);
-      expect(readAssets(site, "docs/latest/assets")).toContain(
-        "/inc-repo/docs/latest/skills/beta/",
-      );
+      const assets = readAssets(site, "docs/latest/assets");
+      expect(assets).toContain('"url":"/inc-repo/docs/latest/skills/beta/"');
+      expect(assets).not.toContain("skills/beta/SKILL.html");
       expect(result.stdout).toMatch(
         /internal links resolve \(\d+ links judged across \d+ current pages\)/,
       );

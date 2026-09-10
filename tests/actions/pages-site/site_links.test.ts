@@ -62,12 +62,20 @@ describe("fragment reads", () => {
     const html =
       '<a href="#install">i</a> <a href="setup.html#x">s</a> <a href="/r/docs/#top">d</a>' +
       ' <a href="https://example.test/#x">e</a> <a href="#">bare</a> <a href="../">up</a>' +
-      ' <a href="a%20b.html#c%20d">enc</a>';
+      ' <a href="a%20b.html#c%20d">enc</a> <a href="#100%">pct</a>';
     expect(fragmentTargets(html, "https://site.invalid/r/guide/index.html")).toEqual([
       { href: "/r/guide/index.html#install", path: "/r/guide/index.html", fragment: "install" },
       { href: "/r/guide/setup.html#x", path: "/r/guide/setup.html", fragment: "x" },
       { href: "/r/docs/#top", path: "/r/docs/", fragment: "top" },
       { href: "/r/guide/a%20b.html#c%20d", path: "/r/guide/a b.html", fragment: "c d" },
+      { href: "/r/guide/index.html#100%", path: "/r/guide/index.html", fragment: "100%" },
+    ]);
+  });
+
+  test("a <base href> re-roots the page's relative anchors, as the browser resolves them", () => {
+    const html = '<head><base href="/r/"></head><a href="setup.html#missing">s</a>';
+    expect(fragmentTargets(html, "https://site.invalid/r/guide/index.html")).toEqual([
+      { href: "/r/setup.html#missing", path: "/r/setup.html", fragment: "missing" },
     ]);
   });
 
