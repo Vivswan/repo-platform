@@ -67,4 +67,21 @@ describe("readRegistration", () => {
     symlinkSync("elsewhere.yml", join(linked, ".repo-platform.yml"));
     expect(() => readRegistration(linked)).toThrow("not a regular file");
   });
+
+  test("a malformed registration is a hard error naming the file; unknown module names pass", () => {
+    const target = temp.dir("writer-registration-bad-");
+    const file = join(target, ".repo-platform.yml");
+    writeFileSync(file, "modules: [bun]\nprojekt: {name: x}\n");
+    expect(() => readRegistration(target)).toThrow(
+      ".repo-platform.yml: (top level): Unrecognized key",
+    );
+    writeFileSync(file, "modules: [bun, bun]\n");
+    expect(() => readRegistration(target)).toThrow(
+      '.repo-platform.yml: duplicate modules entry "bun"',
+    );
+    writeFileSync(file, "project: {name: x, slug: x, description: y}\n");
+    expect(() => readRegistration(target)).toThrow(".repo-platform.yml: no module selection found");
+    writeFileSync(file, "modules: [bun, not-a-module]\n");
+    expect(readRegistration(target)).toEqual({ modules: ["bun", "not-a-module"] });
+  });
 });

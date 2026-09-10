@@ -4,7 +4,7 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Registration } from "../../../../actions/shared/registration.ts";
+import type { Registration } from "../../../../actions/plan/registration.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { pathProblem } from "./files_config.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";

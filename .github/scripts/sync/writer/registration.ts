@@ -1,17 +1,25 @@
-// The target repository's registration, read from its checkout, and the
-// placeholder values the writer derives from it plus the repository slug
-// the operator passes (the registration never names its own owner).
+// The target repository's registration, read from its checkout through the
+// fleet grammar (actions/plan/registration.ts), and the placeholder values
+// the writer derives from it plus the repository slug the operator passes
+// (the registration never names its own owner).
 
-import { parseRegistration, type Registration } from "../../../../actions/shared/registration.ts";
+import {
+  parseRegistration,
+  REGISTRATION_PATH,
+  type Registration,
+} from "../../../../actions/plan/registration.ts";
 import type { PlaceholderValues } from "./placeholders.ts";
 import { existingFile } from "./target_files.ts";
 
-export const REGISTRATION_FILE = ".repo-platform.yml";
-
+/** The registration the target declares. A malformed one is a hard error:
+ *  the grammar names the file in every message, and a module name it does
+ *  not know is not an error here (files.yml decides which names it knows). */
 export function readRegistration(target: string): Registration {
-  const bytes = existingFile(target, REGISTRATION_FILE);
-  if (bytes === null) throw new Error(`${REGISTRATION_FILE}: missing from the target repository`);
-  return parseRegistration(bytes.toString("utf-8"));
+  const bytes = existingFile(target, REGISTRATION_PATH);
+  if (bytes === null) throw new Error(`${REGISTRATION_PATH}: missing from the target repository`);
+  const read = parseRegistration(bytes.toString("utf-8"));
+  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  return read.registration;
 }
 
 export interface RepositorySlug {
