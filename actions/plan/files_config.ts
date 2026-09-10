@@ -117,6 +117,41 @@ export interface FilesConfig {
 
 export const SOURCE_PREFIX = "files/";
 
+/** A block value sits between a file's stem and its extension, so it is one
+ *  word without dots. */
+export const BLOCK_VALUE_RE = /^[A-Za-z0-9_-]+$/;
+
+/** The block file `value` names beside an entry's path: the value goes
+ *  between the stem and the extension so every tool keys on the real one
+ *  (`.github/dependabot.block.bun.yml`); an extension-only dotfile keeps
+ *  its suffix (`.block.Node.gitignore`). */
+export function blockSourcePath(entryPath: string, value: string): string {
+  const { dir, stem, ext } = splitEntryPath(entryPath);
+  return `${dir}${stem}.block.${value}${ext}`;
+}
+
+/** The value a block file of `entryPath` carries in its name, or null when
+ *  `name` is not one: how a reader tells a module's block files apart from
+ *  its other sources. */
+export function blockValueOf(entryPath: string, name: string): string | null {
+  const { stem, ext } = splitEntryPath(entryPath);
+  const prefix = `${stem}.block.`;
+  if (!name.startsWith(prefix) || !name.endsWith(ext)) return null;
+  const value = name.slice(prefix.length, name.length - ext.length);
+  return BLOCK_VALUE_RE.test(value) ? value : null;
+}
+
+function splitEntryPath(entryPath: string): { dir: string; stem: string; ext: string } {
+  const slash = entryPath.lastIndexOf("/");
+  const base = entryPath.slice(slash + 1);
+  const dot = base.lastIndexOf(".");
+  return {
+    dir: entryPath.slice(0, slash + 1),
+    stem: dot === -1 ? base : base.slice(0, dot),
+    ext: dot === -1 ? "" : base.slice(dot),
+  };
+}
+
 export class FilesConfigError extends Error {
   constructor(
     label: string,

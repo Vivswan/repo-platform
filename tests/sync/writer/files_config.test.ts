@@ -120,63 +120,87 @@ describe("blockSources and verifySources", () => {
   );
   const tree = temp.dir("writer-files-blocks-tree-");
   writeTree(tree, {
-    "bun/.gitignore.block.Node": "## Node\n*.log\n",
-    "bun/.gitignore.block.Bun": "## Bun\n",
-    "node/.gitignore.block.Node": "## Node\n*.log\n",
-    "deno/.gitignore.block.Node": "## Node\n*.log\n",
-    "deno/.gitignore.block.Deno": "## Deno\n",
+    "bun/.block.Node.gitignore": "## Node\n*.log\n",
+    "bun/.block.Bun.gitignore": "## Bun\n",
+    "node/.block.Node.gitignore": "## Node\n*.log\n",
+    "deno/.block.Node.gitignore": "## Node\n*.log\n",
+    "deno/.block.Deno.gitignore": "## Deno\n",
   });
 
   test("blocks come from the selected modules carrying the key, in files.yml order", () => {
     expect(blockSources(config, gitignore, ["bun", "pages"], tree)).toEqual([
-      "bun/.gitignore.block.Node",
-      "bun/.gitignore.block.Bun",
+      "bun/.block.Node.gitignore",
+      "bun/.block.Bun.gitignore",
     ]);
     expect(blockSources(config, gitignore, ["pages"], tree)).toEqual([]);
   });
 
   test("a block three selected modules declare with the same bytes lands once, from the first", () => {
     expect(blockSources(three, three.files[1], ["bun", "node", "deno"], tree)).toEqual([
-      "bun/.gitignore.block.Node",
-      "bun/.gitignore.block.Bun",
-      "deno/.gitignore.block.Deno",
+      "bun/.block.Node.gitignore",
+      "bun/.block.Bun.gitignore",
+      "deno/.block.Deno.gitignore",
     ]);
     expect(blockSources(three, three.files[1], ["deno", "node"], tree)).toEqual([
-      "node/.gitignore.block.Node",
-      "deno/.gitignore.block.Deno",
+      "node/.block.Node.gitignore",
+      "deno/.block.Deno.gitignore",
     ]);
   });
 
   test("one value name with different bytes per module is each module's own block", () => {
     const agents = temp.dir("writer-files-blocks-agents-");
     writeTree(agents, {
-      "bun/AGENTS.md.block.toolchain": "- bun\n",
-      "node/AGENTS.md.block.toolchain": "- node\n",
+      "bun/AGENTS.block.toolchain.md": "- bun\n",
+      "node/AGENTS.block.toolchain.md": "- node\n",
     });
     const config = parseFilesConfig(
       "placeholders: []\nmodules:\n  bun: { agents_toolchain: [toolchain] }\n  node: { agents_toolchain: [toolchain] }\nfiles:\n  - { path: AGENTS.md, class: split, region: html, blocks: agents_toolchain }\n",
     );
     expect(blockSources(config, config.files[0], ["bun", "node"], agents)).toEqual([
-      "bun/AGENTS.md.block.toolchain",
-      "node/AGENTS.md.block.toolchain",
+      "bun/AGENTS.block.toolchain.md",
+      "node/AGENTS.block.toolchain.md",
     ]);
   });
 
   test("blocks apply to managed and starter entries too, and never to links", () => {
     const own = temp.dir("writer-files-blocks-classes-");
-    writeTree(own, { "bun/d.yml.block.bun": "d\n", "bun/s.yml.block.bun": "s\n" });
+    writeTree(own, { "bun/d.block.bun.yml": "d\n", "bun/s.block.bun.yml": "s\n" });
     const config = parseFilesConfig(
       "placeholders: []\nmodules:\n  bun: { eco: [bun] }\nfiles:\n  - { path: d.yml, class: managed, blocks: eco }\n  - { path: s.yml, class: starter, blocks: eco }\n",
     );
-    expect(blockSources(config, config.files[0], ["bun"], own)).toEqual(["bun/d.yml.block.bun"]);
-    expect(blockSources(config, config.files[1], ["bun"], own)).toEqual(["bun/s.yml.block.bun"]);
+    expect(blockSources(config, config.files[0], ["bun"], own)).toEqual(["bun/d.block.bun.yml"]);
+    expect(blockSources(config, config.files[1], ["bun"], own)).toEqual(["bun/s.block.bun.yml"]);
   });
 
-  test("a block value that is not one path-safe word is refused", () => {
-    const escaping = parseFilesConfig(BASE.replace("[Node, Bun]", "[../../outside]"));
-    expect(() => blockSources(escaping, escaping.files[1], ["bun"], tree)).toThrow(
-      "must be a list of block names",
-    );
+  test("a block value that is not one word (a path, a dotted name) is refused", () => {
+    for (const value of ["../../outside", "Node.old"]) {
+      const bad = parseFilesConfig(BASE.replace("[Node, Bun]", `[${value}]`));
+      expect(() => blockSources(bad, bad.files[1], ["bun"], tree)).toThrow(
+        "must be a list of block names",
+      );
+    }
+  });
+
+  test("a file no entry or block name reads is a load error: a block file under the extension-first name", () => {
+    const tree = temp.dir("writer-files-stray-");
+    writeTree(tree, {
+      "base/.github/workflows/ci.yml": "",
+      "base/.gitignore": "",
+      "bun/.block.Node.gitignore": "## Node\n",
+      "bun/.block.Bun.gitignore": "## Bun\n",
+      "bun/.gitignore.block.Node": "## Node\n",
+      "docs-site/docs-site.standalone.yml": "",
+      "docs-site/docs-site.with-pages.yml": "",
+      "fuzzer/.github/workflows/nightly-fuzz.yml": "",
+    });
+    let problems: string[] = [];
+    try {
+      verifySources(config, tree);
+    } catch (error) {
+      if (!(error instanceof FilesConfigError)) throw error;
+      problems = error.problems;
+    }
+    expect(problems).toEqual(["files/bun/.gitignore.block.Node is read by no entry or block name"]);
   });
 
   test("a missing source, an unlisted placeholder, or a marker mention is a load error", () => {
@@ -184,8 +208,8 @@ describe("blockSources and verifySources", () => {
     writeTree(tree, {
       "base/.github/workflows/ci.yml": "name: {{project_name}} {{owner}}\n",
       "base/.gitignore": "node_modules\n",
-      "bun/.gitignore.block.Node": "*.log\n# END REPO-PLATFORM MANAGED\n",
-      "bun/.gitignore.block.Bun": "bun.lockb\n",
+      "bun/.block.Node.gitignore": "*.log\n# END REPO-PLATFORM MANAGED\n",
+      "bun/.block.Bun.gitignore": "bun.lockb\n",
       "docs-site/docs-site.standalone.yml": "",
       "docs-site/docs-site.with-pages.yml": "",
     });
@@ -198,7 +222,7 @@ describe("blockSources and verifySources", () => {
     }
     expect(problems).toEqual([
       "source files/base/.github/workflows/ci.yml uses unlisted placeholder(s) {{owner}}",
-      "source files/bun/.gitignore.block.Node mentions the hash region markers the writer adds itself",
+      "source files/bun/.block.Node.gitignore mentions the hash region markers the writer adds itself",
       "source files/fuzzer/.github/workflows/nightly-fuzz.yml is missing from the tree",
     ]);
   });
@@ -209,9 +233,9 @@ describe("blockSources and verifySources", () => {
       "base/d.yml": "updates:\n  {{blocks}}\n",
       "base/s.yml": "a\n{{blocks}}\nb\n",
       "base/plain.yml": "{{blocks}}\n",
-      "bun/d.yml.block.x": "one\n",
-      "node/d.yml.block.x": "two\n",
-      "bun/s.yml.block.x": "{{blocks}}\n",
+      "bun/d.block.x.yml": "one\n",
+      "node/d.block.x.yml": "two\n",
+      "bun/s.block.x.yml": "{{blocks}}\n",
     });
     const config = parseFilesConfig(
       [
@@ -235,8 +259,8 @@ describe("blockSources and verifySources", () => {
     expect(problems).toEqual([
       "source files/base/d.yml mentions {{blocks}} mid-line; it must be a line of its own",
       "source files/base/plain.yml uses unlisted placeholder(s) {{blocks}}",
-      "source files/bun/s.yml.block.x uses unlisted placeholder(s) {{blocks}}",
-      "source files/node/s.yml.block.x is missing from the tree",
+      "source files/bun/s.block.x.yml uses unlisted placeholder(s) {{blocks}}",
+      "source files/node/s.block.x.yml is missing from the tree",
     ]);
   });
 

@@ -320,7 +320,7 @@ describe("the files/ side", () => {
   test("blockName is the source file's stem, subdirectory dropped", () => {
     expect(blockName("Node.gitignore")).toBe("Node");
     expect(blockName("Global/macOS.gitignore")).toBe("macOS");
-    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.gitignore.block.Node");
+    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.block.Node.gitignore");
   });
 
   test("files/base/.gitignore is exactly the template's region body", () => {
@@ -386,23 +386,23 @@ describe("the files/ side", () => {
   test("a block file that differs from its fragment's section is stale", () => {
     const dir = generatedTree();
     writeFileSync(
-      join(dir, "uv", ".gitignore.block.Python"),
+      join(dir, "uv", ".block.Python.gitignore"),
       "## Python (github/gitignore Python.gitignore)\nold\n\n",
     );
     const found = problems(dir);
     expect(found).toHaveLength(1);
     expect(found[0]).toContain(
-      "files/uv/.gitignore.block.Python differs from its section in templates/uv/fragments/gitignore.jinja",
+      "files/uv/.block.Python.gitignore differs from its section in templates/uv/fragments/gitignore.jinja",
     );
   });
 
   test("a missing block file and a stale base are named", () => {
     const dir = generatedTree();
-    rmSync(join(dir, "bun", ".gitignore.block.bun"));
+    rmSync(join(dir, "bun", ".block.bun.gitignore"));
     writeFileSync(join(dir, "base", ".gitignore"), "# old\n");
     expect(problems(dir).map((problem) => problem.split(";")[0])).toEqual([
       "files/base/.gitignore differs from templates/base/.gitignore.jinja's region body",
-      "files/bun/.gitignore.block.bun is missing (its section in templates/bun/fragments/gitignore.jinja)",
+      "files/bun/.block.bun.gitignore is missing (its section in templates/bun/fragments/gitignore.jinja)",
     ]);
   });
 
@@ -430,9 +430,9 @@ describe("the files/ side", () => {
 
   test("a block file no manifest source names is a stray; base is never scanned", () => {
     const dir = generatedTree();
-    writeFileSync(join(dir, "uv", ".gitignore.block.Node"), "## Node\n");
-    writeFileSync(join(dir, "base", ".gitignore.block.Node"), "## Node\n");
-    expect(strayBlockFiles(entries, dir)).toEqual(["files/uv/.gitignore.block.Node"]);
+    writeFileSync(join(dir, "uv", ".block.Node.gitignore"), "## Node\n");
+    writeFileSync(join(dir, "base", ".block.Node.gitignore"), "## Node\n");
+    expect(strayBlockFiles(entries, dir)).toEqual(["files/uv/.block.Node.gitignore"]);
   });
 });
 

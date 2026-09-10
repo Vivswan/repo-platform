@@ -144,10 +144,10 @@ function runOver(
     mkdirSync(join(root, dir), { recursive: true });
   }
   // One file per scanned root, the sync writer's workflow block file
-  // included: its name ends in the block suffix, not .yml.
+  // included: a plain .yml, its block value before the extension.
   const files: Record<string, string[]> = {
     ".github/workflows/a.yml": [],
-    "files/m/.github/workflows/c.yml.block.toolchain": [],
+    "files/m/.github/workflows/c.block.toolchain.yml": [],
     "actions/x/action.yml": [],
     "templates/t/b.yml.jinja": [],
   };
@@ -214,7 +214,7 @@ describe("resolve_action_refs.ts over a scratch tree", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr.trimEnd().split("\n")).toEqual([
-      `::error::action-refs: actions/cache@${SHA} # v6.1.0: v6.1.0 is commit ${OTHER}, not ${SHA} (pinned in files/m/.github/workflows/c.yml.block.toolchain). Re-pin the sha the comment names, or fix the comment.`,
+      `::error::action-refs: actions/cache@${SHA} # v6.1.0: v6.1.0 is commit ${OTHER}, not ${SHA} (pinned in files/m/.github/workflows/c.block.toolchain.yml). Re-pin the sha the comment names, or fix the comment.`,
       `::error::action-refs: actions/setup-node@v7.0.999 (the comment beside ${DEAD}) does not resolve to any commit, tag, or branch upstream (pinned in .github/workflows/a.yml). Name the release the pinned sha is.`,
       "::error::action-refs: astral-sh/setup-uv@v9 does not resolve to any commit, tag, or branch upstream (pinned in actions/x/action.yml). Check the repository's published tags and pin one that exists.",
       `::error::action-refs: could not verify oven-sh/setup-bun@${OTHER} (gh: Internal Server Error (HTTP 500)). This is an API problem (rate limit, auth, outage), not evidence the pin is wrong - re-run the job.`,

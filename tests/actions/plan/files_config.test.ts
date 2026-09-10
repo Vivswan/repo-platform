@@ -4,6 +4,8 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  blockSourcePath,
+  blockValueOf,
   checkFilesConfig,
   type FileEntry,
   FilesConfigError,
@@ -276,5 +278,27 @@ describe("pathProblem", () => {
     ["a\\b", "contains a backslash"],
   ])("%s -> %p", (path, problem) => {
     expect(pathProblem(path)).toBe(problem);
+  });
+});
+
+describe("block file names", () => {
+  test("the value sits between the stem and the extension, the directory untouched", () => {
+    expect(blockSourcePath(".github/dependabot.yml", "bun")).toBe(
+      ".github/dependabot.block.bun.yml",
+    );
+    expect(blockSourcePath("AGENTS.md", "toolchain")).toBe("AGENTS.block.toolchain.md");
+    expect(blockSourcePath(".gitignore", "Node")).toBe(".block.Node.gitignore");
+    expect(blockSourcePath(".github/CODEOWNERS", "x")).toBe(".github/CODEOWNERS.block.x");
+  });
+
+  test("blockValueOf reads the value back and refuses every other name", () => {
+    expect(blockValueOf(".gitignore", ".block.Node.gitignore")).toBe("Node");
+    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yml")).toBe("bun");
+    expect(blockValueOf("CODEOWNERS", "CODEOWNERS.block.x")).toBe("x");
+    expect(blockValueOf(".gitignore", ".gitignore.block.Node")).toBeNull();
+    expect(blockValueOf(".gitignore", ".gitignore")).toBeNull();
+    expect(blockValueOf(".gitignore", ".block..gitignore")).toBeNull();
+    expect(blockValueOf(".gitignore", ".block.a.b.gitignore")).toBeNull();
+    expect(blockValueOf("dependabot.yml", "dependabot.block.bun.yaml")).toBeNull();
   });
 });
