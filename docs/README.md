@@ -45,7 +45,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 1. [New repo](new-repo.md) - scaffold a repository, render the template, and register it with the fleet.
 2. [Fleet guidelines](fleet-guidelines.md) - the conventions every managed repository follows, each with what enforces it.
 3. [All-green](all-green.md) - the required check: ci.yml's own gate job judging every needed result.
-4. [Settings](settings.md) - the six-layer settings merge and how applies run.
+4. [Settings](settings.md) - the settings layer stack, the merge the action owns, and how applies run.
 
 ### Modules
 

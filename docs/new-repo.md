@@ -177,7 +177,7 @@ A new managed repo touches nothing in repo-platform: there is no fleet list to e
 
 ## 5. Settings management
 
-Repository settings are applied from repo-platform for every managed repository - the full model (six layers, merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
+Repository settings are applied from repo-platform for every managed repository - the full model (the layer stack, the merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
 
 - The render carries `.github/settings.yml` ONCE as a repo-owned identity starter (`description`, `homepage`, `topics`, `private`, seeded from the copier answers; a sync that renders it for a repository whose answers never recorded `homepage`/`topics` seeds those two from the live repository) plus commented examples. Everything fleet-shaped stays out of the file, so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) --> `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
 - Declare only the repo's OWN labels, rulesets, and overrides in settings.yml; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless.
