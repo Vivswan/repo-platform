@@ -15,7 +15,7 @@ const temp = tempDirs();
 // recopy resets the sanctioned repo-owned sides (the live defect) and the
 // carry must restore every one. Requires copier on PATH, so CI's
 // script-tests job skips it; the always-on coverage is the upgrade-path
-// harness's recovery leg (ci/upgrade_path/02_recovery_recopy.sh), which
+// harness's recovery leg (tests/ci/upgrade_path/02_recovery_recopy.test.ts), which
 // drives the same carry against a real recopy.
 const hasCopier = Bun.which("copier") !== null;
 

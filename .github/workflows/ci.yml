@@ -508,7 +508,7 @@ jobs:
           (cd /tmp/smoke && "$GITHUB_WORKSPACE/actionlint" -color .github/workflows/*.yml)
 
   # Generate from a previous build tree, then `copier update` to a fresh
-  # build - the path every managed repo takes (details in the script).
+  # build - the path every managed repo takes (tests/ci/upgrade_path/).
   upgrade-path:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -520,10 +520,15 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
       - name: Install copier
         run: pipx install copier
       - name: Update from a previous build tree to a fresh build
-        run: .github/scripts/ci/upgrade_path_test.sh
+        # The legs skip without copier; here a missing copier must fail.
+        env:
+          REQUIRE_COPIER: "1"
+        run: bun run test tests/ci/upgrade_path
       # The one bun test that needs real copier: the stamp hook runs on the
       # destination exactly once per copy, update, and recopy (the
       # script-tests job has no copier and skips it).

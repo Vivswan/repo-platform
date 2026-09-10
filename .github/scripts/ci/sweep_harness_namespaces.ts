@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-// Sweeps the `ci-build-<token>` ref namespaces a SIGKILLed upgrade_path_test.sh
-// run leaves in the ref store every linked worktree shares; ownership comes
+// Sweeps the `ci-build-<token>` ref namespaces a SIGKILLed upgrade-path
+// harness run (tests/ci/upgrade_path/) leaves in the ref store every linked
+// worktree shares; ownership comes
 // from the namespace's own annotated `/run` tag, never from its random name.
 //
 // Usage: bun .github/scripts/ci/sweep_harness_namespaces.ts [--execute] [--force-unowned] [--repo <path>]
@@ -11,8 +12,9 @@ import { resolve } from "node:path";
 import { capture } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
-/** The tag names upgrade_path_test.sh creates under its namespace (its
- * `*_TAG="$REF_NS/<name>"` lines; the test pins the two lists together). */
+/** The tag names the harness creates under its namespace
+ * (NAMESPACE_TAG_NAMES in tests/ci/upgrade_path/fixture.ts; the test pins
+ * the two lists together). */
 export const HARNESS_TAG_NAMES = ["run", "old", "new", "split", "probe1", "probe2"] as const;
 /** Exactly the harness's shape: `ci-build-` plus mktemp's six-character
  * token, as the branch itself or one of the tags above. A lookalike such as

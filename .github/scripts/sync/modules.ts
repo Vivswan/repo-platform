@@ -11,7 +11,7 @@
 // (dropping a typo would strip a module's files; a retired name is a ladder
 // rung's job, docs/migrations.md), and malformed input never reads as empty. Errors print as ::error:: workflow commands (on stdout,
 // where the runner parses them) and the exit code is nonzero. The CLI
-// stays for ci/upgrade_path_test.sh; the sync itself imports the pure
+// stays for the upgrade-path harness (tests/ci/upgrade_path/); the sync itself imports the pure
 // functions (sync/select_modules.ts).
 
 import { readFileSync } from "node:fs";

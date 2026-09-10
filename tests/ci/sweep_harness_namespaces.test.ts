@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,10 +9,9 @@ import {
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
+import { NAMESPACE_TAG_NAMES } from "./upgrade_path/fixture";
 
-const SCRIPTS = join(import.meta.dir, "../../.github/scripts/ci");
-const SCRIPT = join(SCRIPTS, "sweep_harness_namespaces.ts");
-const HARNESS = join(SCRIPTS, "upgrade_path_test.sh");
+const SCRIPT = join(import.meta.dir, "../../.github/scripts/ci/sweep_harness_namespaces.ts");
 const temp = tempDirs();
 const HOST = hostname();
 const IDENTITY = ["-c", "user.name=ci", "-c", "user.email=ci@localhost"];
@@ -197,12 +196,8 @@ describe("sweep_harness_namespaces", () => {
     expect(bad.stderr).toContain('unknown argument "--prune"');
   });
 
-  test("the sweeper's tag list is the harness's *_TAG list", () => {
-    const harness = readFileSync(HARNESS, "utf8");
-    const declared = [...harness.matchAll(/^[A-Z0-9]+_TAG="\$REF_NS\/([a-z0-9]+)"$/gm)].map(
-      (m) => m[1],
-    );
-    expect(declared.sort()).toEqual([...HARNESS_TAG_NAMES].sort());
+  test("the sweeper's tag list is the harness's namespace tag list", () => {
+    expect([...NAMESPACE_TAG_NAMES].sort()).toEqual([...HARNESS_TAG_NAMES].sort());
   });
 });
 
