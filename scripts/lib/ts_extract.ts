@@ -15,7 +15,7 @@
 // empty or false and the RULE consuming them owns its anchor-lost throw
 // - exactly where the emptiness checks live today.
 
-import { type Expression, Node, Project, type SourceFile } from "ts-morph";
+import { type Expression, Node, Project, type SourceFile, SyntaxKind } from "ts-morph";
 
 // One shared project; sources are parsed once per distinct text (rules and
 // tests re-scan the same bytes many times per run).
@@ -337,4 +337,48 @@ export function propertyAssignmentCarries(source: string, key: string, valueText
         node.getName() === key &&
         node.getInitializer()?.getText() === valueText,
     );
+}
+
+/** Every module specifier `source` names: static imports (type-only
+ *  included), re-exports, `import x = require()`, `import("...")` type
+ *  nodes, and `import()` / `require()` calls. `nonLiteral` names the
+ *  shapes whose specifier is not a string literal, so a caller can fail
+ *  closed on them. */
+export function moduleSpecifiers(source: string): { literal: string[]; nonLiteral: string[] } {
+  const file = parseTs(source);
+  const literalOf = (node: Node | undefined): string | null =>
+    node !== undefined && (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node))
+      ? node.getLiteralValue()
+      : null;
+  const literal: string[] = [
+    ...file.getImportDeclarations().map((decl) => decl.getModuleSpecifierValue()),
+    ...file
+      .getExportDeclarations()
+      .map((decl) => decl.getModuleSpecifierValue())
+      .filter((value): value is string => value !== undefined),
+  ];
+  const nonLiteral: string[] = [];
+  const record = (what: string, value: string | null) => {
+    if (value === null) nonLiteral.push(what);
+    else literal.push(value);
+  };
+  for (const decl of file.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+    const reference = decl.getModuleReference();
+    record(
+      "import-equals",
+      Node.isExternalModuleReference(reference) ? literalOf(reference.getExpression()) : null,
+    );
+  }
+  for (const node of file.getDescendantsOfKind(SyntaxKind.ImportType)) {
+    const argument = node.getArgument();
+    record("import type", Node.isLiteralTypeNode(argument) ? literalOf(argument.getLiteral()) : null);
+  }
+  for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const callee = call.getExpression();
+    const dynamic =
+      callee.getKind() === SyntaxKind.ImportKeyword ||
+      (Node.isIdentifier(callee) && callee.getText() === "require");
+    if (dynamic) record(`${callee.getText()}()`, literalOf(call.getArguments()[0]));
+  }
+  return { literal, nonLiteral };
 }

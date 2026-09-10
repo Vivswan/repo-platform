@@ -137,7 +137,6 @@ export const ALL_GREEN_ROSTER = [
   "actionlint-binary",
   "gitleaks",
   "dependency-review",
-  "shellcheck",
   "allgreen-judgment",
   "yamllint",
   "biome",
@@ -413,9 +412,7 @@ export const allGreenRules: Rule[] = [
             const command = line.trim();
             if (!command.startsWith("bun ") || command.startsWith("bun install")) continue;
             // The ci/ scripts are CI-only by design (they need workflow
-            // context: matrix rows, PR refs) and never belong in the local
-            // chain - their bash predecessors never matched this rule's
-            // "bun " prefix either.
+            // context: matrix rows, PR refs) and never belong in the local chain.
             if (command.startsWith("bun .github/scripts/ci/")) continue;
             const words = command.split(/\s+/);
             let reachable: boolean;

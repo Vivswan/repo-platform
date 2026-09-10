@@ -79,6 +79,7 @@ export const RULE_ROSTER = [
   "stream-write-sync",
   "local-bun-runtime",
   "skill-ownership-tables",
+  "ci-harness-imports",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the live
