@@ -193,6 +193,7 @@ export const ENTRY_FIELDS = [
   "commit",
   ...MANAGED_REGION_WIRE_FIELDS,
 ] as const satisfies readonly (keyof ManifestEntryShape)[];
+/** Compile-time only. @public */
 export type EntryFieldsExhaustive = AssertNever<
   Exclude<keyof ManifestEntryShape, (typeof ENTRY_FIELDS)[number]>
 >;

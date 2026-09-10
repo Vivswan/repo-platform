@@ -14,16 +14,6 @@ export function isRegularFile(path: string): boolean {
   }
 }
 
-/** Presence of any kind (a symlink counts). */
-export function pathExists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** The shape of a YAML file for the structural checks, which need its
  *  content rather than its verdict: duplicate keys are tolerated here
  *  because the yaml check already reports them, and a second, wrong

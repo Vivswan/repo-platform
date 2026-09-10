@@ -1,0 +1,29 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": true,
+  // Every script runs by path (package.json scripts, workflows, bun test), so the entry globs are
+  // wide and entry exports are judged too, or a dead export in a shared library would never surface.
+  "includeEntryExports": true,
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.ts", ".github/scripts/**/*.ts", "tests/**/*.ts"],
+      "project": ["**/*.{ts,mts}"],
+      // Local-only tools behind `command -v` guards in package.json scripts.
+      "ignoreBinaries": ["actionlint", "gitleaks", "uvx"]
+    },
+    "actions/*": {
+      // Action entrypoints run by path from action.yml.
+      "entry": ["*.ts", "src/**/*.ts", "validator/**/*.ts"],
+      "project": ["**/*.{ts,mts}"]
+    },
+    "actions/pages-site": {
+      // The two scripts action.yml runs; the vitepress plugin adds the config and theme, and vitepress
+      // consumes the data loaders' default exports, which is why entry exports are not judged here.
+      "entry": ["build.ts", "check_links.ts", ".vitepress/**/*.data.ts"],
+      "project": ["**/*.{ts,mts}"],
+      "includeEntryExports": false,
+      // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through vitepress.
+      "ignoreDependencies": ["@localSearchIndex", "shiki", "markdown-it"]
+    }
+  }
+}
