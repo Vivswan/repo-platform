@@ -37,7 +37,7 @@
     ".github/workflows/update-release-pr.yml": {"class": "starter"},
     ".github/workflows/update-release.yml": {"class": "starter"},
     ".github/workflows/validate-skills.yml": {"class": "managed", "hash": "ca415822cc15050ad1b688b24c4852f7371b1574fbd0e57c2743939b5635a9b9"},
-    ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "61292dee2cbc6b8f3731e3854e6d6b49f790e78847f8cd89be2594c062e417a8"},
+    ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "4f37fe0bd0d3e63575c152290f64ba703c78d326b5351a8fc7f430deb630ef0b"},
     ".gitleaks.toml": {"class": "starter"},
     ".node-version": {"class": "managed", "hash": "7e8a2fa94951112b894a3dbe3d05efef5e9263741fa49125f0a70f40fedab4cc"},
     ".release-please-manifest.json": {"class": "starter"},

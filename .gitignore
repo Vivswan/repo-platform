@@ -8,6 +8,13 @@
 # Smoke-test output from local copier runs
 /.smoke/
 
+# Paths this repository's own workflows create inside the checkout (the
+# sync's target and validator checkouts, ci.yml's actionlint binary),
+# root-anchored so a nested folder of the same name is not swallowed.
+/target/
+/validator/
+/actionlint
+
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore - do not edit between the BEGIN/END
 # markers; repository-local patterns live outside the managed region
@@ -19,6 +26,10 @@
 .codex/worktrees/
 .worktrees/
 .claude/settings.local.json
+
+## CI workspace paths (repo-platform)
+/results.sarif
+/.fuzz-failures/
 
 ## Windows (github/gitignore Global/Windows.gitignore)
 # Windows thumbnail cache files
@@ -248,7 +259,7 @@ dist
 # TernJS port file
 .tern-port
 
-# Stores VSCode versions used for testing VSCode extensions
+# Stores Visual Studio Code versions used for testing Visual Studio Code extensions
 .vscode-test
 
 # pnpm
@@ -596,10 +607,10 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer,
-#   you could uncomment the following to ignore the entire vscode folder
+#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore that
+#   can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
+#   and can be added to the global gitignore or merged into this file. However, if you prefer, you
+#   could uncomment the following to ignore the entire vscode folder
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py

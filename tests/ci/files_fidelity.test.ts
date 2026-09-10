@@ -7,11 +7,11 @@
 // Every difference is pinned: a path the writer never writes is listed with
 // its reason, and a file whose content differs is listed with the exact
 // transform of the golden that yields the writer's output, so an entry that
-// stops differing fails as stale. Content a weekly refresh rewrites (the
-// toolchain pin dotfiles, the github/gitignore sections) is compared with
-// the templates side as it is now, not with the frozen bytes: the renders
-// cannot be re-frozen after a refresh, and the templates side is what they
-// rendered from.
+// stops differing fails as stale. Content the templates side keeps moving
+// (the toolchain pin dotfiles, the gitignore skeleton's region body, the
+// github/gitignore sections) is compared with the templates side as it is
+// now, not with the frozen bytes: the renders cannot be re-frozen after a
+// refresh, and the templates side is what they rendered from.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -50,13 +50,19 @@ const PIN_FILES: Record<string, string> = {
   ".dvmrc": "deno",
 };
 
+const TEMPLATE_GITIGNORE = join(TEMPLATES, "base", ".gitignore.jinja");
+
+/** The skeleton's region body as the templates side carries it now: the
+ *  header comment, repo-platform's own sections, and the OS sections. */
+function currentRegionBody(): string {
+  return templateRegionBody(readFileSync(TEMPLATE_GITIGNORE, "utf-8"));
+}
+
 /** Every github/gitignore section the templates side carries now, by
  *  source path: the base template's OS sections plus every module
  *  fragment's. */
 function currentSections(): Record<string, string> {
-  const texts = [
-    templateRegionBody(readFileSync(join(TEMPLATES, "base", ".gitignore.jinja"), "utf-8")),
-  ];
+  const texts = [currentRegionBody()];
   for (const module of readdirSync(TEMPLATES)) {
     const fragment = join(TEMPLATES, module, "fragments", "gitignore.jinja");
     if (existsSync(fragment)) texts.push(readFileSync(fragment, "utf-8"));
@@ -119,13 +125,19 @@ const KNOWN: Record<string, Known> = {
   ".gitignore": {
     selections: SELECTIONS,
     reason:
-      "region only (the comment above BEGIN is repository-owned); one blank line before the first toolchain section instead of the composer's two;" +
-      " the github/gitignore sections are the templates side's current ones (a refresh rewrites them)",
-    expected: (golden) =>
-      refreshSections(
-        region(golden, HASH_BEGIN, HASH_END).replace("nohup.out\n\n\n## ", "nohup.out\n\n## "),
+      "region only (the comment above BEGIN is repository-owned); the skeleton through the OS sections is the templates side's current region body" +
+      " (one blank line before the first toolchain section instead of the composer's two); the toolchain sections are the templates side's current ones (a refresh rewrites them)",
+    expected: (golden) => {
+      const frozen = region(golden, HASH_BEGIN, HASH_END);
+      const headings = [...frozen.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)];
+      const linux = headings.findIndex((match) => match[1] === "Global/Linux.gitignore");
+      const toolchains =
+        linux + 1 < headings.length ? frozen.slice(headings[linux + 1].index) : `${HASH_END}\n`;
+      return refreshSections(
+        `${HASH_BEGIN}\n${currentRegionBody()}${toolchains}`,
         currentSections(),
-      ),
+      );
+    },
   },
   ".gitleaks.toml": {
     selections: ["minimal", "uv-no-release-please"],
