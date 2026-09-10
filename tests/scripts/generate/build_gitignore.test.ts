@@ -8,21 +8,33 @@
 // not outlive its module's gitignore_sources declaration.
 // The argv tests pin the two-mode shape: the script takes only --topology,
 // and the retired pin flags are rejected before any network call - the one
-// part of main() that can run offline.
+// part of main() that can run offline. The files/ tests pin the writer's
+// side: the block files and files/base/.gitignore are derived from the
+// same sections as the fragments and the template, and the offline check
+// reads them back from those outputs.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  blockName,
+  blockRel,
+  buildBlock,
+  buildFilesBase,
   buildFragment,
+  buildTemplate,
+  filesSideProblems,
   fragmentGuardExpressions,
   fragmentPlans,
   fragmentSourcePaths,
   guardExpressionFor,
   main,
   missingFragmentFiles,
+  sectionsIn,
   selfSources,
+  strayBlockFiles,
   strayFragmentFiles,
+  templateRegionBody,
 } from "../../../scripts/generate/build_gitignore";
 import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
 import { tempDirs } from "../../shared/temp_dir";
@@ -274,5 +286,150 @@ describe("fragmentSourcePaths", () => {
 
   test("a heading-free fragment reads as no sources (mismatch, not a crash)", () => {
     expect(fragmentSourcePaths("# not a generated fragment\n")).toEqual([]);
+  });
+});
+
+describe("the files/ side", () => {
+  const sections: Record<string, string> = {
+    ...SECTIONS,
+    "Global/macOS.gitignore": "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\n",
+    "Global/Windows.gitignore":
+      "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n",
+    "Global/Linux.gitignore": "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n",
+    "Python.gitignore":
+      "## Python (github/gitignore Python.gitignore)\n__pycache__/\n\n*.py[cod]\n",
+  };
+  const entries: [string, string[]][] = [
+    ["bun", ["Node.gitignore", "bun.gitignore"]],
+    ["uv", ["Python.gitignore"]],
+  ];
+  const filesModules = {
+    bun: { gitignore_sources: ["Node", "bun"] },
+    uv: { gitignore_sources: ["Python"] },
+    pages: {},
+  };
+  const [bunPlan, uvPlan] = fragmentPlans(entries);
+  const fragments = new Map([
+    ["bun", buildFragment(sections, bunPlan.parts, GATES)],
+    ["uv", buildFragment(sections, uvPlan.parts, GATES)],
+  ]);
+  const templateText = buildTemplate(sections);
+
+  test("blockName is the source file's stem, subdirectory dropped", () => {
+    expect(blockName("Node.gitignore")).toBe("Node");
+    expect(blockName("Global/macOS.gitignore")).toBe("macOS");
+    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.gitignore.block.Node");
+  });
+
+  test("files/base/.gitignore is exactly the template's region body", () => {
+    expect(templateRegionBody(templateText)).toBe(buildFilesBase(sections));
+    expect(buildFilesBase(sections).startsWith("# Generated from github/gitignore")).toBe(true);
+    expect(buildFilesBase(sections).endsWith(`${sections["Global/Linux.gitignore"]}\n`)).toBe(true);
+    expect(() => templateRegionBody("# no markers\n")).toThrow("compose anchor");
+  });
+
+  test("sectionsIn reads each section back from a fragment, guards removed and blank lines inside a body kept", () => {
+    const shared = buildFragment(
+      sections,
+      [
+        { path: "Node.gitignore", earlier: ["bun"] },
+        { path: "Python.gitignore", earlier: [] },
+      ],
+      GATES,
+    );
+    expect(sectionsIn(shared)).toEqual({
+      "Node.gitignore": sections["Node.gitignore"],
+      "Python.gitignore": sections["Python.gitignore"],
+    });
+    expect(sectionsIn("# not a fragment\n")).toEqual({});
+  });
+
+  test("a block file is the section plus the blank line the composed fragment carried", () => {
+    expect(buildBlock(sections["bun.gitignore"])).toBe(`${sections["bun.gitignore"]}\n`);
+  });
+
+  /** A files/ tree holding exactly the outputs the generator would write. */
+  function generatedTree(): string {
+    const dir = temp.dir("gitignore-files-");
+    mkdirSync(join(dir, "base"), { recursive: true });
+    writeFileSync(join(dir, "base", ".gitignore"), buildFilesBase(sections));
+    for (const [module, paths] of entries) {
+      mkdirSync(join(dir, module), { recursive: true });
+      for (const path of paths) {
+        writeFileSync(join(dir, blockRel(module, path)), buildBlock(sections[path]));
+      }
+    }
+    mkdirSync(join(dir, "pages"));
+    return dir;
+  }
+
+  const problems = (
+    filesDir: string,
+    overrides: Partial<Parameters<typeof filesSideProblems>[0]> = {},
+  ) =>
+    filesSideProblems({
+      entries,
+      filesModules,
+      templateText,
+      fragmentText: (module) => fragments.get(module) ?? "",
+      filesDir,
+      ...overrides,
+    });
+
+  test("the generator's own outputs pass, shared sources landing once per module", () => {
+    expect(problems(generatedTree())).toEqual([]);
+    expect(strayBlockFiles(entries, generatedTree())).toEqual([]);
+  });
+
+  test("a block file that differs from its fragment's section is stale", () => {
+    const dir = generatedTree();
+    writeFileSync(
+      join(dir, "uv", ".gitignore.block.Python"),
+      "## Python (github/gitignore Python.gitignore)\nold\n\n",
+    );
+    const found = problems(dir);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain(
+      "files/uv/.gitignore.block.Python differs from its section in templates/uv/fragments/gitignore.jinja",
+    );
+  });
+
+  test("a missing block file and a stale base are named", () => {
+    const dir = generatedTree();
+    rmSync(join(dir, "bun", ".gitignore.block.bun"));
+    writeFileSync(join(dir, "base", ".gitignore"), "# old\n");
+    expect(problems(dir).map((problem) => problem.split(";")[0])).toEqual([
+      "files/base/.gitignore differs from templates/base/.gitignore.jinja's region body",
+      "files/bun/.gitignore.block.bun is missing (its section in templates/bun/fragments/gitignore.jinja)",
+    ]);
+  });
+
+  test("files.yml must name the manifests' sources as block names, module for module", () => {
+    const dir = generatedTree();
+    expect(
+      problems(dir, {
+        filesModules: { ...filesModules, uv: { gitignore_sources: ["Python", "uv"] } },
+      })[0],
+    ).toContain(
+      'files.yml modules.uv.gitignore_sources is ["Python","uv"] but templates/uv/module.yml declares ["Python"]',
+    );
+    expect(
+      problems(dir, {
+        filesModules: { ...filesModules, pages: { gitignore_sources: ["Node"] } },
+      })[0],
+    ).toContain(
+      'files.yml modules.pages.gitignore_sources is ["Node"] but templates/pages/module.yml declares undefined',
+    );
+    const { uv: _, ...withoutUv } = filesModules;
+    expect(problems(dir, { filesModules: withoutUv })).toEqual([
+      "files.yml has no modules.uv entry for a module declaring gitignore_sources",
+    ]);
+  });
+
+  test("a block file no manifest source names is a stray; base is never scanned", () => {
+    const dir = generatedTree();
+    writeFileSync(join(dir, "uv", ".gitignore.block.Node"), "## Node\n");
+    writeFileSync(join(dir, "base", ".gitignore.block.Node"), "## Node\n");
+    expect(strayBlockFiles(entries, dir)).toEqual(["files/uv/.gitignore.block.Node"]);
   });
 });

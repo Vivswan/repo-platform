@@ -99,6 +99,8 @@ describe("dogfood-parity (licenseCopies and dogfoodPairMismatches)", () => {
   ];
   const TRACKED = [
     "tests/golden-renders/minimal/LICENSE.md",
+    "tests/ci/files_fidelity/renders/minimal/LICENSE.md",
+    "files/base/LICENSE.md",
     ...SKILL_COPIES,
     LICENSE_TEMPLATE,
     "LICENSE.md",
@@ -106,7 +108,7 @@ describe("dogfood-parity (licenseCopies and dogfoodPairMismatches)", () => {
     "package.json",
   ];
 
-  test("licenseCopies keeps the root and every skill copy, sorted, and drops the template and golden renders", () => {
+  test("licenseCopies keeps the root and every skill copy, sorted, and drops the template, the writer source, and the renders", () => {
     expect(licenseCopies(TRACKED)).toEqual(["LICENSE.md", ...SKILL_COPIES]);
   });
 

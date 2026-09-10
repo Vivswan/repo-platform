@@ -1,0 +1,16 @@
+{
+  "name": "golden-render-skills",
+  "owner": {
+    "name": "Vivswan"
+  },
+  "metadata": {
+    "description": "Agent skills for Golden Render"
+  },
+  "plugins": [
+    {
+      "name": "golden-render-skills",
+      "description": "Agent skills for Golden Render",
+      "source": "./"
+    }
+  ]
+}

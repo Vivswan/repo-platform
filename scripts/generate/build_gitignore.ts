@@ -2,10 +2,12 @@
 // Compose .gitignore files from the latest github/gitignore templates: the
 // base skeleton downstream repos receive (OS sections plus the
 // `{# compose:gitignore #}` anchor), one fragment per module declaring
-// gitignore_sources in its manifest, and this repository's own .gitignore
-// (every toolchain template once; content outside the managed region is
-// preserved). The sharing rule (a source several modules declare is emitted
-// plain by the first and gate-negated by the rest) and the topology gate are
+// gitignore_sources in its manifest, the sync writer's copies of both
+// (files/base/.gitignore is the skeleton's region body, one block file per
+// module and source), and this repository's own .gitignore (every toolchain
+// template once; content outside the managed region is preserved). The
+// sharing rule (a source several modules declare is emitted plain by the
+// first and gate-negated by the rest) and the topology gate are
 // docs/compose.md. The template and self outputs open their managed block
 // with one section that has no upstream source: agent local state.
 //
@@ -14,14 +16,16 @@
 // outputs change only when consumed upstream content changes and the
 // refresh-gitignore PR diff stays worth reading. There is no offline
 // REGENERATION mode: --topology only verifies (fragments match the
-// manifests' sources and gates), and content drift INSIDE a managed block
-// is ungated until the next refresh regenerates over it.
+// manifests' sources and gates, the files/ side matches the fragments), and
+// content drift INSIDE a managed block is ungated until the next refresh
+// regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 //   (no flag: fetch upstream HEAD and regenerate; --topology: offline verify)
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { parseFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 import { gateExpression } from "../compose/exclude.ts";
 import { loadManifests, type ModuleManifest } from "../lib/module_manifests.ts";
@@ -30,6 +34,9 @@ const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const TEMPLATES_DIR = join(REPO_ROOT, "templates");
 const OUTPUT_TEMPLATE = join(REPO_ROOT, "templates", "base", ".gitignore.jinja");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
+const FILES_DIR = join(REPO_ROOT, "files");
+const FILES_CONFIG = join(REPO_ROOT, "files.yml");
+const OUTPUT_FILES_BASE = join(FILES_DIR, "base", ".gitignore");
 
 const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"];
 
@@ -71,6 +78,17 @@ const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
 
 function fragmentOutput(module: string): string {
   return join(TEMPLATES_DIR, module, "fragments", `${ANCHOR}.jinja`);
+}
+
+/** The name a github/gitignore path takes in its section heading and, on
+ *  the files/ side, in its block file's suffix: the file's stem. */
+export function blockName(path: string): string {
+  return (path.split("/").pop() as string).replace(/\.gitignore$/, "");
+}
+
+/** The files/-relative block file the writer reads for one module's source. */
+export function blockRel(module: string, path: string): string {
+  return `${module}/.gitignore.block.${blockName(path)}`;
 }
 
 /** Generated gitignore fragments whose module no longer declares
@@ -128,7 +146,7 @@ async function upstreamHead(): Promise<string> {
 }
 
 async function section(sha: string, path: string): Promise<string> {
-  const name = (path.split("/").pop() as string).replace(/\.gitignore$/, "");
+  const name = blockName(path);
   // Upstream files may carry CRLF line endings (Windows.gitignore does), and
   // macOS.gitignore spells CR-suffixed filename patterns as a character
   // class holding a raw CR byte (`Icon[\r]`); normalize to LF and rewrite
@@ -158,14 +176,14 @@ function localSeed(body: string): string {
   return `${body}\n`;
 }
 
+const HEADER_COMMENT =
+  "# Generated from github/gitignore - do not edit between the BEGIN/END\n" +
+  "# markers; repository-local patterns live outside the managed region\n" +
+  "# (above BEGIN, or below END where last-match-wins can override).\n" +
+  "\n";
+
 function managedHeader(): string {
-  return (
-    `${HASH_REGION_MARKERS.begin}\n` +
-    "# Generated from github/gitignore - do not edit between the BEGIN/END\n" +
-    "# markers; repository-local patterns live outside the managed region\n" +
-    "# (above BEGIN, or below END where last-match-wins can override).\n" +
-    "\n"
-  );
+  return `${HASH_REGION_MARKERS.begin}\n${HEADER_COMMENT}`;
 }
 
 /** Current content outside the managed region (above BEGIN and below END),
@@ -190,19 +208,143 @@ export function existingLocalSides(output: string): { above: string; below: stri
   return { above: slice.above, below: slice.below };
 }
 
-function buildTemplate(sections: Record<string, string>): string {
-  const parts = [
-    "{# Generated by scripts/generate/build_gitignore.ts - edit the script, not this file. #}\n",
-    localSeed(DEFAULT_LOCAL_BODY),
-    managedHeader(),
-    AGENT_SECTION,
-    "\n",
-  ];
+/** The skeleton's region body up to the compose anchor: the header
+ *  comment, the agent section, and the OS sections. The template carries
+ *  it between BEGIN and the anchor; files/base/.gitignore IS it (the
+ *  writer adds the markers and appends the module blocks). */
+export function buildFilesBase(sections: Record<string, string>): string {
+  const parts = [HEADER_COMMENT, AGENT_SECTION, "\n"];
   for (const path of ALWAYS) {
     parts.push(sections[path], "\n");
   }
-  parts.push(`{# compose:${ANCHOR} #}\n`, `${HASH_REGION_MARKERS.end}\n`);
   return parts.join("");
+}
+
+export function buildTemplate(sections: Record<string, string>): string {
+  return (
+    "{# Generated by scripts/generate/build_gitignore.ts - edit the script, not this file. #}\n" +
+    localSeed(DEFAULT_LOCAL_BODY) +
+    `${HASH_REGION_MARKERS.begin}\n` +
+    buildFilesBase(sections) +
+    `{# compose:${ANCHOR} #}\n` +
+    `${HASH_REGION_MARKERS.end}\n`
+  );
+}
+
+/** A block file: the section plus the blank line the composed fragment
+ *  put after it, so the writer's concatenation reads like the render. */
+export function buildBlock(section: string): string {
+  return `${section}\n`;
+}
+
+/** The region body a generated template carries (what buildFilesBase
+ *  produced), read back for the offline files/ comparison. */
+export function templateRegionBody(templateText: string): string {
+  const begin = `${HASH_REGION_MARKERS.begin}\n`;
+  const anchor = `{# compose:${ANCHOR} #}\n`;
+  const start = templateText.indexOf(begin);
+  const end = templateText.indexOf(anchor);
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(
+      "templates/base/.gitignore.jinja has no BEGIN marker followed by the compose anchor",
+    );
+  }
+  return templateText.slice(start + begin.length, end);
+}
+
+/** The github/gitignore sections a generated fragment carries, by source
+ *  path: each heading through the line before the next, jinja tags removed
+ *  and the trailing blank line dropped, so the text is what section()
+ *  produced and the files/ side can be derived from the fragment offline. */
+export function sectionsIn(fragmentText: string): Record<string, string> {
+  const plain = fragmentText.replace(/\{%.*?%\}/g, "");
+  const headings = [...plain.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)];
+  const sections: Record<string, string> = {};
+  headings.forEach((match, index) => {
+    const end = index + 1 < headings.length ? headings[index + 1].index : plain.length;
+    sections[match[1]] = `${plain.slice(match.index, end).trimEnd()}\n`;
+  });
+  return sections;
+}
+
+/** Block files under files/ that no manifest source names: the files/
+ *  twin of strayFragmentFiles (a dropped or renamed source leaves the old
+ *  block for the writer to keep appending). */
+export function strayBlockFiles(entries: [string, string[]][], filesDir: string): string[] {
+  const expected = new Set(
+    entries.flatMap(([module, sources]) => sources.map((path) => blockRel(module, path))),
+  );
+  const strays: string[] = [];
+  for (const module of readdirSync(filesDir).sort()) {
+    const dir = join(filesDir, module);
+    if (!existsSync(dir) || module === "base") continue;
+    for (const name of readdirSync(dir).sort()) {
+      const rel = `${module}/${name}`;
+      if (name.startsWith(".gitignore.block.") && !expected.has(rel)) strays.push(`files/${rel}`);
+    }
+  }
+  return strays;
+}
+
+/** The files/ side against the templates side, offline: files.yml names
+ *  each module's sources by block name, files/base/.gitignore is the
+ *  template's region body, and every block file is its fragment's section.
+ *  Any difference means a refresh regenerated the templates and not the
+ *  copies (or a hand edit on one side); the problems name the fix. */
+export function filesSideProblems(input: {
+  entries: [string, string[]][];
+  filesModules: Record<string, Record<string, unknown>>;
+  templateText: string;
+  fragmentText: (module: string) => string;
+  filesDir: string;
+}): string[] {
+  const problems: string[] = [];
+  const rerun = "run 'bun scripts/generate/build_gitignore.ts' to regenerate both sides";
+  const declaring = new Map(input.entries);
+  for (const [module, data] of Object.entries(input.filesModules)) {
+    const declared = data.gitignore_sources;
+    const expected = declaring.get(module)?.map(blockName);
+    if (JSON.stringify(declared) !== JSON.stringify(expected)) {
+      problems.push(
+        `files.yml modules.${module}.gitignore_sources is ${JSON.stringify(declared)} but ` +
+          `templates/${module}/module.yml declares ${JSON.stringify(expected)} as block names - ` +
+          "edit files.yml to match (the templates side is the source until the cutover)",
+      );
+    }
+  }
+  for (const module of declaring.keys()) {
+    if (!(module in input.filesModules)) {
+      problems.push(
+        `files.yml has no modules.${module} entry for a module declaring gitignore_sources`,
+      );
+    }
+  }
+  const compare = (rel: string, expected: string, source: string) => {
+    const abs = join(input.filesDir, rel);
+    if (!existsSync(abs)) {
+      problems.push(`files/${rel} is missing (${source}); ${rerun}`);
+    } else if (readFileSync(abs, "utf-8") !== expected) {
+      problems.push(`files/${rel} differs from ${source}; ${rerun}`);
+    }
+  };
+  compare(
+    "base/.gitignore",
+    templateRegionBody(input.templateText),
+    "templates/base/.gitignore.jinja's region body",
+  );
+  for (const [module, sources] of input.entries) {
+    const sections = sectionsIn(input.fragmentText(module));
+    for (const path of sources) {
+      const section = sections[path];
+      if (section === undefined) continue;
+      compare(
+        blockRel(module, path),
+        buildBlock(section),
+        `its section in templates/${module}/fragments/${ANCHOR}.jinja`,
+      );
+    }
+  }
+  return problems;
 }
 
 /** Each module's fragment parts: its sources in manifest order, each with
@@ -320,6 +462,14 @@ async function run(topology = false): Promise<number> {
         "manifest's gitignore_sources)",
     );
   }
+  const { entries, gates } = byModule(manifests);
+  const strayBlocks = strayBlockFiles(entries, FILES_DIR);
+  if (strayBlocks.length > 0) {
+    throw new Error(
+      `stray gitignore block file(s) no manifest source names: ${strayBlocks.join(", ")} - ` +
+        "the writer would keep appending them; delete them (or restore the source)",
+    );
+  }
   // --topology: the OFFLINE manifests-vs-fragments check for bun run check.
   // It fires on the PR that changes a manifest, before the weekly refresh
   // would: a stray fragment would ABORT the refresh with no way to
@@ -335,7 +485,6 @@ async function run(topology = false): Promise<number> {
           "to generate them (or drop the manifest key)",
       );
     }
-    const { entries, gates } = byModule(manifests);
     const plans = new Map(fragmentPlans(entries).map((plan) => [plan.module, plan.parts]));
     for (const [module, declared] of entries) {
       const rel = relative(REPO_ROOT, fragmentOutput(module));
@@ -361,12 +510,24 @@ async function run(topology = false): Promise<number> {
         );
       }
     }
+    const filesProblems = filesSideProblems({
+      entries,
+      filesModules: parseFilesConfig(readFileSync(FILES_CONFIG, "utf-8")).modules,
+      templateText: readFileSync(OUTPUT_TEMPLATE, "utf-8"),
+      fragmentText: (module) => readFileSync(fragmentOutput(module), "utf-8"),
+      filesDir: FILES_DIR,
+    });
+    if (filesProblems.length > 0) {
+      throw new Error(
+        `the files/ side is stale against the templates:\n  - ${filesProblems.join("\n  - ")}`,
+      );
+    }
     console.log(
-      "gitignore topology OK: fragments match the manifests' gitignore_sources and gates.",
+      "gitignore topology OK: fragments match the manifests' gitignore_sources and gates, and files/ matches the fragments.",
     );
     return 0;
   }
-  const { entries: moduleSources, gates } = byModule(manifests);
+  const moduleSources = entries;
   const sources = selfSources(moduleSources);
   // Before any fetch: a malformed self output must abort while every
   // output still stands as committed, rather than behind a half-written
@@ -386,6 +547,13 @@ async function run(topology = false): Promise<number> {
       fragmentOutput(module),
       buildFragment(sections, parts, gates),
     ]),
+    [OUTPUT_FILES_BASE, buildFilesBase(sections)],
+    ...moduleSources.flatMap(([module, paths]) =>
+      paths.map((path): [string, string] => [
+        join(FILES_DIR, blockRel(module, path)),
+        buildBlock(sections[path]),
+      ]),
+    ),
     [OUTPUT_SELF, buildSelf(sections, sources, selfSides)],
   ];
 

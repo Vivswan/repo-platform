@@ -42,6 +42,7 @@ import {
   pagesSetupDefault,
   pagesSetupMeaning,
 } from "../../scripts/generate/pages";
+import { type RegionInputs, wholeFiles } from "../../scripts/generate/targets";
 import {
   actionSetsUpBun,
   BUN_SETUP_ACTION,
@@ -565,6 +566,24 @@ describe("toolchain pins", () => {
       "templates/uv/.python-version",
     ]);
     expect(strayPinFiles([PINNED_BUN], dir)).toEqual(["templates/bun/.bunver"]);
+  });
+
+  test("strayPinFiles scans the files/ tree under its own label and skips a module with no directory", () => {
+    const dir = temp.dir("files-strays-");
+    mkdirSync(join(dir, "bun"));
+    writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
+    writeFileSync(join(dir, "bun", ".bunver"), "1.0.0\n");
+    expect(strayPinFiles([PINNED_BUN, UV], dir, "files")).toEqual(["files/bun/.bunver"]);
+  });
+
+  test("wholeFiles emits the pin dotfile under templates/ and its files/ twin from one pin", () => {
+    const pinned = wholeFiles([PINNED_BUN, UV])
+      .filter(([file]) => file.endsWith("/.bun-version") && !file.startsWith("actions/"))
+      .map(([file, content]) => [file, content({} as RegionInputs)]);
+    expect(pinned).toEqual([
+      ["templates/bun/.bun-version", "1.3.14\n"],
+      ["files/bun/.bun-version", "1.3.14\n"],
+    ]);
   });
 
   test("bunToolchainPin returns the bun module's pin and refuses a pinless manifest set", () => {

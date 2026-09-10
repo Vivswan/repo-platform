@@ -32,6 +32,8 @@ export const RULE_ROSTER = [
   "no-retired-shapes",
   "bun-types-pin",
   "toolchain-version-files",
+  "files-pins",
+  "files-pages",
   "local-gates",
   "dogfood-parity",
   "gitattributes-region",

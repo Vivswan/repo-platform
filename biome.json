@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!template", "!templates/module.schema.json", "!tests/golden-renders"]
+    "includes": [
+      "**",
+      "!template",
+      "!templates/module.schema.json",
+      "!tests/golden-renders",
+      "!tests/ci/files_fidelity/renders"
+    ]
   },
   "formatter": {
     "enabled": true,

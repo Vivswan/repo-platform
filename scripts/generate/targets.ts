@@ -207,11 +207,18 @@ export function wholeFiles(
       () => themeTokensCss(),
       "its content does not match the token data in actions/pages-site/.vitepress/theme/tokens.ts",
     ],
-    ...toolchainPins(manifests).map((pin): [string, (inputs: RegionInputs) => string, string] => [
-      `templates/${pin.module}/${pin.file}`,
-      () => pinFileContent(pin),
-      `its content does not match the toolchain pin in templates/${pin.module}/module.yml`,
-    ]),
+    ...toolchainPins(manifests).flatMap(
+      (pin): [string, (inputs: RegionInputs) => string, string][] =>
+        // The template's dotfile and the sync writer's copy under files/,
+        // from the one manifest pin.
+        [`templates/${pin.module}/${pin.file}`, `files/${pin.module}/${pin.file}`].map(
+          (file): [string, (inputs: RegionInputs) => string, string] => [
+            file,
+            () => pinFileContent(pin),
+            `its content does not match the toolchain pin in templates/${pin.module}/module.yml`,
+          ],
+        ),
+    ),
     ...bunPinnedActionDirs(join(REPO_ROOT, "actions")).map(
       (dir): [string, (inputs: RegionInputs) => string, string] => [
         `${dir}/.bun-version`,

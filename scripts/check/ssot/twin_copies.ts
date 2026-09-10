@@ -38,16 +38,25 @@ function lineDiffMismatch(
 export const LICENSE_TEMPLATE =
   "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
 
+/** The trees whose LICENSE.md is a source or an oracle, never a copy: the
+ *  template, the sync writer's placeholder source (files/), and the copier
+ *  renders (tests/golden-renders, owned by renders:check; the fidelity
+ *  test's frozen renders, compared by tests/ci/files_fidelity.test.ts). */
+export const LICENSE_SOURCE_TREES = [
+  "templates/",
+  "files/",
+  "tests/golden-renders/",
+  "tests/ci/files_fidelity/renders/",
+];
+
 /** Every tracked LICENSE.md that copies this repository's license (the root
- *  file, each skill folder's copy, any copy added later); the template source
- *  and the golden renders (owned by renders:check) are not copies. */
+ *  file, each skill folder's copy, any copy added later). */
 export function licenseCopies(tracked: string[]): string[] {
   const copies = tracked
     .filter(
       (rel) =>
         (rel === "LICENSE.md" || rel.endsWith("/LICENSE.md")) &&
-        !rel.startsWith("templates/") &&
-        !rel.startsWith("tests/golden-renders/"),
+        !LICENSE_SOURCE_TREES.some((tree) => rel.startsWith(tree)),
     )
     .sort();
   if (!copies.includes("LICENSE.md")) {

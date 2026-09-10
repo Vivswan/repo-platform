@@ -12,7 +12,10 @@ import {
   bunDirsMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
+  copierDistDefault,
   FETCHED_TREE_PIN_ANCHOR,
+  filesDistMismatches,
+  filesModuleDataMismatches,
   lockedTypesBunVersion,
   majorMinor,
   SCRATCH_SCOPED_SCRIPTS,
@@ -622,6 +625,116 @@ ${extra}      shell: ${shell}
     expect(
       files.flatMap((file) => actionsBunGuardMismatches(file, readFileSync(file, "utf-8"))),
     ).toEqual([]);
+  });
+});
+
+describe("filesModuleDataMismatches", () => {
+  const pins = [
+    { module: "bun", value: { file: ".bun-version", version: "1.4.0" } },
+    { module: "node", value: { file: ".node-version", version: "24.19.0" } },
+  ];
+  const agreeing = {
+    bun: { pin: { file: ".bun-version", version: "1.4.0" } },
+    node: { pin: { file: ".node-version", version: "24.19.0" } },
+    uv: { description: "no pin" },
+  };
+
+  test("files.yml values equal to the manifests' pass", () => {
+    expect(filesModuleDataMismatches("pin", "toolchain.pin", pins, agreeing)).toEqual([]);
+  });
+
+  test("a version the refresh bumped on one side only, a missing pin, and a pin with no manifest twin are named", () => {
+    const drifted = {
+      bun: { pin: { file: ".bun-version", version: "1.4.1" } },
+      uv: { pin: { file: ".python-version", version: "3.13.0" } },
+    };
+    expect(filesModuleDataMismatches("pin", "toolchain.pin", pins, drifted)).toEqual([
+      {
+        file: "files.yml modules.bun.pin",
+        expected:
+          '{"file":".bun-version","version":"1.4.0"} (templates/bun/module.yml\'s toolchain.pin)',
+        got: '{"file":".bun-version","version":"1.4.1"}',
+      },
+      {
+        file: "files.yml modules.node.pin",
+        expected:
+          '{"file":".node-version","version":"24.19.0"} (templates/node/module.yml\'s toolchain.pin)',
+        got: "no pin",
+      },
+      {
+        file: "files.yml modules.uv.pin",
+        expected: "no pin (templates/uv/module.yml declares no toolchain.pin)",
+        got: '{"file":".python-version","version":"3.13.0"}',
+      },
+    ]);
+  });
+
+  test("the pages axis: a build command changed on one side, a missing block, and a block with no manifest twin are named under the pages key", () => {
+    const pages = [
+      {
+        module: "bun",
+        value: { install: "bun install --frozen-lockfile", build: "bun run build" },
+      },
+      {
+        module: "rust",
+        value: { install: "cargo +stable install mdbook --locked", build: "mdbook build -d dist" },
+      },
+    ];
+    const drifted = {
+      bun: { pages: { install: "bun install --frozen-lockfile", build: "bun run docs:build" } },
+      uv: { pages: { install: "uv sync", build: "uv run mkdocs build" } },
+      pages: { dist: "dist" },
+    };
+    expect(filesModuleDataMismatches("pages", "pages", pages, drifted)).toEqual([
+      {
+        file: "files.yml modules.bun.pages",
+        expected:
+          '{"build":"bun run build","install":"bun install --frozen-lockfile"} (templates/bun/module.yml\'s pages)',
+        got: '{"build":"bun run docs:build","install":"bun install --frozen-lockfile"}',
+      },
+      {
+        file: "files.yml modules.rust.pages",
+        expected:
+          '{"build":"mdbook build -d dist","install":"cargo +stable install mdbook --locked"} (templates/rust/module.yml\'s pages)',
+        got: "no pages",
+      },
+      {
+        file: "files.yml modules.uv.pages",
+        expected: "no pages (templates/uv/module.yml declares no pages)",
+        got: '{"build":"uv run mkdocs build","install":"uv sync"}',
+      },
+    ]);
+  });
+});
+
+describe("filesDistMismatches", () => {
+  test("a dist equal to copier.yml's default passes", () => {
+    expect(filesDistMismatches("dist", { pages: { dist: "dist" } })).toEqual([]);
+  });
+
+  test("a missing dist and a dist that differs from the default are named", () => {
+    const expected = '"dist" (copier.yml\'s pages_dist_dir default)';
+    expect(filesDistMismatches("dist", { pages: { description: "no dist" } })).toEqual([
+      { file: "files.yml modules.pages.dist", expected, got: "no dist" },
+    ]);
+    expect(filesDistMismatches("dist", { pages: { dist: "site" } })).toEqual([
+      { file: "files.yml modules.pages.dist", expected, got: '"site"' },
+    ]);
+  });
+});
+
+describe("copierDistDefault", () => {
+  test("reads the pages_dist_dir question's string default", () => {
+    expect(copierDistDefault({ pages_dist_dir: { type: "str", default: "dist" } })).toBe("dist");
+  });
+
+  test.each([
+    ["no question", {}],
+    ["no default", { pages_dist_dir: { type: "str" } }],
+    ["an empty default", { pages_dist_dir: { default: "" } }],
+    ["a non-string default", { pages_dist_dir: { default: 1 } }],
+  ])("%s is refused", (_case, copier) => {
+    expect(() => copierDistDefault(copier)).toThrow(/pages_dist_dir/);
   });
 });
 

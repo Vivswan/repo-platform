@@ -2,10 +2,11 @@
 // Weekly refresher for the toolchain version pins: fetch each pinned
 // toolchain's latest upstream version (bun's latest GitHub release, Node's
 // newest LTS line, Deno's latest stable release), rewrite the manifests'
-// pin version lines in place (line-targeted, so manifest comments and
-// layout survive), and regenerate the derived outputs (the pinned
-// dotfiles, the validator/docs regions, the dogfood copies). The workflow
-// around it commits and opens the PR, mirroring refresh-gitignore.
+// pin version lines and files.yml's pin entries in place (line-targeted,
+// so comments and layout survive), and regenerate the derived outputs (the
+// pinned dotfiles under templates/ and files/, the validator/docs regions,
+// the dogfood copies). The workflow around it commits and opens the PR,
+// mirroring refresh-gitignore.
 //
 // Emits to GITHUB_OUTPUT: `bumps=<prose list>` (empty when everything is
 // already current), e.g. "bun to 1.3.15 and deno to 2.9.6", and
@@ -109,6 +110,33 @@ export function bumpPinVersion(text: string, version: string, where: string): st
     return lines.join("\n");
   }
   throw new Error(`${where}: pin block has no version line`);
+}
+
+/** Rewrite files.yml's `pin: {file: X, version: Y}` line under
+ *  `modules.<module>`, leaving every other byte untouched. The line must be
+ *  exactly that flow mapping (the form the committed file uses); anything
+ *  else fails loudly rather than being skipped or half-rewritten. */
+export function bumpFilesPin(text: string, module: string, version: string, where: string): string {
+  const lines = text.split("\n");
+  const modulesAt = lines.indexOf("modules:");
+  if (modulesAt === -1) throw new Error(`${where}: no modules section found`);
+  const moduleAt = lines.indexOf(`  ${module}:`, modulesAt + 1);
+  if (moduleAt === -1) throw new Error(`${where}: no modules.${module} entry found`);
+  for (let i = moduleAt + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() !== "" && !line.startsWith("    ")) break;
+    if (!line.trim().startsWith("pin:")) continue;
+    const match = /^( {4}pin: \{file: [^,}]+, version: )\d+\.\d+\.\d+\}$/.exec(line);
+    if (!match) {
+      throw new Error(
+        `${where}: modules.${module}.pin must be exactly 'pin: {file: X, version: X.Y.Z}' ` +
+          `(no quotes, no trailing comment), got '${line.trim()}'`,
+      );
+    }
+    lines[i] = `${match[1]}${version}}`;
+    return lines.join("\n");
+  }
+  throw new Error(`${where}: modules.${module} has no pin line`);
 }
 
 export interface Bump {
@@ -224,6 +252,8 @@ async function main(): Promise<number> {
   // Compute every rewrite before writing anything, for the same reason.
   const writes: { path: string; next: string }[] = [];
   const bumps: Bump[] = [];
+  const filesPath = join(REPO_ROOT, "files.yml");
+  let filesText = readFileSync(filesPath, "utf-8");
   for (const { module, pin, latest } of latests) {
     const decision = decideBump(pin.version, latest);
     if (decision === "current") {
@@ -243,9 +273,11 @@ async function main(): Promise<number> {
       path: manifestPath,
       next: bumpPinVersion(readFileSync(manifestPath, "utf-8"), latest, where),
     });
+    filesText = bumpFilesPin(filesText, module, latest, "files.yml");
     console.log(`${module}: ${pin.version} -> ${latest}`);
     bumps.push({ module, from: pin.version, version: latest });
   }
+  if (bumps.length > 0) writes.push({ path: filesPath, next: filesText });
   for (const { path, next } of writes) writeFileSync(path, next);
 
   if (bumps.length > 0) {

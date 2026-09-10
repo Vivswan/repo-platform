@@ -38,6 +38,7 @@ import { build, writeOutput } from "../../../scripts/compose/compose.ts";
 import { reservedLabelNames } from "../../../scripts/generate/copier_questions.ts";
 import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
 import { MIGRATIONS_DIR, RUNG_FILE_RE } from "../sync/run_migrations.ts";
+import { loadFilesConfig } from "../sync/writer/files_config.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -85,6 +86,11 @@ export const MODULE_DATA_DIR = "modules";
  *  label the same way. */
 export const RESERVED_LABELS_FILE = "reserved-labels.yml";
 
+/** The sync writer's data file and source tree, shipped verbatim: the
+ *  operator reads both from the build commit it syncs. */
+export const FILES_CONFIG = "files.yml";
+export const FILES_DIR = "files";
+
 const README = `\
 # repo-platform build branch
 
@@ -102,7 +108,8 @@ under \`.github/workflows/\`, the module manifests under \`modules/\` (one
 data the plan action resolves each repository's CI from at run time), and
 the migration ladder's rungs under
 \`migrations/\` (self-contained scripts; the sync runs the ones that
-appeared after a repository's recorded build) - every path is
+appeared after a repository's recorded build), and the sync writer's data
+(\`files.yml\` plus the \`files/\` source tree it copies from) - every path is
 extraction-safe (no jinja-expression filenames), so
 \`uses: <owner>/repo-platform/actions/<name>@build\` refs extract cleanly
 on the runner, and an @build pin runs only action and workflow code CI has
@@ -298,12 +305,22 @@ export function copyModuleData(repoRoot: string, dest: string): void {
   writeFileSync(join(dest, RESERVED_LABELS_FILE), reserved.join(""));
 }
 
+/** Copies files.yml and the files/ tree verbatim, after the writer's own
+ *  loader has accepted them: a source missing from the tree or a token
+ *  outside the placeholder list fails the assembly here rather than every
+ *  fleet sync that reads the branch. */
+export function copyFilesTree(repoRoot: string, dest: string): void {
+  loadFilesConfig(join(repoRoot, FILES_CONFIG), join(repoRoot, FILES_DIR));
+  cpSync(join(repoRoot, FILES_DIR), join(dest, FILES_DIR), { recursive: true });
+  writeFileSync(join(dest, FILES_CONFIG), readFileSync(join(repoRoot, FILES_CONFIG)));
+}
+
 /** Assemble the whole branch tree at `dest` (which must exist and be
  *  empty): the composed template/, actions/ (the stamp hook rides inside
  *  actions/shared/), the fleet-facing reusable workflows, the module
- *  manifests, the migration rungs, copier.yml, and the README. Exported
- *  for the extraction-safety regression, which asserts no assembled path
- *  carries a jinja expression. */
+ *  manifests, the migration rungs, the sync writer's files.yml and files/,
+ *  copier.yml, and the README. Exported for the extraction-safety
+ *  regression, which asserts no assembled path carries a jinja expression. */
 export function assembleBranchTree(dest: string): void {
   const composed = build();
   writeOutput(composed, join(dest, "template"));
@@ -311,6 +328,7 @@ export function assembleBranchTree(dest: string): void {
   copyFleetWorkflows(REPO_ROOT, dest);
   copyModuleData(REPO_ROOT, dest);
   copyMigrations(REPO_ROOT, dest);
+  copyFilesTree(REPO_ROOT, dest);
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
   writeFileSync(join(dest, "README.md"), README);
 }

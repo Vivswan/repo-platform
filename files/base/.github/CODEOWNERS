@@ -1,0 +1,10 @@
+# Default owners for everything in the repo. Baseline from
+# {{github_username}}/repo-platform; this section is replaced on
+# template sync.
+
+* @{{github_username_lower}}
+/.github/ @{{github_username_lower}}
+
+# Repository-specific owners go below the END marker; they stay yours
+# across template updates. CODEOWNERS applies the LAST matching pattern,
+# so entries below the managed region override the defaults above.

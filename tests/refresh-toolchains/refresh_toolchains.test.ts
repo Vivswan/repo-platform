@@ -4,7 +4,10 @@
 // cross-check against the live repo.
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  bumpFilesPin,
   bumpPinVersion,
   decideBump,
   fetchJson,
@@ -190,6 +193,67 @@ describe("bumpPinVersion", () => {
     ],
   ])("throws when %s", (_reason, text, thrown) => {
     expect(() => bumpPinVersion(text, "1.0.0", "demo")).toThrow(thrown);
+  });
+});
+
+describe("bumpFilesPin", () => {
+  const files = [
+    "placeholders: []",
+    "",
+    "modules:",
+    "  bun:",
+    "    description: bun",
+    "    pin: {file: .bun-version, version: 1.4.0}",
+    "  node:",
+    "    pin: {file: .node-version, version: 24.19.0}",
+    "  uv:",
+    "    description: no pin",
+    "",
+    "files: []",
+    "",
+  ].join("\n");
+
+  test.each([
+    ["bun", "1.4.1", "    pin: {file: .bun-version, version: 1.4.0}"],
+    ["node", "26.0.0", "    pin: {file: .node-version, version: 24.19.0}"],
+  ])("bumps only modules.%s's pin line to %s", (module, version, line) => {
+    expect(bumpFilesPin(files, module, version, "files.yml")).toBe(
+      files.replace(line, line.replace(/\d+\.\d+\.\d+/, version)),
+    );
+  });
+
+  test("the current version is idempotent", () => {
+    expect(bumpFilesPin(files, "bun", "1.4.0", "files.yml")).toBe(files);
+  });
+
+  test.each([
+    ["the module carries no pin line", files, "uv", "no pin line"],
+    ["the module is not under modules", files, "deno", "no modules.deno entry"],
+    ["there is no modules section", "files: []\n", "bun", "no modules section"],
+    [
+      "the pin is not the one-line flow mapping",
+      files.replace(
+        "    pin: {file: .bun-version, version: 1.4.0}",
+        "    pin:\n      file: .bun-version\n      version: 1.4.0",
+      ),
+      "bun",
+      "pin: {file: X, version: X.Y.Z}",
+    ],
+    [
+      "the pin line carries a trailing comment",
+      files.replace("version: 1.4.0}", "version: 1.4.0} # keep"),
+      "bun",
+      "pin: {file: X, version: X.Y.Z}",
+    ],
+  ])("throws when %s", (_reason, text, module, thrown) => {
+    expect(() => bumpFilesPin(text, module, "9.9.9", "files.yml")).toThrow(thrown);
+  });
+
+  test("the committed files.yml carries a bumpable pin for every PIN_SOURCES module", () => {
+    const text = readFileSync(join(import.meta.dir, "../../files.yml"), "utf-8");
+    for (const module of Object.keys(PIN_SOURCES)) {
+      expect(bumpFilesPin(text, module, "0.0.0", "files.yml")).not.toBe(text);
+    }
   });
 });
 

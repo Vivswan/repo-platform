@@ -39,6 +39,59 @@ Two files the render plants matter later:
 | `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list in a PR and have the render pushed onto that PR ([changing the module selection](#changing-the-module-selection)). Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
 | `.github/repo-platform-manifest.json` | The ownership manifest: each platform-written path's class (`managed`, `split`, `starter`, `mirror`, or `link`) plus sha256 hashes of the managed content (a link's hash covers its target string), stamped after each render. validate-template's INTEGRITY check blocks on drift against it, judged by the validator of the template commit the repo was rendered from ([the template check](#the-template-check)): managed content changed outside a sync, a listed managed file missing from the repo, or a roster path the manifest does not list. Severity follows the recorded `_commit`: a rule newer than the repo's build arrives as a latest-validator warning until the next sync PR merges. Its freshness report never blocks. |
 
+### What the sync writes
+
+Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on, `link` is a relative symlink placed and repaired on every sync. A path listed more than once has one variant per condition.
+
+<!-- BEGIN GENERATED: files-table (scripts/files_table.ts - edit files.yml, not this block) -->
+| File | Class | When |
+| --- | --- | --- |
+| `.editorconfig` | split | always |
+| `.gitattributes` | split | always |
+| `.gitignore` | split | always |
+| `.github/CODEOWNERS` | split | always |
+| `.github/dependabot.yml` | managed | always |
+| `.github/actionlint.yaml` | starter | always |
+| `.github/instructions/review.instructions.md` | managed | always |
+| `.github/settings.yml` | starter | public |
+| `.github/settings.yml` | starter | private |
+| `.github/workflows/ci.yml` | managed | always |
+| `.github/workflows/checks.yml` | starter | always |
+| `.github/workflows/post-green.yml` | starter | always |
+| `.github/workflows/update-release.yml` | starter | always |
+| `.github/workflows/update-release-pr.yml` | starter | always |
+| `.github/workflows/copilot-setup-steps.yml` | starter | always |
+| `.gitleaks.toml` | starter | always |
+| `.yamllint` | managed | always |
+| `.github/workflows/auto-assign.yml` | managed | any of `bun`, `node`, `deno`, `uv`; public |
+| `.github/workflows/auto-assign.yml` | managed | private |
+| `.github/workflows/auto-assign.yml` | managed | without `bun`, `node`, `deno`, `uv`; public |
+| `.github/workflows/auto-format.yml` | starter | any of `bun`, `node`, `deno`, `uv` |
+| `.typography-allow` | managed | without `release-please` |
+| `.typography-allow` | managed | modules: `release-please` |
+| `AGENTS.md` | split | without `bun`, `node`, `deno`, `uv`, `rust` |
+| `AGENTS.md` | split | any of `bun`, `node`, `deno`, `uv`, `rust` |
+| `LICENSE.md` | split | without `custom-license` |
+| `CLAUDE.md` | link | always |
+| `.github/agents.md` | link | always |
+| `.github/copilot-instructions.md` | link | always |
+| `.bun-version` | managed | modules: `bun` |
+| `.github/workflows/dependabot-bun-lockfile.yml` | managed | modules: `bun` |
+| `.node-version` | managed | modules: `node` |
+| `.dvmrc` | managed | modules: `deno` |
+| `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
+| `.github/workflows/pages.yml` | managed | modules: `pages` |
+| `.github/workflows/docs-site.yml` | managed | modules: `docs-site` |
+| `.release-please-manifest.json` | starter | modules: `release-please` |
+| `release-please-config.json` | starter | modules: `release-please` |
+| `.claude-plugin/marketplace.json` | starter | modules: `skills` |
+| `.claude-plugin/plugin.json` | starter | modules: `skills` |
+| `.github/workflows/validate-skills.yml` | managed | modules: `skills` |
+| `.github/workflows/pr-title.yml` | managed | modules: `pr-title` |
+| `.github/workflows/nightly-fuzz.yml` | starter | modules: `fuzzer` |
+| `.github/workflows/nightly.yml` | starter | modules: `nightly` |
+<!-- END GENERATED: files-table -->
+
 ### Mirror copies of rendered files
 
 Some repos must carry byte-identical copies of a rendered file at paths the template does not own - the skills repo copies `LICENSE.md` into `template/` and into every skill folder, because a standalone skill install copies only that folder. Declare the copies in `.repo-platform.yml` and every sync rewrites them from the freshly rendered source, in the same PR:
