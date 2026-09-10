@@ -1,0 +1,2 @@
+- Node.js with npm: `npm install`, `npm test`, `npm run <script>` (scripts in `package.json`)
+- `.node-version` is managed by sync; pin another version in a repo-owned workflow's version input, not in the dotfile.
