@@ -192,6 +192,11 @@ function walk(root: string, ignored: ReturnType<typeof gitIgnored>): string[] {
   return found.sort();
 }
 
+/** The sync writer's source tree: its files carry `{{placeholder}}` tokens
+ *  and are not YAML before substitution, so self mode leaves them to the
+ *  writer's own loader. */
+const WRITER_SOURCES = "files/";
+
 /** Loads the tree at `root`. Client renders walk every path: they are
  *  validated as plain trees, often before any git init, and everything in
  *  them is content. Self mode skips gitignored paths: the operator checkout
@@ -205,7 +210,7 @@ export function loadContext(root: string, selfMode: boolean): Context {
     return {
       mode: "self",
       root,
-      files: walk(root, gitIgnored(root)),
+      files: walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES)),
       isPrivateRender,
       ownership: declaredOwnership({ isPrivateRender, selectedModules: null }),
       manifestPresent: isRegularFile(join(root, MANIFEST_NAME)),
