@@ -5,7 +5,7 @@
 // and its one set of options.
 
 import { join, resolve } from "node:path";
-import { githubSlug } from "../../../actions/pages-site/.vitepress/anchors.ts";
+import { githubSlug, headingText } from "../../../actions/pages-site/.vitepress/anchors.ts";
 import {
   alertTitlesRule,
   CUSTOM_BLOCK_LABELS,
@@ -46,7 +46,7 @@ export async function vitepressRenderer(): Promise<Md> {
     ACTION_DIR,
     {
       highlight: () => "",
-      anchor: { slugify: githubSlug },
+      anchor: { slugify: githubSlug, getTokensText: headingText },
       headers: { level: [2, 3] },
       container: CUSTOM_BLOCK_LABELS,
       config(md: Md) {

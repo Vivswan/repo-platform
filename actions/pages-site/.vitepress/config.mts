@@ -34,7 +34,7 @@ import type { ThemeConfig } from "vitepress-carbon";
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
 import type { IncludeRoot } from "../lib.ts";
-import { githubSlug } from "./anchors.ts";
+import { githubSlug, headingText } from "./anchors.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, includeIndexPages, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
@@ -99,7 +99,7 @@ const nativeName = (tag: string): string => {
 const markdown: MarkdownOptions = {
   // Heading ids are GitHub's (anchors.ts): the fleet writes its links for
   // the README on GitHub, and the headers plugin reads the anchor's id.
-  anchor: { slugify: githubSlug },
+  anchor: { slugify: githubSlug, getTokensText: headingText },
   // One highlighter theme whose colors are custom properties: the theme's
   // tokens.ts owns the code palette per mode (--fleet-code-*), so token contrast is
   // a token value the contrast test can guard, not a hex baked into every

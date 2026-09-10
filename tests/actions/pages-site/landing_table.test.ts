@@ -328,7 +328,7 @@ describe("landingTableRule under VitePress's renderer", () => {
     const headers = renderedHeaders(env);
     expect(headers).toEqual([
       { title: "title: Guide", anchor: "title-guide", level: 2 },
-      { title: "Caf\u00e9 a &amp; b \u26a0\ufe0f", anchor: "caf\u00e9-a--b", level: 2 },
+      { title: "Caf\u00e9 a &amp; b \u26a0\ufe0f", anchor: "caf\u00e9-a-amp-b", level: 2 },
       { title: "Sub em [x]", anchor: "sub-em-x", level: 3 },
     ]);
     for (const header of headers) expect(html).toContain(`<h${header.level} id="${header.anchor}"`);

@@ -47,22 +47,32 @@ function stagedPath(repoPath: string, scope: LinkScope): string | null {
   return null;
 }
 
+/** A percent-encoded path decoded for a lookup in the rewrite map, whose
+ *  keys are file names; a malformed escape stays as written. */
+function decodedPath(path: string): string {
+  try {
+    return decodeURI(path);
+  } catch {
+    return path;
+  }
+}
+
 /** The href a link renders with, given the page it sits on (its rewritten
  *  relative path, VitePress's `env.relativePath`, which shares the source's
- *  directory). */
+ *  directory). Paths stay percent-encoded as written: VitePress decodes the
+ *  href once more when it renders. */
 export function rewriteHref(href: string, relativePath: string, scope: LinkScope): string {
   if (NOT_A_PATH.test(href)) return href;
   const suffixAt = href.search(/[?#]/);
-  const rawPath = suffixAt === -1 ? href : href.slice(0, suffixAt);
+  const path = suffixAt === -1 ? href : href.slice(0, suffixAt);
   const suffix = suffixAt === -1 ? "" : href.slice(suffixAt);
-  if (rawPath === "") return href;
-  const path = decodeURI(rawPath);
+  if (path === "") return href;
   const trailing = path.endsWith("/") ? "/" : "";
   const pageDir = posix.dirname(relativePath);
   // A site-absolute link already names a staged path (VitePress prefixes
   // the base); only the rewrite map applies.
   if (path.startsWith("/")) {
-    const target = scope.rewrites[posix.normalize(path.slice(1))];
+    const target = scope.rewrites[decodedPath(posix.normalize(path.slice(1)))];
     return target === undefined ? href : `/${target}${suffix}`;
   }
   const pageRepoPath = sourcePathOf(scope.docsDir, scope.includes, relativePath);
@@ -70,7 +80,7 @@ export function rewriteHref(href: string, relativePath: string, scope: LinkScope
   if (repoTarget.startsWith("../")) return href;
   const staged = stagedPath(repoTarget === "." ? "" : repoTarget, scope);
   if (staged === null) return `${scope.repoUrl}/blob/${scope.ref}/${repoTarget}${suffix}`;
-  const target = scope.rewrites[staged] ?? staged;
+  const target = scope.rewrites[decodedPath(staged)] ?? staged;
   const relative = posix.relative(pageDir === "." ? "" : pageDir, target);
   if (relative === "") return `./${suffix}`;
   return `${relative}${target === staged ? trailing : ""}${suffix}`;

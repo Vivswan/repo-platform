@@ -50,6 +50,8 @@ describe("rewriteHref", () => {
     ["setup.md#a", "guide/index.md"],
     ["guide/", "index.md"],
     ["../", "guide/index.md"],
+    // Percent escapes stay as written: VitePress decodes the href once more.
+    ["100%25.md", "index.md"],
     ["https://example.test/README.md", "index.md"],
     ["mailto:x@example.test", "index.md"],
     ["#readme", "index.md"],
@@ -72,11 +74,12 @@ describe("rewriteLinksRule through VitePress's renderer", () => {
     const md = await vitepressRenderer();
     expect(LINK_SCOPE.rewrites["ja/README.md"]).toBe("ja/index.md");
     const html = md.render(
-      "[ja](ja/README.md#intro), [a page](other.md), and [the workflow](../.github/workflows/ci.yml)",
+      "[ja](ja/README.md#intro), [a page](other.md), [pct](100%25.md), and [the workflow](../.github/workflows/ci.yml)",
       { path: "/x/index.md", relativePath: "index.md" },
     );
     expect(html).toContain('href="./ja/#intro"');
     expect(html).toContain('href="./other.html"');
+    expect(html).toContain('href="./100%.html"');
     expect(html).toContain(
       'href="https://github.com/fixture-owner/fixture-repo/blob/main/.github/workflows/ci.yml"',
     );
