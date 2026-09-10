@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   actionDirNames,
   assembleBranchTree,
@@ -19,11 +20,15 @@ import {
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
   MIGRATIONS_SRC_REL,
+  MODULE_DATA_DIR,
   parseArgs,
+  RESERVED_LABELS_FILE,
   SHARED_DIR,
   TEST_FILE_SUFFIX,
   UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
+import { reservedLabelNames } from "../../scripts/generate/copier_questions.ts";
+import { loadManifests } from "../../scripts/lib/module_manifests.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -267,6 +272,8 @@ describe("assembleBranchTree", () => {
       "actions",
       "copier.yml",
       "migrations",
+      "modules",
+      "reserved-labels.yml",
       "template",
     ]);
     // Every action directory of this checkout ships (the shared zone
@@ -303,6 +310,35 @@ describe("assembleBranchTree", () => {
     for (const name of shipped) {
       expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
+  });
+
+  test("modules/ is every module manifest, byte for byte, under its module name", () => {
+    // The plan action reads these at run time beside itself on the branch:
+    // a missing or altered manifest would plan every fleet run wrongly.
+    const templates = join(REPO_ROOT, "templates");
+    const moduleDirs = readdirSync(templates, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "base")
+      .map((entry) => entry.name)
+      .sort();
+    expect(moduleDirs.length).toBeGreaterThan(0);
+    expect(readdirSync(join(dest, MODULE_DATA_DIR)).sort()).toEqual(
+      moduleDirs.map((name) => `${name}.yml`),
+    );
+    for (const name of moduleDirs) {
+      expect(readFileSync(join(dest, MODULE_DATA_DIR, `${name}.yml`))).toEqual(
+        readFileSync(join(templates, name, "module.yml")),
+      );
+    }
+  });
+
+  test("reserved-labels.yml is the managed label roster copier.yml's validators reject", () => {
+    // The plan action refuses a registration label on this list the way
+    // copier refuses the same recorded answer; a short roster would let a
+    // tracking stream take over a managed label.
+    const shipped = parseYaml(readFileSync(join(dest, RESERVED_LABELS_FILE), "utf8"));
+    expect(shipped).toEqual(reservedLabelNames(loadManifests()));
+    expect(shipped).toContain("bug");
+    expect(shipped).toContain("autorelease: pending");
   });
 
   test("actions/ holds only actions: every directory but the shared zone carries an action.yml, the validator inside the report action", () => {

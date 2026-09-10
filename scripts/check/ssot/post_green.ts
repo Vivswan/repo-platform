@@ -215,6 +215,10 @@ export const FLEET_TOKEN_NON_WRITERS: Record<string, string> = {
   ".github/workflows/refresh-toolchains.yml": "opens PRs in THIS repository",
   ".github/workflows/reusable-template-sync.yml":
     "workflow_call-only; sync-repos.yml hands it the secret per target",
+  ".github/workflows/fleet-release.yml":
+    "workflow_call-only; a managed ci.yml hands it the secret so release-please's PR runs its checks in THAT repository",
+  ".github/workflows/fleet-release-publish.yml":
+    "workflow_call-only; a managed ci.yml hands it the secret to publish THAT repository's draft release",
 };
 
 /** Whether a parsed workflow can read the fleet PAT: any string value (never

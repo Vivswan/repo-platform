@@ -27,6 +27,7 @@ describe("bunLockDirs", () => {
       "actions/fuzz-issue",
       "actions/module-render",
       "actions/pages-site",
+      "actions/plan",
       "actions/release-health",
       "actions/validate-commit-names",
       "actions/validate-skills",

@@ -502,20 +502,36 @@ export function pagesLegMismatches(
       got: "no such input",
     });
   }
+  // The config job resolves the commit (the sha input first) and the deploy
+  // job builds exactly that commit, so the two cannot split on a moving
+  // default branch.
   const jobs = asRecord(reusable.jobs ?? {}, `${reusableRel} jobs`);
-  const steps = (asRecord(jobs.deploy ?? {}, `${reusableRel} deploy`).steps ?? []) as Record<
-    string,
-    unknown
-  >[];
-  const checkout = steps.find((step) => String(step.uses ?? "").startsWith("actions/checkout@"));
-  if (checkout === undefined) throw new Error(`${reusableRel}: no checkout step - anchor lost`);
-  const ref = String(asRecord(checkout.with ?? {}, `${reusableRel} checkout with`).ref ?? "");
-  if (!ref.startsWith("${{ inputs.sha || ")) {
+  const checkoutRef = (job: string): string => {
+    const steps = (asRecord(jobs[job] ?? {}, `${reusableRel} ${job}`).steps ?? []) as Record<
+      string,
+      unknown
+    >[];
+    const checkout = steps.find((step) => String(step.uses ?? "").startsWith("actions/checkout@"));
+    if (checkout === undefined)
+      throw new Error(`${reusableRel}: ${job} has no checkout step - anchor lost`);
+    return String(asRecord(checkout.with ?? {}, `${reusableRel} ${job} checkout with`).ref ?? "");
+  };
+  const configRef = checkoutRef("config");
+  if (!configRef.startsWith("${{ inputs.sha || ")) {
     mismatches.push({
       file: reusableRel,
       expected:
-        "the deploy checkout's ref starting `${{ inputs.sha || ` (the caller's judged commit wins; a checkout ignoring it builds a commit the gate never judged)",
-      got: ref || "no ref",
+        "the config checkout's ref starting `${{ inputs.sha || ` (the caller's judged commit wins; a checkout ignoring it plans a commit the gate never judged)",
+      got: configRef || "no ref",
+    });
+  }
+  const deployRef = checkoutRef("deploy");
+  if (deployRef !== "${{ needs.config.outputs.sha }}") {
+    mismatches.push({
+      file: reusableRel,
+      expected:
+        "the deploy checkout's ref `${{ needs.config.outputs.sha }}` (the commit the config job planned from; resolving the branch again could build a different commit than was planned)",
+      got: deployRef || "no ref",
     });
   }
   // The rendered shape, parsed.

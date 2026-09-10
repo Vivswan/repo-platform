@@ -5,7 +5,7 @@ group: Modules
 
 # Pages
 
-Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout.
+Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout. The shared workflow's `config` job ([actions/plan](../actions/plan/action.yml), mode `pages`) owns the deploy configuration: a caller that passes no `mounts` gets the mount list, toolchain setup, commands, output directory, site title, and link-rot label resolved from the repository's registration and recorded answers; today's rendered pages.yml still passes them as inputs, which the step publishes unchanged.
 
 | URL | Built from | Content changes when |
 |---|---|---|

@@ -1,9 +1,12 @@
 # Every managed repository's ci.yml calls this reusable, so an edit here
 # changes fleet CI with no per-repo diff trail; repo-platform's own CI
-# gating every edit is the counterweight. The caller job's RESULT is what
-# the all-green gate judges: a job that fails here fails the whole call,
-# and a SKIPPED job leaves it green (module/visibility conditions are the
-# design). Job names are non-gating and nothing here may be
+# gating every edit is the counterweight. The `plan` job runs first and
+# resolves the repository's configuration from its registration
+# (actions/plan@build); every other job needs it and keys on its outputs,
+# so a call carries no per-repository inputs. The caller job's RESULT is
+# what the all-green gate judges: a job that fails here fails the whole
+# call, and a SKIPPED job leaves it green (module/visibility conditions are
+# the design). Job names are non-gating and nothing here may be
 # name-addressed. Action refs must stay fully qualified @build: a `./`
 # ACTION path resolves against the CALLER's checkout (a `./` WORKFLOW ref
 # resolves against this repository).
@@ -12,39 +15,79 @@ name: Fleet CI
 
 on:
   workflow_call:
+    # The inputs are IGNORED: the plan job resolves every value from the
+    # caller's registration. They stay declared so callers rendered before
+    # the plan job existed keep calling; the next release removes them.
     inputs:
       modules:
-        description: The repository's module selection, a JSON array (the rendered .repo-platform.yml answer).
-        required: true
+        description: Ignored; the plan job resolves the module selection.
+        required: false
         type: string
+        default: "[]"
       private:
-        description: The repository's recorded visibility.
-        required: true
+        description: Ignored; the plan job resolves the visibility.
+        required: false
         type: boolean
+        default: false
       skills-dir:
-        description: The skills module's catalog directory (its copier answer).
+        description: Ignored; the plan job resolves the skills directory.
         required: false
         type: string
         default: skills
       codeql-languages:
-        description: CodeQL languages to analyze, a JSON array; empty when CodeQL is off (private, or no analyzable toolchain).
+        description: Ignored; the plan job resolves the CodeQL languages.
         required: false
         type: string
         default: "[]"
       tracking-labels:
-        description: Comma-separated nightly tracking-issue labels (the fuzzer/nightly answers); release-health blocks on open issues carrying them.
+        description: Ignored; the plan job resolves the tracking labels.
         required: false
         type: string
         default: ""
+    outputs:
+      modules:
+        description: The repository's module selection in canonical order, a compact JSON array.
+        value: ${{ jobs.plan.outputs.modules }}
+      tracking-labels:
+        description: Comma-separated nightly tracking-issue labels of the selected stream modules.
+        value: ${{ jobs.plan.outputs.tracking-labels }}
 
 permissions:
   contents: read
 
 jobs:
+  # The one read of the registration: a sparse checkout of the two files
+  # the plan resolves from, and the outputs every later job keys on. The
+  # visibility rides the event's repository object; the action asks the API
+  # when an event carries none.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      modules: ${{ steps.plan.outputs.modules }}
+      private: ${{ steps.plan.outputs.private }}
+      skills-dir: ${{ steps.plan.outputs.skills-dir }}
+      codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
+      tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .repo-platform.yml
+            .github/.copier-answers.yml
+          sparse-checkout-cone-mode: false
+      - uses: Vivswan/repo-platform/actions/plan@build
+        id: plan
+        with:
+          private: ${{ github.event.repository.private }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
   # behind the build branch) only informs. The action DEFERS the integrity
   # step so the findings comment is posted before the gate goes red.
   validate-template:
+    needs: [plan]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -73,6 +116,7 @@ jobs:
   # branch input); a PR leaving both files alone is a fast no-op. PR events
   # only: nothing else has a selection diff to judge.
   module-render:
+    needs: [plan]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -90,6 +134,7 @@ jobs:
   # bills a rounded-up minute per push); !cancelled() keeps later checks
   # running past a failure, and the judge last names every failed check.
   base-checks:
+    needs: [plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -155,9 +200,11 @@ jobs:
 
   # Fails a PR introducing dependencies with known vulnerabilities. Public
   # only (the dependency-graph API is free just there); PR events only:
-  # nothing else has a diff.
+  # nothing else has a diff. != 'true' so an empty visibility output runs
+  # the check and fails loudly rather than standing the gate down.
   dependency-review:
-    if: ${{ !inputs.private && github.event_name == 'pull_request' }}
+    needs: [plan]
+    if: ${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -167,11 +214,12 @@ jobs:
 
   # CodeQL, one call per language.
   codeql:
-    if: inputs.codeql-languages != '[]' && inputs.codeql-languages != ''
+    needs: [plan]
+    if: needs.plan.outputs.codeql-languages != '[]' && needs.plan.outputs.codeql-languages != ''
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON(inputs.codeql-languages) }}
+        language: ${{ fromJSON(needs.plan.outputs.codeql-languages) }}
     permissions:
       contents: read
       security-events: write
@@ -183,20 +231,22 @@ jobs:
   # Offline and inside the gate; the network-dependent discovery check
   # stays advisory in the standalone validate-skills.yml.
   validate-skills:
-    if: contains(fromJSON(inputs.modules), 'skills')
+    needs: [plan]
+    if: contains(fromJSON(needs.plan.outputs.modules), 'skills')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: Vivswan/repo-platform/actions/validate-skills@build
         with:
-          skills-dir: ${{ inputs.skills-dir }}
+          skills-dir: ${{ needs.plan.outputs.skills-dir }}
 
   # Fails when the release-please PR head lacks main's tip at CHECK time:
   # a stale release PR cuts a release missing commits already on main.
   # Other PRs stay mergeable while behind.
   release-freshness:
-    if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    needs: [plan]
+    if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -223,7 +273,8 @@ jobs:
   # issues or Dependabot alerts at the severity threshold. Can go stale,
   # so the release path re-runs the same action as the pre-flight.
   release-health:
-    if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    needs: [plan]
+    if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # vulnerability-alerts read is the Dependabot alerts API key; where
@@ -238,6 +289,6 @@ jobs:
         with:
           mode: pull-request
           # Empty disables the tracking gates (no stream module selected).
-          tracking-labels: ${{ inputs.tracking-labels }}
+          tracking-labels: ${{ needs.plan.outputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

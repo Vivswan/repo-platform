@@ -380,8 +380,10 @@ export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
 
 /** Every gating job in fleet-ci.yml, by job id (ALL_GREEN_ROSTER's fleet
  *  counterpart): a job deleted there stops gating the whole fleet with no
- *  per-repo diff. The six base checks are STEPS of base-checks (shape test). */
+ *  per-repo diff. The six base checks are STEPS of base-checks (shape test);
+ *  plan is the first job, whose outputs every other job keys on. */
 export const FLEET_CI_ROSTER = [
+  "plan",
   "validate-template",
   "module-render",
   "base-checks",

@@ -1,0 +1,144 @@
+name: Plan
+description: >-
+  Resolves one managed repository's fleet configuration at run time, so
+  every managed ci.yml can be byte-identical: reads the repository's
+  registration (.repo-platform.yml) with its recorded copier answers as the
+  fallback, checks it against the template's module data shipped beside
+  this action on the build branch (modules/<name>.yml, copier.yml's module
+  order), and publishes the result as step outputs. Mode default resolves
+  what fleet-ci.yml's jobs key on (the module selection in canonical order,
+  the visibility, the skills directory, the CodeQL languages, the tracking
+  labels); mode pages resolves the deploy configuration reusable-pages.yml
+  consumes (mounts, toolchain setup, commands, output directory, site
+  title, link-rot label). Fails closed on any invalid registration. Runs in
+  the caller's checkout; needs GH_TOKEN in the environment only when the
+  private input is empty (the visibility is then read from the API).
+
+inputs:
+  mode:
+    description: default (the fleet-ci job outputs) or pages (the reusable-pages deploy configuration).
+    required: false
+    default: default
+  private:
+    description: >-
+      The repository's visibility ("true"/"false"; pass
+      github.event.repository.private). Empty asks the API with GH_TOKEN.
+    required: false
+    default: ""
+  # Mode pages only: a caller that configures the deploy itself. A non-empty
+  # mounts publishes these eight values unchanged (setup grammar-checked)
+  # and the registration is not read; they leave with the last such caller.
+  mounts:
+    description: Caller-configured deploys only; the JSON mount list. Empty resolves the deploy from the registration.
+    required: false
+    default: ""
+  setup:
+    description: Caller-configured deploys only; the toolchain setup tokens.
+    required: false
+    default: none
+  install_command:
+    description: Caller-configured deploys only; the install command.
+    required: false
+    default: ""
+  build_command:
+    description: Caller-configured deploys only; the build command.
+    required: false
+    default: ""
+  dist_dir:
+    description: Caller-configured deploys only; the build output directory.
+    required: false
+    default: dist
+  site_title:
+    description: Caller-configured deploys only; the vitepress site title.
+    required: false
+    default: ""
+  docs_dir:
+    description: Caller-configured deploys only; the docs tree.
+    required: false
+    default: docs
+  link_rot_label:
+    description: Caller-configured deploys only; the link-rot tracking label.
+    required: false
+    default: ""
+
+outputs:
+  modules:
+    description: The selected modules in canonical order, a compact JSON array (mode default).
+    value: ${{ steps.plan.outputs.modules }}
+  private:
+    description: The repository's visibility, "true" or "false" (mode default).
+    value: ${{ steps.plan.outputs.private }}
+  skills-dir:
+    description: The skills module's catalog directory (mode default).
+    value: ${{ steps.plan.outputs.skills-dir }}
+  codeql-languages:
+    description: CodeQL languages to analyze, a compact JSON array; "[]" when CodeQL is off (mode default).
+    value: ${{ steps.plan.outputs.codeql-languages }}
+  tracking-labels:
+    description: Comma-separated nightly tracking-issue labels of the selected stream modules (mode default).
+    value: ${{ steps.plan.outputs.tracking-labels }}
+  mounts:
+    description: The pages-site mount list, compact JSON (mode pages).
+    value: ${{ steps.plan.outputs.mounts }}
+  setup:
+    description: Toolchain(s) installed on the build runner, comma-separated, or none (mode pages).
+    value: ${{ steps.plan.outputs.setup }}
+  install_command:
+    description: Dependency install command run before each command-mount build; "" skips (mode pages).
+    value: ${{ steps.plan.outputs.install_command }}
+  build_command:
+    description: Build command for command mounts (mode pages).
+    value: ${{ steps.plan.outputs.build_command }}
+  dist_dir:
+    description: Command-mount build output directory, relative to the repo root (mode pages).
+    value: ${{ steps.plan.outputs.dist_dir }}
+  site_title:
+    description: Site title for vitepress mounts; empty without the docs-site module (mode pages).
+    value: ${{ steps.plan.outputs.site_title }}
+  docs_dir:
+    description: The docs tree a vitepress mount renders (mode pages).
+    value: ${{ steps.plan.outputs.docs_dir }}
+  link_rot_label:
+    description: Tracking label of the nightly external-link check; empty without the docs-site module (mode pages).
+    value: ${{ steps.plan.outputs.link_rot_label }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@build
+      with:
+        pin: ${{ github.action_path }}/.bun-version
+
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # The module data, the reserved label roster, and copier.yml sit at the
+    # build branch root, two levels above this action's directory.
+    - name: Resolve the plan
+      id: plan
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        MODE: ${{ inputs.mode }}
+        PRIVATE: ${{ inputs.private }}
+        MODULES_DIR: ${{ github.action_path }}/../../modules
+        COPIER_FILE: ${{ github.action_path }}/../../copier.yml
+        RESERVED_LABELS_FILE: ${{ github.action_path }}/../../reserved-labels.yml
+        CALLER_MOUNTS: ${{ inputs.mounts }}
+        CALLER_SETUP: ${{ inputs.setup }}
+        CALLER_INSTALL_COMMAND: ${{ inputs.install_command }}
+        CALLER_BUILD_COMMAND: ${{ inputs.build_command }}
+        CALLER_DIST_DIR: ${{ inputs.dist_dir }}
+        CALLER_SITE_TITLE: ${{ inputs.site_title }}
+        CALLER_DOCS_DIR: ${{ inputs.docs_dir }}
+        CALLER_LINK_ROT_LABEL: ${{ inputs.link_rot_label }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/plan.ts"'

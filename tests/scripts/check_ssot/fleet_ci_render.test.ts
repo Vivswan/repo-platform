@@ -790,12 +790,21 @@ describe("pagesLegMismatches", () => {
     "        type: string",
     '        default: ""',
     "jobs:",
+    "  config:",
+    "    outputs:",
+    "      sha: ${{ steps.checkout.outputs.commit }}",
+    "    steps:",
+    "      - uses: actions/checkout@v7",
+    "        id: checkout",
+    "        with:",
+    "          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}",
     "  deploy:",
+    "    needs: config",
     "    steps:",
     "      - uses: actions/checkout@v7",
     "        with:",
     "          fetch-depth: 0",
-    "          ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}",
+    "          ref: ${{ needs.config.outputs.sha }}",
     "",
   ].join("\n");
 
@@ -1144,16 +1153,31 @@ describe("pagesLegMismatches", () => {
     const ignored = judge(
       leg,
       pagesWf,
-      reusable.replace(/ {10}ref: .*\n/, "          ref: ${{ github.sha }}\n"),
+      reusable.replace(/ {10}ref: \$\{\{ inputs\.sha .*\n/, "          ref: ${{ github.sha }}\n"),
     );
-    expect(ignored.some((m) => m.expected.includes("the deploy checkout's ref starting"))).toBe(
+    expect(ignored.some((m) => m.expected.includes("the config checkout's ref starting"))).toBe(
       true,
     );
+    // The deploy resolving the branch itself could build a commit other
+    // than the one config planned from.
+    const split = judge(
+      leg,
+      pagesWf,
+      reusable.replace(
+        "          ref: ${{ needs.config.outputs.sha }}\n",
+        "          ref: ${{ inputs.sha || github.event.repository.default_branch }}\n",
+      ),
+    );
+    expect(
+      split.some((m) =>
+        m.expected.includes("the deploy checkout's ref `${{ needs.config.outputs.sha }}`"),
+      ),
+    ).toBe(true);
     expect(() =>
       judge(
         leg,
         pagesWf,
-        "on:\n  workflow_call:\n    inputs:\n      sha: {}\njobs:\n  deploy:\n    steps: []\n",
+        "on:\n  workflow_call:\n    inputs:\n      sha: {}\njobs:\n  config:\n    steps: []\n  deploy:\n    steps: []\n",
       ),
     ).toThrow("anchor lost");
   });
