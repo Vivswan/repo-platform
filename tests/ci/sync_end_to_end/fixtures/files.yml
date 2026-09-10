@@ -19,6 +19,7 @@ files:
     class: managed
   - path: LICENSE.md
     class: managed
+    source: files/base/LICENSE.txt
   - path: .github/SECURITY.md
     class: managed
   - path: .gitignore
