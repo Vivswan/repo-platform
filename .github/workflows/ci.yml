@@ -212,6 +212,8 @@ jobs:
         run: bun run ssot:check
       - name: Check generated regions against the module manifests
         run: bun run generate:check
+      - name: Check the files table in docs/new-repo.md against files.yml
+        run: bun run files:check
       - name: Check generated dogfood copies against their template twins
         run: bun run dogfood:check
       # Offline and sub-second: fragments must match the manifests'

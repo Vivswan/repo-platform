@@ -27,16 +27,21 @@ const BUILD = "x".repeat(40);
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
 
+/** A starter the platform stopped writing is neither written nor retired
+ *  (a retirement would only report it kept); the account's .github
+ *  repository serves the forms. */
+const STARTER_LEFT_ALONE =
+  "no longer written and not retired: a starter is repo-owned; served by the account's .github repository";
+
 /** Paths the golden carries that the writer never writes, with why. */
 const ABSENT: Record<string, string> = {
   ".github/.copier-answers.yml": "retired: copier's answers file has no successor",
   "CONTRIBUTING.md": "retired: served by the account's .github repository",
   ".github/CODE_OF_CONDUCT.md": "retired: served by the account's .github repository",
   ".github/SECURITY.md": "retired: served by the account's .github repository",
-  ".github/ISSUE_TEMPLATE/bug_report.yml": "retired: served by the account's .github repository",
-  ".github/ISSUE_TEMPLATE/config.yml": "retired: served by the account's .github repository",
-  ".github/ISSUE_TEMPLATE/feature_request.yml":
-    "retired: served by the account's .github repository",
+  ".github/ISSUE_TEMPLATE/bug_report.yml": STARTER_LEFT_ALONE,
+  ".github/ISSUE_TEMPLATE/config.yml": STARTER_LEFT_ALONE,
+  ".github/ISSUE_TEMPLATE/feature_request.yml": STARTER_LEFT_ALONE,
   "CLAUDE.md": "writer gap: files.yml has no symlink entry class",
   ".github/agents.md": "writer gap: files.yml has no symlink entry class",
   ".github/copilot-instructions.md": "writer gap: files.yml has no symlink entry class",
@@ -126,14 +131,14 @@ const KNOWN: Record<string, Known> = {
   "AGENTS.md": {
     selections: SELECTIONS,
     reason:
-      "the three module-conditional phrases are worded unconditionally; the Toolchain section moves to the end of the region (blocks append);" +
+      "the module-conditional phrases are worded as 'with the <module> module' or unconditionally; the Toolchain section moves to the end of the region (blocks append);" +
       " the Repository-specific guidance heading and its comment go (the opening paragraph already says where guidance goes)",
     expected: (golden) => {
       const toolchain = /\n## Toolchain\n\n(?:- .*\n)+/.exec(golden);
       let out = toolchain === null ? golden : golden.replace(toolchain[0], "");
       out = out.replace(
         /^- PR titles and commit subjects are Conventional Commits.*$/m,
-        "- PR titles and commit subjects are Conventional Commits; with the release-please module they drive its versioning. PRs are squash-merged, so the PR title becomes the commit subject; the pr-title module's check validates the title.",
+        "- PR titles and commit subjects are Conventional Commits; with the release-please module they drive its versioning. PRs are squash-merged, so the PR title becomes the commit subject; with the pr-title module, its check validates the title.",
       );
       out = out.replace(/^- A green push to main releases.*\n/m, "");
       out = out.replace(

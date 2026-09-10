@@ -125,12 +125,12 @@ files:
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
   - {path: .github/workflows/nightly.yml, class: starter, when: {modules: [nightly]}}
 
+# Starters are never retired: a recorded starter is repo-owned and the writer
+# only reports it kept, so the ISSUE_TEMPLATE forms (starters, now served by
+# the account's .github repository) stay where each repository left them.
 retired:
   - {path: .github/.copier-answers.yml}
   - {path: .github/workflows/release.yml}
   - {path: CONTRIBUTING.md}
   - {path: .github/CODE_OF_CONDUCT.md}
   - {path: .github/SECURITY.md}
-  - {path: .github/ISSUE_TEMPLATE/bug_report.yml}
-  - {path: .github/ISSUE_TEMPLATE/config.yml}
-  - {path: .github/ISSUE_TEMPLATE/feature_request.yml}

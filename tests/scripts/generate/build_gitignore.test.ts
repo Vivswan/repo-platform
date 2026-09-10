@@ -290,7 +290,7 @@ describe("fragmentSourcePaths", () => {
 });
 
 describe("the files/ side", () => {
-  const sections = {
+  const sections: Record<string, string> = {
     ...SECTIONS,
     "Global/macOS.gitignore": "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\n",
     "Global/Windows.gitignore":

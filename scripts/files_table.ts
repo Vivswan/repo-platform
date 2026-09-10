@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // The file table of files.yml as Markdown (path, class, when), for
 // docs/new-repo.md and PR bodies. --check compares the table against the
-// generated region of a Markdown file instead of printing.
+// generated region of a Markdown file instead of printing; `bun run
+// files:check` runs it over docs/new-repo.md in the check chain and CI.
 //
 // Usage: bun scripts/files_table.ts [--check docs/new-repo.md]
 
