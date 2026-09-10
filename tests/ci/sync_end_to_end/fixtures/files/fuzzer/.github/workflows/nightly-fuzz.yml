@@ -1,0 +1,7 @@
+name: nightly fuzz
+on: workflow_dispatch
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "write your fuzz step here"
