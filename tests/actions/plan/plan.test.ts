@@ -135,7 +135,7 @@ describe("planCi", () => {
   const MONDAY = new Date("2026-09-07T04:03:00Z");
   const THURSDAY = new Date("2026-09-10T04:03:00Z");
 
-  test("canonical order, CodeQL per toolchain, tracking labels per stream (defaults)", () => {
+  test("canonical order, CodeQL per toolchain, tracking labels per stream (defaults) plus the fleet security label", () => {
     const plan = planCi(
       input("modules: [nightly, uv, bun, fuzzer, docs-site, release-please]"),
       MONDAY,
@@ -145,7 +145,7 @@ describe("planCi", () => {
       private: false,
       skillsDir: "skills",
       codeqlLanguages: ["javascript-typescript", "python"],
-      trackingLabels: ["docs-link-rot", "fuzz-nightly", "nightly-failure"],
+      trackingLabels: ["docs-link-rot", "fuzz-nightly", "nightly-failure", "security-nightly"],
       weekly: true,
     });
     expect(outputsOf(plan)).toEqual({
@@ -153,7 +153,7 @@ describe("planCi", () => {
       "private": "false",
       "skills-dir": "skills",
       "codeql-languages": '["javascript-typescript","python"]',
-      "tracking-labels": "docs-link-rot,fuzz-nightly,nightly-failure",
+      "tracking-labels": "docs-link-rot,fuzz-nightly,nightly-failure,security-nightly",
       "weekly": "true",
     });
   });
@@ -174,18 +174,21 @@ describe("planCi", () => {
     };
     expect(planCi(input("modules: [skills, fuzzer, nightly]", answers))).toMatchObject({
       skillsDir: "lib/skills",
-      trackingLabels: ["fuzz: nightly", "night"],
+      trackingLabels: ["fuzz: nightly", "night", "security-nightly"],
     });
     const text =
       "modules: [skills, fuzzer, nightly]\nskills:\n  dir: agents\nlabels:\n  nightly: nightly-red\n";
     expect(planCi(input(text, { fuzzer_label: "fuzz: nightly" }))).toMatchObject({
       skillsDir: "agents",
-      trackingLabels: ["fuzz: nightly", "nightly-red"],
+      trackingLabels: ["fuzz: nightly", "nightly-red", "security-nightly"],
     });
     // Both agreeing is fine: the same value from two sources is one identity.
     expect(
       planCi(input(text, { skills_dir: "agents", nightly_label: "nightly-red" })),
-    ).toMatchObject({ skillsDir: "agents", trackingLabels: ["fuzz-nightly", "nightly-red"] });
+    ).toMatchObject({
+      skillsDir: "agents",
+      trackingLabels: ["fuzz-nightly", "nightly-red", "security-nightly"],
+    });
   });
 
   test("CodeQL is off for a private repository and where no module analyzes", () => {
@@ -197,13 +200,13 @@ describe("planCi", () => {
     ]);
   });
 
-  test("an empty selection plans an empty repository", () => {
+  test("an empty selection plans an empty repository: the fleet security label is still tracked", () => {
     expect(outputsOf(planCi(input("modules: []"), THURSDAY))).toEqual({
       "modules": "[]",
       "private": "false",
       "skills-dir": "skills",
       "codeql-languages": "[]",
-      "tracking-labels": "",
+      "tracking-labels": "security-nightly",
       "weekly": "false",
     });
   });
@@ -617,7 +620,7 @@ describe("plan.ts as a child", () => {
         "private=false",
         "skills-dir=skills",
         'codeql-languages=["javascript-typescript"]',
-        "tracking-labels=fuzz-nightly",
+        "tracking-labels=fuzz-nightly,security-nightly",
         `weekly=${new Date().getUTCDay() === 1}`,
         "",
       ].join("\n"),

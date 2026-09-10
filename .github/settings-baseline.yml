@@ -45,6 +45,13 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
+  # The fleet-wide nightly Trivy stream's tracking label (docs/security-scans.md):
+  # fleet-ci files findings under it on every repository, so it is fleet
+  # data, not a module's copier answer; the plan job lists it among the
+  # tracking labels release-health blocks on.
+  - name: security-nightly
+    color: "1d76db"
+    description: Automated nightly security scan findings
 
 rulesets:
   # The pr-title module's required-check ruleset, DISABLED here so the

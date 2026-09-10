@@ -29,6 +29,7 @@ describe("bunLockDirs", () => {
       "actions/pages-site",
       "actions/plan",
       "actions/release-health",
+      "actions/trivy",
       "actions/validate-commit-names",
       "actions/validate-skills",
       "actions/validate-template-report",

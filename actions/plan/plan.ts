@@ -274,6 +274,12 @@ export function weekly(now: Date): boolean {
   return now.getUTCDay() === 1;
 }
 
+/** The fleet-wide nightly security stream's label (docs/security-scans.md):
+ *  fleet-ci files every repository's Trivy findings under it, so it joins
+ *  the tracking labels release-health blocks on without a module or an
+ *  answer; the settings baseline declares it on every repository. */
+export const SECURITY_LABEL = "security-nightly";
+
 /** CodeQL is off for a private repository (personal-account code scanning
  *  is public-only) and where no selected module analyzes as a language;
  *  otherwise the distinct languages in canonical order. */
@@ -291,7 +297,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
       resolved(input, "skills.dir", input.registration.skills?.dir, "skills_dir", "skills") ??
       "skills",
     codeqlLanguages: codeqlLanguages(selected, input.private),
-    trackingLabels: trackingLabels(input, selected),
+    trackingLabels: [...trackingLabels(input, selected), SECURITY_LABEL],
     weekly: weekly(now),
   };
 }

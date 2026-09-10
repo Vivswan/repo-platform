@@ -297,3 +297,71 @@ jobs:
           tracking-labels: ${{ needs.plan.outputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The blocking half of the security scan (docs/security-scans.md): a
+  # CRITICAL finding with a fix available in any lockfile, Dockerfile, or
+  # infrastructure file fails the gate for every visibility; the
+  # repository's .trivyignore.yaml, statement and expiry per entry, is the
+  # only bypass. The configuration lives in the action.
+  trivy:
+    needs: [plan]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/trivy@build
+
+  # The nightly half: every severity, never red. The findings become the
+  # one security-nightly tracking issue (release-health blocks while it is
+  # open), closed on a clean night; the SARIF reaches code scanning where
+  # the repository is public (personal-account code scanning is public-only).
+  trivy-nightly:
+    needs: [plan]
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/trivy@build
+        id: scan
+        with:
+          mode: nightly
+      - name: Upload the findings report
+        if: steps.scan.outputs.found == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-findings-${{ github.run_attempt }}
+          path: ${{ steps.scan.outputs.report-dir }}
+          if-no-files-found: ignore
+      - name: File or update the security issue
+        if: steps.scan.outputs.found == 'true'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: report
+          label: security-nightly
+          title: Nightly security scan findings
+          artifacts-dir: ${{ steps.scan.outputs.report-dir }}
+          artifact-name: trivy-findings-${{ github.run_attempt }}
+          # The stream's create tuple, anchored to the settings baseline's
+          # label by check_ssot's labels rule.
+          label-color: "1d76db"
+          label-description: Automated nightly security scan findings
+          stream: generic
+      - name: Close the security issue on a clean night
+        if: steps.scan.outputs.found == 'false'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: resolve
+          label: security-nightly
+          stream: generic
+      - name: Upload the SARIF to code scanning
+        if: needs.plan.outputs.private == 'false'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: trivy

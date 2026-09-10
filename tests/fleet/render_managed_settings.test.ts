@@ -36,9 +36,16 @@ const temp = tempDirs();
 
 const manifests = loadManifests();
 
-// The baseline's unconditional roster: dependabot's base pair, then the
-// triage trio. Every selection starts from it.
-const BASELINE_LABELS = ["dependencies", "github_actions", "bug", "enhancement", "fix-lint"];
+// The baseline's unconditional roster: dependabot's base pair, the triage
+// trio, then the fleet-wide nightly security stream. Every selection starts from it.
+const BASELINE_LABELS = [
+  "dependencies",
+  "github_actions",
+  "bug",
+  "enhancement",
+  "fix-lint",
+  "security-nightly",
+];
 
 function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
   return {

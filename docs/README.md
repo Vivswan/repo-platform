@@ -25,6 +25,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |
 | See which toolchain versions the fleet pins | [Toolchains: the pins](toolchains.md#the-pins) |
 | Use a different toolchain version in one repo | [Toolchains: overriding](toolchains.md#overriding-per-toolchain) |
+| Silence a Trivy finding that blocks my PR, or read the nightly security issue | [Security scans](security-scans.md) |
 | Understand the issue a red night filed | [Tracking issues: lifecycle](tracking-issues.md#issue-lifecycle) |
 | Ship a release while a tracking issue is open | [Tracking issues: release gating](tracking-issues.md#release-gating) |
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
@@ -58,10 +59,11 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 ### Fleet operations
 
 10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
-11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, and docs-site modules share: lifecycle, release gating, renaming.
-12. [Migrations](migrations.md) - the ladder of one-shot fleet transitions: one self-contained file per rung on the build branch, and the sync's walk over build history that runs the rungs a repository has not crossed.
-13. [Composition](compose.md) - how templates/ composes into the tree copier renders: gates, anchors, fragments, data anchors, collisions, and the ownership contract.
-14. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
-15. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-16. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
-17. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, docs-site, and security streams share: lifecycle, release gating, renaming.
+12. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking fixable-CRITICAL gate, the expiring bypass file, and the nightly scan that files one tracking issue per repository.
+13. [Migrations](migrations.md) - the ladder of one-shot fleet transitions: one self-contained file per rung on the build branch, and the sync's walk over build history that runs the rungs a repository has not crossed.
+14. [Composition](compose.md) - how templates/ composes into the tree copier renders: gates, anchors, fragments, data anchors, collisions, and the ownership contract.
+15. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
+16. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+17. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
+18. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

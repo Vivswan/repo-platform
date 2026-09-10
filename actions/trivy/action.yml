@@ -1,0 +1,101 @@
+name: Trivy
+description: >-
+  The fleet's Trivy scan of the caller's checkout (lockfiles, Dockerfiles,
+  infrastructure files), so the configuration lives here once and no
+  managed repository carries a Trivy file. Mode blocking fails on a
+  CRITICAL finding with a fix available. Mode nightly scans everything at
+  every severity, never fails, and leaves the findings as the fuzz-issue
+  action's report directory plus a SARIF file for code scanning. Both modes
+  honor the repository's .trivyignore.yaml only when every entry carries a
+  statement and an expired_at date (Trivy drops expired entries, so a
+  bypass undoes itself); the plain .trivyignore format is refused.
+
+inputs:
+  mode:
+    description: blocking (fixable CRITICAL fails) or nightly (every severity, reported, never fails)
+    required: false
+    default: blocking
+
+outputs:
+  findings:
+    description: How many findings the nightly scan reported (mode nightly)
+    value: ${{ steps.report.outputs.findings }}
+  found:
+    description: '"true" when the nightly scan reported anything, "false" on a clean scan (mode nightly)'
+    value: ${{ steps.report.outputs.found }}
+  report-dir:
+    description: The fuzz-issue report directory; empty of subdirectories on a clean scan (mode nightly)
+    value: ${{ steps.report.outputs.report-dir }}
+  sarif:
+    description: The SARIF file for code scanning (mode nightly)
+    value: ${{ steps.sarif.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@build
+      with:
+        pin: ${{ github.action_path }}/.bun-version
+
+    - name: Check the bypass file
+      id: bypass
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/ignore_check.ts"'
+
+    # The database cache lives outside the workspace so the scan never
+    # walks it; the wrapper restores it by date.
+    - name: Scan for fixable critical findings
+      if: inputs.mode == 'blocking'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        version: v0.74.0
+        scan-type: fs
+        scan-ref: .
+        scanners: vuln,misconfig
+        severity: CRITICAL
+        ignore-unfixed: "true"
+        exit-code: "1"
+        trivyignores: ${{ steps.bypass.outputs.ignorefile }}
+        cache-dir: ${{ runner.temp }}/trivy-cache
+
+    - name: Scan everything
+      if: inputs.mode == 'nightly'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        version: v0.74.0
+        scan-type: fs
+        scan-ref: .
+        scanners: vuln,misconfig,secret
+        format: json
+        output: ${{ runner.temp }}/trivy.json
+        trivyignores: ${{ steps.bypass.outputs.ignorefile }}
+        cache-dir: ${{ runner.temp }}/trivy-cache
+
+    - name: Write the findings report
+      if: inputs.mode == 'nightly'
+      id: report
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        RESULTS: ${{ runner.temp }}/trivy.json
+        REPORT_DIR: ${{ runner.temp }}/trivy-report
+      run: '"$ACTION_BUN" "${{ github.action_path }}/report.ts"'
+
+    # trivy is on PATH once the wrapper's setup step has run.
+    - name: Convert the results to SARIF
+      if: inputs.mode == 'nightly'
+      id: sarif
+      shell: bash
+      env:
+        RESULTS: ${{ runner.temp }}/trivy.json
+        SARIF: ${{ runner.temp }}/trivy.sarif
+      run: |
+        trivy convert --format sarif --output "$SARIF" "$RESULTS"
+        echo "path=$SARIF" >> "$GITHUB_OUTPUT"

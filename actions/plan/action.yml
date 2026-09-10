@@ -78,7 +78,7 @@ outputs:
     description: CodeQL languages to analyze, a compact JSON array; "[]" when CodeQL is off (mode default).
     value: ${{ steps.plan.outputs.codeql-languages }}
   tracking-labels:
-    description: Comma-separated nightly tracking-issue labels of the selected stream modules (mode default).
+    description: Comma-separated nightly tracking-issue labels of the selected stream modules, the fleet-wide security stream last (mode default).
     value: ${{ steps.plan.outputs.tracking-labels }}
   weekly:
     description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
