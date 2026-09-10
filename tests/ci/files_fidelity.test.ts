@@ -3,7 +3,7 @@
 // registration is derived from the golden's answers, and the result is
 // compared byte for byte with the frozen render under files_fidelity/renders.
 // The frozen renders are tests/golden-renders/<selection> as of
-// redesign/p1b-skeleton commit 7b776485 (its tip when they were frozen).
+// redesign/p1b-skeleton commit 469a9b00 (its tip when they were frozen).
 // Every difference is pinned: a path the writer never writes is listed with
 // its reason, and a file whose content differs is listed with the exact
 // transform of the golden that yields the writer's output, so an entry that

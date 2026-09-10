@@ -13,7 +13,6 @@ placeholders:
   - skills_dir
   - fuzzer_label
   - nightly_label
-  - docs_site_label
 
 modules:
   bun:

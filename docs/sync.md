@@ -133,7 +133,7 @@ The three links carry no `when`: every repository gets them.
 | `settings_layers` | the settings layer files the module contributes | the settings apply |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder | the fleet plan, the settings baseline, and the writer |
 
-Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. `docs_site_label` is listed for the day `docs-site.yml` and `pages.yml` pass the link-rot label; the committed sources do not name it yet.
+Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `docs_site_label`: the docs-site and pages workflows do not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
 A module with no files still appears under `modules` (`issue-templates`, `custom-license`) so a registration selecting it is known and a `when` can name it.
 
