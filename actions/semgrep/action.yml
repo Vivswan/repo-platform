@@ -1,0 +1,38 @@
+name: Semgrep
+description: >-
+  The fleet's static analysis: semgrep's default registry ruleset over the
+  caller's checkout, every finding uploaded to code scanning as SARIF, and
+  the step failing on an ERROR-severity finding. Public repositories only:
+  the registry needs no token, but code scanning needs a public repository
+  or Advanced Security. The only bypass is semgrep's own `// nosemgrep:
+  rule-id` comment on the finding, with a reason.
+
+runs:
+  using: composite
+  steps:
+    - name: Install semgrep
+      shell: bash
+      run: python3 -m pip install --quiet semgrep==1.176.1
+
+    # No --error: the JSON copy is judged by severity below, so WARNING and
+    # INFO findings reach code scanning without blocking.
+    - name: Scan
+      shell: bash
+      run: semgrep scan --config p/default --metrics=off --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" .
+
+    - name: Upload the findings to code scanning
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: ${{ runner.temp }}/semgrep.sarif
+        category: semgrep
+
+    # The verdict reads the JSON copy: ERROR-severity findings and fatal
+    # analysis errors fail; partial parses and timeouts (level warn) only
+    # annotate, so a WARNING or INFO finding reaches code scanning unblocked.
+    - name: Fail on an ERROR finding
+      shell: bash
+      run: |
+        findings="$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$RUNNER_TEMP/semgrep.json")"
+        fatal="$(jq '[.errors[] | select(.level == "error")] | length' "$RUNNER_TEMP/semgrep.json")"
+        jq -r '[.errors[] | select(.level != "error")] | if length > 0 then "::warning::semgrep: \(length) non-fatal analysis error(s) (partial parses, timeouts); see the scan log above" else empty end' "$RUNNER_TEMP/semgrep.json"
+        [ "$findings" = "0" ] && [ "$fatal" = "0" ] || { echo "::error::semgrep: $findings ERROR-severity finding(s), $fatal fatal analysis error(s); see the scan log above"; exit 1; }
