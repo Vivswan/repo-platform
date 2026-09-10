@@ -1,0 +1,9 @@
+name: "{{project_name}} CI"
+on:
+  push:
+    branches: [main]
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.sha }} for {{github_username_lower}}/{{project_slug}}"

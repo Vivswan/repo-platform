@@ -1,0 +1,49 @@
+# The end-to-end fixture's data file: one entry per class, a same-path pair
+# split by module conditions, a visibility-gated entry, and three retirements.
+placeholders:
+  - project_name
+  - project_slug
+  - description
+  - github_username
+  - github_username_lower
+  - copyright_holder
+  - year
+modules:
+  bun:
+    gitignore_sources: [Node, Bun]
+  pages: {}
+  docs-site: {}
+  fuzzer: {}
+files:
+  - path: .github/workflows/ci.yml
+    class: managed
+  - path: LICENSE.md
+    class: managed
+  - path: .github/SECURITY.md
+    class: managed
+  - path: .gitignore
+    class: split
+    region: hash
+    blocks: gitignore_sources
+  - path: AGENTS.md
+    class: split
+    region: html
+  - path: .github/workflows/docs-site.yml
+    class: managed
+    when: {modules: [docs-site], without: [pages]}
+    source: files/docs-site/docs-site.standalone.yml
+  - path: .github/workflows/docs-site.yml
+    class: managed
+    when: {modules: [docs-site, pages]}
+    source: files/docs-site/docs-site.with-pages.yml
+  - path: .github/workflows/nightly-fuzz.yml
+    class: starter
+    when: {modules: [fuzzer]}
+  - path: .github/workflows/private-only.yml
+    class: managed
+    when: {private: true}
+retired:
+  - path: .github/.copier-answers.yml
+  - path: .github/workflows/release.yml
+  - path: SECURITY.md
+    moved_to: .github/SECURITY.md

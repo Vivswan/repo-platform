@@ -1,0 +1,7 @@
+name: docs site (with pages)
+on: workflow_dispatch
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "{{project_slug}} docs on pages"
