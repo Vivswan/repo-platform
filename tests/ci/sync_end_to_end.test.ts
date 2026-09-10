@@ -47,6 +47,7 @@ function oldManifest(): string {
     "SECURITY.md": `{"class": "managed", "hash": "${sha256(OLD_SECURITY)}"}`,
     ".github/workflows/nightly-fuzz.yml": `{"class": "starter"}`,
     ".github/workflows/old-starter.yml": `{"class": "starter"}`,
+    ".github/workflows/deselected-starter.yml": `{"class": "starter"}`,
     "skills/gamma/LICENSE.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
     "../escape.txt": `{"class": "managed", "hash": "${sha256("x")}"}`,
     [MANIFEST]: `{"class": "managed", "hash": null, "commit": "1111111111111111111111111111111111111111"}`,
@@ -75,6 +76,7 @@ function seedTarget(): string {
     "SECURITY.md": OLD_SECURITY,
     ".github/workflows/nightly-fuzz.yml": STARTER,
     ".github/workflows/old-starter.yml": OLD_STARTER,
+    ".github/workflows/deselected-starter.yml": OLD_STARTER,
     "skills/alpha/README.md": "alpha\n",
     "skills/beta/README.md": "beta\n",
     "skills/beta/LICENSE.md": "a hand-written license\n",
@@ -260,6 +262,7 @@ describe("sync.ts end to end", () => {
         ".github/workflows/docs-site.yml",
         ".github/workflows/nightly-fuzz.yml",
         ".github/workflows/old-starter.yml",
+        ".github/workflows/deselected-starter.yml",
         ".github/workflows/release.yml",
         "skills/alpha/LICENSE.md",
         "skills/gamma/LICENSE.md",
@@ -278,6 +281,10 @@ describe("sync.ts end to end", () => {
     // Kept and refused files keep their previous records, so a later sync
     // can still recognise the platform's last write.
     expect(manifest.files[".github/workflows/old-starter.yml"]).toEqual({ class: "starter" });
+    expect(manifest.files[".github/workflows/deselected-starter.yml"]).toEqual({
+      class: "starter",
+    });
+    expect(read(".github/workflows/deselected-starter.yml")).toBe(OLD_STARTER);
     expect(manifest.files["skills/gamma/LICENSE.md"]).toEqual({
       class: "mirror",
       hash: sha256(OLD_LICENSE),

@@ -60,6 +60,10 @@ describe("writeSplit", () => {
     expect(region("")).toBe(`${markers.begin}\n${markers.end}\n`);
   });
 
+  test("renderRegion refuses a body that mentions a marker (a placeholder value can)", () => {
+    expect(() => region(`about ${markers.end} here`)).toThrow("mentions the marker text");
+  });
+
   test("a new file is the region alone; a marker-less file keeps its content below", () => {
     const target = temp.dir("writer-split-new-");
     expect(writeSplit(target, ".gitignore", region("a"), markers, null)).toEqual({

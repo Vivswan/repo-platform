@@ -213,6 +213,15 @@ describe("blockSources and verifySources", () => {
     ]);
   });
 
+  test("a source shared by a split and a managed entry keeps the marker constraint", () => {
+    const tree = temp.dir("writer-files-shared-");
+    writeTree(tree, { "base/shared.txt": "# BEGIN REPO-PLATFORM MANAGED\n" });
+    const config = parseFilesConfig(
+      "placeholders: []\nfiles:\n  - { path: a, class: split, region: hash, source: files/base/shared.txt }\n  - { path: b, class: managed, source: files/base/shared.txt }\n",
+    );
+    expect(() => verifySources(config, tree)).toThrow("mentions the hash region markers");
+  });
+
   test("loadFilesConfig runs every check, retirements included", () => {
     const root = temp.dir("writer-files-load-");
     writeTree(root, {

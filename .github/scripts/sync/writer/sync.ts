@@ -153,6 +153,12 @@ export function runSync(options: SyncOptions): SyncReport {
   for (const row of retired) {
     if (row.outcome === "held" || row.outcome === "kept") carry(row.path);
   }
+  // A starter whose module was deselected stays the repository's own; its
+  // record stays too, so a later retirement still reads it as kept.
+  for (const [path, entry] of Object.entries(records)) {
+    if (entry.class !== "starter" || entryPaths.has(path) || pathProblem(path) !== null) continue;
+    if (existingFile(options.target, path) !== null) carry(path);
+  }
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];

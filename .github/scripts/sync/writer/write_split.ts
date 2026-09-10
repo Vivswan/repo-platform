@@ -8,6 +8,7 @@ import {
   type RegionMarkers,
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
+import { mentionsMarkers } from "./files_config.ts";
 import { sha256 } from "./manifest.ts";
 import { existingFile, writeFile } from "./target_files.ts";
 import type { WriteOutcome } from "./write_managed.ts";
@@ -17,8 +18,13 @@ export function terminated(text: string): string {
   return text === "" || text.endsWith("\n") ? text : `${text}\n`;
 }
 
-/** The region text: the BEGIN line, the body (newline-terminated), the END line. */
+/** The region text: the BEGIN line, the body (newline-terminated), the END
+ *  line. A body that already mentions a marker (a placeholder value can
+ *  carry one) is refused: the file would have no honest slice next run. */
 export function renderRegion(body: string, markers: RegionMarkers): string {
+  if (mentionsMarkers(body, markers)) {
+    throw new Error("the region body mentions the marker text the writer adds itself");
+  }
   return `${markers.begin}\n${terminated(body)}${markers.end}\n`;
 }
 

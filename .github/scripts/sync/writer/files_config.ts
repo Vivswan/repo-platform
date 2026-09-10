@@ -11,6 +11,7 @@ import { z } from "zod";
 import {
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
+  type RegionMarkers,
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
 import { PLACEHOLDER_NAMES, unknownPlaceholders } from "./placeholders.ts";
@@ -89,6 +90,11 @@ const configSchema = z.strictObject({
 });
 
 const SOURCE_PREFIX = "files/";
+
+/** Whether `text` contains either marker string anywhere. */
+export function mentionsMarkers(text: string, markers: RegionMarkers): boolean {
+  return [markers.begin, markers.end].some((marker) => substringCount(text, marker) > 0);
+}
 
 /** A block value names a file suffix, so it is one path-safe word. */
 const BLOCK_NAME_RE = /^[A-Za-z0-9._-]+$/;
@@ -227,17 +233,20 @@ export function blockSources(config: FilesConfig, entry: FileEntry, modules: str
  *  only listed placeholders. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
-  // Source -> the region markers it must not mention (the writer adds them,
-  // and a second pair leaves the file without an honest slice).
-  const sources = new Map<string, RegionKind | null>();
+  // Source -> every region grammar it feeds; a split source must not mention
+  // its own markers (the writer adds them, and a second pair leaves the
+  // file without an honest slice). A source shared with a managed entry
+  // keeps the constraint.
+  const sources = new Map<string, Set<RegionKind>>();
   for (const entry of config.files) {
-    const region = entry.class === "split" ? entry.region : null;
-    sources.set(entry.source, region);
-    for (const source of blockSources(config, entry, Object.keys(config.modules))) {
-      sources.set(source, region);
+    const regions = [entry.source, ...blockSources(config, entry, Object.keys(config.modules))];
+    for (const source of regions) {
+      const set = sources.get(source) ?? new Set<RegionKind>();
+      if (entry.class === "split") set.add(entry.region);
+      sources.set(source, set);
     }
   }
-  for (const [source, region] of [...sources].sort()) {
+  for (const [source, regions] of [...sources].sort()) {
     const abs = join(tree, source);
     if (!existsSync(abs)) {
       problems.push(`source ${SOURCE_PREFIX}${source} is missing from the tree`);
@@ -250,9 +259,8 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
         `source ${SOURCE_PREFIX}${source} uses unlisted placeholder(s) ${unknown.map((n) => `{{${n}}}`).join(", ")}`,
       );
     }
-    if (region !== null) {
-      const markers = region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS;
-      if ([markers.begin, markers.end].some((marker) => substringCount(text, marker) > 0)) {
+    for (const region of regions) {
+      if (mentionsMarkers(text, region === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS)) {
         problems.push(
           `source ${SOURCE_PREFIX}${source} mentions the ${region} region markers the writer adds itself`,
         );
