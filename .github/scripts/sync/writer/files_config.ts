@@ -3,7 +3,7 @@
 // and the retirement check against a previous data file. The grammar
 // itself is actions/plan/files_config.ts, which every reader shares.
 
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   BLOCK_VALUE_RE,
@@ -24,6 +24,7 @@ import {
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
 import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
+import { walkFiles } from "../walk.ts";
 import {
   blocksAnchorProblem,
   isPlaceholderName,
@@ -160,19 +161,6 @@ interface SourceUse {
   withBlocks: number;
 }
 
-/** Every regular file under `dir`, tree-relative. */
-function treeFiles(tree: string, dir = ""): string[] {
-  const abs = join(tree, dir);
-  if (!existsSync(abs)) return [];
-  return readdirSync(abs)
-    .sort()
-    .flatMap((name) => {
-      const rel = dir === "" ? name : `${dir}/${name}`;
-      const stat = lstatSync(join(tree, rel));
-      return stat.isDirectory() ? treeFiles(tree, rel) : stat.isFile() ? [rel] : [];
-    });
-}
-
 /** Every source the config can ever read from the tree exists and carries
  *  only listed placeholders, and the tree carries nothing else: a file no
  *  entry or block name reads (a block file under a retired name) would
@@ -231,7 +219,10 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
       }
     }
   }
-  for (const rel of treeFiles(tree)) {
+  // Nothing is skipped by name, so a stray under a vendored-looking name is
+  // reported too; symlinks are not walked (the tree holds none and nothing
+  // writes one). A missing tree has each source reported missing above.
+  for (const rel of existsSync(tree) ? walkFiles(tree, new Set()) : []) {
     if (!sources.has(rel)) {
       problems.push(`${SOURCE_PREFIX}${rel} is read by no entry or block name`);
     }
