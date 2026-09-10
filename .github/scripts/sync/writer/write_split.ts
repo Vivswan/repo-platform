@@ -11,10 +11,14 @@ import {
 import { sha256 } from "./manifest.ts";
 import { existingFile, type WriteOutcome, writeFile } from "./write_managed.ts";
 
+/** `text` ending in exactly the newline it needs to be followed by more. */
+export function terminated(text: string): string {
+  return text === "" || text.endsWith("\n") ? text : `${text}\n`;
+}
+
 /** The region text: the BEGIN line, the body (newline-terminated), the END line. */
 export function renderRegion(body: string, markers: RegionMarkers): string {
-  const terminated = body === "" || body.endsWith("\n") ? body : `${body}\n`;
-  return `${markers.begin}\n${terminated}${markers.end}\n`;
+  return `${markers.begin}\n${terminated(body)}${markers.end}\n`;
 }
 
 export function writeSplit(
