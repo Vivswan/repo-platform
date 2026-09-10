@@ -45,6 +45,7 @@ export const RULE_ROSTER = [
   "issue-labels",
   "release-guard-labels",
   "all-green-roster",
+  "all-green-judge-substitutions",
   "fleet-ci-roster",
   "all-green-name",
   "fleet-ci-render-roster",
