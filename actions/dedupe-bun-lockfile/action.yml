@@ -1,0 +1,58 @@
+name: Dedupe Bun Lockfile
+description: >-
+  Regenerates every tracked bun.lock from scratch in the calling checkout
+  and pushes the fix commit to a Dependabot PR's head: Dependabot bumps the
+  target package but leaves stale nested entries behind, so `bun install
+  --frozen-lockfile` fails with mixed-version errors, and bun keeps a stale
+  lockfile as a valid resolution, so only a delete-then-resolve drops them.
+  Nothing changed is a no-op. The commit carries the `[dependabot skip]`
+  trailer so Dependabot keeps rebasing over it. A push made with
+  github.token starts no workflows, so with can-retrigger false the action
+  sets no_retrigger for the caller's sticky comment and warns, but stays
+  green. The calling job needs contents write and a checkout of the PR
+  head with persist-credentials off.
+
+inputs:
+  token:
+    description: >-
+      Token the push authenticates with: REPO_PLATFORM_TOKEN when the
+      repository registers it as a Dependabot secret, else github.token.
+    required: true
+  head-ref:
+    description: The PR head branch the fix commit is pushed to.
+    required: true
+  can-retrigger:
+    description: >-
+      "true" when token is a PAT whose push re-runs CI; anything else flags
+      the no_retrigger output and warns after a push.
+    required: true
+
+outputs:
+  no_retrigger:
+    description: >-
+      "true" when a fix was pushed with a token that starts no workflows;
+      empty otherwise.
+    value: ${{ steps.dedupe.outputs.no_retrigger }}
+
+runs:
+  using: composite
+  steps:
+    # The action's pinned bun by absolute path: later steps run
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
+    # setup-bun can put another bun first. The same bun lands on PATH for
+    # the lockfile regeneration, which runs `bun install` by name.
+    - name: Set up the action's bun
+      id: action-bun
+      uses: Vivswan/repo-platform/actions/bun-setup@build
+      with:
+        pin: ${{ github.action_path }}/.bun-version
+
+    - name: Regenerate, commit, and push the deduped lockfiles
+      id: dedupe
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        CAN_RETRIGGER: ${{ inputs.can-retrigger }}
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+      run: '"$ACTION_BUN" "${{ github.action_path }}/dedupe-bun-lockfile.ts"'

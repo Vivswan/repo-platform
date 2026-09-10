@@ -1334,8 +1334,8 @@ export const EXPECTATIONS: Row[] = [
     ],
   },
   {
-    // Managed machinery (always overwritten by sync): regenerates bun.lock
-    // on Dependabot PRs and pushes the fix.
+    // Managed machinery (always overwritten by sync): the dedupe action
+    // regenerates bun.lock on Dependabot PRs and pushes the fix.
     name: "bun renders the Dependabot lockfile fixer and its version pin",
     when: has("bun"),
     checks: () => [
@@ -1344,8 +1344,7 @@ export const EXPECTATIONS: Row[] = [
         kind: "text",
         path: `${WF}/dependabot-bun-lockfile.yml`,
         has: [
-          "bun install --lockfile-only",
-          "bun-version-file: .bun-version",
+          "/repo-platform/actions/dedupe-bun-lockfile@build",
           "github.actor == 'dependabot[bot]'",
           "REPO_PLATFORM_TOKEN || github.token",
         ],

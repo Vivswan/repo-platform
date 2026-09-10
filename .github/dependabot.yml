@@ -16,6 +16,7 @@ updates:
       - "/actions/bun-setup"
       - "/actions/check-file-size"
       - "/actions/check-typography"
+      - "/actions/dedupe-bun-lockfile"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
       - "/actions/module-render"
@@ -65,6 +66,17 @@ updates:
   # current.
   - package-ecosystem: "bun"
     directory: "/actions/check-typography"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the dedupe-bun-lockfile action.
+  - package-ecosystem: "bun"
+    directory: "/actions/dedupe-bun-lockfile"
     schedule:
       interval: "monthly"
     cooldown:
