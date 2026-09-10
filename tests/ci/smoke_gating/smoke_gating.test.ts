@@ -5,12 +5,12 @@
 // SMOKE_DIR set to a smoke_generate.ts render (ci.yml's smoke-generate
 // matrix passes MODULES, PRIVATE, EXPECT_IN_PAGES, and EXTRA_DATA for the
 // row that produced it) and skips loudly otherwise. The code under test is
-// reached only through the rendered files and two settings-assembly
-// subprocesses.
+// reached only through the rendered files and the settings layer-list
+// subprocess.
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { boundedSpawnSync } from "../../shared/bounded_spawn";
@@ -23,11 +23,11 @@ import {
   EXPECTATIONS,
   GATED_MODULES,
   MANIFEST_CLASSES,
-  MERGED_SETTINGS,
-  MERGED_SETTINGS_EXPECTATIONS,
   MODULES,
   orderedModulesJson,
   type Row,
+  SETTINGS_LAYER_EXPECTATIONS,
+  SETTINGS_LAYERS,
   type Selection,
   selectionFromEnv,
   streamLabels,
@@ -161,7 +161,7 @@ describe("the expectation tables", () => {
 
   test("every row yields checks for the everything and the empty selection", () => {
     for (const selection of [EVERYTHING, "[]"].map((m) => selectionFromEnv(m, "false", ""))) {
-      for (const row of [...EXPECTATIONS, ...MERGED_SETTINGS_EXPECTATIONS]) {
+      for (const row of [...EXPECTATIONS, ...SETTINGS_LAYER_EXPECTATIONS]) {
         expect(row.checks(selection).length).toBeGreaterThan(0);
       }
     }
@@ -239,52 +239,45 @@ if (smokeDir === undefined || smokeDir === "") {
       });
     }
 
-    // The assembly CLI runs as a black box against the rendered repo's own
-    // recorded facts; the merged document (the rendered layers plus the
-    // smoke repo's settings.yml plus the fleet override) is what the apply
-    // receives, and only it shows the whole contract.
-    describe("assembled settings", () => {
+    // The layer-list CLI runs as a black box against the rendered repo's own
+    // recorded facts; the list it publishes (plus the tracking scratch layer
+    // it writes) is what the central apply hands the action's merge, and
+    // only it shows which layers this render selects.
+    describe("settings layers", () => {
       let assembled = "";
       beforeAll(
         () => {
           const work = temp.dir("smoke-gating-");
-          const env = { ...process.env, GITHUB_OUTPUT: join(work, "step-output.txt") };
-          const managed = join(work, "managed-settings.yml");
-          const commands = [
-            [
-              "bun",
-              join(REPO_ROOT, ".github/scripts/fleet/render_managed_settings.ts"),
-              "--repo",
-              "smoke/test",
-              "--target-dir",
-              smokeDir,
-              "--out",
-              managed,
-            ],
-            [
-              "bun",
-              join(REPO_ROOT, ".github/scripts/fleet/merge_settings_layers.ts"),
-              "--managed",
-              managed,
-              "--repo-file",
-              join(smokeDir, ".github/settings.yml"),
-              "--out",
-              join(work, MERGED_SETTINGS),
-            ],
+          const outputPath = join(work, "step-output.txt");
+          const argv = [
+            "bun",
+            join(REPO_ROOT, ".github/scripts/fleet/settings_layers.ts"),
+            "--target-dir",
+            smokeDir,
+            "--scratch-dir",
+            join(work, "settings-layers"),
           ];
-          for (const argv of commands) {
-            const result = boundedSpawnSync(argv, { cwd: REPO_ROOT, env, timeoutMs: 120_000 });
-            if (result.exitCode !== 0) {
-              throw new Error(
-                `${argv.join(" ")} exited ${result.exitCode}\n${result.stdout}${result.stderr}`,
-              );
-            }
+          const result = boundedSpawnSync(argv, {
+            cwd: REPO_ROOT,
+            env: { ...process.env, GITHUB_OUTPUT: outputPath },
+            timeoutMs: 120_000,
+          });
+          if (result.exitCode !== 0) {
+            throw new Error(
+              `${argv.join(" ")} exited ${result.exitCode}\n${result.stdout}${result.stderr}`,
+            );
           }
+          const outputs = readFileSync(outputPath, "utf-8");
+          const layers = /^layers=(.*)$/m.exec(outputs)?.[1];
+          if (layers === undefined || layers === "") {
+            throw new Error(`settings_layers.ts published no layer list:\n${outputs}`);
+          }
+          writeFileSync(join(work, SETTINGS_LAYERS), `${layers.split(",").join("\n")}\n`);
           assembled = work;
         },
         { timeout: 120_000 },
       );
-      for (const row of applicable(MERGED_SETTINGS_EXPECTATIONS, selection)) {
+      for (const row of applicable(SETTINGS_LAYER_EXPECTATIONS, selection)) {
         test(`${row.name} [${row.when.label}]`, () => {
           runChecks(assembled, row.checks(selection), hint);
         });

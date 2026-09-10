@@ -1442,172 +1442,114 @@ export const MANIFEST_CLASSES: ManifestClassRow[] = [
   { when: not(has("custom-license")), path: "LICENSE.md", class: "split" },
 ];
 
-/** The centrally assembled settings document (the managed baseline merged
- * under the rendered starter, as the apply receives it), asserted against
- * hardcoded expectations: the module and visibility gating that used to
- * render into settings.yml lives in the assembly now. */
-export const MERGED_SETTINGS = "merged-settings.yml";
+/** The settings LAYER LIST the central apply hands github-settings-as-code's
+ * merge for this render (settings_layers.ts on the rendered tree), one path
+ * per line, plus the tracking-labels scratch layer it writes. The module and
+ * visibility gating that used to render into settings.yml lives in the layer
+ * selection now; the merge itself is the action's, proven by its own suite
+ * and the fleet's check_only runs. */
+export const SETTINGS_LAYERS = "settings-layers.txt";
+export const TRACKING_LAYER = "settings-layers/tracking-labels.yml";
 
 const label = (name: string) => ({ name });
-const mainRule = (rule: unknown) => [{ name: "main", rules: [rule] }];
+const STREAMS = anyOf("docs-site", "fuzzer", "nightly");
+const moduleLayer = (module: Module) => `templates/${module}/settings.yml`;
+const publicOverlay = (module: Module) => `templates/${module}/settings-public.yml`;
 
-export const MERGED_SETTINGS_EXPECTATIONS: Row[] = [
+export const SETTINGS_LAYER_EXPECTATIONS: Row[] = [
   {
-    // dependabot's base pair (dependabot recreates missing labels, so an
-    // undeclared one would loop delete/recreate nightly) plus the triage
-    // trio; the fleet rulesets with main's ONE required check pinned to
-    // the GitHub Actions app, and the review-thread gate. The retired
-    // copilot-pull-request-reviewer context must not render.
-    name: "the assembly carries the unconditional labels and the fleet rulesets",
+    // Every stack opens on the fleet baseline, carries the rendered
+    // starter as its repo layer, and closes on the fleet override.
+    name: "the stack carries the baseline, the repo layer, and the override",
     when: ALWAYS,
     checks: () => [
       {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["labels"],
-        matches: ["dependencies", "github_actions", "bug", "enhancement", "fix-lint"].map(label),
+        kind: "text",
+        path: SETTINGS_LAYERS,
+        hasLine: [".github/settings-baseline.yml", ".github/settings-override.yml"],
+        has: ["/.github/settings.yml"],
       },
-      {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["rulesets"],
-        matches: [
-          {
-            name: "main",
-            rules: [
-              {
-                type: "required_status_checks",
-                parameters: {
-                  required_status_checks: [{ context: "all-green", integration_id: 15368 }],
-                },
-              },
-              { type: "pull_request", parameters: { required_review_thread_resolution: true } },
-            ],
-          },
-          { name: "non-bypassable" },
-        ],
-      },
-      { kind: "text", path: MERGED_SETTINGS, lacks: ["copilot-pull-request-reviewer"] },
     ],
   },
   {
-    // Copilot reviews are disabled on private repos, so the auto-request
-    // rule is public-only; they stay advisory either way.
-    name: "the public overlay requests Copilot reviews",
+    // security_and_analysis and the Copilot review request live in the
+    // public overlay; the private one carries the report marker label.
+    name: "a public render takes the public fleet overlay",
     when: PUBLIC,
     checks: () => [
       {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["rulesets"],
-        matches: mainRule({ type: "copilot_code_review" }),
+        kind: "text",
+        path: SETTINGS_LAYERS,
+        hasLine: [".github/settings-public.yml"],
+        lacksLine: [".github/settings-private.yml"],
       },
     ],
   },
   {
-    name: "a private assembly requests no Copilot reviews",
-    when: PRIVATE,
-    checks: () => [{ kind: "text", path: MERGED_SETTINGS, lacks: ["copilot_code_review"] }],
-  },
-  {
-    // GitHub 422s the code_scanning rule on a private personal repo.
-    name: "the main ruleset carries the code_scanning rule under enable_codeql",
-    when: ENABLE_CODEQL,
-    checks: () => [
-      {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["rulesets"],
-        matches: mainRule({ type: "code_scanning" }),
-      },
-    ],
-  },
-  {
-    name: "no code_scanning rule without enable_codeql",
-    when: not(ENABLE_CODEQL),
-    checks: () => [{ kind: "text", path: MERGED_SETTINGS, lacks: ["type: code_scanning"] }],
-  },
-  {
-    // Private repos without Advanced Security reject the block; the
-    // settings-as-code-report marker label is the private-only counterpart.
-    name: "a public assembly enables secret scanning and carries no report marker",
-    when: PUBLIC,
-    checks: () => [
-      {
-        kind: "yaml-defined",
-        path: MERGED_SETTINGS,
-        at: ["repository", "security_and_analysis", "secret_scanning_push_protection"],
-      },
-      { kind: "text", path: MERGED_SETTINGS, lacks: ["settings-as-code-report"] },
-    ],
-  },
-  {
-    name: "a private assembly omits security_and_analysis and carries the report marker",
+    name: "a private render takes the private fleet overlay and no public module overlay",
     when: PRIVATE,
     checks: () => [
-      { kind: "yaml-absent", path: MERGED_SETTINGS, at: ["repository", "security_and_analysis"] },
-      { kind: "text", path: MERGED_SETTINGS, lacks: ["security_and_analysis:"] },
       {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["labels"],
-        matches: [label("settings-as-code-report")],
+        kind: "text",
+        path: SETTINGS_LAYERS,
+        hasLine: [".github/settings-private.yml"],
+        lacksLine: [".github/settings-public.yml"],
+        lacks: ["settings-public.yml"],
       },
     ],
   },
   ...(
     [
-      [anyOf("bun", "node"), "javascript", "name: javascript"],
-      [has("deno"), "deno", "name: deno"],
-      [has("uv"), "python:uv", "python:uv"],
-      [has("rust"), "rust", "name: rust"],
-    ] as [Condition, string, string][]
-  ).flatMap(([when, name, banned]): Row[] => [
+      "bun",
+      "node",
+      "deno",
+      "uv",
+      "rust",
+      "release-please",
+      "pages",
+      "docs-site",
+      "pr-title",
+    ] as Module[]
+  ).flatMap((module): Row[] => [
     {
-      name: `the ${name} dependabot label follows its toolchain`,
-      when,
-      checks: () => [
-        { kind: "yaml-matches", path: MERGED_SETTINGS, at: ["labels"], matches: [label(name)] },
-      ],
+      name: `${module} contributes its settings layer`,
+      when: has(module),
+      checks: () => [{ kind: "text", path: SETTINGS_LAYERS, hasLine: [moduleLayer(module)] }],
     },
     {
-      name: `no ${name} dependabot label without its toolchain`,
-      when: not(when),
-      checks: () => [{ kind: "text", path: MERGED_SETTINGS, lacks: [banned] }],
+      name: `no ${module} settings layer without the module`,
+      when: not(has(module)),
+      checks: () => [{ kind: "text", path: SETTINGS_LAYERS, lacksLine: [moduleLayer(module)] }],
+    },
+  ]),
+  ...(["bun", "node", "deno", "uv"] as Module[]).flatMap((module): Row[] => [
+    {
+      // GitHub 422s the code_scanning rule on a private personal repo, so
+      // the overlay carrying it joins only under enable_codeql.
+      name: `${module}'s code_scanning overlay joins under enable_codeql`,
+      when: and(PUBLIC, has(module)),
+      checks: () => [{ kind: "text", path: SETTINGS_LAYERS, hasLine: [publicOverlay(module)] }],
+    },
+    {
+      name: `no ${module} code_scanning overlay otherwise`,
+      when: not(and(PUBLIC, has(module))),
+      checks: () => [{ kind: "text", path: SETTINGS_LAYERS, lacksLine: [publicOverlay(module)] }],
     },
   ]),
   {
-    name: "release-please brings its labels and the release-tags ruleset",
-    when: has("release-please"),
+    name: "the tracking scratch layer sits between the module layers and the repo layer",
+    when: STREAMS,
     checks: () => [
-      {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["labels"],
-        matches: [
-          "autorelease: pending",
-          "autorelease: tagged",
-          "release-blocker",
-          "release-override",
-        ].map(label),
-      },
-      {
-        kind: "yaml-matches",
-        path: MERGED_SETTINGS,
-        at: ["rulesets"],
-        matches: [{ name: "release-tags" }],
-      },
+      { kind: "exists", path: TRACKING_LAYER },
+      { kind: "text", path: SETTINGS_LAYERS, has: ["/settings-layers/tracking-labels.yml"] },
     ],
   },
   {
-    name: "no release labels or ruleset without release-please",
-    when: not(has("release-please")),
+    name: "no tracking scratch layer without a stream module",
+    when: not(STREAMS),
     checks: () => [
-      {
-        kind: "text",
-        path: MERGED_SETTINGS,
-        lacks: ["autorelease:", "release-blocker", "release-override", "name: release-tags"],
-      },
+      { kind: "missing", path: TRACKING_LAYER },
+      { kind: "text", path: SETTINGS_LAYERS, lacks: ["tracking-labels.yml"] },
     ],
   },
   ...(
@@ -1621,37 +1563,20 @@ export const MERGED_SETTINGS_EXPECTATIONS: Row[] = [
       name: `${module} declares its ${name} tracking label`,
       when: has(module),
       checks: () => [
-        { kind: "yaml-matches", path: MERGED_SETTINGS, at: ["labels"], matches: [label(name)] },
+        { kind: "yaml-matches", path: TRACKING_LAYER, at: ["labels"], matches: [label(name)] },
       ],
     },
     {
       name: `no ${name} tracking label without ${module}`,
-      when: not(has(module)),
-      checks: () => [{ kind: "text", path: MERGED_SETTINGS, lacks: [name] }],
+      when: and(STREAMS, not(has(module))),
+      checks: () => [{ kind: "text", path: TRACKING_LAYER, lacks: [name] }],
     },
   ]),
-  {
-    name: "Pages enablement rides the pages and docs-site layers",
-    when: anyOf("pages", "docs-site"),
-    checks: () => [
-      {
-        kind: "yaml-equals",
-        path: MERGED_SETTINGS,
-        at: ["pages", "build_type"],
-        equals: "workflow",
-      },
-    ],
-  },
-  {
-    name: "no Pages enablement without pages or docs-site",
-    when: not(anyOf("pages", "docs-site")),
-    checks: () => [{ kind: "text", path: MERGED_SETTINGS, lacks: ["build_type:"] }],
-  },
 ];
 
 /** The modules some row conditions on, across every table. */
 export const GATED_MODULES: ReadonlySet<Module> = new Set(
-  [...EXPECTATIONS, ...MERGED_SETTINGS_EXPECTATIONS, ...MANIFEST_CLASSES].flatMap(
+  [...EXPECTATIONS, ...SETTINGS_LAYER_EXPECTATIONS, ...MANIFEST_CLASSES].flatMap(
     (row) => row.when.modules,
   ),
 );
