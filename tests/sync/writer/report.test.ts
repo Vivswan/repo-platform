@@ -47,6 +47,11 @@ describe("holdReasons", () => {
       replaced: [{ path: "ci.yml", diff: "" }],
       retired: [
         { path: "r.yml", outcome: "held", detail: "the content differs from the last write" },
+        {
+          path: "CONTRIBUTING.md",
+          outcome: "region removed",
+          detail: "retired; repository-owned content kept",
+        },
       ],
       notes: ["dropped unknown module `uv` (files.yml does not know it)"],
       mirrors: [
@@ -58,6 +63,7 @@ describe("holdReasons", () => {
       ".gitignore: the managed region was added above repository-owned content",
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",
+      "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
       "mirror s/L refused: the pattern uses '**'",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
     ]);

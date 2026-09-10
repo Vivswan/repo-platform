@@ -149,20 +149,21 @@ Without the rule, a managed file that becomes split would have the region prepen
 
 ## Retirement
 
-Retirement runs before writing. Rows appear only for files present.
+Retirement runs before writing. Rows appear only for files present. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since the platform never wrote it and it is not its to retire.
 
 | State of the retired file | Outcome |
 | --- | --- |
 | `managed`, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
-| `split`, region equals the recorded hash, repository-owned content outside it | `held` |
+| `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the PR holds this once. Next run the path is unrecorded and produces no row. |
+| `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
 | a symlink whose target hashes to the recorded hash, whatever class the record names | `deleted` (the link goes; what it points at is never touched) |
 | a symlink with another target; a regular file where a `link` was recorded | `held` |
-| content differs, no record, or a record without a hash | `held` |
+| content differs, or a record without a hash | `held` |
 | recorded as `starter` | `kept` (repo-owned) |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
-| `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: `deleted` on a hash match, else `held` |
+| `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: the outcomes above apply |
 
 A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file, a held entry, and a refused mirror target keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note, and so is a `mirror` record no declaration reaches any more (the copy stays as the repository's own; a mirror declared again adopts it while it still holds the source's content).
 
@@ -192,4 +193,4 @@ The registration's `mirrors` list (`source`, `targets`) copies a file this sync 
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
-`hold` is true on any held or `region added` written row, any replaced local edit, any held retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns.
+`hold` is true on any held or `region added` written row, any replaced local edit, any held or `region removed` retirement, any refused mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns.

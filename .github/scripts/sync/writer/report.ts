@@ -48,6 +48,11 @@ export function holdReasons(outcome: SyncOutcome): string[] {
   for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);
   for (const row of outcome.retired) {
     if (row.outcome === "held") reasons.push(`retirement of ${row.path} held: ${row.detail}`);
+    if (row.outcome === "region removed") {
+      reasons.push(
+        `retirement of ${row.path}: the managed region was removed and the repository-owned content kept`,
+      );
+    }
   }
   for (const row of outcome.mirrors) {
     if (row.outcome === "refused") reasons.push(`mirror ${row.target} refused: ${row.detail}`);

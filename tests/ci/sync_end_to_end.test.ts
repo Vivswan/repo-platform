@@ -1,7 +1,8 @@
 // The copy writer end to end: sync.ts as a subprocess over the fixture
 // files/ tree and a fixture git checkout carrying every state the writer
 // judges (a local edit in a managed file, a repo-owned tail in a split file,
-// an existing starter, a clean and an edited retired file, a move, a mirror
+// an existing starter, a clean and an edited retired file, a retired split
+// file with repository-owned content around its region, a move, a mirror
 // and a foreign mirror copy, an unknown module, a symlink recorded by the
 // previous pipeline at a link path and at a path nothing selects, a class
 // flip that matches its record and one that does not). The written tree,
@@ -50,6 +51,13 @@ const LOCAL_CI = "name: my own ci\non: push\n";
 const OLD_ANSWERS = "_commit: 0000000000000000000000000000000000000000\n";
 const RELEASE_EDITED = "name: release (hand tuned)\n";
 const OLD_SECURITY = "# Security policy (old home)\n";
+const HTML_BEGIN = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+const HTML_END = "<!-- END REPO-PLATFORM MANAGED -->";
+const OLD_CONTRIBUTING_REGION = `${HTML_BEGIN}\n# old contributing guide\n${HTML_END}\n`;
+// A repository-owned head and tail around the region: a blank line, a CRLF
+// line, and no trailing newline, so the handover is checked byte for byte.
+const CONTRIBUTING_HEAD = "# Contributing\n\n";
+const CONTRIBUTING_TAIL = "\nHouse rules:\r\n- open a PR";
 const STARTER = "name: my fuzz\non: workflow_dispatch\n";
 const OLD_STARTER = "name: an old starter, still mine\n";
 const OLD_NOTES = "# Notes (old home)\n";
@@ -71,6 +79,7 @@ function oldManifest(): string {
     ".github/workflows/release.yml": `{"class": "managed", "hash": "${sha256("name: release\n")}"}`,
     "SECURITY.md": `{"class": "managed", "hash": "${sha256(OLD_SECURITY)}"}`,
     "OLD_NOTES.md": `{"class": "managed", "hash": "${sha256(OLD_NOTES)}"}`,
+    "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "begin": "${HTML_BEGIN}", "end": "${HTML_END}", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
     ".github/workflows/nightly-fuzz.yml": `{"class": "starter"}`,
     ".github/workflows/old-starter.yml": `{"class": "starter"}`,
     ".github/workflows/deselected-starter.yml": `{"class": "starter"}`,
@@ -130,6 +139,7 @@ function seedTarget(): string {
     ".github/workflows/release.yml": RELEASE_EDITED,
     "SECURITY.md": OLD_SECURITY,
     "OLD_NOTES.md": OLD_NOTES,
+    "CONTRIBUTING.md": `${CONTRIBUTING_HEAD}${OLD_CONTRIBUTING_REGION}${CONTRIBUTING_TAIL}`,
     ".github/workflows/nightly-fuzz.yml": STARTER,
     ".github/workflows/old-starter.yml": OLD_STARTER,
     ".github/workflows/deselected-starter.yml": OLD_STARTER,
@@ -389,6 +399,11 @@ describe("sync.ts end to end", () => {
         detail: "retired (its new home docs/NOTES.md is not selected here)",
       },
       {
+        path: "CONTRIBUTING.md",
+        outcome: "region removed",
+        detail: "retired; repository-owned content kept",
+      },
+      {
         path: ".github/copilot-instructions.md",
         outcome: "deleted",
         detail: "no longer selected",
@@ -404,6 +419,10 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/release.yml")).toBe(RELEASE_EDITED);
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
     expect(read(".github/SECURITY.md")).toContain("Report issues to OwnerOrg privately.");
+    // The handover: markers and region gone, head and tail byte for byte.
+    expect(readFileSync(join(target, "CONTRIBUTING.md"))).toEqual(
+      Buffer.from(`${CONTRIBUTING_HEAD}${CONTRIBUTING_TAIL}`, "utf-8"),
+    );
   });
 
   test("mirrors the written files, literals before globs, refusing foreign and retired targets", () => {
@@ -540,6 +559,8 @@ describe("sync.ts end to end", () => {
     });
     expect(read(".github/workflows/deselected-starter.yml")).toBe(OLD_STARTER);
     expect(manifest.files["docs/NOTES.md"]).toBeUndefined();
+    // The handed-over split file's record left with its region.
+    expect(manifest.files["CONTRIBUTING.md"]).toBeUndefined();
     expect(manifest.files["skills/gamma/LICENSE.md"]).toEqual({
       class: "mirror",
       hash: sha256(OLD_LICENSE),
@@ -591,6 +612,7 @@ describe("sync.ts end to end", () => {
       ".dockerignore: the managed region was added above repository-owned content",
       "local edits replaced in .github/workflows/ci.yml",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
+      "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
       "retirement of LEGACY.md held: the record carries no hash",
       `mirror ${MANIFEST} refused: the pattern is a path files.yml writes`,
       "mirror SECURITY.md refused: the pattern is a path files.yml retires",
@@ -632,6 +654,10 @@ describe("sync.ts end to end", () => {
     ]);
     // The region-added file is now a marked split file: current, no longer held.
     expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(".dockerignore"));
+    // The handed-over split file is the repository's own now: no row, no hold.
+    expect(again.summary.holdReasons).not.toContainEqual(
+      expect.stringContaining("CONTRIBUTING.md"),
+    );
     // The local edit is gone and the unsafe record left the manifest; the
     // other reasons stand until a human acts.
     expect(again.summary.holdReasons).toEqual(
@@ -639,7 +665,8 @@ describe("sync.ts end to end", () => {
         (r) =>
           !r.startsWith("local edits") &&
           !r.includes("manifest record") &&
-          !r.startsWith(".dockerignore"),
+          !r.startsWith(".dockerignore") &&
+          !r.startsWith("retirement of CONTRIBUTING.md"),
       ),
     );
     expect(snapshot(target)).toEqual(before);

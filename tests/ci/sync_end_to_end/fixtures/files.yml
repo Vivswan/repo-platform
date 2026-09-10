@@ -2,7 +2,9 @@
 # split, a managed, and a starter entry (two modules declaring one block
 # value), a same-path pair split by module conditions, a visibility-gated
 # entry, two links, three class flips (one from a hash-less record, which
-# is held), and three retirements.
+# is held), and the retirements: clean, edited, moved, a starter, a move to
+# an unselected home, and a split file with repository-owned content around
+# its region.
 placeholders:
   - project_name
   - project_slug
@@ -97,3 +99,4 @@ retired:
   - path: .github/workflows/old-starter.yml
   - path: OLD_NOTES.md
     moved_to: docs/NOTES.md
+  - path: CONTRIBUTING.md
