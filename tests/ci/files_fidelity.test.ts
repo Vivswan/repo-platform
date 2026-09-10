@@ -7,12 +7,17 @@
 // Every difference is pinned: a path the writer never writes is listed with
 // its reason, and a file whose content differs is listed with the exact
 // transform of the golden that yields the writer's output, so an entry that
-// stops differing fails as stale.
+// stops differing fails as stale. Content a weekly refresh rewrites (the
+// toolchain pin dotfiles, the github/gitignore sections) is compared with
+// the templates side as it is now, not with the frozen bytes: the renders
+// cannot be re-frozen after a refresh, and the templates side is what they
+// rendered from.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { sectionsIn, templateRegionBody } from "../../scripts/generate/build_gitignore";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -26,6 +31,48 @@ const BUILD = "x".repeat(40);
 
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
+const TEMPLATES = join(REPO_ROOT, "templates");
+
+/** Refresh-owned paths: the module whose generated template dotfile is the
+ *  expected content (templates/<module>/<path>, kept current by
+ *  generate:check), instead of the frozen golden's copy. */
+const PIN_FILES: Record<string, string> = {
+  ".bun-version": "bun",
+  ".node-version": "node",
+  ".dvmrc": "deno",
+};
+
+/** Every github/gitignore section the templates side carries now, by
+ *  source path: the base template's OS sections plus every module
+ *  fragment's. */
+function currentSections(): Record<string, string> {
+  const texts = [
+    templateRegionBody(readFileSync(join(TEMPLATES, "base", ".gitignore.jinja"), "utf-8")),
+  ];
+  for (const module of readdirSync(TEMPLATES)) {
+    const fragment = join(TEMPLATES, module, "fragments", "gitignore.jinja");
+    if (existsSync(fragment)) texts.push(readFileSync(fragment, "utf-8"));
+  }
+  return Object.assign({}, ...texts.map(sectionsIn));
+}
+
+/** `region` with every github/gitignore section's text replaced by the
+ *  current one for its source path (a section runs from its heading to the
+ *  next heading or the END marker line, and keeps its trailing blank line). */
+export function refreshSections(region: string, current: Record<string, string>): string {
+  const headings = [...region.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)];
+  let out = "";
+  let cursor = 0;
+  headings.forEach((match, index) => {
+    const end =
+      index + 1 < headings.length ? headings[index + 1].index : region.indexOf(`${HASH_END}\n`);
+    const refreshed = current[match[1]];
+    if (refreshed === undefined) throw new Error(`no current section for ${match[1]}`);
+    out += `${region.slice(cursor, match.index)}${refreshed}\n`;
+    cursor = end;
+  });
+  return out + region.slice(cursor);
+}
 
 /** A starter the platform stopped writing is neither written nor retired
  *  (a retirement would only report it kept); the account's .github
@@ -82,7 +129,9 @@ const KNOWN: Record<string, Known> = {
   ".gitignore": {
     selections: SELECTIONS,
     reason:
-      "region only (the comment above BEGIN is repository-owned); one blank line before the first toolchain section instead of the composer's two; a source several selected modules declare lands once per module (writer gap: no cross-module block dedupe)",
+      "region only (the comment above BEGIN is repository-owned); one blank line before the first toolchain section instead of the composer's two;" +
+      " a source several selected modules declare lands once per module (writer gap: no cross-module block dedupe);" +
+      " the github/gitignore sections are the templates side's current ones (a refresh rewrites them)",
     expected: (golden, selection) => {
       let out = region(golden, HASH_BEGIN, HASH_END).replace(
         "nohup.out\n\n\n## ",
@@ -91,7 +140,7 @@ const KNOWN: Record<string, Known> = {
       if (selection === "all-modules") {
         out = repeatSharedSection(out, "Node", ["## Deno (", "## Python ("]);
       }
-      return out;
+      return refreshSections(out, currentSections());
     },
   },
   ".github/dependabot.yml": {
@@ -261,6 +310,7 @@ describe.each([...SELECTIONS])("files.yml reproduces the %s render", (selection)
       (path) =>
         !(path in ABSENT) &&
         !(path in NOT_COMPARED) &&
+        !(path in PIN_FILES) &&
         !knownHere.includes(path) &&
         !lstatSync(join(golden, path)).isSymbolicLink(),
     );
@@ -269,6 +319,16 @@ describe.each([...SELECTIONS])("files.yml reproduces the %s render", (selection)
       (path) => !readFileSync(join(golden, path)).equals(readFileSync(join(run.target, path))),
     );
     expect(differing).toEqual([]);
+  });
+
+  test("each pin dotfile is the templates side's generated dotfile, not the frozen copy", () => {
+    for (const path of goldenPaths.filter((path) => path in PIN_FILES)) {
+      const expected = readFileSync(join(TEMPLATES, PIN_FILES[path], path), "utf-8");
+      expect({ path, content: readFileSync(join(run.target, path), "utf-8") }).toEqual({
+        path,
+        content: expected,
+      });
+    }
   });
 
   test("each known difference is exactly its pinned transform of the golden", () => {
@@ -289,13 +349,52 @@ test("the fixture renders are the three kept golden selections", () => {
   expect(readdirSync(RENDERS).sort()).toEqual([...SELECTIONS].sort());
 });
 
-test("every listed absence and known difference names a path some golden renders", () => {
+test("every listed absence, known difference, and pin file names a path some golden renders", () => {
   const rendered = new Set(SELECTIONS.flatMap((selection) => walk(join(RENDERS, selection))));
   for (const path of [
     ...Object.keys(ABSENT),
     ...Object.keys(NOT_COMPARED),
     ...Object.keys(KNOWN),
+    ...Object.keys(PIN_FILES),
   ]) {
     expect({ path, rendered: rendered.has(path) }).toEqual({ path, rendered: true });
   }
+});
+
+describe("refreshSections", () => {
+  const region = [
+    HASH_BEGIN,
+    "# header",
+    "",
+    "## Windows (github/gitignore Global/Windows.gitignore)",
+    "Thumbs.db",
+    "",
+    "## Node (github/gitignore Node.gitignore)",
+    "node_modules/",
+    "",
+    "*.log",
+    "",
+    HASH_END,
+    "",
+  ].join("\n");
+  const current = {
+    "Global/Windows.gitignore":
+      "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n",
+    "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n\n*.log\n",
+  };
+
+  test("sections already current leave the region unchanged", () => {
+    expect(refreshSections(region, current)).toBe(region);
+  });
+
+  test("a refreshed upstream body replaces the frozen one, blank lines and markers kept", () => {
+    const refreshed = {
+      ...current,
+      "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n.next/\n",
+    };
+    expect(refreshSections(region, refreshed)).toBe(
+      region.replace("node_modules/\n\n*.log\n", "node_modules/\n.next/\n"),
+    );
+    expect(() => refreshSections(region, {})).toThrow("no current section for Global/Windows");
+  });
 });
