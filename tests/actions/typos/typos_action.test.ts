@@ -52,14 +52,17 @@ describe("actions/typos", () => {
     expect(Object.keys(config.default)).toEqual(["extend-ignore-re"]);
     // The patterns as regexes (the (?Rm) prefix is typos' CRLF+multiline
     // flag): the hex ignore must cover a sha and leave an ordinary word
-    // alone, the inline marker must cover only a line carrying it.
+    // alone, the inline marker must cover only a line carrying it, under
+    // either comment leader.
     const [hex, marker] = (config.default["extend-ignore-re"] as string[]).map(
       (pattern) => new RegExp(pattern.replace("(?Rm)", ""), "m"),
     );
     expect(hex.test("598b829d7f507749e4e05469a31ddcfc9a7404c7")).toBe(true);
     expect(hex.test("teh quick fox")).toBe(false);
     expect(marker.test("const teh = 1; # typos: ignore")).toBe(true);
+    expect(marker.test("const teh = 1; // typos: ignore")).toBe(true);
     expect(marker.test("const teh = 1;")).toBe(false);
+    expect(marker.test("const teh = 1; // typos are ignored elsewhere")).toBe(false);
   });
 
   test("this repository's own _typos.toml only adds words and excludes this suite's fixtures", () => {

@@ -10,6 +10,6 @@ extend-exclude = ["*.lock", "*.lockb", "package-lock.json", "*.min.js", "*.min.c
 extend-ignore-re = [
   # Hex digests (commit shas, checksums) of seven or more nibbles.
   "\\b[0-9a-f]{7,}\\b",
-  # A line ending in `# typos: ignore` opts itself out.
-  "(?Rm)^.*#\\s*typos:\\s*ignore.*$",
+  # A line ending in `# typos: ignore` or `// typos: ignore` opts itself out.
+  "(?Rm)^.*(#|//)\\s*typos:\\s*ignore.*$",
 ]

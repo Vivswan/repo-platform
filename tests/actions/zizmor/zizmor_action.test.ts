@@ -1,9 +1,11 @@
-// The zizmor action's contract: the fleet policy is passed unless the
+// The zizmor action's contract: the fleet policy is copied into the
+// workspace (the upstream container mounts nothing else) unless the
 // repository carries its own, the SARIF pass is visibility-keyed and never
-// the verdict, and the verdict pass fails on high alone.
+// the verdict, the verdict pass fails on high alone, and the copy is
+// removed whatever the passes said.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
@@ -11,11 +13,13 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const action = loadAction("actions/zizmor/action.yml");
-const [resolve, upload, gate] = action.runs.steps;
+const [resolve, upload, gate, cleanup] = action.runs.steps;
+const ACTION_DIR = join(REPO_ROOT, "actions/zizmor");
+const COPY = ".zizmor-fleet-policy.yml";
 const UPSTREAM = /^zizmorcore\/zizmor-action@[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
 
 describe("actions/zizmor", () => {
-  test("one input (the upload switch), three steps: resolve, upload, gate", () => {
+  test("one input (the upload switch), four steps: resolve, upload, gate, cleanup", () => {
     expect(action.runs.using).toBe("composite");
     expect(Object.keys(action.inputs ?? {})).toEqual(["upload-sarif"]);
     expect(action.inputs?.["upload-sarif"]?.default).toBe("true");
@@ -23,6 +27,7 @@ describe("actions/zizmor", () => {
       "Resolve the policy",
       "Upload every finding to code scanning",
       "Fail on a high finding",
+      "Remove the copied policy",
     ]);
   });
 
@@ -56,26 +61,42 @@ describe("actions/zizmor", () => {
     expect(gate.with).toMatchObject({ "advanced-security": false, "min-severity": "high" });
   });
 
-  const resolvePolicy = (repo: string) =>
-    runBashStep(stepNamed(action, "Resolve the policy"), {
-      fills: { "${{ github.action_path }}": "/opt/action" },
+  const runStep = (name: string, repo: string) =>
+    runBashStep(stepNamed(action, name), {
+      fills: { "${{ github.action_path }}": ACTION_DIR },
       cwd: repo,
       root: repo,
     });
 
-  test("resolve: the fleet policy beside the action when the repository has none", () => {
+  test("resolve: the fleet policy beside the action is copied into the workspace when the repository has none", () => {
     const repo = temp.dir("zizmor-none-");
-    const run = resolvePolicy(repo);
-    expect([run.exitCode, run.outputs]).toEqual([0, { path: "/opt/action/zizmor.yml" }]);
+    const run = runStep("Resolve the policy", repo);
+    // A workspace-relative path: the container sees /workspace, never the
+    // runner's action path.
+    expect([run.exitCode, run.outputs]).toEqual([0, { path: COPY }]);
+    expect(readFileSync(join(repo, COPY), "utf8")).toBe(
+      readFileSync(join(ACTION_DIR, "zizmor.yml"), "utf8"),
+    );
     expect(resolve.id).toBe("policy");
   });
 
-  test("resolve: the repository's own .github/zizmor.yml replaces the fleet policy", () => {
+  test("resolve: the repository's own .github/zizmor.yml replaces the fleet policy and nothing is copied", () => {
     const repo = temp.dir("zizmor-own-");
     mkdirSync(join(repo, ".github"));
     writeFileSync(join(repo, ".github/zizmor.yml"), "rules: {}\n");
-    const run = resolvePolicy(repo);
+    const run = runStep("Resolve the policy", repo);
     expect([run.exitCode, run.outputs]).toEqual([0, { path: ".github/zizmor.yml" }]);
+    expect(existsSync(join(repo, COPY))).toBe(false);
+  });
+
+  test("cleanup: always runs, removes the copy, and is a no-op when nothing was copied", () => {
+    expect(cleanup.if).toBe("always()");
+    const repo = temp.dir("zizmor-cleanup-");
+    runStep("Resolve the policy", repo);
+    expect(existsSync(join(repo, COPY))).toBe(true);
+    expect(runStep("Remove the copied policy", repo).exitCode).toBe(0);
+    expect(existsSync(join(repo, COPY))).toBe(false);
+    expect(runStep("Remove the copied policy", repo).exitCode).toBe(0);
   });
 
   test("the fleet policy: ref pins for the delivery channel only, sha pins elsewhere at medium, two managed-file ignores", () => {

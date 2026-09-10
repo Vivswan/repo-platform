@@ -53,9 +53,14 @@ case "$method" in
         ;;
       repos/${SLUG}/issues)
         echo "31"
-        # vanish: the NEXT spawn (the assignees POST) finds no gh at all,
-        # so Bun.spawnSync throws instead of returning a nonzero exit.
-        if [ "\${GH_FAIL:-}" = "vanish" ]; then rm -- "$0"; fi
+        # vanish: the NEXT spawn (the assignees POST) must make
+        # Bun.spawnSync throw instead of returning a nonzero exit. Removing
+        # the stub is not enough: bun's PATH search skips a missing entry
+        # and runs the next gh on PATH (the runner's real one). A dead
+        # interpreter line is still resolved on PATH and fails at exec.
+        if [ "\${GH_FAIL:-}" = "vanish" ]; then
+          printf '#!/nonexistent/gh\\n' >"$0.next" && chmod 755 "$0.next" && mv -f -- "$0.next" "$0"
+        fi
         ;;
     esac
     ;;
@@ -82,6 +87,16 @@ function run(mode: string | undefined, opts: Options = {}) {
   mkdirSync(temp);
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
+  // A second gh right behind the stub on PATH. bun's search falls through
+  // to the next entry when the stub is missing or unexecutable, which once
+  // ran the machine's real gh (network, unbounded time); reaching this one
+  // is a harness fault, never a result.
+  const behind = join(root, "behind");
+  const fellThrough = join(root, "fell-through");
+  mkdirSync(behind);
+  writeFileSync(join(behind, "gh"), `#!/usr/bin/env bash\ntouch "$GH_FELL_THROUGH"\nexit 1\n`, {
+    mode: 0o755,
+  });
   const calls = join(root, "calls.log");
   const bodyOut = join(root, "delivered-body.md");
   if (opts.failures || opts.rawRows) {
@@ -99,7 +114,8 @@ function run(mode: string | undefined, opts: Options = {}) {
   const proc = boundedSpawnSync(["bun", script, ...(mode === undefined ? [] : [mode])], {
     env: {
       ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${bin}:${behind}:${process.env.PATH}`,
+      GH_FELL_THROUGH: fellThrough,
       RUNNER_TEMP: temp,
       TARGET: SLUG,
       RUN_URL: "https://github.com/Vivswan/repo-platform/actions/runs/123",
@@ -112,6 +128,11 @@ function run(mode: string | undefined, opts: Options = {}) {
       ...opts.env,
     },
   });
+  if (existsSync(fellThrough)) {
+    throw new Error(
+      "a gh call fell through the stub to the next PATH entry - failed to look, not a result",
+    );
+  }
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,

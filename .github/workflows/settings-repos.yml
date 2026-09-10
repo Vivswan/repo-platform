@@ -306,9 +306,10 @@ jobs:
         # step writes no document, because
         # applying the baseline alone would delete the repo's own labels.
         if: steps.freshness.outputs.moved == 'false'
-        # Pinned to an immutable commit; bump to @v1 once the action cuts
-        # its first release.
-        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
+        # Pinned to an immutable commit that is on none of the action's
+        # branches or tags, hence the impostor-commit ignore; the pin moves
+        # to the action's packaged latest branch in a separate PR.
+        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3 # zizmor: ignore[impostor-commit]
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}

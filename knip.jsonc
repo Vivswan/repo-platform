@@ -12,15 +12,29 @@
       "ignoreBinaries": ["actionlint", "gitleaks", "uvx"]
     },
     "actions/*": {
-      // Action entrypoints run by path from action.yml.
-      "entry": ["*.ts", "src/**/*.ts", "validator/**/*.ts"],
+      // Action entrypoints run by path from action.yml, at the action root.
+      "entry": ["*.ts"],
+      "project": ["**/*.{ts,mts}"]
+    },
+    "actions/module-render": {
+      "entry": ["src/admit.ts", "src/render.ts"],
+      "project": ["**/*.{ts,mts}"]
+    },
+    "actions/validate-template-report": {
+      // The three orchestrator scripts and the validator directory action.yml runs.
+      "entry": [
+        "src/aligned/fetch.ts",
+        "src/aligned/judge.ts",
+        "src/report.ts",
+        "validator/validate_generated_files.ts"
+      ],
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {
       // The two scripts action.yml runs; the vitepress plugin adds the config and theme, and vitepress
       // consumes the data loaders' default exports, which is why entry exports are not judged here.
       "entry": ["build.ts", "check_links.ts", ".vitepress/**/*.data.ts"],
-      "project": ["**/*.{ts,mts}"],
+      "project": ["**/*.{ts,mts,vue}"],
       "includeEntryExports": false,
       // @localSearchIndex is vitepress's virtual module; shiki and markdown-it are imported directly but arrive through vitepress.
       "ignoreDependencies": ["@localSearchIndex", "shiki", "markdown-it"]

@@ -31,5 +31,4 @@ runs:
       env:
         CONFIG_FLAG: ${{ steps.config.outputs.flag }}
       # Unquoted on purpose: the flag is two words or empty.
-      # shellcheck disable=SC2086
       run: npx --yes knip@6.35.1 $CONFIG_FLAG

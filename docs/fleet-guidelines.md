@@ -96,19 +96,20 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Rule: a blocking check is bypassed only through its tool's own per-finding mechanism, in the repository, visible in the diff, with a reason beside it. No job-level switch, environment variable, or label skips a check.
 - Why: a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
 - How: the table below, one row per check fleet-ci.yml runs. A repo-owned config file (`.github/zizmor.yml`, `knip.json`) replaces the fleet default for that tool; `_typos.toml` extends it.
+- The fleet knip default adds nothing to what knip finds on its own: `index`, `cli`, and `main` at the root or under `src/`; package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; and test files when a `bun test` script exists (knip's bun plugin). A repository whose tests run through a launcher script instead, whose composite actions live outside `.github/`, or whose scripts run by path from anywhere else needs its own `knip.json` naming them under `entry`, or knip reports them as unused files.
 
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|
-| actionlint | base-checks | any finding | a `# shellcheck disable=SCnnnn` comment on the line (shellcheck findings); an `actionlint.yaml` config for the rest |
+| actionlint | base-checks | any finding | a `# shellcheck disable=SCnnnn` comment on the line above the command (shellcheck findings); the repo-owned `.github/actionlint.yaml` for the rest |
 | yamllint | base-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line; the repo-owned `.yamllint` |
 | gitleaks | base-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | base-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
 | file-size | base-checks | nothing (advisory) | a `comment-cap: ignore <reason>` line inside or above the block |
 | commit-names | base-checks | a non-conventional subject | none: reword the commit |
-| typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (`[default.extend-words]`, `[default.extend-identifiers]`, `[files] extend-exclude`), or `# typos: ignore` on the line |
-| zizmor | zizmor | a high finding | a `# zizmor: ignore[rule] reason` comment on the finding; a `rules.<rule>.ignore` entry in the repo-owned `.github/zizmor.yml` |
+| typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (`[default.extend-words]`, `[default.extend-identifiers]`, `[files] extend-exclude`), or `# typos: ignore` or `// typos: ignore` at the end of the line |
+| zizmor | zizmor | a high finding | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it; a `rules.<rule>.ignore` entry naming the file in the repo-owned `.github/zizmor.yml` |
 | knip | knip (bun or node repos) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
-| semgrep | semgrep (public repos) | an ERROR finding | a `// nosemgrep: rule-id` comment on the line above the finding |
+| semgrep | semgrep (public repos) | an ERROR finding | a `// nosemgrep: rule-id` comment on the finding's line or the line above it |
 | dependency-review | dependency-review | a vulnerable dependency at or above low | none: upgrade or drop the dependency |
 | CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |
 
