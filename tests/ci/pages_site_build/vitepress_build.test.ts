@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tierRouteGuard } from "../../../actions/pages-site/.vitepress/theme/tier-routes.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 import {
@@ -130,6 +131,37 @@ describe("the versioned vitepress deploy", () => {
     const v020 = readSite(site, "v0.2.0/index.html");
     expect(v020).toContain('aria-current="true">v0.2.0</a>');
     expect(v020).toContain("Built from v0.2.0");
+  });
+
+  test("hands the landing's other-version links to the browser and routes the tier's own pages", () => {
+    // The guard judges the links the build EMITTED (the facts card's
+    // versions, the launcher's first page row) under each tier's base, as
+    // the client does: a version link the router served itself was the
+    // SPA's 404 until a reload.
+    const verdicts = (rel: string, base: string) => {
+      const html = readSite(site, `${rel}index.html`);
+      const roots = select(html, "select.docs-site-version-switcher option").map(
+        (o) => o.attrs.value,
+      );
+      const left: string[] = [];
+      const guard = tierRouteGuard(base, roots, { here: () => base, leave: (to) => left.push(to) });
+      const links = [
+        ...select(html, ".fleet-facts-items a"),
+        ...select(html, "a.fleet-launcher-link").slice(0, 1),
+      ];
+      const hrefs = links.map((a) => a.attrs.href);
+      const routed = hrefs.filter((href) => guard(href) === undefined);
+      return { routed, left };
+    };
+    expect(verdicts("", "/fixture-repo/")).toEqual({
+      routed: ["/fixture-repo/setup.html"],
+      left: ["/fixture-repo/latest/", "/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
+    });
+    expect(verdicts("latest/", "/fixture-repo/latest/")).toEqual({
+      routed: ["/fixture-repo/latest/", "/fixture-repo/latest/setup.html"],
+      left: ["/fixture-repo/v0.2.0/", "/fixture-repo/v0.1.0/"],
+    });
+    expect(latestAssets).toContain("onBeforeRouteChange=");
   });
 
   test("wraps every table in the scroll wrapper, which is the one tab stop", () => {
