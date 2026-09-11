@@ -50,6 +50,8 @@ import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import {
   ANSWERS_PATH,
   AnswersFileError,
+  AnswersFileMissingError,
+  type CopierAnswers,
   readAnswersBytes,
   readAnswersFile,
 } from "./answers_file.ts";
@@ -87,6 +89,11 @@ export class RecoveryNeededError extends RehearsalError {}
  * default branch); production's selector skips these, so the fleet report
  * files them as skips, not failures. */
 export class NotManagedError extends RehearsalError {}
+
+/** The target registered through the sync writer path (.repo-platform.yml
+ * present, no copier answers file): the copier rehearsal cannot model it,
+ * so the fleet report files it as a skip, not a failure. */
+export class WriterRegisteredError extends RehearsalError {}
 
 export interface ConflictedFile {
   file: string;
@@ -146,6 +153,37 @@ function describeCommand(command: string[]): string {
     }
   }
   return command[0];
+}
+
+/** The target's recorded copier answers, or the typed reason the rehearsal
+ * cannot proceed: not adopted (no .repo-platform.yml), registered through
+ * the writer path (adopted, no answers file), or adopted but broken (an
+ * unreadable answers file, no _commit) - a failure, not a skip, since
+ * production's copier legs would fail on it too. */
+export function recordedAnswers(slug: string, targetDir: string): CopierAnswers {
+  if (!existsSync(join(targetDir, ".repo-platform.yml"))) {
+    throw new NotManagedError(
+      `${slug} is not managed by repo-platform: .repo-platform.yml is missing from its default branch`,
+    );
+  }
+  let answers: CopierAnswers;
+  try {
+    answers = readAnswersFile(targetDir);
+  } catch (err) {
+    if (err instanceof AnswersFileMissingError) {
+      throw new WriterRegisteredError(
+        `${slug} has no ${ANSWERS_PATH}: the sync writer path serves this repository, which the copier rehearsal cannot model`,
+      );
+    }
+    if (!(err instanceof AnswersFileError)) throw err;
+    throw new RehearsalError(`${slug}'s ${ANSWERS_PATH}: ${err.message}`);
+  }
+  if (answers.commit === "") {
+    throw new RehearsalError(
+      `${slug}'s ${ANSWERS_PATH} records no _commit; there is no base to update from`,
+    );
+  }
+  return answers;
 }
 
 /** Subprocess runners that throw RehearsalError instead of exiting, so the
@@ -335,26 +373,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     }
     const origHead = runCaptured(["git", "-C", targetDir, "rev-parse", "HEAD"]).stdout.trim();
 
-    if (!existsSync(join(targetDir, ".repo-platform.yml"))) {
-      throw new NotManagedError(
-        `${slug} is not managed by repo-platform: .repo-platform.yml is missing from its default branch`,
-      );
-    }
-    // Adopted but broken (a missing or unreadable answers file included)
-    // is a failure, not a skip: production's selector only gates on
-    // .repo-platform.yml, and the sync leg would fail here.
-    let answers: ReturnType<typeof readAnswersFile>;
-    try {
-      answers = readAnswersFile(targetDir);
-    } catch (err) {
-      if (!(err instanceof AnswersFileError)) throw err;
-      throw new RehearsalError(`${slug}'s ${ANSWERS_PATH}: ${err.message}`);
-    }
-    if (answers.commit === "") {
-      throw new RehearsalError(
-        `${slug}'s ${ANSWERS_PATH} records no _commit; there is no base to update from`,
-      );
-    }
+    const answers = recordedAnswers(slug, targetDir);
     // Recorded answers stand in for the workflow's live API read (parity gap
     // in the header): the render still gets real per-repo values.
     const privateAnswer = answers.fields.private === true ? "true" : "false";
@@ -776,6 +795,7 @@ export const fleetOutcomeSchema = z.discriminatedUnion("kind", [
     }),
   }),
   z.object({ kind: z.literal("not-managed"), reason: z.string() }),
+  z.object({ kind: z.literal("writer-registered"), reason: z.string() }),
   z.object({ kind: z.literal("recovery-needed"), reason: z.string() }),
   z.object({ kind: z.literal("failed"), reason: z.string() }),
 ]);
@@ -814,9 +834,11 @@ function main(): number {
       message =
         err instanceof NotManagedError
           ? { kind: "not-managed", reason }
-          : err instanceof RecoveryNeededError
-            ? { kind: "recovery-needed", reason }
-            : { kind: "failed", reason };
+          : err instanceof WriterRegisteredError
+            ? { kind: "writer-registered", reason }
+            : err instanceof RecoveryNeededError
+              ? { kind: "recovery-needed", reason }
+              : { kind: "failed", reason };
     }
     writeFileSync(outFile, JSON.stringify(message), "utf-8");
     return 0;

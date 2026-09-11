@@ -12,6 +12,7 @@ import {
   RecoveryNeededError,
   RehearsalError,
   type RehearsalOutcome,
+  WriterRegisteredError,
 } from "../../.github/scripts/sync/rehearse.ts";
 import {
   enumerateFleet,
@@ -22,6 +23,7 @@ import {
   outcomeRow,
   phaseOf,
   privateDisplayNames,
+  type RowSeverity,
   rehearseFleet,
   runPool,
   statusTally,
@@ -198,17 +200,49 @@ describe("laneOutcome", () => {
     expect(() => laneOutcome('{"kind": "nonsense"}', "o/r")).toThrow("unexpected shape");
   });
 
-  test("typed skips re-throw their typed errors, keeping failureRow's one mapping", () => {
-    expect(() => laneOutcome(JSON.stringify({ kind: "not-managed", reason: "r" }), "o/r")).toThrow(
-      NotManagedError,
-    );
-    expect(() =>
-      laneOutcome(JSON.stringify({ kind: "recovery-needed", reason: "r" }), "o/r"),
-    ).toThrow(RecoveryNeededError);
-    expect(() => laneOutcome(JSON.stringify({ kind: "failed", reason: "boom" }), "o/r")).toThrow(
-      "boom",
-    );
-  });
+  test.each<{
+    kind: string;
+    error: new (message: string) => Error;
+    status: string;
+    severity: RowSeverity;
+  }>([
+    {
+      kind: "not-managed",
+      error: NotManagedError,
+      status: "skipped (not adopted)",
+      severity: "ok",
+    },
+    {
+      kind: "writer-registered",
+      error: WriterRegisteredError,
+      status: "skipped (writer-registered)",
+      severity: "ok",
+    },
+    {
+      kind: "recovery-needed",
+      error: RecoveryNeededError,
+      status: "recovery needed",
+      severity: "warning",
+    },
+    { kind: "failed", error: Error, status: "REHEARSAL FAILED", severity: "error" },
+  ])(
+    "a $kind envelope re-throws its typed error and files as its row, reason carried",
+    ({ kind, error, status, severity }) => {
+      let caught: unknown;
+      try {
+        laneOutcome(JSON.stringify({ kind, reason: `o/r: the ${kind} reason` }), "o/r");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(error);
+      expect(failureRow("o/r", caught)).toEqual({
+        repo: "o/r",
+        status,
+        detail: `o/r: the ${kind} reason`,
+        severity,
+      });
+    },
+  );
 });
 
 describe("rehearseFleet failure handling", () => {
@@ -326,6 +360,19 @@ describe("failureRow", () => {
         repo: "o/r",
         status: "skipped (not adopted)",
         detail: "o/r is not managed by repo-platform",
+        severity: "ok",
+      },
+    },
+    {
+      reason: "a writer-registered repo files as a skip: the copier rehearsal cannot model it",
+      err: new WriterRegisteredError(
+        "o/r has no .github/.copier-answers.yml: the sync writer path serves this repository, which the copier rehearsal cannot model",
+      ),
+      expected: {
+        repo: "o/r",
+        status: "skipped (writer-registered)",
+        detail:
+          "o/r has no .github/.copier-answers.yml: the sync writer path serves this repository, which the copier rehearsal cannot model",
         severity: "ok",
       },
     },
@@ -624,14 +671,17 @@ describe("summary formatting", () => {
     expect(summaryLine(row)).toBe(expected);
   });
 
-  test("statusTally buckets per-file conflict statuses together", () => {
+  test("statusTally buckets per-file conflict statuses together and counts every skip", () => {
     expect(
       statusTally([
         ...rows,
         { repo: "o/c1", status: "2 conflict(s)", detail: "", severity: "ok" },
         { repo: "o/c2", status: "1 conflict(s)", detail: "", severity: "ok" },
+        failureRow("o/w", new WriterRegisteredError("o/w has no answers file")),
       ]),
-    ).toBe("1 clean, 1 skipped (private), 1 REHEARSAL FAILED, 2 with conflicts");
+    ).toBe(
+      "1 clean, 1 skipped (private), 1 REHEARSAL FAILED, 2 with conflicts, 1 skipped (writer-registered)",
+    );
   });
 
   test("summaryTable aligns the repo and status columns under a header", () => {

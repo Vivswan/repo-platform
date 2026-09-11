@@ -34,6 +34,12 @@ export interface CopierAnswers {
  * print it. */
 export class AnswersFileError extends Error {}
 
+/** No answers file at ANSWERS_PATH at all (the file or a parent directory
+ * absent). A repository the sync writer path registered never has one, so
+ * callers that must tell absence from a present-but-unusable file catch
+ * this subclass. */
+export class AnswersFileMissingError extends AnswersFileError {}
+
 function commitOf(text: string): string {
   // logLevel error: the parser's default level prints warned-on source
   // lines (an explicit !!tag) to stderr, which would leak target-controlled
@@ -59,7 +65,8 @@ export const ANSWERS_PATH = ".github/.copier-answers.yml";
  * order the steps run. */
 export function readAnswersBytes(targetDir: string): Buffer {
   const parents = walkParents(targetDir, ANSWERS_PATH);
-  if (parents.kind === "missing") throw new AnswersFileError("missing from the default branch");
+  if (parents.kind === "missing")
+    throw new AnswersFileMissingError("missing from the default branch");
   if (parents.kind === "not-a-directory") {
     throw new AnswersFileError(
       `${parents.segment} is not a real directory (a symlink or a file); the sync refuses to read through it`,
@@ -74,7 +81,7 @@ export function readAnswersBytes(targetDir: string): Buffer {
     // EIO, ELOOP) is not, and propagates.
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
-    throw new AnswersFileError("missing from the default branch");
+    throw new AnswersFileMissingError("missing from the default branch");
   }
   if (!kind.isFile()) {
     throw new AnswersFileError(

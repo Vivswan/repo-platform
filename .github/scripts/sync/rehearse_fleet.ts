@@ -35,14 +35,15 @@ import {
   NotManagedError,
   RecoveryNeededError,
   type RehearsalOutcome,
+  WriterRegisteredError,
 } from "./rehearse.ts";
 import { SHRANK_PHRASE } from "./tail_tripwire.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
 /** How a row counts under --gate: "error" fails the gate, "warning"
- * annotates without failing, "ok" is silent (clean rows, both skip
- * shapes, and auto-resolved conflicts - production delivers those through
+ * annotates without failing, "ok" is silent (clean rows, every skip
+ * shape, and auto-resolved conflicts - production delivers those through
  * a reviewable PR, so they are report material, not a regression). */
 export type RowSeverity = "ok" | "warning" | "error";
 
@@ -157,13 +158,17 @@ export function outcomeRow(slug: string, outcome: RehearsalOutcome): FleetRow {
   };
 }
 
-/** The row for a rehearsal that threw: non-adoption and the unresolvable
- * recorded _commit get their own statuses, everything else is a one-line
- * failure naming the pipeline phase when a known leg script threw. */
+/** The row for a rehearsal that threw: non-adoption, writer registration,
+ * and the unresolvable recorded _commit get their own statuses, everything
+ * else is a one-line failure naming the pipeline phase when a known leg
+ * script threw. */
 export function failureRow(slug: string, err: unknown): FleetRow {
   const reason = (err instanceof Error ? err.message : String(err)).split("\n")[0];
   if (err instanceof NotManagedError) {
     return { repo: slug, status: "skipped (not adopted)", detail: reason, severity: "ok" };
+  }
+  if (err instanceof WriterRegisteredError) {
+    return { repo: slug, status: "skipped (writer-registered)", detail: reason, severity: "ok" };
   }
   if (err instanceof RecoveryNeededError) {
     return { repo: slug, status: "recovery needed", detail: reason, severity: "warning" };
@@ -429,6 +434,8 @@ export function laneOutcome(envelopeText: string, slug: string): RehearsalOutcom
       return message.outcome;
     case "not-managed":
       throw new NotManagedError(message.reason);
+    case "writer-registered":
+      throw new WriterRegisteredError(message.reason);
     case "recovery-needed":
       throw new RecoveryNeededError(message.reason);
     case "failed":
