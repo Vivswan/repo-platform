@@ -1,8 +1,9 @@
 // The typos action's contract: one pinned upstream step, the fleet
 // allowlist passed as --config (typos layers it over the file it discovers
 // at the checkout root, so a repository's _typos.toml extends it), and a
-// fleet allowlist that excludes only generated files and hashes and accepts
-// one spelling variant - proved on the patterns themselves, and end to end
+// fleet allowlist that excludes only generated files, hashes, and the
+// hyphenated mis- prefix and accepts one spelling variant - proved on the
+// patterns themselves, and end to end
 // with a typos binary on PATH: skipped without one locally, mandatory under
 // TYPOS_REQUIRED=1 (the ci.yml script-tests job installs the action's
 // pinned release and sets it).
@@ -36,7 +37,7 @@ describe("actions/typos", () => {
     expect(pinLine).toMatch(/ # v\d+\.\d+\.\d+$/);
   });
 
-  test("the fleet allowlist: generated-file excludes, two ignore patterns, and one spelling variant", () => {
+  test("the fleet allowlist: generated-file excludes, three ignore patterns, and one spelling variant", () => {
     const config = Bun.TOML.parse(readFileSync(FLEET_CONFIG, "utf8")) as Record<
       string,
       Record<string, unknown>
@@ -61,19 +62,32 @@ describe("actions/typos", () => {
     expect(Object.keys(config.default).sort()).toEqual(["extend-ignore-re", "extend-words"]);
     // The only accepted word: a variant typos corrects to unparsable.
     expect(config.default["extend-words"]).toEqual({ unparseable: "unparseable" });
-    // The patterns as regexes (the (?Rm) prefix is typos' CRLF+multiline
-    // flag): the hex ignore must cover a sha and leave an ordinary word
-    // alone, the inline marker must cover only a line carrying it, under
-    // either comment leader.
-    const [hex, marker] = (config.default["extend-ignore-re"] as string[]).map(
-      (pattern) => new RegExp(pattern.replace("(?Rm)", ""), "m"),
-    );
+    // The patterns as regexes, typos' leading inline flags mapped to JS
+    // flags (R, its CRLF flag, has none): the hex ignore must cover a sha
+    // and leave an ordinary word alone, the inline marker must cover only a
+    // line carrying it, under either comment leader, and the mis- ignore
+    // must cover the hyphenated prefix in any case, never a bare `mis` or a
+    // word that merely ends in it.
+    const patterns = config.default["extend-ignore-re"] as string[];
+    expect(patterns).toHaveLength(3);
+    const [hex, marker, misPrefix] = patterns.map((pattern) => {
+      const flags = /^\(\?([a-zA-Z]+)\)/.exec(pattern);
+      return new RegExp(
+        flags ? pattern.slice(flags[0].length) : pattern,
+        flags ? flags[1].replace("R", "") : "",
+      );
+    });
     expect(hex.test("598b829d7f507749e4e05469a31ddcfc9a7404c7")).toBe(true);
     expect(hex.test("teh quick fox")).toBe(false);
     expect(marker.test("const teh = 1; # typos: ignore")).toBe(true);
     expect(marker.test("const teh = 1; // typos: ignore")).toBe(true);
     expect(marker.test("const teh = 1;")).toBe(false);
     expect(marker.test("const teh = 1; // typos are ignored elsewhere")).toBe(false);
+    expect(misPrefix.test("the parser mis-parses it")).toBe(true);
+    expect(misPrefix.test("Mis-set")).toBe(true);
+    expect(misPrefix.test("MIS-SET")).toBe(true);
+    expect(misPrefix.test("a bare mis word")).toBe(false);
+    expect(misPrefix.test("amis-")).toBe(false);
   });
 
   test("this repository's own _typos.toml only adds words and excludes this suite's fixtures", () => {
@@ -105,12 +119,19 @@ describe("actions/typos", () => {
       cwd: repo,
     });
 
-  endToEnd("end to end: an ordinary typo fails under the fleet config", () => {
-    const repo = temp.dir("typos-e2e-");
-    writeFileSync(join(repo, "a.md"), "teh quick fox\n");
-    const run = typos(repo);
-    expect([run.exitCode, run.stdout.includes("`teh`")]).toEqual([2, true]);
-  });
+  endToEnd(
+    "end to end: an ordinary typo fails under the fleet config; the hyphenated mis- prefix does not",
+    () => {
+      const repo = temp.dir("typos-e2e-");
+      writeFileSync(join(repo, "a.md"), "teh quick fox mis-parses. Mis-set and MIS-SET\n");
+      const run = typos(repo);
+      expect([run.exitCode, run.stdout.includes("`teh`"), run.stdout.includes("`mis`")]).toEqual([
+        2,
+        true,
+        false,
+      ]);
+    },
+  );
 
   endToEnd(
     "end to end: the repository's _typos.toml extends the fleet allowlist (words and fixture paths); a sha is ignored",

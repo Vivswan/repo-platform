@@ -105,7 +105,13 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Rule: a blocking check is bypassed only through its tool's own per-finding mechanism, in the repository, visible in the diff, with a reason beside it. No job-level switch, environment variable, or label skips a check.
 - Why: a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
 - How: the table below, one row per check fleet-ci.yml runs. A repo-owned config file (`.github/zizmor.yml`, `knip.json`) replaces the fleet default for that tool; `_typos.toml` extends it.
-- The fleet knip default adds nothing to what knip finds on its own: `index`, `cli`, and `main` at the root or under `src/`; package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; and test files when a `bun test` script exists (knip's bun plugin). A repository whose tests run through a launcher script instead, whose composite actions live outside `.github/`, or whose scripts run by path from anywhere else needs its own `knip.json` naming them under `entry`, or knip reports them as unused files.
+- The fleet knip default names the fleet's layout under `entry`, on top of what knip finds on its own (package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; what its plugins read, such as a bunfig `preload`). The globs cover `.ts`, `.mts`, `.js`, and `.mjs` files in the root workspace:
+  - `index`, `cli`, and `main` at the root or under `src/` (every JavaScript and TypeScript extension): knip's own defaults, restated because a custom `entry` replaces them.
+  - `*.test.*` anywhere and everything under `tests/`: test files run by name through a launcher script, their helpers, and a preload.
+  - everything under `.githooks/`: git hooks run by path.
+  - everything under a `scripts/` directory at any depth (`scripts/`, `skills/*/scripts/`): entrypoints run by path from anywhere.
+- The fleet knip default also lists the tools the fleet's CI installs itself (`uv`, `uvx`, `actionlint`, `gitleaks`) under `ignoreBinaries`, so a package.json script that runs one is not an unlisted binary.
+- A repository whose composite actions live outside `.github/`, whose entrypoints sit anywhere else or carry another extension, or which declares package workspaces (knip gives each its own entries) needs its own `knip.json` naming them under `entry`, or knip reports them as unused files. That file replaces the fleet default entirely, so it starts from a copy of the fleet `entry` and `ignoreBinaries` lists.
 
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|
@@ -124,7 +130,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |
 
 - What the fleet configs settle before a repository's bypass applies:
-  - typos accepts `unparseable` everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
+  - typos accepts `unparseable` and the hyphenated `mis-` prefix (`mis-parses`, `mis-set`) everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
   - semgrep excludes `mutable-action-tag` permanently: zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
   - semgrep excludes `secrets-inherit` until the fleet cutover: managed repositories still run the old rendered ci.yml and release.yml, whose `secrets: inherit` lines carry no marker. The writer's ci.yml marks each of its three with its reason (the called workflows are the repository's own), so the exclusion is lifted once the writer has replaced them.
   - WARNING and INFO findings (`detect-non-literal-regexp` among them) reach code scanning without blocking; what to mark there is the repository's own call.
