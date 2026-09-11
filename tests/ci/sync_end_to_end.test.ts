@@ -54,8 +54,7 @@ const OLD_SECURITY = "# Security policy (old home)\n";
 const HTML_BEGIN = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const HTML_END = "<!-- END REPO-PLATFORM MANAGED -->";
 const OLD_CONTRIBUTING_REGION = `${HTML_BEGIN}\n# old contributing guide\n${HTML_END}\n`;
-// A repository-owned head and tail around the region: a blank line, a CRLF
-// line, and no trailing newline, so the handover is checked byte for byte.
+// A repository-owned head and tail around the region: a blank line on each side of it, a CRLF line, and no trailing newline.
 const CONTRIBUTING_HEAD = "# Contributing\n\n";
 const CONTRIBUTING_TAIL = "\nHouse rules:\r\n- open a PR";
 const STARTER = "name: my fuzz\non: workflow_dispatch\n";
@@ -401,7 +400,8 @@ describe("sync.ts end to end", () => {
       {
         path: "CONTRIBUTING.md",
         outcome: "region removed",
-        detail: "retired; repository-owned content kept",
+        detail:
+          "retired; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
       },
       {
         path: ".github/copilot-instructions.md",
@@ -419,9 +419,9 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/release.yml")).toBe(RELEASE_EDITED);
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
     expect(read(".github/SECURITY.md")).toContain("Report issues to OwnerOrg privately.");
-    // The handover: markers and region gone, head and tail byte for byte.
+    // The handover: markers and region gone, the blank lines that framed it merged into one.
     expect(readFileSync(join(target, "CONTRIBUTING.md"))).toEqual(
-      Buffer.from(`${CONTRIBUTING_HEAD}${CONTRIBUTING_TAIL}`, "utf-8"),
+      Buffer.from("# Contributing\n\nHouse rules:\r\n- open a PR", "utf-8"),
     );
   });
 

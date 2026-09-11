@@ -3,8 +3,9 @@
 // recorded is held for a human, and an unrecorded file there is not the
 // platform's to retire. A split file whose region is the recorded write but
 // which carries repository-owned content around it is handed over once: the
-// region and its marker lines go, the rest stays as a plain file, and the
-// record leaves with the region, so the next run has no claim on the path.
+// region and its marker lines go, the rest stays as a plain file joined
+// without the blank lines the region left behind, and the record leaves
+// with the region, so the next run has no claim on the path.
 // A `moved_to` path is `git mv`ed while its new home is absent, and its
 // record travels with it so the following write sees the moved file as the
 // writer's own.
@@ -25,17 +26,35 @@ export interface RetireRow {
   detail: string;
 }
 
-/** What sits at a path against the writer's last write: exactly it (`own`),
- *  a split whose region is the last write with repository-owned content
- *  around it (`handover`, with those bytes), or something else (`foreign`,
- *  with the reason). A symbolic link is judged by its target string, never
- *  read through, whatever class the record names. */
+/** What sits at a path against the writer's last write.
+ *  `blank`: a split whose region is the last write with only blank lines around it, so nothing is worth handing over.
+ *  A symbolic link is judged by its target string, never read through, whatever class the record names. */
 export type Judgement =
   | { verdict: "own" }
+  | { verdict: "blank" }
   | { verdict: "handover"; kept: Buffer }
   | { verdict: "foreign"; reason: string };
 
 const foreign = (reason: string): Judgement => ({ verdict: "foreign", reason });
+
+/** Lines with their terminators, so joining them gives the text back. */
+const lines = (text: string) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+const blank = (line: string) => line.trim() === "";
+
+/** The halves around a removed region as one plain file.
+ *  The region usually opened the file, so the blank lines the tail began with would lead a headless file: they go.
+ *  Blank lines that framed a mid-file region merge into one, and into none when content stands on one side only.
+ *  Every other byte is the repository's own and stays. */
+export function joinHalves(above: string, below: string): string {
+  const head = lines(above);
+  const tail = lines(below);
+  const contentEnd = head.findLastIndex((line) => !blank(line)) + 1;
+  const contentStart = tail.findIndex((line) => !blank(line));
+  if (contentStart === -1) return head.slice(0, contentEnd).join("");
+  const seam = [...head.slice(contentEnd), ...tail.slice(0, contentStart)];
+  const gap = contentEnd > 0 ? seam.slice(0, 1) : [];
+  return [...head.slice(0, contentEnd), ...gap, ...tail.slice(contentStart)].join("");
+}
 
 export function judge(target: string, path: string, records: Records): Judgement {
   const entry = records[path];
@@ -62,10 +81,12 @@ export function judge(target: string, path: string, records: Records): Judgement
     if (sha256(Buffer.from(slice.region, "latin1")) !== hash) {
       return foreign("the managed region was edited");
     }
-    if (slice.above.trim() === "" && slice.below.trim() === "") return { verdict: "own" };
+    if (slice.above.trim() === "" && slice.below.trim() === "") {
+      return slice.above === "" && slice.below === "" ? { verdict: "own" } : { verdict: "blank" };
+    }
     return {
       verdict: "handover",
-      kept: Buffer.from(`${slice.above}${slice.below}`, "latin1"),
+      kept: Buffer.from(joinHalves(slice.above, slice.below), "latin1"),
     };
   }
   return sha256(found.bytes) === hash
@@ -76,10 +97,10 @@ export function judge(target: string, path: string, records: Records): Judgement
 /** Why what sits at `path` may not be replaced whole, or null when it is
  *  exactly the writer's last write. For a class flip, which rewrites the
  *  whole file, repository-owned content around a split region is as much
- *  a reason as any other. */
+ *  a reason as any other; blank lines around it are not. */
 export function keepReason(target: string, path: string, records: Records): string | null {
   const judgement = judge(target, path, records);
-  if (judgement.verdict === "own") return null;
+  if (judgement.verdict === "own" || judgement.verdict === "blank") return null;
   if (judgement.verdict === "handover") {
     return "the file carries repository-owned content outside the managed region";
   }
@@ -116,17 +137,19 @@ export function retire(
   const dispose = (path: string, detail: string) => {
     if (records[path] === undefined) return;
     const judgement = judge(target, path, records);
-    if (judgement.verdict === "own") {
+    if (judgement.verdict === "own" || judgement.verdict === "blank") {
       removeFile(target, path);
       delete records[path];
-      rows.push({ path, outcome: "deleted", detail });
+      const note =
+        judgement.verdict === "blank" ? "; only blank lines sat outside the managed region" : "";
+      rows.push({ path, outcome: "deleted", detail: `${detail}${note}` });
     } else if (judgement.verdict === "handover") {
       writeFile(target, path, judgement.kept);
       delete records[path];
       rows.push({
         path,
         outcome: "region removed",
-        detail: `${detail}; repository-owned content kept`,
+        detail: `${detail}; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it`,
       });
     } else if (records[path]?.class === "starter") {
       rows.push({ path, outcome: "kept", detail: judgement.reason });
