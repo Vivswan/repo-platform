@@ -52,7 +52,7 @@ describe("placeholderValues: the registration-backed names", () => {
     skills_dir: "skills",
     fuzzer_label: "fuzz-nightly",
     nightly_label: "nightly-failure",
-    docs_site_label: "docs-link-rot",
+    site_label: "docs-link-rot",
   };
 
   test("absent from both sides, the name has no value; a module default fills it", () => {
@@ -66,13 +66,13 @@ describe("placeholderValues: the registration-backed names", () => {
     const registration = {
       modules: [],
       skills: { dir: "lib/skills" },
-      labels: { fuzzer: "fuzz", docs_site: "rot" },
+      labels: { fuzzer: "fuzz", site: "rot" },
     };
     expect(placeholderValues(registration, SLUG, defaults, NOW)).toMatchObject({
       skills_dir: "lib/skills",
       fuzzer_label: "fuzz",
       nightly_label: "nightly-failure",
-      docs_site_label: "rot",
+      site_label: "rot",
     });
   });
 });
@@ -90,8 +90,8 @@ describe("readRegistration", () => {
   test("reads .repo-platform.yml from the checkout; a symlink or a missing file is refused", () => {
     const target = temp.dir("writer-registration-");
     expect(() => readRegistration(target)).toThrow("missing from the target repository");
-    writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, pages]\n");
-    expect(readRegistration(target)).toEqual({ modules: ["bun", "pages"] });
+    writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, site]\n");
+    expect(readRegistration(target)).toEqual({ modules: ["bun", "site"] });
     const linked = temp.dir("writer-registration-link-");
     writeFileSync(join(linked, "elsewhere.yml"), "modules: [bun]\n");
     symlinkSync("elsewhere.yml", join(linked, ".repo-platform.yml"));

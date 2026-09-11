@@ -24,7 +24,7 @@ const VALUES: PlaceholderValues = {
   skills_dir: "lib/skills",
   fuzzer_label: "fuzz-nightly",
   nightly_label: "nightly-failure",
-  docs_site_label: "docs-link-rot",
+  site_label: "docs-link-rot",
 };
 
 describe("placeholders", () => {
@@ -59,7 +59,7 @@ describe("placeholders", () => {
 
   test("the registration-backed names substitute like the rest", () => {
     expect(
-      substitute("{{skills_dir}} {{fuzzer_label}} {{nightly_label}} {{docs_site_label}}", VALUES),
+      substitute("{{skills_dir}} {{fuzzer_label}} {{nightly_label}} {{site_label}}", VALUES),
     ).toBe("lib/skills fuzz-nightly nightly-failure docs-link-rot");
   });
 

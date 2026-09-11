@@ -15,7 +15,7 @@ export const PLACEHOLDER_NAMES = [
   "skills_dir",
   "fuzzer_label",
   "nightly_label",
-  "docs_site_label",
+  "site_label",
 ] as const;
 
 export type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];

@@ -1,0 +1,2 @@
+name: site build for {{project_slug}}
+runs: {using: composite, steps: []}

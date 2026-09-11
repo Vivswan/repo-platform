@@ -5,10 +5,10 @@ modules:
   - bun
   - skills
   - pr-title
-  - docs-site
+  - site
 project:
   name: repo-platform
   slug: repo-platform
   description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
 labels:
-  docs_site: docs-link-rot
+  site: docs-link-rot

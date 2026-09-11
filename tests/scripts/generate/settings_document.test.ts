@@ -51,7 +51,7 @@ describe("renderOwnSettings", () => {
       allow_merge_commit: false,
       squash_merge_commit_title: "PR_TITLE",
     });
-    // The baseline roster, the bun module's dependabot label, the docs-site tracking label.
+    // The baseline roster, the bun module's dependabot label, the site tracking label.
     expect(names(doc.labels)).toEqual([
       "dependencies",
       "github_actions",
@@ -119,10 +119,10 @@ describe("renderOwnSettings", () => {
         const path = join(root, ".repo-platform.yml");
         writeFileSync(
           path,
-          readFileSync(path, "utf-8").replace("docs_site: docs-link-rot", "docs_site: Bug"),
+          readFileSync(path, "utf-8").replace("site: docs-link-rot", "site: Bug"),
         );
       },
-      message: `${RENDERED} cannot be rendered: tracking label "Bug" (docs_site) is a label the platform already manages; a green night would close whatever issues carry it and every settings apply would fight over it`,
+      message: `${RENDERED} cannot be rendered: tracking label "Bug" (site) is a label the platform already manages; a green night would close whatever issues carry it and every settings apply would fight over it`,
     },
   ])("refuses $name by name and writes nothing", ({ mutate, message }) => {
     const root = scratchRoot();

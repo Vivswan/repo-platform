@@ -531,11 +531,11 @@ describe("parseDirectives", () => {
     {
       reason:
         "a modules: filter is dispatch-only: it intersects with the tokens, so the range union would misread it",
-      body: message("[fleet-sync: public, modules:pages]", PROSE),
+      body: message("[fleet-sync: public, modules:site]", PROSE),
       expected: {
         kind: "error",
         errors: [
-          '"[fleet-sync: public, modules:pages]" carries a modules: filter, which is dispatch-only (it intersects with the visibility tokens, so the range union would misread it): dispatch the sync by hand with gh workflow run sync-repos.yml -f repo=...',
+          '"[fleet-sync: public, modules:site]" carries a modules: filter, which is dispatch-only (it intersects with the visibility tokens, so the range union would misread it): dispatch the sync by hand with gh workflow run sync-repos.yml -f repo=...',
         ],
       },
     },

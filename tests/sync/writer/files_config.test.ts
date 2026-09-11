@@ -68,11 +68,11 @@ describe("placeholderDefaults", () => {
   test("come from tracking_label (as <key>_label) and skills_dir; a stream no placeholder names rides along", () => {
     const config = parseFilesConfig(
       [
-        "placeholders: [skills_dir, fuzzer_label, docs_site_label]",
+        "placeholders: [skills_dir, fuzzer_label, site_label]",
         "modules:",
         "  skills: { skills_dir: { default: skills } }",
         "  fuzzer: { tracking_label: { key: fuzzer, default: fuzz-nightly, color: B60205 } }",
-        "  docs-site: { tracking_label: { key: docs_site, default: docs-link-rot } }",
+        "  site: { tracking_label: { key: site, default: docs-link-rot } }",
         "  other: { tracking_label: { key: unknown_stream, default: x } }",
         "files: []",
       ].join("\n"),
@@ -81,7 +81,7 @@ describe("placeholderDefaults", () => {
       defaults: {
         skills_dir: "skills",
         fuzzer_label: "fuzz-nightly",
-        docs_site_label: "docs-link-rot",
+        site_label: "docs-link-rot",
       },
       problems: [],
     });

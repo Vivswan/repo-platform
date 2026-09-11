@@ -23,7 +23,7 @@ const temp = tempDirs();
 // every other run and shift each exact row list): badlist (public, its
 // modules list unreadable: a filter cannot judge it, so it is reported by
 // slug and left out) and hidden-nomods (PRIVATE, the same defect, counted).
-// Declared selections: steady [uv, pages], hidden-server [pages,
+// Declared selections: steady [uv, site], hidden-server [site,
 // release-please], every other adopted persona [uv].
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
@@ -60,12 +60,12 @@ describe("select_sync_repos.ts", () => {
         // partial body left on stdout (as a timed-out raw read leaves it)
         // names another private repo and must not print at all.
         "  repos/Vivswan/hidden-blocked/contents/.repo-platform.yml)",
-        "    echo 'modules: [pages] # shared with Vivswan/hidden-billing'",
+        "    echo 'modules: [site] # shared with Vivswan/hidden-billing'",
         '    echo "HTTP 500: https://api.github.com/repos/Vivswan/hidden-blocked failed; hidden-blocked unavailable, retry HIDDEN-BLOCKED later" >&2',
         "    exit 1",
         "    ;;",
-        "  repos/Vivswan/steady/contents/.repo-platform.yml) echo 'modules: [uv, pages]' ;;",
-        "  repos/Vivswan/hidden-server/contents/.repo-platform.yml) echo 'modules: [pages, release-please]' ;;",
+        "  repos/Vivswan/steady/contents/.repo-platform.yml) echo 'modules: [uv, site]' ;;",
+        "  repos/Vivswan/hidden-server/contents/.repo-platform.yml) echo 'modules: [site, release-please]' ;;",
         "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml) echo 'notmodules: true' ;;",
         "  repos/Vivswan/badlist/contents/.repo-platform.yml) echo 'modules: notalist' ;;",
         "  repos/*/contents/.repo-platform.yml) echo 'modules: [uv]' ;;",
@@ -408,7 +408,7 @@ describe("select_sync_repos.ts", () => {
     {
       reason:
         "one module selects every visibility that selects it; the two unreadable lists are reported, the private one counted (case folds)",
-      repo: "Modules: Pages",
+      repo: "Modules: Site",
       rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
@@ -422,7 +422,7 @@ describe("select_sync_repos.ts", () => {
     },
     {
       reason: "AND: every named module must be selected",
-      repo: "modules:pages+release-please",
+      repo: "modules:site+release-please",
       rows: [HIDDEN_SERVER_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
@@ -436,7 +436,7 @@ describe("select_sync_repos.ts", () => {
     },
     {
       reason: "a visibility token intersects: only public candidates are probed and judged",
-      repo: "public,modules:pages",
+      repo: "public,modules:site",
       rows: [STEADY_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
