@@ -16,6 +16,16 @@
       "entry": ["*.ts"],
       "project": ["**/*.{ts,mts}"]
     },
+    "actions/check-file-size": {
+      "entry": ["*.ts"],
+      "project": ["**/*.{ts,mts}"],
+      // The grammar packages are loaded as wasm files by path, never imported.
+      "ignoreDependencies": [
+        "tree-sitter-wasms",
+        "tree-sitter-bash",
+        "@tree-sitter-grammars/tree-sitter-yaml"
+      ]
+    },
     "actions/module-render": {
       "entry": ["src/admit.ts", "src/render.ts"],
       "project": ["**/*.{ts,mts}"]

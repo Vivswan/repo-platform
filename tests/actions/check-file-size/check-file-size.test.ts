@@ -10,14 +10,18 @@ import {
   classify,
   describe as describeFinding,
   type Finding,
+  GRAMMAR_WASMS,
+  type Grammar,
+  type Grammars,
   HARD,
   isGenerated,
-  isLiteralLine,
   isManaged,
   isUnbreakable,
   judgeFile,
   type Kind,
+  loadGrammars,
   type Outcome,
+  outcomeOf,
   parseAllowlist,
   parseArgs,
   REASON_RULE,
@@ -30,6 +34,7 @@ import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
+const grammars = await loadGrammars();
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/check-file-size");
 const SCRIPT = join(ACTION_DIR, "check-file-size.ts");
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
@@ -239,15 +244,29 @@ describe("judgeFile line counts", () => {
     const hard = HARD.lines[kind];
     const warn = WARN.lines[kind];
     const path = `file.${kind}`;
-    expect(judgeFile(path, kind, `${region}${lines(warn)}`)).toEqual([]);
-    expect(judgeFile(path, kind, `${lines(warn + 1)}${region}`)).toEqual([
-      { path, kind, tier: "warn", measure: "lines", value: warn + 1, cap: warn },
+    expect(judgeFile(path, kind, `${region}${lines(warn)}`, grammars)).toEqual([]);
+    expect(judgeFile(path, kind, `${lines(warn + 1)}${region}`, grammars)).toEqual([
+      {
+        path,
+        kind,
+        tier: "warn",
+        measure: "lines",
+        value: warn + 1,
+        cap: warn,
+      },
     ]);
-    expect(judgeFile(path, kind, `${region}${lines(hard)}`)).toEqual([
+    expect(judgeFile(path, kind, `${region}${lines(hard)}`, grammars)).toEqual([
       { path, kind, tier: "warn", measure: "lines", value: hard, cap: warn },
     ]);
-    expect(judgeFile(path, kind, `${lines(hard + 1)}${region}`)).toEqual([
-      { path, kind, tier: "hard", measure: "lines", value: hard + 1, cap: hard },
+    expect(judgeFile(path, kind, `${lines(hard + 1)}${region}`, grammars)).toEqual([
+      {
+        path,
+        kind,
+        tier: "hard",
+        measure: "lines",
+        value: hard + 1,
+        cap: hard,
+      },
     ]);
   });
 
@@ -261,7 +280,7 @@ describe("judgeFile line counts", () => {
       value,
       cap,
     });
-    expect(judgeFile("a.ts", "source", `// BEGIN GENERATED: x\n${lines(cap)}`)).toEqual([
+    expect(judgeFile("a.ts", "source", `// BEGIN GENERATED: x\n${lines(cap)}`, grammars)).toEqual([
       finding(cap + 1),
     ]);
     // The warn boundary, where one uncounted marker line decides.
@@ -270,10 +289,16 @@ describe("judgeFile line counts", () => {
         "a.ts",
         "source",
         `// BEGIN GENERATED: x END GENERATED: x\n${lines(WARN.lines.source)}`,
+        grammars,
       ),
     ).toEqual([]);
     expect(
-      judgeFile("a.ts", "source", `// BEGIN GENERATED: x END GENERATED: x\n${lines(cap + 1)}`),
+      judgeFile(
+        "a.ts",
+        "source",
+        `// BEGIN GENERATED: x END GENERATED: x\n${lines(cap + 1)}`,
+        grammars,
+      ),
     ).toEqual([finding(cap + 1)]);
   });
 
@@ -288,8 +313,8 @@ describe("judgeFile line counts", () => {
       cap: over,
     });
     const body = Array.from({ length: cap + 1 }, () => "x").join("\n");
-    expect(judgeFile("a.ts", "source", body)).toEqual([finding("hard", cap + 1, cap)]);
-    expect(judgeFile("a.ts", "source", lines(cap))).toEqual([
+    expect(judgeFile("a.ts", "source", body, grammars)).toEqual([finding("hard", cap + 1, cap)]);
+    expect(judgeFile("a.ts", "source", lines(cap), grammars)).toEqual([
       finding("warn", cap, WARN.lines.source),
     ]);
   });
@@ -303,9 +328,13 @@ describe("judgeFile line width", () => {
     ).join(" ");
   };
   /** Expected rows as [tier, line, width, cap]; expanded to whole width
-   *  findings on "f" before comparing. */
-  const widthFinding = (kind: Kind, [tier, line, value, cap]: (Tier | number)[]): Finding => ({
-    path: "f",
+   *  findings before comparing. */
+  const widthFinding = (
+    path: string,
+    kind: Kind,
+    [tier, line, value, cap]: (Tier | number)[],
+  ): Finding => ({
+    path,
     kind,
     tier: tier as Tier,
     measure: "width",
@@ -313,149 +342,203 @@ describe("judgeFile line width", () => {
     value: value as number,
     cap: cap as number,
   });
+  const judgeWidth = (path: string, text: string, expected: (Tier | number)[][]): void => {
+    const kind = classify(path);
+    if (kind === null) throw new Error(`${path} has no kind`);
+    expect(judgeFile(path, kind, text, grammars)).toEqual(
+      expected.map((row) => widthFinding(path, kind, row)),
+    );
+  };
 
-  test.each<[string, Kind, string, (Tier | number)[][]]>([
-    ["a breakable line over the hard cap", "source", `${wide(300)}\n`, [["hard", 1, 300, 256]]],
+  // Every case names its file, since the literal exemption follows the grammar.
+  test.each<[string, string, string, (Tier | number)[][]]>([
+    ["a breakable line over the hard cap", "f.ts", `${wide(300)}\n`, [["hard", 1, 300, 256]]],
     [
       "a breakable line over the warn cap only",
-      "source",
+      "f.ts",
       `${wide(232)}\n`,
       [["warn", 1, 232, WARN.width]],
     ],
-    ["a line at the warn cap", "source", `${"a".repeat(WARN.width - 2)} b\n`, []],
-    ["a CRLF line at the warn cap", "source", `${"a".repeat(WARN.width - 2)} b\r\n`, []],
-    ["a single unbreakable token over the hard cap", "source", `${"u".repeat(300)}\n`, []],
-    ["an indented single token over the hard cap", "source", `    ${"u".repeat(300)}\n`, []],
+    ["a line at the warn cap", "f.ts", `${"a".repeat(WARN.width - 2)} b\n`, []],
+    ["a CRLF line at the warn cap", "f.ts", `${"a".repeat(WARN.width - 2)} b\r\n`, []],
+    ["a single unbreakable token over the hard cap", "f.ts", `${"u".repeat(300)}\n`, []],
+    ["an indented single token over the hard cap", "f.ts", `    ${"u".repeat(300)}\n`, []],
     [
       "a literal assigned on one line is two tokens and fails (control for the single-token rule)",
-      "source",
+      "f.ts",
       `const x = "${"a".repeat(280)}";\n`,
       [["hard", 1, 293, 256]],
     ],
     [
       "an unmatched BEGIN GENERATED fences no width either",
-      "source",
+      "f.ts",
       `// BEGIN GENERATED: x\n${wide(300)}\n`,
       [["hard", 2, 300, 256]],
     ],
     [
       "a key with a wide value is two tokens and fails",
-      "workflow",
+      ".github/workflows/f.yml",
       `  run: ${"u".repeat(300)}
 `,
       [["hard", 1, 307, 256]],
     ],
     [
       "a line over the warn cap with one wide token among others still warns",
-      "shell",
+      "f.sh",
       `echo ${"u".repeat(190)} ${"v".repeat(30)}
 `,
       [["warn", 1, 226, WARN.width]],
     ],
     [
       "a wide line inside a generated region, then the same line outside it",
-      "source",
+      "f.ts",
       `// BEGIN GENERATED: x\n${wide(300)}\n// END GENERATED: x\n${wide(300)}\n`,
       [["hard", 4, 300, 256]],
     ],
-    ["markdown prose has no width cap", "markdown", `${wide(1000)}\n`, []],
+    ["markdown prose has no width cap", "f.md", `${wide(1000)}\n`, []],
     [
       "width counts code points, not bytes",
-      "source",
+      "f.ts",
       `${wide(232).replace(/a/g, "é")}\n`,
       [["warn", 1, 232, WARN.width]],
     ],
     [
       "a warn-wide line that is one assigned string literal",
-      "source",
+      "f.ts",
       `const x = "${"a ".repeat(115)}";\n`,
       [],
     ],
     [
       "a warn-wide line that is one returned literal",
-      "source",
+      "f.ts",
       `  return '${"a ".repeat(115)}';\n`,
       [],
     ],
     [
       "a warn-wide keyed literal with a trailing comma",
-      "source",
+      "f.ts",
       `  key: \`${"a ".repeat(115)}\`,\n`,
       [],
     ],
-    ["a warn-wide bash assignment", "shell", `msg="${"a ".repeat(115)}"\n`, []],
-    ["a warn-wide concatenation piece", "source", `  "${"a ".repeat(115)}" +\n`, []],
-    ["a warn-wide regex literal", "test", `const re = /${"a ".repeat(115)}/i;\n`, []],
+    ["a warn-wide bash assignment", "f.sh", `msg="${"a ".repeat(115)}"\n`, []],
+    ["a warn-wide concatenation piece", "f.ts", `  "${"a ".repeat(115)}" +\n`, []],
+    ["a warn-wide regex literal", "f.test.ts", `const re = /${"a ".repeat(115)}/i;\n`, []],
     [
       "a hard-wide assigned literal is still a hard finding",
-      "source",
+      "f.ts",
       `const x = "${"a ".repeat(150)}";\n`,
       [["hard", 1, 313, 256]],
     ],
     [
       "a warn-wide literal beside other code (control)",
-      "source",
+      "f.ts",
       `  foo("${"a ".repeat(115)}", bar);\n`,
       [["warn", 1, 245, WARN.width]],
     ],
-    ["a warn-wide python raw literal", "source", `pattern = r"${"a ".repeat(115)}"\n`, []],
+    ["a warn-wide python raw literal", "f.py", `pattern = r"${"a ".repeat(115)}"\n`, []],
+    [
+      "a warn-wide quoted yaml value; the same value unquoted is a plain scalar and warns (control)",
+      ".github/workflows/f.yml",
+      `name: "${"a ".repeat(115)}"\nname: ${"a ".repeat(115)}\n`,
+      [["warn", 2, 236, WARN.width]],
+    ],
+    [
+      "a warn-wide line inside a multi-line template literal is the literal's; the code line after it is not",
+      "f.ts",
+      `const t = \`\n${"a ".repeat(115)}\n\`;\nconst u = f(\n  ${"a ".repeat(115)}\n);\n`,
+      [["warn", 5, 232, WARN.width]],
+    ],
+    [
+      "a warn-wide line inside a python docstring is the string's",
+      "f.py",
+      `def f():\n    """\n    ${"a ".repeat(115)}\n    """\n`,
+      [],
+    ],
+    [
+      "a warn-wide literal with a trailing comment is judged (the comment can wrap)",
+      "f.ts",
+      `const x = "${"a ".repeat(100)}"; // c\n`,
+      [["warn", 1, 218, WARN.width]],
+    ],
     [
       "both markers on one line fence that line alone",
-      "source",
+      "f.ts",
       `// BEGIN GENERATED: x ${wide(300)} END GENERATED: x\n${wide(300)}\n`,
       [["hard", 2, 300, 256]],
     ],
-  ])("%s", (_name, kind, text, expected) => {
-    expect(judgeFile("f", kind, text)).toEqual(expected.map((row) => widthFinding(kind, row)));
-  });
-});
-
-describe("isLiteralLine", () => {
-  test("pathological inputs finish in linear time (the regex form took seconds at 100k)", () => {
-    const cases: [string, boolean][] = [
-      [`\`\`${" ".repeat(100_000)}x`, false],
-      [`\`\`${" ".repeat(100_000)}`, true],
-      ["`".repeat(100_000), false],
-      [`const x = "${"a ".repeat(50_000)}";${" ".repeat(50_000)}`, true],
-    ];
-    const started = performance.now();
-    expect(cases.map(([line]) => isLiteralLine(line))).toEqual(cases.map(([, ok]) => ok));
-    expect(performance.now() - started).toBeLessThan(1000);
+  ])("%s", (_name, path, text, expected) => {
+    judgeWidth(path, text, expected);
   });
 
   // Each line is warn-wide (WARN.width < width <= HARD.width) and
   // breakable; a literal line yields no finding, anything else the whole
   // warn width finding.
   const F = "a ".repeat(110).trim();
-  test.each<[string, string, boolean]>([
-    ["a typed exported declaration", `export const x: Readonly<T[]> = "${F}";`, true],
-    ["a template with a trailing comma", `let x = \`${F}\`,`, true],
-    ["a returned regex with flags", `  return /${F}/gi`, true],
-    ["a keyed literal with trailers", `key: '${F}')]`, true],
-    ["a += assignment", `obj.key += "${F}"`, true],
-    ["a python raw bytes prefix", `rb"${F}"`, true],
-    ["an escaped quote inside", `"esc\\"aped ${F}"`, true],
-    ["an escaped slash inside a regex", `/a\\/b ${F}/`, true],
-    ["two literals joined on one line", `'${F}' + 'b'`, false],
-    ["an unclosed literal", `const x = "unclosed ${F}`, false],
-    ["a three-letter prefix", `rbx"${F}"`, false],
-    ["a prefixed template", `r\`${F}\``, false],
-    ["a comment (an empty regex body is no literal)", `// ${F}`, false],
-    ["a literal followed by code", `const x = "${F}" x`, false],
-  ])("%s", (_name, line, literal) => {
+  test.each<[string, string, string, boolean]>([
+    ["a typed exported declaration", "f.ts", `export const x: Readonly<T[]> = "${F}";`, true],
+    ["a template with a trailing comma", "f.ts", `let x = \`${F}\`,`, true],
+    ["a returned regex with flags", "f.ts", `  return /${F}/gi`, true],
+    ["a keyed literal with trailers", "f.ts", `key: '${F}')]`, true],
+    ["a += assignment", "f.ts", `obj.key += "${F}"`, true],
+    ["a python raw bytes prefix", "f.py", `rb"${F}"`, true],
+    ["an escaped quote inside", "f.ts", `"esc\\"aped ${F}"`, true],
+    ["an escaped slash inside a regex", "f.ts", `/a\\/b ${F}/`, true],
+    ["a string holding comment syntax is a string", "f.ts", `const s = "// ${F}";`, true],
+    ["a regex holding a comment opener is a regex", "f.ts", `const r = /\\/* ${F}/;`, true],
+    ["a sole string argument", "f.ts", `throw new Error("${F}");`, true],
+    ["a template literal type", "f.ts", `type X = \`${F}\`;`, true],
+    [
+      "a string-typed declaration: the type keyword is not a literal",
+      "f.ts",
+      `const x: string = "${F}";`,
+      true,
+    ],
+    [
+      "a long property name typed string holds no literal",
+      "f.ts",
+      `type T = { ${"a".repeat(145)}: string };`,
+      false,
+    ],
+    [
+      "a test title: only punctuation and keywords follow it",
+      "f.ts",
+      `test("${F}", async () => {`,
+      true,
+    ],
+    [
+      "a quoted key before a long value is a key, not a second literal",
+      "f.ts",
+      `const o = { "k": \`${F}\` };`,
+      true,
+    ],
+    ["a quoted yaml key before a long value", ".github/workflows/f.yml", `"k": "${F}"`, true],
+    ["a quoted python key before a long value", "f.py", `d = {"k": "${F}"}`, true],
+    ["a quoted key alone is judged like any string beside code", "f.ts", `  "${F}": x,`, false],
+    [
+      "a ternary's two literals are two literals, not a key and a value",
+      "f.ts",
+      `const x = f ? "a" : "${F}";`,
+      false,
+    ],
+    [
+      "a comment before the literal keeps the row judged (the comment can wrap)",
+      "f.ts",
+      `/* ${"c ".repeat(20)}*/ const x = "${"a ".repeat(85)}";`,
+      false,
+    ],
+    ["two literals joined on one line", "f.ts", `'${F}' + 'b'`, false],
+    ["an unclosed literal", "f.ts", `const x = "unclosed ${F}`, false],
+    ["a three-letter prefix is an identifier glued to a string", "f.py", `rbx"${F}"`, false],
+    ["a tagged template (the tag is a call target)", "f.ts", `r\`${F}\``, false],
+    ["a comment", "f.ts", `// ${F}`, false],
+    ["a literal followed by code", "f.ts", `const x = "${F}" x`, false],
+    ["a shell word before a string is a command", "f.sh", `echo "${F}"`, false],
+    ["a shell regex match is a regex literal", "f.sh", `[[ $x =~ ^${"a".repeat(170)}$ ]]`, true],
+  ])("%s", (_name, path, line, literal) => {
     const width = [...line].length;
     expect(width).toBeGreaterThan(WARN.width);
     expect(width).toBeLessThanOrEqual(HARD.width);
-    const finding: Finding = {
-      path: "f",
-      kind: "source",
-      tier: "warn",
-      measure: "width",
-      line: 1,
-      value: width,
-      cap: WARN.width,
-    };
-    expect(judgeFile("f", "source", `${line}\n`)).toEqual(literal ? [] : [finding]);
+    judgeWidth(path, `${line}\n`, literal ? [] : [["warn", 1, width, WARN.width]]);
   });
 });
 
@@ -675,9 +758,70 @@ describe("judgeFile comment blocks", () => {
       [[3, BLOCK + 1, "block"]],
     ],
     [
-      "an unterminated /* */ block runs to the end of the file",
+      "an unterminated /* is a syntax error, so the grammar makes it code, not a comment",
       "f.ts",
       `x\n/*\n${"a\n".repeat(BLOCK)}`,
+      [],
+    ],
+    // Comment syntax inside literals is a literal: the grammar, not a prefix, decides.
+    [
+      "a string holding // is a string, so the run is code",
+      "f.ts",
+      `x\n${'const s = "// c";\n'.repeat(BLOCK + 1)}x\n`,
+      [],
+    ],
+    [
+      "a regex holding /* is a regex",
+      "f.ts",
+      `x\n${"const r = /\\/* c/;\n".repeat(BLOCK + 1)}x\n`,
+      [],
+    ],
+    [
+      "the lines inside a template literal are the literal's, whatever they start with",
+      "f.ts",
+      `x\nconst t = \`\n${"# c\n// c\n".repeat(BLOCK)}\`;\nx\n`,
+      [],
+    ],
+    [
+      "a python docstring is a string: it counts toward no comment cap, and it is code that demotes the header",
+      "f.py",
+      `"""\n${"doc\n".repeat(HEADER)}"""\n${hashes(BLOCK + 1)}x = 1\n`,
+      [[HEADER + 3, BLOCK + 1, "block"]],
+    ],
+    [
+      "a yaml comment run after a document marker is a block: the marker is code",
+      ".github/workflows/f.yml",
+      `---\n${hashes(BLOCK + 1)}on: push\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a yaml comment run inside a block scalar is the scalar's text",
+      ".github/workflows/f.yml",
+      `run: |\n${hashes(BLOCK + 1).replace(/^/gm, "  ")}x: y\n`,
+      [],
+    ],
+    [
+      "the # lines of a shell here-doc are its body, and the same lines after it are a block (control)",
+      "f.sh",
+      `cat <<'EOF'\n${hashes(BLOCK + 1)}EOF\n${hashes(BLOCK + 1)}echo y\n`,
+      [[BLOCK + 4, BLOCK + 1, "block"]],
+    ],
+    [
+      "a C preprocessor line is code",
+      "f.c",
+      `#include <x.h>\n${slashes(BLOCK + 1)}int x;\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a JavaScript html comment run is a block",
+      "f.js",
+      `x;\n${"<!-- c\n".repeat(BLOCK + 1)}x;\n`,
+      [[2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a Rust doc comment run is a block like any other",
+      "f.rs",
+      `fn f() {}\n${"/// d\n".repeat(BLOCK + 1)}fn g() {}\n`,
       [[2, BLOCK + 1, "block"]],
     ],
     // The exemption marker: a comment line inside the block, reason required.
@@ -722,6 +866,18 @@ describe("judgeFile comment blocks", () => {
       "f.ts",
       `x\n// ${COMMENT_MARKER}\n${slashes(BLOCK)}x\n`,
       [[2], [2, BLOCK + 1, "block"]],
+    ],
+    [
+      "a bare marker inside a /* */ body takes no reason from the lines after it",
+      "f.ts",
+      `x();\n/*\n * ${COMMENT_MARKER}\n${" * text\n".repeat(9)} */\n`,
+      [[3], [2, 12, "block"]],
+    ],
+    [
+      "a bare marker in a nested block comment (Rust nests them) ends at the inner closer",
+      "f.rs",
+      `fn f() {}\n/*\n/* ${COMMENT_MARKER} */\n${" * c\n".repeat(10)}*/\n`,
+      [[3], [2, 13, "block"]],
     ],
     [
       "a bare /* */ marker warns: the closing delimiter is no reason",
@@ -784,6 +940,30 @@ describe("judgeFile comment blocks", () => {
       [],
     ],
     [
+      "a // reason may start with */ too: the closer belongs to the /* */ form of the same node type",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER} */ is the upstream glob\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "a /* */ reason may start with -->: html_comment's text is no closer here",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} --> is part of the upstream syntax */\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "a /* */ marker's reason ends at its own */, not a later one on the line",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} */ /* upstream text */\n${slashes(BLOCK)}x\n`,
+      [[2], [2, BLOCK + 1, "block"]],
+    ],
+    [
+      "an html_comment runs to the line end: --> inside it is part of the reason",
+      "f.js",
+      `x;\n<!-- ${COMMENT_MARKER} --> is part of the upstream syntax\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
       "a marker inside a generated region is not read",
       "f.ts",
       `x\n// BEGIN GENERATED: x\n// ${COMMENT_MARKER} upstream text\n// END GENERATED: x\n${slashes(BLOCK + 1)}x\n`,
@@ -792,8 +972,253 @@ describe("judgeFile comment blocks", () => {
   ])("%s", (_name, path, text, expected) => {
     const kind = classify(path);
     if (kind === null) throw new Error(`${path} has no kind`);
-    expect(judgeFile(path, kind, text)).toEqual(
+    expect(judgeFile(path, kind, text, grammars)).toEqual(
       expected.map((row) => commentFinding(path, kind, row)),
+    );
+  });
+});
+
+describe("grammars", () => {
+  const { block: BLOCK } = COMMENT_CAPS;
+  /** One comment line and one code line per judged extension. */
+  const SAMPLES: [path: string, comment: string, code: string][] = [
+    ["f.ts", "// c", "const x = 1;"],
+    ["f.mts", "// c", "const x = 1;"],
+    ["f.cts", "// c", "const x = 1;"],
+    ["f.tsx", "// c", "const x = <a>b</a>;"],
+    ["f.js", "// c", "const x = 1;"],
+    ["f.jsx", "// c", "const x = <a>b</a>;"],
+    ["f.mjs", "// c", "const x = 1;"],
+    ["f.cjs", "// c", "const x = 1;"],
+    ["f.py", "# c", "x = 1"],
+    ["f.pyi", "# c", "x: int"],
+    ["f.rs", "// c", "fn f() {}"],
+    ["f.go", "// c", "package main"],
+    ["f.kt", "// c", "val x = 1"],
+    ["f.java", "// c", "class A {}"],
+    ["f.c", "// c", "int x;"],
+    ["f.h", "// c", "int x;"],
+    ["f.cpp", "// c", "class A {};"],
+    ["f.cc", "// c", "class A {};"],
+    ["f.cxx", "// c", "class A {};"],
+    ["f.hh", "// c", "class A {};"],
+    ["f.hpp", "// c", "class A {};"],
+    ["f.sh", "# c", "case $x in a) echo b ;; esac"],
+    ["f.bash", "# c", 'if [[ "$a" == "b" ]]; then echo ok; fi'],
+    ["f.zsh", "# c", 'for f in a b; do echo "$f"; done'],
+    [".github/workflows/f.yml", "# c", "on: push"],
+    [".github/workflows/f.yaml", "# c", "on: push"],
+  ];
+
+  test("every judged extension but Swift has a working grammar; Swift's reason names the leak", () => {
+    expect([...grammars].filter(([, grammar]) => "reason" in grammar)).toEqual([
+      ["swift", { reason: expect.stringContaining("keeps scanner state across files") }],
+    ]);
+    expect([...grammars.keys()].sort()).toEqual(
+      [...SAMPLES.map(([path]) => path.slice(path.lastIndexOf(".") + 1)), "swift"].sort(),
+    );
+    // No comment judgement and no literal exemption, whatever the file holds.
+    const chatty = `${"// c\n".repeat(BLOCK + 1)}let x = "${"a ".repeat(115)}"\n`;
+    expect(judgeFile("f.swift", "source", chatty, grammars).map(describeFinding)).toEqual([
+      `f.swift:${BLOCK + 2}: 240 chars (cap ${WARN.width})`,
+    ]);
+  });
+
+  // A grammar wasm importing a libc symbol the runtime does not export loads fine.
+  // It then crashes the parse on the first input reaching the symbol (tree-sitter-wasms' bash build imports isalpha).
+  // The two assertion sinks are reached only by a grammar bug, a crash either way.
+  test("every grammar wasm imports only symbols the runtime provides; the tree-sitter-wasms bash build is the control", async () => {
+    const runtime = await WebAssembly.compile(
+      readFileSync(join(ACTION_DIR, "node_modules", "web-tree-sitter", "tree-sitter.wasm")),
+    );
+    const provided = new Set(WebAssembly.Module.exports(runtime).map((entry) => entry.name));
+    const glue = new Set(["abort", "__assert_fail"]);
+    const missingImports = async (wasms: readonly string[]): Promise<string[]> => {
+      const missing: string[] = [];
+      for (const wasm of wasms) {
+        const grammar = await WebAssembly.compile(readFileSync(wasm));
+        for (const entry of WebAssembly.Module.imports(grammar)) {
+          if (entry.kind === "function" && !provided.has(entry.name) && !glue.has(entry.name)) {
+            missing.push(`${wasm.slice(wasm.lastIndexOf("/") + 1)}: ${entry.name}`);
+          }
+        }
+      }
+      return missing;
+    };
+    expect(GRAMMAR_WASMS.length).toBe(12);
+    expect(await missingImports(GRAMMAR_WASMS)).toEqual([]);
+    const crashing = join(
+      ACTION_DIR,
+      "node_modules",
+      "tree-sitter-wasms",
+      "out",
+      "tree-sitter-bash.wasm",
+    );
+    expect(GRAMMAR_WASMS).not.toContain(crashing);
+    expect(await missingImports([crashing])).toContain("tree-sitter-bash.wasm: isalpha");
+  });
+
+  test.each(SAMPLES)(
+    "%s: a comment run after code is a block; the same lines as code are not",
+    (path, comment, code) => {
+      const kind = classify(path);
+      if (kind === null) throw new Error(`${path} has no kind`);
+      const run = `${comment}\n`.repeat(BLOCK + 1);
+      expect(judgeFile(path, kind, `${code}\n${run}${code}\n`, grammars)).toEqual([
+        {
+          path,
+          kind,
+          tier: "warn",
+          measure: "comment",
+          line: 2,
+          value: BLOCK + 1,
+          cap: BLOCK,
+          scope: "block",
+        },
+      ]);
+      expect(judgeFile(path, kind, `${code}\n`.repeat(BLOCK + 2), grammars)).toEqual([]);
+    },
+  );
+
+  /** Every comment form of every grammar: how it opens, and how it closes when the reason does not run to the line end. */
+  const STYLES: [path: string, open: string, close: string][] = [
+    ["f.ts", "//", ""],
+    ["f.ts", "/*", "*/"],
+    ["f.ts", "<!--", ""],
+    ["f.tsx", "//", ""],
+    ["f.tsx", "/*", "*/"],
+    ["f.tsx", "<!--", ""],
+    ["f.js", "//", ""],
+    ["f.js", "/*", "*/"],
+    ["f.js", "<!--", ""],
+    ["f.js", "-->", ""],
+    ["f.py", "#", ""],
+    ["f.rs", "//", ""],
+    ["f.rs", "/*", "*/"],
+    ["f.go", "//", ""],
+    ["f.go", "/*", "*/"],
+    ["f.c", "//", ""],
+    ["f.c", "/*", "*/"],
+    ["f.cpp", "//", ""],
+    ["f.cpp", "/*", "*/"],
+    ["f.java", "//", ""],
+    ["f.java", "/*", "*/"],
+    ["f.kt", "//", ""],
+    ["f.kt", "/*", "*/"],
+    ["f.sh", "#", ""],
+    [".github/workflows/f.yml", "#", ""],
+  ];
+  const extension = (path: string): string => path.slice(path.lastIndexOf(".") + 1);
+  const loaded = (path: string): Grammar => {
+    const grammar = grammars.get(extension(path));
+    if (grammar === undefined || "reason" in grammar) throw new Error(`${path} has no grammar`);
+    return grammar;
+  };
+  /** The node type the grammar gives a comment written in this style. */
+  const commentType = (grammar: Grammar, text: string): string => {
+    const tree = grammar.parser.parse(text);
+    if (tree === null) throw new Error("tree-sitter returned no tree");
+    const pending = [tree.rootNode];
+    for (let node = pending.shift(); node !== undefined; node = pending.shift()) {
+      if (grammar.comments.has(node.type)) return node.type;
+      pending.push(...node.children.filter((child) => child !== null));
+    }
+    throw new Error(`no comment in ${JSON.stringify(text)}`);
+  };
+
+  test.each(STYLES)(
+    "%s %s: a reason holding the other forms' closers survives to its own closer",
+    (path, open, close) => {
+      const kind = classify(path);
+      if (kind === null) throw new Error(`${path} has no kind`);
+      const foreign = ["*/", "-->"].filter((closer) => closer !== close).join(" ");
+      const marker = `${open} ${COMMENT_MARKER} ${foreign} is upstream syntax ${close}`.trimEnd();
+      const run = `${open} c ${close}`.trimEnd();
+      const header = `${marker}\n${`${run}\n`.repeat(COMMENT_CAPS.header)}`;
+      expect(judgeFile(path, kind, header, grammars)).toEqual([]);
+      // The control: the same block with a bare marker warns twice.
+      expect(
+        judgeFile(
+          path,
+          kind,
+          header.replace(marker, `${open} ${COMMENT_MARKER} ${close}`.trimEnd()),
+          grammars,
+        ),
+      ).toEqual([
+        { path, kind, tier: "warn", measure: "marker", line: 1 },
+        {
+          path,
+          kind,
+          tier: "warn",
+          measure: "comment",
+          line: 1,
+          value: COMMENT_CAPS.header + 1,
+          cap: COMMENT_CAPS.header,
+          scope: "header",
+        },
+      ]);
+    },
+  );
+
+  test("every comment node type of every grammar has a style above, so its delimiters are proven", () => {
+    // A grammar is named by the first extension reaching it: a style's, else its own.
+    const byGrammar = new Map<Grammar, { name: string; types: Set<string> }>();
+    for (const [path, open, close] of STYLES) {
+      const grammar = loaded(path);
+      const entry = byGrammar.get(grammar) ?? { name: extension(path), types: new Set<string>() };
+      byGrammar.set(grammar, entry);
+      entry.types.add(commentType(grammar, `${open} c ${close}\n`));
+    }
+    for (const [ext, grammar] of grammars) {
+      if (!("reason" in grammar) && !byGrammar.has(grammar)) {
+        byGrammar.set(grammar, { name: ext, types: new Set() });
+      }
+    }
+    const styled = Object.fromEntries(
+      [...byGrammar.values()].map(({ name, types }) => [name, [...types].sort()]),
+    );
+    const declared = Object.fromEntries(
+      [...byGrammar].map(([grammar, { name }]) => [name, [...grammar.comments.keys()].sort()]),
+    );
+    expect(styled).toEqual(declared);
+    expect(Object.keys(styled)).toEqual([
+      "ts",
+      "tsx",
+      "js",
+      "py",
+      "rs",
+      "go",
+      "c",
+      "cpp",
+      "java",
+      "kt",
+      "sh",
+      "yml",
+    ]);
+  });
+
+  test("an extension without a grammar gets no comment judgement and no literal exemption, and is reported once", () => {
+    const none: Grammars = new Map([["ts", { reason: "no grammar maps this extension" }]]);
+    const wide = `const x = "${"a ".repeat(115)}";\n`;
+    const chatty = `${"// c\n".repeat(BLOCK + 1)}x\n\n${"// c\n".repeat(BLOCK + 1)}${wide}`;
+    // Control: with the grammar, the block warns and the literal is left alone.
+    expect(judgeFile("f.ts", "source", chatty, grammars).map(describeFinding)).toEqual([
+      `f.ts:${BLOCK + 4}: ${BLOCK + 1} comment lines (cap ${BLOCK})`,
+    ]);
+    expect(judgeFile("f.ts", "source", chatty, none).map(describeFinding)).toEqual([
+      `f.ts:${2 * BLOCK + 5}: 243 chars (cap ${WARN.width})`,
+    ]);
+    const root = checkout({
+      "a.ts": chatty,
+      "b.ts": lines(3),
+      "c.sh": "echo x\n",
+    });
+    const verdict = check(root, none);
+    expect(verdict.unjudged).toEqual([
+      { extension: "ts", files: 2, reason: "no grammar maps this extension" },
+    ]);
+    expect(report(outcomeOf(verdict))).toContain(
+      "\n2 `.ts` file(s) not judged for comment blocks or literal lines (no working grammar: no grammar maps this extension).\n",
     );
   });
 });
@@ -840,7 +1265,7 @@ describe("check", () => {
   const WIDE = `${"a ".repeat(140).trim()}\n`;
   const bigLine = `src/big.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`;
   const summary = (root: string, rendered?: string[]) => {
-    const verdict = check(root, { rendered });
+    const verdict = check(root, grammars, { rendered });
     return {
       failures: verdict.failures.map(describeFinding),
       warnings: verdict.warnings.map(describeFinding),
@@ -911,11 +1336,13 @@ describe("check", () => {
     expect(summary(root, ["out"]).failures).toEqual([
       `out/src/big.ts: ${HARD.lines.source + 1} lines (cap ${HARD.lines.source} for source)`,
     ]);
-    expect(() => check(root, { rendered: ["missing"] })).toThrow(
+    expect(() => check(root, grammars, { rendered: ["missing"] })).toThrow(
       "--rendered missing: no tracked files under it",
     );
-    expect(() => check(root, { rendered: ["."] })).toThrow("--rendered .: must be a subdirectory");
-    expect(() => check(root, { rendered: ["out", "out/src"] })).toThrow(
+    expect(() => check(root, grammars, { rendered: ["."] })).toThrow(
+      "--rendered .: must be a subdirectory",
+    );
+    expect(() => check(root, grammars, { rendered: ["out", "out/src"] })).toThrow(
       "--rendered out/src: already inside --rendered out",
     );
   });
@@ -937,7 +1364,10 @@ describe("check", () => {
   });
 
   test("an allowlisted warn-tier file is silenced too, and is not stale", () => {
-    const root = checkout({ "src/warm.ts": WARM, [ALLOWLIST_FILE]: "src/warm.ts # known\n" });
+    const root = checkout({
+      "src/warm.ts": WARM,
+      [ALLOWLIST_FILE]: "src/warm.ts # known\n",
+    });
     expect(summary(root)).toEqual({
       failures: [],
       warnings: [],
@@ -947,7 +1377,10 @@ describe("check", () => {
   });
 
   test("an entry without a reason fails and exempts nothing", () => {
-    const root = checkout({ "src/big.ts": BIG, [ALLOWLIST_FILE]: "src/big.ts\n" });
+    const root = checkout({
+      "src/big.ts": BIG,
+      [ALLOWLIST_FILE]: "src/big.ts\n",
+    });
     expect(summary(root)).toEqual({
       failures: [bigLine],
       warnings: [],
@@ -973,7 +1406,9 @@ describe("check", () => {
   });
 
   test("this repository passes with its allowlist, rendered goldens included", () => {
-    const verdict = check(REPO_ROOT, { rendered: ["tests/golden-renders/all-modules"] });
+    const verdict = check(REPO_ROOT, grammars, {
+      rendered: ["tests/golden-renders/all-modules"],
+    });
     expect([...verdict.failures.map(describeFinding), ...verdict.allowlistErrors]).toEqual([]);
   });
 });
@@ -1046,7 +1481,10 @@ describe("the CLI", () => {
   test("findings: exit 1, ::error:: lines, the table as comment body, summary, and report=findings", () => {
     const hardLines = HARD.lines.source + 1;
     const wide = `${"a ".repeat(120).trim()}\n`;
-    const root = checkout({ "src/big.ts": lines(hardLines), "src/warm.sh": wide });
+    const root = checkout({
+      "src/big.ts": lines(hardLines),
+      "src/warm.sh": wide,
+    });
     expect(run(root)).toEqual({
       exitCode: 1,
       stdout: [`::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`],
@@ -1080,7 +1518,10 @@ describe("the CLI", () => {
   });
 
   test("clean: exit 0, a summary, no comment body (the action deletes the comment), report=clean", () => {
-    const root = checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` });
+    const root = checkout({
+      "src/fine.ts": lines(3),
+      "src/managed.ts": `${MANAGED}${lines(3)}`,
+    });
     expect(run(root)).toEqual({
       exitCode: 0,
       stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
@@ -1117,7 +1558,14 @@ describe("the CLI", () => {
 describe("report", () => {
   const verdict: Verdict = {
     failures: [
-      { path: "a.ts", kind: "source", tier: "hard", measure: "lines", value: 2100, cap: 2000 },
+      {
+        path: "a.ts",
+        kind: "source",
+        tier: "hard",
+        measure: "lines",
+        value: 2100,
+        cap: 2000,
+      },
     ],
     warnings: [
       {
@@ -1153,6 +1601,7 @@ describe("report", () => {
     ],
     allowlistErrors: [`${ALLOWLIST_FILE}:1: 'c.ts' is stale`],
     managedSkipped: 3,
+    unjudged: [{ extension: "kt", files: 2, reason: "kotlin did not load" }],
   };
 
   test.each<[string, Outcome, string[]]>([
@@ -1180,11 +1629,22 @@ describe("report", () => {
         "",
         "3 managed file(s) skipped; repo-platform owns them.",
         "",
+        "2 `.kt` file(s) not judged for comment blocks or literal lines (no working grammar: kotlin did not load).",
+        "",
       ],
     ],
     [
       "clean says so and keeps the managed count",
-      { state: "clean", verdict: { ...verdict, failures: [], warnings: [], allowlistErrors: [] } },
+      {
+        state: "clean",
+        verdict: {
+          ...verdict,
+          failures: [],
+          warnings: [],
+          allowlistErrors: [],
+          unjudged: [],
+        },
+      },
       [
         "## File size check",
         "",
