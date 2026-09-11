@@ -81,6 +81,8 @@ function input(
     answers,
     modules,
     defaults: TEMPLATE.defaults,
+    files: TEMPLATE.files,
+    retired: TEMPLATE.retired,
     reservedLabels: RESERVED,
     private: isPrivate,
   };
@@ -308,9 +310,42 @@ describe("planCi", () => {
       answers: { nightly_label: "dependencies" },
       error: 'tracking label "dependencies" (nightly) is a label the template already manages',
     },
+    {
+      reason:
+        "a mirror source files.yml does not write for the selection (custom-license drops LICENSE.md)",
+      text: "modules: [custom-license]\nmirrors:\n  - {source: LICENSE.md, targets: [skills/*/LICENSE.md]}\n",
+      error:
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'skills/*/LICENSE.md': the source is not a managed or split file files.yml writes for this repository",
+    },
+    {
+      reason: "a mirror target that is a path files.yml writes",
+      text: "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [CLAUDE.md]}\n",
+      error:
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'CLAUDE.md': the target is a path files.yml writes",
+    },
+    {
+      reason: "a mirror target under .github/workflows/",
+      text: "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [.github/workflows/release.yml]}\n",
+      error:
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target '.github/workflows/release.yml': the target sits under .github/workflows/",
+    },
+    {
+      reason: "two mirror targets that nest",
+      text: "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [copies/a, copies/a/b]}\n",
+      error:
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a': the target is a path prefix of another target 'copies/a/b'\n" +
+        ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a/b': the target sits under another target 'copies/a'",
+    },
   ])("fails closed on $reason", ({ text, answers, error }) => {
     expect(() => planCi(input(text, answers))).toThrow(PlanError);
     expect(() => planCi(input(text, answers))).toThrow(error);
+  });
+
+  test("a sound mirror declaration plans exactly like the registration without it", () => {
+    const bare = "modules: [bun, skills]\n";
+    const text = `${bare}mirrors:\n  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, template/LICENSE.md]}\n  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}\n`;
+    expect(planCi(input(text), THURSDAY)).toEqual(planCi(input(bare), THURSDAY));
+    expect(planCi(input(text), THURSDAY).modules).toEqual(["bun", "skills"]);
   });
 
   test("the reserved roster is the template's managed labels, lowercased (the copier validators' list)", () => {
@@ -714,6 +749,23 @@ describe("plan.ts as a child", () => {
       '::error::.repo-platform.yml: module "agents" is not a module this template offers',
     );
     expect(unknown.output).toBe("");
+  });
+
+  test("an impossible mirror declaration fails as one workflow error per target and writes no row", () => {
+    const result = run(
+      {
+        ".repo-platform.yml":
+          "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [copies/a, copies/a/b, skills/*/LICENSE.md]}\n",
+        ".github/.copier-answers.yml": ANSWERS,
+      },
+      { PRIVATE: "false" },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      "::error::.repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a': the target is a path prefix of another target 'copies/a/b'\n" +
+        "::error::.repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a/b': the target sits under another target 'copies/a'\n",
+    );
+    expect(result.output).toBe("");
   });
 
   test("a missing registration, an invalid one, or an unknown mode fails as a workflow error", () => {

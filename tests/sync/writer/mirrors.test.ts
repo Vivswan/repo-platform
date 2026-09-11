@@ -1,5 +1,7 @@
-// Mirrors: the pattern grammar, the refusals (unwritten source, unsafe,
-// platform-written, or nested targets, foreign content), and the byte copies.
+// Mirrors: the pattern grammar, the byte copies, what is replaced for
+// review (other content, a directory, a file where a directory must be),
+// and what fails the run (an impossible declaration, a symbolic link, a
+// held source, a glob landing on a nested or contested path).
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -9,6 +11,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -19,9 +22,10 @@ import {
   blockedAncestor,
   blockedPrefix,
   expandPattern,
+  MirrorFailure,
   type MirrorRow,
-  mirrorPathProblem,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
+import type { MirrorProblem, OwnedPaths } from "../../../actions/plan/mirrors.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -33,6 +37,38 @@ function tree(files: Record<string, string>): string {
     writeFileSync(join(root, rel), content);
   }
   return root;
+}
+
+/** What files.yml claims: every source is written, plus the manifest. */
+function owned(sources: string[], writes: string[] = [], retires: string[] = []): OwnedPaths {
+  return {
+    sources: new Set(sources),
+    writes: new Set([...sources, ...writes, ".github/repo-platform-manifest.json"]),
+    retires: new Set(retires),
+  };
+}
+
+const bytes = (entries: Record<string, string>) =>
+  new Map(Object.entries(entries).map(([path, text]) => [path, Buffer.from(text)]));
+
+const row = (source: string, target: string, outcome: MirrorRow["outcome"], detail = "") =>
+  ({ source, target, outcome, detail }) as MirrorRow;
+
+const failure = (source: string, target: string, problem: string): MirrorProblem => ({
+  source,
+  target,
+  problem,
+});
+
+/** The failures a run throws, or null when it completes. */
+function failuresOf(run: () => unknown): MirrorProblem[] | null {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof MirrorFailure) return error.failures;
+    throw error;
+  }
+  return null;
 }
 
 describe("expandPattern", () => {
@@ -75,32 +111,6 @@ describe("expandPattern", () => {
   });
 });
 
-describe("mirrorPathProblem", () => {
-  test.each([
-    ["skills/a/LICENSE.md", null],
-    ["../LICENSE.md", "carries an empty, '.', or '..' segment"],
-    [".github/workflows/x.yml", "sits under .github/workflows/"],
-    ["LICENSE.md", "is a path files.yml writes"],
-    ["nightly.yml", "is a path files.yml writes"],
-    ["SECURITY.md", "is a path files.yml retires"],
-    ["LICENSE.md/copy.md", "sits under 'LICENSE.md', a path files.yml writes"],
-    ["docs", "is a path prefix of 'docs/README.md', a path files.yml writes"],
-    ["docs-site/README.md", null],
-    ["SECURITY.md/copy.md", "sits under 'SECURITY.md', a path files.yml retires"],
-    ["old", "is a path prefix of 'old/SECURITY.md', a path files.yml retires"],
-  ])("%s -> %p", (path, problem) => {
-    // The selected set carries every selected path, a starter included; the
-    // retired set every listed or stale retirement.
-    expect(
-      mirrorPathProblem(
-        path,
-        new Set(["LICENSE.md", "nightly.yml", "docs/README.md"]),
-        new Set(["SECURITY.md", "old/SECURITY.md"]),
-      ),
-    ).toBe(problem);
-  });
-});
-
 describe("blockedPrefix", () => {
   test("names the first linked or file literal directory before the star, or null", () => {
     const root = tree({ "outside/secret.txt": "", "real/a/x": "" });
@@ -108,7 +118,6 @@ describe("blockedPrefix", () => {
     const link = { dir: "docs", is: "a symbolic link" } as const;
     expect(blockedPrefix(root, "docs/*")).toEqual(link);
     expect(blockedPrefix(root, "docs/sub/*/x")).toEqual(link);
-    expect(blockedPrefix(root, "docs/file.md")).toEqual(link);
     expect(blockedPrefix(root, "real/a/x/*")).toEqual({ dir: "real/a/x", is: "a file" });
     expect(blockedPrefix(root, "real/*/x")).toBeNull();
     expect(blockedPrefix(root, "*/x")).toBeNull();
@@ -134,7 +143,7 @@ describe("blockedAncestor", () => {
 });
 
 describe("applyMirrors", () => {
-  test("writes, reports current copies, and refuses foreign content", () => {
+  test("writes absent and previous copies, reports current ones, replaces other content with a diff", () => {
     const root = tree({
       "LICENSE.md": "v2\n",
       "skills/a/README.md": "",
@@ -146,283 +155,318 @@ describe("applyMirrors", () => {
       "skills/d/LICENSE.md": "v1\n",
       "skills/e/README.md": "",
       "skills/e/LICENSE.md": "AGENTS.md",
-      "skills/f/README.md": "",
-      "starter.yml": "v1\n",
     });
-    symlinkSync("../../LICENSE.md", join(root, "skills/f/LICENSE.md"));
-    const written = new Map([["LICENSE.md", Buffer.from("v2\n")]]);
-    symlinkSync("skills", join(root, "linked"));
-    const rows = applyMirrors(
+    const { rows, replaced } = applyMirrors(
       root,
-      [
-        { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] },
-        { source: "README.md", targets: ["docs/README.md", "skills/*/README.md"] },
-        { source: "LICENSE.md", targets: ["skills/**/LICENSE.md", "LICENSE.md", "starter.yml"] },
-        { source: "LICENSE.md", targets: ["shared/copy.txt"] },
-        { source: "NOTICE.md", targets: ["shared/copy.txt"] },
-        { source: "LICENSE.md", targets: ["nowhere/*/LICENSE.md", "linked/*/LICENSE.md"] },
-      ],
-      written,
-      new Set(["LICENSE.md", "starter.yml"]),
+      [{ source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] }],
+      bytes({ "LICENSE.md": "v2\n" }),
+      owned(["LICENSE.md"]),
       {
         "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") },
         // A link record's hash covers a target string, so it vouches for no file bytes.
         "skills/e/LICENSE.md": { class: "link", hash: sha256("AGENTS.md") },
       },
     );
-    const byTarget = (
-      a: { source: string; target: string },
-      b: { source: string; target: string },
-    ) => `${a.target} ${a.source}`.localeCompare(`${b.target} ${b.source}`);
-    const expected: MirrorRow[] = [
-      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
-      { source: "LICENSE.md", target: "skills/b/LICENSE.md", outcome: "current", detail: "" },
-      {
-        source: "LICENSE.md",
-        target: "skills/c/LICENSE.md",
-        outcome: "refused",
-        detail: "the target holds content that is not the previous mirror",
-      },
-      { source: "LICENSE.md", target: "skills/d/LICENSE.md", outcome: "written", detail: "" },
-      {
-        source: "LICENSE.md",
-        target: "skills/e/LICENSE.md",
-        outcome: "refused",
-        detail: "the target holds content that is not the previous mirror",
-      },
-      {
-        source: "LICENSE.md",
-        target: "skills/f/LICENSE.md",
-        outcome: "refused",
-        detail: "the target is a symbolic link",
-      },
-      {
-        source: "README.md",
-        target: "docs/README.md",
-        outcome: "refused",
-        detail: "the source is not a file this sync writes",
-      },
-      ...["a", "b", "c", "d", "e", "f"].map((skill) => ({
-        source: "README.md",
-        target: `skills/${skill}/README.md`,
-        outcome: "refused" as const,
-        detail: "the source is not a file this sync writes",
-      })),
-      {
-        source: "LICENSE.md",
-        target: "skills/**/LICENSE.md",
-        outcome: "refused",
-        detail: "the pattern uses '**'",
-      },
-      {
-        source: "LICENSE.md",
-        target: "nowhere/*/LICENSE.md",
-        outcome: "refused",
-        detail: "the pattern matches nothing",
-      },
-      {
-        source: "LICENSE.md",
-        target: "linked/*/LICENSE.md",
-        outcome: "refused",
-        detail: "the pattern's ancestor 'linked' is a symbolic link",
-      },
-      {
-        source: "LICENSE.md",
-        target: "LICENSE.md",
-        outcome: "refused",
-        detail: "the target is a path files.yml writes",
-      },
-      {
-        source: "LICENSE.md",
-        target: "starter.yml",
-        outcome: "refused",
-        detail: "the target is a path files.yml writes",
-      },
-      {
-        source: "LICENSE.md",
-        target: "shared/copy.txt",
-        outcome: "refused",
-        detail: "the target is claimed by more than one source",
-      },
-      {
-        source: "NOTICE.md",
-        target: "shared/copy.txt",
-        outcome: "refused",
-        detail: "the target is claimed by more than one source",
-      },
-    ];
-    expect([...rows].sort(byTarget)).toEqual([...expected].sort(byTarget));
-    expect(existsSync(join(root, "shared/copy.txt"))).toBe(false);
-    expect(readFileSync(join(root, "starter.yml"), "utf-8")).toBe("v1\n");
-    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
-    expect(readFileSync(join(root, "skills/c/LICENSE.md"), "utf-8")).toBe("hand edited\n");
-    expect(readFileSync(join(root, "skills/d/LICENSE.md"), "utf-8")).toBe("v2\n");
+    expect(rows).toEqual([
+      row("LICENSE.md", "skills/a/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/b/LICENSE.md", "current"),
+      row("LICENSE.md", "skills/c/LICENSE.md", "replaced local edits"),
+      row("LICENSE.md", "skills/d/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/e/LICENSE.md", "replaced local edits"),
+    ]);
+    expect(replaced).toEqual([
+      { path: "skills/c/LICENSE.md", before: "hand edited\n", after: "v2\n" },
+      { path: "skills/e/LICENSE.md", before: "AGENTS.md", after: "v2\n" },
+    ]);
+    for (const skill of ["a", "b", "c", "d", "e"]) {
+      expect(readFileSync(join(root, `skills/${skill}/LICENSE.md`), "utf-8")).toBe("v2\n");
+    }
   });
 
-  test("a target nested with another path, a file, or a directory is refused, and the rest is written", () => {
-    const root = tree({ "afile.txt": "", "adir/keep.md": "", "docs/keep.md": "" });
-    const written = new Map([
-      ["LICENSE.md", Buffer.from("L\n")],
-      ["NOTICE.md", Buffer.from("N\n")],
-    ]);
-    const rows = applyMirrors(
+  test("a directory at the target or a file where a directory must be is removed, named, and written over", () => {
+    const root = tree({
+      "adir/keep.md": "",
+      "adir/deep/er.md": "",
+      "afile.txt": "",
+      "skills/a/LICENSE.md/inner.md": "",
+      "outside/keep.md": "",
+    });
+    // A link inside the removed directory is unlinked, never followed.
+    symlinkSync("../outside", join(root, "adir/out"));
+    const { rows, replaced } = applyMirrors(
       root,
       [
-        // Two targets of one source nest; a target nests with another source's.
-        { source: "LICENSE.md", targets: ["copies/a", "copies/a/b", "copies/c/d", "good/COPY.md"] },
-        { source: "NOTICE.md", targets: ["copies/c", "afile.txt/COPY.md", "adir", "afile.txt"] },
-        // A literal makes a directory that a glob then names as a file.
-        { source: "LICENSE.md", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
-        // The source itself, with a `selected` that does not list it.
-        { source: "NOTICE.md", targets: ["LICENSE.md"] },
-        // A contested literal under a nested one: refused for every claimant,
-        // and a glob of one claimant cannot take the settled path later.
-        { source: "LICENSE.md", targets: ["docs/a", "d*/a"] },
-        { source: "NOTICE.md", targets: ["docs/a"] },
-        { source: "HELD.md", targets: ["docs/a/b"] },
+        { source: "L.md", targets: ["adir", "afile.txt/COPY.md"] },
+        { source: "N.md", targets: ["skills/*/LICENSE.md"] },
       ],
-      written,
-      new Set(),
+      bytes({ "L.md": "L\n", "N.md": "N\n" }),
+      owned(["L.md", "N.md"]),
       {},
     );
-    const refused = (source: string, path: string, detail: string) => ({
-      source,
-      target: path,
-      outcome: "refused" as const,
-      detail,
-    });
-    const written_ = (source: string, path: string) => ({
-      source,
-      target: path,
-      outcome: "written" as const,
-      detail: "",
-    });
-    const above = (other: string) => `the target is a path prefix of another target '${other}'`;
-    const under = (other: string) => `the target sits under another target '${other}'`;
-    // Rows follow the declarations, literals first; every path is settled
-    // before the pass writes, so a refusal never depends on what an earlier
-    // row of the same pass did.
     expect(rows).toEqual([
-      refused("LICENSE.md", "copies/a", above("copies/a/b")),
-      refused("LICENSE.md", "copies/a/b", under("copies/a")),
-      refused("LICENSE.md", "copies/c/d", under("copies/c")),
-      written_("LICENSE.md", "good/COPY.md"),
-      refused("NOTICE.md", "copies/c", above("copies/c/d")),
-      refused("NOTICE.md", "afile.txt/COPY.md", "the target's ancestor 'afile.txt' is a file"),
-      refused("NOTICE.md", "adir", "the target is a directory"),
-      refused("NOTICE.md", "afile.txt", above("afile.txt/COPY.md")),
-      written_("LICENSE.md", "skills/LICENSE.md/x"),
-      refused("NOTICE.md", "LICENSE.md", "the target is a path files.yml writes"),
-      refused("LICENSE.md", "docs/a", above("docs/a/b")),
-      refused("NOTICE.md", "docs/a", above("docs/a/b")),
-      refused("HELD.md", "docs/a/b", under("docs/a")),
-      refused("LICENSE.md", "adir/LICENSE.md", under("adir")),
-      written_("LICENSE.md", "docs/LICENSE.md"),
-      written_("LICENSE.md", "good/LICENSE.md"),
-      refused("LICENSE.md", "skills/LICENSE.md", "the target is a directory"),
-      refused("LICENSE.md", "docs/a", above("docs/a/b")),
+      row("L.md", "adir", "replaced", "a directory stood at the target"),
+      row("L.md", "afile.txt/COPY.md", "replaced", "a file stood at ancestor 'afile.txt'"),
+      row("N.md", "skills/a/LICENSE.md", "replaced", "a directory stood at the target"),
     ]);
-    expect(existsSync(join(root, "copies"))).toBe(false);
-    expect(existsSync(join(root, "docs/a"))).toBe(false);
-    expect(readFileSync(join(root, "good/COPY.md"), "utf-8")).toBe("L\n");
-    expect(readFileSync(join(root, "afile.txt"), "utf-8")).toBe("");
-    expect(readFileSync(join(root, "adir/keep.md"), "utf-8")).toBe("");
+    expect(replaced).toEqual([]);
+    expect(readFileSync(join(root, "adir"), "utf-8")).toBe("L\n");
+    expect(readFileSync(join(root, "afile.txt/COPY.md"), "utf-8")).toBe("L\n");
+    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("N\n");
+    expect(readFileSync(join(root, "outside/keep.md"), "utf-8")).toBe("");
   });
 
-  test("a matched path under a linked directory is refused by name, and the pass goes on", () => {
+  test("an impossible declaration fails the run before anything is written, every problem named", () => {
+    const root = tree({ "skills/a/README.md": "" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          { source: "LICENSE.md", targets: ["copies/a", "copies/a/b", "good/COPY.md"] },
+          { source: "LICENSE.md", targets: ["LICENSE.md", "SECURITY.md", "docs/**/x"] },
+          { source: "LICENSE.md", targets: [".repo-platform.yml/copy.md"] },
+          { source: "README.md", targets: ["skills/*/README.md"] },
+        ],
+        bytes({ "LICENSE.md": "L\n" }),
+        owned(["LICENSE.md"], [], ["SECURITY.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      failure("LICENSE.md", "LICENSE.md", "the target is a path files.yml writes"),
+      failure("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
+      failure("LICENSE.md", "docs/**/x", "the pattern uses '**'"),
+      failure("LICENSE.md", ".repo-platform.yml/copy.md", "the target sits under the registration"),
+      failure(
+        "README.md",
+        "skills/*/README.md",
+        "the source is not a managed or split file files.yml writes for this repository",
+      ),
+      failure(
+        "LICENSE.md",
+        "copies/a",
+        "the target is a path prefix of another target 'copies/a/b'",
+      ),
+      failure("LICENSE.md", "copies/a/b", "the target sits under another target 'copies/a'"),
+    ]);
+    expect(existsSync(join(root, "good"))).toBe(false);
+    expect(existsSync(join(root, "copies"))).toBe(false);
+  });
+
+  test("a literal pass fails whole on a link at or above a target, a held source, or a directory the glob pass would need", () => {
     const root = tree({
-      "deep/alpha/README.md": "",
-      "deep/beta/sub/README.md": "",
-      "outside/keep.md": "",
-      "outside/locked/x.md": "",
-      "outside/sub/x.md": "",
+      "LICENSE.md": "v2\n",
       "skills/a/README.md": "",
+      "outside/x.md": "",
+      "sub/dir/README.md": "",
     });
-    symlinkSync("../../outside", join(root, "deep/alpha/sub"));
+    symlinkSync("../../LICENSE.md", join(root, "skills/a/LICENSE.md"));
+    symlinkSync("outside", join(root, "linked"));
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          {
+            source: "LICENSE.md",
+            targets: ["skills/a/LICENSE.md", "linked/LICENSE.md", "good/COPY.md", "sub/*/L.md"],
+          },
+          { source: "HELD.md", targets: ["copies/HELD.md", "sub/*/HELD.md"] },
+        ],
+        bytes({ "LICENSE.md": "v2\n" }),
+        owned(["LICENSE.md", "HELD.md"]),
+        {},
+      ),
+    );
+    // Every failure of the pass, in claim order, and no write of the pass:
+    // the glob pass never ran, so its held source is not reached.
+    expect(failures).toEqual([
+      failure(
+        "HELD.md",
+        "copies/HELD.md",
+        "the source was held this run, so there is nothing to copy",
+      ),
+      failure("LICENSE.md", "skills/a/LICENSE.md", "the target is a symbolic link"),
+      failure(
+        "LICENSE.md",
+        "linked/LICENSE.md",
+        "the target's ancestor 'linked' is a symbolic link",
+      ),
+    ]);
+    expect(existsSync(join(root, "good"))).toBe(false);
+    expect(existsSync(join(root, "sub/dir/L.md"))).toBe(false);
+    expect(readlinkSync(join(root, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
+  });
+
+  test("a glob pass fails whole on the links it meets, a pattern reading through a link or a file or matching nothing, and a held source", () => {
+    const root = tree({
+      ".repo-platform.yml": "modules: []\n",
+      "skills/a/README.md": "",
+      "skills/b/README.md": "",
+      "docs/a.md": "L\n",
+      "real/a/x": "",
+      "outside/x.md": "",
+    });
     symlinkSync("../outside", join(root, "skills/link"));
     symlinkSync("loop", join(root, "skills/loop"));
+    symlinkSync("a.md", join(root, "docs/b.md"));
     // Links that cannot be looked through: a name no filesystem holds
     // (ENAMETOOLONG) and a file behind a directory nobody may traverse
     // (EACCES; root traverses anything, so that case is skipped for root).
     symlinkSync("n".repeat(256), join(root, "skills/long"));
     const denied = process.getuid?.() !== 0;
     if (denied) {
+      mkdirSync(join(root, "outside/locked"));
+      writeFileSync(join(root, "outside/locked/x.md"), "");
       symlinkSync("../outside/locked/x.md", join(root, "skills/denied"));
       chmodSync(join(root, "outside/locked"), 0o000);
     }
-    let rows: MirrorRow[];
+    let failures: MirrorProblem[] | null;
     try {
-      rows = applyMirrors(
-        root,
-        [
-          {
-            source: "LICENSE.md",
-            targets: ["deep/*/sub/LICENSE.md", "skills/*/LICENSE.md", "skills/*/sub/*.md"],
-          },
-        ],
-        new Map([["LICENSE.md", Buffer.from("L\n")]]),
-        new Set(),
-        {},
+      failures = failuresOf(() =>
+        applyMirrors(
+          root,
+          [
+            { source: "A.md", targets: ["skills/*/LICENSE.md", "skills/*/nope/LICENSE.md"] },
+            {
+              source: "B.md",
+              targets: ["nowhere/*/x", "skills/link/*.md", "real/a/x/*", "docs/*.md"],
+            },
+            { source: "HELD.md", targets: ["skills/*/HELD.md"] },
+            // A root glob reaching the registration the sync reads.
+            { source: "B.md", targets: ["*.yml"] },
+          ],
+          bytes({ "A.md": "A\n", "B.md": "B\n" }),
+          owned(["A.md", "B.md", "HELD.md"]),
+          {},
+        ),
       );
     } finally {
-      chmodSync(join(root, "outside/locked"), 0o755);
+      if (denied) chmodSync(join(root, "outside/locked"), 0o755);
     }
-    const refused = (path: string, dir: string) => ({
-      source: "LICENSE.md",
-      target: path,
-      outcome: "refused" as const,
-      detail: `the target's ancestor '${dir}' is a symbolic link`,
-    });
-    // The star after a linked directory is never expanded (outside/sub/x.md
-    // is not listed), and a link loop or an unresolvable link is refused
-    // rather than followed.
-    const unreadable = denied ? ["skills/denied"] : [];
-    const links = [...unreadable, "skills/link", "skills/long", "skills/loop"];
-    expect(rows).toEqual([
-      refused("deep/alpha/sub/LICENSE.md", "deep/alpha/sub"),
-      { source: "LICENSE.md", target: "deep/beta/sub/LICENSE.md", outcome: "written", detail: "" },
-      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
-      ...links.map((link) => refused(`${link}/LICENSE.md`, link)),
-      ...links.map((link) => refused(`${link}/sub/*.md`, link)),
+    const linkAbove = (path: string, dir: string) =>
+      failure("A.md", path, `the target's ancestor '${dir}' is a symbolic link`);
+    const links = [
+      ...(denied ? ["skills/denied"] : []),
+      "skills/link",
+      "skills/long",
+      "skills/loop",
+    ];
+    // The star after a linked directory is never expanded (outside/x.md is
+    // not listed): the rest of the pattern rides along and fails by its
+    // linked ancestor. A glob never creates a directory.
+    expect(failures).toEqual([
+      failure("B.md", "nowhere/*/x", "the pattern matches nothing"),
+      failure(
+        "B.md",
+        "skills/link/*.md",
+        "the pattern's ancestor 'skills/link' is a symbolic link",
+      ),
+      failure("B.md", "real/a/x/*", "the pattern's ancestor 'real/a/x' is a file"),
+      failure(
+        "HELD.md",
+        "skills/*/HELD.md",
+        "the source was held this run, so there is nothing to copy",
+      ),
+      ...links.map((link) => linkAbove(`${link}/LICENSE.md`, link)),
+      failure(
+        "A.md",
+        "skills/a/nope/LICENSE.md",
+        "the target's directory 'skills/a/nope' does not exist",
+      ),
+      failure(
+        "A.md",
+        "skills/b/nope/LICENSE.md",
+        "the target's directory 'skills/b/nope' does not exist",
+      ),
+      ...links.map((link) => linkAbove(`${link}/nope/LICENSE.md`, link)),
+      failure("B.md", "docs/b.md", "the target is a symbolic link"),
+      failure("B.md", ".repo-platform.yml", "the target is the registration itself"),
     ]);
+    expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe("modules: []\n");
+    expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
-    expect(existsSync(join(root, "outside/sub/LICENSE.md"))).toBe(false);
+    expect(readFileSync(join(root, "docs/a.md"), "utf-8")).toBe("L\n");
+  });
+
+  test("a glob landing on another source's literal, or on a path nested with a target, fails after the literals are written", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "B\n" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          // A literal makes a directory that a glob then names as a file.
+          { source: "A.md", targets: ["skills/LICENSE.md/x", "skills/a/COPY.md", "*/LICENSE.md"] },
+          { source: "B.md", targets: ["skills/*/COPY.md"] },
+        ],
+        bytes({ "A.md": "A\n", "B.md": "B\n" }),
+        owned(["A.md", "B.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      failure("B.md", "skills/a/COPY.md", "the target is claimed by more than one source"),
+      failure(
+        "A.md",
+        "skills/LICENSE.md",
+        "the target is a path prefix of another target 'skills/LICENSE.md/x'",
+      ),
+      failure(
+        "B.md",
+        "skills/LICENSE.md/COPY.md",
+        "the target sits under another target 'skills/LICENSE.md'",
+      ),
+    ]);
+    expect(readFileSync(join(root, "skills/LICENSE.md/x"), "utf-8")).toBe("A\n");
+    expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("A\n");
+    expect(existsSync(join(root, "skills/LICENSE.md/COPY.md"))).toBe(false);
+  });
+
+  test("two globs of different sources landing on one path fail both sides", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/L.md": "A\n" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          { source: "A.md", targets: ["skills/*/L.md"] },
+          { source: "B.md", targets: ["skills/a/*.md"] },
+        ],
+        bytes({ "A.md": "A\n", "B.md": "B\n" }),
+        owned(["A.md", "B.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      failure("A.md", "skills/a/L.md", "the target is claimed by more than one source"),
+      failure("B.md", "skills/a/L.md", "the target is claimed by more than one source"),
+    ]);
+    expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
   });
 
   test.each([
     ["17 segments of 255 bytes", Array(17).fill("a".repeat(255)).join("/")],
     ["30 segments of 200 bytes", `${Array(30).fill("a".repeat(200)).join("/")}/LICENSE.md`],
-  ])(
-    "a target longer than the runner can stat (%s) is refused by its length, and the pass goes on",
-    (_, long) => {
-      // Every segment is legal; only the whole path is too long to look up,
-      // so an lstat of it would throw ENAMETOOLONG.
-      const root = tree({ "skills/a/README.md": "" });
-      const rows = applyMirrors(
-        root,
-        [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
-        new Map([["LICENSE.md", Buffer.from("L\n")]]),
-        new Set(),
-        {},
-      );
-      expect(rows).toEqual([
-        {
-          source: "LICENSE.md",
-          target: long,
-          outcome: "refused",
-          detail: "the target is longer than 1024 bytes",
-        },
-        { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
-      ]);
-      expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
-      expect(existsSync(join(root, long.split("/")[0]))).toBe(false);
-    },
-  );
+  ])("a target longer than the runner can stat (%s) fails by its length", (_, long) => {
+    // Every segment is legal; only the whole path is too long to look up,
+    // so an lstat of it would throw ENAMETOOLONG.
+    const root = tree({ "skills/a/README.md": "" });
+    expect(
+      failuresOf(() =>
+        applyMirrors(
+          root,
+          [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
+          bytes({ "LICENSE.md": "L\n" }),
+          owned(["LICENSE.md"]),
+          {},
+        ),
+      ),
+    ).toEqual([failure("LICENSE.md", long, "the target is longer than 1024 bytes")]);
+    expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
+    expect(existsSync(join(root, long.split("/")[0]))).toBe(false);
+  });
 
   // macOS caps a whole path at 1024 bytes, so a checkout there cannot hold a
   // relative path near the bound; the runners are Linux (PATH_MAX 4096).
   test.skipIf(process.platform === "darwin")(
-    "a glob that grows past the bound through long directory names is refused by name, never probed",
+    "a glob that grows past the bound through long directory names fails by name, never probed",
     () => {
       const seg = "d".repeat(255);
       const levels = 17;
@@ -434,31 +478,27 @@ describe("applyMirrors", () => {
       chunk(root, 8);
       chunk(join(root, ...Array(8).fill(seg)), levels - 8);
       try {
-        const rows = applyMirrors(
-          root,
-          [
-            {
-              source: "LICENSE.md",
-              targets: [`${Array(levels).fill("*").join("/")}/LICENSE.md`, "skills/*/LICENSE.md"],
-            },
-          ],
-          new Map([["LICENSE.md", Buffer.from("L\n")]]),
-          new Set(),
-          {},
+        const failures = failuresOf(() =>
+          applyMirrors(
+            root,
+            [
+              {
+                source: "LICENSE.md",
+                targets: [`${Array(levels).fill("*").join("/")}/LICENSE.md`, "skills/*/LICENSE.md"],
+              },
+            ],
+            bytes({ "LICENSE.md": "L\n" }),
+            owned(["LICENSE.md"]),
+            {},
+          ),
         );
         // Four levels fit the bound and are listed; the fifth does not, so
         // the rest of the pattern rides along from there.
         const rider = [...Array(5).fill(seg), ...Array(levels - 5).fill("*"), "LICENSE.md"].join(
           "/",
         );
-        expect(rows).toEqual([
-          {
-            source: "LICENSE.md",
-            target: rider,
-            outcome: "refused",
-            detail: "the target is longer than 1024 bytes",
-          },
-          { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+        expect(failures).toEqual([
+          failure("LICENSE.md", rider, "the target is longer than 1024 bytes"),
         ]);
         expect(readdirSync(join(root, ...Array(4).fill(seg)))).toEqual([seg]);
       } finally {
@@ -467,120 +507,43 @@ describe("applyMirrors", () => {
     },
   );
 
-  test("a final star matching a symlink refuses it instead of skipping it", () => {
-    const root = tree({ "docs/a.md": "L\n" });
-    symlinkSync("a.md", join(root, "docs/b.md"));
-    const rows = applyMirrors(
-      root,
-      [{ source: "LICENSE.md", targets: ["docs/*.md"] }],
-      new Map([["LICENSE.md", Buffer.from("L\n")]]),
-      new Set(),
-      { "docs/b.md": { class: "mirror", hash: sha256("L\n") } },
-    );
-    expect(rows).toEqual([
-      { source: "LICENSE.md", target: "docs/a.md", outcome: "current", detail: "" },
-      {
-        source: "LICENSE.md",
-        target: "docs/b.md",
-        outcome: "refused",
-        detail: "the target is a symbolic link",
-      },
-    ]);
-  });
-
-  test("a glob never creates a directory: a matched path whose directory is missing is refused", () => {
-    // A directory literally named * makes the glob expand to its own text;
-    // the pass, not the spelling, says it is a glob.
-    const root = tree({ "skills/a/README.md": "", "skills/*/README.md": "" });
-    const rows = applyMirrors(
-      root,
-      [{ source: "LICENSE.md", targets: ["skills/*/nope/LICENSE.md"] }],
-      new Map([["LICENSE.md", Buffer.from("L\n")]]),
-      new Set(),
-      {},
-    );
-    const refused = (dir: string) => ({
-      source: "LICENSE.md",
-      target: `${dir}/LICENSE.md`,
-      outcome: "refused" as const,
-      detail: `the target's directory '${dir}' does not exist`,
-    });
-    expect(rows).toEqual([refused("skills/*/nope"), refused("skills/a/nope")]);
-    expect(existsSync(join(root, "skills/a/nope"))).toBe(false);
-    expect(existsSync(join(root, "skills/*/nope"))).toBe(false);
-  });
-
   test("literal targets are written before globs expand, so a new directory is matched in one run", () => {
     const root = tree({ "skills/old/README.md": "" });
-    const written = new Map([
-      ["LICENSE.md", Buffer.from("L\n")],
-      ["AGENTS.md", Buffer.from("A\n")],
-    ]);
-    const rows = applyMirrors(
+    const { rows } = applyMirrors(
       root,
       [
         { source: "AGENTS.md", targets: ["skills/*/AGENTS.md"] },
         { source: "LICENSE.md", targets: ["skills/new/LICENSE.md"] },
       ],
-      written,
-      new Set(["LICENSE.md", "AGENTS.md"]),
+      bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
+      owned(["LICENSE.md", "AGENTS.md"]),
       {},
     );
     expect(rows).toEqual([
-      { source: "LICENSE.md", target: "skills/new/LICENSE.md", outcome: "written", detail: "" },
-      { source: "AGENTS.md", target: "skills/new/AGENTS.md", outcome: "written", detail: "" },
-      { source: "AGENTS.md", target: "skills/old/AGENTS.md", outcome: "written", detail: "" },
+      row("LICENSE.md", "skills/new/LICENSE.md", "written"),
+      row("AGENTS.md", "skills/new/AGENTS.md", "written"),
+      row("AGENTS.md", "skills/old/AGENTS.md", "written"),
     ]);
     expect(readFileSync(join(root, "skills/new/AGENTS.md"), "utf-8")).toBe("A\n");
   });
 
-  test("a target two literals contest stays refused when a glob of one of them matches it too", () => {
-    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "B\n" });
-    const written = new Map([
-      ["A.md", Buffer.from("A\n")],
-      ["B.md", Buffer.from("B\n")],
-    ]);
-    const rows = applyMirrors(
+  test("a path one source claims twice, by a literal and a glob or by two globs, is written once and then current", () => {
+    const root = tree({ "skills/a/README.md": "" });
+    const { rows } = applyMirrors(
       root,
       [
-        { source: "A.md", targets: ["skills/a/COPY.md", "skills/*/COPY.md"] },
-        { source: "B.md", targets: ["skills/a/COPY.md"] },
+        { source: "LICENSE.md", targets: ["skills/a/LICENSE.md", "skills/*/LICENSE.md"] },
+        { source: "LICENSE.md", targets: ["skills/a/*.md"] },
       ],
-      written,
-      new Set(),
-      { "skills/a/COPY.md": { class: "mirror", hash: sha256("B\n") } },
+      bytes({ "LICENSE.md": "L\n" }),
+      owned(["LICENSE.md"]),
+      {},
     );
-    expect(rows.map((row) => [row.source, row.outcome])).toEqual([
-      ["A.md", "refused"],
-      ["B.md", "refused"],
-      ["A.md", "refused"],
+    expect(rows).toEqual([
+      row("LICENSE.md", "skills/a/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/a/LICENSE.md", "current"),
+      row("LICENSE.md", "skills/a/LICENSE.md", "current"),
+      row("LICENSE.md", "skills/a/README.md", "replaced local edits"),
     ]);
-    expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("B\n");
-  });
-
-  test("a literal target a glob of another source also matches stays the literal's", () => {
-    const root = tree({ "skills/a/README.md": "" });
-    const written = new Map([
-      ["LICENSE.md", Buffer.from("L\n")],
-      ["NOTICE.md", Buffer.from("N\n")],
-    ]);
-    const declared = [
-      { source: "NOTICE.md", targets: ["skills/*/LICENSE.md"] },
-      { source: "LICENSE.md", targets: ["skills/a/LICENSE.md"] },
-    ];
-    const first = applyMirrors(root, declared, written, new Set(), {});
-    expect(first).toEqual([
-      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
-      {
-        source: "NOTICE.md",
-        target: "skills/a/LICENSE.md",
-        outcome: "refused",
-        detail: "the target is claimed by more than one source",
-      },
-    ]);
-    const records = { "skills/a/LICENSE.md": { class: "mirror", hash: sha256("L\n") } };
-    const second = applyMirrors(root, declared, written, new Set(), records);
-    expect(second.map((row) => row.outcome)).toEqual(["current", "refused"]);
-    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
   });
 });

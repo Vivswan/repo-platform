@@ -360,6 +360,8 @@ export function trackingLabelsOf(
     answers: answersText === null ? {} : parseYamlMapping(answersText, where.answers),
     modules: data.modules,
     defaults: data.defaults,
+    files: data.files,
+    retired: data.retired,
     reservedLabels: new Set(managedLabelNames(manifests).map((name) => name.toLowerCase())),
     private: isPrivate,
   };

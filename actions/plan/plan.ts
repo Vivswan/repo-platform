@@ -10,9 +10,12 @@
 // CodeQL languages, the tracking labels, and whether a scheduled run is
 // the week's CodeQL rescan. `pages` resolves the deploy
 // configuration reusable-pages.yml consumes (mounts, toolchain, commands,
-// output directory, site title, link-rot label), from the registration or,
-// for a caller passing `mounts`, from its own inputs (below). Fail closed:
-// an unknown module, an unknown key, a malformed value, or a missing
+// registration-configured: the plan resolves all eight from its
+// .repo-platform.yml. Both stay supported (repo-platform's own docs-site.yml
+// is caller-configured: this repository carries no registration).
+// Fail closed:
+// an unknown module, an unknown key, a malformed value, a mirror
+// declaration files.yml proves unwritable (mirrors.ts), or a missing
 // registration fails the step - nothing here ever defaults an invalid
 // registration into a green run.
 //
@@ -38,7 +41,15 @@ import {
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
-import { FilesConfigError, type ModuleData, parseFilesConfig } from "./files_config.ts";
+import {
+  type FileEntry,
+  type FilesConfig,
+  FilesConfigError,
+  type ModuleData,
+  parseFilesConfig,
+  type RetiredEntry,
+} from "./files_config.ts";
+import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
 import {
   LABEL_RE,
   parseRegistration,
@@ -80,6 +91,9 @@ export interface TemplateData {
   /** Every module in files.yml order, which is the canonical module order. */
   modules: Module[];
   defaults: PlanDefaults;
+  /** The file entries and retirements, for the paths a mirror may name. */
+  files: FileEntry[];
+  retired: RetiredEntry[];
 }
 
 /** Where files.yml declares one default the plan reads. */
@@ -104,13 +118,14 @@ export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSourc
  *  file, or one missing a default the plan resolves from, is an error
  *  naming the file and every missing default. */
 export function loadModuleData(text: string, label = "files.yml"): TemplateData {
-  let modules: Record<string, ModuleData>;
+  let config: FilesConfig;
   try {
-    modules = parseFilesConfig(text, label).modules;
+    config = parseFilesConfig(text, label);
   } catch (error) {
     if (!(error instanceof FilesConfigError)) throw error;
     throw new PlanError(error.problems.map((problem) => `${label}: ${problem}`));
   }
+  const { modules } = config;
   const missing: string[] = [];
   const required = ({ module, key, pick }: DefaultSource): string => {
     const data = modules[module];
@@ -128,7 +143,12 @@ export function loadModuleData(text: string, label = "files.yml"): TemplateData 
     docsPath: required(REQUIRED_DEFAULTS.docsPath),
   };
   if (missing.length > 0) throw new PlanError(missing);
-  return { modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })), defaults };
+  return {
+    modules: Object.entries(modules).map(([name, data]) => ({ ...data, name })),
+    defaults,
+    files: config.files,
+    retired: config.retired,
+  };
 }
 
 export interface PlanInput {
@@ -137,6 +157,8 @@ export interface PlanInput {
   answers: Record<string, unknown>;
   modules: Module[];
   defaults: PlanDefaults;
+  files: FileEntry[];
+  retired: RetiredEntry[];
   /** Lowercased names of the labels the template manages (the settings
    *  layers' labels): a tracking stream reusing one would let a green night
    *  close unrelated issues and every settings apply fight over it. */
@@ -296,6 +318,14 @@ export function codeqlLanguages(selected: Module[], isPrivate: boolean): string[
 
 export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   const selected = selectModules(input);
+  if (input.registration.mirrors !== undefined) {
+    const owned = ownedPaths(input, {
+      modules: selected.map((module) => module.name),
+      private: input.private,
+    });
+    const problems = mirrorDeclarationProblems(input.registration.mirrors, owned);
+    if (problems.length > 0) throw new PlanError(problems.map(describeMirrorProblem));
+  }
   return {
     modules: selected.map((module) => module.name),
     private: input.private,

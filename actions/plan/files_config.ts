@@ -115,6 +115,34 @@ export interface FilesConfig {
   retired: RetiredEntry[];
 }
 
+/** One repository's side of every `when` clause. */
+export interface Selection {
+  /** Selected modules in files.yml order. */
+  modules: string[];
+  private: boolean;
+}
+
+/** `modules` = all selected, `any` = at least one selected, `without` =
+ *  none selected, `private` = the visibility matches; absent clauses hold. */
+export function applies(when: When | null, selection: Selection): boolean {
+  if (when === null) return true;
+  const selected = (name: string) => selection.modules.includes(name);
+  return (
+    (when.modules ?? []).every(selected) &&
+    (when.any === undefined || when.any.some(selected)) &&
+    !(when.without ?? []).some(selected) &&
+    (when.private === undefined || when.private === selection.private)
+  );
+}
+
+/** The entries files.yml writes for one repository. */
+export function selectEntries(
+  config: Pick<FilesConfig, "files">,
+  selection: Selection,
+): FileEntry[] {
+  return config.files.filter((entry) => applies(entry.when, selection));
+}
+
 export const SOURCE_PREFIX = "files/";
 
 /** A block value sits between a file's stem and its extension, so it is one

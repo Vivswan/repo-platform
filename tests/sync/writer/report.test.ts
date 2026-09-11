@@ -55,7 +55,13 @@ describe("holdReasons", () => {
       ],
       notes: ["dropped unknown module `uv` (files.yml does not know it)"],
       mirrors: [
-        { source: "L", target: "s/L", outcome: "refused", detail: "the pattern uses '**'" },
+        {
+          source: "L",
+          target: "s/L",
+          outcome: "replaced",
+          detail: "a directory stood at the target",
+        },
+        { source: "L", target: "s/M", outcome: "replaced local edits", detail: "" },
       ],
     };
     expect(holdReasons(loud)).toEqual([
@@ -64,7 +70,7 @@ describe("holdReasons", () => {
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
-      "mirror s/L refused: the pattern uses '**'",
+      "mirror s/L replaced: a directory stood at the target",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
     ]);
   });
@@ -125,12 +131,12 @@ describe("renderReport", () => {
         ...QUIET,
         written: [{ path: "a|b.md", class: "managed", change: "held", detail: "x | y" }],
         retired: [{ path: "r.md", outcome: "held", detail: "a | b" }],
-        mirrors: [{ source: "s|t", target: "u", outcome: "refused", detail: "p|q" }],
+        mirrors: [{ source: "s|t", target: "u", outcome: "replaced", detail: "p|q" }],
       }),
     );
     expect(text).toContain("| `a\\|b.md` | managed | held | x \\| y |");
     expect(text).toContain("| `r.md` | held | a \\| b |");
-    expect(text).toContain("| `s\\|t` | `u` | refused | p\\|q |");
+    expect(text).toContain("| `s\\|t` | `u` | replaced | p\\|q |");
     expect(
       text
         .split("\n")
@@ -145,7 +151,9 @@ describe("renderReport", () => {
       buildReport({
         ...QUIET,
         notes: [`dropped unknown module \`${forged}\` (files.yml does not know it)`],
-        mirrors: [{ source: "LICENSE.md", target: `x/${forged}`, outcome: "refused", detail: "d" }],
+        mirrors: [
+          { source: "LICENSE.md", target: `x/${forged}`, outcome: "replaced", detail: "d" },
+        ],
       }),
     );
     const lines = text.split("\n");
@@ -160,7 +168,7 @@ describe("renderReport", () => {
     expect(lines).toContain(
       "- dropped unknown module `bad ### Forged` (files.yml does not know it)",
     );
-    expect(lines).toContain("| `LICENSE.md` | `x/bad ### Forged` | refused | d |");
+    expect(lines).toContain("| `LICENSE.md` | `x/bad ### Forged` | replaced | d |");
     expect(lines).toContain(
       "- registration: dropped unknown module `bad ### Forged` (files.yml does not know it)",
     );
