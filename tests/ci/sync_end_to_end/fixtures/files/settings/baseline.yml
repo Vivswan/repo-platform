@@ -1,0 +1,21 @@
+# The fixture's fleet baseline: two labels and the disabled pr-title ruleset.
+repository:
+  has_wiki: false
+  allow_merge_commit: true
+labels:
+  - name: bug
+    color: d73a4a
+    description: Something isn't working
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+rulesets:
+  - name: pr-title
+    target: branch
+    enforcement: disabled
+    rules:
+      - type: required_status_checks
+        parameters:
+          required_status_checks:
+            - context: pr-title
+              integration_id: 15368
