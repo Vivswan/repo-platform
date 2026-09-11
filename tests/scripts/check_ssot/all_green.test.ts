@@ -13,9 +13,11 @@ import {
   declaredCheckName,
   expandCheckChain,
   FLEET_CALLERS,
+  FLEET_CI_SOURCE,
   judgeRunBlock,
   judgeSubstitutionMismatches,
   OPERATOR_CALLERS,
+  planUnconditionalMismatches,
   rosterMismatches,
   SKELETON_SOURCE,
   skeletonCi,
@@ -377,6 +379,32 @@ describe("the judge's substitution ban", () => {
     expect(() =>
       judgeSubstitutionMismatches(text.replace("Judge every needed result", "Judge")),
     ).toThrow("anchor lost");
+  });
+});
+
+describe("planUnconditionalMismatches", () => {
+  test("the live plan job carries no condition; a job-level if: on plan goes red naming the condition", () => {
+    const text = readFileSync(FLEET_CI_SOURCE, "utf-8");
+    expect(planUnconditionalMismatches(text)).toEqual([]);
+    const gated = text.replace(
+      "  plan:\n    runs-on: ubuntu-latest\n",
+      "  plan:\n    if: github.event_name != 'schedule'\n    runs-on: ubuntu-latest\n",
+    );
+    expect(gated).not.toBe(text);
+    expect(planUnconditionalMismatches(gated)).toEqual([
+      {
+        file: ".github/workflows/fleet-ci.yml job 'plan'",
+        expected: expect.stringContaining("no job-level if:"),
+        got: "if: github.event_name != 'schedule'",
+      },
+    ]);
+    // A condition on any OTHER job is the design; only plan is pinned.
+    const siblingGated = text.replace(
+      "  trivy:\n    needs: [plan]\n    if: github.event_name != 'schedule'\n",
+      "  trivy:\n    needs: [plan]\n    if: github.event_name != 'schedule' && needs.plan.outputs.private != 'true'\n",
+    );
+    expect(siblingGated).not.toBe(text);
+    expect(planUnconditionalMismatches(siblingGated)).toEqual([]);
   });
 });
 

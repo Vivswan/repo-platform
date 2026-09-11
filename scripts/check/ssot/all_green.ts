@@ -404,6 +404,32 @@ export const FLEET_CI_ROSTER = [
   "trivy",
 ];
 
+export const FLEET_CI_SOURCE = ".github/workflows/fleet-ci.yml";
+
+/** fleet-ci.yml's jobs by id, off the file text: the one parse every fleet-ci rule shares. */
+export function fleetCiJobs(text: string): Record<string, unknown> {
+  return ciJobs(asRecord(parseYaml(text), FLEET_CI_SOURCE), FLEET_CI_SOURCE);
+}
+
+/** The plan job carries no job-level `if:`.
+ *  On a schedule run the skeleton's `checks` job skips (files/base/.github/workflows/ci.yml) and every other fleet-ci job stands down, codeql excepted on its weekly day.
+ *  plan's success is then the one result the all-green gate can count on, and the gate fails closed on an all-skipped run.
+ *  A missing plan job is the roster rule's finding, not this one's. Pure, for the forcing tests. */
+export function planUnconditionalMismatches(text: string): Mismatch[] {
+  const plan = fleetCiJobs(text).plan;
+  if (plan === undefined) return [];
+  const job = asRecord(plan, "plan");
+  if (job.if === undefined) return [];
+  return [
+    {
+      file: `${FLEET_CI_SOURCE} job 'plan'`,
+      expected:
+        "no job-level if: (plan is the one fleet-ci job that runs on every schedule run, so its success is what keeps every managed repository's nightly all-green from failing closed on an all-skipped run)",
+      got: `if: ${String(job.if)}`,
+    },
+  ];
+}
+
 /** Every job in fleet-nightly.yml, by job id: the schedule-only leg the
  *  skeleton's `nightly` caller runs beside fleet-ci's schedule run (where
  *  only plan and, on the weekly day, codeql run). Not a gate - nothing
@@ -631,8 +657,8 @@ export const allGreenRules: Rule[] = [
     // ids, an all-green job, name:, and job-level continue-on-error are banned.
     name: "fleet-ci-roster",
     run: () => {
-      const rel = ".github/workflows/fleet-ci.yml";
-      const jobs = ciJobs(asRecord(parseYaml(read(rel)), rel), rel);
+      const rel = FLEET_CI_SOURCE;
+      const jobs = fleetCiJobs(read(rel));
       const mismatches = rosterMismatches(FLEET_CI_ROSTER, Object.keys(jobs), {
         jobsFile: rel,
         rosterName: "FLEET_CI_ROSTER",
@@ -674,6 +700,12 @@ export const allGreenRules: Rule[] = [
       }
       return mismatches;
     },
+  },
+  {
+    // plan is the one fleet-ci job that runs on every schedule run; gating
+    // it off would turn every managed repository's nightly all-green red.
+    name: "fleet-ci-plan-unconditional",
+    run: () => planUnconditionalMismatches(read(FLEET_CI_SOURCE)),
   },
   {
     // fleet-nightly.yml's jobs against FLEET_NIGHTLY_ROSTER, both directions:
