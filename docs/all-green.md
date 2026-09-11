@@ -106,9 +106,9 @@ The PR body OPENS with a directives block: its first paragraph is one bracketed 
 | Scope line | Syncs now | Notes |
 | --- | --- | --- |
 | `[fleet-sync: public]` | every public managed repo | the default choice |
-| `[fleet-sync: private]` | the private ones | private repos burn paid Actions minutes, so the weekly sync (paused until the fleet cutover re-arms it) normally carries them |
+| `[fleet-sync: private]` | the private ones | private repos burn paid Actions minutes, so the weekly sync normally carries them |
 | `[fleet-sync: public, owner/a, owner/b]` | the union of tokens and public repo slugs | slugs name PUBLIC repos only |
-| `[fleet-sync: all] <justification>` | the whole fleet, the same run the weekly cron performs once re-armed | the reason is required, on the same line, and generic; this line is written bare, since a code span followed by text is prose |
+| `[fleet-sync: all] <justification>` | the whole fleet, the same run the weekly cron performs | the reason is required, on the same line, and generic; this line is written bare, since a code span followed by text is prose |
 
 - Case does not matter, and `` `[fleet-sync: public]` `` reads the same as `[fleet-sync: public]`. The bare `[fleet-sync]` form is retired with no compatibility: it is the all-scope without its justification and turns the leg red.
 - The justification says what changed and why every repo needs it now, naming no private repository: `[fleet-sync: all] the all-green gate action changed for every ci.yml`.

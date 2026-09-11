@@ -19,35 +19,6 @@ name: Fleet CI
 
 on:
   workflow_call:
-    # The inputs are IGNORED: the plan job resolves every value from the
-    # caller's registration. They stay declared so callers rendered before
-    # the plan job existed keep calling; the next release removes them.
-    inputs:
-      modules:
-        description: Ignored; the plan job resolves the module selection.
-        required: false
-        type: string
-        default: "[]"
-      private:
-        description: Ignored; the plan job resolves the visibility.
-        required: false
-        type: boolean
-        default: false
-      skills-dir:
-        description: Ignored; the plan job resolves the skills directory.
-        required: false
-        type: string
-        default: skills
-      codeql-languages:
-        description: Ignored; the plan job resolves the CodeQL languages.
-        required: false
-        type: string
-        default: "[]"
-      tracking-labels:
-        description: Ignored; the plan job resolves the tracking labels.
-        required: false
-        type: string
-        default: ""
     outputs:
       modules:
         description: The repository's module selection in canonical order, a compact JSON array.

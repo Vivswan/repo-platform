@@ -178,7 +178,7 @@ PR edits modules: in .repo-platform.yml
 
 `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` runs the ordinary sync against the repository's default branch and delivers the files as a sync PR that waits for review:
 
-- Same code path as a scheduled sync ([sync.md](sync.md#the-operator); the weekly run is paused until the fleet cutover re-arms it): the writer selects by the registration on the default branch and replaces platform files whole; `manual=true` only keeps auto-merge off, so a clean report waits for a human too.
+- Same code path as a scheduled sync ([sync.md](sync.md#the-operator)): the writer selects by the registration on the default branch and replaces platform files whole; `manual=true` only keeps auto-merge off, so a clean report waits for a human too.
 - A broken target is re-synced the same way: re-run the workflow, and the writer replaces platform files whole. There is no recovery mode.
 - A failed run surfaces where every sync failure does: from the target checkout on, one `[repo-platform] sync failed` issue in the target repository carrying the log tails ([private repositories](sync.md#private-repositories)); a failure before the target is resolved (the plan job, or a row's setup) is red in the run itself, and re-running the workflow is the remedy ([sync.md](sync.md#the-operator)).
 

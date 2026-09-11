@@ -121,7 +121,6 @@ function prConfig(overrides: Partial<Config> = {}): Config {
     context: { mode: "pull-request", eventPath },
     repo: "o/r",
     trackingLabels: ["fuzz-nightly"],
-    legacyFuzzLabel: undefined,
     blockerLabel: "release-blocker",
     overrideLabel: "release-override",
     security: "high",
@@ -166,7 +165,6 @@ describe("parseConfig", () => {
   const defaults: Omit<Config, "context"> = {
     repo: "o/r",
     trackingLabels: [],
-    legacyFuzzLabel: undefined,
     blockerLabel: "release-blocker",
     overrideLabel: "release-override",
     security: "high",
@@ -178,7 +176,7 @@ describe("parseConfig", () => {
       expected: { ...defaults, context: { mode: "pull-request", eventPath } },
     },
     {
-      reason: "release mode with every non-deprecated input set explicitly",
+      reason: "release mode with every optional input set explicitly",
       env: {
         MODE: "release",
         TRACKING_LABELS: "fuzz-nightly,nightly-failure",
@@ -190,7 +188,6 @@ describe("parseConfig", () => {
         context: { mode: "release", sha: "abc123" },
         repo: "o/r",
         trackingLabels: ["fuzz-nightly", "nightly-failure"],
-        legacyFuzzLabel: undefined,
         blockerLabel: "no-ship",
         overrideLabel: "ship-anyway",
         security: "critical",
@@ -238,11 +235,14 @@ describe("parseConfig", () => {
         parseConfig({ ...baseEnv, MODE: "release", BLOCKER_LABEL: label } as NodeJS.ProcessEnv),
       ).toThrow("BLOCKER_LABEL");
       expect(() =>
-        parseConfig({ ...baseEnv, MODE: "release", TRACKING_LABELS: label } as NodeJS.ProcessEnv),
-      ).toThrow("TRACKING_LABELS");
-      expect(() =>
-        parseConfig({ ...baseEnv, MODE: "release", FUZZ_LABEL: label } as NodeJS.ProcessEnv),
-      ).toThrow("FUZZ_LABEL");
+        parseConfig({
+          ...baseEnv,
+          MODE: "release",
+          TRACKING_LABELS: `fuzz-nightly,${label}`,
+        } as NodeJS.ProcessEnv),
+      ).toThrow(
+        `TRACKING_LABELS must be a plain label (letters, digits, ._:- and spaces; no leading dash), got '${label}'`,
+      );
     }
   });
 
@@ -254,45 +254,39 @@ describe("parseConfig", () => {
 });
 
 describe("parseTrackingLabels", () => {
-  test("empty environment means no tracking labels", () => {
-    expect(parseTrackingLabels({} as NodeJS.ProcessEnv)).toEqual({
-      labels: [],
-      legacyFuzzLabel: undefined,
+  const cases: Array<{ reason: string; env: Record<string, string>; expected: string[] }> = [
+    { reason: "an unset variable means no tracking labels", env: {}, expected: [] },
+    {
+      reason: "an empty variable means no tracking labels",
+      env: { TRACKING_LABELS: "" },
+      expected: [],
+    },
+    {
+      reason: "one label needs no comma",
+      env: { TRACKING_LABELS: "fuzz-nightly" },
+      expected: ["fuzz-nightly"],
+    },
+    {
+      reason: "commas split, whitespace is trimmed, empty tokens are dropped",
+      env: { TRACKING_LABELS: " fuzz-nightly , nightly-failure ," },
+      expected: ["fuzz-nightly", "nightly-failure"],
+    },
+    {
+      reason: "a whitespace-only token is empty too",
+      env: { TRACKING_LABELS: "fuzz-nightly, ,nightly-failure" },
+      expected: ["fuzz-nightly", "nightly-failure"],
+    },
+    {
+      reason: "a repeat differing only in case is one label, the way GitHub deduplicates names",
+      env: { TRACKING_LABELS: "Fuzz-Nightly,nightly-failure,fuzz-nightly" },
+      expected: ["Fuzz-Nightly", "nightly-failure"],
+    },
+  ];
+  for (const { reason, env, expected } of cases) {
+    test(reason, () => {
+      expect(parseTrackingLabels(env as NodeJS.ProcessEnv)).toEqual(expected);
     });
-    expect(parseTrackingLabels({ TRACKING_LABELS: "" } as NodeJS.ProcessEnv)).toEqual({
-      labels: [],
-      legacyFuzzLabel: undefined,
-    });
-  });
-
-  test("splits on commas, trimming whitespace and dropping empty tokens; one label needs no comma", () => {
-    expect(
-      parseTrackingLabels({
-        TRACKING_LABELS: " fuzz-nightly , nightly-failure ,",
-      } as NodeJS.ProcessEnv),
-    ).toEqual({ labels: ["fuzz-nightly", "nightly-failure"], legacyFuzzLabel: undefined });
-    expect(parseTrackingLabels({ TRACKING_LABELS: "fuzz-nightly" } as NodeJS.ProcessEnv)).toEqual({
-      labels: ["fuzz-nightly"],
-      legacyFuzzLabel: undefined,
-    });
-  });
-
-  test("a label sourced from the deprecated FUZZ_LABEL alone is flagged legacy", () => {
-    expect(parseTrackingLabels({ FUZZ_LABEL: "fuzz-nightly" } as NodeJS.ProcessEnv)).toEqual({
-      labels: ["fuzz-nightly"],
-      legacyFuzzLabel: "fuzz-nightly",
-    });
-  });
-
-  test("FUZZ_LABEL already covered by TRACKING_LABELS is deduplicated, not legacy", () => {
-    // Case-insensitively, the way GitHub deduplicates label names.
-    expect(
-      parseTrackingLabels({
-        TRACKING_LABELS: "Fuzz-Nightly,nightly-failure",
-        FUZZ_LABEL: "fuzz-nightly",
-      } as NodeJS.ProcessEnv),
-    ).toEqual({ labels: ["Fuzz-Nightly", "nightly-failure"], legacyFuzzLabel: undefined });
-  });
+  }
 });
 
 describe("severitiesAtOrAbove", () => {
@@ -619,22 +613,6 @@ describe("runHealthCheck", () => {
     const issueLists = calls.filter((c) => c[0] === "issue");
     expect(issueLists).toHaveLength(1);
     expect(issueLists[0]?.[issueLists[0].indexOf("--label") + 1]).toBe("release-blocker");
-  });
-
-  test("a legacy-sourced label draws a deprecation notice and still gates", async () => {
-    const { run } = fakeGh({
-      issues: { "fuzz-nightly": [2], "release-blocker": [] },
-      alerts: [],
-      prViewLabels: [],
-    });
-    const { out, lines, setOutput } = collect();
-    expect(
-      await runHealthCheck(prConfig({ legacyFuzzLabel: "fuzz-nightly" }), run, out, setOutput),
-    ).toBe(1);
-    expect(lines).toEqual([
-      "::notice::tracking label 'fuzz-nightly' arrived via the deprecated fuzz-label input; this workflow render predates the tracking-labels input, and the next template sync moves the label there",
-      `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
-    ]);
   });
 
   test("each tracking label is its own gate, queried and reported by label", async () => {
