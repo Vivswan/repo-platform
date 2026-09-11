@@ -50,13 +50,13 @@ misconfigurations:
 
 Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
 
-- Rules: the registry's `p/default` set, with two rules excluded:
+- Rules: the registry's `p/default` set at `--severity ERROR`, with two rules excluded:
 
 | Excluded rule | Why | Until |
 |---|---|---|
 | `github-actions-mutable-action-tag` | zizmor's `unpinned-uses` owns action pinning: one tool per finding class | permanent |
 | `secrets-inherit` | managed repositories still run the old ci.yml and release.yml, whose `secrets: inherit` lines carry no marker, so the rule would fail every fleet repository; the writer's ci.yml marks each of its three lines with its reason (the called workflows are the repository's own) | the fleet cutover, once the writer has replaced them |
 
-- Verdict: a scan that did not exit 0 fails first, naming its exit status, because there is no verdict without a completed scan. Then the JSON copy is judged by severity: ERROR findings and fatal analysis errors fail the job; WARNING and INFO findings (`detect-non-literal-regexp` among them) reach code scanning without blocking; partial parses and timeouts only annotate.
-- Bypass: semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. Which WARNING and INFO findings to mark is the repository's own call.
-- Upload: unmarked findings go to code scanning as SARIF under the `semgrep` category, and marked ones do not. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning ignores the suppressions field and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload. A scan that wrote no SARIF leaves nothing to filter, and the upload fails on the missing file.
+- Verdict: a scan that did not exit 0 fails first, naming its exit status, because there is no verdict without a completed scan. Then the JSON copy is judged: ERROR findings and fatal analysis errors fail the job; partial parses and timeouts only annotate. WARNING and INFO rules do not run, so their findings appear nowhere, neither in the verdict nor in code scanning.
+- Bypass: semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. The marker applies to an ERROR finding; whether to mark one is the repository's own call.
+- Upload: unmarked ERROR findings go to code scanning as SARIF under the `semgrep` category, and marked ones do not. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning ignores the suppressions field and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload. A scan that wrote no SARIF leaves nothing to filter, and the upload fails on the missing file. An earlier upload may have opened lower-severity alerts; code scanning marks them fixed once a later upload for the same category and branch lacks them.
