@@ -160,7 +160,5 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - What the fleet configs settle before a repository's bypass applies:
   - typos accepts `unparseable` and the hyphenated `mis-` prefix (`mis-parses`, `mis-set`) everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
-  - semgrep excludes `mutable-action-tag` permanently: zizmor's `unpinned-uses` owns action pinning (one tool per finding class).
-  - semgrep excludes `secrets-inherit` until the fleet cutover: managed repositories still run the old rendered ci.yml and release.yml, whose `secrets: inherit` lines carry no marker. The writer's ci.yml marks each of its three with its reason (the called workflows are the repository's own), so the exclusion is lifted once the writer has replaced them.
-  - WARNING and INFO findings (`detect-non-literal-regexp` among them) reach code scanning without blocking; what to mark there is the repository's own call.
+  - semgrep runs the registry's `p/default` rule set with two rules excluded, one permanently and one until the fleet cutover; WARNING and INFO findings reach code scanning without blocking, and what to mark there is the repository's own call ([security-scans.md](security-scans.md#semgrep)).
 - Enforced by: review of the diff that carries the bypass; the sync overwrites a managed file, so a bypass in one is lost on the next sync PR.
