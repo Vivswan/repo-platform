@@ -164,7 +164,9 @@ interface SourceUse {
 /** Every source the config can ever read from the tree exists and carries
  *  only listed placeholders, and the tree carries nothing else: a file no
  *  entry or block name reads (a block file under a retired name) would
- *  otherwise sit there unnoticed. */
+ *  otherwise sit there unnoticed. The settings layers the module data
+ *  declares sit in the tree for the settings render, not the writer, so
+ *  they are known but not judged here. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
   // Source -> every region grammar it feeds; a split source must not mention
@@ -219,11 +221,14 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
       }
     }
   }
-  // Nothing is skipped by name, so a stray under a vendored-looking name is
-  // reported too; symlinks are not walked (the tree holds none and nothing
-  // writes one). A missing tree has each source reported missing above.
-  for (const rel of existsSync(tree) ? walkFiles(tree, new Set()) : []) {
-    if (!sources.has(rel)) {
+  const settingsLayers = new Set(
+    Object.entries(config.modules).flatMap(([module, data]) =>
+      (data.settings_layers ?? []).map((name) => `${module}/${name}`),
+    ),
+  );
+  // A missing tree has each source reported missing above.
+  for (const rel of existsSync(tree) ? walkFiles(tree) : []) {
+    if (!sources.has(rel) && !settingsLayers.has(rel)) {
       problems.push(`${SOURCE_PREFIX}${rel} is read by no entry or block name`);
     }
   }

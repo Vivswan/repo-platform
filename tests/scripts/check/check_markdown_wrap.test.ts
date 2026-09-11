@@ -247,10 +247,10 @@ describe("scan scope", () => {
   test("isMarkdown takes plain .md files and the writer's markdown block files", () => {
     expect(isMarkdown("docs/guide.md")).toBe(true);
     expect(isMarkdown("files/base/AGENTS.md")).toBe(true);
-    expect(isMarkdown("files/deno/AGENTS.md.block.toolchain")).toBe(true);
+    expect(isMarkdown("files/deno/AGENTS.block.toolchain.md")).toBe(true);
     expect(isMarkdown("scripts/files_table.ts")).toBe(false);
     expect(isMarkdown("files/base/.gitignore")).toBe(false);
-    expect(isMarkdown("files/deno/.gitignore.block.Deno")).toBe(false);
+    expect(isMarkdown("files/deno/.block.Deno.gitignore")).toBe(false);
   });
 
   test("vendored/generated texts are exempt, the writer's license source included", () => {

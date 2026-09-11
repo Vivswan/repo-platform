@@ -3,7 +3,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
-  actionManifests,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
   extractUsesPins,
@@ -41,29 +40,6 @@ describe("extractUsesPins", () => {
   });
 });
 
-describe("actionManifests", () => {
-  test("lists every action.yml and action.yaml under actions/, nested ones included, sorted; symlinks, other files, and unpublished directories are not manifests", () => {
-    expect(
-      actionManifests([
-        { path: "actions/pages-site/check-links/action.yml", symlink: false },
-        { path: "actions/spelled-long/action.yaml", symlink: false },
-        { path: "actions/pages-site/node_modules/dep/action.yml", symlink: false },
-        { path: "actions/pages-site/dist/action.yml", symlink: false },
-        { path: "actions/pages-site/action.yml", symlink: false },
-        { path: "actions/pages-site/site.ts", symlink: false },
-        { path: "actions/shared/action.yml", symlink: true },
-        { path: "actions/x/not-action.yml", symlink: false },
-        { path: "actions/bun-setup/action.yml", symlink: false },
-      ]),
-    ).toEqual([
-      "actions/bun-setup/action.yml",
-      "actions/pages-site/action.yml",
-      "actions/pages-site/check-links/action.yml",
-      "actions/spelled-long/action.yaml",
-    ]);
-  });
-});
-
 describe("pinShapeMismatches", () => {
   const pin = (file: string, action: string, ref: string, version: string | null): Pin => ({
     file,
@@ -76,7 +52,7 @@ describe("pinShapeMismatches", () => {
   test("passes sha pins with release comments, the owner's own refs, and the allowlisted branch pin", () => {
     const pins = [
       pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
-      pin("b.jinja", "actions/checkout", SHA, "v7.0.1"),
+      pin("b.yml", "actions/checkout", SHA, "v7.0.1"),
       pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
       pin("a.yml", "Vivswan/repo-platform", "build", null),
       pin("a.yml", "vivswan/github-settings-as-code", "latest", null),

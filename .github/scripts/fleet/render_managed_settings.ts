@@ -345,9 +345,11 @@ export function registrationFacts(
     if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
     return { module: m.name, key: tracking.key, label: declared[tracking.key] ?? tracking.default };
   });
-  // The same refusal the plan action makes from the build branch's
-  // reserved roster: a stream label the layers already manage would have
-  // a green night close unrelated issues and every apply fight over it.
+  // The same two refusals the plan action makes: a stream label the layers
+  // already manage would have a green night close unrelated issues and
+  // every apply fight over it, and one label shared by two streams (GitHub
+  // folds label case) would have each stream close the other's issues.
+  const lowered = new Map<string, string>();
   for (const { key, label } of trackingLabels) {
     if (reserved.has(label.toLowerCase())) {
       throw new Error(
@@ -355,6 +357,14 @@ export function registrationFacts(
           "a green night would close whatever issues carry it and every settings apply would fight over it",
       );
     }
+    const other = lowered.get(label.toLowerCase());
+    if (other !== undefined) {
+      throw new Error(
+        `${where}: tracking label "${label}" is shared by two streams (${other}, ${key}); ` +
+          "GitHub label names are case-insensitive, so each stream needs its own",
+      );
+    }
+    lowered.set(label.toLowerCase(), key);
   }
   return {
     modules: selected,

@@ -5,10 +5,10 @@
 // a column width. A violation is a line that merely continues the previous
 // line's text; the fix is always joining it onto that line.
 //
-// Scope: every tracked .md file, and the writer's markdown block files
-// (`<name>.md.block.<value>`, spliced into a markdown file at sync).
-// Symlinks are skipped (their targets are scanned directly). Vendored and
-// generated texts keep their upstream formatting: LICENSE*, CHANGELOG*.
+// Scope: every tracked .md file, the writer's markdown block files
+// (`<stem>.block.<value>.md`) among them. Symlinks are skipped (their
+// targets are scanned directly). Vendored and generated texts keep their
+// upstream formatting: LICENSE*, CHANGELOG*.
 //
 // Ignored regions, where multi-line content is structural rather than
 // wrapped prose: YAML frontmatter, fenced code blocks, HTML comment
@@ -21,7 +21,7 @@
 // Usage: bun scripts/check/check_markdown_wrap.ts   # exit 1 listing violations
 
 import { lstatSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
@@ -169,22 +169,15 @@ export function scanMarkdown(content: string): {
   return { hits, unterminated: fence !== null ? "fence" : inComment ? "comment" : null };
 }
 
-/** True when the tracked path is markdown: a plain .md file, or a writer
- *  block file spliced into one (`<name>.md.block.<value>`). */
+/** True when the tracked path is markdown; a writer block file spliced
+ *  into a markdown file (`<stem>.block.<value>.md`) keeps the extension. */
 export function isMarkdown(path: string): boolean {
-  return markdownName(path).endsWith(".md");
-}
-
-/** The markdown filename a path stands for: a block file's suffix
- *  stripped, anything else as is. */
-function markdownName(path: string): string {
-  const base = path.split("/").pop() ?? "";
-  return base.replace(/\.block\.[^/]+$/, "");
+  return basename(path).endsWith(".md");
 }
 
 /** Vendored/generated texts keep their upstream formatting. */
 export function isExempt(path: string): boolean {
-  const name = markdownName(path);
+  const name = basename(path);
   return name.startsWith("LICENSE") || name.startsWith("CHANGELOG");
 }
 

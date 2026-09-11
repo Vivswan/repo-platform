@@ -107,7 +107,7 @@ describe("strayPinFiles", () => {
       mkdirSync(join(filesDir, rel.split("/")[0]), { recursive: true });
       writeFileSync(join(filesDir, rel), "1.0.0\n");
     }
-    writeFileSync(join(filesDir, "uv/.gitignore.block.Python"), "x\n");
+    writeFileSync(join(filesDir, "uv/.block.Python.gitignore"), "x\n");
     writeFileSync(join(filesDir, "uv/settings.yml"), "labels: []\n");
     expect(strayPinFiles(toolchainPins(FILES_YML), filesDir)).toEqual([
       "files/deno/.bun-version",

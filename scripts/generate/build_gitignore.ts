@@ -21,14 +21,19 @@
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { parseFilesConfig } from "../../actions/plan/files_config.ts";
+import {
+  blockSourcePath,
+  blockValueOf,
+  parseFilesConfig,
+} from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 const FILES_DIR = join(REPO_ROOT, "files");
 const FILES_CONFIG = join(REPO_ROOT, "files.yml");
-const BASE_REL = "base/.gitignore";
+const GITIGNORE = ".gitignore";
+const BASE_REL = `base/${GITIGNORE}`;
 
 /** The OS sections every repository receives, github/gitignore paths. */
 export const ALWAYS = [
@@ -71,15 +76,15 @@ export function upstreamPath(name: string): string {
   return `${name}.gitignore`;
 }
 
-/** The name a github/gitignore path takes in its section heading and in
- *  its block file's suffix: the file's stem. */
+/** The name a github/gitignore path takes in its section heading and as
+ *  its block file's value: the file's stem. */
 export function blockName(path: string): string {
   return (path.split("/").pop() as string).replace(/\.gitignore$/, "");
 }
 
 /** The files/-relative block file the writer reads for one module's source. */
 export function blockRel(module: string, path: string): string {
-  return `${module}/.gitignore.block.${blockName(path)}`;
+  return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
 }
 
 /** Each module's github/gitignore source paths, in files.yml order, from
@@ -117,7 +122,7 @@ export function strayBlockFiles(entries: [string, string[]][], filesDir: string)
     if (!existsSync(dir) || module === "base") continue;
     for (const name of readdirSync(dir).sort()) {
       const rel = `${module}/${name}`;
-      if (name.startsWith(".gitignore.block.") && !expected.has(rel)) strays.push(`files/${rel}`);
+      if (blockValueOf(GITIGNORE, name) !== null && !expected.has(rel)) strays.push(`files/${rel}`);
     }
   }
   return strays;

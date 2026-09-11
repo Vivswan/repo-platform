@@ -44,12 +44,14 @@ describe("the registration", () => {
     );
   });
 
-  test("every module the data file knows passes", () => {
+  test("a registration that adds modules while the tree and manifest stay as the last sync left them passes", () => {
+    // BASELINE registers uv alone and its manifest records uv's files: the
+    // roster judged is that stamped manifest, never the module list, so the
+    // registration edit is green before the sync PR brings the new files.
     const { exitCode, stderr } = runValidator({
       ".repo-platform.yml": "modules: [bun, uv, pages, release-please]\n",
     });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
+    expect([exitCode, stderr]).toEqual([0, ""]);
   });
 
   test.each([

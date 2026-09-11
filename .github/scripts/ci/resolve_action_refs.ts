@@ -10,7 +10,7 @@
 // than inside `bun run check` (which must work offline).
 //
 // Scanned: workflow YAML, composite action manifests, and the sync
-// writer's files/ sources (workflow block files included). Skipped: local
+// writer's files/ sources (its workflow block files end in .yml). Skipped: local
 // `./` paths and self-references carrying a placeholder owner (the writer
 // substitutes it). A comment naming a branch (`# master`) is not judged:
 // branch heads move by design.
@@ -113,7 +113,7 @@ function* walk(dir: string): Generator<string> {
     // must not throw.
     const entry = lstatSync(path);
     if (entry.isDirectory()) yield* walk(path);
-    else if (entry.isFile() && /\.ya?ml$|\.ya?ml\.block\./.test(name)) yield path;
+    else if (entry.isFile() && /\.ya?ml$/.test(name)) yield path;
   }
 }
 

@@ -649,3 +649,9 @@ rustc-ice-*.txt
 #.idea/
 
 # END REPO-PLATFORM MANAGED
+
+# The managed Python section ignores lib/ wholesale, which would drop a new
+# shared helper or its test from a commit without a word; these two are
+# source directories of this repository.
+!/scripts/lib/
+!/tests/scripts/lib/

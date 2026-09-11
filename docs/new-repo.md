@@ -161,7 +161,11 @@ The `validate-managed-files` job judges the repository against the platform's cu
 
 ### Changing the module selection
 
-A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying its files. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR. The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
+A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR.
+
+- The managed-files check is green on the first PR by design: it judges the stamped manifest, never the module list, so nothing is bypassed.
+- The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.node-version` for `node`). It stays red until the sync PR lands unless the first PR adds that file.
+- The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text
 PR edits modules: in .repo-platform.yml
@@ -169,7 +173,7 @@ PR edits modules: in .repo-platform.yml
   -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet
   -> merge the registration edit (the files cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
-  -> the sync opens a PR carrying the files (the writer replaces platform files whole), held for review
+  -> the sync opens a PR carrying the files and the new manifest stamp (the writer replaces platform files whole), held for review
   -> review and merge the sync PR
 ```
 
@@ -183,7 +187,7 @@ PR edits modules: in .repo-platform.yml
 
 `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` runs the ordinary sync against the repository's default branch and delivers the files as a sync PR that waits for review:
 
-- Same code path as a weekly sync ([sync.md](sync.md#the-operator)): the writer selects by the registration on the default branch and replaces platform files whole; `manual=true` only keeps auto-merge off, so a clean report waits for a human too.
+- Same code path as a scheduled sync ([sync.md](sync.md#the-operator); the weekly run is paused until the fleet cutover re-arms it): the writer selects by the registration on the default branch and replaces platform files whole; `manual=true` only keeps auto-merge off, so a clean report waits for a human too.
 - A broken target is re-synced the same way: re-run the workflow, and the writer replaces platform files whole. There is no recovery mode.
 - A failed run surfaces where every sync failure does: from the target checkout on, one `[repo-platform] sync failed` issue in the target repository carrying the log tails ([private repositories](sync.md#private-repositories)); a failure before the target is resolved (the plan job, or a row's setup) is red in the run itself, and re-running the workflow is the remedy ([sync.md](sync.md#the-operator)).
 

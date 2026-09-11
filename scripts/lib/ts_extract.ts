@@ -14,15 +14,7 @@
 // moduleSpecifiers) return empty or false and the RULE consuming them
 // owns its anchor-lost throw - exactly where the emptiness checks live.
 
-import {
-  type CallExpression,
-  type PropertyAssignment,
-  type Expression,
-  Node,
-  Project,
-  type SourceFile,
-  SyntaxKind,
-} from "ts-morph";
+import { type Expression, Node, Project, type SourceFile, SyntaxKind } from "ts-morph";
 
 // One shared project; sources are parsed once per distinct text (rules and
 // tests re-scan the same bytes many times per run).
@@ -278,7 +270,10 @@ export function moduleSpecifiers(source: string): { literal: string[]; nonLitera
   }
   for (const node of file.getDescendantsOfKind(SyntaxKind.ImportType)) {
     const argument = node.getArgument();
-    record("import type", Node.isLiteralTypeNode(argument) ? literalOf(argument.getLiteral()) : null);
+    record(
+      "import type",
+      Node.isLiteralTypeNode(argument) ? literalOf(argument.getLiteral()) : null,
+    );
   }
   for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();

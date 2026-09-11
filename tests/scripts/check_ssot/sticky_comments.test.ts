@@ -16,7 +16,7 @@ describe("sticky-pr-comments", () => {
   const PIN = `${STICKY_COMMENT_ACTION}@${SHA} # v3.0.5`;
   const WORKFLOW = "files/bun/.github/workflows/dependabot-bun-lockfile.yml";
   const VARIANT = "files/base/.github/workflows/auto-assign.codeql.yml";
-  const BLOCK = "files/bun/.github/workflows/auto-format.yml.block.toolchain";
+  const BLOCK = "files/bun/.github/workflows/auto-format.block.toolchain.yml";
   const REPO_WORKFLOW = ".github/workflows/protect-build-branches.yml";
   const ACTION = "actions/check-file-size/action.yml";
   const SCRIPT = "actions/validate-managed-files/src/report.ts";
@@ -47,8 +47,8 @@ describe("sticky-pr-comments", () => {
     { rel: WORKFLOW, stem: HOST },
     { rel: VARIANT, stem: "auto-assign" },
     { rel: BLOCK, stem: "auto-format" },
-    { rel: "files/bun/.github/dependabot.yml.block.bun", stem: null },
-    { rel: "files/bun/.gitignore.block.Node", stem: null },
+    { rel: "files/bun/.github/dependabot.block.bun.yml", stem: null },
+    { rel: "files/bun/.block.Node.gitignore", stem: null },
     { rel: REPO_WORKFLOW, stem: null },
   ])("sourceWorkflowStem($rel) -> $stem", ({ rel, stem }) => {
     expect(sourceWorkflowStem(rel)).toBe(stem);
@@ -60,11 +60,11 @@ describe("sticky-pr-comments", () => {
     { rel: WORKFLOW, scope: strict(HOST) },
     { rel: VARIANT, scope: strict("auto-assign") },
     { rel: BLOCK, scope: strict("auto-format") },
-    { rel: "files/bun/.gitignore.block.Node", scope: strict() },
+    { rel: "files/bun/.block.Node.gitignore", scope: strict() },
     { rel: REPO_WORKFLOW, scope: strict("protect-build-branches") },
     { rel: ACTION, scope: lenient("check-file-size") },
     { rel: SCRIPT, scope: lenient("validate-managed-files") },
-    { rel: "files/bun/.github/dependabot.yml.block.bun", scope: strict() },
+    { rel: "files/bun/.github/dependabot.block.bun.yml", scope: strict() },
     { rel: "scripts/check_ssot.ts", scope: strict() },
   ])("stickyScopeOf($rel)", ({ rel, scope }) => {
     expect(stickyScopeOf(rel)).toEqual(scope);
@@ -504,12 +504,12 @@ describe("sticky-pr-comments", () => {
     },
     {
       reason: "a block file no workflow lands",
-      rel: "files/bun/.gitignore.block.Node",
+      rel: "files/bun/.block.Node.gitignore",
       scope: strict(),
       text: step("repo-platform/auto-format"),
       mismatches: [
         {
-          file: "files/bun/.gitignore.block.Node:3",
+          file: "files/bun/.block.Node.gitignore:3",
           expected: "a source with exactly one host workflow or action (the header names it)",
           got: "0 hosts ()",
         },
@@ -559,12 +559,12 @@ describe("sticky-pr-comments", () => {
     expect(
       stickyTreeMismatches([
         [WORKFLOW, "steps:\n  - run: echo hi\n"],
-        ["files/bun/.gitignore.block.Node", step(HEADER)],
-        ["files/bun/.github/dependabot.yml.block.bun", step(HEADER)],
+        ["files/bun/.block.Node.gitignore", step(HEADER)],
+        ["files/bun/.github/dependabot.block.bun.yml", step(HEADER)],
       ]).map((m) => [m.file, m.got]),
     ).toEqual([
-      ["files/bun/.gitignore.block.Node:3", "0 hosts ()"],
-      ["files/bun/.github/dependabot.yml.block.bun:3", "0 hosts ()"],
+      ["files/bun/.block.Node.gitignore:3", "0 hosts ()"],
+      ["files/bun/.github/dependabot.block.bun.yml:3", "0 hosts ()"],
     ]);
     expect(() => stickyTreeMismatches([[WORKFLOW, "steps:\n  - run: echo hi\n"]])).toThrow(
       /no marocchino\/sticky-pull-request-comment step .* anchor lost/,

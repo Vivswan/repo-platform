@@ -30,7 +30,7 @@ A skill folder is UNPUBLISHED until `plugin.json` lists it: installers and the [
 
 | Key | Meaning | Default |
 |---|---|---|
-| `skills.dir` | Directory holding the repository's agent skills, in `.repo-platform.yml`. Relative path segments of letters, digits, dots, underscores, and dashes: the value lands in the gate job's action input, where the fleet plan reads it. The managed discovery workflow `validate-skills.yml` is written with the default directory (its `paths` filter and `skills-dir` input), so a non-default value leaves discovery watching `skills/` until that file takes the directory from the registration. | `skills` |
+| `skills.dir` | Directory holding the repository's agent skills, in `.repo-platform.yml`. Relative path segments of letters, digits, dots, underscores, and dashes: the value lands in the gate job's action input, where the fleet plan reads it, and the sync writes it into the managed discovery workflow `validate-skills.yml` (its `paths` filter and `skills-dir` input). | `skills` |
 
 The directory is a registration key, rather than an edit in the written files, because the gate job's action input and the discovery workflow's trigger paths must agree on it.
 

@@ -643,16 +643,36 @@ describe("registrationFacts", () => {
     ).toThrow("labels.fuzzer");
   });
 
-  test("a default that collides with another stream's declared label still fails the render", () => {
-    const trackingLabels = registrationFacts(
-      "modules: [docs-site, fuzzer]\nlabels: {docs_site: fuzz-nightly}\n",
-      WHERE,
-      modules,
-    ).trackingLabels;
-    expect(trackingLabels).toEqual([
+  test.each([
+    {
+      reason: "two declared labels",
+      registration: "modules: [fuzzer, nightly]\nlabels: {fuzzer: same, nightly: same}\n",
+      error: 'tracking label "same" is shared by two streams (fuzzer, nightly)',
+    },
+    {
+      reason: "two declared labels differing only in case",
+      registration: "modules: [fuzzer, nightly]\nlabels: {fuzzer: Same, nightly: same}\n",
+      error: 'tracking label "same" is shared by two streams (fuzzer, nightly)',
+    },
+    {
+      reason: "a declared label that is another stream's default",
+      registration: "modules: [docs-site, fuzzer]\nlabels: {docs_site: fuzz-nightly}\n",
+      error: 'tracking label "fuzz-nightly" is shared by two streams (docs_site, fuzzer)',
+    },
+  ])(
+    "a label shared by two streams is refused at the facts boundary: $reason",
+    ({ registration, error }) => {
+      expect(() => registrationFacts(registration, WHERE, modules)).toThrow(error);
+    },
+  );
+
+  test("two settings layers claiming one label name fail the render", () => {
+    // Bypassing registrationFacts, which refuses the shared label first:
+    // the render's own collision check guards the merged layers.
+    const trackingLabels = [
       { module: "docs-site", label: "fuzz-nightly" },
       { module: "fuzzer", label: "fuzz-nightly" },
-    ]);
+    ];
     expect(() =>
       managedSettings(facts({ modules: ["docs-site", "fuzzer"], trackingLabels }), modules),
     ).toThrow("which collide");
