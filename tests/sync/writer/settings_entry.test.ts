@@ -26,7 +26,7 @@ const FILES_YML = [
   "  rust: {settings_layers: [settings.yml]}",
   "  fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}",
   "  nightly: {tracking_label: {key: nightly, default: nightly-failure, color: D93F0B, description: Automated nightly CI failure}}",
-  "  docs-site: {tracking_label: {key: docs_site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}}",
+  "  site: {tracking_label: {key: site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}}",
   "settings:",
   "  baseline: files/settings/baseline.yml",
   "  public: files/settings/public.yml",

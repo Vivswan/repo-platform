@@ -90,6 +90,8 @@ const OLD_SETTINGS = [
   "    bypass_actors: []",
 ].join("\n");
 const SETTINGS = ".github/settings.yml";
+const HOOK = ".github/actions/site-build/action.yml";
+const OWN_HOOK = "name: my own site build\r\nruns: {using: composite, steps: []}";
 const OVERLAY = ".github/settings.local.yml";
 const MOVED_REASON = `${SETTINGS}: the repository's file moved to ${OVERLAY} and the rendered document replaced it`;
 
@@ -306,6 +308,7 @@ describe("sync.ts end to end", () => {
       row(".github/agents.md", "link", "created"),
       row(".github/dependabot.yml", "managed", "created"),
       row(".github/workflows/checks.yml", "starter", "created"),
+      row(HOOK, "starter", "created"),
       row(OVERLAY, "starter", "unchanged"),
       row(SETTINGS, "managed", "moved", `to ${OVERLAY}`),
       row(".editorconfig", "split", "updated"),
@@ -438,6 +441,8 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/checks.yml")).toBe(
       "name: checks\non: pull_request\njobs: {}\n# A demo repository\n# Examples:\n#   bun test\n",
     );
+    // The hook starter, absent from the seed, is rendered once and recorded.
+    expect(read(HOOK)).toBe("name: site build for demo\nruns: {using: composite, steps: []}\n");
   });
 
   test("substitutes placeholders and leaves Actions expressions alone", () => {
@@ -582,6 +587,7 @@ describe("sync.ts end to end", () => {
         ".github/agents.md",
         ".github/dependabot.yml",
         ".github/workflows/checks.yml",
+        HOOK,
         ".editorconfig",
         ".gitattributes",
         ".yamllint",
@@ -624,6 +630,7 @@ describe("sync.ts end to end", () => {
     });
     expect(manifest.files["docs/old-mirror.md"]).toBeUndefined();
     expect(manifest.files[".github/workflows/nightly-fuzz.yml"]).toEqual({ class: "starter" });
+    expect(manifest.files[HOOK]).toEqual({ class: "starter" });
     // The displaced file's starter record travelled to the overlay path;
     // the rendered document is recorded as the managed write it is.
     expect(manifest.files[OVERLAY]).toEqual({ class: "starter" });
@@ -879,9 +886,12 @@ describe("sync.ts over a modules-only registration", () => {
     const target = temp.dir("sync-e2e-bare-target-");
     writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, fuzzer]\n");
     // Both fixture starters need {{description}}: the present one is the
-    // repository's own and is not rendered, the absent one is held.
+    // repository's own and is not rendered, the absent one is held. The
+    // hook the repository already carries stays byte for byte.
     mkdirSync(join(target, ".github/workflows"), { recursive: true });
     writeFileSync(join(target, ".github/workflows/nightly-fuzz.yml"), STARTER);
+    mkdirSync(join(target, ".github/actions/site-build"), { recursive: true });
+    writeFileSync(join(target, HOOK), OWN_HOOK);
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     const { summary } = runSync(target, join(temp.dir("sync-e2e-bare-summary-"), "summary.json"));
     // project_name and copyright_holder fall back to the slug; description has no fallback.
@@ -905,6 +915,13 @@ describe("sync.ts over a modules-only registration", () => {
       change: "unchanged",
       detail: "",
     });
+    expect(summary.written.find((row) => row.path === HOOK)).toEqual({
+      path: HOOK,
+      class: "starter",
+      change: "unchanged",
+      detail: "",
+    });
+    expect(readFileSync(join(target, HOOK), "latin1")).toBe(OWN_HOOK);
     // The overlay starter needs the description too, so the render finds
     // no overlay and holds behind it.
     expect(summary.written.find((row) => row.path === OVERLAY)).toEqual(held(OVERLAY, "starter"));
@@ -932,6 +949,7 @@ describe("sync.ts over a modules-only registration", () => {
       files: Record<string, unknown>;
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
+    expect(manifest.files[HOOK]).toEqual({ class: "starter" });
   });
 });
 

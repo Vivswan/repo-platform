@@ -4,7 +4,9 @@
 // project block from the recorded answers, the per-module values only
 // where they differ from the module defaults in files.yml, unknown module
 // names dropped and reported. The answers file itself leaves through the
-// data file's retired entry. Every note holds the PR for review.
+// data file's retired entry. A repository whose website the retired
+// pages.yml deployed is held until its site-build hook is filled in.
+// Every note holds the PR for review.
 
 import { parse as parseYaml, stringify } from "yaml";
 import type { ModuleData } from "../../../../actions/plan/files_config.ts";
@@ -15,7 +17,7 @@ import {
 } from "../../../../actions/plan/registration.ts";
 import type { WriterFilesConfig } from "./files_config.ts";
 import type { RepositorySlug } from "./registration.ts";
-import { existingFile, writeFile } from "./target_files.ts";
+import { existingFile, probe, writeFile } from "./target_files.ts";
 
 export const ANSWERS_FILE = ".github/.copier-answers.yml";
 
@@ -45,13 +47,21 @@ function answer(answers: Record<string, unknown>, key: string): string | undefin
  *  repository already registers the new way and nothing is derived. */
 export const V1_KEYS: ReadonlySet<string> = new Set(["modules", "mirrors"]);
 
-/** A module's `pages` data (install, build) marks it as a toolchain the
- *  pages build installs; the copier defaults derived from these. */
-function pagesData(data: ModuleData | undefined): { install: string; build: string } | null {
-  const pages = data?.pages;
-  if (!isRecord(pages)) return null;
-  return { install: text(pages.install) ?? "", build: text(pages.build) ?? "" };
-}
+/** The hook a repository's own site build lives in now; the old template
+ *  recorded the build as `pages_*` answers instead. */
+export const SITE_BUILD_HOOK = ".github/actions/site-build/action.yml";
+
+/** The retired workflow whose presence marks a repository as one whose
+ *  website build has not moved into the hook yet. */
+export const PAGES_WORKFLOW = ".github/workflows/pages.yml";
+
+/** The `pages_*` answers, in the order the note lists them. */
+const PAGES_ANSWERS = [
+  "pages_setup",
+  "pages_install_command",
+  "pages_build_command",
+  "pages_dist_dir",
+];
 
 /** A module's tracking label stream: `tracking_label: {key, default}`. */
 function trackingLabel(data: ModuleData | undefined): { key: string; default: string } | null {
@@ -95,29 +105,6 @@ export function deriveRegistration(
     description: answer(answers, "description") ?? "",
     copyright_holder: differs(answer(answers, "copyright_holder"), repository.owner),
   });
-  // The plan's rule for the pages defaults: the setup is the selected
-  // toolchains (modules carrying pages data), and the commands come from
-  // the first module, in files.yml order, that the RESOLVED setup names.
-  const defaultSetup =
-    selected.filter((name) => pagesData(data(name)) !== null).join(",") || "none";
-  const setup = answer(answers, "pages_setup") ?? defaultSetup;
-  const named = new Set(setup.split(","));
-  const commands = pagesData(
-    data(known.find((name) => named.has(name) && pagesData(data(name)) !== null) ?? ""),
-  );
-  const pages = has("pages")
-    ? compact({
-        setup: differs(answer(answers, "pages_setup"), defaultSetup),
-        install: differs(answer(answers, "pages_install_command"), commands?.install ?? ""),
-        build: differs(answer(answers, "pages_build_command"), commands?.build ?? ""),
-        dist: differs(answer(answers, "pages_dist_dir"), text(data("pages")?.dist) ?? "dist"),
-      })
-    : undefined;
-  const docsSite = has("docs-site")
-    ? compact({
-        path: differs(answer(answers, "docs_site_path"), text(data("docs-site")?.path) ?? "docs"),
-      })
-    : undefined;
   const skills = has("skills")
     ? compact({
         dir: differs(answer(answers, "skills_dir"), config.defaults.skills_dir ?? "skills"),
@@ -132,8 +119,6 @@ export function deriveRegistration(
 
   const document: Record<string, unknown> = { modules: selected };
   if (project !== undefined) document.project = project;
-  if (pages !== undefined) document.pages = pages;
-  if (docsSite !== undefined) document.docs_site = docsSite;
   if (skills !== undefined) document.skills = skills;
   const declaredLabels = compact(labels);
   if (declaredLabels !== undefined) document.labels = declaredLabels;
@@ -146,16 +131,87 @@ export function deriveRegistration(
       (name) =>
         `cutover: dropped unknown module \`${name}\` from ${REGISTRATION_PATH} (files.yml does not know it)`,
     ),
+    ...siteNotes(modules, answers, {
+      path: text(data("site")?.path) ?? "docs",
+      label: trackingLabel(data("site"))?.default ?? "docs-link-rot",
+    }),
   ];
   return { document, notes };
+}
+
+/** A selected old module becomes the instruction to select `site`; the
+ *  recorded build belongs in the repo-owned hook, not in a registration
+ *  key, so the answers ride in the note. Copier recorded every answer
+ *  whether or not its module was selected: only a selection notes. */
+function siteNotes(
+  modules: string[],
+  answers: Record<string, unknown>,
+  defaults: { path: string; label: string },
+): string[] {
+  const notes: string[] = [];
+  if (modules.includes("pages")) {
+    const recorded = PAGES_ANSWERS.map((key) => [key, answer(answers, key)] as const).filter(
+      ([, value]) => value !== undefined && value !== "",
+    );
+    const build =
+      recorded.length > 0
+        ? `the recorded ${recorded.map(([key, value]) => `${key}=\`${value}\``).join(", ")}`
+        : "its build";
+    notes.push(
+      `cutover: the \`pages\` module is the \`site\` module now, and its build is the repo-owned ${SITE_BUILD_HOOK} hook: ` +
+        `select \`site\` and move ${build} into the hook before merging`,
+    );
+  }
+  if (modules.includes("docs-site")) {
+    // Each recorded docs-site answer that is not the site default, as the
+    // registration key it becomes.
+    const moved = (
+      [
+        ["docs_site_path", "site.path", defaults.path],
+        ["docs_site_label", "labels.site", defaults.label],
+      ] as const
+    )
+      .map(([key, target, fallback]) => [answer(answers, key), target, key, fallback] as const)
+      .filter(([value, , , fallback]) => value !== undefined && value !== "" && value !== fallback)
+      .map(([value, target, key]) => `${target} to \`${value}\` (the recorded ${key})`);
+    const settings = moved.length > 0 ? ` and set ${moved.join(" and ")}` : "";
+    notes.push(
+      `cutover: the \`docs-site\` module is the \`site\` module now: select \`site\`${settings} before merging`,
+    );
+  }
+  return notes;
 }
 
 const HEADER =
   "# Written once by repo-platform and repo-owned from then on: the sync reads this file and never rewrites it.\n";
 
+/** The hold for a repository whose website the retired pages.yml deployed:
+ *  the sync seeds the hook as a no-op, so without this note a clean report
+ *  would auto-merge and the next main run would publish the docs alone. A
+ *  hook already at its path means the build has moved. */
+export function siteHoldNotes(target: string): string[] {
+  // Presence is what the starter writer judges too: a symlink at the hook
+  // path is the repository's own hook.
+  if (probe(target, PAGES_WORKFLOW).kind === "absent") return [];
+  if (probe(target, SITE_BUILD_HOOK).kind !== "absent") return [];
+  return [
+    `site cutover: ${PAGES_WORKFLOW} is retired and ${SITE_BUILD_HOOK} is seeded as a no-op; ` +
+      "move the former pages build into the hook before merging, or the next main run serves the docs alone (or nothing)",
+  ];
+}
+
+/** Every transitional note: the site hold, then the v1 rewrite. */
+export function cutover(
+  target: string,
+  config: WriterFilesConfig,
+  repository: RepositorySlug,
+): string[] {
+  return [...siteHoldNotes(target), ...answersCutover(target, config, repository)];
+}
+
 /** Rewrites a v1 registration as v2 when the target still carries its
  *  answers file; returns the notes, empty when there is nothing to do. */
-export function cutover(
+function answersCutover(
   target: string,
   config: WriterFilesConfig,
   repository: RepositorySlug,
