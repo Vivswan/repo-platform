@@ -14,7 +14,7 @@ Every managed repository carries a rendered `.github/settings.yml`: a managed fi
 | 3 | Module layer | `files/<module>/settings.yml` | what selecting that module adds: a toolchain module's dependabot label, release-please's four labels and its `release-tags` ruleset, [pr-title's activation](#the-pr-title-ruleset) |
 | 4 | Module visibility overlay | `files/<module>/settings-public.yml` or `settings-private.yml` | the analyzable toolchains' `code_scanning` rule, which GitHub rejects on private repos |
 | 5 | Repo overlay | the repo's own `.github/settings.local.yml` | identity keys (`description`, `homepage`, `topics`, `private`) plus the repo's own labels, rulesets, and overrides |
-| 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken: the squash-only merge policy, `allow_auto_merge`, `enable_vulnerability_alerts`, and the `main` and `non-bypassable` protection rulesets |
+| 6 | Fleet override | [files/settings/override.yml](../files/settings/override.yml) | the invariants no repo may weaken: the squash-only merge policy (the PR title as the squash subject, a blank squash body), `allow_auto_merge`, `enable_vulnerability_alerts`, and the `main` and `non-bypassable` protection rulesets |
 
 Every layer is a plain settings-as-code YAML document a human can read on its own; no settings content derives from code. The mechanics:
 
@@ -86,7 +86,7 @@ A target is selected when all three probes pass, in this order:
 
 ## What the baseline contains
 
-- The shared `repository:` feature toggles live in the fleet baseline; a repo opts out of any of them by declaring its own value (or `null`) in its overlay. The exceptions live in the override layer, where no repo can opt out: the merge policy (squash-only, with the squash-title enforcement the pr-title check and release-please rely on), `allow_auto_merge`, and `enable_vulnerability_alerts`.
+- The shared `repository:` feature toggles live in the fleet baseline; a repo opts out of any of them by declaring its own value (or `null`) in its overlay. The exceptions live in the override layer, where no repo can opt out: the merge policy (squash-only; the squash subject is the PR title, which the pr-title check and release-please rely on, and the squash body is blank, so a PR body's tables and fences never reach the changelog and release-please footers travel in a `BEGIN_COMMIT_OVERRIDE` block), `allow_auto_merge`, and `enable_vulnerability_alerts`.
 - Visibility-dependent blocks follow the `private:` the overlay declares, so a deliberate flip and its visibility-gated blocks land in one render. `security_and_analysis` (secret scanning + push protection) is rejected with a 422 by private repos without Advanced Security, so only the public overlay carries it. The `main` ruleset's `code_scanning` rule renders only where CodeQL analyzes (public plus an analyzable toolchain). Its `code_quality` rule follows visibility alone: it gates on GitHub Code Quality's own analysis and, on current evidence, stands down where that feature is not enabled, so every public repo carries it regardless of toolchain (the evidence and reasoning are in [files/settings/public.yml](../files/settings/public.yml)).
 
 The label roster is the union of every selected layer's `labels`, so it cannot drift from what the modules need (a repository whose overlay sets `labels: null` renders no roster at all):

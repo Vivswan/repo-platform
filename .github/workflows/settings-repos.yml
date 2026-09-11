@@ -39,8 +39,8 @@ on:
   # workflow from the merge's CI run, needs-ordered behind the all-green
   # job. Named `repos`, not `repo`, on purpose - the dispatch input may
   # be a private slug and never rides in step env, while this value is
-  # "all" or text off a public main commit and is passed as ONLY_REPO
-  # below. check_only is dispatch-only, so a called run always applies.
+  # "all" or public text off the merged PRs of a main range and is passed
+  # as ONLY_REPO below. check_only is dispatch-only, so a called run always applies.
   workflow_call:
     inputs:
       repos:
@@ -122,8 +122,8 @@ jobs:
 
       # Probes retry and then warn-and-skip a repo they cannot answer for;
       # only a failed discovery fails this job. ONLY_REPO carries only the
-      # workflow_call scope ("all", or public text off a main commit; empty
-      # on cron and dispatch runs). The typed dispatch input never rides
+      # workflow_call scope ("all", or public text off the merged PRs of a
+      # main range; empty on cron and dispatch runs). The typed dispatch input never rides
       # here: it may be a private slug, and the runner prints step env into
       # this public log, so the script reads it from the event payload.
       # The repos output is a STEP output on purpose: a job output holding a
