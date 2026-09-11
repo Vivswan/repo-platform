@@ -4,6 +4,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { RESYNC } from "../../../../../actions/validate-template-report/validator/checks/manifest_shape.ts";
+import {
+  coveredPaths,
+  declaredOwnership,
+  type RenderSelection,
+} from "../../../../../actions/validate-template-report/validator/ownership.ts";
 import { tempDirs } from "../../../../shared/temp_dir.ts";
 import {
   ANSWERS,
@@ -110,23 +115,22 @@ describe("a render the sync writer has cut over", () => {
   // The writer derives the registration's project block from the answers
   // file and retires the file; from then on the manifest's own entry is the
   // build record, the owner is unpinned, and the visibility is unrecorded.
-  // `keep` leaves a retired file in the tree (the repository kept its own copy).
-  const cutOver = (extra: Record<string, string> = {}, opts: { keep?: string[] } = {}) =>
+  const cutOver = (extra: Record<string, string> = {}) =>
     runValidator({ ".repo-platform.yml": V2_REGISTRATION, ...extra }, [], {
-      omit: CUT_OVER_OMIT.filter((rel) => !(opts.keep ?? []).includes(rel)),
+      omit: CUT_OVER_OMIT,
     });
   const writerManifest = (commit: string | null, tree: Record<string, string> = {}) =>
     manifestOf({
       ...stampedEntries(cutOverTree(tree)),
       [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${JSON.stringify(commit)}}`,
     });
-  const cutOverTree = (extra: Record<string, string>, keep: string[] = []) => {
+  const cutOverTree = (extra: Record<string, string>) => {
     const tree: Record<string, string> = {
       ...BASELINE,
       ".repo-platform.yml": V2_REGISTRATION,
       ...extra,
     };
-    for (const rel of CUT_OVER_OMIT) if (!keep.includes(rel)) delete tree[rel];
+    for (const rel of CUT_OVER_OMIT) delete tree[rel];
     return tree;
   };
 
@@ -201,25 +205,28 @@ describe("a render the sync writer has cut over", () => {
     expect(clean.exitCode).toBe(0);
   });
 
-  test("a public-only file the repository kept is neither required nor drift", () => {
-    // No visibility is recorded, so CONTRIBUTING.md stands down: a kept copy
-    // with its entry passes parity, and its absence is not an error.
-    const kept = cutOver({}, { keep: ["CONTRIBUTING.md"] });
-    expect(kept.stderr).toBe("");
-    expect(kept.exitCode).toBe(0);
-    // The kept copy is still on parity: its region edited after the stamp is drift.
-    const edited = cutOver(
-      {
-        "CONTRIBUTING.md": BASELINE["CONTRIBUTING.md"].replace(
-          "# Contributing",
-          "# Contributing here",
-        ),
-        [MANIFEST]: manifestOf(stampedEntries(cutOverTree({}, ["CONTRIBUTING.md"]))),
-      },
-      { keep: ["CONTRIBUTING.md"] },
-    );
-    expect(edited.exitCode).toBe(1);
-    expect(edited.stderr).toContain("CONTRIBUTING.md: its managed region does not match");
+  test("the tables stand down exactly what the cutover fixture omits", () => {
+    // Public-only entries stand down while the visibility is unrecorded, and
+    // the template renders none today, so only the answers file leaves. A
+    // returning public-only file fails this and needs its own cut-over case.
+    const publicRender: RenderSelection = {
+      isPrivateRender: false,
+      selectedModules: ["uv"],
+      registeredByAnswers: true,
+    };
+    const cutOverRender: RenderSelection = {
+      ...publicRender,
+      isPrivateRender: null,
+      registeredByAnswers: false,
+    };
+    const cutRoster = new Set(declaredOwnership(cutOverRender).map((entry) => entry.path));
+    const cutCovered = coveredPaths(cutOverRender);
+    expect({
+      roster: declaredOwnership(publicRender)
+        .map((entry) => entry.path)
+        .filter((path) => !cutRoster.has(path)),
+      covered: [...coveredPaths(publicRender)].filter((path) => !cutCovered.has(path)),
+    }).toEqual({ roster: CUT_OVER_OMIT, covered: CUT_OVER_OMIT });
   });
 });
 
