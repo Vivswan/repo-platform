@@ -7,82 +7,45 @@ import {
   untitledPageTitle,
 } from "../../../actions/pages-site/.vitepress/derive.ts";
 import { isLandingFile, sourcePathOf } from "../../../actions/pages-site/.vitepress/source-path.ts";
-import { parseMounts } from "../../../actions/pages-site/lib.ts";
+import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
 
 const SKILLS = { path: "skills", mount: "skills", page: "SKILL.md" };
 
-describe("parseMounts include roots", () => {
-  test("a vitepress mount carries its include list as written", () => {
-    expect(
-      parseMounts(
-        '[{"path": "/", "source": "command", "versioned": false},' +
-          ' {"path": "/docs/", "source": "vitepress", "versioned": true,' +
-          ' "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]',
-      ),
-    ).toEqual([
-      { path: "/", source: "command", versioned: false },
-      { path: "/docs/", source: "vitepress", versioned: true, include: [SKILLS] },
-    ]);
+/** A config whose include list is `include`, the other keys neutral. */
+const config = (include: unknown) =>
+  JSON.stringify({ site_title: "", docs_path: "docs", include, link_rot_label: "" });
+
+describe("parseSiteConfig include roots", () => {
+  test("the include list is carried as written", () => {
+    expect(parseSiteConfig(config([SKILLS])).include).toEqual([SKILLS]);
+    expect(parseSiteConfig(config([])).include).toEqual([]);
   });
 
   test.each([
-    [
-      "on a command mount",
-      '[{"path": "/", "source": "command", "versioned": false, "include": []}]',
-      "only a vitepress mount renders other roots",
-    ],
-    [
-      "not a list",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": {"path": "skills"}}]',
-      "must be a list of {path, mount, page}",
-    ],
-    [
-      "an unknown key",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md", "title": "x"}]}]',
-      "unknown keys: title",
-    ],
-    [
-      "a traversing path",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "../skills", "mount": "skills", "page": "SKILL.md"}]}]',
-      "plain relative path",
-    ],
-    [
-      "a locale-shaped mount",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "de", "page": "SKILL.md"}]}]',
-      "reads as a locale directory",
-    ],
-    [
-      "a dot-prefixed mount",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": ".skills", "page": "SKILL.md"}]}]',
-      "never walks",
-    ],
-    [
-      "a public mount",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "public/skills", "page": "SKILL.md"}]}]',
-      "starts with public/",
-    ],
+    ["not a list", { path: "skills" }, "must be a list of {path, mount, page}"],
+    ["an unknown key", [{ ...SKILLS, title: "x" }], "unknown keys: title"],
+    ["a traversing path", [{ ...SKILLS, path: "../skills" }], "plain relative path"],
+    ["a locale-shaped mount", [{ ...SKILLS, mount: "de" }], "reads as a locale directory"],
+    ["a dot-prefixed mount", [{ ...SKILLS, mount: ".skills" }], "never walks"],
+    ["a public mount", [{ ...SKILLS, mount: "public/skills" }], "starts with public/"],
     [
       "a node_modules segment in the mount",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "content/node_modules", "page": "SKILL.md"}]}]',
+      [{ ...SKILLS, mount: "content/node_modules" }],
       "never walks",
     ],
     [
       "a page with a directory in it",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "skills", "page": "x/SKILL.md"}]}]',
+      [{ ...SKILLS, page: "x/SKILL.md" }],
       "plain markdown file name",
     ],
-    [
-      "index.md as the page",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "skills", "page": "index.md"}]}]',
-      "is index.md",
-    ],
+    ["index.md as the page", [{ ...SKILLS, page: "index.md" }], "is index.md"],
     [
       "two roots on one mount",
-      '[{"path": "/", "source": "vitepress", "versioned": true, "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md"}, {"path": "agents", "mount": "skills", "page": "AGENT.md"}]}]',
+      [SKILLS, { path: "agents", mount: "skills", page: "AGENT.md" }],
       "lists one mount twice",
     ],
-  ])("refuses an include list %s", (_, json, message) => {
-    expect(() => parseMounts(json)).toThrow(message);
+  ])("refuses an include list %s", (_, include, message) => {
+    expect(() => parseSiteConfig(config(include))).toThrow(message);
   });
 });
 

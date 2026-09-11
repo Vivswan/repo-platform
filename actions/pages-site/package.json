@@ -1,7 +1,7 @@
 {
   "name": "pages-site",
   "private": true,
-  "description": "Assembles the fleet's versioned GitHub Pages site artifact: enumerates version tags, builds each mount's tiers (VitePress over the caller's docs, or the caller's own build command), and lays out one deployable _site tree.",
+  "description": "Assembles the fleet's GitHub Pages site artifact: the repository's prebuilt website at the root and its docs (VitePress over docs/, versioned from the release tags) beside or alone, laid out as one deployable _site tree.",
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/wix-madefor-display": "^5.3.0",

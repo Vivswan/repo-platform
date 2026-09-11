@@ -26,8 +26,23 @@ export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/bu
 export const BUILD_TIMEOUT_MS = 180_000;
 export const TEST_TIMEOUT_MS = 200_000;
 
-export const VITEPRESS_MOUNT = '[{"path": "/", "source": "vitepress", "versioned": true}]';
-export const COMMAND_MOUNT = '[{"path": "/", "source": "command", "versioned": true}]';
+/** The CONFIG env the action step sets, from the plan or the caller. */
+export function siteConfig(
+  overrides: Partial<{
+    site_title: string;
+    docs_path: string;
+    include: { path: string; mount: string; page: string }[];
+    link_rot_label: string;
+  }> = {},
+): string {
+  return JSON.stringify({
+    site_title: "",
+    docs_path: "docs",
+    include: [],
+    link_rot_label: "",
+    ...overrides,
+  });
+}
 
 export interface RunnerTemp {
   /** What RUNNER_TEMP is set to: a SYMLINK to the real directory. macOS
@@ -53,7 +68,7 @@ export interface BuildResult {
 }
 
 /** One build.ts run over `workspace` into `runner.alias`; `env` carries
- *  the mode (MOUNTS, CHECK, DOCS_DIR, BUILD_COMMAND, SITE_TITLE, PATH). */
+ *  the mode (CHECK, SITE_DIR, CONFIG, CUSTOM_DOMAIN). */
 export function buildSite(
   workspace: string,
   repository: string,
@@ -67,6 +82,8 @@ export function buildSite(
       GITHUB_REPOSITORY: repository,
       RUNNER_TEMP: runner.alias,
       GITHUB_OUTPUT: "",
+      CONFIG: siteConfig(),
+      SITE_DIR: "",
       ...env,
     },
     timeoutMs: BUILD_TIMEOUT_MS,

@@ -1,4 +1,4 @@
-// Nightly external-link check over the assembled site (docs/docs-site.md,
+// Nightly external-link check over the assembled site (docs/site.md,
 // "Link rot"): linkinator crawls the built output from a local static
 // server, and only EXTERNAL breakage is reported - internal links were
 // already fatal at build time. Non-fatal by contract: the deploy has

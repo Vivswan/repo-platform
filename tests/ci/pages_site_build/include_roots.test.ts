@@ -12,6 +12,7 @@ import {
   readAssets,
   readSite,
   runnerTemp,
+  siteConfig,
   TEST_TIMEOUT_MS,
 } from "./fixtures.ts";
 import { select, texts } from "./html.ts";
@@ -20,36 +21,26 @@ const temp = tempDirs();
 
 const REPO = "fixture-owner/inc-repo";
 
-/** A website at "/" over the docs at "/docs/" with the skills/ root
- *  rendered inside the docs mount. */
-const MOUNTS =
-  '[{"path": "/", "source": "command", "versioned": false},' +
-  ' {"path": "/docs/", "source": "vitepress", "versioned": true,' +
-  ' "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]';
+/** The skills/ root rendered inside the docs mount; the website (the
+ *  hook's dist, prebuilt in the fixture) sits at "/" over the docs at
+ *  "/docs/". */
+const INCLUDE = [{ path: "skills", mount: "skills", page: "SKILL.md" }];
 
 /** The website's one page links INTO the docs mount, into an include page
  *  among them: the class of link nothing but the assembled-site gate can
  *  judge. `extra` adds a link the fail case breaks. */
-function siteScript(extra: string): string {
-  // Double-quoted for the shell, so $PAGES_BASE_PATH expands at build time;
-  // the other characters the shell reads inside double quotes are escaped.
+function website(repo: string, extra = ""): void {
   const links = [
-    '<a href=\\"${PAGES_BASE_PATH}docs/\\">docs</a>',
-    '<a href=\\"${PAGES_BASE_PATH}docs/skills/alpha/\\">alpha</a>',
+    '<a href="/inc-repo/docs/">docs</a>',
+    '<a href="/inc-repo/docs/skills/alpha/">alpha</a>',
     // Extensionless, as Pages serves it; and a sibling site of the same
     // owner, which is not this artifact's to judge.
-    '<a href=\\"${PAGES_BASE_PATH}docs/skills/alpha/reference\\">reference</a>',
-    '<a href=\\"https://fixture-owner.github.io/other-repo/\\">sibling</a>',
-    extra.replace(/[\\"`]/g, "\\$&"),
+    '<a href="/inc-repo/docs/skills/alpha/reference">reference</a>',
+    '<a href="https://fixture-owner.github.io/other-repo/">sibling</a>',
+    extra,
   ].join(" ");
-  return `mkdir -p dist && echo "<html><body>${links}</body></html>" > dist/index.html`;
-}
-
-function packageJson(repo: string, extra = ""): void {
-  writeFileSync(
-    join(repo, "package.json"),
-    `${JSON.stringify({ name: "inc-fixture", scripts: { "build:site": siteScript(extra) } })}\n`,
-  );
+  mkdirSync(join(repo, "dist"), { recursive: true });
+  writeFileSync(join(repo, "dist", "index.html"), `<html><body>${links}</body></html>\n`);
 }
 
 const ALPHA_SKILL = [
@@ -88,7 +79,7 @@ const DOCS_README =
  *  skills landing table. */
 function includeFixture(repo: string): void {
   mkdirSync(join(repo, "docs", "skills"), { recursive: true });
-  packageJson(repo);
+  website(repo);
   writeFileSync(join(repo, "docs", "README.md"), "# Fixture\n\nDocs only, so far.\n");
   writeFileSync(join(repo, "docs", "skills", "README.md"), "# Skills, hand-written\n");
   initRepo(repo);
@@ -117,7 +108,7 @@ function includeFixture(repo: string): void {
   commitAll(repo, "beta skill and the skills landing");
 }
 
-const ENV = { MOUNTS, BUILD_COMMAND: "bun run build:site", SITE_TITLE: "Inc Docs" };
+const ENV = { SITE_DIR: "dist", CONFIG: siteConfig({ site_title: "Inc Docs", include: INCLUDE }) };
 
 describe("include roots in the assembled site", () => {
   test(
@@ -221,7 +212,7 @@ describe("include roots in the assembled site", () => {
     () => {
       const workspace = temp.dir("pages-site-include-broken-");
       includeFixture(workspace);
-      packageJson(workspace, '<a href="${PAGES_BASE_PATH}docs/skills/missing/">gone</a>');
+      website(workspace, '<a href="/inc-repo/docs/skills/missing/">gone</a>');
       const readme = join(workspace, "docs", "README.md");
       writeFileSync(
         readme,
@@ -252,12 +243,7 @@ function refusalFixture(repo: string, mutate: (repo: string) => void): void {
   mutate(repo);
 }
 
-const CHECK_ENV = {
-  CHECK: "true",
-  MOUNTS:
-    '[{"path": "/", "source": "vitepress", "versioned": true,' +
-    ' "include": [{"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]',
-};
+const CHECK_ENV = { CHECK: "true", CONFIG: siteConfig({ include: INCLUDE }) };
 
 describe("include root staging refusals", () => {
   test.each<[string, (repo: string) => void, string]>([
@@ -305,10 +291,9 @@ describe("include root staging refusals", () => {
  *  first: staging order is the mount's depth, never the list's. */
 const NESTED_CHECK_ENV = {
   CHECK: "true",
-  MOUNTS:
-    '[{"path": "/", "source": "vitepress", "versioned": true, "include": [' +
-    '{"path": "agents", "mount": "skills/agents", "page": "AGENT.md"},' +
-    ' {"path": "skills", "mount": "skills", "page": "SKILL.md"}]}]',
+  CONFIG: siteConfig({
+    include: [{ path: "agents", mount: "skills/agents", page: "AGENT.md" }, ...INCLUDE],
+  }),
 };
 
 /** The skill links the agent in repository space; the agent links back. */
