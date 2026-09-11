@@ -1,16 +1,20 @@
 // Unit tests for rehearse.ts's fleet-consumable pieces: the conflict-report
 // parser over resolve_copier_conflicts.ts's stdout shapes, the validator-
-// diagnostics extraction for quiet-mode fleet rows, and the ownership-
-// manifest stamp classification. Nothing here touches the network or runs
-// a real rehearsal.
+// diagnostics extraction for quiet-mode fleet rows, the ownership-manifest
+// stamp classification, and the adoption decision over a cloned target's
+// tree. Nothing here touches the network or runs a real rehearsal.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   manifestStatus,
+  NotManagedError,
   parseConflictReport,
+  RehearsalError,
+  recordedAnswers,
   validationErrorLines,
+  WriterRegisteredError,
 } from "../../.github/scripts/sync/rehearse.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -143,5 +147,84 @@ describe("manifestStatus", () => {
   test("a manifest the stamp would still rewrite reports stale", () => {
     const root = tree(manifestText("null"), { "README.md": "hello\n" });
     expect(manifestStatus(root)).toBe("stale");
+  });
+});
+
+describe("recordedAnswers", () => {
+  const ANSWERS = ".github/.copier-answers.yml";
+  const COMMIT = "a".repeat(40);
+
+  function target(files: Record<string, string>): string {
+    const root = temp.dir("rehearse-target-");
+    mkdirSync(join(root, ".github"), { recursive: true });
+    for (const [rel, content] of Object.entries(files)) {
+      writeFileSync(join(root, rel), content);
+    }
+    return root;
+  }
+
+  test("an adopted copier-era target returns its recorded answers", () => {
+    const root = target({
+      ".repo-platform.yml": "modules: [uv]\n",
+      [ANSWERS]: `_commit: '${COMMIT}'\ndescription: hi\n`,
+    });
+    expect(recordedAnswers("o/r", root)).toEqual({
+      commit: COMMIT,
+      fields: { _commit: COMMIT, description: "hi" },
+    });
+  });
+
+  test.each<{
+    reason: string;
+    files: Record<string, string>;
+    error: typeof RehearsalError;
+    message: string;
+  }>([
+    {
+      reason: "no .repo-platform.yml is not adopted, whatever else the tree holds",
+      files: { [ANSWERS]: `_commit: '${COMMIT}'\n` },
+      error: NotManagedError,
+      message: "o/r is not managed by repo-platform",
+    },
+    {
+      reason: ".repo-platform.yml alone is a writer-registered repository, a skip",
+      files: { ".repo-platform.yml": "modules: [uv]\nproject:\n  name: r\n" },
+      error: WriterRegisteredError,
+      message:
+        "o/r has no .github/.copier-answers.yml: the sync writer path serves this repository, which the copier rehearsal cannot model",
+    },
+    {
+      reason: "an answers file that is not YAML is adopted but broken, a failure",
+      files: { ".repo-platform.yml": "modules: [uv]\n", [ANSWERS]: "a: [\n" },
+      error: RehearsalError,
+      message: "o/r's .github/.copier-answers.yml: cannot read as YAML",
+    },
+    {
+      reason: "an answers file that is not a mapping is a failure",
+      files: { ".repo-platform.yml": "modules: [uv]\n", [ANSWERS]: "- a\n- list\n" },
+      error: RehearsalError,
+      message: "o/r's .github/.copier-answers.yml: top level must be a mapping",
+    },
+    {
+      reason: "an answers file without a _commit has no base, a failure",
+      files: { ".repo-platform.yml": "modules: [uv]\n", [ANSWERS]: "description: hi\n" },
+      error: RehearsalError,
+      message: "o/r's .github/.copier-answers.yml records no _commit",
+    },
+  ])("$reason", ({ files, error, message }) => {
+    const root = target(files);
+    let caught: unknown;
+    try {
+      recordedAnswers("o/r", root);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(error);
+    expect((caught as Error).message).toContain(message);
+    // The skip classes are siblings: a broken file must never file as either skip.
+    if (error === RehearsalError) {
+      expect(caught).not.toBeInstanceOf(WriterRegisteredError);
+      expect(caught).not.toBeInstanceOf(NotManagedError);
+    }
   });
 });
