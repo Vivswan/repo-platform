@@ -249,7 +249,7 @@ describe("render, displaces, and the settings block", () => {
   const doc = (files: string[], extra: string[] = [SETTINGS]) =>
     [
       "placeholders: []",
-      "modules:\n  bun: {}",
+      "modules:\n  bun: {}\n  pages: {}",
       ...extra,
       "files:",
       ...files,
@@ -437,6 +437,38 @@ describe("render, displaces, and the settings block", () => {
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
   });
+
+  // The starter is spelled canonically; the displacer's clause varies.
+  const COVERAGE_STARTER =
+    "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun, pages], private: false } }";
+  test.each([
+    ["the canonical spelling", "{ modules: [bun, pages], private: false }", []],
+    [
+      "the same selection, keys and modules reordered",
+      "{ private: false, modules: [pages, bun] }",
+      [],
+    ],
+    [
+      "a different selection",
+      "{ modules: [bun], private: false }",
+      [
+        "files: .github/settings.yml: displaces .github/settings.local.yml, whose starters are not selected exactly when this entry is" +
+          " - an unconditional displacer needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when",
+      ],
+    ],
+  ])(
+    "a displacer whose when is %s is judged by the selection it means",
+    (_reason, when, problems) => {
+      expect(
+        problemsOf(
+          doc([
+            COVERAGE_STARTER,
+            `  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml, when: ${when} }`,
+          ]),
+        ),
+      ).toEqual(problems);
+    },
+  );
 });
 
 describe("starterCoverage", () => {
@@ -450,6 +482,11 @@ describe("starterCoverage", () => {
     [{ private: false }, [{ private: false }, { private: true }], true],
     [{ modules: ["a"] }, [{ modules: ["a"] }], true],
     [{ modules: ["a"] }, [null], false],
+    [{ modules: ["a", "b"], private: false }, [{ private: false, modules: ["b", "a"] }], true],
+    [{ any: ["a", "b"], without: ["c"] }, [{ without: ["c"], any: ["b", "a"] }], true],
+    [{ modules: ["a", "b"], private: false }, [{ modules: ["a", "c"], private: false }], false],
+    [{ modules: ["a", "b"], private: false }, [{ modules: ["b", "a"], private: true }], false],
+    [{ modules: ["a", "b"] }, [{ any: ["a", "b"] }], false],
   ])("%j over %j -> %p", (displacer, starters, expected) => {
     expect(starterCoverage(displacer, starters)).toBe(expected);
   });

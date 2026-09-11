@@ -8,7 +8,7 @@
 import type { FileEntry } from "../../../../actions/plan/files_config.ts";
 import type { Records } from "./manifest.ts";
 import { gitMove } from "./retire.ts";
-import { probe } from "./target_files.ts";
+import { occupant } from "./target_files.ts";
 
 export type Displacement =
   | { path: string; outcome: "moved"; to: string }
@@ -22,14 +22,15 @@ export function displace(target: string, entries: FileEntry[], records: Records)
   for (const entry of entries) {
     if (entry.class !== "managed" || entry.displaces === undefined) continue;
     const to = entry.displaces;
-    if (probe(target, entry.path).kind !== "file") continue;
+    if (occupant(target, entry.path) !== "a regular file") continue;
     const record = records[entry.path];
     if (record !== undefined && record.class !== "starter") continue;
-    if (probe(target, to).kind !== "absent") {
+    const taken = occupant(target, to);
+    if (taken !== null) {
       rows.push({
         path: entry.path,
         outcome: "held",
-        detail: `class changed from starter to managed, and ${to} already exists, so the file was not moved over it`,
+        detail: `class changed from starter to managed, and ${to} is already taken by ${taken}, so the file was not moved over it`,
       });
       continue;
     }

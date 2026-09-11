@@ -5,7 +5,15 @@
 // link, or nothing at the path is left alone.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { displace } from "../../../.github/scripts/sync/writer/displace.ts";
 import { type Records, sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
@@ -33,7 +41,7 @@ function checkout(files: Record<string, string>, links: Record<string, string> =
   const target = temp.dir("writer-displace-");
   fixtureGit(target, ["init", "-q", "-b", "main"]);
   for (const [rel, content] of Object.entries(files)) {
-    mkdirSync(join(target, rel, ".."), { recursive: true });
+    mkdirAt(target, join(rel, ".."));
     writeFileSync(join(target, rel), content);
   }
   for (const [rel, to] of Object.entries(links)) {
@@ -46,6 +54,12 @@ function checkout(files: Record<string, string>, links: Record<string, string> =
 }
 
 const records = (entries: Records): Records => Object.assign(Object.create(null), entries);
+
+function mkdirAt(target: string, rel: string): string {
+  const abs = join(target, rel);
+  mkdirSync(abs, { recursive: true });
+  return abs;
+}
 
 describe("displace", () => {
   test.each([
@@ -69,24 +83,46 @@ describe("displace", () => {
     },
   );
 
-  test("an overlay path already taken holds the entry and moves nothing", () => {
-    const target = checkout({
-      ".github/settings.yml": OWN,
-      ".github/settings.local.yml": "theirs\n",
-    });
-    const seeded = records({ ".github/settings.yml": { class: "starter" } });
-    expect(displace(target, ENTRIES, seeded)).toEqual([
-      {
-        path: ".github/settings.yml",
-        outcome: "held",
-        detail:
-          "class changed from starter to managed, and .github/settings.local.yml already exists, so the file was not moved over it",
-      },
-    ]);
-    expect(readFileSync(join(target, ".github/settings.yml"), "latin1")).toBe(OWN);
-    expect(readFileSync(join(target, ".github/settings.local.yml"), "utf-8")).toBe("theirs\n");
-    expect(seeded).toEqual(records({ ".github/settings.yml": { class: "starter" } }));
-  });
+  test.each([
+    {
+      taken: "a regular file",
+      seed: (target: string) =>
+        writeFileSync(join(target, ".github/settings.local.yml"), "theirs\n"),
+      still: (target: string) =>
+        expect(readFileSync(join(target, ".github/settings.local.yml"), "utf-8")).toBe("theirs\n"),
+    },
+    {
+      taken: "a directory",
+      seed: (target: string) =>
+        writeFileSync(join(mkdirAt(target, ".github/settings.local.yml"), "inner.yml"), "x\n"),
+      still: (target: string) =>
+        expect(lstatSync(join(target, ".github/settings.local.yml")).isDirectory()).toBe(true),
+    },
+    {
+      taken: "a symbolic link",
+      seed: (target: string) =>
+        symlinkSync("elsewhere.yml", join(target, ".github/settings.local.yml")),
+      still: (target: string) =>
+        expect(readlinkSync(join(target, ".github/settings.local.yml"))).toBe("elsewhere.yml"),
+    },
+  ])(
+    "an overlay path taken by $taken holds the entry and moves nothing",
+    ({ taken, seed, still }) => {
+      const target = checkout({ ".github/settings.yml": OWN });
+      seed(target);
+      const seeded = records({ ".github/settings.yml": { class: "starter" } });
+      expect(displace(target, ENTRIES, seeded)).toEqual([
+        {
+          path: ".github/settings.yml",
+          outcome: "held",
+          detail: `class changed from starter to managed, and .github/settings.local.yml is already taken by ${taken}, so the file was not moved over it`,
+        },
+      ]);
+      expect(readFileSync(join(target, ".github/settings.yml"), "latin1")).toBe(OWN);
+      still(target);
+      expect(seeded).toEqual(records({ ".github/settings.yml": { class: "starter" } }));
+    },
+  );
 
   test.each<{
     reason: string;
@@ -105,6 +141,12 @@ describe("displace", () => {
       files: {},
       links: { ".github/settings.yml": "settings.local.yml" },
       record: undefined,
+    },
+    {
+      reason: "a directory at the path",
+      files: { ".github/settings.yml/inner.yml": "x\n" },
+      links: {},
+      record: { class: "starter" } as Records[string],
     },
     { reason: "nothing at the path", files: {}, links: {}, record: undefined },
   ])("$reason is not displaced", ({ files, links, record }) => {

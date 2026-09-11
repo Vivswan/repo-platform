@@ -63,7 +63,7 @@ import {
 import { keepReason, retire } from "./retire.ts";
 import { resolveModules } from "./select.ts";
 import { renderSettings } from "./settings_entry.ts";
-import { type Found, probe, removeFile, writeFile } from "./target_files.ts";
+import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
 import { writeLink } from "./write_link.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { renderRegion, writeSplit } from "./write_split.ts";
@@ -139,12 +139,13 @@ function render(
   }
   if ("render" in entry) {
     // The overlay is the starter this entry displaces, written earlier in
-    // the same loop when absent; a link there is never read through.
+    // the same loop when absent; only a regular file there is read.
     const overlayPath = entry.displaces;
-    const overlay = probe(target, overlayPath);
-    if (overlay.kind === "link") {
-      return { held: `${overlayPath} is a symbolic link, which the render does not read through` };
+    const what = occupant(target, overlayPath);
+    if (what !== null && what !== "a regular file") {
+      return { held: `${overlayPath} is ${what}, which the render does not read through` };
     }
+    const overlay = probe(target, overlayPath);
     const rendered = renderSettings({
       config,
       tree: options.tree,
@@ -319,7 +320,7 @@ export function runSync(options: SyncOptions): SyncReport {
   // record stays too, so a later retirement still reads it as kept.
   for (const [path, entry] of Object.entries(records)) {
     if (entry.class !== "starter" || entryPaths.has(path) || pathProblem(path) !== null) continue;
-    if (probe(options.target, path).kind !== "absent") carry(path);
+    if (occupant(options.target, path) !== null) carry(path);
   }
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];
@@ -333,6 +334,19 @@ export function runSync(options: SyncOptions): SyncReport {
         class: entry.class,
         change: "held",
         detail: displacement.detail,
+      });
+      continue;
+    }
+    // The class writers hold a file or a link in the way; anything else
+    // they refuse loudly, and the sync must still end in a report.
+    const taken = occupant(options.target, entry.path);
+    if (taken === "a directory" || taken === "something that is not a regular file") {
+      carry(entry.path);
+      rows.push({
+        path: entry.path,
+        class: entry.class,
+        change: "held",
+        detail: `${taken} sits at the path, and the writer will not replace it`,
       });
       continue;
     }

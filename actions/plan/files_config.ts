@@ -324,6 +324,21 @@ export function mutuallyExclusive(a: When | null, b: When | null): boolean {
   );
 }
 
+/** One spelling per selection: fixed key order and sorted module lists,
+ *  so `{modules: [a, b], private: false}` and `{private: false, modules: [b, a]}`
+ *  compare equal. */
+export function whenKey(when: When | null): string {
+  if (when === null) return "null";
+  const sorted = (list: string[] | undefined) =>
+    list === undefined ? undefined : [...list].sort();
+  return JSON.stringify({
+    modules: sorted(when.modules),
+    any: sorted(when.any),
+    without: sorted(when.without),
+    private: when.private,
+  });
+}
+
 /** Whether the starters at a displaced path are selected exactly when the
  *  displacing entry is: an unconditional displacer over one unconditional
  *  starter or a private true/false pair, or a displacer whose condition
@@ -336,7 +351,8 @@ export function starterCoverage(displacer: When | null, starters: (When | null)[
     );
     return starters.length === 2 && visibilities.includes(true) && visibilities.includes(false);
   }
-  return starters.some((when) => JSON.stringify(when) === JSON.stringify(displacer));
+  const key = whenKey(displacer);
+  return starters.some((when) => whenKey(when) === key);
 }
 
 export interface CheckedFilesConfig {

@@ -775,36 +775,103 @@ describe("sync.ts end to end", () => {
   });
 });
 
-describe("sync.ts over a repository whose overlay path is already taken", () => {
-  test("the settings.yml is held with the displacement detail and neither file moves", () => {
-    const target = temp.dir("sync-e2e-taken-target-");
-    const files: Record<string, string> = {
-      ".repo-platform.yml":
-        "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
-      [SETTINGS]: OLD_SETTINGS,
-      [OVERLAY]: "# an overlay someone already wrote\nrepository:\n  private: false\n",
-    };
-    for (const [rel, content] of Object.entries(files)) {
-      mkdirSync(dirname(join(target, rel)), { recursive: true });
-      writeFileSync(join(target, rel), content);
-    }
-    fixtureGit(target, ["init", "-q", "-b", "main"]);
-    const { summary } = runSync(target, join(temp.dir("sync-e2e-taken-summary-"), "summary.json"));
-    expect(summary.written.filter((row) => row.path.startsWith(".github/settings"))).toEqual([
-      { path: OVERLAY, class: "starter", change: "unchanged", detail: "" },
-      {
-        path: SETTINGS,
-        class: "managed",
-        change: "held",
-        detail: `class changed from starter to managed, and ${OVERLAY} already exists, so the file was not moved over it`,
-      },
-    ]);
-    expect(readFileSync(join(target, SETTINGS), "latin1")).toBe(OLD_SETTINGS);
-    expect(readFileSync(join(target, OVERLAY), "utf-8")).toBe(files[OVERLAY]);
-    expect(summary.holdReasons).toContain(
-      `${SETTINGS} held: class changed from starter to managed, and ${OVERLAY} already exists, so the file was not moved over it`,
-    );
+describe("sync.ts over a repository whose settings or overlay path is taken", () => {
+  const THEIRS = "# an overlay someone already wrote\nrepository:\n  private: false\n";
+  const NOT_MOVED = (taken: string) =>
+    `class changed from starter to managed, and ${OVERLAY} is already taken by ${taken}, so the file was not moved over it`;
+  const DIRECTORY_HELD = "a directory sits at the path, and the writer will not replace it";
+  const row = (path: string, cls: string, change: string, detail = "") => ({
+    path,
+    class: cls,
+    change,
+    detail,
   });
+  const dirWithInner = (target: string, rel: string) => {
+    mkdirSync(join(target, rel), { recursive: true });
+    writeFileSync(join(target, rel, "inner.yml"), THEIRS);
+  };
+  test.each<{
+    reason: string;
+    seed: (target: string) => void;
+    rows: Summary["written"];
+    still: (target: string) => void;
+  }>([
+    {
+      reason: "a regular file at the overlay path, the repository's own settings.yml",
+      seed: (target: string) => {
+        writeFileSync(join(target, SETTINGS), OLD_SETTINGS);
+        writeFileSync(join(target, OVERLAY), THEIRS);
+      },
+      rows: [
+        row(OVERLAY, "starter", "unchanged"),
+        row(SETTINGS, "managed", "held", NOT_MOVED("a regular file")),
+      ],
+      still: (target: string) => {
+        expect(readFileSync(join(target, SETTINGS), "latin1")).toBe(OLD_SETTINGS);
+        expect(readFileSync(join(target, OVERLAY), "utf-8")).toBe(THEIRS);
+      },
+    },
+    {
+      reason: "a directory at the overlay path, the repository's own settings.yml",
+      seed: (target: string) => {
+        writeFileSync(join(target, SETTINGS), OLD_SETTINGS);
+        dirWithInner(target, OVERLAY);
+      },
+      rows: [
+        row(OVERLAY, "starter", "held", DIRECTORY_HELD),
+        row(SETTINGS, "managed", "held", NOT_MOVED("a directory")),
+      ],
+      still: (target: string) => {
+        expect(readFileSync(join(target, SETTINGS), "latin1")).toBe(OLD_SETTINGS);
+        expect(readFileSync(join(target, OVERLAY, "inner.yml"), "utf-8")).toBe(THEIRS);
+      },
+    },
+    {
+      reason: "a directory at the overlay path, no settings.yml",
+      seed: (target: string) => dirWithInner(target, OVERLAY),
+      rows: [
+        row(OVERLAY, "starter", "held", DIRECTORY_HELD),
+        row(
+          SETTINGS,
+          "managed",
+          "held",
+          `${OVERLAY} is a directory, which the render does not read through`,
+        ),
+      ],
+      still: (target: string) => {
+        expect(existsSync(join(target, SETTINGS))).toBe(false);
+        expect(readFileSync(join(target, OVERLAY, "inner.yml"), "utf-8")).toBe(THEIRS);
+      },
+    },
+    {
+      reason: "a directory at the settings.yml path, no overlay",
+      seed: (target: string) => dirWithInner(target, SETTINGS),
+      rows: [row(OVERLAY, "starter", "created"), row(SETTINGS, "managed", "held", DIRECTORY_HELD)],
+      still: (target: string) => {
+        expect(readFileSync(join(target, SETTINGS, "inner.yml"), "utf-8")).toBe(THEIRS);
+        expect(existsSync(join(target, OVERLAY))).toBe(true);
+      },
+    },
+  ])(
+    "$reason: the sync ends in a report with both rows and nothing moves",
+    ({ seed, rows, still }) => {
+      const target = temp.dir("sync-e2e-taken-target-");
+      mkdirSync(join(target, ".github"), { recursive: true });
+      writeFileSync(
+        join(target, ".repo-platform.yml"),
+        "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+      );
+      seed(target);
+      fixtureGit(target, ["init", "-q", "-b", "main"]);
+      const { summary } = runSync(
+        target,
+        join(temp.dir("sync-e2e-taken-summary-"), "summary.json"),
+      );
+      expect(summary.written.filter((r) => r.path.startsWith(".github/settings"))).toEqual(rows);
+      still(target);
+      expect(summary.holdReasons).toContain(`${SETTINGS} held: ${rows[1].detail}`);
+    },
+  );
 });
 
 describe("sync.ts over a modules-only registration", () => {
