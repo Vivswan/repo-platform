@@ -24,8 +24,6 @@ import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
 import { harnessImportRules } from "./check/ssot/harness_imports.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
-import { moduleRules } from "./check/ssot/modules.ts";
-import { pagesCallerRules } from "./check/ssot/pages_callers.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
 import { prTitleRules } from "./check/ssot/pr_title.ts";
 import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
@@ -39,7 +37,6 @@ import { toolchainRules } from "./check/ssot/toolchain.ts";
 /** Every rule, one group module at a time; ruleRosterMismatches audits
  *  the assembled list against RULE_ROSTER before the loop runs. */
 const rules: Rule[] = [
-  ...moduleRules,
   ...toolchainRules,
   ...deliveryPinRules,
   ...stickyCommentRules,
@@ -50,7 +47,6 @@ const rules: Rule[] = [
   ...prTitleRules,
   ...literalAnchorRules,
   ...postGreenRules,
-  ...pagesCallerRules,
   ...processDisciplineRules,
   ...harnessImportRules,
   ...syncOperatorRules,

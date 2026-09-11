@@ -142,8 +142,6 @@ const moduleDataSchema = z.looseObject({
       description: z.string().min(1).optional(),
     })
     .optional(),
-  pages: z.looseObject({ install: z.string(), build: z.string().min(1) }).optional(),
-  dist: z.string().min(1).optional(),
   path: z.string().min(1).optional(),
   skills_dir: z.looseObject({ default: z.string().min(1) }).optional(),
   pin: z

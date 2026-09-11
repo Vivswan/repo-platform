@@ -384,6 +384,8 @@ describe("fleet-ci.yml", () => {
     const GUARDS = {
       "validate-skills":
         "contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'",
+      "docs-check":
+        "contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'",
       "release-freshness":
         "contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
       "release-health":
@@ -400,6 +402,26 @@ describe("fleet-ci.yml", () => {
       (step.uses ?? "").includes("repo-platform/actions/validate-skills@build"),
     );
     expect(action?.with?.["skills-dir"]).toBe("${{ needs.plan.outputs.skills-dir }}");
+  });
+
+  test("docs-check builds docs/ strictly through pages-site at @build, standing down without a docs/ tree", () => {
+    const steps = fleetCi.jobs["docs-check"]?.steps ?? [];
+    // The hashFiles guard sits on the steps: at the job level it would
+    // read an empty workspace and never arm.
+    expect(steps.map((step) => [step.uses ?? step.run, step.if, step.with])).toEqual([
+      [expect.stringContaining("actions/checkout@"), undefined, undefined],
+      [
+        expect.stringContaining("repo-platform/actions/pages-site@build"),
+        "hashFiles('docs/**') != ''",
+        { check: "true" },
+      ],
+      [
+        expect.stringContaining("::notice::docs-check stood down"),
+        "hashFiles('docs/**') == ''",
+        undefined,
+      ],
+    ]);
+    expect(fleetCi.jobs["docs-check"]?.permissions).toBeUndefined();
   });
 
   test("release-health calls its action at @build in pull-request mode, labels forwarded", () => {

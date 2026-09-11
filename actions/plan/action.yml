@@ -8,15 +8,15 @@ description: >-
   step outputs. Mode default resolves
   what fleet-ci.yml's jobs key on (the module selection in canonical order,
   the visibility, the skills directory, the CodeQL languages, the tracking
-  labels); mode pages resolves the deploy configuration reusable-pages.yml
-  consumes (mounts, toolchain setup, commands, output directory, site
-  title, link-rot label). Fails closed on any invalid registration. Runs in
+  labels); mode site resolves the docs configuration the pages-site action
+  consumes (the docs mount path, the site title, the include roots, the
+  link-rot label). Fails closed on any invalid registration. Runs in
   the caller's checkout; needs GH_TOKEN in the environment only when the
   private input is empty (the visibility is then read from the API).
 
 inputs:
   mode:
-    description: default (the fleet-ci job outputs) or pages (the reusable-pages deploy configuration).
+    description: default (the fleet-ci job outputs) or site (the pages-site docs configuration).
     required: false
     default: default
   private:
@@ -25,45 +25,6 @@ inputs:
       github.event.repository.private). Empty asks the API with GH_TOKEN.
     required: false
     default: ""
-  # Mode pages only, the caller-configured deploy: a non-empty mounts
-  # publishes these eight values unchanged (setup grammar-checked) and the
-  # registration is not read. A caller passing no mounts is
-  # registration-configured: the plan resolves all eight from its
-  # .repo-platform.yml. Both stay supported (repo-platform's own docs-site.yml
-  # is caller-configured: this repository carries no registration).
-  mounts:
-    description: Caller-configured deploys only; the JSON mount list. Empty resolves the deploy from the registration.
-    required: false
-    default: ""
-  setup:
-    description: Caller-configured deploys only; the toolchain setup tokens.
-    required: false
-    default: none
-  install_command:
-    description: Caller-configured deploys only; the install command.
-    required: false
-    default: ""
-  build_command:
-    description: Caller-configured deploys only; the build command.
-    required: false
-    default: ""
-  dist_dir:
-    description: Caller-configured deploys only; the build output directory.
-    required: false
-    default: dist
-  site_title:
-    description: Caller-configured deploys only; the vitepress site title.
-    required: false
-    default: ""
-  docs_dir:
-    description: Caller-configured deploys only; the docs tree.
-    required: false
-    default: docs
-  link_rot_label:
-    description: Caller-configured deploys only; the link-rot tracking label.
-    required: false
-    default: ""
-
 outputs:
   modules:
     description: The selected modules in canonical order, a compact JSON array (mode default).
@@ -83,29 +44,17 @@ outputs:
   weekly:
     description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
     value: ${{ steps.plan.outputs.weekly }}
-  mounts:
-    description: The pages-site mount list, compact JSON (mode pages).
-    value: ${{ steps.plan.outputs.mounts }}
-  setup:
-    description: Toolchain(s) installed on the build runner, comma-separated, or none (mode pages).
-    value: ${{ steps.plan.outputs.setup }}
-  install_command:
-    description: Dependency install command run before each command-mount build; "" skips (mode pages).
-    value: ${{ steps.plan.outputs.install_command }}
-  build_command:
-    description: Build command for command mounts (mode pages).
-    value: ${{ steps.plan.outputs.build_command }}
-  dist_dir:
-    description: Command-mount build output directory, relative to the repo root (mode pages).
-    value: ${{ steps.plan.outputs.dist_dir }}
+  docs_path:
+    description: The URL segment the docs mount under beside the repository's website (mode site).
+    value: ${{ steps.plan.outputs.docs_path }}
   site_title:
-    description: Site title for vitepress mounts; empty without the docs-site module (mode pages).
+    description: The docs site's title; empty means the repository name (mode site).
     value: ${{ steps.plan.outputs.site_title }}
-  docs_dir:
-    description: The docs tree a vitepress mount renders (mode pages).
-    value: ${{ steps.plan.outputs.docs_dir }}
+  include:
+    description: The registration's site.include roots, a compact JSON list (mode site).
+    value: ${{ steps.plan.outputs.include }}
   link_rot_label:
-    description: Tracking label of the nightly external-link check; empty without the docs-site module (mode pages).
+    description: Tracking label of the nightly external-link check (mode site).
     value: ${{ steps.plan.outputs.link_rot_label }}
 
 runs:
@@ -138,12 +87,4 @@ runs:
         PRIVATE: ${{ inputs.private }}
         FILES_CONFIG: ${{ github.action_path }}/../../files.yml
         RESERVED_LABELS_FILE: ${{ github.action_path }}/../../reserved-labels.yml
-        CALLER_MOUNTS: ${{ inputs.mounts }}
-        CALLER_SETUP: ${{ inputs.setup }}
-        CALLER_INSTALL_COMMAND: ${{ inputs.install_command }}
-        CALLER_BUILD_COMMAND: ${{ inputs.build_command }}
-        CALLER_DIST_DIR: ${{ inputs.dist_dir }}
-        CALLER_SITE_TITLE: ${{ inputs.site_title }}
-        CALLER_DOCS_DIR: ${{ inputs.docs_dir }}
-        CALLER_LINK_ROT_LABEL: ${{ inputs.link_rot_label }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/plan.ts"'

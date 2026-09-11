@@ -49,12 +49,8 @@ export function actionManifestFiles(): string[] {
 
 /** Third-party actions pinned to a BRANCH commit rather than a release: the
  *  value is the branch the trailing comment must name. Record the reason
- *  with each entry. dtolnay/rust-toolchain publishes no version tags (its
- *  branches name toolchains), so its pin is a master commit and the
- *  toolchain travels as the step's explicit input. */
-export const BRANCH_PINNED: Record<string, string> = {
-  "dtolnay/rust-toolchain": "master",
-};
+ *  with each entry (an action that publishes no version tags). */
+export const BRANCH_PINNED: Record<string, string> = {};
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;

@@ -554,6 +554,7 @@ export const FLEET_CI_ROSTER = [
   "semgrep",
   "codeql",
   "validate-skills",
+  "docs-check",
   "release-freshness",
   "release-health",
   "trivy",
@@ -609,6 +610,7 @@ export function skeletonCi(): Record<string, unknown> {
 export const FLEET_CALLERS: Record<string, string> = {
   ".github/workflows/fleet-ci.yml": "ci",
   ".github/workflows/fleet-nightly.yml": "nightly",
+  ".github/workflows/reusable-site.yml": "site",
 };
 
 /** The operator's own call chain, each called workflow with the job that calls it: ci.yml's
