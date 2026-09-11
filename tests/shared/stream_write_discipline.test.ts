@@ -12,8 +12,7 @@
 // comments never fire) over the same three roots its stream-write-sync
 // rule scans, instead of keeping a second implementation whose semantics
 // could silently diverge (the two guards previously carried same-named
-// stripComments locals with removal semantics; timeout_log_lines.test.ts
-// reads the shared parser for the same reason). The scanner's own
+// stripComments locals with removal semantics). The scanner's own
 // fixture controls - fire shapes, the allowlist mechanism, stale entries
 // - live in tests/scripts/check_ssot/process_discipline.test.ts; what this suite adds is the
 // bun-test-side enforcement plus the reach control below.

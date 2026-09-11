@@ -29,11 +29,13 @@ import { ROWS_FILE } from "../sync/verdict.ts";
 import {
   captureNetwork,
   notAdoptedNotice,
+  PRIVATE_DISPLAY,
   parseDiscovered,
   pushProbeSkipNotice,
   readDispatchRepo,
   scopeSource,
   scrubSlug,
+  selectedLine,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {
@@ -44,22 +46,6 @@ import {
   scopeRefusal,
   scopeSelects,
 } from "./sync_scope.ts";
-
-/** How a private repository is named in this public log. */
-const PRIVATE_DISPLAY = "a private repository";
-
-/** The one line naming what was selected: public repositories by slug,
- *  private ones as a count. */
-function selectedLine(rows: { repo: string; private: boolean }[]): string {
-  if (rows.length === 0) return "no adopted repos selected; nothing to sync.";
-  const publicSlugs = rows.filter((row) => !row.private).map((row) => row.repo);
-  const hidden = rows.length - publicSlugs.length;
-  const parts = [
-    ...(publicSlugs.length > 0 ? [publicSlugs.join(", ")] : []),
-    ...(hidden > 0 ? [`${hidden} private ${hidden === 1 ? "repository" : "repositories"}`] : []),
-  ];
-  return `syncing: ${parts.join(" and ")}`;
-}
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -157,6 +143,6 @@ const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
 writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(rows));
 setOutput("count", String(rows.length));
-const line = selectedLine(rows);
+const line = selectedLine(rows, "syncing", "no adopted repos selected; nothing to sync.");
 if (rows.length === 0) notice(line);
 else console.log(line);

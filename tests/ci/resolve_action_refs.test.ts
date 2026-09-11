@@ -85,7 +85,7 @@ describe("collectRefs", () => {
       files: [
         {
           path: "g.yml",
-          text: '      - uses: "Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3"\n',
+          text: '      - uses: "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84" # v2.0.0\n',
         },
         { path: "h.yml", text: "      - uses: 'actions/checkout@v7'\n" },
       ],
@@ -93,8 +93,8 @@ describe("collectRefs", () => {
         { repo: "actions/checkout", ref: "v7", version: null, sources: ["h.yml"] },
         {
           repo: "Vivswan/github-settings-as-code",
-          ref: "ac83fb48219309e2249294ef37fb55310bd45fb3",
-          version: null,
+          ref: "046adf3b24454f26f569850630809bcf481f8b84",
+          version: "v2.0.0",
           sources: ["g.yml"],
         },
       ],

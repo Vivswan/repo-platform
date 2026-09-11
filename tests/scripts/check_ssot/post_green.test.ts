@@ -24,11 +24,9 @@ describe("settingsGreenGateMismatches", () => {
   const CHECKOUT = "      - uses: actions/checkout@v7\n";
   const valid = `
 jobs:
-  select:
+  apply:
     steps:
-${CHECKOUT}${GATE}${SELECT}  apply:
-    steps:
-${CHECKOUT}`;
+${CHECKOUT}${GATE}${SELECT}`;
 
   test("the synthetic fixture is judged clean - the control for every red case below", () => {
     expect(settingsGreenGateMismatches(valid)).toEqual([]);
@@ -37,7 +35,7 @@ ${CHECKOUT}`;
   const REL = ".github/workflows/settings-repos.yml";
   const GATE_MISSING = {
     file: REL,
-    expected: "a select-job step running fleet/require_green_commit.ts",
+    expected: "a step running fleet/require_green_commit.ts in the apply job",
     got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
   };
   test.each([
@@ -74,10 +72,10 @@ ${CHECKOUT}`;
       },
     },
     {
-      reason: "an apply checkout pinned to a ref - a tree the gate never judged",
+      reason: "a checkout pinned to a ref - a tree the gate never judged",
       text: valid.replace(
-        `  apply:\n    steps:\n${CHECKOUT}`,
-        `  apply:\n    steps:\n${CHECKOUT}        with:\n          ref: \${{ github.event.before }}\n`,
+        CHECKOUT,
+        `${CHECKOUT}        with:\n          ref: \${{ github.event.before }}\n`,
       ),
       mismatch: {
         file: REL,
@@ -87,17 +85,32 @@ ${CHECKOUT}`;
       },
     },
     {
-      reason: "a second select checkout - it could replace the judged tree",
+      reason: "a second checkout - it could replace the judged tree",
       text: valid.replace(SELECT, CHECKOUT + SELECT),
       mismatch: {
         file: REL,
         expected:
-          "exactly one checkout in the select job (a second one could replace the judged tree)",
+          "exactly one checkout in the apply job (a second one could replace the judged tree)",
         got: "2 checkout step(s)",
+      },
+    },
+    {
+      reason: "a second job with a ref'd checkout, however well the selecting job is gated",
+      text: `${valid}  report:\n    steps:\n${CHECKOUT}        with:\n          ref: main\n`,
+      mismatch: {
+        file: REL,
+        expected:
+          "the report job's checkout without a ref - it lands on the trigger commit the gate judged",
+        got: "ref: main",
       },
     },
   ])("$reason is the one mismatch", ({ text, mismatch }) => {
     expect(settingsGreenGateMismatches(text)).toEqual([mismatch]);
+  });
+
+  test("a selection step named by an echo decoy alone is anchor-lost, never a pass", () => {
+    const decoy = valid.replace(SELECT, SELECT.replace("run: bun", "run: echo bun"));
+    expect(() => settingsGreenGateMismatches(decoy)).toThrow("anchor lost");
   });
 
   test("the settings-repos green gate is ARMED: the live workflow passes the rule's judgment", () => {
@@ -125,7 +138,7 @@ on:
 concurrency:
   group: \${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}
 jobs:
-  select:
+  apply:
     steps:
       - name: Require a green commit
         id: gate

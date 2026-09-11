@@ -22,7 +22,7 @@ import { lastLine } from "./lines.ts";
 import { capture, type RunResult } from "./proc.ts";
 
 /** The gate check's name - the same context branch protection requires
- * (.github/settings-override.yml) and the ci.yml all-green job's own
+ * (files/settings/override.yml) and the ci.yml all-green job's own
  * check run carries (a job's check run is named by its job id). */
 export const CHECK_NAME = "all-green";
 

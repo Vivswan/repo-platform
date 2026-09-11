@@ -10,8 +10,10 @@ import { OWNER, REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** settings-repos.yml's green gate, judged on the parsed workflow (exported
- *  for the forcing tests). A ref-free actions/checkout lands on the trigger
- *  commit the gate judged, which is why every job gets exactly one. */
+ *  for the forcing tests): in the job that selects the targets, the gate
+ *  runs before the selection and unconditionally; every job checks out
+ *  exactly once and without a ref, landing on the trigger commit the gate
+ *  judged. */
 export function settingsGreenGateMismatches(text: string): Mismatch[] {
   const rel = ".github/workflows/settings-repos.yml";
   const mismatches: Mismatch[] = [];
@@ -22,18 +24,24 @@ export function settingsGreenGateMismatches(text: string): Mismatch[] {
   const steps = (job: Record<string, unknown>): Record<string, unknown>[] =>
     Array.isArray(job.steps) ? (job.steps as unknown[]).map(mapping) : [];
   const jobs = mapping(mapping(parseYaml(text)).jobs);
-  const selectSteps = steps(mapping(jobs.select));
-  if (selectSteps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
   // Trim-equal, never a substring: an `echo bun ...` decoy carries the
   // command in its text without running it.
-  const runs = selectSteps.map((step) => String(step.run ?? "").trim());
-  const gateAt = runs.indexOf("bun .github/scripts/fleet/require_green_commit.ts");
-  const selectAt = runs.indexOf("bun .github/scripts/fleet/select_settings_repos.ts");
-  if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
+  const runs = (job: Record<string, unknown>) =>
+    steps(job).map((step) => String(step.run ?? "").trim());
+  const selecting = Object.entries(jobs).filter(([, job]) =>
+    runs(mapping(job)).includes("bun .github/scripts/fleet/select_settings_repos.ts"),
+  );
+  if (selecting.length !== 1)
+    throw new Error(`${rel}: no single target-selection job - anchor lost`);
+  const [jobName, selectJob] = selecting[0];
+  const selectSteps = steps(mapping(selectJob));
+  const selectRuns = runs(mapping(selectJob));
+  const gateAt = selectRuns.indexOf("bun .github/scripts/fleet/require_green_commit.ts");
+  const selectAt = selectRuns.indexOf("bun .github/scripts/fleet/select_settings_repos.ts");
   if (gateAt === -1) {
     mismatches.push({
       file: rel,
-      expected: "a select-job step running fleet/require_green_commit.ts",
+      expected: `a step running fleet/require_green_commit.ts in the ${jobName} job`,
       got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
     });
   } else if (gateAt > selectAt) {

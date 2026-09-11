@@ -3,6 +3,7 @@
 // must be single-line with %/CR/LF escaped, or the runner misparses the
 // command and the raw value hits the log.
 
+import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 
 export function env(name: string, fallback = ""): string {
@@ -16,10 +17,6 @@ export function requireEnv(name: string): string {
     process.exit(2);
   }
   return value;
-}
-
-export function hideDetails(): boolean {
-  return env("HIDE_DETAILS", "false") === "true";
 }
 
 export function escapeData(value: string): string {
@@ -53,7 +50,15 @@ export function fail(messages: string | string[]): never {
   process.exit(1);
 }
 
-/** Append a step output to $GITHUB_OUTPUT. */
+/** Append a step output to $GITHUB_OUTPUT; a value with a newline takes
+ *  the runner's heredoc form. */
 export function setOutput(name: string, value: string): void {
-  appendFileSync(requireEnv("GITHUB_OUTPUT"), `${name}=${value}\n`);
+  if (!value.includes("\n")) {
+    appendFileSync(requireEnv("GITHUB_OUTPUT"), `${name}=${value}\n`);
+    return;
+  }
+  const delimiter = `ghadelimiter_${randomUUID()}`;
+  if (value.includes(delimiter))
+    throw new Error(`setOutput(${name}): the value carries the delimiter`);
+  appendFileSync(requireEnv("GITHUB_OUTPUT"), `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
