@@ -70,7 +70,7 @@ export const labelRules: Rule[] = [
       for (const name of required) {
         if (!rosterNames.has(name)) {
           mismatches.push({
-            file: ".github/settings-baseline.yml (or a module's settings.yml layer)",
+            file: "files/settings/baseline.yml (or a module's settings.yml layer)",
             expected: `label '${name}' in the managed roster`,
             got: "missing",
           });
@@ -197,7 +197,7 @@ export const labelRules: Rule[] = [
       const baselineTuple = managedLabelRoster().find((label) => label.name === securityLabel);
       if (baselineTuple === undefined) {
         mismatches.push({
-          file: ".github/settings-baseline.yml",
+          file: "files/settings/baseline.yml",
           expected: `label '${securityLabel}' (actions/plan/plan.ts SECURITY_LABEL)`,
           got: "missing - every repository must carry the label the nightly scan files under",
         });
@@ -235,7 +235,7 @@ export const labelRules: Rule[] = [
       ) {
         mismatches.push({
           file: ".github/workflows/fleet-nightly.yml trivy-nightly label overrides",
-          expected: `${baselineTuple.color} / ${baselineTuple.description} (.github/settings-baseline.yml '${securityLabel}')`,
+          expected: `${baselineTuple.color} / ${baselineTuple.description} (files/settings/baseline.yml '${securityLabel}')`,
           got: `${nightlyColor} / ${nightlyDescription}`,
         });
       }
