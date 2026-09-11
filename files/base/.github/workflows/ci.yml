@@ -107,8 +107,9 @@ jobs:
   # hence the quoted module name. `ci` sits in each needs list because a
   # job reads outputs only from its direct dependencies. The release runs
   # downstream of the gate AND the repo-owned hook, so the repository's own
-  # green-gated work lands before the tag is minted; the lane it holds is
-  # one no called job takes (a shared name would deadlock).
+  # green-gated work lands before the tag is minted.
+  # No lane here: a caller-side lane keeps one pending call and cancels the older one, which is how a release merge lost its tag.
+  # The called job holds its own lane keyed by the judged commit, so only a re-run of the same commit ever waits.
   release:
     needs: [ci, all-green, post-green]
     if: >-
@@ -117,9 +118,6 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       contains(needs.ci.outputs.modules, '"release-please"')
-    concurrency:
-      group: post-green-release
-      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

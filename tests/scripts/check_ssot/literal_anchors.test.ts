@@ -73,26 +73,42 @@ describe("isOwnPagesOrigin", () => {
 });
 
 describe("releaseCutWiringMismatches", () => {
-  // The three files as wired, reduced to the keys the rule reads.
-  const workflow = (
-    skip = "${{ steps.health.outputs.release-cut != 'true' }}",
+  // The four files as wired, reduced to the keys the rule reads.
+  const workflow = ({
     healthId = "health",
     mode = "release",
-  ) => `
+    cutIf = "steps.health.outputs.release-cut == 'true'",
+    cutWith = "skip-github-pull-request: true",
+    proposeIf = "steps.health.outputs.release-cut == 'false' && steps.head.outputs.current == 'true'",
+    proposeWith = "skip-github-release: true",
+    lane = "release-cut-${{ inputs.sha || github.sha }}",
+    cancel = "false",
+    extra = "",
+  } = {}) => `
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${lane}
+      cancel-in-progress: ${cancel}
     steps:
       - uses: Vivswan/repo-platform/actions/release-health@build
         id: ${healthId}
         with:
           mode: ${mode}
       - uses: googleapis/release-please-action@sha # v5.0.0
-        id: release
+        id: cut
+        ${cutIf === "" ? "" : `if: ${cutIf}`}
         with:
           token: \${{ github.token }}
-          skip-github-release: ${skip}
-`;
+          ${cutWith}
+      - uses: googleapis/release-please-action@sha # v5.0.0
+        id: propose
+        ${proposeIf === "" ? "" : `if: ${proposeIf}`}
+        with:
+          token: \${{ github.token }}
+          ${proposeWith}
+${extra}`;
   const action = (value = "${{ steps.check.outputs.release-cut }}", stepId = "check") => `
 name: Release Health
 outputs:
@@ -108,26 +124,104 @@ runs:
 `;
   const script = (write = 'setOutput("release-cut", pr === undefined ? "false" : "true");') =>
     `if (cfg.context.mode === "release") {\n  ${write}\n}\n`;
-  const wired = { workflow: workflow(), action: action(), script: script() };
+  const skeleton = (lane = "") => `
+jobs:
+  release:
+    needs: [ci, all-green, post-green]
+${lane}
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release.yml@build
+`;
+  const wired = { workflow: workflow(), action: action(), script: script(), skeleton: skeleton() };
 
   test("the wiring as shipped yields nothing (the control)", () => {
     expect(releaseCutWiringMismatches(wired)).toEqual([]);
   });
 
+  const cutSite = ".github/workflows/fleet-release.yml release-please step 'cut'";
+  const proposeSite = ".github/workflows/fleet-release.yml release-please step 'propose'";
   const drifts = [
     {
-      reason: "the workflow stops passing skip-github-release, so every push run tags",
-      files: { ...wired, workflow: workflow("") },
+      reason: "the cut step loses its condition, so every push run tags",
+      files: { ...wired, workflow: workflow({ cutIf: "" }) },
       expected: {
-        file: ".github/workflows/fleet-release.yml release-please step 'release'",
-        expected: "skip-github-release: ${{ steps.health.outputs.release-cut != 'true' }}",
-        got: "no skip-github-release input",
+        file: cutSite,
+        expected: "if: steps.health.outputs.release-cut == 'true'",
+        got: "no condition",
+      },
+    },
+    {
+      reason:
+        "the cut step starts doing PR work too (two runs would race the release-please branch)",
+      files: { ...wired, workflow: workflow({ cutWith: "skip-github-release: false" }) },
+      expected: {
+        file: cutSite,
+        expected:
+          "skip-github-pull-request: true and no skip-github-release (the cut tags and does no PR work)",
+        got: '{"skip-github-release":false,"token":"${{ github.token }}"}',
+      },
+    },
+    {
+      reason: "the propose step drops its release-cut clause, so a release merge runs both steps",
+      files: {
+        ...wired,
+        workflow: workflow({ proposeIf: "steps.head.outputs.current == 'true'" }),
+      },
+      expected: {
+        file: proposeSite,
+        expected:
+          "an if: carrying steps.health.outputs.release-cut == 'false' (the propose step stands down on a release-PR merge; a positive test, since an absent output passes !=)",
+        got: "steps.head.outputs.current == 'true'",
+      },
+    },
+    {
+      reason: "the propose step stops passing skip-github-release, so every push run tags",
+      files: { ...wired, workflow: workflow({ proposeWith: "skip-labeling: false" }) },
+      expected: {
+        file: proposeSite,
+        expected: "skip-github-release: true (the propose step never tags)",
+        got: '{"skip-labeling":false,"token":"${{ github.token }}"}',
+      },
+    },
+    {
+      reason: "a third release-please step with no condition tags on every push run",
+      files: {
+        ...wired,
+        workflow: workflow({
+          extra:
+            "      - uses: googleapis/release-please-action@sha # v5.0.0\n        id: release\n",
+        }),
+      },
+      expected: {
+        file: ".github/workflows/fleet-release.yml release-please",
+        expected:
+          "every release-please step is the cut or the propose step (a third one would tag on every push run)",
+        got: "a release-please step with id: release",
+      },
+    },
+    {
+      reason: "the job lane is keyed by something runs share, so a pending cut can be cancelled",
+      files: { ...wired, workflow: workflow({ lane: "post-green-release" }) },
+      expected: {
+        file: ".github/workflows/fleet-release.yml release-please",
+        expected:
+          "concurrency group release-cut-${{ inputs.sha || github.sha }} with cancel-in-progress: false (a lane no other run shares, so nothing cancels a pending cut)",
+        got: '{"cancel-in-progress":false,"group":"post-green-release"}',
+      },
+    },
+    {
+      reason: "the job lane cancels in progress",
+      files: { ...wired, workflow: workflow({ cancel: "true" }) },
+      expected: {
+        file: ".github/workflows/fleet-release.yml release-please",
+        expected:
+          "concurrency group release-cut-${{ inputs.sha || github.sha }} with cancel-in-progress: false (a lane no other run shares, so nothing cancels a pending cut)",
+        got: '{"cancel-in-progress":true,"group":"release-cut-${{ inputs.sha || github.sha }}"}',
       },
     },
     {
       reason:
         "the health step loses the id the expression reads (an empty output is not 'true', so every run skips)",
-      files: { ...wired, workflow: workflow(undefined, "gate") },
+      files: { ...wired, workflow: workflow({ healthId: "gate" }) },
       expected: {
         file: ".github/workflows/fleet-release.yml release-please",
         expected: "the release-health step carries id: health",
@@ -137,11 +231,26 @@ runs:
     {
       reason:
         "the health step runs in pull-request mode, which never writes release-cut (the id and the expression still line up, so only the mode pin sees it)",
-      files: { ...wired, workflow: workflow(undefined, undefined, "pull-request") },
+      files: { ...wired, workflow: workflow({ mode: "pull-request" }) },
       expected: {
         file: ".github/workflows/fleet-release.yml release-please step 'health'",
         expected: "mode: release",
         got: "mode: pull-request",
+      },
+    },
+    {
+      reason: "the skeleton's caller takes a lane back, so a pending release call can be cancelled",
+      files: {
+        ...wired,
+        skeleton: skeleton(
+          "    concurrency:\n      group: post-green-release\n      cancel-in-progress: false",
+        ),
+      },
+      expected: {
+        file: "files/base/.github/workflows/ci.yml job 'release'",
+        expected:
+          "no concurrency lane on the caller (a caller-side lane keeps one pending call and cancels the older one, so a release merge would lose its tag)",
+        got: '{"cancel-in-progress":false,"group":"post-green-release"}',
       },
     },
     {
