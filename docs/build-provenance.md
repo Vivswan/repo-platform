@@ -43,6 +43,17 @@ A missing publish (a failed or evicted post-green run after a green gate) and a 
 
 The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded build, the `commit` of its manifest's own entry - stay reachable forever.
 
+## The stable tag, beside the branch
+
+The same post-green run also moves the lightweight tag `refs/tags/stable` to the judged commit ([post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts), the `move-stable` job): the delivery ref the fleet's pins will move to, existing beside the `build` branch until they do, and consumed by nothing yet.
+
+- **Provenance is the commit itself.** The tag names a main commit whose own CI run the mover judged (main history, then the `all-green` check at that sha through [shared/all_green.ts](../.github/scripts/shared/all_green.ts)), so there is no generated tree to prove and no stamp to parse.
+- **Newest-green wins.** A mover whose sha the tag already names, or has moved past, moves nothing; otherwise the move is a `--force-with-lease` push naming the value just read, so two movers racing leaves the loser red and the tag untouched.
+- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it.
+- **The ruleset blocks deletion only.** Git classifies every update of an existing tag as a forced update, so a `non_fast_forward` or `update` rule in the `stable-tag` ruleset ([.github/settings.yml](../.github/settings.yml)) would block the mover itself; rollback protection is the mover's ancestry skip plus the lease.
+- **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
+- **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal. If GitHub refuses the push, the fallback is the `REPO_PLATFORM_TOKEN` the workflow already receives for the publisher, passed as the mover checkout's `token`, with no new secret.
+
 The recorded build is the full 40-hex build commit sha: the writer takes it from the operator's `--build` argument (the tip resolve_build.ts resolved for the whole run) and writes it into the manifest's own entry ([sync.md](sync.md#the-manifest)), so every repository names the exact build its files came from.
 
 ## One publisher at a time

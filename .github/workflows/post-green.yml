@@ -1,6 +1,7 @@
 # The post-green home (docs/build-provenance.md, docs/all-green.md). Two ways in:
 # the workflow_call from ci.yml's post-green job runs every leg on the judged
-# sha, and a workflow_dispatch runs publish-build alone on a green main sha.
+# sha, and a workflow_dispatch runs the two delivery legs alone (publish-build
+# and move-stable) on a green main sha.
 #
 # Invariants every leg must hold: STATE-shaped (a coalesced pending run is
 # covered by its evictor or healed by the next trigger); the commit comes from
@@ -24,8 +25,9 @@ on:
         description: >-
           The push payload's `before` (all zeros for a branch-creating
           push): the read-directives leg's FALLBACK base, used only when
-          no build branch exists yet or its every stamp is sha itself
-          (the first publish, landed by this run).
+          the mover reports no base (the tag did not move, or did not exist
+          before this run) and no build branch exists yet or its every stamp
+          is sha itself (the first publish, landed by this run).
           Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
@@ -36,16 +38,16 @@ on:
           .github/workflows/ files GITHUB_TOKEN may not push (the
           publish-build job's checkout).
         required: true
-  # The self-heal: publish one green main commit by hand. publish.ts
-  # refuses anything that is not main history with a completed
-  # successful all-green check at that exact sha (re-run that commit's
-  # CI first when the check is missing - the all-green job posts it).
+  # The self-heal: publish one green main commit by hand. publish.ts and
+  # move_stable.ts each refuse anything that is not main history with a
+  # completed successful all-green check at that exact sha (re-run that
+  # commit's CI first when the check is missing - the all-green job posts it).
   workflow_dispatch:
     inputs:
       sha:
         description: >-
-          The full 40-hex main commit to publish the build branch from;
-          must carry a green all-green check.
+          The full 40-hex main commit to publish the build branch from and
+          move the stable tag to; must carry a green all-green check.
         required: true
         type: string
 
@@ -103,14 +105,58 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
 
+  # The stable tag mover, on both ways in (docs/build-provenance.md): moves
+  # refs/tags/stable to the sha, beside the build branch until the fleet's
+  # pins follow it. State-shaped like the publisher: newest-green wins behind
+  # a staleness read of the tag, and the lease push is the compare-and-swap,
+  # so a racing mover loses loudly with the tag untouched. move_stable.ts
+  # re-verifies main history and the all-green check at the sha before the
+  # push (defense in depth on the call, the sole gate on a dispatch). Its
+  # previous output is the directives leg's base after a move.
+  move-stable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # One mover lane, LITERAL for the reason the publisher lane states.
+    concurrency:
+      group: stable-tag-move
+      cancel-in-progress: false
+    # contents: write is the token's tag push (the caller job in ci.yml
+    # grants the same, a called job's ceiling).
+    permissions:
+      contents: write
+      checks: read
+    outputs:
+      previous: ${{ steps.move.outputs.previous }}
+    steps:
+      # The default token stays persisted: it is the push credential.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Move the stable tag
+        id: move
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.sha }}
+        run: bun .github/scripts/post-green/move_stable.ts
+
   # The merged PRs' opt-in to an immediate fleet sync, read off the merged
   # pull request of every commit since the last published build (the squash
   # commit carries the title alone; a direct push is read from its message:
   # fleet_sync_marker.ts) and handed to sync-fleet. State-shaped: mutates
   # nothing; the range covers the merges whose runs this run evicted. A bad directive fails the leg on the judged
   # commit only; an older one already failed its own run and warns here.
+  # Needs-ordered behind the mover for its fallback base (the tag's previous
+  # commit, else the push's `before`) and run on every mover result: only
+  # this run is sure to read this commit (docs/all-green.md).
   read-directives:
-    if: github.event_name != 'workflow_dispatch'
+    needs: [move-stable]
+    if: github.event_name != 'workflow_dispatch' && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -138,20 +184,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.sha }}
-          BEFORE_SHA: ${{ inputs.before }}
+          BEFORE_SHA: ${{ needs.move-stable.outputs.previous || inputs.before }}
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
   # The opted-in sync: sync-repos.yml called in this run, needs-ordered
   # behind the publish so the sync renders from the tip as the publish left
-  # it (a red publish skips it rather than sync the previous build).
-  # State-shaped: the called sync re-verifies the build's green source and
+  # it (a red publish skips it rather than sync the previous build); the
+  # publish and the opt-in are judged by name, so a red mover upstream of
+  # the directives read does not swallow the sync. State-shaped: the called sync re-verifies the build's green source and
   # provenance itself, and a swallowed run leaves a repo one sync behind,
   # healed by the weekly cron. THIS job holds the fleet's single-writer lane
   # (the literal sync-repos.yml's cron and dispatch runs hold at workflow
   # level) while the called run takes a per-run group: the deadlock law above.
   sync-fleet:
     needs: [publish-build, read-directives]
-    if: needs.read-directives.outputs.armed == 'true'
+    if: >-
+      !cancelled() &&
+      needs.publish-build.result == 'success' &&
+      needs.read-directives.outputs.armed == 'true'
     concurrency:
       group: sync-repos
       cancel-in-progress: false

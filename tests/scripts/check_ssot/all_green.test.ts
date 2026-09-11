@@ -504,9 +504,17 @@ describe("callerCeilingMismatches", () => {
       const text = readFileSync(rel, "utf-8");
       const site = { rel: caller, job, permissions: callerDoc.jobs[job].permissions };
       expect(callerCeilingMismatches({ rel, text }, site)).toEqual([]);
-      // Every contents: read grant raised at once, at whatever level the workflow spells it: a
+      // The raised scope is one the caller grants at read: a caller granting contents: write
+      // (ci.yml's post-green, for the tag push) would make a hardcoded contents raise vacuous.
+      // Every grant of that scope is raised at once, at whatever level the workflow spells it: a
       // job's own block shadows the top-level one, so raising only the first could raise nothing.
-      const raised = text.replace(/^( *)contents: read$/gm, "$1contents: write");
+      const ceiling = site.permissions as Record<string, string>;
+      const scope = Object.keys(ceiling).find(
+        (name) => ceiling[name] === "read" && new RegExp(`^ *${name}: read$`, "m").test(text),
+      );
+      if (scope === undefined)
+        throw new Error(`${rel} declares no scope its caller grants at read`);
+      const raised = text.replace(new RegExp(`^( *)${scope}: read$`, "gm"), `$1${scope}: write`);
       expect(raised).not.toBe(text);
       expect(callerCeilingMismatches({ rel, text: raised }, site).length).toBeGreaterThan(0);
     },
