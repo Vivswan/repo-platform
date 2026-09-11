@@ -296,4 +296,5 @@ A repository still registered the old way (`.repo-platform.yml` holding only `mo
 - The module list is the old file's selection in `files.yml` order (the order the writer selects in); an unknown name is dropped and noted.
 - The derived document must pass the registration schema, or the writer fails (the row files its issue).
 - The answers file leaves through the `retired` entry for `.github/.copier-answers.yml` that the files.yml conversion carries (files.yml retires it); the cutover notes hold the PR for review.
+- After the cutover the manifest's own entry is the one record of the build commit: validate-template's fetch ([aligned/fetch.ts](../actions/validate-template-report/src/aligned/fetch.ts)) and the validator read it there, the answers file's `_commit` only while that file still exists, and the tracking labels come from the registration's `labels` block ([settings.md](settings.md)).
 - A repository whose registration already carries `project`, or that has no answers file, is left alone.

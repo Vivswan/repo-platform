@@ -9,8 +9,9 @@
 // layer file is ever synced into a client repo. Facts: the module selection
 // (.repo-platform.yml - every repository carrying one is a settings
 // target), effective visibility (private repos reject the public-only
-// layers with a 422), and the tracking-label answers in
-// .github/.copier-answers.yml.
+// layers with a 422), and the tracking labels the fleet plan resolves from
+// the registration's `labels` block (the recorded `<key>_label` answer
+// while .github/.copier-answers.yml still exists, else the module default).
 // CLI: bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
 //   --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
 // By default the facts come from the target's default branch via gh api
@@ -23,7 +24,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { readModules } from "../../../actions/plan/registration.ts";
+import {
+  loadModuleData,
+  type PlanInput,
+  trackingLabels as planTrackingLabels,
+  selectModules,
+} from "../../../actions/plan/plan.ts";
+import { parseRegistration, readModules } from "../../../actions/plan/registration.ts";
 import { parseAnswers } from "../../../scripts/generate/render_dogfood.ts";
 import {
   loadManifests,
@@ -32,7 +39,7 @@ import {
   type SettingsLayerName,
 } from "../../../scripts/lib/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { fail, notice, setOutput, warning } from "../shared/gha.ts";
+import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
 import { captureNetwork } from "./discovery.ts";
@@ -60,7 +67,7 @@ export interface RepoFacts {
   /** Effective visibility (declared repository.private, else live):
    *  private repos reject the public-only blocks. */
   private: boolean;
-  /** Resolved tracking-label answers, one per SELECTED stream module. */
+  /** The resolved tracking labels, one per SELECTED stream module. */
   trackingLabels: { module: string; label: string }[];
   /** Whether the pinned revision carries the pr-title module's managed
    *  workflow (PR_TITLE_WORKFLOW). Selecting the module activates its
@@ -76,6 +83,10 @@ export interface RepoFacts {
 // --- the settings layers ----------------------------------------------------
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
+/** The module data file the fleet plan resolves a repository's labels
+ *  from; the build tree ships the same file at its root. */
+export const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 
 /** The module-level layer filenames, next to each templates/<module>/
  *  module.yml, bound by ROLE (never by list position) from the manifest
@@ -216,8 +227,8 @@ function assertUniqueNames(
 
 /** The repo's tracking labels: the ONE settings contribution no layer
  *  file can express, because the label NAME is the repository's own
- *  copier answer (fuzzer_label / nightly_label) while the color and
- *  description tuple lives in the module manifest. */
+ *  (its registration's `labels` block) while the color and description
+ *  tuple lives in the module manifest. */
 export function trackingLabels(facts: RepoFacts, manifests: ModuleManifest[]): Label[] {
   const byModule = new Map(manifests.map((m) => [m.module, m]));
   return facts.trackingLabels.map(({ module, label }) => {
@@ -326,27 +337,48 @@ export function assertKnownModules(
   return modules;
 }
 
-/** What an ABSENT tracking-label answer means to a fact source: a client
- *  repository's answer arrives with its pending sync PR, so absence falls
- *  back to the manifest default with a notice; the operator maintains its
- *  own answers file by hand, so absence there is a defect. */
-export type AbsentAnswerPolicy =
-  | { readonly fallback: "default"; readonly report: (message: string) => void }
-  | { readonly fallback: "fail" };
+/** The selected stream modules' labels for a registration text, resolved
+ *  by the fleet plan's own function (actions/plan): the registration's
+ *  `labels.<key>`, else the recorded `<key>_label` answer while the
+ *  answers file exists, else the module default files.yml declares. The
+ *  plan's refusals (a `labels` key naming no selected stream, a label the
+ *  settings layers already manage, two streams sharing one name) apply
+ *  here unchanged, so the settings roster and fleet-ci agree on every
+ *  repository. */
+export function trackingLabelsOf(
+  registrationText: string,
+  answersText: string | null,
+  isPrivate: boolean,
+  manifests: ModuleManifest[],
+  where: { registration: string; answers: string },
+): { module: string; label: string }[] {
+  const read = parseRegistration(registrationText, where.registration);
+  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  const data = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"), FILES_CONFIG);
+  const input: PlanInput = {
+    registration: read.registration,
+    answers: answersText === null ? {} : parseYamlMapping(answersText, where.answers),
+    modules: data.modules,
+    defaults: data.defaults,
+    reservedLabels: new Set(managedLabelNames(manifests).map((name) => name.toLowerCase())),
+    private: isPrivate,
+  };
+  const selected = selectModules(input);
+  const labels = planTrackingLabels(input, selected);
+  return selected
+    .filter((module) => module.tracking_label !== undefined)
+    .map((module, index) => ({ module: module.name, label: labels[index] }));
+}
 
-/** The selected stream modules' tracking-label answers from a
- *  .github/.copier-answers.yml text. A module reaches .repo-platform.yml one
- *  PR before the sync PR recording its answer, so an ABSENT answer is a
- *  normal state of every module addition: it resolves to the manifest
- *  default (check_ssot pins it to the copier question's) with a notice, per
- *  `absent`. A PRESENT but unreadable answer is an answers-file defect and
- *  throws: the label is the stream's identity, and a guess would loop it. */
+/** The selected stream modules' tracking-label answers from the operator's
+ *  own answers file, the one fact source with no registration: the file is
+ *  maintained by hand, so an absent or unreadable answer is a defect, never
+ *  a pending render. */
 export function trackingLabelsFrom(
   answersText: string,
   modules: string[],
   manifests: ModuleManifest[],
   where: string,
-  absent: AbsentAnswerPolicy = { fallback: "default", report: notice },
 ): { module: string; label: string }[] {
   const streams = manifests.filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
@@ -357,21 +389,11 @@ export function trackingLabelsFrom(
     const tracking = m.tracking_label;
     if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
     if (!Object.hasOwn(answers, tracking.answer)) {
-      if (absent.fallback === "fail") {
-        throw new Error(
-          `${where}: the ${m.module} module is selected but the file records no ` +
-            `${tracking.answer} answer - no sync PR records this file, so the tracking label ` +
-            "cannot be resolved; record the answer",
-        );
-      }
-      absent.report(
+      throw new Error(
         `${where}: the ${m.module} module is selected but the file records no ` +
-          `${tracking.answer} answer yet, so this apply assumes the module's default label ` +
-          `'${tracking.default}'. The repository's pending sync PR writes the answer; the ` +
-          "first apply after it merges reads the recorded value, so a label customized in " +
-          "that PR takes effect then.",
+          `${tracking.answer} answer - no sync PR records this file, so the tracking label ` +
+          "cannot be resolved; record the answer",
       );
-      return { module: m.module, label: tracking.default };
     }
     const value = answers[tracking.answer];
     if (typeof value !== "string" || value === "") {
@@ -498,11 +520,8 @@ export function factsFromOperatorAnswers(
     // The answers file records a selected stream module's label under the
     // same key copier asks for (docs_site_label today - the dogfood
     // answers schema is strict, so selecting another stream module means
-    // teaching that schema its answer first). No sync PR writes this file,
-    // so an absent answer is a defect here, never a pending render.
-    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath, {
-      fallback: "fail",
-    }),
+    // teaching that schema its answer first).
+    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath),
     prTitleWorkflowPresent: existsSync(join(dirname(resolve(answersPath)), PR_TITLE_WORKFLOW)),
   };
 }
@@ -520,33 +539,23 @@ export function factsFromFetch(
   manifests: ModuleManifest[],
   ref: string,
   fetch: RepoFileFetcher = fetchRepoFile,
-  report: (message: string) => void = notice,
 ): RepoFacts | null {
   const registration = fetch(repo, ".repo-platform.yml", ref);
   if (registration === null) return null;
   const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`, manifests);
   const isPrivate =
     declaredPrivate(fetch(repo, ".github/settings.yml", ref)) ?? fetchRepoIsPrivate(repo);
-  const streams = manifests.filter(
-    (m) => m.tracking_label !== undefined && modules.includes(m.module),
+  // Resolved for every selection, streams or none: a `labels` key naming an
+  // unselected stream is the plan's refusal, and skipping it here would
+  // render a roster without that label for the apply to delete. A cut-over
+  // repository has no answers file, and null is its normal state.
+  const trackingLabels = trackingLabelsOf(
+    registration,
+    fetch(repo, ANSWERS_PATH, ref),
+    isPrivate,
+    manifests,
+    { registration: `${repo}/.repo-platform.yml`, answers: `${repo}/${ANSWERS_PATH}` },
   );
-  let trackingLabels: { module: string; label: string }[] = [];
-  if (streams.length > 0) {
-    const answers = fetch(repo, ANSWERS_PATH, ref);
-    if (answers === null) {
-      throw new Error(
-        `${repo}: selects tracking-stream module(s) but has no .github/.copier-answers.yml - ` +
-          "the tracking labels cannot be resolved",
-      );
-    }
-    trackingLabels = trackingLabelsFrom(
-      answers,
-      modules,
-      manifests,
-      `${repo}/.github/.copier-answers.yml`,
-      { fallback: "default", report },
-    );
-  }
   // Probed only where it can matter (the module selected): a 404 is a
   // genuine absence (fetch returns null), any other failure throws - a
   // presence misread must never silently flip the required check.
@@ -561,32 +570,39 @@ export function factsFromFetch(
  *  checkout carries no .repo-platform.yml (it is not a settings target),
  *  like the fetched source. The private fact prefers the checkout's
  *  DECLARED repository.private (the same precedence as the fetch path),
- *  falling back to the recorded answer - post-update the sync has already
- *  re-recorded the live value there. */
+ *  falling back to the recorded answer while the answers file exists; a
+ *  cut-over checkout declares it or the visibility cannot be computed. */
 export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): RepoFacts | null {
   const where = (name: string) => `${join(dir, name)}`;
   if (!existsSync(join(dir, ".repo-platform.yml"))) return null;
-  const modules = modulesFrom(
-    readFileSync(join(dir, ".repo-platform.yml"), "utf-8"),
-    where(".repo-platform.yml"),
-    manifests,
-  );
-  const answersText = readAnswersBytes(dir).toString("utf-8");
+  const registrationText = readFileSync(join(dir, ".repo-platform.yml"), "utf-8");
+  const modules = modulesFrom(registrationText, where(".repo-platform.yml"), manifests);
+  const answersText = existsSync(join(dir, ANSWERS_PATH))
+    ? readAnswersBytes(dir).toString("utf-8")
+    : null;
   const settingsPath = join(dir, ".github/settings.yml");
   const declared = declaredPrivate(
     existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
   );
-  const recorded = parseYamlMapping(answersText, where(ANSWERS_PATH)).private;
+  const recorded =
+    answersText === null ? undefined : parseYamlMapping(answersText, where(ANSWERS_PATH)).private;
   if (declared === null && typeof recorded !== "boolean") {
     throw new Error(
-      `${where(ANSWERS_PATH)}: records no boolean private answer - ` +
-        "the baseline's visibility-gated blocks cannot be computed",
+      `${where(".github/settings.yml")}: declares no boolean repository.private` +
+        (answersText === null
+          ? " and the checkout records no answers file"
+          : ` and ${where(ANSWERS_PATH)} records no boolean private answer`) +
+        " - the baseline's visibility-gated blocks cannot be computed",
     );
   }
+  const isPrivate = declared ?? recorded === true;
   return {
     modules,
-    private: declared ?? recorded === true,
-    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, where(ANSWERS_PATH)),
+    private: isPrivate,
+    trackingLabels: trackingLabelsOf(registrationText, answersText, isPrivate, manifests, {
+      registration: where(".repo-platform.yml"),
+      answers: where(ANSWERS_PATH),
+    }),
     prTitleWorkflowPresent: existsSync(join(dir, PR_TITLE_WORKFLOW)),
   };
 }

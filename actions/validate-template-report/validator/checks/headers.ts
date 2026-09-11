@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { HEADER_WINDOW } from "../../../shared/grammar.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { isRegularFile, regexLiteral } from "../readers.ts";
+import { isRegularFile } from "../readers.ts";
 
 /** Ownership self-declarations: every sync-managed file that supports
  *  comments tells its readers who owns it - the managed header on files
@@ -21,7 +21,7 @@ export function checkHeaders(ctx: Context): Finding[] {
   // a negated look-alike ("is not managed by") nor a longer repo name
   // ("/repo-platform_fork", "/repo-platform.fork") counts.
   const headerRe = new RegExp(
-    `This file is managed by ${regexLiteral(owner)}/repo-platform\\.(?![A-Za-z0-9._-])`,
+    `This file is managed by ${owner.pattern}/repo-platform\\.(?![A-Za-z0-9._-])`,
   );
   const findings: Finding[] = [];
   for (const entry of ctx.ownership) {
@@ -37,7 +37,7 @@ export function checkHeaders(ctx: Context): Finding[] {
       findings.push(
         error(
           `${entry.path}: does not open with the managed header ('This file is ` +
-            `managed by ${owner}/repo-platform.') - the file is ` +
+            `managed by ${owner.display}/repo-platform.') - the file is ` +
             "overwritten by template sync and the header is what warns readers " +
             "their local edits get replaced; run a template sync to restore it",
         ),

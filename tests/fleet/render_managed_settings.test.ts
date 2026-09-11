@@ -26,6 +26,7 @@ import {
   type RepoFacts,
   renderManagedYaml,
   trackingLabelsFrom,
+  trackingLabelsOf,
 } from "../../.github/scripts/fleet/render_managed_settings";
 import { capture } from "../../.github/scripts/shared/proc";
 import { loadManifests } from "../../scripts/lib/module_manifests";
@@ -365,7 +366,10 @@ describe("the render CLI acts on the adoption recheck", () => {
   // written at all.
   const script = resolve(import.meta.dir, "../../.github/scripts/fleet/render_managed_settings.ts");
 
-  function runCli(modules: string | null): {
+  function runCli(
+    registration: string | null,
+    opts: { answers?: boolean } = {},
+  ): {
     exitCode: number | null;
     stdout: string;
     outputs: string;
@@ -386,11 +390,12 @@ describe("the render CLI acts on the adoption recheck", () => {
     git(["git", "-C", root, "config", "user.name", "t"]);
     git(["git", "-C", root, "config", "commit.gpgsign", "false"]);
     git(["git", "-C", root, "config", "core.hooksPath", "/dev/null"]);
-    if (modules !== null)
-      writeFileSync(join(root, ".repo-platform.yml"), `modules: [${modules}]\n`);
+    if (registration !== null) writeFileSync(join(root, ".repo-platform.yml"), registration);
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".github/settings.yml"), "repository:\n  private: false\n");
-    writeFileSync(join(root, ".github/.copier-answers.yml"), "github_username: o\n");
+    if (opts.answers ?? true) {
+      writeFileSync(join(root, ".github/.copier-answers.yml"), "github_username: o\n");
+    }
     git(["git", "-C", root, "add", "-A"]);
     git(["git", "-C", root, "commit", "-qm", "facts"]);
     const head = git(["git", "-C", root, "rev-parse", "HEAD"]);
@@ -418,7 +423,7 @@ describe("the render CLI acts on the adoption recheck", () => {
   });
 
   test("an adopted checkout writes the document and publishes skipped=false", () => {
-    const result = runCli("uv");
+    const result = runCli("modules: [uv]\n");
     expect(result.exitCode).toBe(0);
     // The written file IS the render for the checkout's facts - the
     // document the workflow applies - and it carries the generator's
@@ -433,18 +438,14 @@ describe("the render CLI acts on the adoption recheck", () => {
     expect(result.outputs).toContain(`ref=${result.head}`);
   });
 
-  test("a selected stream module with no recorded answer renders on its default with a notice", () => {
-    // The unit tests inject the report sink; this proves the script's own
-    // sink is the workflow command the apply log shows, and that the render
-    // still writes the document (the label is the default, not a failure).
-    const result = runCli("uv, fuzzer");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(
-      `::notice::${join(result.root, ".github/.copier-answers.yml")}: the fuzzer module is ` +
-        "selected but the file records no fuzzer_label answer yet, so this apply assumes the " +
-        "module's default label 'fuzz-nightly'.",
+  test("a cut-over checkout renders its tracking labels from the registration, no answers file", () => {
+    const result = runCli(
+      "modules: [uv, fuzzer, nightly]\nproject: {name: Demo, slug: demo, description: ''}\nlabels: {fuzzer: my-fuzz}\n",
+      { answers: false },
     );
-    expect(result.document).toContain("name: fuzz-nightly");
+    expect(result.exitCode).toBe(0);
+    expect(result.document).toContain("name: my-fuzz");
+    expect(result.document).toContain("name: nightly-failure");
     expect(result.outputs).toContain("skipped=false");
   });
 });
@@ -476,6 +477,27 @@ describe("adoption is rechecked at the pinned commit", () => {
       trackingLabels: [],
       prTitleWorkflowPresent: false,
     });
+  });
+
+  test("a cut-over checkout needs no answers file: the declared visibility and the registration's labels", () => {
+    const dir = temp.dir("cut-over-");
+    mkdirSync(join(dir, ".github"));
+    writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
+    writeFileSync(
+      join(dir, ".repo-platform.yml"),
+      "modules: [uv, fuzzer]\nproject: {name: Demo, slug: demo, description: ''}\nlabels: {fuzzer: my-fuzz}\n",
+    );
+    expect(factsFromTargetDir(dir, manifests)).toEqual({
+      modules: ["uv", "fuzzer"],
+      private: true,
+      trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
+      prTitleWorkflowPresent: false,
+    });
+    // Without a declared visibility there is nothing left to read it from.
+    writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
+    expect(() => factsFromTargetDir(dir, manifests)).toThrow(
+      "declares no boolean repository.private and the checkout records no answers file",
+    );
   });
 
   test("the skip reason names the repository and the deletion it avoids", () => {
@@ -534,147 +556,196 @@ describe("fact resolvers", () => {
     expect(() => modulesFrom("a: [unclosed\n", "f")).toThrow("YAML parse error");
   });
 
-  describe("trackingLabelsFrom", () => {
-    // A module lands in .repo-platform.yml one PR before the sync PR that
-    // records its label answer, so an ABSENT answer is a normal state of
-    // every module addition and resolves to the manifest default with this
-    // notice; a PRESENT but unreadable answer is an answers-file defect.
-    const WHERE = "owner/name/.github/.copier-answers.yml";
-    const PENDING_FUZZER_NOTICE =
-      "owner/name/.github/.copier-answers.yml: the fuzzer module is selected but the file " +
-      "records no fuzzer_label answer yet, so this apply assumes the module's default label " +
-      "'fuzz-nightly'. The repository's pending sync PR writes the answer; the first apply " +
-      "after it merges reads the recorded value, so a label customized in that PR takes " +
-      "effect then.";
+  describe("trackingLabelsOf", () => {
+    // The fleet plan's resolution, reused: the registration's labels block,
+    // else the recorded answer while the answers file exists, else the
+    // module default files.yml declares - so the settings roster and
+    // fleet-ci name the same label for every repository.
+    const WHERE = {
+      registration: "owner/name/.repo-platform.yml",
+      answers: "owner/name/.github/.copier-answers.yml",
+    };
+    const V2 = "project: {name: Demo, slug: demo, description: ''}\n";
     test.each<{
       reason: string;
-      answers: string;
-      modules: string[];
-      labels: { module: string; label: string }[] | "throws";
-      notices: string[];
+      registration: string;
+      answers: string | null;
+      labels: { module: string; label: string }[];
     }>([
       {
-        reason: "a recorded answer is the label, no notice",
-        answers: "fuzzer_label: my-fuzz\n",
-        modules: ["fuzzer"],
+        reason: "a cut-over registration's labels block, no answers file",
+        registration: `modules: [uv, fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
+        answers: null,
         labels: [{ module: "fuzzer", label: "my-fuzz" }],
-        notices: [],
       },
       {
-        reason: "no selected stream module resolves nothing",
-        answers: "{}\n",
-        modules: ["uv"],
-        labels: [],
-        notices: [],
+        reason: "a cut-over registration without a labels block resolves the module default",
+        registration: `modules: [uv, fuzzer, nightly]\n${V2}`,
+        answers: null,
+        labels: [
+          { module: "fuzzer", label: "fuzz-nightly" },
+          { module: "nightly", label: "nightly-failure" },
+        ],
       },
       {
-        reason: "an absent answer for a selected stream is the manifest default, with the notice",
-        answers: "github_username: o\n",
-        modules: ["uv", "fuzzer"],
-        labels: [{ module: "fuzzer", label: "fuzz-nightly" }],
-        notices: [PENDING_FUZZER_NOTICE],
-      },
-      {
-        reason: "the fallback is per stream: the recorded one stays recorded",
-        answers: "nightly_label: my-nightly\n",
-        modules: ["fuzzer", "nightly"],
+        reason: "the fallback is per stream: a declared one stays declared",
+        registration: `modules: [fuzzer, nightly]\n${V2}labels: {nightly: my-nightly}\n`,
+        answers: null,
         labels: [
           { module: "fuzzer", label: "fuzz-nightly" },
           { module: "nightly", label: "my-nightly" },
         ],
-        notices: [PENDING_FUZZER_NOTICE],
       },
       {
-        reason: "a present but empty answer still fails",
-        answers: 'fuzzer_label: ""\n',
-        modules: ["fuzzer"],
-        labels: "throws",
-        notices: [],
+        reason: "the old shape: the recorded answer while the answers file exists",
+        registration: "modules: [uv, fuzzer]\n",
+        answers: "fuzzer_label: my-fuzz\n",
+        labels: [{ module: "fuzzer", label: "my-fuzz" }],
       },
       {
-        reason: "a present but null answer still fails",
-        answers: "fuzzer_label:\n",
-        modules: ["fuzzer"],
-        labels: "throws",
-        notices: [],
+        reason: "the old shape with no recorded answer resolves the module default",
+        registration: "modules: [uv, fuzzer]\n",
+        answers: "github_username: o\n",
+        labels: [{ module: "fuzzer", label: "fuzz-nightly" }],
       },
       {
-        reason: "a present but non-string answer still fails",
+        reason: "a declared label agreeing with the recorded answer",
+        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
+        answers: "fuzzer_label: my-fuzz\n",
+        labels: [{ module: "fuzzer", label: "my-fuzz" }],
+      },
+      {
+        reason: "no selected stream module resolves nothing",
+        registration: `modules: [uv]\n${V2}`,
+        answers: null,
+        labels: [],
+      },
+    ])("$reason", ({ registration, answers, labels }) => {
+      expect(trackingLabelsOf(registration, answers, false, manifests, WHERE)).toEqual(labels);
+    });
+
+    test.each<{ reason: string; registration: string; answers: string | null; error: string }>([
+      {
+        reason: "a labels key naming no selected stream",
+        registration: `modules: [uv]\n${V2}labels: {fuzzer: my-fuzz}\n`,
+        answers: null,
+        error: "labels.fuzzer names no selected tracking stream",
+      },
+      {
+        reason: "a declared label disagreeing with the recorded answer",
+        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
+        answers: "fuzzer_label: other\n",
+        error: "the two must agree while both exist",
+      },
+      {
+        reason: "a label the settings layers already manage",
+        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: dependencies}\n`,
+        answers: null,
+        error: "is a label the template already manages",
+      },
+      {
+        reason: "two streams sharing one label",
+        registration: `modules: [fuzzer, nightly]\n${V2}labels: {fuzzer: same, nightly: same}\n`,
+        answers: null,
+        error: "is shared by two streams",
+      },
+      {
+        reason: "a registration the fleet grammar refuses",
+        registration: "modules: [fuzzer]\nlabels: {fuzzer: 'bad\"quote'}\n",
+        answers: null,
+        error: "owner/name/.repo-platform.yml: labels.fuzzer: must be a plain label",
+      },
+      {
+        reason: "a recorded answer that is not a string",
+        registration: "modules: [fuzzer]\n",
         answers: "fuzzer_label: [a]\n",
-        modules: ["fuzzer"],
-        labels: "throws",
-        notices: [],
+        error: "fuzzer_label must be a string",
       },
-    ])("$reason", ({ answers, modules, labels, notices }) => {
+    ])("fails closed on $reason", ({ registration, answers, error }) => {
+      expect(() => trackingLabelsOf(registration, answers, false, manifests, WHERE)).toThrow(error);
+    });
+
+    test("the fetched facts resolve a cut-over repository from its registration alone", () => {
       const seen: string[] = [];
-      const absent = {
-        fallback: "default",
-        report: (message: string) => seen.push(message),
-      } as const;
-      if (labels === "throws") {
-        expect(() => trackingLabelsFrom(answers, modules, manifests, WHERE, absent)).toThrow(
-          "the fuzzer module is selected but its fuzzer_label answer is not readable",
-        );
-      } else {
-        expect(trackingLabelsFrom(answers, modules, manifests, WHERE, absent)).toEqual(labels);
-      }
-      expect(seen).toEqual(notices);
-    });
-
-    test("an assumed default that collides with another stream's recorded label still fails", () => {
-      // A repo may record another stream's default as its own label while
-      // that stream is unselected. Selecting the stream then has no
-      // resolvable label until its sync PR records a distinct one (copier's
-      // validator refuses the equal pair), so the render fails as on any
-      // label collision instead of guessing.
-      const absent = { fallback: "default", report: () => {} } as const;
-      const trackingLabels = trackingLabelsFrom(
-        "docs_site_label: fuzz-nightly\n",
-        ["docs-site", "fuzzer"],
-        manifests,
-        WHERE,
-        absent,
-      );
-      expect(trackingLabels).toEqual([
-        { module: "docs-site", label: "fuzz-nightly" },
-        { module: "fuzzer", label: "fuzz-nightly" },
-      ]);
-      expect(() =>
-        managedSettings(facts({ modules: ["docs-site", "fuzzer"], trackingLabels }), manifests),
-      ).toThrow("which collide");
-    });
-
-    test("under the fail policy an absent answer throws instead of assuming the default", () => {
-      expect(() =>
-        trackingLabelsFrom("github_username: o\n", ["fuzzer"], manifests, WHERE, {
-          fallback: "fail",
-        }),
-      ).toThrow(
-        "owner/name/.github/.copier-answers.yml: the fuzzer module is selected but the file " +
-          "records no fuzzer_label answer - no sync PR records this file, so the tracking " +
-          "label cannot be resolved; record the answer",
-      );
-    });
-
-    test("the fetched facts resolve a pending answer the same way, naming the repository", () => {
-      // The observed shape: .repo-platform.yml already lists the module,
-      // the sync PR rendering it (and recording fuzzer_label) is still open.
       const fetcher = (_repo: string, path: string): string | null => {
-        if (path === ".repo-platform.yml") return "modules: [uv, fuzzer]\n";
+        seen.push(path);
+        if (path === ".repo-platform.yml")
+          return `modules: [uv, fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`;
         if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-        if (path === ".github/.copier-answers.yml") return "github_username: o\nprivate: false\n";
         return null;
       };
-      const seen: string[] = [];
-      const report = (message: string) => seen.push(message);
-      expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher, report)).toEqual({
+      expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toEqual({
         modules: ["uv", "fuzzer"],
         private: false,
-        trackingLabels: [{ module: "fuzzer", label: "fuzz-nightly" }],
+        trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
         prTitleWorkflowPresent: false,
       });
-      expect(seen).toEqual([PENDING_FUZZER_NOTICE]);
+      // The answers file is still asked for (a 404 is its normal state now).
+      expect(seen).toEqual([
+        ".repo-platform.yml",
+        ".github/settings.yml",
+        ".github/.copier-answers.yml",
+      ]);
     });
+
+    test("the fetched facts refuse a labels key naming no selected stream, like the plan", () => {
+      // Skipping the resolver on a stream-less selection would render a
+      // roster without the declared label, and the apply deletes it.
+      const fetcher = (_repo: string, path: string): string | null => {
+        if (path === ".repo-platform.yml") return `modules: [uv]\n${V2}labels: {fuzzer: my-fuzz}\n`;
+        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
+        return null;
+      };
+      expect(() => factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toThrow(
+        "labels.fuzzer names no selected tracking stream",
+      );
+    });
+
+    test("a stream-less fetched selection still reads the answers file at the pin", () => {
+      const seen: string[] = [];
+      const fetcher = (_repo: string, path: string): string | null => {
+        seen.push(path);
+        if (path === ".repo-platform.yml") return "modules: [uv]\n";
+        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
+        return null;
+      };
+      expect(
+        factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)?.trackingLabels,
+      ).toEqual([]);
+      expect(seen).toEqual([
+        ".repo-platform.yml",
+        ".github/settings.yml",
+        ".github/.copier-answers.yml",
+      ]);
+    });
+  });
+
+  describe("trackingLabelsFrom", () => {
+    // The operator's own answers file has no registration and no sync PR
+    // writes it, so an absent or unreadable answer is a defect.
+    const WHERE = "operator/.repo-platform-answers.yml";
+    test("a recorded answer is the label", () => {
+      expect(trackingLabelsFrom("fuzzer_label: my-fuzz\n", ["fuzzer"], manifests, WHERE)).toEqual([
+        { module: "fuzzer", label: "my-fuzz" },
+      ]);
+      expect(trackingLabelsFrom("{}\n", ["uv"], manifests, WHERE)).toEqual([]);
+    });
+    test("an absent answer throws instead of assuming the default", () => {
+      expect(() =>
+        trackingLabelsFrom("github_username: o\n", ["fuzzer"], manifests, WHERE),
+      ).toThrow(
+        `${WHERE}: the fuzzer module is selected but the file records no fuzzer_label answer - ` +
+          "no sync PR records this file, so the tracking label cannot be resolved; record the answer",
+      );
+    });
+    test.each(['fuzzer_label: ""\n', "fuzzer_label:\n", "fuzzer_label: [a]\n"])(
+      "a present but unreadable answer fails: %s",
+      (answers) => {
+        expect(() => trackingLabelsFrom(answers, ["fuzzer"], manifests, WHERE)).toThrow(
+          "the fuzzer module is selected but its fuzzer_label answer is not readable",
+        );
+      },
+    );
   });
 
   test("declaredPrivate reads only a boolean repository.private", () => {

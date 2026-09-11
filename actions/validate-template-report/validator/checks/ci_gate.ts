@@ -1,20 +1,21 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Context } from "../context.ts";
+import { ANY_OWNER, type Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
-import { isRecord, isRegularFile, regexLiteral, shapeOfYaml } from "../readers.ts";
+import { isRecord, isRegularFile, shapeOfYaml } from "../readers.ts";
 
 const CI_PATH = ".github/workflows/ci.yml";
 
 type Step = Record<string, unknown>;
 
 /** The regex source matching the owner whose fleet-ci reusable this tree
- *  must call: the pinned answer on a render, any well-formed owner in self
- *  mode, and null while a render's answers cannot pin one (the fleet-caller
- *  check then stands down; the registration check reports the cause). */
+ *  must call: the render's owner pin (context.ts), any well-formed owner in
+ *  self mode, and null while a render's answers cannot pin one (the
+ *  fleet-caller check then stands down; the registration check reports the
+ *  cause). */
 function ownerPattern(ctx: Context): string | null {
-  if (ctx.mode === "self") return "[A-Za-z0-9-]+";
-  return ctx.owner === null ? null : regexLiteral(ctx.owner);
+  if (ctx.mode === "self") return ANY_OWNER.pattern;
+  return ctx.owner === null ? null : ctx.owner.pattern;
 }
 
 function jobNeeds(job: unknown): string[] {

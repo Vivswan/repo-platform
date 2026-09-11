@@ -158,18 +158,29 @@ export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFil
 };
 // END GENERATED: module-ownership
 
+/** The copier answers file: the registration record of a render the
+ *  template wrote, retired by the sync writer's registration cutover. Its
+ *  base entry applies while the registration still has the shape the
+ *  template rendered; a missing managed file is damage everywhere else on
+ *  the roster, and this one's absence is the cutover. */
+export const ANSWERS_PATH = ".github/.copier-answers.yml";
+
 /** The facts of a render that decide which table entries apply to it.
  *  `selectedModules` is null while the modules list is missing or
  *  malformed (the registration check's own error) and in self mode: the
- *  module-gated and module-conditioned entries then stand down. */
+ *  module-gated and module-conditioned entries then stand down.
+ *  `isPrivateRender` is null while the render records no visibility (the
+ *  writer's registration carries none): the public-only entries stand
+ *  down. `registeredByAnswers` keeps ANSWERS_PATH on the roster. */
 export interface RenderSelection {
-  isPrivateRender: boolean;
+  isPrivateRender: boolean | null;
   selectedModules: string[] | null;
+  registeredByAnswers: boolean;
 }
 
 function whenHolds(when: RenderWhen | undefined, render: RenderSelection): boolean {
   if (when === undefined) return true;
-  if (when.publicOnly && render.isPrivateRender) return false;
+  if (when.publicOnly && render.isPrivateRender !== false) return false;
   if (when.withoutModule !== undefined) {
     if (render.selectedModules === null || render.selectedModules.includes(when.withoutModule)) {
       return false;
@@ -178,10 +189,15 @@ function whenHolds(when: RenderWhen | undefined, render: RenderSelection): boole
   return true;
 }
 
+function onRoster(entry: BaseOwnedFile, render: RenderSelection): boolean {
+  if (entry.path === ANSWERS_PATH) return render.registeredByAnswers;
+  return whenHolds(entry.when, render);
+}
+
 /** Every file the tables expect on this render: the base entries whose
  *  render condition holds plus the selected modules' entries. */
 export function declaredOwnership(render: RenderSelection): readonly OwnedFile[] {
-  const declared: OwnedFile[] = BASE_OWNERSHIP.filter((entry) => whenHolds(entry.when, render)).map(
+  const declared: OwnedFile[] = BASE_OWNERSHIP.filter((entry) => onRoster(entry, render)).map(
     ({ when: _when, ...entry }) => entry,
   );
   for (const module of render.selectedModules ?? []) {
@@ -202,13 +218,20 @@ export function ungatedBaseRegionPaths(): ReadonlySet<string> {
 
 /** Every path the tables cover on SOME render this validator can judge: a
  *  manifest entry for one of these whose render condition is off on this
- *  render cannot come from the template. Module-conditioned paths (module
- *  entries, base entries gated on a module's absence) count only while
- *  the modules list is known. */
-export function coveredPaths(selectedModules: readonly string[] | null): ReadonlySet<string> {
+ *  render cannot come from the template. A conditioned path counts only
+ *  while its condition is known: module-conditioned paths (module entries,
+ *  base entries gated on a module's absence) need the modules list,
+ *  public-only paths need the visibility, and the answers file is covered
+ *  only while it is the registration record (a held retirement carries
+ *  its entry past the cutover). */
+export function coveredPaths(render: RenderSelection): ReadonlySet<string> {
+  const { isPrivateRender, selectedModules } = render;
   return new Set<string>([
     ...BASE_OWNERSHIP.filter(
-      (entry) => entry.when?.withoutModule === undefined || selectedModules !== null,
+      (entry) =>
+        (entry.path !== ANSWERS_PATH || render.registeredByAnswers) &&
+        (entry.when?.withoutModule === undefined || selectedModules !== null) &&
+        (entry.when?.publicOnly !== true || isPrivateRender !== null),
     ).map((entry) => entry.path),
     ...(selectedModules !== null
       ? Object.values(MODULE_OWNERSHIP).flatMap((entries) => (entries ?? []).map((f) => f.path))

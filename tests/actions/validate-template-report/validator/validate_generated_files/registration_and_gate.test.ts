@@ -1,17 +1,21 @@
-// The render's wiring: the answers that pin its owner and template commit,
-// and the ci.yml single-call gate shape that gates its merge.
+// The render's wiring: the records that pin its owner and build commit
+// (the answers file, then the manifest once the sync writer has retired
+// it), and the ci.yml single-call gate shape that gates its merge.
 
 import { describe, expect, test } from "bun:test";
+import { RESYNC } from "../../../../../actions/validate-template-report/validator/checks/manifest_shape.ts";
 import { tempDirs } from "../../../../shared/temp_dir.ts";
 import {
   ANSWERS,
   BASELINE,
   COMMIT,
+  CUT_OVER_OMIT,
   MANAGED_HEADER,
   MANIFEST,
   managedEntry,
   manifestOf,
   stampedEntries,
+  V2_REGISTRATION,
   validatorRunner,
 } from "./fixtures";
 
@@ -99,6 +103,123 @@ describe("the render's owner and provenance answers", () => {
     );
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
+  });
+});
+
+describe("a render the sync writer has cut over", () => {
+  // The writer derives the registration's project block from the answers
+  // file and retires the file; from then on the manifest's own entry is the
+  // build record, the owner is unpinned, and the visibility is unrecorded.
+  // `keep` leaves a retired file in the tree (the repository kept its own copy).
+  const cutOver = (extra: Record<string, string> = {}, opts: { keep?: string[] } = {}) =>
+    runValidator({ ".repo-platform.yml": V2_REGISTRATION, ...extra }, [], {
+      omit: CUT_OVER_OMIT.filter((rel) => !(opts.keep ?? []).includes(rel)),
+    });
+  const writerManifest = (commit: string | null, tree: Record<string, string> = {}) =>
+    manifestOf({
+      ...stampedEntries(cutOverTree(tree)),
+      [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${JSON.stringify(commit)}}`,
+    });
+  const cutOverTree = (extra: Record<string, string>, keep: string[] = []) => {
+    const tree: Record<string, string> = {
+      ...BASELINE,
+      ".repo-platform.yml": V2_REGISTRATION,
+      ...extra,
+    };
+    for (const rel of CUT_OVER_OMIT) if (!keep.includes(rel)) delete tree[rel];
+    return tree;
+  };
+
+  test("passes with no answers file: the manifest records the build", () => {
+    const { exitCode, stderr } = cutOver();
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test.each([
+    { reason: "no commit", commit: null, shape: "no build commit" },
+    {
+      reason: "a short sha",
+      commit: "abc1234",
+      shape: "'abc1234', which is not a full 40-hex commit sha",
+    },
+  ])(
+    "a manifest stamping $reason is the run's one error, naming the manifest",
+    ({ commit, shape }) => {
+      const { exitCode, stderr } = cutOver({ [MANIFEST]: writerManifest(commit) });
+      expect(exitCode).toBe(1);
+      expect(stderr).toBe(
+        `error: ${MANIFEST}: its own entry records ${shape} - the sync writer stamps the build ` +
+          "commit it wrote the tree from there, and the tree cannot be judged at its own build " +
+          `commit until it does; ${RESYNC}\n\n1 error(s).\n`,
+      );
+    },
+  );
+
+  test("the answers file stays required while the registration keeps the template's shape", () => {
+    const { exitCode, stderr } = runValidator({}, [], { omit: [".github/.copier-answers.yml"] });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      ".github/.copier-answers.yml is missing while .repo-platform.yml still has the shape the template rendered",
+    );
+  });
+
+  test("the managed header and the fleet caller are still checked, for any owner", () => {
+    const forked = BASELINE[".github/workflows/ci.yml"].replaceAll("Vivswan/", "SomeFork/");
+    const ok = cutOver({ ".github/workflows/ci.yml": forked });
+    expect(ok.stderr).toBe("");
+    expect(ok.exitCode).toBe(0);
+    const headerless = cutOver({ ".yamllint": "extends: default\n" });
+    expect(headerless.exitCode).toBe(1);
+    expect(headerless.stderr).toContain(
+      ".yamllint: does not open with the managed header ('This file is managed by <owner>/repo-platform.')",
+    );
+    const noCaller = cutOver({
+      ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"].replace(
+        "Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
+        "./.github/workflows/other.yml",
+      ),
+    });
+    expect(noCaller.exitCode).toBe(1);
+    expect(noCaller.stderr).toContain("no job calls repo-platform's fleet-ci.yml reusable");
+  });
+
+  test("while the answers file still exists beside a converted registration it stays the record", () => {
+    // A hand-converted registration ahead of the sync: the answers still
+    // pin the owner, so a fork's fleet-ci caller is refused as before.
+    const pinned = runValidator({
+      ".repo-platform.yml": V2_REGISTRATION,
+      ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"].replace(
+        "Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
+        "SomeFork/repo-platform/.github/workflows/fleet-ci.yml@build",
+      ),
+    });
+    expect(pinned.exitCode).toBe(1);
+    expect(pinned.stderr).toContain("no job calls repo-platform's fleet-ci.yml reusable");
+    const clean = runValidator({ ".repo-platform.yml": V2_REGISTRATION });
+    expect(clean.stderr).toBe("");
+    expect(clean.exitCode).toBe(0);
+  });
+
+  test("a public-only file the repository kept is neither required nor drift", () => {
+    // No visibility is recorded, so CONTRIBUTING.md stands down: a kept copy
+    // with its entry passes parity, and its absence is not an error.
+    const kept = cutOver({}, { keep: ["CONTRIBUTING.md"] });
+    expect(kept.stderr).toBe("");
+    expect(kept.exitCode).toBe(0);
+    // The kept copy is still on parity: its region edited after the stamp is drift.
+    const edited = cutOver(
+      {
+        "CONTRIBUTING.md": BASELINE["CONTRIBUTING.md"].replace(
+          "# Contributing",
+          "# Contributing here",
+        ),
+        [MANIFEST]: manifestOf(stampedEntries(cutOverTree({}, ["CONTRIBUTING.md"]))),
+      },
+      { keep: ["CONTRIBUTING.md"] },
+    );
+    expect(edited.exitCode).toBe(1);
+    expect(edited.stderr).toContain("CONTRIBUTING.md: its managed region does not match");
   });
 });
 

@@ -10,7 +10,7 @@ export const RESYNC =
 /** The ownership manifest's shape and trust model. The manifest is itself
  *  a managed render, so clients carry it and the template repo must NOT
  *  (self mode inverts); absence, unparsable text, and a provenance stamp
- *  differing from the recorded _commit are errors. Ownership METADATA is
+ *  differing from the answers file's recorded _commit are errors. Ownership METADATA is
  *  not trusted for roster paths: the sync BASELINES local manifest edits,
  *  so a hand-flipped class would disable parity permanently and invisibly;
  *  roster and manifest come from one template commit, so disagreement is
@@ -68,18 +68,26 @@ export function checkManifestShape(ctx: Context): Finding[] {
       ),
     );
   }
-  // Provenance: the stamped commit on the self entry must EQUAL the
-  // recorded answers _commit. Once a provenance error is reported, a
-  // missing roster entry is an advisory naming that error instead of a
-  // second error per path on the same cause; `absenceCaveat` (null =
-  // strict) carries the name. A render recording no _commit is the
-  // registration check's error, and nothing can be compared against it:
-  // the stamp is left unjudged and absence takes the same caveat.
+  // Provenance: while the answers file exists, the stamped commit on the
+  // self entry must EQUAL its recorded _commit; once the sync writer has
+  // retired the answers file, the self entry is the one record and its
+  // shape is the registration check's report. Once a provenance error is
+  // reported, a missing roster entry is an advisory naming that error
+  // instead of a second error per path on the same cause; `absenceCaveat`
+  // (null = strict) carries the name. A tree recording no build commit is
+  // the registration check's error, and nothing can be compared against
+  // it: the stamp is left unjudged and absence takes the same caveat.
   const answersCommit = ctx.answers?.commit ?? null;
   const rawSelfCommit = files[MANIFEST_NAME]?.commit;
   const manifestCommit = typeof rawSelfCommit === "string" ? rawSelfCommit : null;
+  const recordedCommit = ctx.buildRecord?.commit ?? null;
   let absenceCaveat: string | null = null;
-  if (answersCommit === null) {
+  if (ctx.answers === null) {
+    if (recordedCommit === null) {
+      absenceCaveat =
+        "its own entry records no build commit to judge the roster against (the registration check's error)";
+    }
+  } else if (answersCommit === null) {
     absenceCaveat =
       "the render records no _commit to compare against (the registration check's error)";
   } else if (manifestCommit === null) {
@@ -122,7 +130,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
         absenceCaveat === null
           ? error(
               `${MANIFEST_NAME} does not list '${path}', which ${declaredBy} - the ` +
-                `stamper writes every entry of its render (${answersCommit}), so ` +
+                `sync writes every entry of its build (${recordedCommit}), so ` +
                 "the entry was deleted by hand, and sync baselines manifest edits; " +
                 `revert it (git history has the stamped original) or ${RESYNC}`,
             )
@@ -170,7 +178,11 @@ export function checkManifestShape(ctx: Context): Finding[] {
   // unselected module's workflow, a public-only file on a private render)
   // cannot come from the template; it is manifest drift.
   const expected = new Set(ctx.ownership.map((f) => f.path));
-  const covered = coveredPaths(ctx.selectedModules);
+  const covered = coveredPaths({
+    isPrivateRender: ctx.isPrivateRender,
+    selectedModules: ctx.selectedModules,
+    registeredByAnswers: ctx.registeredByAnswers,
+  });
   for (const rel of Object.keys(files)) {
     if (covered.has(rel) && !expected.has(rel)) {
       findings.push(
