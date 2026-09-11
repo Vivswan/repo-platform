@@ -51,11 +51,9 @@ jobs:
           git add -A
           git commit -m "style: apply automated formatting"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
-          # Checks will not re-run on the new head (github.token): flag it
-          # for the sticky PR comment below and as an annotation, but stay
-          # green - the push itself succeeded.
+          # The push succeeded, so the pending approval is a notice, not a failure.
           echo "no_retrigger=true" >> "$GITHUB_OUTPUT"
-          echo "::warning::formatting commit pushed with github.token - checks will not re-run on the new head; close/reopen the PR to re-run them"
+          echo "::warning::formatting commit pushed with github.token: the new head's pull_request run waits for approval. Open it in the Actions tab and choose Approve and run, or push an empty commit."
       # One comment per PR, edited in place on later runs; a failed post
       # fails the step.
       - name: Comment that checks will not re-run
@@ -65,7 +63,8 @@ jobs:
           header: repo-platform/auto-format
           message: >
             Pushed a formatting commit with the default workflow token, which starts no workflows,
-            so checks will not re-run on the new head. Close and reopen this PR to re-run them.
+            so the new head's `pull_request` run waits for approval.
+            Open it in the Actions tab and choose **Approve and run**, or push an empty commit.
       # The label is a one-shot request: remove it even when a step failed,
       # so a broken run cannot loop.
       - name: Remove the fix-lint label
