@@ -1,5 +1,0 @@
-# yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
-# Owns no files: the issue forms are served to every repository by the
-# account's Vivswan/.github defaults, so the choice only has to stay valid.
-description: bug/feature issue forms (served by the account's .github repository; no files here)

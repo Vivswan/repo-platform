@@ -1,7 +1,0 @@
-      - name: Format (deno)
-        env:
-          DENO_NO_UPDATE_CHECK: "1"
-        run: |
-          deno lint --fix || true
-          # Markdown prose is never re-wrapped: documents carry no width limit.
-          deno fmt --prose-wrap preserve
