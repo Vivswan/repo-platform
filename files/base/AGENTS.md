@@ -2,7 +2,7 @@
 
 Guidance for AI coding agents working in this repository. `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to this file, so edit only here.
 
-Everything between the BEGIN and END markers is managed by {{github_username}}/repo-platform and overwritten by template sync. This repository's own guidance goes below the END marker.
+Everything between the BEGIN and END markers is managed by {{github_username}}/repo-platform and replaced on every sync. This repository's own guidance goes below the END marker.
 
 ## Project
 

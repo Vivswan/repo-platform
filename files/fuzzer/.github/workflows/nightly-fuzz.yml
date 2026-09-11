@@ -1,5 +1,5 @@
-# Nightly fuzzing starter: generated once by {{github_username}}/repo-platform,
-# never overwritten by template sync. Replace the placeholder fuzz step;
+# Nightly fuzzing starter: written once by {{github_username}}/repo-platform,
+# never overwritten by a later sync. Replace the placeholder fuzz step;
 # follow the failure-report contract in docs/fuzzer.md and the issue
 # filing, replay, and auto-close steps keep working.
 name: Nightly Fuzz

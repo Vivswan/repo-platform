@@ -1,5 +1,5 @@
-# Repo-owned: generated once by {{github_username}}/repo-platform, never
-# overwritten by template sync - adjust the format commands freely. The
+# Repo-owned: written once by {{github_username}}/repo-platform, never
+# overwritten by a later sync - adjust the format commands freely. The
 # push uses github.token, which starts no workflows; a PAT would
 # re-trigger CI, but any same-repo PR's formatter tooling runs in this
 # checkout before the push - only wire in a token you would expose to it.

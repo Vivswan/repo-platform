@@ -1,5 +1,5 @@
-# Nightly CI starter: generated once by {{github_username}}/repo-platform,
-# never overwritten by template sync. Replace the placeholder step; the
+# Nightly CI starter: written once by {{github_username}}/repo-platform,
+# never overwritten by a later sync. Replace the placeholder step; the
 # report job files one label-deduplicated tracking issue on a red night
 # and closes it on a green one (docs/nightly.md).
 name: Nightly

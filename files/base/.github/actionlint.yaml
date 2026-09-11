@@ -1,6 +1,6 @@
-# Repo-owned actionlint configuration. Generated once by
-# {{github_username}}/repo-platform and never overwritten by template
-# sync, so add this repository's own ignores freely.
+# Repo-owned actionlint configuration. Written once by
+# {{github_username}}/repo-platform, never overwritten by a later sync,
+# so add this repository's own ignores freely.
 
 paths:
   .github/workflows/**/*.{yml,yaml}:

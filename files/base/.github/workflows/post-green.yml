@@ -1,4 +1,4 @@
-# Repo-owned: generated once by {{github_username}}/repo-platform, never
+# Repo-owned: written once by {{github_username}}/repo-platform, never
 # overwritten by sync. Called after the all-green gate on every green push
 # to main, before the release: REPLACE the no-op job with this repository's
 # work (it uses a runner allocation per push until you do; the contract is in
