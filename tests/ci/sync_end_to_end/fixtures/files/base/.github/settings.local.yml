@@ -1,0 +1,6 @@
+# {{project_name}}'s own settings overlay: {{description}}
+repository:
+  description: "{{description}}"
+  homepage: ""
+  topics: ""
+  private: false

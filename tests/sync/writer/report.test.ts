@@ -43,6 +43,12 @@ describe("holdReasons", () => {
           detail: "a regular file sits where a link is declared",
         },
         { path: ".gitignore", class: "split", change: "region added", detail: "" },
+        {
+          path: ".github/settings.yml",
+          class: "managed",
+          change: "moved",
+          detail: "to .github/settings.local.yml",
+        },
       ],
       replaced: [{ path: "ci.yml", diff: "" }],
       retired: [
@@ -61,6 +67,7 @@ describe("holdReasons", () => {
     expect(holdReasons(loud)).toEqual([
       "CLAUDE.md held: a regular file sits where a link is declared",
       ".gitignore: the managed region was added above repository-owned content",
+      ".github/settings.yml: the repository's file moved to .github/settings.local.yml and the rendered document replaced it",
       "local edits replaced in ci.yml",
       "retirement of r.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
