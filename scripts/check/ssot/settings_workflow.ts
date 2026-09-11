@@ -4,7 +4,15 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { isMap, isScalar, isSeq, parseDocument, parse as parseYaml } from "yaml";
+import {
+  isMap,
+  isScalar,
+  isSeq,
+  LineCounter,
+  parseDocument,
+  parse as parseYaml,
+  type Scalar,
+} from "yaml";
 import {
   identityKeyIssues,
   loadOverrideLayer,
@@ -167,11 +175,26 @@ export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repo
 export const SETTINGS_ACTION_USES =
   "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0";
 
-/** Every apply step's `uses` as written, `<value> # <comment>`: the pin
- *  and its version comment off the YAML document's scalar node. */
+/** YAML also attaches an indented comment on the NEXT line as the scalar's
+ *  trailing comment; the release-tag verification reads the `uses` line
+ *  alone, so only a comment on the scalar's own line counts. */
+function sameLineComment(scalar: Scalar, lines: LineCounter): string | null {
+  const token = scalar.srcToken;
+  if (typeof scalar.comment !== "string" || scalar.range == null || token === undefined) {
+    return null;
+  }
+  const comment = "end" in token ? token.end?.find((t) => t.type === "comment") : undefined;
+  if (comment === undefined) return null;
+  const sameLine = lines.linePos(comment.offset).line === lines.linePos(scalar.range[1]).line;
+  return sameLine ? scalar.comment : null;
+}
+
+/** Every apply step's `uses` as written on its line, `<value> # <comment>`:
+ *  the pin and its version comment off the YAML document's scalar node. */
 function applyUsesPins(text: string): string[] {
   const pins: string[] = [];
-  const jobs = parseDocument(text).get("jobs");
+  const lines = new LineCounter();
+  const jobs = parseDocument(text, { keepSourceTokens: true, lineCounter: lines }).get("jobs");
   if (!isMap(jobs)) return pins;
   for (const job of jobs.items) {
     const steps = isMap(job.value) ? job.value.get("steps") : undefined;
@@ -179,8 +202,8 @@ function applyUsesPins(text: string): string[] {
     for (const step of steps.items) {
       const uses = isMap(step) ? step.get("uses", true) : undefined;
       if (!isScalar(uses) || !String(uses.value).includes("github-settings-as-code")) continue;
-      const comment = typeof uses.comment === "string" ? ` #${uses.comment.trimEnd()}` : "";
-      pins.push(`${String(uses.value)}${comment}`);
+      const comment = sameLineComment(uses, lines);
+      pins.push(`${String(uses.value)}${comment === null ? "" : ` #${comment.trimEnd()}`}`);
     }
   }
   return pins;
