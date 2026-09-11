@@ -17,8 +17,10 @@ const TOKEN = "ghs_secret_token_value";
 const REPO = "Vivswan/managed";
 const HEAD_REF = "dependabot/npm_and_yarn/zod-4.4.3";
 const WARNING =
-  "::warning::lockfile fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head; " +
-  "close/reopen the PR or register the token as a Dependabot secret";
+  "::warning::lockfile fix pushed without REPO_PLATFORM_TOKEN: the new head's pull_request run waits for approval. " +
+  "Open it in the Actions tab and choose Approve and run, or push an empty commit. " +
+  "Durable fix: register REPO_PLATFORM_TOKEN as a Dependabot secret " +
+  "(Settings > Secrets and variables > Dependabot) so the push comes from the PAT and its run starts on its own.";
 
 const LS_FILES = ["git", "ls-files", "-z", "--", "bun.lock", "*/bun.lock"];
 const DIFF = ["git", "diff", "--quiet", "--", "bun.lock", "*/bun.lock"];

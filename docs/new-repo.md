@@ -207,10 +207,12 @@ Every render carries the agent instructions (`AGENTS.md` with its `CLAUDE.md`, `
 
 ### Fix commits and re-triggering CI
 
-Two of those workflows push fix commits to PR branches, and a push made with the default token (`github.token` / `GITHUB_TOKEN`) starts no workflows - the required `all-green` check would sit unreported on the new head. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning saying so; close/reopen the PR to re-run its checks. To make fix commits re-trigger CI automatically:
+Two of those workflows push fix commits to PR branches, and a push made with the default token (`github.token` / `GITHUB_TOKEN`) starts no workflows - the required `all-green` check would sit unreported on the new head. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning naming the way out.
 
-- bun lockfile fixes: register `REPO_PLATFORM_TOKEN` as a *Dependabot* secret - a fine-grained token scoped to that one repo's Contents:RW is enough; do not put the fleet PAT in a downstream repo.
-- auto-format: a PAT with Contents:RW would work, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
+- auto-format: close/reopen the PR to re-run its checks. A PAT with Contents:RW would re-trigger them, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
+- bun lockfile fixes, this PR: the new head's `pull_request` run sits at "awaiting approval". Open it in the Actions tab and choose "Approve and run", or push an empty commit. A hand `workflow_dispatch` run does not unblock the merge: the ruleset's code-scanning rule wants the PR-event CodeQL analysis.
+- bun lockfile fixes, the durable fix: register `REPO_PLATFORM_TOKEN` as a *Dependabot* secret in every bun repository (Settings > Secrets and variables > Dependabot). A Dependabot-triggered run reads Dependabot secrets only, so an Actions secret of the same name is invisible to it. A fine-grained token scoped to that one repo's Contents:RW is enough; do not put the fleet PAT in a downstream repo.
+- Known limitation, accepted: Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2. A Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
 
 ### The release pipeline (release-please)
 

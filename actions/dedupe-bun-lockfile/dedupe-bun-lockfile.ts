@@ -27,9 +27,12 @@ const PUSH_DEADLINE_MS = 300_000;
 const COMMIT_SUBJECT = "build(deps): dedupe bun lockfile";
 /** Keeps Dependabot rebasing and updating the PR over this commit. */
 const COMMIT_TRAILER = "[dependabot skip]";
+/** The caller's sticky PR comment says the same: files/bun/.github/workflows/dependabot-bun-lockfile.yml. */
 const NO_RETRIGGER_WARNING =
-  "lockfile fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head; " +
-  "close/reopen the PR or register the token as a Dependabot secret";
+  "lockfile fix pushed without REPO_PLATFORM_TOKEN: the new head's pull_request run waits for approval. " +
+  "Open it in the Actions tab and choose Approve and run, or push an empty commit. " +
+  "Durable fix: register REPO_PLATFORM_TOKEN as a Dependabot secret " +
+  "(Settings > Secrets and variables > Dependabot) so the push comes from the PAT and its run starts on its own.";
 
 function exitCodeOf(exit: ChildExit): number {
   return exit.kind === "exited" ? exit.code : 1;

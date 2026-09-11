@@ -22,7 +22,7 @@
     ".github/workflows/ci.yml": {"class": "managed", "hash": "6a361f72634fc8499e4a31b70f5faf2a3f790bd3b1b2d561253c817d42e7c2a6"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},
     ".github/workflows/deno-audit.yml": {"class": "managed", "hash": "d9288e784d2b1f1f8eda1f69d7bd494ef750c3c085ba91d8534c2085b8d23589"},
-    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": "eb669d83add420e117a96545430e5ec84e60c9997e50fdfb2dcf86f33c819188"},
+    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": "c570431a424fe94696f0fbda932d36f7de1dd59d4921c940bb31d8c7add975b0"},
     ".github/workflows/docs-site.yml": {"class": "managed", "hash": "0e129287e23889a15e40b5b44469d636be7db44e67fe6bd37de50c1fc5a2af78"},
     ".github/workflows/nightly-fuzz.yml": {"class": "starter"},
     ".github/workflows/nightly.yml": {"class": "starter"},
