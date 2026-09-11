@@ -202,7 +202,9 @@ describe("cutover", () => {
     const notes = cutover(target, CONFIG, REPOSITORY);
     expect(notes).toHaveLength(2);
     const written = readFileSync(join(target, ".repo-platform.yml"), "utf-8");
-    expect(written.startsWith("# Generated once by repo-platform")).toBe(true);
+    expect(written.split("\n")[0]).toBe(
+      "# Written once by repo-platform and repo-owned from then on: the sync reads this file and never rewrites it.",
+    );
     const parsed = parseRegistration(written);
     expect("registration" in parsed).toBe(true);
     if ("registration" in parsed) {

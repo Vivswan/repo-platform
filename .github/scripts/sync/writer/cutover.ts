@@ -151,7 +151,7 @@ export function deriveRegistration(
 }
 
 const HEADER =
-  "# Generated once by repo-platform and repo-owned from then on: the sync reads this file and never rewrites it.\n";
+  "# Written once by repo-platform and repo-owned from then on: the sync reads this file and never rewrites it.\n";
 
 /** Rewrites a v1 registration as v2 when the target still carries its
  *  answers file; returns the notes, empty when there is nothing to do. */
