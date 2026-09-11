@@ -18,7 +18,7 @@ Because the starters are repo-owned, the sync never rewrites them, so the `fuzz-
 Each stream is identified by a label, set as a registration key (`labels.fuzzer`, `labels.nightly`, `labels.docs_site` in `.repo-platform.yml`) rather than a starter edit alone, because two more places must agree on it:
 
 - The report and resolve steps: both dedup and auto-close by the label.
-- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The rendered `.github/settings.yml` declares the label automatically - the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)).
+- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The rendered `.github/settings.yml` declares the label automatically - the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)). A repository whose overlay opts out of label management (`labels: null`) owns its tracking labels instead.
 
 The registration grammar and fleet-ci's `plan` job enforce:
 

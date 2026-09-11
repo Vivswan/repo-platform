@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-// This repository's own .github/settings.yml through the sync writer's
-// render: the sync never targets the operator (its files are the
-// sources), so the operator renders itself. --check reports drift.
+// This repository's own .github/settings.yml through the sync writer's render.
+// The sync never targets the operator (its files are the sources), so the
+// operator renders itself.
 //
 // Usage: bun scripts/generate/settings_document.ts [--check] [--root <dir>]
 
@@ -21,14 +21,11 @@ const FILES_CONFIG = "files.yml";
 const TREE = "files";
 
 export interface OwnSettings {
-  /** The rendered document's repo-relative path (the render entry's). */
   path: string;
-  /** The overlay it was rendered from (the entry's `displaces`). */
   overlayPath: string;
   content: string;
 }
 
-/** The one entry the writer renders rather than copies. */
 function renderedEntry(config: FilesConfig): RenderedEntry {
   const entries = config.files.filter((entry): entry is RenderedEntry => "render" in entry);
   if (entries.length !== 1) {
@@ -39,8 +36,6 @@ function renderedEntry(config: FilesConfig): RenderedEntry {
   return entries[0];
 }
 
-/** This repository's settings document, every input read from `root`;
- *  throws with the reason when the render cannot stand. */
 export function renderOwnSettings(root: string): OwnSettings {
   const tree = join(root, TREE);
   const config = loadFilesConfig(join(root, FILES_CONFIG), tree);
