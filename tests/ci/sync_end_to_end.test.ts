@@ -2,8 +2,8 @@
 // files/ tree and a fixture git checkout carrying every state the writer
 // judges (a local edit in a managed file, a repo-owned tail in a split file,
 // an existing starter, a clean and an edited retired file, a retired split
-// file with repository-owned content around its region, a move, a mirror
-// and a foreign mirror copy, an unknown module, a symlink recorded by the
+// file with repository-owned content around its region, a move, mirrors
+// over absent, current, edited, and blocked targets, an unknown module, a symlink recorded by the
 // previous pipeline at a link path and at a path nothing selects, a class
 // flip that matches its record and one that does not). The written tree,
 // the manifest, the report sections, the summary, and idempotence are
@@ -40,7 +40,6 @@ const droppedMirrorNote = (path: string) =>
   `manifest record for \`${path}\` dropped: no mirror in .repo-platform.yml reaches it now, so ` +
   "the file is the repository's own (a mirror declared again adopts it while it still holds the " +
   "source's content)";
-const LOOP_REFUSAL = "the target's ancestor 'skills/loop' is a symbolic link";
 
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
@@ -86,9 +85,8 @@ function oldManifest(): string {
     // A mirror record no declaration reaches any more: dropped with a note.
     "docs/old-mirror.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
     // A mirror record under a directory that is now a symlink loop: the
-    // globs refuse the directory by name, and the record is noted, never
-    // looked up through the loop.
-    "skills/loop/sub/x.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
+    // record is noted, never looked up through the loop.
+    "other/loop/sub/x.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
     // The previous pipeline recorded its symlinks as managed, hashing the
     // link target string.
     "CLAUDE.md": `{"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
@@ -125,9 +123,9 @@ function seedTarget(): string {
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "labels: {fuzzer: fuzz-me}",
       "mirrors:",
-      "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, .github/repo-platform-manifest.json]}",
-      "  - {source: .gitattributes, targets: [docs/gitattributes.txt]}",
-      "  - {source: LICENSE.md, targets: [SECURITY.md, skills/new/LICENSE.md, nowhere/*/LICENSE.md]}",
+      // A literal in a new directory a glob then matches; a directory at a
+      // target and a file where a directory must be, both replaced for review.
+      "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, skills/new/LICENSE.md, plain, skills/alpha/README.md/LICENSE.md]}",
       "  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}",
       "",
     ].join("\n"),
@@ -151,6 +149,8 @@ function seedTarget(): string {
     "skills/delta/README.md": "delta\n",
     "skills/delta/LICENSE.md": NEW_LICENSE,
     "docs/old-mirror.md": OLD_LICENSE,
+    "plain/keep.md": "keep\n",
+    "other/keep.md": "",
     ".editorconfig": OLD_EDITORCONFIG,
     ".gitattributes": OLD_GITATTRIBUTES,
     ".yamllint": OLD_YAMLLINT,
@@ -168,7 +168,7 @@ function seedTarget(): string {
   chmodSync(join(target, ".editorconfig"), 0o755);
   symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
   symlinkSync("../AGENTS.md", join(target, ".github/copilot-instructions.md"));
-  symlinkSync("loop", join(target, "skills/loop"));
+  symlinkSync("loop", join(target, "other/loop"));
   fixtureGit(target, ["init", "-q", "-b", "main"]);
   fixtureGit(target, ["add", "-A"]);
   fixtureGit(target, ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-q", "-m", "seed"]);
@@ -203,8 +203,8 @@ interface Summary {
   notes: string[];
 }
 
-function runSync(target: string, summaryPath: string): { stdout: string; summary: Summary } {
-  const result = boundedSpawnSync(
+function spawnSync(target: string, summaryPath: string) {
+  return boundedSpawnSync(
     [
       "bun",
       SYNC,
@@ -225,6 +225,10 @@ function runSync(target: string, summaryPath: string): { stdout: string; summary
     ],
     { cwd: REPO_ROOT, env: fixtureGitEnv(), timeoutMs: 60_000 },
   );
+}
+
+function runSync(target: string, summaryPath: string): { stdout: string; summary: Summary } {
+  const result = spawnSync(target, summaryPath);
   expect(result.stderr).toBe("");
   expect(result.exitCode).toBe(0);
   return { stdout: result.stdout, summary: JSON.parse(readFileSync(summaryPath, "utf-8")) };
@@ -250,7 +254,7 @@ describe("sync.ts end to end", () => {
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
       droppedMirrorNote("docs/old-mirror.md"),
-      droppedMirrorNote("skills/loop/sub/x.md"),
+      droppedMirrorNote("other/loop/sub/x.md"),
     ]);
     expect(read("BESPOKE.md")).toBe("b\n");
     expect(read("docs/old-mirror.md")).toBe(OLD_LICENSE);
@@ -425,41 +429,27 @@ describe("sync.ts end to end", () => {
     );
   });
 
-  test("mirrors the written files, literals before globs, refusing foreign and retired targets", () => {
+  test("mirrors the written files, literals before globs, replacing what stands at a target", () => {
     const mirror = (source: string, path: string, outcome: string, detail = "") => ({
       source,
       target: path,
       outcome,
       detail,
     });
-    // Each pass (literals, then globs) reports its pattern refusals first.
+    // Rows follow the declarations, literals first.
     expect(summary.mirrors).toEqual([
-      mirror("LICENSE.md", MANIFEST, "refused", "the pattern is a path files.yml writes"),
-      mirror("LICENSE.md", "SECURITY.md", "refused", "the pattern is a path files.yml retires"),
-      mirror(
-        ".gitattributes",
-        "docs/gitattributes.txt",
-        "refused",
-        "the source is not a file this sync writes",
-      ),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "written"),
-      mirror("LICENSE.md", "skills/loop/LICENSE.md", "refused", LOOP_REFUSAL),
-      mirror("LICENSE.md", "nowhere/*/LICENSE.md", "refused", "the pattern matches nothing"),
-      mirror("AGENTS.md", "skills/loop/AGENTS.md", "refused", LOOP_REFUSAL),
+      mirror("LICENSE.md", "plain", "replaced", "a directory stood at the target"),
+      mirror(
+        "LICENSE.md",
+        "skills/alpha/README.md/LICENSE.md",
+        "replaced",
+        "a file stood at ancestor 'skills/alpha/README.md'",
+      ),
       mirror("LICENSE.md", "skills/alpha/LICENSE.md", "written"),
-      mirror(
-        "LICENSE.md",
-        "skills/beta/LICENSE.md",
-        "refused",
-        "the target holds content that is not the previous mirror",
-      ),
+      mirror("LICENSE.md", "skills/beta/LICENSE.md", "replaced local edits"),
       mirror("LICENSE.md", "skills/delta/LICENSE.md", "current"),
-      mirror(
-        "LICENSE.md",
-        "skills/gamma/LICENSE.md",
-        "refused",
-        "the target holds content that is not the previous mirror",
-      ),
+      mirror("LICENSE.md", "skills/gamma/LICENSE.md", "replaced local edits"),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "current"),
       mirror("AGENTS.md", "skills/alpha/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/beta/AGENTS.md", "written"),
@@ -467,13 +457,16 @@ describe("sync.ts end to end", () => {
       mirror("AGENTS.md", "skills/gamma/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/new/AGENTS.md", "written"),
     ]);
-    expect(existsSync(join(target, "docs/gitattributes.txt"))).toBe(false);
+    // The directory and the blocking file are gone; every target holds the source.
+    expect(existsSync(join(target, "plain/keep.md"))).toBe(false);
+    expect(read("plain")).toBe(NEW_LICENSE);
+    expect(read("skills/alpha/README.md/LICENSE.md")).toBe(NEW_LICENSE);
+    expect(read("skills/new/AGENTS.md")).toBe(read("AGENTS.md"));
+    for (const skill of ["alpha", "beta", "delta", "gamma", "new"]) {
+      expect(read(`skills/${skill}/LICENSE.md`)).toBe(NEW_LICENSE);
+    }
     // The retired path was moved, never rewritten by its mirror.
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
-    expect(read("skills/new/AGENTS.md")).toBe(read("AGENTS.md"));
-    expect(read("skills/alpha/LICENSE.md")).toBe(read("LICENSE.md"));
-    expect(read("skills/beta/LICENSE.md")).toBe("a hand-written license\n");
-    expect(read("skills/gamma/LICENSE.md")).toBe("an edited mirror copy\n");
   });
 
   test("records what it wrote in the manifest, the build on the self entry", () => {
@@ -505,6 +498,9 @@ describe("sync.ts end to end", () => {
         "skills/gamma/AGENTS.md",
         "skills/new/AGENTS.md",
         "skills/delta/LICENSE.md",
+        "skills/beta/LICENSE.md",
+        "plain",
+        "skills/alpha/README.md/LICENSE.md",
         ".github/workflows/docs-site.yml",
         ".github/workflows/nightly-fuzz.yml",
         ".github/workflows/validate-skills.yml",
@@ -551,8 +547,8 @@ describe("sync.ts end to end", () => {
       class: "split",
       hash: sha256(read(".editorconfig")),
     });
-    // Kept and refused files keep their previous records, so a later sync
-    // can still recognise the platform's last write.
+    // Kept files keep their previous records, so a later sync can still
+    // recognise the platform's last write.
     expect(manifest.files[".github/workflows/old-starter.yml"]).toEqual({ class: "starter" });
     expect(manifest.files[".github/workflows/deselected-starter.yml"]).toEqual({
       class: "starter",
@@ -561,10 +557,10 @@ describe("sync.ts end to end", () => {
     expect(manifest.files["docs/NOTES.md"]).toBeUndefined();
     // The handed-over split file's record left with its region.
     expect(manifest.files["CONTRIBUTING.md"]).toBeUndefined();
-    expect(manifest.files["skills/gamma/LICENSE.md"]).toEqual({
-      class: "mirror",
-      hash: sha256(OLD_LICENSE),
-    });
+    // Every mirror target is recorded with the copy's hash, the replaced ones too.
+    for (const path of ["skills/gamma/LICENSE.md", "skills/beta/LICENSE.md", "plain"]) {
+      expect(manifest.files[path]).toEqual({ class: "mirror", hash: sha256(NEW_LICENSE) });
+    }
     const gitignore = read(".gitignore");
     const region = gitignore.slice(
       gitignore.indexOf(HASH_BEGIN),
@@ -604,6 +600,9 @@ describe("sync.ts end to end", () => {
     expect(stdout).toContain(
       '```diff\n--- .github/workflows/ci.yml\n+++ .github/workflows/ci.yml\n@@\n-name: my own ci\n-on: push\n+name: "Demo Project CI"',
     );
+    expect(stdout).toContain(
+      "#### `skills/beta/LICENSE.md`\n\n```diff\n--- skills/beta/LICENSE.md\n+++ skills/beta/LICENSE.md\n@@\n-a hand-written license\n+MIT License",
+    );
     expect(summary.hold).toBe(true);
     expect(summary.holdReasons).toEqual([
       ".gitattributes held: class changed from managed to split, and the content differs from the last write",
@@ -611,22 +610,18 @@ describe("sync.ts end to end", () => {
       "constructor held: class changed from starter to managed, and a starter is repo-owned",
       ".dockerignore: the managed region was added above repository-owned content",
       "local edits replaced in .github/workflows/ci.yml",
+      "local edits replaced in skills/beta/LICENSE.md",
+      "local edits replaced in skills/gamma/LICENSE.md",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
       "retirement of LEGACY.md held: the record carries no hash",
-      `mirror ${MANIFEST} refused: the pattern is a path files.yml writes`,
-      "mirror SECURITY.md refused: the pattern is a path files.yml retires",
-      "mirror docs/gitattributes.txt refused: the source is not a file this sync writes",
-      `mirror skills/loop/LICENSE.md refused: ${LOOP_REFUSAL}`,
-      "mirror nowhere/*/LICENSE.md refused: the pattern matches nothing",
-      `mirror skills/loop/AGENTS.md refused: ${LOOP_REFUSAL}`,
-      "mirror skills/beta/LICENSE.md refused: the target holds content that is not the previous mirror",
-      "mirror skills/gamma/LICENSE.md refused: the target holds content that is not the previous mirror",
+      "mirror plain replaced: a directory stood at the target",
+      "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
       "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
       `registration: ${droppedMirrorNote("docs/old-mirror.md")}`,
-      `registration: ${droppedMirrorNote("skills/loop/sub/x.md")}`,
+      `registration: ${droppedMirrorNote("other/loop/sub/x.md")}`,
     ]);
   });
 
@@ -658,12 +653,14 @@ describe("sync.ts end to end", () => {
     expect(again.summary.holdReasons).not.toContainEqual(
       expect.stringContaining("CONTRIBUTING.md"),
     );
-    // The local edit is gone and the unsafe record left the manifest; the
-    // other reasons stand until a human acts.
+    // The local edits are gone, the replaced mirrors are current, and the
+    // unsafe record left the manifest; the other reasons stand until a
+    // human acts.
     expect(again.summary.holdReasons).toEqual(
       summary.holdReasons.filter(
         (r) =>
           !r.startsWith("local edits") &&
+          !r.startsWith("mirror ") &&
           !r.includes("manifest record") &&
           !r.startsWith(".dockerignore") &&
           !r.startsWith("retirement of CONTRIBUTING.md"),
@@ -721,5 +718,82 @@ describe("sync.ts over a modules-only registration", () => {
       files: Record<string, unknown>;
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
+  });
+});
+
+describe("sync.ts over a mirror declaration it cannot write", () => {
+  function seed(registration: string, links: Record<string, string> = {}): string {
+    const target = temp.dir("sync-e2e-mirror-target-");
+    writeFileSync(join(target, ".repo-platform.yml"), registration);
+    mkdirSync(join(target, "skills/a"), { recursive: true });
+    writeFileSync(join(target, "skills/a/README.md"), "");
+    for (const [path, to] of Object.entries(links)) symlinkSync(to, join(target, path));
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    return target;
+  }
+  const error = (source: string, target: string, problem: string) =>
+    `::error::.repo-platform.yml: mirrors: source '${source}', target '${target}': ${problem}`;
+
+  test("an impossible declaration exits nonzero naming every problem, and records nothing", () => {
+    const target = seed(
+      [
+        "modules: [bun]",
+        "project: {name: Demo, slug: demo, description: A demo}",
+        "mirrors:",
+        "  - {source: LICENSE.md, targets: [copies/a, copies/a/b, .github/repo-platform-manifest.json]}",
+        "  - {source: README.md, targets: [skills/*/README.md]}",
+        "  - {source: LICENSE.md, targets: [SECURITY.md, docs/GONE.md, docs/**/LICENSE.md]}",
+        "",
+      ].join("\n"),
+    );
+    // A managed record of a module no longer selected: the run retires it,
+    // and no mirror may land there.
+    const stale = `{\n  "files": {\n    "docs/GONE.md": {"class": "managed", "hash": "${sha256("gone\n")}"}\n  }\n}\n`;
+    mkdirSync(join(target, ".github"));
+    writeFileSync(join(target, MANIFEST), stale);
+    const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      `${[
+        error("LICENSE.md", MANIFEST, "the target is a path files.yml writes"),
+        error(
+          "README.md",
+          "skills/*/README.md",
+          "the source is not a managed or split file files.yml writes for this repository",
+        ),
+        error("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
+        error("LICENSE.md", "docs/GONE.md", "the target is a path a stale manifest record retires"),
+        error("LICENSE.md", "docs/**/LICENSE.md", "the pattern uses '**'"),
+        error(
+          "LICENSE.md",
+          "copies/a",
+          "the target is a path prefix of another target 'copies/a/b'",
+        ),
+        error("LICENSE.md", "copies/a/b", "the target sits under another target 'copies/a'"),
+      ].join("\n")}\n`,
+    );
+    expect(readFileSync(join(target, MANIFEST), "utf-8")).toBe(stale);
+    expect(existsSync(join(target, "copies"))).toBe(false);
+  });
+
+  test("a symbolic link where a copy would land exits nonzero the same way", () => {
+    const target = seed(
+      [
+        "modules: [bun]",
+        "project: {name: Demo, slug: demo, description: A demo}",
+        "mirrors:",
+        "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, linked/LICENSE.md]}",
+        "",
+      ].join("\n"),
+      { "skills/a/LICENSE.md": "../../LICENSE.md", linked: "skills" },
+    );
+    const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      `${error("LICENSE.md", "linked/LICENSE.md", "the target's ancestor 'linked' is a symbolic link")}\n`,
+    );
+    expect(existsSync(join(target, MANIFEST))).toBe(false);
+    expect(readlinkSync(join(target, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
   });
 });

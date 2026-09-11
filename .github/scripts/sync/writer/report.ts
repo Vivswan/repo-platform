@@ -55,7 +55,7 @@ export function holdReasons(outcome: SyncOutcome): string[] {
     }
   }
   for (const row of outcome.mirrors) {
-    if (row.outcome === "refused") reasons.push(`mirror ${row.target} refused: ${row.detail}`);
+    if (row.outcome === "replaced") reasons.push(`mirror ${row.target} replaced: ${row.detail}`);
   }
   for (const note of outcome.notes) reasons.push(`registration: ${note}`);
   return reasons;

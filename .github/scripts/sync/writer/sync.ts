@@ -17,7 +17,9 @@ import {
   type FileEntry,
   type FilesConfig,
   pathProblem,
+  selectEntries,
 } from "../../../../actions/plan/files_config.ts";
+import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import { REGISTRATION_PATH } from "../../../../actions/plan/registration.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
@@ -34,7 +36,7 @@ import {
   sha256,
   writeManifest,
 } from "./manifest.ts";
-import { applyMirrors, linkedAncestor } from "./mirrors.ts";
+import { applyMirrors, blockedAncestor, MirrorFailure } from "./mirrors.ts";
 import {
   missingPlaceholders,
   type PlaceholderName,
@@ -56,7 +58,7 @@ import {
   type WrittenRow,
 } from "./report.ts";
 import { keepReason, retire } from "./retire.ts";
-import { resolveModules, selectEntries } from "./select.ts";
+import { resolveModules } from "./select.ts";
 import { type Found, probe, removeFile, writeFile } from "./target_files.ts";
 import { writeLink } from "./write_link.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
@@ -77,7 +79,7 @@ export interface SyncOptions {
 }
 
 /** A previous record carried into the new manifest when its file stays (a
- *  held or kept retirement, a held entry, a refused mirror), so the next
+ *  held or kept retirement, a held entry), so the next
  *  run still holds the file instead of judging it unrecorded; a missing
  *  hash rides along as null. Null when the class is not one the writer
  *  records or a split names no markers. */
@@ -236,12 +238,12 @@ export function runSync(options: SyncOptions): SyncReport {
 
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
-  const retiredPaths = new Set(config.retired.map((entry) => entry.path));
+  const owned = ownedPaths(config, { modules: selected, private: options.private });
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
   const stale: string[] = [];
   for (const [path, entry] of Object.entries(records)) {
-    if (path === MANIFEST_NAME || entryPaths.has(path) || retiredPaths.has(path)) continue;
+    if (path === MANIFEST_NAME || entryPaths.has(path) || owned.retires.has(path)) continue;
     if (carriedRecord(entry) === null) {
       notes.push(
         `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
@@ -315,19 +317,17 @@ export function runSync(options: SyncOptions): SyncReport {
 
   const mirrors =
     registration.mirrors === undefined
-      ? []
+      ? { rows: [], replaced: [], hashes: new Map<string, string>() }
       : applyMirrors(
           options.target,
           registration.mirrors,
           written,
-          new Set([...entryPaths, MANIFEST_NAME]),
+          { ...owned, stale: new Set(stale) },
           records,
-          new Set([...retiredPaths, ...stale]),
         );
-  for (const row of mirrors) {
-    const bytes = written.get(row.source);
-    if (row.outcome === "refused") carry(row.target);
-    else if (bytes !== undefined) next.set(row.target, { class: "mirror", hash: sha256(bytes) });
+  for (const [path, hash] of mirrors.hashes) next.set(path, { class: "mirror", hash });
+  for (const { path, before, after } of mirrors.replaced) {
+    replaced.push({ path, diff: unifiedDiff(path, before, after) });
   }
   // A mirror record no declaration reaches now (removed from the
   // registration, or its glob no longer matches) leaves the manifest with a
@@ -336,7 +336,7 @@ export function runSync(options: SyncOptions): SyncReport {
   for (const [path, entry] of Object.entries(records)) {
     if (entry.class !== "mirror" || next.has(path) || pathProblem(path) !== null) continue;
     if (
-      linkedAncestor(options.target, path) === null &&
+      blockedAncestor(options.target, path)?.is !== "a symbolic link" &&
       lstatOrNull(join(options.target, path)) === null
     ) {
       continue;
@@ -356,7 +356,7 @@ export function runSync(options: SyncOptions): SyncReport {
     replaced,
     retired,
     notes,
-    mirrors,
+    mirrors: mirrors.rows,
   });
 }
 
@@ -385,6 +385,7 @@ function main(argv: string[]): number {
       cutover: flags["--cutover"] === "true",
     });
   } catch (error) {
+    if (error instanceof MirrorFailure) fail(error.failures.map(describeMirrorProblem));
     fail(error instanceof Error ? error.message : String(error));
   }
   if (flags["--summary"] !== undefined) {

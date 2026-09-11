@@ -2,12 +2,8 @@
 // drops unknown names instead of failing.
 
 import { describe, expect, test } from "bun:test";
-import {
-  applies,
-  resolveModules,
-  selectEntries,
-} from "../../../.github/scripts/sync/writer/select.ts";
-import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import { resolveModules } from "../../../.github/scripts/sync/writer/select.ts";
+import { applies, parseFilesConfig, selectEntries } from "../../../actions/plan/files_config.ts";
 
 const CONFIG = parseFilesConfig(`
 placeholders: []

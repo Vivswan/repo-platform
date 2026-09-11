@@ -21,7 +21,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `labels.fuzzer` | The fuzzer module's tracking-issue label | `fuzz-nightly` |
 | `labels.nightly` | The nightly module's tracking-issue label | `nightly-failure` |
 | `labels.docs_site` | The docs-site link-rot tracking label | `docs-link-rot` |
-| `mirrors` | `{source, targets}` entries copying a file the sync wrote to other paths; single-segment `*` globs | none |
+| `mirrors` | `{source, targets}` entries copying a `managed` or `split` file the sync writes here to other paths; single-segment `*` globs. The `plan` job rejects a target that nests with another, with a path the sync writes or retires, or under `.github/workflows/` | none |
 
 Shapes the schema pins: `project.slug` is kebab-case; `docs_site.path` and every `mount` are one lowercase URL segment; `pages.dist`, `skills.dir`, and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
 

@@ -2,7 +2,7 @@
 // passing render, the ownership-table mirror that stamps its manifest, the
 // manifest builders, and the validator runner (bound to each file's TempDirs).
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { boundedSpawnSync } from "../../../../shared/bounded_spawn.ts";
 import type { TempDirs } from "../../../../shared/temp_dir.ts";
@@ -238,6 +238,8 @@ export interface RunValidatorOptions {
   env?: Record<string, string>;
   noManifest?: boolean;
   omit?: string[];
+  /** Symbolic links to plant after the files, path -> link target. */
+  links?: Record<string, string>;
 }
 
 export interface ValidatorResult {
@@ -271,6 +273,10 @@ export function validatorRunner(temp: TempDirs) {
     for (const [rel, content] of Object.entries(tree)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
+    }
+    for (const [rel, to] of Object.entries(opts.links ?? {})) {
+      mkdirSync(join(root, dirname(rel)), { recursive: true });
+      symlinkSync(to, join(root, rel));
     }
     if (opts.gitInit) {
       const init = boundedSpawnSync(["git", "-C", root, "init", "-q"], { env: gitFreeEnv() });

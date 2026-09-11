@@ -19,11 +19,11 @@ The platform retired a split file (`.github/SECURITY.md` in the cutover) and the
 
 Resolution: the file is now yours. Delete the platform's region and keep your text, or delete the file; the row returns on every sync until the file is gone.
 
-## 3. `refused` mirror
+## 3. A mirror declaration the writer cannot honour
 
-`.repo-platform.yml` declares `mirrors: [{source: LICENSE.md, targets: ["docs/**/LICENSE.md"]}]`. The Mirrors row reads `refused` because `**` is not accepted; the PR holds.
+`.repo-platform.yml` declares `mirrors: [{source: LICENSE.md, targets: ["docs/**/LICENSE.md"]}]`. The `plan` job of fleet CI rejects `**` on the PR that adds it; a declaration that lands anyway, or one only the checkout can refuse (a symbolic link where the copy would land), fails the sync: no PR, and the `[repo-platform] sync failed` issue's writer log reads `.repo-platform.yml: mirrors: source 'LICENSE.md', target 'docs/**/LICENSE.md': the pattern uses '**'`.
 
-Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration in an ordinary PR; the next sync writes the copies.
+Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration in an ordinary PR, dispatch the sync again; it writes the copies and closes the issue.
 
 ## 4. Registration note: an unknown module
 

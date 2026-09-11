@@ -115,7 +115,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
 | Registration notes | a module name `files.yml` does not know, dropped |
-| Mirrors | one row per declared target: `written`, `current`, or `refused` |
+| Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
 Merge when every row is explained.

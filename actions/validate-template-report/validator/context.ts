@@ -118,11 +118,11 @@ export interface RenderContext extends Tree {
   mode: "render";
   /** null when .github/.copier-answers.yml is not a regular file. */
   answers: AnswersFile | null;
-  /** .repo-platform.yml's top-level `modules` value as written (undefined
-   *  when the key is missing, null when the document is not a mapping)
-   *  and whether the document still has the shape the template rendered;
-   *  the record is null when the file is absent. */
-  registration: { modules: unknown; templateShape: boolean } | null;
+  /** .repo-platform.yml's top-level `modules` and `mirrors` values as
+   *  written (undefined when a key is missing, null when the document is
+   *  not a mapping) and whether the document still has the shape the
+   *  template rendered; the record is null when the file is absent. */
+  registration: { modules: unknown; mirrors: unknown; templateShape: boolean } | null;
   /** Whether the answers file is the registration record this tree must
    *  carry: the registration is missing or still template-shaped. */
   registeredByAnswers: boolean;
@@ -171,7 +171,7 @@ function loadAnswers(root: string): AnswersFile | null {
   return { data, commit };
 }
 
-function loadRegistration(root: string): { modules: unknown; templateShape: boolean } | null {
+function loadRegistration(root: string): RenderContext["registration"] {
   const path = join(root, REGISTRATION_PATH);
   if (!isRegularFile(path)) return null;
   let data: unknown = {};
@@ -180,9 +180,10 @@ function loadRegistration(root: string): { modules: unknown; templateShape: bool
   } catch {
     data = {};
   }
-  if (!isRecord(data)) return { modules: null, templateShape: true };
+  if (!isRecord(data)) return { modules: null, mirrors: null, templateShape: true };
   return {
     modules: data.modules,
+    mirrors: data.mirrors,
     templateShape: Object.keys(data).every((key) => TEMPLATE_REGISTRATION_KEYS.has(key)),
   };
 }

@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -94,4 +95,16 @@ export function writeLink(target: string, path: string, linkTarget: string): voi
 /** Removes the file or symbolic link at `path` (never what a link points at). */
 export function removeFile(target: string, path: string): void {
   unlinkSync(insideTarget(target, path));
+}
+
+/** Removes the directory at `path` with everything under it. Only a
+ *  directory is taken (a link to one is unlinked by removeFile, never
+ *  walked), and links inside it are unlinked, never followed. */
+export function removeTree(target: string, path: string): void {
+  const abs = insideTarget(target, path);
+  const stat = lstatOrNull(abs);
+  if (stat === null || stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`${path}: not a directory in the target repository; nothing to remove whole`);
+  }
+  rmSync(abs, { recursive: true });
 }
