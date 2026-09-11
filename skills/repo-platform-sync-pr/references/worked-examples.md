@@ -13,11 +13,11 @@ git diff origin/main...origin/automation/repo-platform -- .github/workflows/ci.y
 
 Resolution: expected. `ci.yml` is the same file in every repository. Move the job into `checks.yml` (it runs inside the all-green gate) or `post-green.yml` (green-gated work on main), commit on the PR branch, merge.
 
-## 2. `held` retirement of a split file
+## 2. `region removed` retirement of a split file
 
-The platform retired a split file (`.github/SECURITY.md` in the cutover) and the repo had written below its END marker. The Retired row reads `held` with a detail naming repository-owned content outside the region.
+The platform retired a split file (`.github/SECURITY.md` in the cutover) and the repo had written below its END marker. The region still matched the recorded hash, so the Retired row reads `region removed`: the markers and the platform's region went, your text stayed as a plain file, and the PR holds once.
 
-Resolution: the file is now yours. Delete the platform's region and keep your text, or delete the file; the row returns on every sync until the file is gone.
+Resolution: the file is now yours. Keep it or delete it; the record left with the region, so no row returns for it. A region that no longer matches the recorded hash reads `held` instead, and that row returns every sync until the file is gone.
 
 ## 3. `refused` mirror
 

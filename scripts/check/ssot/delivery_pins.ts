@@ -1,13 +1,12 @@
 // Rules pinning what the fleet executes from: upstream action refs and
 // every self-reference riding the build branch.
 
-import {
-  EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
-  FLEET_WORKFLOWS,
-} from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { join } from "node:path";
+import { FLEET_WORKFLOWS } from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { actionManifestPaths } from "../../lib/action_steps.ts";
 import { constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, sortedSet } from "./comparison.ts";
-import { OWNER, read, walkFiles } from "./inputs.ts";
+import { OWNER, REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 export interface Pin {
@@ -41,28 +40,11 @@ export function extractUsesPins(text: string, file: string): Pin[] {
   return pins;
 }
 
-/** Every composite action manifest under actions/, in either spelling the
- *  runner reads (action.yml or action.yaml), nested ones included
- *  (actions/pages-site/check-links is a manifest of its own), from a
- *  walkFiles listing; symlinks are not manifests, and the directories
- *  publication excludes never reach the fleet. */
-export function actionManifests(files: { path: string; symlink: boolean }[]): string[] {
-  return files
-    .filter(
-      (f) =>
-        !f.symlink &&
-        /(^|\/)action\.ya?ml$/.test(f.path) &&
-        !f.path.split("/").some((segment) => EXCLUDED_ACTION_DIRS.has(segment)),
-    )
-    .map((f) => f.path)
-    .sort();
-}
-
 /** The checked-out actions/ tree's manifests: the one walk every rule over
- *  action manifests and their forcing tests share, so no two judge
- *  different rosters. */
+ *  action manifests, the pin generator, and their forcing tests share, so
+ *  no two judge different rosters. */
 export function actionManifestFiles(): string[] {
-  return actionManifests(walkFiles("actions"));
+  return actionManifestPaths(join(REPO_ROOT, "actions"));
 }
 
 /** Third-party actions pinned to a BRANCH commit rather than a release: the

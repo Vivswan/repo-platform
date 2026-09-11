@@ -90,7 +90,7 @@ describe("the source grammar", () => {
   test("a files.yml name is a github/gitignore root stem, and the block file carries it", () => {
     expect(upstreamPath("Node")).toBe("Node.gitignore");
     expect(blockName("Global/macOS.gitignore")).toBe("macOS");
-    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.gitignore.block.Node");
+    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.block.Node.gitignore");
   });
 
   test("gitignoreSources reads the declaring modules in files.yml order", () => {
@@ -167,10 +167,10 @@ describe("the offline topology check", () => {
 
   test("a block no source names is a stray; a declared source without its block is missing", () => {
     const { filesDir } = generated();
-    writeFileSync(join(filesDir, "uv/.gitignore.block.Old"), "x\n");
-    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual(["files/uv/.gitignore.block.Old"]);
+    writeFileSync(join(filesDir, "uv/.block.Old.gitignore"), "x\n");
+    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual(["files/uv/.block.Old.gitignore"]);
     expect(missingBlockFiles([...ENTRIES, ["rust", ["Rust.gitignore"]]], filesDir)).toEqual([
-      "files/rust/.gitignore.block.Rust",
+      "files/rust/.block.Rust.gitignore",
     ]);
   });
 
@@ -178,34 +178,34 @@ describe("the offline topology check", () => {
     const { filesDir, selfPath } = generated();
     const selfText = readSelf(selfPath);
     writeFileSync(
-      join(filesDir, "bun/.gitignore.block.bun"),
+      join(filesDir, "bun/.block.bun.gitignore"),
       buildBlock(SECTIONS["Node.gitignore"]),
     );
-    writeFileSync(join(filesDir, "uv/.gitignore.block.Python"), SECTIONS["Python.gitignore"]);
+    writeFileSync(join(filesDir, "uv/.block.Python.gitignore"), SECTIONS["Python.gitignore"]);
     const problems = topologyProblems({ entries: ENTRIES, filesDir, selfText });
     expect(problems.map((p) => p.split(";")[0])).toEqual([
-      "files/bun/.gitignore.block.bun encodes [Node.gitignore] but its name stands for bun.gitignore",
-      "files/uv/.gitignore.block.Python is not exactly its section plus one blank line",
+      "files/bun/.block.bun.gitignore encodes [Node.gitignore] but its name stands for bun.gitignore",
+      "files/uv/.block.Python.gitignore is not exactly its section plus one blank line",
       "no block file carries [bun.gitignore], so .gitignore cannot be checked against them",
     ]);
     const shared: [string, string[]][] = [...ENTRIES, ["node", ["Node.gitignore"]]];
     writeFileSync(
-      join(filesDir, "bun/.gitignore.block.bun"),
+      join(filesDir, "bun/.block.bun.gitignore"),
       buildBlock(SECTIONS["bun.gitignore"]),
     );
     writeFileSync(
-      join(filesDir, "uv/.gitignore.block.Python"),
+      join(filesDir, "uv/.block.Python.gitignore"),
       buildBlock(SECTIONS["Python.gitignore"]),
     );
     mkdirSync(join(filesDir, "node"));
     writeFileSync(
-      join(filesDir, "node/.gitignore.block.Node"),
+      join(filesDir, "node/.block.Node.gitignore"),
       buildBlock("## Node (github/gitignore Node.gitignore)\nnode_modules/\ndist/\n"),
     );
     expect(
       topologyProblems({ entries: shared, filesDir, selfText }).map((p) => p.split(";")[0]),
     ).toEqual([
-      "files/node/.gitignore.block.Node differs from another module's copy of Node.gitignore",
+      "files/node/.block.Node.gitignore differs from another module's copy of Node.gitignore",
       ".gitignore's managed region differs from files/base/.gitignore plus the block files",
     ]);
   });
@@ -226,7 +226,7 @@ describe("the offline topology check", () => {
       topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
     ).toEqual([".gitignore's managed region lacks the section(s) [Global/Windows.gitignore]"]);
     // A block file gone: the self comparison cannot run and says so.
-    rmSync(join(filesDir, "bun/.gitignore.block.bun"));
+    rmSync(join(filesDir, "bun/.block.bun.gitignore"));
     expect(
       topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
         (p) => p.split(";")[0],

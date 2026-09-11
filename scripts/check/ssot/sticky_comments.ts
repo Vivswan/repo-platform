@@ -39,12 +39,11 @@ export interface StickyScope {
 
 /** The workflow stem a writer source lands as, or null for any other
  *  path: `files/<module>/.github/workflows/<stem>[.<variant>].yml`, block
- *  files (`<stem>.yml.block.<value>`) included, since a block is spliced
+ *  files (`<stem>.block.<value>.yml`) included, since a block is spliced
  *  into the workflow whose name it carries. The stem is the filename up to
  *  its first dot (`auto-assign.codeql.yml` lands as auto-assign.yml). */
 export function sourceWorkflowStem(rel: string): string | null {
-  const match =
-    /^files\/[^/]+\/\.github\/workflows\/([^/.]+)\.[^/]*\.?ya?ml(?:\.block\.[^/]+)?$/.exec(rel);
+  const match = /^files\/[^/]+\/\.github\/workflows\/([^/.]+)[^/]*\.ya?ml$/.exec(rel);
   return match?.[1] ?? null;
 }
 
