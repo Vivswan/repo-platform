@@ -2,16 +2,19 @@
 // selection, sync.ts runs as a subprocess over an empty checkout whose
 // registration is derived from the golden's answers, and the result is
 // compared byte for byte with the frozen render under files_fidelity/renders.
-// The frozen renders are tests/golden-renders/<selection> as of
-// redesign/p1b-skeleton commit 469a9b00 (its tip when they were frozen).
+// The frozen renders are copies of tests/golden-renders/<selection>; while
+// that directory exists a test below holds them byte-identical to it, so a
+// template change reaches this comparison in the same PR. Refresh: delete
+// tests/ci/files_fidelity/renders/<selection>, then copy
+// tests/golden-renders/<selection> in its place (a copy over the old tree
+// would keep files the golden no longer renders).
 // Every difference is pinned: a path the writer never writes is listed with
 // its reason, and a file whose content differs is listed with the exact
 // transform of the golden that yields the writer's output, so an entry that
 // stops differing fails as stale. Content the templates side keeps moving
 // (the toolchain pin dotfiles, the gitignore skeleton's region body, the
 // github/gitignore sections) is compared with the templates side as it is
-// now, not with the frozen bytes: the renders cannot be re-frozen after a
-// refresh, and the templates side is what they rendered from.
+// now, not with the frozen bytes, so the comparison outlives the goldens.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -34,6 +37,7 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
 const RENDERS = join(import.meta.dir, "files_fidelity/renders");
+const GOLDEN_RENDERS = join(REPO_ROOT, "tests/golden-renders");
 const SELECTIONS = ["minimal", "uv-no-release-please", "all-modules"] as const;
 type Selection = (typeof SELECTIONS)[number];
 const BUILD = "x".repeat(40);
@@ -89,21 +93,9 @@ export function refreshSections(region: string, current: Record<string, string>)
   return out + region.slice(cursor);
 }
 
-/** A starter the platform stopped writing is neither written nor retired
- *  (a retirement would only report it kept); the account's .github
- *  repository serves the forms. */
-const STARTER_LEFT_ALONE =
-  "no longer written and not retired: a starter is repo-owned; served by the account's .github repository";
-
 /** Paths the golden carries that the writer never writes, with why. */
 const ABSENT: Record<string, string> = {
   ".github/.copier-answers.yml": "retired: copier's answers file has no successor",
-  "CONTRIBUTING.md": "retired: served by the account's .github repository",
-  ".github/CODE_OF_CONDUCT.md": "retired: served by the account's .github repository",
-  ".github/SECURITY.md": "retired: served by the account's .github repository",
-  ".github/ISSUE_TEMPLATE/bug_report.yml": STARTER_LEFT_ALONE,
-  ".github/ISSUE_TEMPLATE/config.yml": STARTER_LEFT_ALONE,
-  ".github/ISSUE_TEMPLATE/feature_request.yml": STARTER_LEFT_ALONE,
 };
 
 /** Paths present on both sides that are not compared, with why. */
@@ -594,6 +586,31 @@ describe("blocks land once per distinct content, in module order", () => {
 
 test("the fixture renders are the three kept golden selections", () => {
   expect(readdirSync(RENDERS).sort()).toEqual([...SELECTIONS].sort());
+});
+
+/** A path's content under `root` for comparison: a symlink by its target,
+ *  a file by its bytes, an absent path as null. Only absence is null: an
+ *  unreadable path on both sides must not read as equal. */
+function entry(root: string, path: string): string | null {
+  const full = join(root, path);
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(full);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  return stat.isSymbolicLink() ? `-> ${readlinkSync(full)}` : readFileSync(full, "utf-8");
+}
+
+describe.if(existsSync(GOLDEN_RENDERS))("the frozen renders are the current golden renders", () => {
+  test.each([...SELECTIONS])("%s matches tests/golden-renders byte for byte", (selection) => {
+    const frozen = join(RENDERS, selection);
+    const current = join(GOLDEN_RENDERS, selection);
+    const paths = new Set([...walk(frozen), ...walk(current)]);
+    const stale = [...paths].filter((path) => entry(frozen, path) !== entry(current, path)).sort();
+    expect(stale).toEqual([]);
+  });
 });
 
 test("every listed absence, known difference, and pin file names a path some golden renders", () => {

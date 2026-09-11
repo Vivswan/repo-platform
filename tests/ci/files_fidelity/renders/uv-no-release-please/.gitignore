@@ -15,6 +15,10 @@
 .worktrees/
 .claude/settings.local.json
 
+## CI workspace paths (repo-platform)
+/results.sarif
+/.fuzz-failures/
+
 ## Windows (github/gitignore Global/Windows.gitignore)
 # Windows thumbnail cache files
 Thumbs.db
@@ -319,10 +323,10 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer,
-#   you could uncomment the following to ignore the entire vscode folder
+#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore that
+#   can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
+#   and can be added to the global gitignore or merged into this file. However, if you prefer, you
+#   could uncomment the following to ignore the entire vscode folder
 # .vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
