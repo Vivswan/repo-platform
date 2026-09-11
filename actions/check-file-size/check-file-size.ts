@@ -17,8 +17,9 @@ import { join, relative, resolve } from "node:path";
 
 export type Kind = "source" | "test" | "workflow" | "shell" | "markdown";
 export type Tier = "hard" | "warn";
-/** The header is the first comment block when no code precedes it; every
- *  other block is judged as a block. */
+/** The header is the first comment block when no code precedes it (a
+ *  shebang or a generated region may); every other block is judged as a
+ *  block. */
 export type CommentScope = "header" | "block";
 
 export interface Caps {
@@ -252,8 +253,9 @@ function lineKind(text: string, syntax: CommentSyntax): "comment" | "code" | { c
 
 /** Contiguous runs of whole-line comments. A blank line, a code line (an
  *  inline trailing comment is code, so is a `*\/` followed by code), or a
- *  `skip`ped line ends a run; a block comment counts every line between its
- *  delimiters, blanks included. A first-line shebang is neither. */
+ *  `skip`ped line ends a run, and only code demotes the header; a block
+ *  comment counts every line between its delimiters, blanks included. A
+ *  first-line shebang is neither. */
 function commentBlocks(lines: string[], syntax: CommentSyntax, skip: boolean[]): CommentBlock[] {
   const blocks: CommentBlock[] = [];
   let start = -1;
@@ -282,7 +284,7 @@ function commentBlocks(lines: string[], syntax: CommentSyntax, skip: boolean[]):
   for (const [index, raw] of lines.entries()) {
     if (skip[index]) {
       closer = null;
-      code(index);
+      end(index);
       continue;
     }
     let text = raw.trim();

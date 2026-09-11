@@ -598,6 +598,30 @@ describe("judgeFile comment blocks", () => {
     ],
     ["a one-line /* */ before code is code", "f.ts", `${"/* a */ x();\n".repeat(20)}`, []],
     [
+      "a generated region before the header does not demote it: the header cap applies",
+      "f.ts",
+      `// BEGIN GENERATED: x\ng\n// END GENERATED: x\n${slashes(HEADER)}x\n`,
+      [],
+    ],
+    [
+      "the same header one over the header cap warns as a header, the region not counted",
+      "f.ts",
+      `// BEGIN GENERATED: x\ng\n// END GENERATED: x\n${slashes(HEADER + 1)}x\n`,
+      [[4, HEADER + 1, "header"]],
+    ],
+    [
+      "a code line between the region and the block still demotes it (control)",
+      "f.ts",
+      `// BEGIN GENERATED: x\ng\n// END GENERATED: x\nx\n${slashes(BLOCK + 1)}x\n`,
+      [[5, BLOCK + 1, "block"]],
+    ],
+    [
+      "a generated region ends the header run: the comments after it are a block",
+      "f.ts",
+      `${slashes(2)}// BEGIN GENERATED: x\n// END GENERATED: x\n${slashes(BLOCK + 1)}x\n`,
+      [[5, BLOCK + 1, "block"]],
+    ],
+    [
       "a generated region inside an open /* */ contributes nothing and ends the run",
       "f.ts",
       `x();\n/*\n// BEGIN GENERATED: x\n${"g\n".repeat(20)}// END GENERATED: x\n*/\n`,
