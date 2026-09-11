@@ -63,7 +63,7 @@ every job after all-green also requires needs.all-green.result == 'success' and 
 - The module test is a substring match on the plan's compact JSON array, hence the quoted token: `'"pages"'` cannot match a longer name such as `"pages-site"`.
 - Every job that tests the modules output needs `ci` directly, because a job reads outputs only from its direct dependencies.
 - The deploys sit behind `publish-release` under `!cancelled()`: a release commit's own deploy serves its new tag, and a skipped or red release still deploys.
-- Adding a module: one line in `.repo-platform.yml`, picked up next run. ci.yml does not change. The module data files (the files a module owns beyond ci.yml) still render per selection until the writer of section 6 lands, so the module-render check and the branch sync dispatch it names as the remedy remain until then.
+- Adding a module: one line in `.repo-platform.yml`, picked up next run. ci.yml does not change. The module data files (the files a module owns beyond ci.yml) arrive in the sync PR the writer opens after the registration edit merges; the `plan` job validates the registration on the PR itself, and the module-render check is retired.
 - Adding a leg: one static job in the skeleton plus its platform workflow; the skeleton is a managed file, so that is one sync of one identical file.
 - The release hooks' permission ceiling is the contract with the repo-owned hooks: a hook may need up to those grants and narrows itself per job; a narrower ceiling rejects an existing hook that asks for more.
 - repo-platform's own ci.yml uses the same shape (deploy = publish the build branch; verify = fleet sync).

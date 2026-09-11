@@ -9,7 +9,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Create a new managed repository | [New repo](new-repo.md) |
 | Read a `validate-template` result: what blocks, what only warns | [New repo: the template check](new-repo.md#the-template-check) |
 | Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
-| Add or remove a module, and get its render onto the same PR | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
+| Add or remove a module, and get its render as the sync PR that follows | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
 | Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |
 | Know which conventions every managed repo follows, and what enforces each | [Fleet guidelines](fleet-guidelines.md) |
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
@@ -35,7 +35,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
-| Find where a private repo's failure details land | [Private repos: seeing the full detail](private-repos.md#seeing-the-full-detail) |
+| Find where a private repo's failure details land | [Private repos: details in the target repository](private-repos.md) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 

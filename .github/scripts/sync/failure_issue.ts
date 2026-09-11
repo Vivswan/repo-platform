@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-// Failure-report issue on the target repo (reusable-template-sync.yml's
-// tail steps): a hide-details target's issues are as private as the repo,
-// so the full run_hidden.ts captures are safe there when no sync PR exists
-// to carry them.
+// Failure-report issue on the target repo (the settings apply's tail
+// steps): a hide-details target's issues are as private as the repo, so
+// the full run_hidden.ts captures are safe there when no PR exists to
+// carry them.
 //
 // deliver (failed run): replace the issue body with every recorded hidden
 // failure (hidden-failures.tsv) and (re)open it, assigning the target's
@@ -18,10 +18,9 @@
 // generic advice only, never the slug, request path, API message, or issue
 // URL, all of which would leak into this public log.
 // Usage: failure_issue.ts deliver|resolve. Env: TARGET, GH_TOKEN, RUN_URL,
-// RUNNER_TEMP, GITHUB_REPOSITORY; PR_URL (deliver only, may be empty); MODE
-// and BRANCH (a branch render reports under its own per-branch title);
-// REPORT_TITLE and REPORT_KIND (another reporting workflow's, the settings
-// apply's).
+// RUNNER_TEMP, GITHUB_REPOSITORY; PR_URL (deliver only, may be empty);
+// REPORT_TITLE and REPORT_KIND (the reporting workflow's own title and
+// what failed, the settings apply's).
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,23 +38,18 @@ const runUrl = requireEnv("RUN_URL");
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-// One title per REPORTING WORKFLOW, and per branch for a branch render.
-// The issue is matched by exact title, so a shared one lets an unrelated
-// green run resolve a report the other is still failing on - the settings
-// apply, the default-branch sync, and each branch's render fail for
-// different reasons and recover independently.
-const branchRender = env("MODE") === "branch";
+// One title per REPORTING WORKFLOW. The issue is matched by exact title,
+// so a shared one lets an unrelated green run resolve a report the other
+// is still failing on: workflows fail for different reasons and recover
+// independently.
 const ISSUE_TITLE =
   env("REPORT_TITLE") !== ""
     ? env("REPORT_TITLE")
-    : branchRender
-      ? `[automated] repo-platform branch render: private failure report (${requireEnv("BRANCH")})`
-      : "[automated] repo-platform sync: private failure report";
+    : "[automated] repo-platform sync: private failure report";
 /** What FAILED, in the report's own words. Follows the title so the two
  *  cannot describe different workflows: a settings report that says "push
  *  sync" sends the reader to the wrong run. */
-const REPORT_KIND =
-  env("REPORT_KIND") !== "" ? env("REPORT_KIND") : branchRender ? "branch render" : "push sync";
+const REPORT_KIND = env("REPORT_KIND") !== "" ? env("REPORT_KIND") : "push sync";
 // gh's stderr accumulates here, captured and never printed: it embeds the
 // request path and API message.
 let errlog = "";

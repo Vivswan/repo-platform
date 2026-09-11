@@ -45,13 +45,18 @@ const readReport = (path: string): string | null => {
   }
 };
 
+/** The findings' remedy: the writer replaces a managed file whole, and
+ *  holds a path whose kind changed (write_link.ts) rather than replace it. */
+const REMEDY =
+  "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a file in a link's place) for this repository to restore. This FAILS the check.";
+
 let integrity: string;
 switch (verdict.kind) {
   case "clean":
     integrity = "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
     break;
   case "findings":
-    integrity = `#### Integrity\n\n${verdict.findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+    integrity = `#### Integrity\n\n${verdict.findings}\n${REMEDY}`;
     break;
   case "not-judged":
     integrity = `#### Integrity\n\nNot judged: ${verdict.reason}. See the [run log](${runUrl}). This FAILS the check.`;

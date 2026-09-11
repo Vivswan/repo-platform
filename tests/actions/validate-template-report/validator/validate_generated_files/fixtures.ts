@@ -75,6 +75,20 @@ export const BASELINE: Record<string, string> = {
 
 export const MANIFEST = ".github/repo-platform-manifest.json";
 
+// The registration the sync writer's cutover leaves: the project block
+// beside the module list. A key outside the template's `modules`/`mirrors`
+// pair is what tells the validator the answers file has been retired.
+export const V2_REGISTRATION =
+  "# Generated once by repo-platform and repo-owned from then on.\nmodules: [uv]\nproject:\n  name: Demo\n  slug: demo\n  description: A demo\n";
+// What the cutover takes out of BASELINE: the answers file itself, and the
+// public-only files, which stand down once no answers record the
+// visibility (the writer retires both anyway).
+export const CUT_OVER_OMIT = [
+  ".github/.copier-answers.yml",
+  ".github/CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+];
+
 // Absence and provenance checks are STRICT (every build ships the
 // manifest, and the roster cross-check errors on any roster path the
 // manifest does not list), so every client-render fixture carries each
@@ -160,12 +174,14 @@ export function manifestOf(entries: Record<string, string>): string {
 }
 
 /** The entries the stamper would write for `tree`: the self entry carrying
- *  the recorded _commit, the starter registration file, and one entry per
+ *  the recorded _commit (the writer's build, COMMIT, once no answers file
+ *  records one), the starter registration file, and one entry per
  *  mirror-roster path the tree carries. */
 export function stampedEntries(tree: Record<string, string>): Record<string, string> {
-  const answers = tree[".github/.copier-answers.yml"] ?? "";
-  const isPrivate = /^private:\s*true\b/m.test(answers);
-  const commit = /^_commit:[ \t]*(.+?)[ \t]*$/m.exec(answers)?.[1] ?? null;
+  const answers = tree[".github/.copier-answers.yml"];
+  const isPrivate = answers !== undefined && /^private:\s*true\b/m.test(answers);
+  const commit =
+    answers === undefined ? COMMIT : (/^_commit:[ \t]*(.+?)[ \t]*$/m.exec(answers)?.[1] ?? null);
   const modules = (/^modules:\s*\[([^\]]*)\]/m.exec(tree[".repo-platform.yml"] ?? "")?.[1] ?? "")
     .split(",")
     .map((name) => name.trim().replace(/^["']|["']$/g, ""))

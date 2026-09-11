@@ -2,9 +2,8 @@
 // Delivers every managed-class file of the clean render into the target
 // tree whole, the ownership contract docs/compose.md states for the class.
 // copier's update merges managed files three-way, so a local edit that
-// merges cleanly (a trailing comment) survives the update, the stamp
-// records it, and the module-render check reads the tree as stale on every
-// run after. Managed entries of render-new's manifest are copied byte for
+// merges cleanly (a trailing comment) survives the update and the stamp
+// records it. Managed entries of render-new's manifest are copied byte for
 // byte and symlinks re-linked to the render's target; split files
 // (preserve_local_content.ts), starters (repo-owned), and retired files
 // (retired_cleanup.ts) are never touched. The replaced paths go to the PR

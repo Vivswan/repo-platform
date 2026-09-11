@@ -5,7 +5,14 @@ group: Fleet operations
 
 # Migrations
 
-A one-shot fleet transition (a rendered file moving, a repo-owned file needing a rewrite) is one rung on the migration ladder: ONE self-contained file under `.github/scripts/sync/migrations/`, shipped verbatim on the `build` branch. Retiring a managed file needs no rung: [sync/retired_paths.ts](../.github/scripts/sync/retired_paths.ts) lists every path the old render carried and the new one does not, `_skip_if_exists` files excepted, and the sync deletes them. The sync runs, for each repository, the rungs that appeared in build history after the build it last synced from. Rungs are never retired: the ladder is permanent history. Code is the source of truth; this page is the map.
+A one-shot fleet transition (a rendered file moving, a repo-owned file needing a rewrite) is one rung on the migration ladder: ONE self-contained file under `.github/scripts/sync/migrations/`, shipped verbatim on the `build` branch. Retiring a platform file needs no rung: a `retired` entry in `files.yml` names the path, and the writer deletes it when the file is still what it recorded ([sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts); [sync.md](sync.md) has the outcomes). The ladder's runner ([sync/run_migrations.ts](../.github/scripts/sync/run_migrations.ts)) applies, for one repository, the rungs that appeared in build history after the build it last synced from. Rungs are never retired: the ladder is permanent history. Code is the source of truth; this page is the map.
+
+Who runs the runner, and who does not:
+
+- The local rehearsal ([sync/rehearse.ts](../.github/scripts/sync/rehearse.ts), also ci.yml's `rehearse-fleet` job) and the upgrade-path harness (`tests/ci/upgrade_path/`) run it.
+- The live operator ([sync-repos.yml](../.github/workflows/sync-repos.yml)) runs no rung: its writer replaces platform files whole, so a moved or retired platform file needs no ladder step there.
+- The operator's one transition is the answers-to-registration cutover ([sync.md](sync.md#cutover)), removed after every repository has crossed it.
+- No sync PR carries a rung's rewrite today: the rehearsal is read-only and the harness is a test, so a repo-owned rewrite the fleet needs gets its delivery step in the operator before its rung lands.
 
 | Question | Owner |
 | --- | --- |
@@ -58,7 +65,7 @@ build branch (first-parent, oldest to newest)
 | A repository synced after the rung existed | nothing for that rung | - |
 | The same build on both sides | nothing | - |
 | A rung pruned from main after the repository fell behind | still the rung | the last build commit that carried it (history) |
-| No usable base (`recover=recopy`; the recorded `_commit` is unusable) | every rung on the delivered tree, in order; a pruned rung is not among them | the delivered tip; each rung is idempotent |
+| No usable base (the recorded `_commit` is unusable) | every rung on the delivered tree, in order; a pruned rung is not among them | the delivered tip; each rung is idempotent |
 
 Because the source is history, pruning an old rung from main is an ordinary PR for every repository with a usable recorded base: one that detaches and re-attaches years later still runs it. The one cost is recovery: a repository with no usable base runs only the delivered tip's rungs, so a pruned rung's postcondition is not re-established there. Prune only rungs whose postcondition a fresh render carries anyway (a rename copier re-renders), never one that rewrites repository-owned content. The rung's source is fetched with `git show <commit>:migrations/<file>` into `$RUNNER_TEMP` and loaded from there.
 
@@ -66,9 +73,9 @@ Rungs run before the module selection and before copier updates the tree: a rung
 
 ## A usable base
 
-[sync/recorded_commit.ts](../.github/scripts/sync/recorded_commit.ts) is the one judge, shared by the sync and the rehearsal. Only a build commit is a base: the walk needs one, and so does copier's three-way merge. A rejected `_commit` is a hard error unless the sync was dispatched with `recover=recopy`, where it reads as no base; an answers file the sync cannot read at all fails before that judgment, recovery or not, and is fixed by hand first.
+[sync/recorded_commit.ts](../.github/scripts/sync/recorded_commit.ts) is the ladder's one judge, shared by its runner and the rehearsal; the operator consults neither (above). Only a build commit is a base: the walk needs one. A rejected `_commit` reads as no base. The operator itself has no recovery mode: a broken target is re-synced by re-running the workflow, since the writer replaces platform files whole.
 
-| Rejected recorded state | Why | Under `recover=recopy` |
+| Rejected recorded state | Why | The ladder's reading |
 | --- | --- | --- |
 | Answers file missing, unreadable, or not a YAML mapping | Nothing to judge | Still a hard error (resolve_refs.ts) |
 | No `_commit`, or one that is not a full 40-hex sha (a short sha, a tag, a revspec such as `origin/build`) | git would resolve a revspec to whatever it names today, `origin/build` to the delivered tip, making every rung read as crossed; the stamp hook writes only full shas | No base |

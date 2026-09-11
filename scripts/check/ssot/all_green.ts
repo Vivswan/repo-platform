@@ -390,7 +390,6 @@ export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
 export const FLEET_CI_ROSTER = [
   "plan",
   "validate-template",
-  "module-render",
   "base-checks",
   "dependency-review",
   "zizmor",

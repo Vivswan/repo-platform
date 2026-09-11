@@ -1,25 +1,23 @@
-# Push sync fan-out: resolves which repos to sync (every discovered repo
-# the REPO_PLATFORM_TOKEN can push to - the grant is the only membership
-# fact) and runs reusable-template-sync.yml against
-# each one, in parallel. Managed repos carry no sync workflow and no
-# sync secret; their update PRs are pushed from here with the
-# REPO_PLATFORM_TOKEN PAT.
+# The push-only sync operator: the plan job resolves the build and the rows
+# (which managed repositories, from the REPO_PLATFORM_TOKEN's grant, probed
+# per repository), and one row job per index copies the build into its
+# target and delivers a PR. Managed repositories carry no sync workflow and
+# no secret; the fleet PAT lives here alone.
 #
-# The `sync-repos` concurrency group makes this the single automated
-# writer of every target's automation branch: legs fan out in parallel,
-# but each writes to a different repo, so the per-branch single-writer
-# guarantee holds; the sync's lease-guarded force-push regenerates that
-# branch each run. GitHub keeps only ONE pending run per group and
-# cancels the rest ("a higher priority waiting request exists"), so
-# multi-repo work belongs in a single run - repo=all covers a
-# fleet-wide recover=recopy, and repo takes a comma list. The weekly cron
-# is the catch-all: repos pick up main merges through it, and it heals
-# any sync run that was missed. A dispatch naming ONE repo plus a branch
-# renders onto that branch instead (the PR that changed the module
-# selection gets its render; the reusable sync reads the branch off the
-# event payload, never a step input). A merged PR opts into an immediate sync
-# with a [fleet-sync: <scope>] directive (fleet_sync_marker.ts): post-green.yml's
-# sync-fleet leg then CALLS this workflow in the merge's own CI run.
+# The public log carries the operator's vocabulary and nothing else
+# (docs/sync.md, "The operator"; docs/private-repos.md): the matrix holds
+# row indexes, the row's resolve step masks the name before any other step
+# prints, every later run step writes to $RUNNER_TEMP files, and the
+# details land in the target repository itself (the PR body, or a failure
+# issue). The same job runs for public and private targets.
+#
+# The `sync-repos` concurrency group makes this the single automated writer
+# of every target's automation branch: rows fan out in parallel, each to a
+# different repository. GitHub keeps ONE pending run per group, so
+# multi-repo work belongs in a single run (repo=all, or a comma list). A
+# merged PR opts into an immediate sync with a [fleet-sync: <scope>]
+# directive (fleet_sync_marker.ts): post-green.yml's sync-fleet leg then
+# CALLS this workflow in the merge's own CI run.
 
 name: Sync Repos
 
@@ -34,19 +32,8 @@ on:
           modules:<a>+<b> (every managed repo whose .repo-platform.yml selects ALL the listed modules;
           a visibility token intersects with it, a slug adds as typed), or the
           literal "all" - same as leaving it empty, every managed repo
-          (recovery requires an explicit value)
         required: false
         type: string
-      recover:
-        description: >-
-          Recovery mode - "recopy" regenerates the repo with a full
-          re-render (no three-way merge) when its recorded _commit base
-          is unusable. Requires an explicit repo scope (owner/name, or
-          "all" to recover the whole fleet); the PRs stay manual-review.
-        required: false
-        type: choice
-        options: [none, recopy]
-        default: none
       manual:
         description: >-
           Never arm auto-merge - every PR this run delivers waits for
@@ -54,21 +41,11 @@ on:
         required: false
         type: boolean
         default: false
-      branch:
-        description: >-
-          A branch of the ONE repo named above: the sync renders for the
-          selection on that branch and pushes the result onto it (the
-          PR carrying a module change gets its render) instead of
-          opening a sync PR. Refused for the default branch, a missing
-          branch, a repo list, all, or recover=recopy.
-        required: false
-        type: string
   # The opt-in path: post-green.yml's sync-fleet leg calls this workflow
   # from the merge's CI run. Named `repos`, not `repo`, on purpose - the
   # dispatch input may be a private slug and never rides in step env,
   # while this value is text off a public main commit and is passed as
-  # ONLY_REPO below. The dispatch-only inputs are unset here, so recover
-  # and manual keep their defaults.
+  # ONLY_REPO below. The dispatch-only `manual` keeps its default here.
   workflow_call:
     inputs:
       repos:
@@ -108,17 +85,20 @@ jobs:
     # skeleton; a directive sync carries that repository until it returns.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # Sum of the probe bounds at ten adopted repos: discovery 2 x 120 s +
-    # selection's two 300 s stages + 10 repos x 2 x 120 s = 50 min, plus slack.
-    timeout-minutes: 55
+    # The provenance rebuild plus the probe bounds at ten adopted repos:
+    # discovery 2 x 120 s, selection's two 300 s stages, 10 x 2 x 120 s.
+    timeout-minutes: 60
+    # Checks read: the green gate reads the all-green verdict at the build
+    # tip's stamped source (shared/all_green.ts).
     permissions:
       contents: read
+      checks: read
     outputs:
-      repos: ${{ steps.select.outputs.repos }}
+      build: ${{ steps.build.outputs.build }}
+      count: ${{ steps.plan.outputs.count }}
+      indexes: ${{ steps.plan.outputs.indexes }}
     steps:
-      # A missing token is a misconfiguration of this repo: fail loudly. A
-      # deliberately NARROWED token still works - see the reusable sync's
-      # adaptive handling of missing scopes.
+      # A missing token is a misconfiguration of this repo: fail loudly.
       - name: Require the fleet token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -131,34 +111,11 @@ jobs:
             exit 1
           fi
 
-      # Fast-fail twin of select_sync_repos.ts's recovery scope guard
-      # (that script's header states the full contract; its copy is the
-      # tested backstop). Presence-only on purpose: the repo value may be
-      # a private slug, and step env values print into this public log.
-      - name: Require an explicit repo scope for recovery
-        if: inputs.recover == 'recopy'
-        env:
-          REPO_SET: ${{ inputs.repo != '' }}
-        run: |
-          if [ "$REPO_SET" != "true" ]; then
-            echo "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository,"\
-              "or repo=all to fan the recovery out across every managed repo."
-            exit 1
-          fi
-
-      # Presence-only twin of sync_scope.ts's branch guard, for the same
-      # reason as above: the values may be a private slug and branch.
-      - name: Require one repo for a branch render
-        if: inputs.branch != ''
-        env:
-          REPO_SET: ${{ inputs.repo != '' }}
-        run: |
-          if [ "$REPO_SET" != "true" ]; then
-            echo "::error::branch needs repo=<owner/name>: the sync renders onto that one repository's branch instead of opening a sync PR."
-            exit 1
-          fi
-
+      # Full history: the provenance check walks main for the build's
+      # stamped source and rebuilds the tree from that commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -167,9 +124,14 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json
-      # for the select step; the script's header states the contract
-      # (pre-filter vs probe, fail-closed visibility for redaction).
+      # Once for the whole run: every row checks out exactly this commit.
+      - name: Resolve the build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun .github/scripts/sync/resolve_build.ts
+
+      # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json.
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -179,8 +141,7 @@ jobs:
       # main commit; empty on cron and dispatch runs). The typed dispatch
       # input never rides here: it may be a private slug, and the runner
       # prints step env values into this public log - the script reads it
-      # from the event payload instead. The script also re-runs the
-      # recovery scope guard fast-failed above.
+      # from the event payload instead.
       - name: Select repos and check adoption
         id: select
         env:
@@ -188,45 +149,120 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           ONLY_REPO: ${{ inputs.repos }}
-          # The judged commit a refused called scope names; empty
-          # on cron and dispatch runs like ONLY_REPO.
           TARGET_SHA: ${{ inputs.sha }}
-          # Scheduled runs have no inputs context: empty is
-          # fine, only the literal "recopy" means recovery.
-          RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/fleet/select_sync_repos.ts
 
+      - name: Print the plan
+        id: plan
+        env:
+          ROWS: ${{ steps.select.outputs.repos }}
+        run: bun .github/scripts/sync/verdict.ts plan
+
+  # One job per row index; the job name never carries a repository name.
+  # The target checkout and the writer continue on error so deliver.ts can
+  # file the failure in the target; the job is red only before that point.
   sync:
     needs: plan
-    if: needs.plan.outputs.repos != '[]'
-    # Checks read flows to the called workflow's token: its green-source
-    # gate reads the all-green verdict check runs at the build tip's
-    # stamped source (shared/all_green.ts). Provenance itself is
-    # API-free: verify_build_provenance.ts is git plus a local rebuild.
+    if: needs.plan.outputs.count != '0'
     permissions:
       contents: read
-      checks: read
     strategy:
       fail-fast: false
-      # Every leg writes with the same PAT, and PR creation is
-      # content-creating (secondary rate limits): bound the
-      # fleet's burst. Costs a single-repo dispatch nothing.
+      # Every row writes with the same PAT, and PR creation is
+      # content-creating (secondary rate limits): bound the fleet's burst.
       max-parallel: 5
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.repos) }}
-    # matrix.repo is the redaction hint for a private repo - the real slug
-    # must never reach this job name or the called workflow's auto-printed
-    # inputs; the leg resolves it from matrix.verify.
-    name: sync (${{ matrix.repo }})
-    uses: ./.github/workflows/reusable-template-sync.yml
-    with:
-      target_repo: ${{ matrix.repo }}
-      target_private: ${{ matrix.private }}
-      target_verify: ${{ matrix.verify }}
-      # The dispatch default is the literal "none"; only "recopy" means
-      # recovery downstream.
-      recover: ${{ inputs.recover == 'recopy' && 'recopy' || '' }}
-      # Scheduled runs have no inputs context: default false.
-      force_manual: ${{ inputs.manual || false }}
-    secrets:
-      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        row: ${{ fromJSON(needs.plan.outputs.indexes) }}
+    name: sync (row ${{ matrix.row }})
+    runs-on: ubuntu-latest
+    # At least the budget row_budget.ts sums from the steps' bounds (the
+    # operator-verdict-only rule judges it): every bound a step can hit
+    # before deliver.ts files a failure counts, since a row the runner kills
+    # at its timeout files nothing.
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent > "$RUNNER_TEMP/install.log" 2>&1
+
+      - name: Check out the build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.build }}
+          path: build
+
+      # The plan, recomputed: the same discovery and selection the plan job
+      # ran, so row indexes mean the same repositories.
+      - name: Discover repos
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/fleet/discover_repos.ts > "$RUNNER_TEMP/discover.log" 2>&1
+
+      - name: Select repos and check adoption
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          ONLY_REPO: ${{ inputs.repos }}
+          TARGET_SHA: ${{ inputs.sha }}
+        run: bun .github/scripts/fleet/select_sync_repos.ts > "$RUNNER_TEMP/select.log" 2>&1
+
+      # The only step that sees the name in the clear: it registers every
+      # form with the masker before writing anything, then hands the name
+      # on through GITHUB_ENV (TARGET) alone.
+      - name: Resolve the row's target
+        id: target
+        env:
+          ROWS: ${{ steps.select.outputs.repos }}
+          ROW: ${{ matrix.row }}
+          PLANNED: ${{ needs.plan.outputs.count }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/sync/resolve_row.ts
+
+      # A captured clone, not actions/checkout: git quotes target file text
+      # in some diagnostics, and the checkout action echoes them.
+      - name: Check out the target
+        id: checkout
+        continue-on-error: true
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1
+
+      # The one writer step (docs/sync.md): its report is the PR body, its
+      # summary the hold decision; a failure is delivered as an issue.
+      - name: Write the build into the target
+        id: write
+        continue-on-error: true
+        # The writer's bound: its git calls are local to the clone, so the
+        # row budget counts this step by its timeout.
+        timeout-minutes: 10
+        env:
+          BUILD: ${{ needs.plan.outputs.build }}
+        run: >-
+          bun .github/scripts/sync/writer/sync.ts --files build/files.yml --tree build/files --target target
+          --build "$BUILD" --repository "$TARGET" --private "$TARGET_PRIVATE" --cutover true
+          --summary "$RUNNER_TEMP/summary.json" > "$RUNNER_TEMP/sync.log" 2>&1
+
+      - name: Deliver to the target
+        if: always() && env.TARGET != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          BUILD: ${{ needs.plan.outputs.build }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MANUAL: ${{ inputs.manual || false }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          WRITER_OUTCOME: ${{ steps.write.outcome }}
+        run: bun .github/scripts/sync/deliver.ts > "$RUNNER_TEMP/deliver-stdio.log" 2>&1
+
+      - name: Print the verdict
+        if: always()
+        env:
+          ROW: ${{ matrix.row }}
+        run: bun .github/scripts/sync/verdict.ts row

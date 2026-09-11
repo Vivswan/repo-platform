@@ -158,7 +158,7 @@ export const registrationSchema = z.strictObject({
       name: plainText("project.name").pipe(z.string().min(1)),
       slug,
       description: plainText("project.description"),
-      copyright_holder: z.string().min(1).optional(),
+      copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
     })
     .optional(),
   pages: z

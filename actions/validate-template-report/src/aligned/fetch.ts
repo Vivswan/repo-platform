@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-// The integrity leg's FETCH, run from the caller's checkout: `_commit` must
-// be on the build branch and, when BASE_REF has an answers file, at or ahead
-// of its recorded `_commit`; only then is the compare published for freshness.
+// The integrity leg's FETCH, run from the caller's checkout: the recorded
+// build commit must be on the build branch and, when BASE_REF records one,
+// at or ahead of it; only then is the compare published for freshness.
 
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   capture,
   download,
@@ -14,7 +14,12 @@ import {
   requireEnv,
   succeeded,
 } from "../../../shared/action_runtime.ts";
-import { admitBuildCommit, OPERATOR_REPO, recordedBuildSha } from "../../../shared/build_sha.ts";
+import {
+  admitBuildCommit,
+  BUILD_RECORD_FILES,
+  OPERATOR_REPO,
+  recordedBuildSha,
+} from "../../../shared/build_sha.ts";
 import { writeVerdict } from "../verdict.ts";
 import { ACTION_DIR, actionOf, BUN_VERSION_FILE, treeOf, VALIDATOR_SCRIPT } from "./tree.ts";
 
@@ -51,35 +56,40 @@ const admitted = admitBuildCommit(sha, NETWORK_TIMEOUT_MS);
 if ("refusal" in admitted) refuse(admitted.refusal);
 const { status, aheadBy } = admitted;
 
-// The vintage floor: `_commit` may move forward along the build branch,
-// never back to an older validator with fewer rules. The base ref's
-// recorded `_commit` is the floor; no answers file there sets none.
-const baseAnswers = capture(
-  [
-    "gh",
-    "api",
-    "--method",
-    "GET",
-    "-H",
-    "Accept: application/vnd.github.raw+json",
-    `repos/${callerRepo}/contents/.github/.copier-answers.yml`,
-    "-f",
-    `ref=${baseRef}`,
-  ],
-  { timeoutMs: NETWORK_TIMEOUT_MS },
-);
-if (!succeeded(baseAnswers.exit)) {
+// The vintage floor: the recorded commit may move forward along the build
+// branch, never back to an older validator with fewer rules. The base ref's
+// record is the floor, read from the same files in the same order as the
+// checkout's; a base ref carrying neither sets none.
+const baseRoot = join(alignedDir, "base");
+let floorRecorded = false;
+for (const file of BUILD_RECORD_FILES) {
+  const baseFile = capture(
+    [
+      "gh",
+      "api",
+      "--method",
+      "GET",
+      "-H",
+      "Accept: application/vnd.github.raw+json",
+      `repos/${callerRepo}/contents/${file}`,
+      "-f",
+      `ref=${baseRef}`,
+    ],
+    { timeoutMs: NETWORK_TIMEOUT_MS },
+  );
+  if (succeeded(baseFile.exit)) {
+    mkdirSync(dirname(join(baseRoot, file)), { recursive: true });
+    writeFileSync(join(baseRoot, file), baseFile.stdout);
+    floorRecorded = true;
+    break;
+  }
   // Only a normal exit reporting 404 means "no file"; a timeout or a signal
   // death with that text in its stderr is still a failed read.
-  if (!(baseAnswers.exit.kind === "exited" && /\bHTTP 404\b/.test(baseAnswers.stderr))) {
-    refuse(
-      `could not read ${baseRef}'s .github/.copier-answers.yml on ${callerRepo}: ${failureDetail(baseAnswers)}`,
-    );
+  if (!(baseFile.exit.kind === "exited" && /\bHTTP 404\b/.test(baseFile.stderr))) {
+    refuse(`could not read ${baseRef}'s ${file} on ${callerRepo}: ${failureDetail(baseFile)}`);
   }
-} else {
-  const baseRoot = join(alignedDir, "base");
-  mkdirSync(join(baseRoot, ".github"), { recursive: true });
-  writeFileSync(join(baseRoot, ".github", ".copier-answers.yml"), baseAnswers.stdout);
+}
+if (floorRecorded) {
   const base = recordedBuildSha(baseRoot);
   if ("refusal" in base) refuse(`on ${baseRef}, ${base.refusal}`);
   if (base.sha !== sha) {
@@ -89,13 +99,13 @@ if (!succeeded(baseAnswers.exit)) {
     );
     if (!succeeded(floor.exit)) {
       refuse(
-        `could not compare ${baseRef}'s _commit ${base.sha} with ${sha}: ${failureDetail(floor)}`,
+        `could not compare ${baseRef}'s recorded ${base.sha} with ${sha}: ${failureDetail(floor)}`,
       );
     }
     const relation = floor.stdout.trim();
     if (relation !== "identical" && relation !== "ahead") {
       refuse(
-        `_commit moves backwards from ${baseRef}'s ${base.sha} to ${sha} (compare: ${relation})`,
+        `the recorded build commit moves backwards from ${baseRef}'s ${base.sha} to ${sha} (compare: ${relation})`,
       );
     }
   }

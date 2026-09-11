@@ -105,7 +105,7 @@ export function harnessEnv(
 }
 
 /** Runs argv, never throwing on a nonzero exit (a timeout still throws). */
-export function tryRun(argv: string[], options: RunOptions = {}): BoundedSpawnResult {
+function tryRun(argv: string[], options: RunOptions = {}): BoundedSpawnResult {
   return boundedSpawnSync(argv, {
     cwd: options.cwd ?? REPO_ROOT,
     env: harnessEnv(options.env),

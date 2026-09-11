@@ -9,6 +9,7 @@ import {
   B,
   BASELINE,
   COMMIT,
+  CUT_OVER_OMIT,
   E,
   HB,
   HE,
@@ -18,6 +19,8 @@ import {
   SELF_ENTRY,
   shaLatin1 as sha,
   stampedBaseline,
+  stampedEntries,
+  V2_REGISTRATION,
   validatorRunner,
 } from "./fixtures";
 
@@ -235,6 +238,48 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).not.toContain("does not list '.yamllint'");
     expect(stdout).toContain(
       `advisory: ${MANIFEST} does not list '.yamllint', which this validator's ownership tables declare - the render records no _commit to compare against (the registration check's error)`,
+    );
+  });
+
+  // Once the sync writer has retired the answers file, the manifest's own
+  // entry is the record: unstamped, the registration check errors and
+  // absence takes the caveat; stamped, absence is strict and names the build.
+  const cutOverTree = (): Record<string, string> => {
+    const tree: Record<string, string> = { ...BASELINE, ".repo-platform.yml": V2_REGISTRATION };
+    for (const rel of CUT_OVER_OMIT) delete tree[rel];
+    return tree;
+  };
+  test.each([null, ""])(
+    "a cut-over render with an unstamped manifest (%j) downgrades absence to an advisory naming the gap",
+    (stamp) => {
+      const entries = stampedEntries(cutOverTree());
+      delete entries[".yamllint"];
+      entries[MANIFEST] = `{"class": "managed", "hash": null, "commit": ${JSON.stringify(stamp)}}`;
+      const { exitCode, stdout, stderr } = runValidator(
+        { ".repo-platform.yml": V2_REGISTRATION, [MANIFEST]: manifestOf(entries) },
+        [],
+        { omit: CUT_OVER_OMIT },
+      );
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(`${MANIFEST}: its own entry records no build commit`);
+      expect(stderr).not.toContain("does not list '.yamllint'");
+      expect(stdout).toContain(
+        `advisory: ${MANIFEST} does not list '.yamllint', which this validator's ownership tables declare - its own entry records no build commit to judge the roster against (the registration check's error)`,
+      );
+    },
+  );
+
+  test("a cut-over render's unlisted roster path is a strict error naming the build", () => {
+    const entries = stampedEntries(cutOverTree());
+    delete entries[".yamllint"];
+    const { exitCode, stderr } = runValidator(
+      { ".repo-platform.yml": V2_REGISTRATION, [MANIFEST]: manifestOf(entries) },
+      [],
+      { omit: CUT_OVER_OMIT },
+    );
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `${MANIFEST} does not list '.yamllint', which this validator's ownership tables declare - the sync writes every entry of its build (${COMMIT})`,
     );
   });
 

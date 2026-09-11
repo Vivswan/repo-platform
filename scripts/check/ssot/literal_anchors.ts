@@ -1,19 +1,16 @@
 // Rules anchoring facts quoted as literals across hand-written docs,
 // workflows, and scripts: doc-quoted constants, the AGENTS.md smoke recipe,
-// the owner slug, PAT URLs, hidden-capture names, and inlined twin functions.
+// the owner slug, PAT URLs, and inlined twin functions.
 
 import { existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../../.github/scripts/shared/stage_tree.ts";
-import { captureName } from "../../../.github/scripts/sync/run_hidden.ts";
 import {
   argvFlagLeads,
   argvStringAfter,
   constNumberValue,
   constRegexSource,
   constStringValue,
-  literalMatches,
-  wrappedArgvLabels,
 } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
 import {
@@ -25,7 +22,6 @@ import {
   read,
   trackedFiles,
   trackingManifests,
-  walkFiles,
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -451,49 +447,6 @@ export const literalAnchorRules: Rule[] = [
             file: `${fleetCi} job '${job}'`,
             expected: `the pinned release-PR condition ${releaseGateIf}`,
             got: actual === "" ? "no condition" : actual,
-          });
-        }
-      }
-      return mismatches;
-    },
-  },
-  {
-    // open_pr.ts reads run_hidden.ts capture files by name to put hidden
-    // validation diagnostics into the PR body; the names derive from the
-    // labels at the run_hidden call sites - inline in the sync workflow,
-    // or argv arrays in the sync scripts. Rewording a label would silently
-    // break that hand-off, so every referenced capture name must match a
-    // label-derived one.
-    name: "hidden-capture-names",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const labels = [
-        ...[
-          ...read(".github/workflows/reusable-template-sync.yml").matchAll(
-            /run_hidden\.ts "([^"]+)" --/g,
-          ),
-        ].map((match) => match[1]),
-        ...walkFiles(".github/scripts/sync")
-          .filter((file) => file.path.endsWith(".ts") && !file.symlink)
-          .flatMap((file) => wrappedArgvLabels(read(file.path), "run_hidden.ts")),
-      ];
-      if (labels.length === 0) {
-        throw new Error("no run_hidden labels found in the sync call sites - anchor lost");
-      }
-      const derived = new Set(labels.map(captureName));
-      const referenced = literalMatches(
-        read(".github/scripts/sync/open_pr.ts"),
-        /hidden-[A-Za-z0-9-]+\.log/g,
-      );
-      if (referenced.length === 0) {
-        throw new Error("open_pr.ts references no hidden capture files - anchor lost");
-      }
-      for (const name of referenced) {
-        if (!derived.has(name)) {
-          mismatches.push({
-            file: ".github/scripts/sync/open_pr.ts",
-            expected: `a capture name derived from a run_hidden label (${[...derived].join(", ")})`,
-            got: name,
           });
         }
       }

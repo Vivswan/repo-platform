@@ -25,7 +25,6 @@ describe("bunLockDirs", () => {
       "actions/check-typography",
       "actions/dedupe-bun-lockfile",
       "actions/fuzz-issue",
-      "actions/module-render",
       "actions/pages-site",
       "actions/plan",
       "actions/release-health",

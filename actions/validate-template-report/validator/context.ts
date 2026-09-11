@@ -7,11 +7,28 @@ import {
   type ManifestEntryShape,
   parseManifestFiles,
 } from "../../shared/manifest.ts";
-import { declaredOwnership, type OwnedFile } from "./ownership.ts";
-import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
+import {
+  ANSWERS_PATH,
+  declaredOwnership,
+  type OwnedFile,
+  type RenderSelection,
+} from "./ownership.ts";
+import {
+  hasConflictMarker,
+  isRecord,
+  isRegularFile,
+  regexLiteral,
+  shapeOfYaml,
+} from "./readers.ts";
 
-export const ANSWERS_PATH = ".github/.copier-answers.yml";
+export { ANSWERS_PATH };
 export const REGISTRATION_PATH = ".repo-platform.yml";
+
+/** The top-level keys the template's registration starter wrote; a key
+ *  outside them means the sync writer's cutover (or a hand) already
+ *  registered the repository the new way, and the answers file has left
+ *  or is leaving. */
+const TEMPLATE_REGISTRATION_KEYS: ReadonlySet<string> = new Set(["modules", "mirrors"]);
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -53,12 +70,34 @@ export type Manifest =
   | { state: "malformed"; problem: string }
   | { state: "parsed"; files: Record<string, ManifestEntryShape> };
 
+/** Whose repo-platform the render must call, as a regex source and the
+ *  name a finding prints: the `github_username` answer while the answers
+ *  file exists; any well-formed owner once it has left (the writer
+ *  substitutes the repository's own owner and records it nowhere). */
+export interface OwnerPin {
+  pattern: string;
+  display: string;
+}
+
+export const ANY_OWNER: OwnerPin = { pattern: "[A-Za-z0-9-]+", display: "<owner>" };
+
+/** Which file records the build commit the tree was written from, and the
+ *  value it records (null when the file names none): the answers file
+ *  while it exists (copier's record, mirrored into the manifest by the
+ *  stamp hook), the manifest's own entry once the sync writer has retired
+ *  the answers file. */
+export interface BuildRecord {
+  file: typeof ANSWERS_PATH | typeof MANIFEST_NAME;
+  commit: string | null;
+}
+
 /** What every run loads, whichever tree it validates. */
 interface Tree {
   root: string;
   /** Every regular file below root, sorted, relative paths. */
   files: readonly string[];
-  isPrivateRender: boolean;
+  /** null while the render records no visibility (ownership.ts). */
+  isPrivateRender: boolean | null;
   /** The ownership roster the tree must satisfy (ownership.ts). */
   ownership: readonly OwnedFile[];
 }
@@ -80,14 +119,21 @@ export interface RenderContext extends Tree {
   /** null when .github/.copier-answers.yml is not a regular file. */
   answers: AnswersFile | null;
   /** .repo-platform.yml's top-level `modules` value as written (undefined
-   *  when the key is missing, null when the document is not a mapping);
+   *  when the key is missing, null when the document is not a mapping)
+   *  and whether the document still has the shape the template rendered;
    *  the record is null when the file is absent. */
-  registration: { modules: unknown } | null;
-  /** The `github_username` answer, which pins whose composite actions and
-   *  reusable workflows the render must use; null while the answers cannot
-   *  pin an owner (the registration check reports that once, and the
-   *  owner-dependent checks stand down). */
-  owner: string | null;
+  registration: { modules: unknown; templateShape: boolean } | null;
+  /** Whether the answers file is the registration record this tree must
+   *  carry: the registration is missing or still template-shaped. */
+  registeredByAnswers: boolean;
+  /** null while the recording file exists and cannot pin an owner (the
+   *  registration check reports that once, and the owner-dependent checks
+   *  stand down). */
+  owner: OwnerPin | null;
+  /** null when neither recording file is readable: the answers file is
+   *  absent and the manifest is absent, conflicted, or malformed (each its
+   *  own check's report). */
+  buildRecord: BuildRecord | null;
   /** The string entries of a list-shaped modules list; null while the list
    *  is missing or malformed (the registration check's error). */
   selectedModules: string[] | null;
@@ -125,7 +171,7 @@ function loadAnswers(root: string): AnswersFile | null {
   return { data, commit };
 }
 
-function loadRegistration(root: string): { modules: unknown } | null {
+function loadRegistration(root: string): { modules: unknown; templateShape: boolean } | null {
   const path = join(root, REGISTRATION_PATH);
   if (!isRegularFile(path)) return null;
   let data: unknown = {};
@@ -134,7 +180,29 @@ function loadRegistration(root: string): { modules: unknown } | null {
   } catch {
     data = {};
   }
-  return { modules: isRecord(data) ? data.modules : null };
+  if (!isRecord(data)) return { modules: null, templateShape: true };
+  return {
+    modules: data.modules,
+    templateShape: Object.keys(data).every((key) => TEMPLATE_REGISTRATION_KEYS.has(key)),
+  };
+}
+
+function buildRecordOf(answers: AnswersFile | null, manifest: Manifest): BuildRecord | null {
+  if (answers !== null) return { file: ANSWERS_PATH, commit: answers.commit };
+  if (manifest.state !== "parsed") return null;
+  const commit = manifest.files[MANIFEST_NAME]?.commit;
+  return {
+    file: MANIFEST_NAME,
+    commit: typeof commit === "string" && commit !== "" ? commit : null,
+  };
+}
+
+function ownerOf(answers: AnswersFile | null): OwnerPin | null {
+  if (answers === null) return ANY_OWNER;
+  const username = answers.data.github_username;
+  return typeof username === "string" && /^[A-Za-z0-9-]+$/.test(username)
+    ? { pattern: regexLiteral(username), display: username }
+    : null;
 }
 
 function loadManifest(root: string): Manifest {
@@ -205,32 +273,44 @@ const WRITER_SOURCES = "files/";
  *  content. */
 export function loadContext(root: string, selfMode: boolean): Context {
   const answers = loadAnswers(root);
-  const isPrivateRender = answers?.data.private === true;
   if (selfMode) {
+    // The operator renders no answers file: its own tree reads as public.
+    const isPrivateRender = answers?.data.private === true;
     return {
       mode: "self",
       root,
       files: walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES)),
       isPrivateRender,
-      ownership: declaredOwnership({ isPrivateRender, selectedModules: null }),
+      ownership: declaredOwnership({
+        isPrivateRender,
+        selectedModules: null,
+        registeredByAnswers: true,
+      }),
       manifestPresent: isRegularFile(join(root, MANIFEST_NAME)),
     };
   }
   const registration = loadRegistration(root);
-  const username = answers?.data.github_username;
+  const manifest = loadManifest(root);
   const selectedModules = Array.isArray(registration?.modules)
     ? registration.modules.filter((m): m is string => typeof m === "string")
     : null;
+  const selection: RenderSelection = {
+    isPrivateRender: answers === null ? null : answers.data.private === true,
+    selectedModules,
+    registeredByAnswers: registration === null || registration.templateShape,
+  };
   return {
     mode: "render",
     root,
     files: walk(root, null),
-    isPrivateRender,
-    ownership: declaredOwnership({ isPrivateRender, selectedModules }),
+    isPrivateRender: selection.isPrivateRender,
+    ownership: declaredOwnership(selection),
     answers,
     registration,
-    owner: typeof username === "string" && /^[A-Za-z0-9-]+$/.test(username) ? username : null,
+    registeredByAnswers: selection.registeredByAnswers,
+    owner: ownerOf(answers),
+    buildRecord: buildRecordOf(answers, manifest),
     selectedModules,
-    manifest: loadManifest(root),
+    manifest,
   };
 }

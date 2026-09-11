@@ -93,12 +93,18 @@ case "$*" in
     printf '%s\\n' "\${GH_VINTAGE_STATUS:-ahead}"
     exit 0
     ;;
-  *contents/*)
+  *contents/.github/.copier-answers.yml*)
     echo "CONTENTS $*" >> "$CALLS"
     if [ -n "\${GH_BASE_MISSING:-}" ]; then echo "gh: HTTP 404: Not Found (https://api.github.com/...)" >&2; exit 1; fi
     if [ -n "\${GH_BASE_KILLED:-}" ]; then echo "gh: HTTP 404: Not Found" >&2; kill -KILL $$; fi
     if [ -n "\${GH_BASE_FAIL:-}" ]; then echo "gh: HTTP 500" >&2; exit 1; fi
     cat "$GH_BASE_ANSWERS"
+    exit 0
+    ;;
+  *contents/.github/repo-platform-manifest.json*)
+    echo "CONTENTS $*" >> "$CALLS"
+    if [ -z "\${GH_BASE_MANIFEST:-}" ]; then echo "gh: HTTP 404: Not Found (https://api.github.com/...)" >&2; exit 1; fi
+    cat "$GH_BASE_MANIFEST"
     exit 0
     ;;
 esac
@@ -174,10 +180,16 @@ function snapshot(dir: string): string {
     .join("\n---\n");
 }
 
-function writeAnswers(root: string, answers: string | undefined): void {
-  if (answers === undefined) return;
+/** One of the two files a tree records its build commit in, under root/.github. */
+function writeRecord(root: string, name: string, content: string | undefined): void {
+  if (content === undefined) return;
   mkdirSync(join(root, ".github"), { recursive: true });
-  writeFileSync(join(root, ".github/.copier-answers.yml"), answers);
+  writeFileSync(join(root, ".github", name), content);
+}
+
+/** A sync writer's manifest whose own entry records `commit` (null: unstamped). */
+function manifestRecording(commit: string | null): string {
+  return `{\n  "files": {\n    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": ${JSON.stringify(commit)}}\n  }\n}\n`;
 }
 
 /** A fake report action package at `dir`: the validator script under its
@@ -259,8 +271,9 @@ describe("the action's reporting script", () => {
     "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
   const notJudged = (reason: string) =>
     `#### Integrity\n\nNot judged: ${reason}. See the [run log](${RUN_URL}). This FAILS the check.`;
-  const findingsOf = (findings: string) =>
-    `#### Integrity\n\n${findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+  const findingsOf = (findings: string) => `#### Integrity\n\n${findings}\n${REMEDY}`;
+  const REMEDY =
+    "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a file in a link's place) for this repository to restore. This FAILS the check.";
   const FRESH = "#### Freshness\n\nUp to date with the build branch.";
   const behind = (distance: string) =>
     `#### Freshness\n\nThis repository is behind the build branch${distance}. The next sync PR updates the managed files; nothing to do here.`;
@@ -500,7 +513,7 @@ describe("the action's reporting script", () => {
   // after `ahead 3` must render one story: not judged, freshness not checked.
   test("a vintage-floor refusal renders one story: not judged, freshness not checked", () => {
     const BASE = "1111111111111111111111111111111111111111";
-    const reason = `_commit moves backwards from main's ${BASE} to ${SHA} (compare: behind)`;
+    const reason = `the recorded build commit moves backwards from main's ${BASE} to ${SHA} (compare: behind)`;
     const fetched = runFetch({
       answers: `_commit: ${SHA}\n`,
       base: `_commit: ${BASE}\n`,
@@ -757,50 +770,90 @@ describe("how a child ended", () => {
 // --- actions/shared/build_sha.ts ---------------------------------------------
 
 describe("the recorded build sha", () => {
-  // Read the way the stamp hook reads it (quoted or bare), then accepted
-  // only as the full sha the sync writes: a short sha is refused with the
-  // remedy, never resolved.
-  const NO_COMMIT = `.github/.copier-answers.yml records no _commit; ${REMEDY}`;
-  const cases: [string, string | undefined, ReturnType<typeof recordedBuildSha>][] = [
-    ["a bare full sha", `_commit: ${SHA}\n`, { sha: SHA }],
-    ["a double-quoted full sha", `_commit: "${SHA}"\n`, { sha: SHA }],
-    ["a single-quoted full sha", `_commit: '${SHA}'\n`, { sha: SHA }],
+  // The answers file's _commit while the file exists (read the way the
+  // stamp hook reads it, quoted or bare), the manifest's own entry once the
+  // sync writer has retired it; either accepted only as the full sha the
+  // sync writes, a short sha refused with the remedy, never resolved.
+  const ANSWERS_FILE = ".github/.copier-answers.yml";
+  const MANIFEST_FILE = ".github/repo-platform-manifest.json";
+  const NO_COMMIT = `${ANSWERS_FILE} records no build commit; ${REMEDY}`;
+  const notFull = (file: string, value: string) => ({
+    refusal: `${file} records '${value}', which is not a full build sha; ${REMEDY}`,
+  });
+  const cases: [
+    string,
+    { answers?: string; manifest?: string },
+    ReturnType<typeof recordedBuildSha>,
+  ][] = [
+    ["a bare full sha", { answers: `_commit: ${SHA}\n` }, { sha: SHA }],
+    ["a double-quoted full sha", { answers: `_commit: "${SHA}"\n` }, { sha: SHA }],
+    ["a single-quoted full sha", { answers: `_commit: '${SHA}'\n` }, { sha: SHA }],
     [
       "a full sha among other answers",
-      `_src_path: gh:Vivswan/repo-platform\n_commit: ${SHA}\nproject_name: x\n`,
+      { answers: `_src_path: gh:Vivswan/repo-platform\n_commit: ${SHA}\nproject_name: x\n` },
       { sha: SHA },
     ],
     [
       "copier's short sha is refused",
-      "_commit: abc1234\n",
-      { refusal: `_commit 'abc1234' is not a full build sha; ${REMEDY}` },
+      { answers: "_commit: abc1234\n" },
+      notFull(ANSWERS_FILE, "abc1234"),
     ],
     [
       "an exponent-shaped short sha PyYAML left unquoted is refused as written",
-      "_commit: 95e1875\n",
-      { refusal: `_commit '95e1875' is not a full build sha; ${REMEDY}` },
+      { answers: "_commit: 95e1875\n" },
+      notFull(ANSWERS_FILE, "95e1875"),
     ],
     [
       "uppercase hex is not what git prints",
-      `_commit: ${SHA.toUpperCase()}\n`,
-      { refusal: `_commit '${SHA.toUpperCase()}' is not a full build sha; ${REMEDY}` },
+      { answers: `_commit: ${SHA.toUpperCase()}\n` },
+      notFull(ANSWERS_FILE, SHA.toUpperCase()),
     ],
     [
       "41 hex digits are not a sha",
-      `_commit: ${SHA}a\n`,
-      { refusal: `_commit '${SHA}a' is not a full build sha; ${REMEDY}` },
+      { answers: `_commit: ${SHA}a\n` },
+      notFull(ANSWERS_FILE, `${SHA}a`),
     ],
-    ["no answers file", undefined, { refusal: NO_COMMIT }],
+    [
+      "neither recording file",
+      {},
+      {
+        refusal: `neither ${ANSWERS_FILE} nor ${MANIFEST_FILE} records a build commit; ${REMEDY}`,
+      },
+    ],
     [
       "answers without a _commit line",
-      "_src_path: gh:Vivswan/repo-platform\n",
+      { answers: "_src_path: gh:Vivswan/repo-platform\n" },
       { refusal: NO_COMMIT },
     ],
-    ["an empty _commit", "_commit:\n", { refusal: NO_COMMIT }],
+    ["an empty _commit", { answers: "_commit:\n" }, { refusal: NO_COMMIT }],
+    // The writer's record: the manifest alone, once the answers file is retired.
+    ["a cut-over tree's manifest stamp", { manifest: manifestRecording(SHA) }, { sha: SHA }],
+    [
+      "a cut-over tree whose manifest stamps no commit",
+      { manifest: manifestRecording(null) },
+      { refusal: `${MANIFEST_FILE} records no build commit; ${REMEDY}` },
+    ],
+    [
+      "a cut-over tree whose manifest stamps a short sha",
+      { manifest: manifestRecording("abc1234") },
+      notFull(MANIFEST_FILE, "abc1234"),
+    ],
+    [
+      "a cut-over tree whose manifest does not parse",
+      { manifest: "{not json" },
+      { refusal: `${MANIFEST_FILE} records no build commit; ${REMEDY}` },
+    ],
+    // While the answers file exists it is the record, whatever the manifest says.
+    [
+      "the answers file outranks the manifest while it exists",
+      { answers: "_commit: abc1234\n", manifest: manifestRecording(SHA) },
+      notFull(ANSWERS_FILE, "abc1234"),
+    ],
   ];
-  test.each(cases)("%s", (_name, answers, expected) => {
+  test.each(cases)("%s", (_name, tree, expected) => {
     const root = temp.dir("build-sha-");
-    writeAnswers(root, answers);
+    writeRecord(root, ".copier-answers.yml", tree.answers);
+    writeRecord(root, "repo-platform-manifest.json", tree.manifest);
     expect(recordedBuildSha(root)).toEqual(expected);
   });
 });
@@ -810,6 +863,8 @@ describe("the recorded build sha", () => {
 interface FetchOptions {
   /** undefined = no .github/.copier-answers.yml at all. */
   answers?: string;
+  /** The checkout's manifest; undefined = none. */
+  manifest?: string;
   /** false = the served build tree ships no report action (so no validator). */
   validator?: boolean;
   /** false = the served action ships no .bun-version. */
@@ -821,8 +876,10 @@ interface FetchOptions {
   /** true = ALIGNED_DIR is a symlink into another directory (a planted
    *  link must be replaced, never written through). */
   symlinked?: boolean;
-  /** The base ref's answers file; null = none there (a 404, a first onboarding). */
+  /** The base ref's answers file; null = none there (a 404: cut over, or a first onboarding). */
   base?: string | null;
+  /** The base ref's manifest, served once its answers file is a 404; undefined = a 404 too. */
+  baseManifest?: string;
   env?: Record<string, string>;
 }
 
@@ -850,7 +907,8 @@ function runFetch(opts: FetchOptions = {}) {
   const { root, bin } = scratch();
   const repo = join(root, "repo");
   mkdirSync(repo);
-  writeAnswers(repo, opts.answers);
+  writeRecord(repo, ".copier-answers.yml", opts.answers);
+  writeRecord(repo, "repo-platform-manifest.json", opts.manifest);
   const tarball = buildTarball(root, opts);
   const alignedDir = join(root, "aligned");
   const verdict = join(root, "verdict.json");
@@ -875,6 +933,8 @@ function runFetch(opts: FetchOptions = {}) {
   // same sha by default, so the floor holds without a second compare.
   const baseAnswers = join(root, "base-answers.yml");
   writeFileSync(baseAnswers, opts.base ?? `_commit: ${SHA}\n`);
+  const baseManifest = join(root, "base-manifest.json");
+  if (opts.baseManifest !== undefined) writeFileSync(baseManifest, opts.baseManifest);
   const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("fetch")], {
     cwd: repo,
     timeoutMs: 60_000,
@@ -886,6 +946,7 @@ function runFetch(opts: FetchOptions = {}) {
       GH_TARBALL: tarball,
       GH_BASE_ANSWERS: baseAnswers,
       ...(opts.base === null ? { GH_BASE_MISSING: "1" } : {}),
+      ...(opts.baseManifest !== undefined ? { GH_BASE_MANIFEST: baseManifest } : {}),
       GITHUB_REPOSITORY: "Vivswan/managed-repo",
       BASE_REF: "main",
       ALIGNED_DIR: alignedDir,
@@ -898,8 +959,9 @@ function runFetch(opts: FetchOptions = {}) {
   return {
     exitCode: proc.exitCode,
     outputs: read(outputs),
-    /** The gh calls made, in order: the build-branch compare, the base answers
-     *  read, the floor compare when the shas differ, then the fetch. */
+    /** The gh calls made, in order: the build-branch compare, the base record
+     *  reads (the answers file, then the manifest on a 404), the floor compare
+     *  when the shas differ, then the fetch. */
     calls: read(calls).trim(),
     /** null = no refusal was written (the judge step decides). */
     verdict: verdictIn(verdict),
@@ -919,6 +981,10 @@ describe("the action's fetch script", () => {
   const BASE = "1111111111111111111111111111111111111111";
   const compared = `COMPARE api repos/${OPERATOR}/compare/${SHA}...build --jq "\\(.status) \\(.ahead_by)"`;
   const contents = `CONTENTS api --method GET -H Accept: application/vnd.github.raw+json repos/Vivswan/managed-repo/contents/.github/.copier-answers.yml -f ref=main`;
+  const manifestContents = contents.replace(
+    ".github/.copier-answers.yml",
+    ".github/repo-platform-manifest.json",
+  );
   const floor = `COMPARE api repos/${OPERATOR}/compare/${BASE}...${SHA} --jq .status`;
   const admitted = `${compared}\n${contents}`;
   const fetched = `${admitted}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`;
@@ -968,9 +1034,32 @@ describe("the action's fetch script", () => {
       laidOut(AHEAD, `${admitted}\n${floor}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`),
     ],
     [
-      "a base ref with no answers file sets no floor",
+      "a base ref with neither recording file sets no floor",
       { answers: `_commit: ${SHA}\n`, base: null },
+      laidOut(
+        AHEAD,
+        `${admitted}\n${manifestContents}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`,
+      ),
+    ],
+    // A cut-over base ref records the floor in its manifest alone; the
+    // checkout after the cutover records its own commit there too.
+    [
+      "a cut-over base ref sets the floor from its manifest",
+      { answers: `_commit: ${SHA}\n`, base: null, baseManifest: manifestRecording(BASE) },
+      laidOut(
+        AHEAD,
+        `${admitted}\n${manifestContents}\n${floor}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`,
+      ),
+    ],
+    [
+      "a cut-over checkout records its build commit in the manifest",
+      { manifest: manifestRecording(SHA) },
       laidOut(AHEAD),
+    ],
+    [
+      "a cut-over checkout whose manifest stamps no commit is refused before gh is asked anything",
+      { manifest: manifestRecording(null) },
+      refused(`.github/repo-platform-manifest.json records no build commit; ${REMEDY}`),
     ],
     ...(["behind", "diverged"] as const).map(
       (relation): [string, FetchOptions, ReturnType<typeof runFetch>] => [
@@ -981,7 +1070,7 @@ describe("the action's fetch script", () => {
           env: { GH_VINTAGE_STATUS: relation },
         },
         refused(
-          `_commit moves backwards from main's ${BASE} to ${SHA} (compare: ${relation})`,
+          `the recorded build commit moves backwards from main's ${BASE} to ${SHA} (compare: ${relation})`,
           `${admitted}\n${floor}`,
         ),
       ],
@@ -990,7 +1079,7 @@ describe("the action's fetch script", () => {
       "a floor compare that fails is refused, not waved through",
       { answers: `_commit: ${SHA}\n`, base: `_commit: ${BASE}\n`, env: { GH_VINTAGE_FAIL: "1" } },
       refused(
-        `could not compare main's _commit ${BASE} with ${SHA}: gh: HTTP 500`,
+        `could not compare main's recorded ${BASE} with ${SHA}: gh: HTTP 500`,
         `${admitted}\n${floor}`,
       ),
     ],
@@ -1013,7 +1102,10 @@ describe("the action's fetch script", () => {
     [
       "a base ref recording a short sha is refused as the floor",
       { answers: `_commit: ${SHA}\n`, base: "_commit: abc1234\n" },
-      refused(`on main, _commit 'abc1234' is not a full build sha; ${REMEDY}`, admitted),
+      refused(
+        `on main, .github/.copier-answers.yml records 'abc1234', which is not a full build sha; ${REMEDY}`,
+        admitted,
+      ),
     ],
     [
       "no base ref at all is refused before anything else",
@@ -1028,12 +1120,16 @@ describe("the action's fetch script", () => {
     [
       "a short sha is refused before gh is asked anything",
       { answers: "_commit: abc1234\n" },
-      refused(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
+      refused(
+        `.github/.copier-answers.yml records 'abc1234', which is not a full build sha; ${REMEDY}`,
+      ),
     ],
     [
-      "no answers file is refused the same way",
+      "neither recording file is refused the same way",
       {},
-      refused(`.github/.copier-answers.yml records no _commit; ${REMEDY}`),
+      refused(
+        `neither .github/.copier-answers.yml nor .github/repo-platform-manifest.json records a build commit; ${REMEDY}`,
+      ),
     ],
     [
       "a gh outage fails closed before anything is fetched, with gh's own words",

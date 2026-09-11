@@ -5,6 +5,7 @@ import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
 import { isRecordedClass, MANIFEST_NAME, RECORDED_CLASSES } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
+import { RESYNC } from "./manifest_shape.ts";
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -90,8 +91,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
           error(
             `${where} lacks the split grammar field every render stamps - a hand ` +
               "edit, and sync baselines manifest edits instead of healing them; " +
-              "revert the entry (git history has the stamped original) or run a " +
-              "recovery sync (recover=recopy)",
+              `revert the entry (git history has the stamped original) or ${RESYNC}`,
           ),
         );
         continue;
@@ -129,8 +129,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
       findings.push(
         error(
           `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing from the ` +
-            "repo - a managed file deleted outside a sync; restore it from git history " +
-            "or run a recovery sync (recover=recopy)",
+            `repo - a managed file deleted outside a sync; restore it from git history or ${RESYNC}`,
         ),
       );
       continue;
