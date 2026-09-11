@@ -152,7 +152,12 @@ describe("reusable-site.yml", () => {
     for (const index of [configure, upload, deploy]) expect(steps[index]?.if).toBe(PUBLISH);
     expect(steps[upload]?.with).toEqual({ path: "${{ steps.site.outputs.site-dir }}" });
     expect(steps[deploy]?.id).toBe("deployment");
-    expect(steps.filter((step) => (step.uses ?? "").includes("upload-artifact@"))).toEqual([]);
+    // The whole list of upload steps, not the first match: a second Pages
+    // upload or a stray upload-artifact must read as an extra entry.
+    const uploads = steps.filter((step) => /upload-[a-z-]*artifact@/.test(step.uses ?? ""));
+    expect(uploads.map((step) => step.uses?.split("@")[0])).toEqual([
+      "actions/upload-pages-artifact",
+    ]);
     expect(steps.filter((step) => (step.uses ?? "").includes("download-artifact@"))).toEqual([]);
   });
 

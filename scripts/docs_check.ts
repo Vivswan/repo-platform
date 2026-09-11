@@ -16,6 +16,10 @@ import { passthrough } from "../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
+/** The configuration ci.yml's docs-check and site jobs pass (the site-config-parity ssot rule pins the three). */
+const SITE_CONFIG =
+  '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}';
+
 function main(): number {
   // No-op handlers replace bun's default disposition, which would end the
   // process ahead of the finally; the build shares the terminal's process
@@ -31,8 +35,7 @@ function main(): number {
         RUNNER_TEMP: scratch,
         CHECK: "true",
         SITE_DIR: "",
-        CONFIG:
-          '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}',
+        CONFIG: SITE_CONFIG,
         MAX_VERSIONS: "5",
         CUSTOM_DOMAIN: "",
         DEFAULT_BRANCH: "main",
