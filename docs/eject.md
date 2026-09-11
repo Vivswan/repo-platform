@@ -9,7 +9,7 @@ Detaching is cheap by design: managed repos degrade to normal repos, not broken 
 
 | Reference | Pinned at |
 |---|---|
-| every reusable-workflow call (fleet CI, auto-assign, pages), the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
+| every reusable-workflow call (fleet CI, auto-assign, the site deploy), the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 
@@ -30,14 +30,14 @@ Settings stop being applied too: the central run only manages enrolled repos car
 2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-managed-files` job goes red once `.repo-platform.yml` is gone, and no input turns it off. Replace the `ci` job:
    - copy the jobs you want out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public), or write your own
    - drop the copied `plan` job, which reads the registration you deleted: remove `plan` from every copied job's `needs` list and replace each `needs.plan.outputs.*` condition and value with your repo's literals
-   - the `release`, `pages`, and `docs-site` legs need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep and replace every such read in the rest with your repo's literals
+   - the `release` and `site` legs need `ci` and read `needs.ci.outputs.*` in their conditions and inputs (`modules`, `tracking-labels`): delete the legs you do not keep and replace every such read in the rest with your repo's literals
    - after every job you remove, rewire each surviving job's `needs` to jobs that still exist (actionlint reports a dangling one)
    - the `nightly` caller runs `fleet-nightly.yml` on the schedule, and its plan job reads the registration too: delete the job, or inline the scan with literal configuration
    - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
-   - the `pages` and `docs-site` jobs, and the standalone `pages.yml` and `docs-site.yml` callers (the scheduled and manual deploys), call `reusable-pages.yml`, which configures the deploy from `.repo-platform.yml` unless its `mounts` input is set: pass `mounts` and the build inputs explicitly in every caller, or replace them with your own deploy; if you drop the gate, give `pages.yml` a `push` trigger on main instead and delete the ci.yml job
+   - the `site` job calls `reusable-site.yml`, which configures the deploy from `.repo-platform.yml` unless its `config` input is set: pass `config` explicitly, or replace the job with your own deploy that runs `.github/actions/site-build` and uploads its output; the hook itself is already yours
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist - the pinned references keep working unchanged. Otherwise:
-   - replace each thin caller (`auto-assign.yml`, `pages.yml`, the `ci` job's `fleet-ci.yml` call, the `all-green` job's action step) with a copy of the corresponding `reusable-*.yml`/fleet job/action from repo-platform
+   - replace each thin caller (`auto-assign.yml`, the `site` job's `reusable-site.yml` call, the `ci` job's `fleet-ci.yml` call, the `all-green` job's action step) with a copy of the corresponding `reusable-*.yml`/fleet job/action from repo-platform
    - replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts
    - CodeQL runs inside fleet-ci's `codeql` matrix; inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform
    - the `pr-title.yml` workflow needs nothing: it uses a public action directly (drop its required check from the `pr-title` ruleset if you delete it)

@@ -48,8 +48,7 @@ modules:
   node: {gitignore_sources: [Node], dependabot_ecosystems: [npm]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   skills: {skills_dir: {default: skills}}
-  pages: {}
-  docs-site: {}
+  release-please: {}
 settings:
   baseline: files/settings/baseline.yml
   public: files/settings/public.yml
@@ -64,8 +63,9 @@ files:
   - {path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}
   - {path: CLAUDE.md, class: link, target: AGENTS.md}
   - {path: .github/agents.md, class: link, target: ../AGENTS.md}
-  - {path: .github/workflows/docs-site.yml, class: managed, when: {modules: [docs-site], without: [pages]}, source: files/docs-site/docs-site.standalone.yml}
-  - {path: .github/workflows/docs-site.yml, class: managed, when: {modules: [docs-site, pages]}, source: files/docs-site/docs-site.with-pages.yml}
+  - {path: .typography-allow, class: managed, when: {without: [release-please]}}
+  - {path: .typography-allow, class: managed, when: {modules: [release-please]}}
+  - {path: .github/actions/site-build/action.yml, class: starter}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
 retired:
   - {path: .github/.copier-answers.yml}
@@ -117,7 +117,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, displacing the `.github/settings.local.yml` starter) |
 | `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
-| `starter` | `checks.yml`, `post-green.yml`, the release hooks, `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, skills, fuzzer, and nightly starters |
+| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, skills, fuzzer, and nightly starters |
 | `link` | `CLAUDE.md` (to `AGENTS.md`), `.github/agents.md` and `.github/copilot-instructions.md` (to `../AGENTS.md`) |
 
 | `when` form | Used by |
@@ -141,19 +141,17 @@ The three links carry no `when`: every repository gets them.
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
 | `pin` | `{file, version}` of the toolchain's version dotfile: `bun run pins` writes `files/<module>/<file>` from it (and the `.bun-version` copies beside the actions and at this repository's root), and the toolchain refresh bumps it | the pin writer and the toolchain refresh |
-| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others | the fleet plan and the registration cutover |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the `dependabot-label-tuples` rule in `scripts/check/ssot/labels.ts`, which pins it equal to the label in `files/<module>/settings.yml` (the layer the applied roster comes from) |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder and the plan's `skills-dir` output fall back to when the registration sets no `skills.dir` | the writer and the fleet plan |
-| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist` | the fleet plan and the registration cutover |
-| `path` | the `docs-site` module only: the URL segment the docs mount under when the `pages` module also publishes a website, unless the registration sets `docs_site.path` | the fleet plan and the registration cutover |
+| `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `settings_layers` | the settings layer files the module contributes (`settings.yml`, `settings-public.yml`, `settings-private.yml`), read from `files/<module>/` | the writer's settings render |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 
-Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `docs_site_label`: the docs-site and pages workflows do not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
+Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
 A module with no files still appears under `modules` (`issue-templates`, `custom-license`) so a registration selecting it is known and a `when` can name it.
 
@@ -169,7 +167,7 @@ A module with no files still appears under `modules` (`issue-templates`, `custom
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
 | `skills_dir` | `skills.dir` from the registration, else `modules.<m>.skills_dir.default` |
-| `fuzzer_label`, `nightly_label`, `docs_site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `docs_site` |
+| `fuzzer_label`, `nightly_label`, `site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site` |
 
 - A token is the name inside double braces with no spaces; spaces inside the braces make it plain text.
 - A `$` before the braces marks a GitHub Actions expression, left untouched.
@@ -333,7 +331,7 @@ Limits, stated plainly:
 - Mask registration is a snapshot: a repository renamed while its row runs surfaces under its new name, which no mask covers.
 - The `repo=` input typed into a dispatch stays off the log: the plan reads it from the event payload, never from step env, and refusals count entries instead of quoting them.
 - The failure issue and the PR body are write-forward: a report delivered while the repository was private stays in the issue's edit history forever. Flipping a repository public publishes it; delete the report issue before a deliberate flip.
-- The [pages module](pages.md) publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.
+- The [site module](site.md) publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.
 
 ### Cutover
 
@@ -343,8 +341,8 @@ A repository still registered the old way (`.repo-platform.yml` holding only `mo
 | --- | --- |
 | `project.name`, `project.slug`, `project.description` | `project_name`, `project_slug`, `description`; when absent, the repository name, the repository name made kebab-case (lowercase, every run outside `[a-z0-9]` one dash, none at either end), and an empty description |
 | `project.copyright_holder` | `copyright_holder`, only when it differs from the owner login |
-| `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the `pages_*` answers, only where they differ from the defaults the plan action derives: the selected modules carrying `pages` data joined by commas (`none` when there are none); the `install` and `build` of the first module, in `files.yml` order, that the resolved setup names; `modules.pages.dist` (else `dist`) |
-| `docs_site.path` | `docs_site_path`, when it differs from `modules.docs-site.path` (else `docs`) |
+| nothing, a `cutover:` note instead | a selected `pages` or `docs-site` module: each yields a note to select `site`; the `pages` note carries the recorded `pages_*` answers (the build belongs in the repo-owned `.github/actions/site-build/action.yml` hook now), the `docs-site` note the recorded `docs_site_path` and `docs_site_label` where they differ from the `site` defaults (`site.path` and `labels.site` now) |
+| nothing, a `site cutover:` note instead | a target still carrying `.github/workflows/pages.yml` (the retired deploy) with no hook at `.github/actions/site-build/action.yml`: whatever the registration's shape, the note holds the PR until the former pages build has moved into the hook, since the seeded no-op would otherwise publish the docs alone |
 | `skills.dir` | `skills_dir`, when it differs from the `skills_dir` placeholder default the module data declares (`modules.<m>.skills_dir.default`, else `skills`) |
 | `labels.<key>` | `<key>_label` for each selected module carrying `tracking_label: {key, default}`, when it differs from the default |
 | `mirrors` | carried from the old file |

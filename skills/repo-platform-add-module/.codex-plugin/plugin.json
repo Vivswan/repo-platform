@@ -22,7 +22,7 @@
     "defaultPrompt": [
       "Add nightly CI to this repo.",
       "Enable the fuzzer module here.",
-      "Remove the pages module from this repository."
+      "Remove the site module from this repository."
     ],
     "brandColor": "#047857"
   }
