@@ -61,6 +61,17 @@ describe("parseSettingsDoc", () => {
     ).toThrow("no string 'type'");
   });
 
+  test("an alias naming its own ancestor is refused with its path; a shared subtree is legal", () => {
+    // The merge walks the document and would never end on a cycle.
+    expect(() => parseSettingsDoc("rulesets:\n  - &r {name: main, rules: [*r]}\n", "f")).toThrow(
+      "f: a cyclic alias at rulesets[0].rules[0] - the document contains itself and cannot be merged",
+    );
+    expect(parseSettingsDoc("repository: &r {description: Mine}\ncopy: *r\n", "f")).toEqual({
+      repository: { description: "Mine" },
+      copy: { description: "Mine" },
+    });
+  });
+
   test("an empty document is an empty layer, not an error", () => {
     expect(parseSettingsDoc("", "f")).toEqual({});
     expect(parseSettingsDoc("# comments only\n", "f")).toEqual({});

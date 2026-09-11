@@ -277,6 +277,49 @@ describe("renderSettings", () => {
     ]);
   });
 
+  test.each<{ reason: string; modules: string[]; overlay: string; labels: unknown }>([
+    {
+      reason: "labels: null with a tracking stream renders no labels key",
+      modules: ["fuzzer"],
+      overlay: `${OVERLAY}labels: null\n`,
+      labels: undefined,
+    },
+    {
+      reason: "labels: null with no stream renders no labels key",
+      modules: [],
+      overlay: `${OVERLAY}labels: null\n`,
+      labels: undefined,
+    },
+    {
+      reason: "an empty overlay with a tracking stream renders the roster and the tuple",
+      modules: ["fuzzer"],
+      overlay: "",
+      labels: [
+        { name: "bug", color: "d73a4a", description: "Something isn't working" },
+        { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+        { name: "fuzz-nightly", color: "B60205", description: "Automated nightly fuzz failure" },
+      ],
+    },
+  ])("$reason", ({ modules, overlay, labels }) => {
+    // The opt-out leaves the labels to the repository; a roster of tracking
+    // labels alone would have the apply delete every other label.
+    const { doc } = rendered({
+      modules,
+      overlay,
+      registration: registration(`modules: [${modules}]\n`),
+    });
+    expect(doc.labels).toEqual(labels);
+    expect(names(doc.rulesets)).toEqual(
+      overlay === "" ? ["pr-title", "main"] : ["pr-title", "main", "build-branches"],
+    );
+  });
+
+  test("an alias reused without a cycle renders the shared value at both keys", () => {
+    const { doc } = rendered({ overlay: "repository: &r {description: Mine}\ncopy: *r\n" });
+    expect((doc.repository as Record<string, unknown>).description).toBe("Mine");
+    expect(doc.copy).toEqual({ description: "Mine" });
+  });
+
   test("two renders of the same inputs are byte-identical, long descriptions unwrapped", () => {
     // Spaced, so the default folding would wrap it.
     const long = "word ".repeat(24).trim();
@@ -302,6 +345,12 @@ describe("renderSettings", () => {
         "The merge unions labels by name; any other shape would replace the managed labels " +
         "wholesale, and the apply would silently enforce less than the layers declare. Declare " +
         "each entry as a '- name: ...' list item.",
+    },
+    {
+      reason: "an overlay whose alias names its own ancestor",
+      overrides: { overlay: "repository: &r {self: *r}\n" },
+      detail:
+        ".github/settings.local.yml: a cyclic alias at repository.self - the document contains itself and cannot be merged",
     },
     {
       reason: "an overlay declaring one label twice",

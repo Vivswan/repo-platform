@@ -292,6 +292,42 @@ describe("render, displaces, and the settings block", () => {
     expect(parseFilesConfig(doc([STARTER], [])).settings).toBeNull();
   });
 
+  test("every problem of a rendered entry is collected in one pass, and no rendered entry is built from it", () => {
+    const checked = checkFilesConfig(
+      doc(
+        [
+          STARTER,
+          "  - { path: a, class: split, region: hash, render: settings, source: files/base/a }",
+        ],
+        [],
+      ),
+    );
+    expect(checked.problems).toEqual([
+      "files: a: render applies to managed entries only",
+      "files: a: a rendered entry has no source or blocks",
+      "files: a: a rendered entry needs displaces, the overlay it renders from",
+      "settings: missing - a render: settings entry reads the four fleet layers from it",
+    ]);
+    expect(
+      checked.config.files.map((entry) => ("render" in entry ? "rendered" : entry.class)),
+    ).toEqual(["starter", "split"]);
+  });
+
+  test("a managed rendered entry missing displaces is reported and built as a sourced entry, never a rendered one", () => {
+    const checked = checkFilesConfig(
+      doc([STARTER, "  - { path: .github/settings.yml, class: managed, render: settings }"]),
+    );
+    expect(checked.problems).toEqual([
+      "files: .github/settings.yml: a rendered entry needs displaces, the overlay it renders from",
+    ]);
+    expect(checked.config.files[1]).toEqual({
+      path: ".github/settings.yml",
+      class: "managed",
+      source: "base/.github/settings.yml",
+      when: null,
+    });
+  });
+
   test.each([
     [
       "render on a split entry",

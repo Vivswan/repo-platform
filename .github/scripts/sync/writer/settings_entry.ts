@@ -122,7 +122,11 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
   const reserved = new Set(managedLabelNames(config, input.tree).map((name) => name.toLowerCase()));
   const tracking = trackingLabelTuples(input, reserved);
   if ("held" in tracking) return tracking;
-  const labels = [...(Array.isArray(doc.labels) ? (doc.labels as Label[]) : []), ...tracking];
+  const folded = Array.isArray(doc.labels) ? (doc.labels as Label[]) : [];
+  // `labels: null` in the overlay is the repository's opt-out: it owns its
+  // labels, and a roster of tracking labels alone would make the apply
+  // delete every other label on the repository.
+  const labels = overlay.labels === null ? folded : [...folded, ...tracking];
   if (labels.length > 0) doc.labels = labels;
   // A collision here is between the overlay and a layer or a tracking
   // label, so the repository's file names the fix.
