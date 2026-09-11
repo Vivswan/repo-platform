@@ -1,12 +1,15 @@
-// parseJson/parseJsonWith exit the process on failure, so the failure
-// modes run behind a subprocess entry file. The load-bearing assertion:
-// malformed JSON must never echo the input text - Bun's raw SyntaxError
-// quotes the offending fragment ('Unexpected identifier "..."'), which
-// can be target-derived (private repo names, descriptions).
+// parseJson/parseJsonWith exit the process on failure.
+// So the failure modes run behind a subprocess entry file.
+// Load-bearing assertion: malformed JSON must never echo the input text.
+// Bun's raw SyntaxError quotes the offending fragment ('Unexpected identifier "..."').
+// That fragment can be target-derived (private repo names, descriptions).
+// The entry lives under the OS temp dir, outside the repo tree.
+// A bare "zod" there would auto-install from the global cache and the network.
 
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   hasDuplicateJsonKeys,
@@ -19,13 +22,14 @@ import { tempDirs } from "./temp_dir";
 const temp = tempDirs();
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
+const zodPath = fileURLToPath(import.meta.resolve("zod"));
 
 const root = temp.dir("json-proc-");
 const entry = join(root, "entry.ts");
 writeFileSync(
   entry,
   [
-    `import { z } from "zod";`,
+    `import { z } from ${JSON.stringify(zodPath)};`,
     `import { parseJsonWith } from ${JSON.stringify(jsonPath)};`,
     "const schema = z.object({ repo: z.string() });",
     'const parsed = parseJsonWith(schema, process.env.PAYLOAD ?? "", "json.test: payload");',
