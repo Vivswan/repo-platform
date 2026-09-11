@@ -770,6 +770,7 @@ export const allGreenRules: Rule[] = [
         "bun run test",
         "bun run pins:check",
         "bun run theme:check",
+        "bun run settings:check",
         "bun run gitignore:topology",
         "bun run files:check",
         "bun run validate",
