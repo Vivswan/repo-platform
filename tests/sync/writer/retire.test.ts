@@ -52,6 +52,7 @@ describe("keepReason", () => {
       same: "v1\n",
       edited: "v2\n",
       region: REGION,
+      "region-blank": `${REGION}\n\n`,
       "region-tail": `${REGION}mine\n`,
       starter: "s\n",
       unrecorded: "u\n",
@@ -61,12 +62,14 @@ describe("keepReason", () => {
       same: { class: "managed", hash: sha256("v1\n") },
       edited: { class: "managed", hash: sha256("v1\n") },
       region: split(sha256(REGION)),
+      "region-blank": split(sha256(REGION)),
       "region-tail": split(sha256(REGION)),
       starter: { class: "starter" },
       nohash: { class: "managed", hash: null },
     };
     expect(keepReason(target, "same", records)).toBeNull();
     expect(keepReason(target, "region", records)).toBeNull();
+    expect(keepReason(target, "region-blank", records)).toBeNull();
     expect(keepReason(target, "edited", records)).toBe("the content differs from the last write");
     expect(keepReason(target, "region-tail", records)).toBe(
       "the file carries repository-owned content outside the managed region",
@@ -211,13 +214,23 @@ describe("retire", () => {
     expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toBe("a\n");
   });
 
+  const KEPT =
+    "repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it";
   test.each([
     ["a tail, no trailing newline", `${REGION}## Mine\n\nkeep this`, "## Mine\n\nkeep this"],
-    ["a head and a tail", `# Title\n\n${REGION}\ntail\n`, "# Title\n\n\ntail\n"],
+    [
+      "a tail behind the blank lines that framed the region",
+      `${REGION}\n\n## Mine\n\nkeep this\n`,
+      "## Mine\n\nkeep this\n",
+    ],
+    ["a head and a tail", `# Title\n\n${REGION}\ntail\n`, "# Title\n\ntail\n"],
+    ["a head and a tail with no blank line between", `# Title\n${REGION}tail\n`, "# Title\ntail\n"],
+    ["a head alone, the region at the bottom", `# Title\n\n${REGION}\n\n`, "# Title\n"],
+    ["blank lines above a top region", `\n  \n${REGION}\ntail\n`, "tail\n"],
     [
       "CRLF lines around a CRLF region",
-      `head\r\n${REGION.replaceAll("\n", "\r\n")}tail one\r\ntail two\r\n`,
-      "head\r\ntail one\r\ntail two\r\n",
+      `head\r\n\r\n${REGION.replaceAll("\n", "\r\n")}\r\ntail one\r\ntail two\r\n`,
+      "head\r\n\r\ntail one\r\ntail two\r\n",
     ],
     [
       "non-ASCII bytes in the tail",
@@ -232,11 +245,7 @@ describe("retire", () => {
       const records: Records = { "CONTRIBUTING.md": split(sha256(region)) };
       const rows = retire(target, [{ path: "CONTRIBUTING.md" }], [], new Set(), records);
       expect(rows).toEqual([
-        {
-          path: "CONTRIBUTING.md",
-          outcome: "region removed",
-          detail: "retired; repository-owned content kept",
-        },
+        { path: "CONTRIBUTING.md", outcome: "region removed", detail: `retired; ${KEPT}` },
       ]);
       expect(readFileSync(join(target, "CONTRIBUTING.md"))).toEqual(Buffer.from(kept, "utf-8"));
       expect(records["CONTRIBUTING.md"]).toBeUndefined();
@@ -246,34 +255,42 @@ describe("retire", () => {
     },
   );
 
-  test("a split file is deleted when it is all region, held when the region was edited, and handed over as a stale record too", () => {
+  test("deletes an all-region or blank-framed split file, holds an edited region, and hands over a stale record too", () => {
     const target = checkout({
-      "all-region": `${REGION}\n`,
+      "all-region": REGION,
+      "blank-tail": `${REGION}\n  \n\n`,
       edited: `${REGION.replace("managed", "edited")}mine\n`,
       "stale-tail": `${REGION}mine\n`,
     });
     const records: Records = {
       "all-region": split(sha256(REGION)),
+      "blank-tail": split(sha256(REGION)),
       edited: split(sha256(REGION)),
       "stale-tail": split(sha256(REGION)),
     };
     const rows = retire(
       target,
-      [{ path: "all-region" }, { path: "edited" }],
+      [{ path: "all-region" }, { path: "blank-tail" }, { path: "edited" }],
       ["stale-tail"],
       new Set(),
       records,
     );
     expect(rows).toEqual([
       { path: "all-region", outcome: "deleted", detail: "retired" },
+      {
+        path: "blank-tail",
+        outcome: "deleted",
+        detail: "retired; only blank lines sat outside the managed region",
+      },
       { path: "edited", outcome: "held", detail: "the managed region was edited" },
       {
         path: "stale-tail",
         outcome: "region removed",
-        detail: "no longer selected; repository-owned content kept",
+        detail: `no longer selected; ${KEPT}`,
       },
     ]);
     expect(existsSync(join(target, "all-region"))).toBe(false);
+    expect(existsSync(join(target, "blank-tail"))).toBe(false);
     expect(readFileSync(join(target, "edited"), "utf-8")).toBe(
       `${REGION.replace("managed", "edited")}mine\n`,
     );

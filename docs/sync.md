@@ -205,7 +205,8 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 | --- | --- |
 | `managed`, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
-| `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the PR holds this once. Next run the path is unrecorded and produces no row. |
+| `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay. The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it. Next run the path is unrecorded and produces no row. |
+| `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
 | `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
 | a symlink whose target hashes to the recorded hash, whatever class the record names | `deleted` (the link goes; what it points at is never touched) |
 | a symlink with another target; a regular file where a `link` was recorded | `held` |

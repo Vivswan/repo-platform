@@ -50,7 +50,8 @@ describe("holdReasons", () => {
         {
           path: "CONTRIBUTING.md",
           outcome: "region removed",
-          detail: "retired; repository-owned content kept",
+          detail:
+            "retired; repository-owned content kept as a plain file; the region is gone, so read the file whole, give it a heading and intro if it lost them, or delete it",
         },
       ],
       notes: ["dropped unknown module `uv` (files.yml does not know it)"],
