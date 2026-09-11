@@ -15,10 +15,16 @@ repository:
   allow_merge_commit: false
   allow_rebase_merge: false
   # The squash subject must ALWAYS be the PR title (the pr-title check and
-  # release-please rely on it); GitHub only defaults to that for
-  # single-commit PRs.
+  # release-please rely on it); GitHub defaults to that only for
+  # single-commit PRs. The body stays blank: with PR_BODY every squash
+  # message is the whole PR body (tables, fences, details blocks), which
+  # release-please drops from the changelog when it cannot parse it, and
+  # whose footers count only in a clean trailing block. A PR that needs
+  # footers (BREAKING CHANGE, Release-As) carries a BEGIN_COMMIT_OVERRIDE
+  # ... END_COMMIT_OVERRIDE block in its body, which release-please reads
+  # instead of the commit message.
   squash_merge_commit_title: PR_TITLE
-  squash_merge_commit_message: PR_BODY
+  squash_merge_commit_message: BLANK
   allow_auto_merge: true
   enable_vulnerability_alerts: true
 

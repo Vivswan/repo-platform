@@ -305,7 +305,7 @@ describe("scopeRefusal", () => {
     ["o/priv", true],
   ]);
   const PRIVATE_BY_SLUG =
-    "1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text on main (the range judged at 8096c4920f84)";
+    "1 of 2 scoped repos are private: name private repositories with the `private` token, never by slug - a directive is public text (the range judged at 8096c4920f84)";
   test.each<{ reason: string; scope: Scope; source: ScopeSource; expected: string | null }>([
     { reason: "all is never refused", scope: ALL, source: CALL, expected: null },
     {

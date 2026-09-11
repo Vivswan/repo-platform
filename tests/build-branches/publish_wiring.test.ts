@@ -27,6 +27,7 @@ interface Job {
   with?: Record<string, string>;
   secrets?: Record<string, string>;
   outputs?: Record<string, string>;
+  permissions?: Record<string, string>;
   steps?: {
     id?: string;
     name?: string;
@@ -225,8 +226,10 @@ describe("post-green publish wiring", () => {
     // published build (never a re-derived ref) into the two outputs
     // sync-fleet consumes. The whole wiring of that range read is pinned as
     // one shape: the judged sha and the push's `before` (judged_range.ts's
-    // fallback base) as the step's env, and a full-history checkout, since
-    // the stamped base can sit many commits below the judged one.
+    // fallback base) as the step's env, the read token its pull request
+    // lookups need (the squash commit carries the title alone), and a
+    // full-history checkout, since the stamped base can sit many commits
+    // below the judged one.
     const readSteps = jobs["read-directives"].steps ?? [];
     const readStep = readSteps.find((step) =>
       (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
@@ -236,10 +239,16 @@ describe("post-green publish wiring", () => {
     if (checkout === undefined) throw new Error("read-directives has no checkout step");
     expect({
       env: readStep.env,
+      permissions: jobs["read-directives"].permissions,
       checkout: checkout.with,
       outputs: jobs["read-directives"].outputs,
     }).toEqual({
-      env: { SOURCE_SHA: "${{ inputs.sha }}", BEFORE_SHA: "${{ inputs.before }}" },
+      env: {
+        GH_TOKEN: "${{ github.token }}",
+        SOURCE_SHA: "${{ inputs.sha }}",
+        BEFORE_SHA: "${{ inputs.before }}",
+      },
+      permissions: { contents: "read", "pull-requests": "read" },
       checkout: { ref: "${{ inputs.sha }}", "fetch-depth": 0 },
       outputs: {
         armed: "${{ steps.directives.outputs.armed }}",

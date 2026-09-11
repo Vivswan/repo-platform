@@ -15,6 +15,7 @@ import {
   FLEET_CALLERS,
   judgeRunBlock,
   judgeSubstitutionMismatches,
+  OPERATOR_CALLERS,
   rosterMismatches,
   SKELETON_RENDER,
 } from "../../../scripts/check/ssot/all_green.ts";
@@ -450,17 +451,30 @@ describe("callerCeilingMismatches", () => {
     ).toEqual(["no permissions block"]);
   });
 
-  test("the live called workflows fit their skeleton callers; raising one scope goes red", () => {
-    const skeleton = parseYaml(readFileSync(SKELETON_RENDER, "utf-8")) as {
-      jobs: Record<string, { permissions?: unknown }>;
-    };
-    for (const [rel, job] of Object.entries(FLEET_CALLERS)) {
+  // Both rosters, the fleet's skeleton callers and the operator's own chain (ci.yml's
+  // post-green job calling post-green.yml, whose legs call the writers), as one site list.
+  const liveSites = [
+    ...Object.entries(FLEET_CALLERS).map(([rel, job]) => ({ rel, caller: SKELETON_RENDER, job })),
+    ...Object.entries(OPERATOR_CALLERS).map(([rel, caller]) => ({
+      rel,
+      caller: caller.rel,
+      job: caller.job,
+    })),
+  ];
+  test.each(liveSites)(
+    "$rel fits its caller $caller job $job; raising one scope goes red",
+    ({ rel, caller, job }) => {
+      const callerDoc = parseYaml(readFileSync(caller, "utf-8")) as {
+        jobs: Record<string, { permissions?: unknown }>;
+      };
       const text = readFileSync(rel, "utf-8");
-      const site = { rel: SKELETON_RENDER, job, permissions: skeleton.jobs[job].permissions };
+      const site = { rel: caller, job, permissions: callerDoc.jobs[job].permissions };
       expect(callerCeilingMismatches({ rel, text }, site)).toEqual([]);
-      const raised = text.replace("      contents: read\n", "      contents: write\n");
+      // Every contents: read grant raised at once, at whatever level the workflow spells it: a
+      // job's own block shadows the top-level one, so raising only the first could raise nothing.
+      const raised = text.replace(/^( *)contents: read$/gm, "$1contents: write");
       expect(raised).not.toBe(text);
       expect(callerCeilingMismatches({ rel, text: raised }, site).length).toBeGreaterThan(0);
-    }
-  });
+    },
+  );
 });

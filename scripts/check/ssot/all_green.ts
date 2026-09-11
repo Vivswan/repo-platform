@@ -8,6 +8,7 @@ import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, packageScripts, read, repoCi } from "./inputs.ts";
+import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** The check-run lookup template's leading text, backtick included: the
@@ -422,6 +423,20 @@ export const FLEET_CALLERS: Record<string, string> = {
   ".github/workflows/fleet-nightly.yml": "nightly",
 };
 
+/** The operator's own call chain, each called workflow with the job that calls it: ci.yml's
+ *  post-green job calls post-green.yml, whose legs call the fleet writers (the writer roster's
+ *  callerJob, so a newly registered writer is checked without a second listing). The same
+ *  expansion-time check applies, so one scope over a ceiling here fails every main run. */
+export const OPERATOR_CALLERS: Record<string, { rel: string; job: string }> = {
+  [POST_GREEN_REL]: { rel: ".github/workflows/ci.yml", job: "post-green" },
+  ...Object.fromEntries(
+    Object.entries(FLEET_WRITERS).map(([rel, writer]) => [
+      rel,
+      { rel: POST_GREEN_REL, job: writer.callerJob },
+    ]),
+  ),
+};
+
 const PERMISSION_RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 
 /** A called workflow's job grants against its caller job's grant, judged on
@@ -668,14 +683,14 @@ export const allGreenRules: Rule[] = [
     },
   },
   {
-    // Every called workflow's job grants under its skeleton caller's:
-    // one scope over the ceiling fails every fleet run at expansion, so
-    // the check runs here, before the build branch ships the edit.
+    // Every called workflow's job grants under its caller's: one scope over
+    // the ceiling fails every fleet run (or every main run, for the operator's
+    // own chain) at expansion, so the check runs here, before the edit ships.
     name: "fleet-caller-ceilings",
     run: () => {
       const skeleton = asRecord(parseYaml(read(SKELETON_RENDER)), SKELETON_RENDER);
       const callers = ciJobs(skeleton, SKELETON_RENDER);
-      return Object.entries(FLEET_CALLERS).flatMap(([rel, job]) =>
+      const fleet = Object.entries(FLEET_CALLERS).flatMap(([rel, job]) =>
         callerCeilingMismatches(
           { rel, text: read(rel) },
           {
@@ -685,6 +700,18 @@ export const allGreenRules: Rule[] = [
           },
         ),
       );
+      const operator = Object.entries(OPERATOR_CALLERS).flatMap(([rel, caller]) => {
+        const jobs = ciJobs(asRecord(parseYaml(read(caller.rel)), caller.rel), caller.rel);
+        return callerCeilingMismatches(
+          { rel, text: read(rel) },
+          {
+            ...caller,
+            permissions: asRecord(jobs[caller.job], `${caller.rel} job '${caller.job}'`)
+              .permissions,
+          },
+        );
+      });
+      return [...fleet, ...operator];
     },
   },
   {

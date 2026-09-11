@@ -99,8 +99,9 @@ export function parseScope(
   return { kind: "list", visibility, slugs, modules };
 }
 
-/** Where the scope came from: the workflow_call input (ONLY_REPO, public text off the judged
- *  main commit) or the typed dispatch input (may be a private slug). */
+/** Where the scope came from: the workflow_call input (ONLY_REPO, public text off the merged
+ *  pull requests and direct pushes in the judged range) or the typed dispatch input (may be a
+ *  private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 
 /** Whether the scope admits `repo` before its module selection is known: named by slug, or passed
@@ -160,7 +161,7 @@ export function scopeRefusal(
   if (source.kind === "call") {
     const hidden = slugs.filter((slug) => known.get(slug) === true).length;
     if (hidden > 0) {
-      return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${source.sha.slice(0, 12)})`;
+      return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${source.sha.slice(0, 12)})`;
     }
   }
   return null;

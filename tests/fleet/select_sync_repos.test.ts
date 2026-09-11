@@ -300,8 +300,8 @@ describe("select_sync_repos.ts", () => {
   );
 
   // The called path (post-green's sync-fleet leg): the scope is public text
-  // off the judged main commit, so a private repo rides only under the
-  // token. Whole outcome per row: every log line, the matrix, exit code.
+  // off the merged PRs of the judged range, so a private repo rides only
+  // under the token. Whole outcome per row: every log line, the matrix, exit code.
   const HIDDEN_SERVER_ROW = {
     repo: "h**-s**r",
     private: true,
@@ -392,7 +392,7 @@ describe("select_sync_repos.ts", () => {
       reason:
         "a private slug on the called path is refused, naming the judged commit: private repos ride under the token",
       scope: "Vivswan/steady,Vivswan/hidden-server",
-      stdout: `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})\n`,
+      stdout: `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${SHA.slice(0, 12)})\n`,
       withheld: "hidden-server",
     },
     {

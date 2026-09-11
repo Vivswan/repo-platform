@@ -1,11 +1,18 @@
 #!/usr/bin/env bun
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
 // (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
-// range and unioned. Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
+// range and unioned. The squash commit carries the PR title alone (the fleet override's
+// squash_merge_commit_message: BLANK), so each commit's merged pull request is looked up and its
+// title and body parsed; a commit with no pull request (a direct push) is read from its message.
+// Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
+// Env: GITHUB_REPOSITORY, GH_TOKEN (read), plus judged_range.ts's.
 
+import { z } from "zod";
 import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
-import { fail, notice, setOutput, warning } from "../shared/gha.ts";
+import { fail, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { parseJsonWithThrow } from "../shared/json.ts";
 import { mustCapture } from "../shared/proc.ts";
+import { captureNetwork } from "./discovery.ts";
 import {
   type DiffBase,
   judgedRangeEnv,
@@ -106,9 +113,9 @@ function blankCodeSpans(lines: string[]): string[] {
 }
 
 /** One paragraph's lines with their code spans blanked: each stretch between fence lines, and
- *  before a line `opensBlock` says starts a new block, is one inline run scanned as a whole (GitHub
- *  wraps the squash body at 72 columns, so a one-line span in the PR body arrives as several lines
- *  here); a fence line passes through as written. */
+ *  before a line `opensBlock` says starts a new block, is one inline run scanned as a whole (a
+ *  commit message, the direct-push source, may carry a 72-column wrap, so a one-line span can
+ *  arrive as several lines here); a fence line passes through as written. */
 function withoutCodeSpans(
   lines: string[],
   opensBlock: (at: number, runStart: number) => boolean,
@@ -156,8 +163,8 @@ function bareMentions(lines: string[]): boolean[] {
 // (a directive, a typo of one, `[word] prose`); a link, `[text](url)`, or a code span is not.
 const DIRECTIVE_SHAPED = /^\[[^[\]]*\](?:\s|$)/;
 
-/** The lines as the PR body had them: GitHub re-wraps the squash body at 72 columns, so a line
- *  after a justified directive is its continuation. A line the block grammar or the mention scan
+/** The lines as written before any 72-column wrap (a commit message, the direct-push source, may
+ *  carry one): a line after a justified directive is its continuation. A line the block grammar or the mention scan
  *  would judge on its own never folds, so folding hides nothing. */
 function foldJustifications(lines: string[], mentions: boolean[]): string[] {
   const folded: string[] = [];
@@ -219,8 +226,8 @@ function unwrap(line: string): string | null {
   return null;
 }
 
-/** Parses a merged commit message (subject included) for its directives
- * block. Pure: every problem comes back as data, all at once. */
+/** Parses a message (the subject, then the body) for its directives block.
+ * Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
   const isBlockShaped = (lines: string[]) =>
@@ -318,8 +325,46 @@ export function parseDirectives(body: string): Directives {
   return { kind: "fleet-sync", scope };
 }
 
+// repos/{repo}/commits/{sha}/pulls lists every pull request the commit reached. The one whose
+// merge_commit_sha IS the commit is the merge that produced it; a closed unmerged pull request,
+// or one that merely contained the commit, carries another sha or none.
+const associatedPulls = z.array(
+  z.object({
+    number: z.number(),
+    title: z.string(),
+    body: z.string().nullable(),
+    merge_commit_sha: z.string().nullable(),
+  }),
+);
+
+/** The message the directives are read from: the merged pull request's title and body, or the
+ *  commit's own message when no pull request produced it (a direct push). A failed lookup throws:
+ *  an unreadable pull request must never read as "no directive". */
+function directiveSource(cwd: string, repository: string, commit: string): string {
+  const endpoint = `repos/${repository}/commits/${commit}/pulls`;
+  const lookup = captureNetwork(["gh", "api", endpoint]);
+  if (lookup.exitCode !== 0) {
+    const detail = lookup.stderr.trim();
+    throw new Error(
+      `${endpoint} could not be read (gh api exit ${lookup.exitCode})${detail === "" ? "" : `: ${detail}`}`,
+    );
+  }
+  const merged = parseJsonWithThrow(associatedPulls, lookup.stdout, endpoint).filter(
+    (pull) => pull.merge_commit_sha === commit,
+  );
+  if (merged.length > 1) {
+    throw new Error(
+      `${endpoint}: ${merged.length} pull requests claim this commit as their merge (${merged.map((pull) => `#${pull.number}`).join(", ")}); refusing to pick one`,
+    );
+  }
+  if (merged.length === 0)
+    return mustCapture(["git", "-C", cwd, "log", "-1", "--format=%B", commit]);
+  return `${merged[0].title}\n\n${merged[0].body ?? ""}`;
+}
+
 function main(): number {
   const { sha, before } = judgedRangeEnv();
+  const repository = requireEnv("GITHUB_REPOSITORY");
   const cwd = process.cwd();
   let base: DiffBase;
   try {
@@ -336,9 +381,17 @@ function main(): number {
   let all = false;
   const repos = new Set<string>();
   for (const commit of rangeCommits(cwd, sha, base)) {
-    const parsed = parseDirectives(
-      mustCapture(["git", "-C", cwd, "log", "-1", "--format=%B", commit]),
-    );
+    let source: string;
+    try {
+      source = directiveSource(cwd, repository, commit);
+    } catch (error) {
+      // Every commit's lookup is fatal, the older ones included: a directive
+      // that cannot be read must fail the leg, never quietly disarm it.
+      return fail(
+        `${commit.slice(0, 12)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const parsed = parseDirectives(source);
     if (parsed.kind === "none") continue;
     if (parsed.kind === "error") {
       // Only the judged commit's body is this run's fault; failing on an

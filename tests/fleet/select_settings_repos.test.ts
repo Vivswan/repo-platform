@@ -522,8 +522,8 @@ describe("select_settings_repos.ts", () => {
   const NOMODULE = { repo: "Vivswan/nomodule", name: "nomodule", private: false, verify: "" };
 
   // The called path (post-green's settings-fleet leg): the scope is public
-  // text off the judged main commit, so a private repo rides only under the
-  // token. The operator repo joins when the scope selects it (it is
+  // text off the merged PRs of the judged range, so a private repo rides
+  // only under the token. The operator repo joins when the scope selects it (it is
   // public). Whole outcome per row: every log line, the summary, the
   // matrix, exit code.
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
@@ -747,7 +747,7 @@ describe("select_settings_repos.ts", () => {
       expect(r).toEqual({
         exitCode: 1,
         stdout: lines(
-          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
+          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${SHA.slice(0, 12)})`,
         ),
         stderr: "",
         output: "",
