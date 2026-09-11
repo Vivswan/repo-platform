@@ -27,9 +27,9 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -
 
 The run's job log ends `row 0: PR opened`. In the report:
 
-- Written: `.github/workflows/nightly.yml` as `starter`, `created`. Every other row `unchanged`.
+- Written: `.github/workflows/nightly.yml` as `starter`, `created`; `.github/settings.yml` as `managed`, `updated`: the render gains the `nightly-failure` label (or your `labels.nightly`) from the registration. Every other row `unchanged`.
 - Review: `Hold for review: no`; `manual=true` keeps it waiting for you.
-- No `.github/settings.yml` diff from the sync: the settings apply declares the label from the registration (`labels.nightly`, else the default `nightly-failure`).
+- No edit of your own in `.github/settings.local.yml` is needed for the label: the registration key is its home, and the settings apply after the merge declares it.
 
 ### The starter, and moving real checks in
 
@@ -41,7 +41,7 @@ Two jobs: `checks` (yours; the placeholder is a green no-op that never files iss
 ### Verify
 
 - The first scheduled run is green, or files one issue carrying the label.
-- The label exists on the repo: `gh label list -R Vivswan/<repo>`. Create it with `gh label create` when no settings apply has declared it yet.
+- The label exists on the repo: `gh label list -R Vivswan/<repo>`. It arrives with the first settings apply after the sync PR merges; before that, create it with `gh label create`.
 
 ## 2. Adding `skills`
 

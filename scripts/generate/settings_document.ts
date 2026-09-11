@@ -1,0 +1,133 @@
+#!/usr/bin/env bun
+// This repository's own .github/settings.yml through the sync writer's
+// render: the sync never targets the operator (its files are the
+// sources), so the operator renders itself. --check reports drift.
+//
+// Usage: bun scripts/generate/settings_document.ts [--check] [--root <dir>]
+
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { loadFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
+import { readRegistration } from "../../.github/scripts/sync/writer/registration.ts";
+import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
+import { parseSettingsDoc } from "../../.github/scripts/sync/writer/settings_document.ts";
+import { renderSettings } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import { declaredPrivate } from "../../.github/scripts/sync/writer/settings_layers.ts";
+import type { FilesConfig, RenderedEntry } from "../../actions/plan/files_config.ts";
+import { OWNER } from "../check/ssot/inputs.ts";
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
+const FILES_CONFIG = "files.yml";
+const TREE = "files";
+
+export interface OwnSettings {
+  /** The rendered document's repo-relative path (the render entry's). */
+  path: string;
+  /** The overlay it was rendered from (the entry's `displaces`). */
+  overlayPath: string;
+  content: string;
+}
+
+/** The one entry the writer renders rather than copies. */
+function renderedEntry(config: FilesConfig): RenderedEntry {
+  const entries = config.files.filter((entry): entry is RenderedEntry => "render" in entry);
+  if (entries.length !== 1) {
+    throw new Error(
+      `${FILES_CONFIG} declares ${entries.length} render: settings entries; this repository renders exactly one`,
+    );
+  }
+  return entries[0];
+}
+
+/** This repository's settings document, every input read from `root`;
+ *  throws with the reason when the render cannot stand. */
+export function renderOwnSettings(root: string): OwnSettings {
+  const tree = join(root, TREE);
+  const config = loadFilesConfig(join(root, FILES_CONFIG), tree);
+  const entry = renderedEntry(config);
+  const overlayPath = entry.displaces;
+  const overlayAbs = join(root, overlayPath);
+  if (!existsSync(overlayAbs)) {
+    throw new Error(
+      `${overlayPath} is missing - the render reads this repository's overlay from it`,
+    );
+  }
+  const overlay = readFileSync(overlayAbs, "utf-8");
+  // The sync falls back to the operator's visibility fact; the generator
+  // has no GitHub to ask, so the overlay must say.
+  const visibility = declaredPrivate(parseSettingsDoc(overlay, overlayPath));
+  if (visibility === null) {
+    throw new Error(
+      `${overlayPath} must declare repository.private - the visibility layer is selected by it`,
+    );
+  }
+  const registration = readRegistration(root);
+  const { selected, dropped } = resolveModules(config, registration.modules);
+  if (dropped.length > 0) {
+    throw new Error(
+      `.repo-platform.yml selects module(s) ${FILES_CONFIG} does not know: ${dropped.join(", ")}`,
+    );
+  }
+  const rendered = renderSettings({
+    config,
+    tree,
+    modules: selected,
+    private: visibility,
+    registration,
+    overlay,
+    overlayPath,
+    owner: OWNER,
+  });
+  if ("held" in rendered) throw new Error(`${entry.path} cannot be rendered: ${rendered.held}`);
+  return { path: entry.path, overlayPath, content: rendered.content };
+}
+
+function parseArgs(argv: string[]): { check: boolean; root: string } | { error: string } {
+  let check = false;
+  let root = REPO_ROOT;
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--check") check = true;
+    else if (arg === "--root" && argv[index + 1] !== undefined) root = resolve(argv[++index]);
+    else
+      return {
+        error: arg === "--root" ? "--root needs a directory" : `unrecognized argument: ${arg}`,
+      };
+  }
+  return { check, root };
+}
+
+function main(argv: string[]): number {
+  const args = parseArgs(argv);
+  if ("error" in args) {
+    console.error(`error: ${args.error}`);
+    return 2;
+  }
+  const { check, root } = args;
+  let own: OwnSettings;
+  try {
+    own = renderOwnSettings(root);
+  } catch (error) {
+    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+  const abs = join(root, own.path);
+  const current = existsSync(abs) ? readFileSync(abs, "utf-8") : null;
+  if (current === own.content) {
+    console.log(
+      `${own.path} matches the settings layers, the registration, and ${own.overlayPath}`,
+    );
+    return 0;
+  }
+  if (check) {
+    console.log(
+      `${own.path} is stale: it is not the render of the settings layers, the registration, and ${own.overlayPath}; run bun run settings to rewrite it`,
+    );
+    return 1;
+  }
+  writeFileSync(abs, own.content);
+  console.log(`rewrote ${own.path}`);
+  return 0;
+}
+
+if (import.meta.main) process.exit(main(process.argv.slice(2)));

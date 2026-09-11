@@ -18,7 +18,7 @@ Because the starters are repo-owned, the sync never rewrites them, so the `fuzz-
 Each stream is identified by a label, set as a registration key (`labels.fuzzer`, `labels.nightly`, `labels.docs_site` in `.repo-platform.yml`) rather than a starter edit alone, because two more places must agree on it:
 
 - The report and resolve steps: both dedup and auto-close by the label.
-- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The managed settings baseline declares the label automatically - repo-platform reads the registration key at apply time, falls back to the module's default when the key is unset, and fails that repo's apply on a key set for a module the repository does not select ([settings.md](settings.md)).
+- The repository's settings labels: settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The rendered `.github/settings.yml` declares the label automatically - the sync reads the registration key when it renders, falls back to the module's default when the key is unset, and holds the sync PR on a key set for a module the repository does not select ([settings.md](settings.md)).
 
 The registration grammar and fleet-ci's `plan` job enforce:
 
@@ -44,7 +44,7 @@ To unblock:
 
 ## Renaming the label
 
-The fuzz and nightly starters are repo-owned while the label reaches settings from the registration, read fresh on every apply. Renaming the key therefore changes the label the NEXT settings apply declares (no sync needed) - but never the repo-owned workflow. The rename is one default-branch PR that:
+The fuzz and nightly starters are repo-owned while the label reaches the rendered settings from the registration on every sync. Renaming the key therefore changes the label the NEXT sync renders and the apply after it declares - but never the repo-owned workflow. The rename is one default-branch PR that:
 
 1. edits `labels.<key>` in `.repo-platform.yml`
 2. updates the workflow's two `label:` inputs in the same change - or it keeps filing under the old name while the settings apply deletes it
@@ -53,4 +53,4 @@ The docs-site stream is simpler: its workflow is MANAGED and the plan action res
 
 ## Deselecting the module
 
-Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan). For fuzzer and nightly, starters are never deleted by sync: the workflow keeps running - when you drop the module, also delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own settings if you keep the workflow. Deselecting docs-site needs no such step: the managed workflow leaves with the module's next sync PR.
+Deselecting removes the label declaration (remove the `labels.<key>` line with the module: a key for an unselected module fails the plan). For fuzzer and nightly, starters are never deleted by sync: the workflow keeps running - when you drop the module, also delete its workflow file (`.github/workflows/nightly-fuzz.yml` or `nightly.yml`), or keep the label declared in your own `.github/settings.local.yml` if you keep the workflow. Deselecting docs-site needs no such step: the managed workflow leaves with the module's next sync PR.
