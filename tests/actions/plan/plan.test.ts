@@ -321,7 +321,7 @@ describe("planSite", () => {
   test("the registration carries everything: the docs mount path, the title, the include roots verbatim, the label", () => {
     const include = [
       { path: "skills", mount: "skills", page: "SKILL.md" },
-      { path: "guides", mount: "guides" },
+      { path: "guides", mount: "guides", page: "GUIDE.md" },
     ];
     const text = [
       "modules: [bun, site, fuzzer]",
@@ -330,7 +330,7 @@ describe("planSite", () => {
       "  path: manual",
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
-      "    - { path: guides, mount: guides }",
+      "    - { path: guides, mount: guides, page: GUIDE.md }",
       "labels: { site: rot }",
     ].join("\n");
     expect(planSite(input(text))).toEqual({

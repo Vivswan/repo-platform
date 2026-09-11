@@ -1,10 +1,9 @@
-// The internal-link gate over the assembled site (docs/pages.md, "Internal
-// links are checked across mounts"): linkinator crawls the CURRENT
-// content's pages from a loopback server that serves the whole artifact at
-// its Pages base the way GitHub Pages does, and every same-site link,
-// fragment included, must resolve whichever mount serves the target -
-// VitePress's own dead-link check stops at its tree, and a command mount's
-// pages have no check of their own. Blocking by design: a broken link here
+// The internal-link gate over the assembled site (docs/site.md, "The docs
+// PR check"): linkinator crawls the CURRENT content's pages from a loopback
+// server that serves the whole artifact at its Pages base the way GitHub
+// Pages does, and every same-site link, fragment included, must resolve
+// whichever mount serves the target - VitePress's own dead-link check stops
+// at its tree, and the hook's website has no check of its own. Blocking by design: a broken link here
 // ships a 404 on a green deploy. Historical tag tiers are targets but never
 // seeds: history cannot be fixed (build.ts's tierStrictLinks draws the same
 // line).

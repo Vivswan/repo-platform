@@ -152,6 +152,7 @@ export const ALL_GREEN_ROSTER = [
   "script-tests",
   "validate-skills",
   "skills-discovery",
+  "docs-check",
   "pages-site-build",
   "codeql-javascript",
   "zizmor",

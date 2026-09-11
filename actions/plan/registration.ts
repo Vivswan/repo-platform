@@ -142,13 +142,14 @@ export const registrationSchema = z.strictObject({
     .strictObject({
       path: urlSegment.optional(),
       // Extra source roots rendered into the docs mount: each tree at
-      // `path`, served under `mount`, its pages being `page` files when named.
+      // `path`, served under `mount`, each child directory's `page` file
+      // serving at the directory URL.
       include: z
         .array(
           z.strictObject({
             path: relativePath("site.include[].path"),
             mount: urlSegment,
-            page: z.string().min(1).optional(),
+            page: z.string().min(1),
           }),
         )
         .min(1)

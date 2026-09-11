@@ -277,7 +277,7 @@ export interface SitePlan {
   /** Empty stays empty: pages-site then titles the site by repository name. */
   siteTitle: string;
   /** The registration's site.include, verbatim; [] when none are declared. */
-  include: { path: string; mount: string; page?: string }[];
+  include: { path: string; mount: string; page: string }[];
   linkRotLabel: string;
 }
 

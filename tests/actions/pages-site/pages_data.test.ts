@@ -103,8 +103,8 @@ describe("the page index under the action's build topology", () => {
         GITHUB_REPOSITORY: "o/r",
         RUNNER_TEMP: join(root, "runner-temp"),
         CHECK: "true",
-        DOCS_DIR: "docs",
-        SITE_TITLE: "t",
+        SITE_DIR: "",
+        CONFIG: '{"site_title": "t", "docs_path": "docs", "include": [], "link_rot_label": ""}',
       },
       timeoutMs: 180_000,
     });

@@ -19,8 +19,8 @@ import {
   readSite,
   revertHead,
   runnerTemp,
+  siteConfig,
   TEST_TIMEOUT_MS,
-  VITEPRESS_MOUNT,
   versionLabels,
 } from "./fixtures.ts";
 import { select, texts } from "./html.ts";
@@ -28,7 +28,7 @@ import { select, texts } from "./html.ts";
 const temp = tempDirs();
 
 const DOCS_REPO = "fixture-owner/fixture-repo";
-const DEPLOY_ENV = { SITE_TITLE: "Fixture Docs", MOUNTS: VITEPRESS_MOUNT };
+const DEPLOY_ENV = { CONFIG: siteConfig({ site_title: "Fixture Docs" }) };
 
 describe("the versioned vitepress deploy", () => {
   let site = "";
@@ -273,38 +273,31 @@ describe("the versioned vitepress deploy", () => {
   });
 });
 
-describe("a nested docs-dir", () => {
+describe("a shipped favicon", () => {
   test(
-    "lands the leaf tree at the fixed docs/ slot for the tag and HEAD tiers, favicon included",
+    "is linked at the tier's own base and served there, for the tag and HEAD tiers",
     () => {
-      const workspace = temp.dir("pages-site-nested-");
-      mkdirSync(join(workspace, "site", "manual", "public"), { recursive: true });
+      const workspace = temp.dir("pages-site-favicon-");
+      mkdirSync(join(workspace, "docs", "public"), { recursive: true });
+      writeFileSync(join(workspace, "docs", "README.md"), "# Favicon\n\nfavicon landing page\n");
       writeFileSync(
-        join(workspace, "site", "manual", "README.md"),
-        "# Nested\n\nnested landing page\n",
-      );
-      writeFileSync(
-        join(workspace, "site", "manual", "public", "favicon.svg"),
+        join(workspace, "docs", "public", "favicon.svg"),
         '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
       );
       initRepo(workspace);
-      commitAll(workspace, "nested docs");
+      commitAll(workspace, "docs with a favicon");
       fixtureGit(workspace, ["tag", "v1.0.0"]);
       const runner = runnerTemp(temp);
-      const result = buildSite(workspace, "fixture-owner/nested-repo", runner, {
-        DOCS_DIR: "site/manual",
-        MOUNTS: VITEPRESS_MOUNT,
-      });
+      const result = buildSite(workspace, "fixture-owner/favicon-repo", runner, {});
       expect(result.exitCode, describeRun(result)).toBe(0);
-      expect(readSite(runner.site, "index.html")).toContain("nested landing page");
+      expect(readSite(runner.site, "index.html")).toContain("favicon landing page");
       const latest = readSite(runner.site, "latest/index.html");
-      expect(latest).toContain("nested landing page");
-      expect(latest).toContain("Source: site/manual/README.md");
-      // The shipped favicon is linked at the tier's own base and served there.
+      expect(latest).toContain("Source: docs/README.md");
       expect(select(latest, 'link[rel="icon"]').map((link) => link.attrs.href)).toEqual([
-        "/nested-repo/latest/favicon.svg",
+        "/favicon-repo/latest/favicon.svg",
       ]);
       expect(isFile(runner.site, "latest/favicon.svg")).toBe(true);
+      expect(isFile(runner.site, "favicon.svg")).toBe(true);
     },
     TEST_TIMEOUT_MS,
   );

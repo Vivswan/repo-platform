@@ -301,6 +301,20 @@ jobs:
           skills-dir: skills
           mode: discovery
 
+  # This repository's docs built strictly through the site action from the
+  # working tree (dead internal links fail here, not the deploy), with the
+  # same configuration the site job passes; `bun run docs:check` is the
+  # local twin. Unconditional, like every gating job.
+  docs-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/pages-site
+        with:
+          check: "true"
+          config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
+
   # The pages-site action's vitepress build, end to end in the runner's
   # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
   # nothing else in the gate ever RUNS vitepress, and the build's module
@@ -452,6 +466,7 @@ jobs:
       - script-tests
       - validate-skills
       - skills-discovery
+      - docs-check
       - pages-site-build
       - codeql-javascript
       - zizmor

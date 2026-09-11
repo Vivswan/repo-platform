@@ -28,7 +28,7 @@ describe("parseRegistration", () => {
       "  path: manual",
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
-      "    - { path: guides, mount: guides }",
+      "    - { path: guides, mount: guides, page: GUIDE.md }",
       "skills:",
       "  dir: lib/skills",
       "labels:",
@@ -51,7 +51,7 @@ describe("parseRegistration", () => {
           path: "manual",
           include: [
             { path: "skills", mount: "skills", page: "SKILL.md" },
-            { path: "guides", mount: "guides" },
+            { path: "guides", mount: "guides", page: "GUIDE.md" },
           ],
         },
         skills: { dir: "lib/skills" },
@@ -132,13 +132,18 @@ describe("parseRegistration", () => {
     },
     {
       reason: "an include root escaping the repo",
-      text: "modules: []\nsite:\n  include: [{ path: ../x, mount: x }]\n",
+      text: "modules: []\nsite:\n  include: [{ path: ../x, mount: x, page: X.md }]\n",
       error: `${FILE}: site.include.0.path: site.include[].path must be relative path segments`,
     },
     {
       reason: "an include entry with an unknown key",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, title: T }]\n",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, page: X.md, title: T }]\n",
       error: `${FILE}: site.include.0: Unrecognized key: "title"`,
+    },
+    {
+      reason: "an include entry without its page file",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: x }]\n",
+      error: `${FILE}: site.include.0.page: Invalid input: expected string, received undefined`,
     },
     {
       reason: "a pages block, whose build moved into the site-build hook",
