@@ -1,8 +1,8 @@
 // The zizmor action's contract: the fleet policy is copied into the
 // workspace (the upstream container mounts nothing else) unless the
 // repository carries its own, the SARIF pass is visibility-keyed and never
-// the verdict, the verdict pass fails on high alone, and the copy is
-// removed whatever the passes said.
+// the verdict, the verdict pass fails on high alone, each pass's retry
+// alone carries its result, and the copy is removed whatever the passes said.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -13,53 +13,89 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const action = loadAction("actions/zizmor/action.yml");
-const [resolve, upload, gate, cleanup] = action.runs.steps;
+const [resolve, upload, uploadRetry, gate, gateRetry, cleanup] = action.runs.steps;
 const ACTION_DIR = join(REPO_ROOT, "actions/zizmor");
 const COPY = ".zizmor-fleet-policy.yml";
 const UPSTREAM = /^zizmorcore\/zizmor-action@[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
 
 describe("actions/zizmor", () => {
-  test("one input (the upload switch), four steps: resolve, upload, gate, cleanup", () => {
+  test("one input (the upload switch), six steps: resolve, each pass with its retry, cleanup", () => {
     expect(action.runs.using).toBe("composite");
     expect(Object.keys(action.inputs ?? {})).toEqual(["upload-sarif"]);
     expect(action.inputs?.["upload-sarif"]?.default).toBe("true");
     expect(action.runs.steps.map((step) => step.name)).toEqual([
       "Resolve the policy",
       "Upload every finding to code scanning",
+      "Upload every finding to code scanning (retry)",
       "Fail on a high finding",
+      "Fail on a high finding (retry)",
       "Remove the copied policy",
     ]);
   });
 
-  test("both zizmor passes ride the same sha-pinned upstream at the same zizmor version and policy", () => {
+  test("every zizmor attempt rides the same sha-pinned upstream at the same zizmor version and policy", () => {
     // The pin line as written (the parsed uses drops the version comment).
     const pins = readFileSync(join(REPO_ROOT, "actions/zizmor/action.yml"), "utf8")
       .split("\n")
       .filter((line) => line.includes("uses: zizmorcore/"))
       .map((line) => line.trim().replace(/^uses: /, ""));
-    expect(pins).toHaveLength(2);
+    expect(pins).toHaveLength(4);
     expect(pins[0]).toMatch(UPSTREAM);
-    expect(pins[1]).toBe(pins[0]);
-    for (const step of [upload, gate]) {
+    expect(new Set(pins).size).toBe(1);
+    for (const step of [upload, uploadRetry, gate, gateRetry]) {
       const w = step.with as Record<string, string>;
       expect(w.config).toBe("${{ steps.policy.outputs.path }}");
       expect(w.version).toMatch(/^\d+\.\d+\.\d+$/);
+      // The same zizmor: a finding the upload reports is the one the gate judges.
+      expect(w.version).toBe((upload.with as Record<string, string>).version);
     }
-    // The same zizmor: a finding the upload reports is the one the gate judges.
-    expect((gate.with as Record<string, string>).version).toBe(
-      (upload.with as Record<string, string>).version,
-    );
   });
 
-  test("the upload pass is keyed on the input and uploads medium and above; SARIF mode cannot fail", () => {
-    expect(upload.if).toBe("inputs.upload-sarif == 'true'");
-    expect(upload.with).toMatchObject({ "advanced-security": true, "min-severity": "medium" });
-  });
-
-  test("the gate pass is unconditional, plain-format (exit codes live), high only", () => {
-    expect(gate.if).toBeUndefined();
-    expect(gate.with).toMatchObject({ "advanced-security": false, "min-severity": "high" });
-  });
+  // A high finding fails both judging attempts alike; a transient error
+  // fails the first and passes the second.
+  test.each([
+    {
+      pass: "upload",
+      first: upload,
+      retry: uploadRetry,
+      id: "sarif",
+      firstIf: "inputs.upload-sarif == 'true'",
+      retryName: "Upload every finding to code scanning (retry)",
+      inputs: { "advanced-security": true, "min-severity": "medium" },
+    },
+    {
+      pass: "gate",
+      first: gate,
+      retry: gateRetry,
+      id: "gate",
+      firstIf: undefined,
+      retryName: "Fail on a high finding (retry)",
+      inputs: { "advanced-security": false, "min-severity": "high" },
+    },
+  ])(
+    "the $pass pass: a softened first attempt and a verdict-carrying retry of the same invocation",
+    ({ first, retry, id, firstIf, retryName, inputs }) => {
+      expect(first).toEqual({
+        name: retryName.replace(" (retry)", ""),
+        id,
+        ...(firstIf === undefined ? {} : { if: firstIf }),
+        "continue-on-error": true,
+        uses: expect.stringMatching(/^zizmorcore\/zizmor-action@[0-9a-f]{40}$/),
+        with: {
+          config: "${{ steps.policy.outputs.path }}",
+          version: expect.any(String),
+          ...inputs,
+        },
+      });
+      // No continue-on-error: the retry's result is the pass's.
+      expect(retry).toEqual({
+        name: retryName,
+        if: `steps.${id}.outcome == 'failure'`,
+        uses: first.uses,
+        with: first.with,
+      });
+    },
+  );
 
   const runStep = (name: string, repo: string) =>
     runBashStep(stepNamed(action, name), {

@@ -6,9 +6,11 @@ description: >-
   .github/zizmor.yml. Two passes of the pinned upstream action: the first
   uploads every finding of medium severity or above to code scanning as
   SARIF (public repositories only, as private personal repositories have no
-  code scanning), the second fails the step on any high finding. The only
-  bypass is zizmor's own: an inline `# zizmor: ignore[rule]` comment or a
-  config ignore entry, in the repository, with a reason.
+  code scanning), the second fails the step on any high finding. zizmor
+  exits non-zero alike on an audit error and on a finding, so a failed
+  attempt of either pass runs once more and only the retry's result counts.
+  The only bypass is zizmor's own: an inline `# zizmor: ignore[rule]`
+  comment or a config ignore entry, in the repository, with a reason.
 
 inputs:
   upload-sarif:
@@ -35,10 +37,22 @@ runs:
         if [ -f .github/zizmor.yml ]; then path=.github/zizmor.yml; else path=.zizmor-fleet-policy.yml; cp "$FLEET_POLICY" "$path"; fi
         echo "path=$path" >>"$GITHUB_OUTPUT"
 
-    # SARIF mode never fails the step (zizmor suppresses its finding exit
-    # codes there), hence the second, judging pass below.
+    # SARIF mode never fails the step on a finding (zizmor suppresses its
+    # finding exit codes there), hence the judging pass below. A retry keys
+    # on its first attempt's outcome, 'skipped' when that attempt was skipped.
     - name: Upload every finding to code scanning
+      id: sarif
       if: inputs.upload-sarif == 'true'
+      continue-on-error: true
+      uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      with:
+        config: ${{ steps.policy.outputs.path }}
+        version: 1.30.1
+        min-severity: medium
+        advanced-security: true
+
+    - name: Upload every finding to code scanning (retry)
+      if: steps.sarif.outcome == 'failure'
       uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
       with:
         config: ${{ steps.policy.outputs.path }}
@@ -47,6 +61,17 @@ runs:
         advanced-security: true
 
     - name: Fail on a high finding
+      id: gate
+      continue-on-error: true
+      uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      with:
+        config: ${{ steps.policy.outputs.path }}
+        version: 1.30.1
+        min-severity: high
+        advanced-security: false
+
+    - name: Fail on a high finding (retry)
+      if: steps.gate.outcome == 'failure'
       uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
       with:
         config: ${{ steps.policy.outputs.path }}
