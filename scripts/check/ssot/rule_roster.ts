@@ -49,6 +49,7 @@ export const RULE_ROSTER = [
   "all-green-roster",
   "all-green-judge-substitutions",
   "fleet-ci-roster",
+  "fleet-ci-plan-unconditional",
   "fleet-nightly-roster",
   "fleet-caller-ceilings",
   "all-green-name",
