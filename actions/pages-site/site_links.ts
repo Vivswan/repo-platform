@@ -263,6 +263,8 @@ function serveSite(site: string, rootBase: string): ReturnType<typeof Bun.serve>
  *  (`https://owner.github.io/other-repo/`) therefore stays external. */
 export function ownSitePattern(origin: string, rootBase: string): RegExp {
   const prefix = new URL(origin).origin + rootBase.slice(0, -1);
+  // The site's own parsed origin, escaped, never a visitor's input.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[/?#]|$)`);
 }
 

@@ -28,9 +28,12 @@ describe("actions/semgrep", () => {
     expect(command).not.toContain("--error");
     expect(command).not.toContain("--severity");
     // Registry ids carry their path; the id semgrep matches is the one code
-    // scanning shows. zizmor's unpinned-uses owns action pinning.
+    // scanning shows. zizmor's unpinned-uses owns action pinning; the fleet's
+    // old rendered ci.yml and release.yml carry no nosemgrep marker on their
+    // `secrets: inherit` lines until the writer cutover replaces them.
     expect(command.match(/--exclude-rule=(\S+)/g)).toEqual([
       "--exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag",
+      "--exclude-rule=yaml.github-actions.security.secrets-inherit.secrets-inherit",
     ]);
     expect(upload.uses).toMatch(/^github\/codeql-action\/upload-sarif@[0-9a-f]{40}$/);
     expect(upload.with).toEqual({

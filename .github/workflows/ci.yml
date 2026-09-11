@@ -252,7 +252,23 @@ jobs:
           bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
+      # The typos action's end-to-end cases run the binary the action pins
+      # (its release publishes no checksum file, so the archive's sha256 is
+      # recorded here); TYPOS_REQUIRED makes them fail instead of skip.
+      - name: Install the pinned typos release
+        env:
+          TYPOS_VERSION: 1.50.1
+          TYPOS_SHA256: edf0545109aee6a22751d04ddecb97c45be47d3aa0409564fb895eeeace91b1e
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/typos.tar.gz" \
+            "https://github.com/crate-ci/typos/releases/download/v${TYPOS_VERSION}/typos-v${TYPOS_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${TYPOS_SHA256}  $RUNNER_TEMP/typos.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/typos-bin"
+          tar -xzf "$RUNNER_TEMP/typos.tar.gz" -C "$RUNNER_TEMP/typos-bin" ./typos
+          echo "$RUNNER_TEMP/typos-bin" >>"$GITHUB_PATH"
       - name: Run .github/scripts and action tests
+        env:
+          TYPOS_REQUIRED: "1"
         run: bun run test
 
   # Structural validation of this repository's own hosted agent skills

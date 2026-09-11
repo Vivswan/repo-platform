@@ -145,6 +145,8 @@ export function callersOf(
   if (!/^[A-Za-z0-9-]+$/.test(owner)) {
     throw new Error(`callersOf: owner '${owner}' is not a plain GitHub username`);
   }
+  // Built from the validated owner and an escaped path, never from input.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   const canonical = new RegExp(`^${owner}/repo-platform/${escapeRegExp(rel)}@`, "i");
   const mapping = (value: unknown): Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value)

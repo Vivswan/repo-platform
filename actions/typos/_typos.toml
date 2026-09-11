@@ -2,9 +2,11 @@
 # and a repository's own _typos.toml extends it.
 
 [files]
-# Lockfiles and generated bundles carry hashes and minified identifiers,
-# never prose.
-extend-exclude = ["*.lock", "*.lockb", "package-lock.json", "*.min.js", "*.min.css", "*.svg"]
+# Lockfiles, minified bundles, installed packages, and a packaged action's
+# committed build output at the checkout root carry hashes and mangled
+# identifiers, never prose. A root lib/ is source in a Node repository, so
+# a repository that generates it excludes it in its own _typos.toml.
+extend-exclude = ["*.lock", "*.lockb", "package-lock.json", "*.min.js", "*.min.css", "*.svg", "/dist/", "node_modules/"]
 
 [default]
 extend-ignore-re = [
@@ -13,3 +15,7 @@ extend-ignore-re = [
   # A line ending in `# typos: ignore` or `// typos: ignore` opts itself out.
   "(?Rm)^.*(#|//)\\s*typos:\\s*ignore.*$",
 ]
+
+[default.extend-words]
+# A legitimate variant of unparsable, spelled this way across the fleet.
+unparseable = "unparseable"
