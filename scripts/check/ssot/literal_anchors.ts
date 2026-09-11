@@ -46,13 +46,9 @@ export function inlineFunctionCopies(text: string, name: string): string[] {
   return [...text.matchAll(block)].map((match) => match[0]);
 }
 
-/** The release-cut wiring across its three files, compared on the PARSED
- *  documents: release-health.ts writes the output, action.yml declares it
- *  off the step that runs the script, and fleet-release.yml turns
- *  release-please's tag phase off unless it reads "true". A rename or a
- *  dropped `id:` on any side reads as an empty output, which is not
- *  "true": every run would skip the tag phase and no release would ever
- *  cut, silently. */
+/** Pinned on the parsed documents, not a grep: a commented-out write or a stray literal would still match as text.
+ *  A renamed output or a dropped `id:` on any side reads as an empty output, which is not "true": every run skips the tag phase and no release ever cuts, silently.
+ *  The script writes the output only in release mode, so the health step's `mode: release` is pinned too: any other mode is the same empty output. */
 export function releaseCutWiringMismatches(files: {
   workflow: string;
   action: string;
@@ -110,6 +106,16 @@ export function releaseCutWiringMismatches(files: {
       expected: "the release-health step carries id: health",
       got: health === undefined ? "no release-health step" : `id: ${String(health.id ?? "")}`,
     });
+  }
+  if (health !== undefined) {
+    const mode = asRecord(health.with ?? {}, `${workflowRel} health.with`).mode;
+    if (mode !== "release") {
+      mismatches.push({
+        file: `${workflowRel} release-please step 'health'`,
+        expected: "mode: release",
+        got: mode === undefined ? "no mode input" : `mode: ${String(mode)}`,
+      });
+    }
   }
   const release = steps.find((step) => step.id === "release");
   const skip = String(

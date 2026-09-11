@@ -77,6 +77,7 @@ describe("releaseCutWiringMismatches", () => {
   const workflow = (
     skip = "${{ steps.health.outputs.release-cut != 'true' }}",
     healthId = "health",
+    mode = "release",
   ) => `
 jobs:
   release-please:
@@ -85,7 +86,7 @@ jobs:
       - uses: Vivswan/repo-platform/actions/release-health@build
         id: ${healthId}
         with:
-          mode: release
+          mode: ${mode}
       - uses: googleapis/release-please-action@sha # v5.0.0
         id: release
         with:
@@ -131,6 +132,16 @@ runs:
         file: ".github/workflows/fleet-release.yml release-please",
         expected: "the release-health step carries id: health",
         got: "id: gate",
+      },
+    },
+    {
+      reason:
+        "the health step runs in pull-request mode, which never writes release-cut (the id and the expression still line up, so only the mode pin sees it)",
+      files: { ...wired, workflow: workflow(undefined, undefined, "pull-request") },
+      expected: {
+        file: ".github/workflows/fleet-release.yml release-please step 'health'",
+        expected: "mode: release",
+        got: "mode: pull-request",
       },
     },
     {
