@@ -178,8 +178,7 @@ export function applyMirrors(
   const replaced: ReplacedText[] = [];
   /** Every target's sha256 once its copy holds the source: its record. */
   const hashes = new Map<string, string>();
-  /** Each concrete path's one writer. */
-  const settled = new Map<string, string>();
+  const settled = new Set<string>();
 
   /** The concrete claims of a pass: a literal is its own path; a glob fails
    *  whole when it reads through a link or matches nothing, else expands.
@@ -249,7 +248,9 @@ export function applyMirrors(
   /** Settles every path the pass claims: an unwritable path, one nested
    *  with another target (both sides, so declaration order never picks the
    *  winner), or one claimed by two sources fails; the rest are one
-   *  source's to write. Throws with every failure of the pass before
+   *  source's to write. A path an earlier pass settled is this source's
+   *  own: mirrorDeclarationProblems refuses every glob that matches another
+   *  source's literal. Throws with every failure of the pass before
    *  anything is written, so the claims it returns are all writable by
    *  their source. */
   const settle = (
@@ -259,22 +260,12 @@ export function applyMirrors(
   ): Claim[] => {
     const claimants = new Map<string, Set<string>>();
     for (const { source, path } of claims) {
-      const owner = settled.get(path);
-      if (owner !== undefined) {
-        if (owner !== source) {
-          failures.push({
-            source,
-            target: path,
-            problem: "the target is claimed by more than one source",
-          });
-        }
-        continue;
-      }
+      if (settled.has(path)) continue;
       const sources = claimants.get(path) ?? new Set<string>();
       sources.add(source);
       claimants.set(path, sources);
     }
-    const every = new Set([...settled.keys(), ...claimants.keys()]);
+    const every = new Set([...settled, ...claimants.keys()]);
     for (const [path, sources] of claimants) {
       const problems: string[] = [];
       const failure = pathFailure(path, kind);
@@ -291,7 +282,7 @@ export function applyMirrors(
       for (const source of sources) {
         for (const problem of problems) failures.push({ source, target: path, problem });
       }
-      if (problems.length === 0) settled.set(path, [...sources][0]);
+      if (problems.length === 0) settled.add(path);
     }
     if (failures.length > 0) throw new MirrorFailure(failures);
     return claims;
