@@ -33,8 +33,9 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadModules, managedLabelNames } from "../fleet/render_managed_settings.ts";
+import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { loadFilesConfig } from "../sync/writer/files_config.ts";
+import { layerConfig, managedLabelNames } from "../sync/writer/settings_layers.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -258,8 +259,9 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
  *  case-insensitively) and deduped, in declaration order: the settings
  *  layers files.yml declares are the roster's single home. */
 export function reservedLabelNames(repoRoot: string): string[] {
-  const modules = loadModules(join(repoRoot, FILES_CONFIG));
-  return [...new Set(managedLabelNames(modules).map((name) => name.toLowerCase()))];
+  const config = parseFilesConfig(readFileSync(join(repoRoot, FILES_CONFIG), "utf-8"));
+  const names = managedLabelNames(layerConfig(config), join(repoRoot, FILES_DIR));
+  return [...new Set(names.map((name) => name.toLowerCase()))];
 }
 
 /** Writes the reserved label roster the plan action refuses a tracking

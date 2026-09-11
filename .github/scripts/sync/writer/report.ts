@@ -11,7 +11,8 @@ export interface WrittenRow {
   path: string;
   class: FileClass;
   change: Change;
-  /** Why a held row was not written; empty otherwise. */
+  /** Why a held row was not written, or where a moved file went (`to
+   *  <path>`); empty otherwise. */
   detail: string;
 }
 
@@ -43,6 +44,11 @@ export function holdReasons(outcome: SyncOutcome): string[] {
     if (row.change === "held") reasons.push(`${row.path} held: ${row.detail}`);
     if (row.change === "region added") {
       reasons.push(`${row.path}: the managed region was added above repository-owned content`);
+    }
+    if (row.change === "moved") {
+      reasons.push(
+        `${row.path}: the repository's file moved ${row.detail} and the rendered document replaced it`,
+      );
     }
   }
   for (const row of outcome.replaced) reasons.push(`local edits replaced in ${row.path}`);

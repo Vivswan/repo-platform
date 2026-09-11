@@ -21,7 +21,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { isMapping } from "./settings_document.ts";
+import { isMapping } from "../sync/writer/settings_document.ts";
 
 export type ReferenceKind = "issue-form" | "workflow";
 

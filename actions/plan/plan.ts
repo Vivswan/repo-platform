@@ -168,7 +168,10 @@ export function selectModules(input: PlanInput): Module[] {
 /** Each selected tracking stream's label, in canonical order: the
  *  registration's `labels.<key>`, else the module's default. A `labels`
  *  key naming no selected stream fails: it would silently label nothing. */
-export function trackingLabels(input: PlanInput, selected: Module[]): string[] {
+export function trackingLabels(
+  input: Pick<PlanInput, "registration" | "reservedLabels">,
+  selected: Module[],
+): string[] {
   const streams = selected.flatMap((module) =>
     module.tracking_label
       ? [{ key: module.tracking_label.key, default: module.tracking_label.default }]

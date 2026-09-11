@@ -9,8 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   parseLayerFile,
   parseSettingsDoc,
-  parseYamlMapping,
-} from "../../.github/scripts/fleet/settings_document";
+} from "../../../.github/scripts/sync/writer/settings_document";
 
 describe("parseSettingsDoc", () => {
   test("nulls are legal input: they are the dialect's opt-out marker", () => {
@@ -49,9 +48,9 @@ describe("parseSettingsDoc", () => {
     expect(() =>
       parseSettingsDoc(
         "rulesets:\n  - name: main\n    rules:\n      - type: deletion\n      - parameters: {}\n",
-        "owner/name/.github/settings.yml",
+        ".github/settings.local.yml",
       ),
-    ).toThrow('owner/name/.github/settings.yml: rulesets[0].rules[1]: ruleset "main"');
+    ).toThrow('.github/settings.local.yml: rulesets[0].rules[1]: ruleset "main"');
   });
 
   test("a null rule element is refused too, never dropped", () => {
@@ -61,24 +60,33 @@ describe("parseSettingsDoc", () => {
       parseSettingsDoc("rulesets:\n  - name: main\n    rules:\n      - null\n", "f"),
     ).toThrow("no string 'type'");
   });
+
+  test("an empty document is an empty layer, not an error", () => {
+    expect(parseSettingsDoc("", "f")).toEqual({});
+    expect(parseSettingsDoc("# comments only\n", "f")).toEqual({});
+  });
+
+  test("non-mapping documents and parse errors throw with the location", () => {
+    expect(() => parseSettingsDoc("- a list\n", "f")).toThrow("f: not a YAML mapping");
+    expect(() => parseSettingsDoc("a: [unclosed\n", "f")).toThrow("f: YAML parse error");
+  });
 });
 
 describe("the name-keyed sections must be lists of mappings", () => {
   // A mapping or scalar here used to fall out of the name-keyed union
-  // into wholesale replace: a repo declaring `labels:` as a mapping
+  // into wholesale replace: an overlay declaring `labels:` as a mapping
   // silently DISCARDED the managed roster (which the apply then deleted
   // from the live repository), and a mapping `rulesets:` shipped a
-  // well-formed document missing the modules' protection rules - the
-  // apply succeeded green with weaker protection than declared. The
+  // well-formed document missing the modules' protection rules. The
   // refusal happens ONCE, here at the parse boundary, and names the
   // file, the section, and the received shape.
   test.each([
     {
       reason: "a mapping labels section, naming file, section, and shape",
       text: 'labels:\n  bug: "d73a4a"\n',
-      file: "owner/name/.github/settings.yml",
+      file: ".github/settings.local.yml",
       message:
-        "owner/name/.github/settings.yml: labels: labels must be a list of mappings, got a mapping",
+        ".github/settings.local.yml: labels: labels must be a list of mappings, got a mapping",
     },
     {
       reason: "a scalar labels section, with the value quoted",
@@ -89,9 +97,9 @@ describe("the name-keyed sections must be lists of mappings", () => {
     {
       reason: "a mapping rulesets section",
       text: "rulesets:\n  main:\n    rules:\n      - type: deletion\n",
-      file: "owner/name/.github/settings.yml",
+      file: ".github/settings.local.yml",
       message:
-        "owner/name/.github/settings.yml: rulesets: rulesets must be a list of mappings, got a mapping",
+        ".github/settings.local.yml: rulesets: rulesets must be a list of mappings, got a mapping",
     },
   ])("refuses $reason", ({ text, file, message }) => {
     expect(() => parseSettingsDoc(text, file)).toThrow(message);
@@ -119,31 +127,21 @@ describe("the name-keyed sections must be lists of mappings", () => {
   });
 
   test("parseLayerFile refuses the same shapes: one boundary, both entrances", () => {
-    expect(() => parseLayerFile("labels:\n  bug: x\n", "templates/x/settings.yml")).toThrow(
-      "templates/x/settings.yml: labels: labels must be a list of mappings",
+    expect(() => parseLayerFile("labels:\n  bug: x\n", "files/x/settings.yml")).toThrow(
+      "files/x/settings.yml: labels: labels must be a list of mappings",
     );
   });
 });
 
 describe("parseLayerFile", () => {
   test("a fleet or module layer file must declare a mapping", () => {
-    // The render selects layer files by existence, so "declares nothing"
-    // is already expressible by not shipping the file; an empty one is an
-    // authoring accident and says so.
-    expect(() => parseLayerFile("", "templates/x/settings.yml")).toThrow("not a YAML mapping");
-    expect(() => parseLayerFile("# comments only\n", "templates/x/settings.yml")).toThrow(
+    // A declared layer that says nothing is an authoring accident: not
+    // declaring it already expresses an empty layer. A repository's own
+    // overlay is the opposite case: present but empty is a real, empty layer.
+    expect(() => parseLayerFile("", "files/x/settings.yml")).toThrow("not a YAML mapping");
+    expect(() => parseLayerFile("# comments only\n", "files/x/settings.yml")).toThrow(
       "not a YAML mapping",
     );
-    // A repository's own settings.yml is the opposite case: present but
-    // empty is a real, empty layer.
-    expect(parseSettingsDoc("", "owner/name")).toEqual({});
-  });
-});
-
-describe("parseYamlMapping", () => {
-  test("the non-settings mapping parser carries the same location context", () => {
-    expect(parseYamlMapping("modules:\n  - uv\n", "f")).toEqual({ modules: ["uv"] });
-    expect(() => parseYamlMapping("- a list\n", "f")).toThrow("f: not a YAML mapping");
-    expect(() => parseYamlMapping("a: [unclosed\n", "f")).toThrow("f: YAML parse error");
+    expect(parseSettingsDoc("", ".github/settings.local.yml")).toEqual({});
   });
 });

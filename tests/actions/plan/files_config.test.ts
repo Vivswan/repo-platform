@@ -13,6 +13,7 @@ import {
   mutuallyExclusive,
   parseFilesConfig,
   pathProblem,
+  starterCoverage,
 } from "../../../actions/plan/files_config.ts";
 
 const BASE = `
@@ -40,7 +41,8 @@ retired:
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
-const sourceOf = (entry: FileEntry) => (entry.class === "link" ? null : entry.source);
+const sourceOf = (entry: FileEntry) =>
+  entry.class === "link" || "render" in entry ? null : entry.source;
 
 function problemsOf(text: string, label?: string): string[] {
   try {
@@ -233,6 +235,187 @@ describe("parseFilesConfig", () => {
     ],
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
+  });
+});
+
+describe("render, displaces, and the settings block", () => {
+  const SETTINGS = [
+    "settings:",
+    "  baseline: files/settings/baseline.yml",
+    "  public: files/settings/public.yml",
+    "  private: files/settings/private.yml",
+    "  override: files/settings/override.yml",
+  ].join("\n");
+  const doc = (files: string[], extra: string[] = [SETTINGS]) =>
+    [
+      "placeholders: []",
+      "modules:\n  bun: {}",
+      ...extra,
+      "files:",
+      ...files,
+      "retired:\n  - { path: old.yml }",
+    ].join("\n");
+  const RENDERED =
+    "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml }";
+  const STARTER = "  - { path: .github/settings.local.yml, class: starter }";
+  const PAIR = [
+    "  - { path: .github/settings.local.yml, class: starter, when: { private: false } }",
+    "  - { path: .github/settings.local.yml, class: starter, when: { private: true }, source: files/base/.github/settings.local.private.yml }",
+  ];
+
+  test("a rendered entry carries no source, keeps its displacement, and exposes the settings block tree-relative", () => {
+    const config = parseFilesConfig(doc([STARTER, RENDERED]));
+    expect(config.files[1]).toEqual({
+      path: ".github/settings.yml",
+      class: "managed",
+      render: "settings",
+      displaces: ".github/settings.local.yml",
+      when: null,
+    });
+    expect(config.settings).toEqual({
+      baseline: "settings/baseline.yml",
+      public: "settings/public.yml",
+      private: "settings/private.yml",
+      override: "settings/override.yml",
+    });
+    // The two selection shapes the displacement accepts: a private pair
+    // under an unconditional displacer, and a matching condition.
+    expect(problemsOf(doc([...PAIR, RENDERED]))).toEqual([]);
+    expect(
+      problemsOf(
+        doc([
+          PAIR[0],
+          "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml, when: { private: false } }",
+        ]),
+      ),
+    ).toEqual([]);
+    expect(parseFilesConfig(doc([STARTER], [])).settings).toBeNull();
+  });
+
+  test.each([
+    [
+      "render on a split entry",
+      doc([STARTER, "  - { path: a, class: split, region: hash, render: settings }", RENDERED]),
+      "files: a: render applies to managed entries only",
+    ],
+    [
+      "a rendered entry without displaces",
+      doc([STARTER, "  - { path: .github/settings.yml, class: managed, render: settings }"]),
+      "files: .github/settings.yml: a rendered entry needs displaces, the overlay it renders from",
+    ],
+    [
+      "a rendered entry listed before the starter it renders from",
+      doc([RENDERED, STARTER]),
+      "files: .github/settings.yml: displaces .github/settings.local.yml, whose starter entries must be listed before it",
+    ],
+    [
+      "a rendered entry listed between the two starters it renders from",
+      doc([PAIR[0], RENDERED, PAIR[1]]),
+      "files: .github/settings.yml: displaces .github/settings.local.yml, whose starter entries must be listed before it",
+    ],
+    [
+      "render with a source",
+      doc([
+        STARTER,
+        "  - { path: .github/settings.yml, class: managed, render: settings, source: files/base/x }",
+      ]),
+      "files: .github/settings.yml: a rendered entry has no source or blocks",
+    ],
+    [
+      "displaces on a starter",
+      doc([
+        STARTER,
+        "  - { path: b, class: starter, displaces: .github/settings.local.yml }",
+        RENDERED,
+      ]),
+      "files: b: displaces applies to managed entries only",
+    ],
+    [
+      "displaces naming a managed target",
+      doc(["  - { path: .github/settings.local.yml, class: managed }", RENDERED]),
+      "files: .github/settings.yml: displaces .github/settings.local.yml, which must be written by starter entries only - the displacement target is a starter of the same selection",
+    ],
+    [
+      "displaces naming a retired path",
+      doc([
+        STARTER,
+        "  - { path: .github/settings.yml, class: managed, render: settings, displaces: old.yml }",
+      ]),
+      "files: .github/settings.yml: displaces old.yml, a retired path",
+    ],
+    [
+      "displaces with no starter at the target",
+      doc([RENDERED]),
+      "files: .github/settings.yml: displaces .github/settings.local.yml, which must be written by starter entries only",
+    ],
+    [
+      "displaces its own path",
+      doc([
+        STARTER,
+        "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.yml }",
+      ]),
+      "files: .github/settings.yml: displaces its own path",
+    ],
+    [
+      "displaces the manifest",
+      doc([
+        STARTER,
+        "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/repo-platform-manifest.json }",
+      ]),
+      "files: .github/settings.yml: displaces the manifest",
+    ],
+    [
+      "a conditional displacer over a starter with another condition",
+      doc([
+        "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun] } }",
+        "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml, when: { private: false } }",
+      ]),
+      "whose starters are not selected exactly when this entry is",
+    ],
+    [
+      "an unconditional displacer over a modules-gated starter",
+      doc([
+        "  - { path: .github/settings.local.yml, class: starter, when: { modules: [bun] } }",
+        RENDERED,
+      ]),
+      "whose starters are not selected exactly when this entry is",
+    ],
+    [
+      "a rendered entry without the settings block",
+      doc([STARTER, RENDERED], []),
+      "settings: missing - a render: settings entry reads the four fleet layers from it",
+    ],
+    [
+      "a settings block without a rendered entry",
+      doc([STARTER]),
+      "settings: present, but no render: settings entry reads it",
+    ],
+    [
+      "a layer path outside files/",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("files/settings/private.yml", "settings/private.yml")],
+      ),
+      "settings: private 'settings/private.yml' must be a clean path under files/",
+    ],
+  ])("refuses %s", (_reason, text, fragment) => {
+    expect(problemsOf(text).join("\n")).toContain(fragment);
+  });
+});
+
+describe("starterCoverage", () => {
+  test.each([
+    [null, [null], true],
+    [null, [{ private: true }, { private: false }], true],
+    [null, [{ private: false }, { private: true }], true],
+    [null, [{ private: true }], false],
+    [null, [{ private: true, modules: ["a"] }, { private: false }], false],
+    [null, [{ modules: ["a"] }], false],
+    [{ private: false }, [{ private: false }, { private: true }], true],
+    [{ modules: ["a"] }, [{ modules: ["a"] }], true],
+    [{ modules: ["a"] }, [null], false],
+  ])("%j over %j -> %p", (displacer, starters, expected) => {
+    expect(starterCoverage(displacer, starters)).toBe(expected);
   });
 });
 
