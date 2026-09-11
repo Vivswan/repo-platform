@@ -232,7 +232,7 @@ A copy the writer cannot make would leave the repository out of sync with only a
 | `replaced` | a directory stood at the target (removed whole, the links inside unlinked and never followed) or a file stood where an ancestor directory must be (removed); the detail names which, and holds the PR |
 | the run fails | the source was held this run; the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix; a matched path is unsafe, nests with a path `files.yml` writes or retires or a stale record retires, sits under a symbolic link, is a symbolic link, or (a glob's) sits under a file or has no existing directory; a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included); a path is claimed by more than one source. Every path of a pass is judged before the pass writes |
 
-Every row's target is recorded as class `mirror` with the copy's hash, so the next sync can tell its own previous write from a local edit ([docs/new-repo.md](new-repo.md#mirror-copies-of-rendered-files)).
+Every row's target is recorded as class `mirror` with the copy's hash, so the next sync can tell its own previous write from a local edit ([docs/new-repo.md](new-repo.md#mirror-copies-of-platform-files)).
 
 ## The manifest
 
