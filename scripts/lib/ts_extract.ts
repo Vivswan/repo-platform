@@ -238,6 +238,21 @@ export function propertyAssignmentCarries(source: string, key: string, valueText
     );
 }
 
+/** Whether any call in `source` has callee text `callee` and a plain
+ *  string literal `firstArg` as its first argument. A call in a comment
+ *  or inside a string is not a call. */
+export function callCarriesLiteral(source: string, callee: string, firstArg: string): boolean {
+  return parseTs(source)
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .some((call) => {
+      if (unwrapExpression(call.getExpression()).getText() !== callee) return false;
+      const first = call.getArguments()[0];
+      return (
+        first !== undefined && Node.isStringLiteral(first) && first.getLiteralValue() === firstArg
+      );
+    });
+}
+
 /** Every module specifier `source` names: static imports (type-only
  *  included), re-exports, `import x = require()`, `import("...")` type
  *  nodes, and `import()` / `require()` calls. `nonLiteral` names the

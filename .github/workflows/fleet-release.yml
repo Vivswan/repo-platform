@@ -1,11 +1,13 @@
 # The fleet's release cut, called by every managed ci.yml downstream of
-# the all-green gate: release-please runs on the judged commit, draft-first
-# because published releases freeze (a late upload gets 422). The caller
-# then runs its own update-release hook and fleet-release-publish.yml.
+# the all-green gate: release-please tags the merged release PR's merge
+# commit, draft-first because published releases freeze (a late upload
+# gets 422). The caller then runs its own update-release hook and
+# fleet-release-publish.yml.
 # Without REPO_PLATFORM_TOKEN the release PR is created by GITHUB_TOKEN
-# and needs a close/reopen to run its checks. If the pipeline dies after
-# the draft exists, a rerun cannot recreate it (the tag is forced):
-# re-run the failed jobs, or finish by hand with
+# and its checks wait in the Actions tab for "Approve and run" (or start
+# on the PR's next push). If the pipeline dies after the draft exists, a
+# rerun cannot recreate it (the tag is forced): re-run the failed jobs,
+# or finish by hand with
 # `gh release upload <tag> <assets> --clobber` and
 # `gh release edit <tag> --draft=false`.
 
@@ -64,42 +66,30 @@ jobs:
       pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
       pr_head_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
     steps:
-      # A green verdict releases only the commit it judged; gh api (not
-      # anonymous ls-remote) so private repositories work.
-      - name: Check this run judged the current head
-        id: head
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JUDGED: ${{ inputs.sha || github.sha }}
-        run: |
-          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          if [ "$head" = "$JUDGED" ]; then
-            echo "current=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"
-            echo "current=false" >> "$GITHUB_OUTPUT"
-          fi
       # The release PR's CI health check can be stale by merge time, so
       # the same gate re-runs here; release mode self-scopes to
       # release-cut pushes.
       - uses: Vivswan/repo-platform/actions/release-health@build
-        if: steps.head.outputs.current == 'true'
+        id: health
         with:
           mode: release
           tracking-labels: ${{ inputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ github.token }}
+      # release-please tags the merged release PR's own merge commit, never the branch head.
+      # Only the run that judged that merge tags it; every other push run gets the propose phase alone.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
-        if: steps.head.outputs.current == 'true'
         with:
+          # github.token may not create a ref or release on a commit whose .github/workflows differ from main's head (that needs workflows: write).
+          # Once a later commit changes a workflow file on main, only the PAT can still tag the release commit.
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          skip-github-release: ${{ steps.health.outputs.release-cut != 'true' }}
       # release-please's propose phase silently ABORTS - green - while a
       # merged PR still wears "autorelease: pending". Checked AFTER the
       # action so its recovery phase runs first; 30 minutes covers labels
       # legitimately pending right after a merge.
       - name: Fail when a stale pending release PR parks release-please
-        if: steps.head.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -111,6 +101,7 @@ jobs:
           if [ -n "$stale" ]; then
             echo "::error::merged release PR(s) $stale have worn 'autorelease: pending' for over 30 minutes,"\
               "so release-please refuses to propose any new release ('untagged, merged release PRs outstanding')."\
-              "Finish or abandon that release, then move the label to 'autorelease: tagged'."
+              "Re-run the CI run of that merge commit (only the run that judged the merge tags it),"\
+              "or finish or abandon the release by hand and then move the label to 'autorelease: tagged'."
             exit 1
           fi

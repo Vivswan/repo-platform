@@ -5,7 +5,8 @@ description: >-
   Dependabot alert at or above the severity threshold says the repository
   is not release-worthy. Two modes: pull-request (on a release-please PR's
   CI) and release (on the main-push release path; a push that is not a
-  release-PR merge is not gated). The override label on the release PR
+  release-PR merge is not gated, and the release-cut output tells the
+  caller which it was). The override label on the release PR
   turns failures into warnings. Needs GH_TOKEN in the environment with
   issues read, pull-requests read, and vulnerability-alerts read (the
   security gate degrades to a notice where alerts are unreadable or
@@ -42,6 +43,11 @@ inputs:
     required: false
     default: high
 
+outputs:
+  release-cut:
+    description: Release mode only; "true" when the judged commit is a release-PR merge, "false" otherwise.
+    value: ${{ steps.check.outputs.release-cut }}
+
 runs:
   using: composite
   steps:
@@ -55,6 +61,7 @@ runs:
         pin: ${{ github.action_path }}/.bun-version
 
     - name: Check release health
+      id: check
       shell: bash
       env:
         MODE: ${{ inputs.mode }}

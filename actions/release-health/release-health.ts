@@ -3,9 +3,10 @@
  * MODE: pull-request (a release-please PR's CI; the PR's own labels supply
  * the override) and release (the main-push path just before release-please
  * cuts). In release mode only the merge commit of a release-please PR is
- * gated; every other main push exits 0, because release-please runs on
- * every push but cuts only from a release-PR merge, and gating ordinary
- * pushes would paint all of main red while one issue is open.
+ * gated; every other main push exits 0, because gating ordinary pushes
+ * would paint all of main red while one issue is open.
+ * Release mode also reports `release-cut` ("true" on a release-PR merge) as a step output.
+ * fleet-release.yml lets release-please tag only on "true", so an ordinary-push run cannot release a merge its gate never judged.
  *
  * Three gate families, all evaluated even under the override so the report
  * is complete: one tracking gate per label in TRACKING_LABELS (each open
@@ -18,7 +19,7 @@
  * the deprecated single-label spelling of TRACKING_LABELS, folded in.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -360,6 +361,7 @@ export async function runHealthCheck(
   cfg: Config,
   run: GhRunner,
   out: (line: string) => void,
+  setOutput: (name: string, value: string) => void,
 ): Promise<number> {
   if (cfg.legacyFuzzLabel !== undefined) {
     out(
@@ -369,6 +371,7 @@ export async function runHealthCheck(
   let override: Override;
   if (cfg.context.mode === "release") {
     const { pr, unmerged } = await findReleasePr(run, cfg.repo, cfg.context.sha);
+    setOutput("release-cut", pr === undefined ? "false" : "true");
     if (pr === undefined) {
       const open =
         unmerged.length > 0
@@ -464,7 +467,14 @@ async function main(): Promise<number> {
     console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
-  return runHealthCheck(cfg, gh, console.log);
+  // A lost output would read as "not a release cut" and silently skip every tag.
+  const outputFile = process.env.GITHUB_OUTPUT;
+  if (!outputFile) {
+    throw new Error("GITHUB_OUTPUT is required");
+  }
+  return runHealthCheck(cfg, gh, console.log, (name, value) =>
+    appendFileSync(outputFile, `${name}=${value}\n`),
+  );
 }
 
 if (import.meta.main) {

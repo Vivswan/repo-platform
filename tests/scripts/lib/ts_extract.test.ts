@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  callCarriesLiteral,
   constNumberValue,
   constRegexSource,
   constStringValue,
@@ -193,6 +194,22 @@ describe("intersectionCarriesType and propertyAssignmentCarries", () => {
     ].join("\n");
     expect(intersectionCarriesType(decoys, "RedactionState")).toBe(false);
     expect(propertyAssignmentCarries(decoys, "hide_details", "row.hide_details")).toBe(false);
+  });
+});
+
+describe("callCarriesLiteral", () => {
+  test("finds the call by callee and literal first argument; comments, strings, and other literals do not count", () => {
+    const source = [
+      '// setOutput("release-cut", "true");',
+      "const doc = 'setOutput(\"release-cut\", x)';",
+      'setOutput("other", "true");',
+      'other("release-cut", "true");',
+      '(setOutput)("release-cut", pr === undefined ? "false" : "true");',
+    ].join("\n");
+    expect(callCarriesLiteral(source, "setOutput", "release-cut")).toBe(true);
+    expect(
+      callCarriesLiteral(source.split("\n").slice(0, 4).join("\n"), "setOutput", "release-cut"),
+    ).toBe(false);
   });
 });
 
