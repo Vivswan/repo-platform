@@ -5,13 +5,13 @@
     "email": "58091053+Vivswan@users.noreply.github.com"
   },
   "metadata": {
-    "description": "Fleet-operations agent skills shipped alongside the repo-platform template and workflows",
+    "description": "Fleet-operations agent skills shipped alongside the repo-platform sync and its workflows",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "repo-platform-skills",
-      "description": "Fleet-operations agent skills for repo-platform: new project scaffolding, template sync-PR handling, and module changes",
+      "description": "Fleet-operations agent skills for repo-platform: new project registration, sync-PR handling, and module changes",
       "source": "./"
     }
   ]

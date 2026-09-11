@@ -13,7 +13,7 @@
 // never "an empty repo layer": applying the baseline alone would let the
 // action's delete-undeclared reconciliation wipe every label the repository
 // declared for itself, so absence SKIPS the apply (loudly, `skipped=true`)
-// until the settings.yml starter arrives with the next template sync.
+// until the settings.yml starter arrives with the next sync.
 // CLI: bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
 //   --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
 // --repo-fetch reads via gh api (env: GH_TOKEN) pinned to --repo-ref, the
@@ -552,7 +552,7 @@ export function mergeOutcome(
         "onboarded yet, so this apply is SKIPPED. Applying the managed baseline alone would " +
         "delete every label the repository declares for itself, because the apply deletes " +
         "undeclared labels. The settings.yml starter (base content of every render) seeds the " +
-        "file on the next template sync and the apply after that picks it up.",
+        "file on the next sync and the apply after that picks it up.",
     };
   }
   const repo = parseSettingsDoc(repoLayer.text, repoLayer.where);

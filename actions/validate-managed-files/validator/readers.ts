@@ -17,8 +17,8 @@ export function isRegularFile(path: string): boolean {
 /** The shape of a YAML file for the structural checks, which need its
  *  content rather than its verdict: duplicate keys are tolerated here
  *  because the yaml check already reports them, and a second, wrong
- *  diagnostic (a ci.yml with one duplicate line is not an empty file
- *  needing a template sync) must not ride on top. */
+ *  diagnostic (a registration with `modules` written twice is not a
+ *  registration missing `modules`) must not ride on top. */
 export function shapeOfYaml(text: string): unknown {
   return parseYaml(text, { uniqueKeys: false });
 }

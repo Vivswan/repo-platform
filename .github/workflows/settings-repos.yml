@@ -173,7 +173,7 @@ jobs:
     # target-derived output for every step after it.
     env:
       HIDE_DETAILS: ${{ matrix.private }}
-      # Distinct from the template sync's report: failure_issue.ts matches
+      # Distinct from the sync's report: failure_issue.ts matches
       # by exact title, so a shared one would let either workflow's green
       # run close the other's open report.
       SETTINGS_REPORT_TITLE: "[automated] repo-platform settings: private failure report"
@@ -209,12 +209,11 @@ jobs:
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The managed baseline for THIS repository's facts, then the repo's own
-      # settings.yml merged over it (settings_layer_step.ts: the operator
-      # row reads its checkout, every other target is fetched at the pinned
-      # commit). Scratch filenames are fixed and neutral: a redacted slug
-      # reaches the scripts only through env (already masked); the operator
-      # repo has no .repo-platform.yml to fetch, so its facts come from its
-      # recorded answers in this checkout. Both run BEFORE the settings
+      # settings.yml merged over it. settings_layer_step.ts picks the source:
+      # the operator row reads its own checkout's .repo-platform.yml and
+      # layer, every other target is fetched at the pinned commit. Scratch
+      # filenames are fixed and neutral: a redacted slug reaches the scripts
+      # only through env (already masked). Both run BEFORE the settings
       # action, so its own private-repos redaction cannot cover what they
       # print, and both quote repo-owned content when they fail;
       # run_hidden.ts captures that for a private target.
@@ -344,11 +343,11 @@ jobs:
         run: bun .github/scripts/sync/failure_issue.ts deliver
 
       # Without this the issue stays open after a recovered run, and the
-      # template sync's own green run could close a report the settings
-      # apply is still failing on - which is why the two carry different
-      # titles. A green job is not enough on its own: a MOVED target means
-      # this run never checked the settings, so an open report stays open
-      # until a run actually applies. The two skips are terminal - the repo
+      # sync's own green run could close a report the settings apply is
+      # still failing on - which is why the two carry different titles. A
+      # green job is not enough on its own: a MOVED target means this run
+      # never checked the settings, so an open report stays open until a
+      # run actually applies. The two skips are terminal - the repo
       # opted out, or has no settings.yml to layer yet - so they resolve.
       - name: Resolve the settings failure report
         if: >-

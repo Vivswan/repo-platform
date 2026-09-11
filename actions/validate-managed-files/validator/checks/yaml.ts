@@ -5,10 +5,11 @@ import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 
 /** Whether a duplicate mapping key in this path is an error rather than an
- *  advisory. Strict for .github/ (the answers file lives there) plus the
- *  root registration file: GitHub's own parsers reject duplicate keys
- *  there anyway, and a three-way merge can duplicate settings.yml's
- *  identity keys, where the later value silently wins at apply time.
+ *  advisory. Strict for .github/ (the workflows, dependabot.yml, and
+ *  settings.yml live there) plus the root registration file: their
+ *  consumers refuse duplicate keys anyway (GitHub's workflow parser, the
+ *  settings apply's parse boundary in settings_document.ts), and a
+ *  three-way merge can duplicate settings.yml's identity keys.
  *  Elsewhere a duplicate can be deliberate (a parser fixture, a vendored
  *  config) - and a sync walks the whole target repo, so erroring there
  *  would make every sync PR permanently red. */
