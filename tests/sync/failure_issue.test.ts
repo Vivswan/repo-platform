@@ -211,7 +211,7 @@ describe("failure_issue.ts", () => {
     expect(r.body).toContain("## settings render: exit 3");
     expect(r.body).toContain("Traceback: secret target path");
     expect(r.body).toContain("actions/runs/123");
-    expect(r.body).toContain("docs/private-repos.md");
+    expect(r.body).toContain("docs/settings.md");
     // The torn-row control: a well-formed manifest carries no skipped-row note.
     expect(r.body).not.toContain("malformed failure-manifest row");
     // The number gh returned stays out of the public log, like the slug.

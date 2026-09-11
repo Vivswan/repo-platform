@@ -332,7 +332,7 @@ jobs:
       # of this public log, which means the detail only exists in
       # RUNNER_TEMP. Without this step it would die with the runner and
       # the operator would see an exit code and nothing else, breaking the
-      # private-detail contract in docs/private-repos.md. TARGET comes
+      # private-target contract in docs/settings.md. TARGET comes
       # from the resolve step via GITHUB_ENV.
       - name: Deliver hidden failure diagnostics
         if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''

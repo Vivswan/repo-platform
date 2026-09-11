@@ -58,7 +58,7 @@ function withoutGitEnv<T>(fn: () => T): T {
 }
 
 const WITHHELD =
-  "withheld to keep private-repo content out of the log - reproduce the sync locally to see them (docs/private-repos.md)";
+  "withheld to keep private-repo content out of the log - reproduce the sync locally to see them (docs/sync.md)";
 
 /** headEntry's two value-free failure lines, WHOLE: an exact match forbids
  * every leak (path, root, git stderr) at once instead of enumerating them. */

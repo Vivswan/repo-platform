@@ -20,14 +20,14 @@
  *  of which can name private-repo content. Defense in depth behind the
  *  callers' run_hidden.ts wrapping: the message stays safe even if a future
  *  caller logs it unwrapped. Same discipline as shared/json.ts; the withheld
- *  git detail is reproduced locally (docs/private-repos.md). */
+ *  git detail is reproduced locally (docs/sync.md has the command). */
 import { capture, DEFAULT_HANG_BOUND_MS, timeoutExitCode } from "./proc.ts";
 
 function headProbeFailed(subcommand: "ls-tree" | "cat-file", exitCode: number | null): Error {
   return new Error(
     `git ${subcommand} against HEAD failed (exit ${exitCode ?? "unknown"}); the path, ` +
       "repository root, and git stderr are withheld to keep private-repo content out of the " +
-      "log - reproduce the sync locally to see them (docs/private-repos.md)",
+      "log - reproduce the sync locally to see them (docs/sync.md)",
   );
 }
 
@@ -56,7 +56,7 @@ function headEntryUnrecognized(detail: string): Error {
   return new Error(
     `git ls-tree against HEAD listed an entry this probe does not recognize (${detail}); ` +
       "the path, repository root, and full listing are withheld to keep private-repo content " +
-      "out of the log - reproduce the sync locally to see them (docs/private-repos.md)",
+      "out of the log - reproduce the sync locally to see them (docs/sync.md)",
   );
 }
 
