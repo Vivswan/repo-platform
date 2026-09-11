@@ -219,6 +219,8 @@ jobs:
         run: bun run pins:check
       - name: Check the theme CSS against its token data
         run: bun run theme:check
+      - name: Check this repository's rendered settings against its layers and overlay
+        run: bun run settings:check
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
