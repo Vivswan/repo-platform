@@ -3,7 +3,9 @@ description: >-
   The fleet's Trivy scan of the caller's checkout (lockfiles, Dockerfiles,
   infrastructure files), so the configuration lives here once and no
   managed repository carries a Trivy file. Mode blocking fails on a HIGH or
-  CRITICAL finding with a fix available. Mode nightly scans everything at
+  CRITICAL vulnerability with a fix available and on any HIGH or CRITICAL
+  misconfiguration (ignore-unfixed filters vulnerabilities only; a
+  misconfiguration has no fixed version). Mode nightly scans everything at
   HIGH and CRITICAL severity, never fails, and leaves the findings as the
   fuzz-issue action's report directory plus a SARIF file for code scanning.
   A MEDIUM or LOW finding neither blocks nor surfaces. Both modes
@@ -13,7 +15,7 @@ description: >-
 
 inputs:
   mode:
-    description: blocking (fixable HIGH or CRITICAL fails) or nightly (HIGH and CRITICAL reported, never fails)
+    description: blocking (a fixable HIGH or CRITICAL vulnerability or any HIGH or CRITICAL misconfiguration fails) or nightly (HIGH and CRITICAL reported, never fails)
     required: false
     default: blocking
 
@@ -52,7 +54,7 @@ runs:
 
     # The database cache lives outside the workspace so the scan never
     # walks it; the wrapper restores it by date.
-    - name: Scan for fixable high and critical findings
+    - name: Scan for fixable vulnerabilities and any misconfiguration at high and critical
       if: inputs.mode == 'blocking'
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
