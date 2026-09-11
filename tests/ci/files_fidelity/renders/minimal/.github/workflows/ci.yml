@@ -85,7 +85,7 @@ jobs:
       sha: ${{ github.sha }}
     # The called workflow is this repository's own, so it inherits the repository's secrets by design.
     # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
-    secrets: inherit
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 
   # The legs below exist in every repository and gate themselves on the
   # plan's modules output: a substring test on the compact JSON array,
@@ -140,7 +140,7 @@ jobs:
       tag: ${{ needs.release.outputs.tag_name }}
     # The called workflow is this repository's own, so it inherits the repository's secrets by design.
     # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
-    secrets: inherit
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 
   # Attests every asset the hook uploaded and flips the draft live.
   publish-release:
@@ -176,7 +176,7 @@ jobs:
       head_branch: ${{ needs.release.outputs.pr_head_branch }}
     # The called workflow is this repository's own, so it inherits the repository's secrets by design.
     # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
-    secrets: inherit
+    secrets: inherit # zizmor: ignore[secrets-inherit]
 
   # The Pages deploy, in the SAME run as the gate (github.sha IS the judged
   # commit): a red main never reaches the site. Ordered behind the publish

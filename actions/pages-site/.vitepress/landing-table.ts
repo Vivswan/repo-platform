@@ -112,12 +112,18 @@ export function launcherTag(rows: CuratedRow[]): string {
   return `<FleetLauncher rows="${escapeAttribute(JSON.stringify(rows))}"></FleetLauncher>\n`;
 }
 
+const ATTRIBUTE_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  '"': "&quot;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
+
+/** One pass over the four characters HTML attribute values are conventionally
+ *  escaped: the quote that would end the value, the ampersand that could start
+ *  a character reference, and the angle brackets. */
 function escapeAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return value.replace(/[&"<>]/g, (char) => ATTRIBUTE_ESCAPES[char]);
 }
 
 /** The curated rows of a table's body rows given its link column. Per

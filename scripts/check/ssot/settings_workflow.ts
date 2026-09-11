@@ -141,6 +141,8 @@ export function hiddenStepNoticeMismatches(
         return;
       }
       const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // A step id from this repository's own workflow, escaped above; the rest is literal.
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
       const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
       const compensated = parsed.slice(index + 1).some((later) => {
         const laterRun = String(later.run ?? "");

@@ -199,6 +199,8 @@ export function renderedSelfPins(text: string, file: string, owner: string): Sel
   if (!/^[A-Za-z0-9-]+$/.test(owner)) {
     throw new Error(`renderedSelfPins: owner '${owner}' is not a plain GitHub username`);
   }
+  // The owner is validated as a plain username above; the rest of the pattern is literal.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   const token = new RegExp(
     `(?<![A-Za-z0-9-])${owner}/repo-platform(/[A-Za-z0-9_./-]+)@([^\\s"']*)`,
     "gi",

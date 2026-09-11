@@ -1,5 +1,6 @@
 name: private only
 on: workflow_dispatch
+permissions: {}
 jobs:
   noop:
     runs-on: ubuntu-latest

@@ -1,10 +1,11 @@
 // The semgrep action's contract: a pinned install, one scan writing both a
-// SARIF copy (uploaded whole) and a JSON copy with its exit status as a step
-// output, and a verdict step that runs whatever the scan did and fails on a
-// fatal scan or an ERROR finding - executed here against fixture results.
+// SARIF copy (uploaded without its suppressed results) and a JSON copy with
+// its exit status as a step output, and a verdict step that runs whatever
+// the scan did and fails on a fatal scan or an ERROR finding - executed here
+// against fixture results.
 
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadAction, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
@@ -16,7 +17,7 @@ describe("actions/semgrep", () => {
   test("install, scan, upload, judge: pinned, registry default ruleset, both outputs, no --error", () => {
     expect(action.runs.using).toBe("composite");
     expect(action.inputs).toBeUndefined();
-    const [install, scan, upload, judge] = action.runs.steps;
+    const [install, scan, drop, upload, judge] = action.runs.steps;
     expect(String(install.run)).toMatch(/^python3 -m pip install --quiet semgrep==\d+\.\d+\.\d+$/);
     const command = String(scan.run);
     expect(scan.id).toBe("scan");
@@ -40,11 +41,13 @@ describe("actions/semgrep", () => {
       sarif_file: "${{ runner.temp }}/semgrep.sarif",
       category: "semgrep",
     });
+    expect(drop.name).toBe("Drop the marked findings from the SARIF");
+    expect(drop.if).toBe("${{ !cancelled() }}");
     expect(judge.name).toBe("Fail on an ERROR finding");
   });
 
   test("a fatal scan reaches the verdict: the scan's status is a step output, and the upload and judge run unless cancelled", () => {
-    const [, scan, upload, judge] = action.runs.steps;
+    const [, scan, , upload, judge] = action.runs.steps;
     expect(String(scan.run)).toContain(" . \\\n  && status=0 || status=$?\n");
     expect(String(scan.run)).toContain('echo "status=$status" >>"$GITHUB_OUTPUT"');
     expect(upload.if).toBe("${{ !cancelled() }}");
@@ -74,6 +77,51 @@ describe("actions/semgrep", () => {
   test("scan: a fatal exit does not fail the step (the judge must run) and records the status", () => {
     const run = scan(2);
     expect([run.exitCode, run.outputs]).toEqual([0, { status: "2" }]);
+  });
+
+  // The drop step against a SARIF copy: a result carrying a suppression
+  // (semgrep's shape for a nosemgrep-marked finding) leaves; everything
+  // else in the document (version, tool, invocations, every run) stays.
+  const suppressed = (ruleId: string) => ({ ruleId, suppressions: [{ kind: "inSource" }] });
+  const sarifWith = (firstRunResults: object[]) => ({
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: { driver: { name: "Semgrep OSS", semanticVersion: "1.0.0", rules: [{ id: "r" }] } },
+        invocations: [{ executionSuccessful: true, toolExecutionNotifications: [] }],
+        results: firstRunResults,
+      },
+      {
+        tool: { driver: { name: "second" } },
+        results: [{ ruleId: "s" }, suppressed("s")],
+      },
+    ],
+  });
+  const drop = (sarif: object | null) => {
+    const root = temp.dir("semgrep-drop-");
+    const path = join(root, "semgrep.sarif");
+    if (sarif !== null) writeFileSync(path, JSON.stringify(sarif));
+    const run = runBashStep(stepNamed(action, "Drop the marked findings from the SARIF"), {
+      cwd: root,
+      root,
+      env: { RUNNER_TEMP: root },
+    });
+    return { run, kept: existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : null };
+  };
+
+  test("drop: the suppressed results leave every run, the rest of the document survives whole", () => {
+    const plain = { ruleId: "r" };
+    const unsuppressed = { ruleId: "r", suppressions: [] };
+    const { run, kept } = drop(sarifWith([suppressed("r"), plain, unsuppressed, suppressed("r")]));
+    const expected = sarifWith([plain, unsuppressed]);
+    expected.runs[1].results = [{ ruleId: "s" }];
+    expect([run.exitCode, kept]).toEqual([0, expected]);
+  });
+
+  test("drop: no SARIF (a scan that never wrote one) passes and writes nothing", () => {
+    const { run, kept } = drop(null);
+    expect([run.exitCode, kept]).toEqual([0, null]);
   });
 
   const judge = (

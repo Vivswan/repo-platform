@@ -460,6 +460,8 @@ export function stripAnsi(text: string): string {
 /** Boundary match: a listing for `foo-bar` must not satisfy `foo`, and a
  *  short name like `foo` must not match inside `foo-bar`. */
 export function listedInOutput(name: string, output: string): boolean {
+  // A skill folder name already checked as kebab-case above; the rest of the pattern is literal.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return new RegExp(`(^|[^a-z0-9-])${name}([^a-z0-9-]|$)`).test(output);
 }
 
