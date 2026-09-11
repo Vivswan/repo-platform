@@ -20,20 +20,20 @@ const BASE = `
 placeholders: [project_name, year]
 modules:
   bun: { gitignore_sources: [Node, Bun] }
-  pages: {}
-  docs-site: {}
+  site: {}
+  nightly: {}
   fuzzer: {}
 files:
   - { path: .github/workflows/ci.yml, class: managed }
   - { path: .gitignore, class: split, region: hash, blocks: gitignore_sources }
-  - path: .github/workflows/docs-site.yml
+  - path: .github/workflows/nightly.yml
     class: managed
-    when: { modules: [docs-site], without: [pages] }
-    source: files/docs-site/docs-site.standalone.yml
-  - path: .github/workflows/docs-site.yml
+    when: { modules: [nightly], without: [site] }
+    source: files/nightly/nightly.standalone.yml
+  - path: .github/workflows/nightly.yml
     class: managed
-    when: { modules: [docs-site, pages] }
-    source: files/docs-site/docs-site.with-pages.yml
+    when: { modules: [nightly, site] }
+    source: files/nightly/nightly.with-site.yml
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
 retired:
@@ -60,8 +60,8 @@ describe("parseFilesConfig", () => {
     expect(config.files.map(sourceOf)).toEqual([
       "base/.github/workflows/ci.yml",
       "base/.gitignore",
-      "docs-site/docs-site.standalone.yml",
-      "docs-site/docs-site.with-pages.yml",
+      "nightly/nightly.standalone.yml",
+      "nightly/nightly.with-site.yml",
       "fuzzer/.github/workflows/nightly-fuzz.yml",
       null,
     ]);
@@ -77,7 +77,7 @@ describe("parseFilesConfig", () => {
       blocks: "gitignore_sources",
     });
     expect(config.placeholders).toEqual(["project_name", "year"]);
-    expect(Object.keys(config.modules)).toEqual(["bun", "pages", "docs-site", "fuzzer"]);
+    expect(Object.keys(config.modules)).toEqual(["bun", "site", "nightly", "fuzzer"]);
     expect(config.retired).toEqual([
       { path: ".github/.copier-answers.yml" },
       { path: "SECURITY.md", moved_to: ".github/SECURITY.md" },
@@ -90,37 +90,34 @@ describe("parseFilesConfig", () => {
         "placeholders: []",
         "files: []",
         "modules:",
-        "  bun: { codeql_language: javascript-typescript, pages: { install: bun install, build: bun run build }, pin: { file: .bun-version, version: 1.4.0 } }",
-        "  pages: { dist: dist }",
-        "  docs-site: { path: docs, tracking_label: { key: docs_site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
+        "  bun: { codeql_language: javascript-typescript, pin: { file: .bun-version, version: 1.4.0 } }",
+        "  site: { path: docs, tracking_label: { key: site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
         "  skills: { skills_dir: { default: skills } }",
       ].join("\n"),
     );
     expect(config.modules).toEqual({
-      "bun": {
+      bun: {
         codeql_language: "javascript-typescript",
-        pages: { install: "bun install", build: "bun run build" },
         pin: { file: ".bun-version", version: "1.4.0" },
       },
-      "pages": { dist: "dist" },
-      "docs-site": {
+      site: {
         path: "docs",
         tracking_label: {
-          key: "docs_site",
+          key: "site",
           default: "docs-link-rot",
           color: "D4A72C",
           description: "Link rot",
         },
       },
-      "skills": { skills_dir: { default: "skills" } },
+      skills: { skills_dir: { default: "skills" } },
     });
   });
 
   test("two entries for one path must be mutually exclusive by when", () => {
-    const text = BASE.replace("without: [pages] ", "");
+    const text = BASE.replace("without: [site] ", "");
     expect(problemsOf(text)).toEqual([
       expect.stringContaining(
-        ".github/workflows/docs-site.yml is listed twice with conditions that can both hold",
+        ".github/workflows/nightly.yml is listed twice with conditions that can both hold",
       ),
     ]);
   });
@@ -189,19 +186,14 @@ describe("parseFilesConfig", () => {
       "modules.a.tracking_label.key: not a label key",
     ],
     [
-      "a pages block without a build command",
-      "files: []\nplaceholders: []\nmodules:\n  a: { pages: { install: x } }",
-      "modules.a.pages.build: ",
-    ],
-    [
       "a skills_dir without a default",
       "files: []\nplaceholders: []\nmodules:\n  a: { skills_dir: {} }",
       "modules.a.skills_dir.default: ",
     ],
     [
-      "an empty dist or path",
-      "files: []\nplaceholders: []\nmodules:\n  a: { dist: '', path: '' }",
-      "modules.a.dist: ",
+      "an empty path",
+      "files: []\nplaceholders: []\nmodules:\n  a: { path: '' }",
+      "modules.a.path: ",
     ],
     [
       "a modules block that is not a mapping",

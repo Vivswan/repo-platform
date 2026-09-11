@@ -492,19 +492,19 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # This repository's own docs site (the docs-site module, dogfooded): the
-  # skeleton's docs-site leg calling the pipeline by local path. Ordered
-  # behind post-green so the deploy runs after this run republished the
-  # build branch its pipeline consumes (@build), gated on the all-green
-  # result alone: !cancelled() keeps a red fleet leg from holding the site
-  # back. The mount is spelled out: this repository's registration drives
-  # its settings, not the called workflow.
-  docs-site:
+  # This repository's own site: the skeleton's `site` leg carried by hand,
+  # calling the pipeline by local path so this tree's workflow is the one
+  # under test. Ordered behind post-green so the deploy runs after this run
+  # republished the build branch its actions ride (@build); !cancelled()
+  # keeps a red fleet leg from holding the site back. No push clause: the
+  # weekly schedule is the rebuild and the link-rot check, a dispatch the
+  # manual deploy. The configuration is spelled out: this caller reads no
+  # registration through the plan.
+  site:
     needs: [all-green, post-green]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
-      github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
     concurrency:
       group: pages
@@ -514,10 +514,8 @@ jobs:
       pages: write
       id-token: write
       issues: write
-    uses: ./.github/workflows/reusable-pages.yml
+    uses: ./.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
-      mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
-      site_title: repo-platform
-      link_rot_label: docs-link-rot
+      config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
       custom_domain: ${{ vars.CUSTOM_DOMAIN }}

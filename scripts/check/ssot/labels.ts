@@ -41,6 +41,8 @@ export function labelRegexCopyMismatches(
 /** The two starter workflows carrying a tracking stream's create tuple. */
 export const FUZZ_STARTER = "files/fuzzer/.github/workflows/nightly-fuzz.yml";
 export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
+/** The shared deploy carrying the site stream's create tuple. */
+export const REUSABLE_SITE = ".github/workflows/reusable-site.yml";
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const labelRules: Rule[] = [
@@ -80,7 +82,7 @@ export const labelRules: Rule[] = [
       // Tracking-label streams: files.yml's tracking_label block is the
       // single source of each stream's create tuple; the carriers (the
       // action's defaults for the fuzz stream, the starters' overrides for
-      // the nightly stream, the shared deploy for the docs-site stream) are
+      // the nightly stream, the shared deploy for the site stream) are
       // anchored back to it here.
       const streams = trackingStreams();
       const fuzzTracking = streams.find((m) => m.module === "fuzzer");
@@ -160,27 +162,27 @@ export const labelRules: Rule[] = [
         });
       }
 
-      // The docs-site stream's create tuple is passed by the shared deploy
-      // (reusable-pages.yml files the link-rot issue for every caller).
-      const docsTracking = streams.find((m) => m.module === "docs-site");
-      if (!docsTracking) throw new Error("files.yml modules.docs-site lost tracking_label");
-      const reusablePages = read(".github/workflows/reusable-pages.yml");
+      // The site stream's create tuple is passed by the shared deploy
+      // (reusable-site.yml files the link-rot issue for every caller).
+      const siteTracking = streams.find((m) => m.module === "site");
+      if (!siteTracking) throw new Error("files.yml modules.site lost tracking_label");
+      const reusableSite = read(REUSABLE_SITE);
       const rotColor = mustMatch(
-        reusablePages,
+        reusableSite,
         /label-color: "([^"]+)"/,
-        "reusable-pages.yml",
+        REUSABLE_SITE,
         "label-color input",
       )[1];
       const rotDescription = mustMatch(
-        reusablePages,
+        reusableSite,
         /label-description: (.+)/,
-        "reusable-pages.yml",
+        REUSABLE_SITE,
         "label-description input",
       )[1];
-      if (rotColor !== docsTracking.color || rotDescription !== docsTracking.description) {
+      if (rotColor !== siteTracking.color || rotDescription !== siteTracking.description) {
         mismatches.push({
-          file: ".github/workflows/reusable-pages.yml label overrides",
-          expected: `${docsTracking.color} / ${docsTracking.description} (files.yml modules.docs-site.tracking_label)`,
+          file: `${REUSABLE_SITE} label overrides`,
+          expected: `${siteTracking.color} / ${siteTracking.description} (files.yml modules.site.tracking_label)`,
           got: `${rotColor} / ${rotDescription}`,
         });
       }

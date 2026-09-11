@@ -280,14 +280,14 @@ jobs:
   });
 
   test("a whole !cancelled() clause beside the gate clause passes - it only narrows, and a leg ordered behind a sibling needs it", () => {
-    // The docs-site leg's shape: needs the hook as an order edge, gates
-    // on the all-green result alone; without !cancelled() GitHub's
-    // implied success() would skip it behind a red or skipped hook.
+    // The site leg's shape: needs the hook as an order edge, gates on the
+    // all-green result alone; without !cancelled() GitHub's implied
+    // success() would skip it behind a red or skipped hook.
     const ordered = [
       valid.trimEnd(),
-      "  docs-site:",
+      "  site:",
       "    needs: [all-green, post-green]",
-      "    if: \"!cancelled() && needs.all-green.result == 'success' && github.event_name == 'push'\"",
+      "    if: \"!cancelled() && needs.all-green.result == 'success' && github.ref == 'refs/heads/main'\"",
       "",
     ].join("\n");
     expect(allGreenGateMismatches(doc(ordered), ["a", "b"])).toEqual([]);
@@ -615,9 +615,23 @@ describe("skeletonGateMismatches", () => {
     {
       reason: "a leg no longer rides behind the gate",
       mutate: (j) => {
-        j.pages.needs = ["ci"];
+        j.site.needs = ["ci"];
       },
-      job: "pages",
+      job: "site",
+    },
+    {
+      reason: "the site leg grows a clause outside the alphabet",
+      mutate: (j) => {
+        j.site.if = `${String(j.site.if)} && vars.CUSTOM_DOMAIN != ''`;
+      },
+      job: "site",
+    },
+    {
+      reason: "the site leg is released by a status function",
+      mutate: (j) => {
+        j.site.if = "always() && contains(needs.ci.outputs.modules, '\"site\"')";
+      },
+      job: "site",
     },
   ])("$reason goes red naming the job", ({ mutate, job }) => {
     const mutated = doc();

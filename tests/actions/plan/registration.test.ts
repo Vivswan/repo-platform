@@ -11,25 +11,20 @@ const FILE = ".repo-platform.yml";
 
 describe("parseRegistration", () => {
   test("today's shape: a bare module list", () => {
-    expect(parseRegistration("modules: [uv, pages]\n")).toEqual({
-      registration: { modules: ["uv", "pages"] },
+    expect(parseRegistration("modules: [uv, site]\n")).toEqual({
+      registration: { modules: ["uv", "site"] },
     });
   });
 
   test("the full document, every section", () => {
     const text = [
-      "modules: [bun, pages, docs-site, fuzzer]",
+      "modules: [bun, site, fuzzer]",
       "project:",
       "  name: My Project",
       "  slug: my-project",
       "  description: One line",
       "  copyright_holder: Someone",
-      "pages:",
-      "  setup: bun",
-      "  install: bun install",
-      "  build: bun run build",
-      "  dist: out/site",
-      "docs_site:",
+      "site:",
       "  path: manual",
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
@@ -38,22 +33,21 @@ describe("parseRegistration", () => {
       "  dir: lib/skills",
       "labels:",
       "  fuzzer: fuzz-nightly",
-      "  docs_site: rot",
+      "  site: rot",
       "mirrors:",
       "  - source: AGENTS.md",
       "    targets: [CLAUDE.md]",
     ].join("\n");
     expect(parseRegistration(text)).toEqual({
       registration: {
-        modules: ["bun", "pages", "docs-site", "fuzzer"],
+        modules: ["bun", "site", "fuzzer"],
         project: {
           name: "My Project",
           slug: "my-project",
           description: "One line",
           copyright_holder: "Someone",
         },
-        pages: { setup: "bun", install: "bun install", build: "bun run build", dist: "out/site" },
-        docs_site: {
+        site: {
           path: "manual",
           include: [
             { path: "skills", mount: "skills", page: "SKILL.md" },
@@ -61,7 +55,7 @@ describe("parseRegistration", () => {
           ],
         },
         skills: { dir: "lib/skills" },
-        labels: { fuzzer: "fuzz-nightly", docs_site: "rot" },
+        labels: { fuzzer: "fuzz-nightly", site: "rot" },
         mirrors: [{ source: "AGENTS.md", targets: ["CLAUDE.md"] }],
       },
     });
@@ -77,8 +71,8 @@ describe("parseRegistration", () => {
     },
     {
       reason: "an unknown nested key",
-      text: "modules: []\npages:\n  serve: true\n",
-      error: `${FILE}: pages: Unrecognized key: "serve"`,
+      text: "modules: []\nsite:\n  serve: true\n",
+      error: `${FILE}: site: Unrecognized key: "serve"`,
     },
     {
       reason: "a wrong type",
@@ -133,23 +127,28 @@ describe("parseRegistration", () => {
     },
     {
       reason: "a docs path with a slash",
-      text: "modules: []\ndocs_site:\n  path: a/b\n",
-      error: `${FILE}: docs_site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
-    },
-    {
-      reason: "a dist dir escaping the repo",
-      text: "modules: []\npages:\n  dist: ../out\n",
-      error: `${FILE}: pages.dist: pages.dist must be relative path segments of letters, digits, dots, underscores, or dashes joined by single slashes (no leading ./ or /, no '..')`,
+      text: "modules: []\nsite:\n  path: a/b\n",
+      error: `${FILE}: site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
     },
     {
       reason: "an include root escaping the repo",
-      text: "modules: []\ndocs_site:\n  include: [{ path: ../x, mount: x }]\n",
-      error: `${FILE}: docs_site.include.0.path: docs_site.include[].path must be relative path segments`,
+      text: "modules: []\nsite:\n  include: [{ path: ../x, mount: x }]\n",
+      error: `${FILE}: site.include.0.path: site.include[].path must be relative path segments`,
     },
     {
       reason: "an include entry with an unknown key",
-      text: "modules: []\ndocs_site:\n  include: [{ path: x, mount: x, title: T }]\n",
-      error: `${FILE}: docs_site.include.0: Unrecognized key: "title"`,
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, title: T }]\n",
+      error: `${FILE}: site.include.0: Unrecognized key: "title"`,
+    },
+    {
+      reason: "a pages block, whose build moved into the site-build hook",
+      text: "modules: [site]\npages:\n  build: bun run build\n",
+      error: `${FILE}: pages: is no longer a registration key - the website build lives in the repo-owned hook .github/actions/site-build/action.yml and the module is \`site\` (docs/site.md)`,
+    },
+    {
+      reason: "a docs_site block, renamed site",
+      text: "modules: [site]\ndocs_site:\n  path: manual\n",
+      error: `${FILE}: docs_site: is no longer a registration key - it is \`site\` now (\`site.path\`, \`site.include\`; the label key is \`labels.site\`), and a website build belongs in the repo-owned hook .github/actions/site-build/action.yml`,
     },
     {
       reason: "a label starting with a dash",
@@ -183,8 +182,8 @@ describe("parseRegistration", () => {
     // The control for the unknown-key rows: a shape that IS accepted by the
     // same schema object the parser uses.
     expect(registrationSchema.safeParse({ modules: [] }).success).toBe(true);
-    expect(registrationSchema.safeParse({ modules: [], pages: {} }).success).toBe(true);
-    expect(registrationSchema.safeParse({ modules: [], pages: { x: 1 } }).success).toBe(false);
+    expect(registrationSchema.safeParse({ modules: [], site: {} }).success).toBe(true);
+    expect(registrationSchema.safeParse({ modules: [], site: { x: 1 } }).success).toBe(false);
   });
 });
 

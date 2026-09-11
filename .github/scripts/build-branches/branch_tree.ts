@@ -59,8 +59,8 @@ export function canonicalize(path: string): string {
  *  reusable workflow a MANAGED workflow calls `@build`: the managed ci.yml
  *  calls fleet-ci.yml (whose codeql job calls ./reusable-codeql.yml,
  *  resolving at fleet-ci's own ref - this branch), fleet-nightly.yml, and
- *  the release pair, pages.yml and docs-site.yml call reusable-pages.yml,
- *  and auto-assign.yml calls the reusable-auto-assign pair. A
+ *  the release pair, and reusable-site.yml, and auto-assign.yml calls
+ *  the reusable-auto-assign pair. A
  *  reusable-workflow `uses:` fetches the FILE at the named ref, so a build
  *  branch missing one 404s every fleet run that calls it. */
 export const FLEET_WORKFLOWS = [
@@ -71,7 +71,7 @@ export const FLEET_WORKFLOWS = [
   "reusable-auto-assign-alerts.yml",
   "reusable-auto-assign.yml",
   "reusable-codeql.yml",
-  "reusable-pages.yml",
+  "reusable-site.yml",
 ];
 
 /** The labels the platform manages (every settings layer's roster), which
