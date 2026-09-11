@@ -43,7 +43,7 @@ const source = readFileSync(join(import.meta.dir, "../../.github/workflows/fleet
 const fleetCi = parseYaml(source) as {
   on: {
     workflow_call: {
-      inputs: Record<string, { required?: boolean }>;
+      inputs?: unknown;
       outputs: Record<string, { value: string }>;
     };
   };
@@ -51,10 +51,6 @@ const fleetCi = parseYaml(source) as {
 };
 
 describe("fleet-ci.yml", () => {
-  // The plan job is the one read of the registration: everything a call
-  // used to pass as inputs is resolved there, so it runs first and every
-  // other job keys on its outputs (a job reading inputs.* would silently
-  // read the ignored legacy defaults).
   const PLAN_OUTPUTS = [
     "modules",
     "private",
@@ -99,17 +95,15 @@ describe("fleet-ci.yml", () => {
     expect(jobsText).not.toContain("inputs.");
   });
 
-  test("the call declares the plan's modules and tracking-labels as outputs; every input is optional", () => {
+  test("the call declares the plan's modules and tracking-labels as outputs and no inputs", () => {
     const { inputs, outputs } = fleetCi.on.workflow_call;
+    expect(inputs).toBeUndefined();
     expect(outputs).toEqual({
       "modules": expect.objectContaining({ value: "${{ jobs.plan.outputs.modules }}" }),
       "tracking-labels": expect.objectContaining({
         value: "${{ jobs.plan.outputs.tracking-labels }}",
       }),
     });
-    for (const [name, input] of Object.entries(inputs)) {
-      expect([name, input.required]).toEqual([name, false]);
-    }
   });
 
   test("validate-managed-files is a thin caller of the action at @build", () => {

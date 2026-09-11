@@ -89,7 +89,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## No backwards-compatibility code
 
-- Rule: no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; in repo-platform the transitional paths are the writer's cutover of pre-writer repositories and fleet-ci.yml's ignored legacy inputs, both retired at the fleet cutover.
+- Rule: no compatibility shims, dual code paths, or retired-shape handling outside a repo's own `migrations/` directory; in repo-platform the one transitional path is the writer's cutover of pre-writer repositories, retired once every repository has crossed.
 - Why: a one-shot replacement with a loud PR note stays readable; a compat era accretes paths nobody removes.
 - How: replace the shape in one PR and say so in the PR body; a file the platform stops writing gets a `retired` entry in `files.yml` (with `moved_to` for a rename), and the sync carries the transition.
 - Enforced by: review.
