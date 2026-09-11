@@ -201,13 +201,15 @@ describe("callCarriesLiteral", () => {
   test("finds the call by callee and literal first argument; comments, strings, and other literals do not count", () => {
     const source = [
       '// setOutput("release-cut", "true");',
-      'const doc = \'setOutput("release-cut", x)\';',
+      "const doc = 'setOutput(\"release-cut\", x)';",
       'setOutput("other", "true");',
       'other("release-cut", "true");',
       '(setOutput)("release-cut", pr === undefined ? "false" : "true");',
     ].join("\n");
     expect(callCarriesLiteral(source, "setOutput", "release-cut")).toBe(true);
-    expect(callCarriesLiteral(source.split("\n").slice(0, 4).join("\n"), "setOutput", "release-cut")).toBe(false);
+    expect(
+      callCarriesLiteral(source.split("\n").slice(0, 4).join("\n"), "setOutput", "release-cut"),
+    ).toBe(false);
   });
 });
 

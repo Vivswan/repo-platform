@@ -247,7 +247,9 @@ export function callCarriesLiteral(source: string, callee: string, firstArg: str
     .some((call) => {
       if (unwrapExpression(call.getExpression()).getText() !== callee) return false;
       const first = call.getArguments()[0];
-      return first !== undefined && Node.isStringLiteral(first) && first.getLiteralValue() === firstArg;
+      return (
+        first !== undefined && Node.isStringLiteral(first) && first.getLiteralValue() === firstArg
+      );
     });
 }
 
