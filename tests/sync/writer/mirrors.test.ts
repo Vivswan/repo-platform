@@ -389,29 +389,35 @@ describe("applyMirrors", () => {
     expect(existsSync(join(root, "outside/sub/LICENSE.md"))).toBe(false);
   });
 
-  test("a target longer than the runner can stat is refused by its length, and the pass goes on", () => {
-    // Every segment is a legal 255 bytes; only the whole path is too long
-    // to look up, so an lstat of it would throw ENAMETOOLONG.
-    const long = Array(17).fill("a".repeat(255)).join("/");
-    const root = tree({ "skills/a/README.md": "" });
-    const rows = applyMirrors(
-      root,
-      [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
-      new Map([["LICENSE.md", Buffer.from("L\n")]]),
-      new Set(),
-      {},
-    );
-    expect(rows).toEqual([
-      {
-        source: "LICENSE.md",
-        target: long,
-        outcome: "refused",
-        detail: "the target is longer than 1024 bytes",
-      },
-      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
-    ]);
-    expect(existsSync(join(root, long.slice(0, 255)))).toBe(false);
-  });
+  test.each([
+    ["17 segments of 255 bytes", Array(17).fill("a".repeat(255)).join("/")],
+    ["30 segments of 200 bytes", `${Array(30).fill("a".repeat(200)).join("/")}/LICENSE.md`],
+  ])(
+    "a target longer than the runner can stat (%s) is refused by its length, and the pass goes on",
+    (_, long) => {
+      // Every segment is legal; only the whole path is too long to look up,
+      // so an lstat of it would throw ENAMETOOLONG.
+      const root = tree({ "skills/a/README.md": "" });
+      const rows = applyMirrors(
+        root,
+        [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
+        new Map([["LICENSE.md", Buffer.from("L\n")]]),
+        new Set(),
+        {},
+      );
+      expect(rows).toEqual([
+        {
+          source: "LICENSE.md",
+          target: long,
+          outcome: "refused",
+          detail: "the target is longer than 1024 bytes",
+        },
+        { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+      ]);
+      expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
+      expect(existsSync(join(root, long.split("/")[0]))).toBe(false);
+    },
+  );
 
   // macOS caps a whole path at 1024 bytes, so a checkout there cannot hold a
   // relative path near the bound; the runners are Linux (PATH_MAX 4096).

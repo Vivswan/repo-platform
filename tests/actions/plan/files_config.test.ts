@@ -276,7 +276,8 @@ describe("pathProblem", () => {
     ["a//b", "carries an empty, '.', or '..' segment"],
     [".git/config", "carries a .git segment"],
     ["a\\b", "contains a backslash"],
-    // Names the filesystem rejects (a stat of either throws) are judged here instead.
+    // A NUL or an over-long name makes a stat throw instead of answer; a tab
+    // is a legal name the grammar refuses as policy. Neither reaches a stat.
     ["a/b\u0000c", "carries a control character"],
     ["a/b\tc", "carries a control character"],
     [`a/${"b".repeat(255)}`, null],
