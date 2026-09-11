@@ -1,34 +1,30 @@
 #!/usr/bin/env bun
 
 // Single-source-of-truth drift checker: facts this repo intentionally states
-// in more than one INDEPENDENTLY-authored place (hand-written module-roster
-// sites, dogfooded template counterparts, settings/label rosters, doc-quoted
-// constants) are compared here so drift fails CI instead of rotting silently.
-// Copies GENERATED from the module manifests are NOT compared: `bun run
-// generate:check` and `dogfood:check` prove the generators ran, and checking
-// generator output against generator input would pass vacuously.
+// in more than one INDEPENDENTLY-authored place (the fleet workflows' job
+// rosters, the settings and label rosters, doc-quoted constants, the
+// delivery pins the writer's sources carry) are compared here so drift
+// fails CI instead of rotting silently. Nothing here compares a copy to
+// the source it was copied from: the writer copies files whole, and the
+// end-to-end sync test proves that copy.
 //
 // The rules are a flat named list assembled from scripts/check/ssot/. Every
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
 // text disappears fails loudly instead of vacuously; structure read from
 // TypeScript SOURCES comes off the AST via scripts/lib/ts_extract.ts under
 // the same contract, so a comment, string, or template decoy can neither
-// satisfy an anchor nor hide the real declaration. Template (.jinja) inputs
-// are compared modulo jinja via normalizeJinja() (scripts/lib/jinja_subset.ts,
-// shared with render_dogfood.ts); intentional divergences live in
-// RECORDED_DIVERGENCES with a reason.
+// satisfy an anchor nor hide the real declaration.
 //
 // Usage: bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y"
 //                                    # lines and exits 1 on any mismatch
 
 import { allGreenRules } from "./check/ssot/all_green.ts";
-import { type Mismatch, RECORDED_DIVERGENCES, usedDivergences } from "./check/ssot/comparison.ts";
+import type { Mismatch } from "./check/ssot/comparison.ts";
 import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
 import { harnessImportRules } from "./check/ssot/harness_imports.ts";
 import { labelPreflightRules } from "./check/ssot/label_preflight.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
-import { migrationLadderRules } from "./check/ssot/migration_ladder.ts";
 import { moduleRules } from "./check/ssot/modules.ts";
 import { pagesCallerRules } from "./check/ssot/pages_callers.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
@@ -36,10 +32,10 @@ import { prTitleRules } from "./check/ssot/pr_title.ts";
 import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
+import { skillRules } from "./check/ssot/skills.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
 import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
 import { toolchainRules } from "./check/ssot/toolchain.ts";
-import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
 /** Every rule, one group module at a time; ruleRosterMismatches audits
  *  the assembled list against RULE_ROSTER before the loop runs. */
@@ -48,9 +44,8 @@ const rules: Rule[] = [
   ...toolchainRules,
   ...deliveryPinRules,
   ...stickyCommentRules,
-  ...migrationLadderRules,
   ...allGreenRules,
-  ...twinCopyRules,
+  ...skillRules,
   ...settingsWorkflowRules,
   ...labelRules,
   ...prTitleRules,
@@ -93,14 +88,6 @@ function main(): number {
     for (const mismatch of mismatches) {
       console.error(
         `${rule.name}: ${mismatch.file} -> expected ${mismatch.expected}, got ${mismatch.got}`,
-      );
-      failures++;
-    }
-  }
-  for (const [index, entry] of RECORDED_DIVERGENCES.entries()) {
-    if (!usedDivergences.has(index)) {
-      console.error(
-        `recorded-divergences: ${entry.file} -> expected pattern ${entry.skip} to match a line, got nothing (stale entry - remove it)`,
       );
       failures++;
     }

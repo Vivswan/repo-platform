@@ -1,6 +1,6 @@
 // The central VitePress config every fleet docs site builds with. The
 // caller repository contributes its markdown tree plus the repo-level facts
-// (copier answers, toolchain pins, LICENSE.md) the action reads from the
+// (settings.yml identity, toolchain pins, LICENSE.md) the action reads from the
 // tier's git tree; everything here is driven by the environment the
 // pages-site action sets per tier (build.ts owns that contract):
 //

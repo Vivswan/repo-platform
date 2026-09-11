@@ -9,11 +9,11 @@
 // This script asks the GitHub API, so it runs as its own CI job rather
 // than inside `bun run check` (which must work offline).
 //
-// Scanned: workflow YAML, composite action manifests, template .jinja
-// sources, and the sync writer's files/ sources (its workflow block files
-// are plain .yml). Skipped: local `./` paths and refs carrying template
-// expressions (resolved only at render time). A comment naming a branch
-// (`# master`) is not judged: branch heads move by design.
+// Scanned: workflow YAML, composite action manifests, and the sync
+// writer's files/ sources (workflow block files included). Skipped: local
+// `./` paths and self-references carrying a placeholder owner (the writer
+// substitutes it). A comment naming a branch (`# master`) is not judged:
+// branch heads move by design.
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -109,16 +109,16 @@ function* walk(dir: string): Generator<string> {
   for (const name of readdirSync(dir)) {
     if (name === "node_modules") continue;
     const path = join(dir, name);
-    // lstat: a dangling symlink (bun leaves them in node_modules/.bin,
-    // and templates/base/ ships the agent-file symlinks on purpose) must not throw.
+    // lstat: a dangling symlink (bun leaves them in node_modules/.bin)
+    // must not throw.
     const entry = lstatSync(path);
     if (entry.isDirectory()) yield* walk(path);
-    else if (entry.isFile() && /\.(ya?ml|jinja)$/.test(name)) yield path;
+    else if (entry.isFile() && /\.ya?ml$|\.ya?ml\.block\./.test(name)) yield path;
   }
 }
 
 if (import.meta.main) {
-  const files = [".github/workflows", "actions", "templates", "files"]
+  const files = [".github/workflows", "actions", "files"]
     .flatMap((root) => [...walk(root)])
     .map((path) => ({ path, text: readFileSync(path, "utf-8") }));
   const refs = collectRefs(files);

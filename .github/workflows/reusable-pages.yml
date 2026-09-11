@@ -108,7 +108,6 @@ jobs:
           ref: ${{ inputs.sha || (github.event_name == 'push' && github.sha || github.event.repository.default_branch) }}
           sparse-checkout: |
             .repo-platform.yml
-            .github/.copier-answers.yml
           sparse-checkout-cone-mode: false
       - uses: Vivswan/repo-platform/actions/plan@build
         id: plan
@@ -304,8 +303,8 @@ jobs:
           title: Docs site link rot
           artifacts-dir: ${{ steps.links.outputs.report-dir }}
           artifact-name: link-rot-${{ github.run_attempt }}
-          # The stream's create tuple, anchored to templates/docs-site/
-          # module.yml tracking_label by check_ssot's labels rule.
+          # The stream's create tuple, anchored to files.yml's docs-site
+          # tracking_label by check_ssot's labels rule.
           label-color: "D4A72C"
           label-description: Automated docs-site link-rot report
           stream: generic

@@ -543,7 +543,7 @@ function main(): number {
 
   let errors: string[];
   try {
-    // The same containment the copier question enforces fleet-wide, for
+    // The same containment the registration's skills_dir enforces fleet-wide, for
     // direct callers: a traversing or absolute input would validate (or
     // list) a tree outside the checkout.
     for (const [what, value] of [

@@ -11,9 +11,9 @@
 // Targets come from --targets, a JSON array of the selector's enriched
 // rows ({repo, private, display, verify, ...}) - the enrolled, adopted
 // repos (a readable .repo-platform.yml). --self appends the operator
-// repository itself: it is not adopted (no .repo-platform.yml), but its
-// settings are managed by the same run (its baseline facts come from
-// .repo-platform-answers.yml - see render_managed_settings.ts). Prints a
+// repository itself: the sync skips it, but its settings are managed by
+// the same run (its facts come from its own .repo-platform.yml and
+// checkout - see render_managed_settings.ts). Prints a
 // JSON array of {repo, name, private, verify} entries sorted by the
 // emitted repo; a private row's `repo`/`name` carry its display hint so
 // the matrix, the job name it becomes, and the called steps never see the

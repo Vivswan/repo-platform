@@ -77,10 +77,20 @@ const retiredSchema = z.strictObject({
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
+/** The settings layer files a module may declare, in stack order: the
+ *  unconditional layer, then the visibility overlays. */
+export const SETTINGS_LAYER_ORDER = [
+  "settings.yml",
+  "settings-public.yml",
+  "settings-private.yml",
+] as const;
+export type SettingsLayerName = (typeof SETTINGS_LAYER_ORDER)[number];
+
 /** The module-data keys a reader resolves a repository's configuration
- *  from; every other key rides along untyped (block lists, pins, labels).
- *  A tracking label's `key` names the registration's `labels` key and the
- *  `<key>_label` placeholder. */
+ *  from; every other key rides along untyped (block lists). A tracking
+ *  label's `key` names the registration's `labels` key and the
+ *  `<key>_label` placeholder; `settings_layers` names the layer files
+ *  beside the module's sources under files/. */
 const moduleDataSchema = z.looseObject({
   description: z.string().min(1).optional(),
   codeql_language: z.string().min(1).optional(),
@@ -96,6 +106,22 @@ const moduleDataSchema = z.looseObject({
   dist: z.string().min(1).optional(),
   path: z.string().min(1).optional(),
   skills_dir: z.looseObject({ default: z.string().min(1) }).optional(),
+  pin: z
+    .strictObject({
+      file: z.string().regex(/^\.[a-z][a-z0-9.-]*$/, "not a version dotfile name"),
+      version: z.string().regex(/^\d+\.\d+\.\d+$/, "not an X.Y.Z version"),
+    })
+    .optional(),
+  dependabot_label: z
+    .strictObject({ name: z.string().min(1), color: z.string().min(1) })
+    .optional(),
+  settings_layers: z
+    .array(z.enum(SETTINGS_LAYER_ORDER))
+    .min(1)
+    .refine((layers) => layers.every((name, index) => layers.indexOf(name) === index), {
+      message: "each settings layer file at most once",
+    })
+    .optional(),
 });
 
 export type ModuleData = z.infer<typeof moduleDataSchema>;

@@ -3,10 +3,11 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureNetwork,
+  type DiscoveredRepo,
   NETWORK_TIMEOUT_MS,
   notAdoptedNotice,
+  parseDiscovered,
   pushProbeSkipNotice,
-  readDispatchBranch,
   readDispatchRepo,
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
@@ -171,7 +172,7 @@ describe("notice builders", () => {
 
   test("notAdoptedNotice without a consequence matches the sync selector's literal exactly", () => {
     expect(notAdoptedNotice("Vivswan/unadopted")).toBe(
-      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's write access to leave the fleet.",
+      "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform. Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.",
     );
   });
 
@@ -183,9 +184,9 @@ describe("notice builders", () => {
       ),
     ).toBe(
       "Vivswan/unadopted: skipped - no .repo-platform.yml on its default branch, so it has not " +
-        "adopted the template. If it carries .github/settings.yml, the central nightly heal no " +
-        "longer applies it. Generate it with copier (see the repo-platform README) to opt in, or " +
-        "revoke the fleet token's write access to leave the fleet.",
+        "adopted the platform. If it carries .github/settings.yml, the central nightly heal no " +
+        "longer applies it. Register it (docs/new-repo.md) to opt in, or revoke the fleet " +
+        "token's write access to leave the fleet.",
     );
   });
 });
@@ -324,45 +325,6 @@ describe("readDispatchRepo", () => {
     }
     withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
       expect(readDispatchRepo(owner)).toBe(expected);
-    });
-  });
-
-  // The branch input rides the same payload slot; TARGET_BRANCH overrides
-  // it the way ONLY_REPO overrides the scope.
-  test.each([
-    {
-      reason: "TARGET_BRANCH wins and is trimmed",
-      targetBranch: " feat/x ",
-      eventBody: JSON.stringify({ inputs: { branch: "other" } }),
-      expected: "feat/x",
-    },
-    {
-      reason: "the payload's branch input, trimmed",
-      targetBranch: "",
-      eventBody: JSON.stringify({ inputs: { repo: "o/r", branch: " chore/fuzzer " } }),
-      expected: "chore/fuzzer",
-    },
-    {
-      reason: "an absent branch input reads as empty (an ordinary dispatch)",
-      targetBranch: "",
-      eventBody: JSON.stringify({ inputs: { repo: "o/r" } }),
-      expected: "",
-    },
-    {
-      reason: "an inputs-less payload reads as empty (cron, the post-green call)",
-      targetBranch: "",
-      eventBody: JSON.stringify({ inputs: null }),
-      expected: "",
-    },
-    { reason: "nothing set reads as empty", targetBranch: "", eventBody: undefined, expected: "" },
-  ])("readDispatchBranch: $reason", ({ targetBranch, eventBody, expected }) => {
-    let eventPath = "";
-    if (eventBody !== undefined) {
-      eventPath = join(root, `branch-event-${Bun.hash(eventBody).toString(16)}.json`);
-      writeFileSync(eventPath, eventBody);
-    }
-    withEnv({ TARGET_BRANCH: targetBranch, GITHUB_EVENT_PATH: eventPath }, () => {
-      expect(readDispatchBranch()).toBe(expected);
     });
   });
 
@@ -520,5 +482,36 @@ describe("discoverWritableRepos", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discovery.test: user/repos response: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
+  });
+});
+
+describe("parseDiscovered", () => {
+  // Identity on every accepted payload: only repo and private are
+  // inspected; everything else passes through untouched, whatever its
+  // type - pinned so a schema tightening cannot silently change it.
+  test.each<{ reason: string; input: (DiscoveredRepo & Record<string, unknown>)[] }>([
+    {
+      reason: "{repo, private} entries pass their extra keys through",
+      input: [{ repo: "o/a", private: true, archived: false, pushed_at: "now" }],
+    },
+    { reason: "an empty list is valid", input: [] },
+    {
+      reason: "a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)",
+      input: [{ repo: "o/a", private: true, extra: 42 }],
+    },
+  ])("$reason", ({ input }) => {
+    expect(parseDiscovered(input)).toEqual(input);
+  });
+
+  test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
+    expect(parseDiscovered([{ repo: "o/a" }])).toBeNull();
+    expect(parseDiscovered([{ repo: "o/a", private: "true" }])).toBeNull();
+    expect(parseDiscovered([{ repo: "o/a", private: true }, { repo: "o/b" }])).toBeNull();
+  });
+
+  test("rejects non-object entries, a non-string repo, and a non-array payload", () => {
+    expect(parseDiscovered(["o/a"])).toBeNull();
+    expect(parseDiscovered([{ repo: 7, private: true }])).toBeNull();
+    expect(parseDiscovered({ repo: "o/a", private: true })).toBeNull();
   });
 });

@@ -2,78 +2,16 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  applyDivergences,
   canonical,
   escapeRegExp,
   firstDiff,
+  MARKER_TOKENS,
   mustMatch,
   orderedListMismatches,
-  semanticLines,
   setMismatch,
   stripGeneratedRegions,
 } from "../../../scripts/check/ssot/comparison.ts";
 import { callersOf } from "../../../scripts/check/ssot/post_green.ts";
-import { MARKER_TOKENS, mdMarkers } from "../../../scripts/generate/markers.ts";
-
-describe("applyDivergences", () => {
-  const entry = {
-    file: "f",
-    reason: "test",
-    skip: /^- uses: actions\/checkout@v7$/,
-    before: /^- uses: \.\/actions\/x$/,
-  };
-  const checkout = "      - uses: actions/checkout@v7";
-  const anchor = "      - uses: ./actions/x";
-  const template = ["A", anchor];
-
-  test("excuses one operator line sitting immediately before its anchor", () => {
-    const used = new Set<number>();
-    const out = applyDivergences("f", template, ["A", checkout, anchor], [entry], used);
-    expect(out.actual).toEqual(["A", anchor]);
-    expect(out.expected).toEqual(template);
-    expect(out.mismatches).toEqual([]);
-    expect(used.has(0)).toBe(true);
-  });
-
-  test("an operator line migrated below its anchor is not excused", () => {
-    const migrated = ["A", anchor, checkout];
-    const out = applyDivergences("f", template, migrated, [entry], new Set());
-    expect(out.actual).toEqual(migrated);
-    expect(out.mismatches).toEqual([]);
-  });
-
-  test("a second copy of the excused line stays and mismatches", () => {
-    const out = applyDivergences("f", template, [checkout, checkout, anchor], [entry], new Set());
-    expect(out.actual).toEqual([checkout, anchor]);
-  });
-
-  test("a template that gains the anchored line makes the entry stale, excusing nothing", () => {
-    const caught = ["A", checkout, anchor];
-    const used = new Set<number>();
-    const out = applyDivergences("f", caught, caught, [entry], used);
-    expect(out.expected).toEqual(caught);
-    expect(out.actual).toEqual(caught);
-    expect(out.mismatches).toHaveLength(1);
-    expect(out.mismatches[0].got).toContain("drop the RECORDED_DIVERGENCES entry");
-    expect(used.has(0)).toBe(true);
-  });
-
-  test("other files and unmatched lines pass through untouched", () => {
-    const lines = [checkout, anchor];
-    const out = applyDivergences("other", lines, lines, [entry], new Set());
-    expect(out.actual).toEqual(lines);
-    expect(out.mismatches).toEqual([]);
-  });
-});
-
-describe("semanticLines", () => {
-  test("drops blank and comment lines and right-trims the rest", () => {
-    expect(semanticLines("# c\n\nkeep  \n  indented # not a comment\n")).toEqual([
-      "keep",
-      "  indented # not a comment",
-    ]);
-  });
-});
 
 describe("setMismatch", () => {
   test("passes on the same set regardless of order and duplicates", () => {
@@ -166,10 +104,10 @@ describe("escapeRegExp", () => {
 });
 
 describe("stripGeneratedRegions", () => {
-  // Markers built by scripts/generate/markers.ts's own grammar, so a marker-text rename
-  // there keeps these fixtures aligned with what the stripper must match.
-  const begin = (name: string) => mdMarkers(name).begin;
-  const end = (name: string) => mdMarkers(name).end;
+  // Markers built from the stripper's own tokens, so a marker-text rename
+  // keeps these fixtures aligned with what the stripper must match.
+  const begin = (name: string) => `<!-- ${MARKER_TOKENS.begin} ${name} (generator) -->`;
+  const end = (name: string) => `<!-- ${MARKER_TOKENS.end} ${name} -->`;
 
   test("removes balanced regions, inline and multi-line, keeping hand prose", () => {
     const text = `hand ${begin("a")}gen a${end("a")} middle\n${begin("b")}\ngen b\n${end("b")} tail`;

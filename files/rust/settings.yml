@@ -1,0 +1,8 @@
+---
+# The rust module's settings layer (layer 3 of the settings merge,
+# docs/settings.md): merged for every repository that selects the module.
+
+labels:
+  - name: rust
+    color: "000000"
+    description: Pull requests that update rust code

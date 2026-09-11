@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
+
 // The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
 // (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
 // range and unioned. Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
 
-import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
 import { fail, notice, setOutput, warning } from "../shared/gha.ts";
 import { mustCapture } from "../shared/proc.ts";
+import { moduleRoster } from "../sync/modules.ts";
 import {
   type DiffBase,
   judgedRangeEnv,
@@ -31,7 +32,7 @@ const DIRECTIVE = /^\[([A-Za-z][A-Za-z0-9-]*)(?::\s*(.*?))?\s*\]$/;
 const NEEDS_REASON =
   "syncing every repo needs a justification; use `public` unless private repos need this now - write [fleet-sync: all] <why every repo needs this now>";
 const FLEET_SYNC_ANYWHERE = /\[\s*fleet-sync/i;
-const MODULE_ROSTER = new Set(MODULE_ORDER);
+const MODULE_ROSTER = new Set(moduleRoster());
 // paragraphs()[0] is the subject, so the PR body opens at index 1.
 const BLOCK_INDEX = 1;
 const POSITION =

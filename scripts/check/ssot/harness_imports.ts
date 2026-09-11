@@ -35,11 +35,6 @@ export const IN_PROCESS_SCRIPT_IMPORTS: readonly InProcessScriptImport[] = [
     script: ".github/scripts/ci/resolve_action_refs",
     reason: "collectRefs is the pure ref parser the CI script wraps",
   },
-  {
-    importer: "tests/ci/sweep_harness_namespaces.test.ts",
-    script: ".github/scripts/ci/sweep_harness_namespaces",
-    reason: "the sweep's namespace and age parsers are pure helpers beside its subprocess run",
-  },
 ];
 
 /** `specifier` as a repo-relative, extensionless path when it is a relative

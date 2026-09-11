@@ -1,17 +1,12 @@
-// Unit tests for the shared manifest module's emit/parse pair: entryLine's
-// byte layout (which the stamper rewrites in place and copier's three-way
-// merge diffs line by line, so it is a wire format), parseEntry reading it
-// back, and the MANIFEST_NAME self-entry's provenance slot.
+// Unit tests for the shared manifest module: the value-free parse every
+// consumer reads through, and the closed entry-field vocabulary the
+// validator judges unknown fields against.
 
 import { describe, expect, test } from "bun:test";
-import { splitEntries } from "../../.github/scripts/sync/preserve_local_content";
-import type { GrammarId, SplitShapes } from "../../actions/shared/grammar";
 import {
-  entryLine,
+  entryBody,
   MANIFEST_NAME,
   type ManifestEntryShape,
-  type ParsedEntryLine,
-  parseEntry,
   parseManifestFiles,
   unknownEntryFields,
 } from "../../actions/shared/manifest";
@@ -44,24 +39,40 @@ describe("parseManifestFiles problem strings are value-free", () => {
     const text = '{"files": {"a.txt": {"class": "starter"}}}';
     expect(parseManifestFiles(text)).toEqual({
       files: { "a.txt": { class: "starter" } },
-      resolved: text,
       problem: null,
     });
   });
 });
 
-describe("unknownEntryFields", () => {
-  test("names each entry's keys outside the closed vocabulary; the vocabulary itself is clean", () => {
-    // ENTRY_FIELDS is the runtime twin of the emitted shapes: every key entryLine writes for any
-    // class or grammar is known, so a stamped render reports nothing.
-    const rendered = parseManifestFiles(
-      `{"files": {\n${[
-        entryLine("a.md", { class: "starter" }),
-        entryLine("b.md", { class: "managed" }),
-        entryLine(MANIFEST_NAME, { class: "managed" }),
-        entryLine("c.md", { class: "split", grammar: "managed-region", begin: "# b", end: "# e" }),
-      ].join(",\n")}\n}}`,
+describe("entryBody", () => {
+  test("prints the fields in the given order as one inline object", () => {
+    expect(entryBody({ class: "managed", hash: "abc" })).toBe(
+      '{"class": "managed", "hash": "abc"}',
     );
+    expect(
+      entryBody({
+        class: "split",
+        grammar: "managed-region",
+        begin: "# b",
+        end: "# e",
+        hash: null,
+      }),
+    ).toBe(
+      '{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
+    );
+  });
+});
+
+describe("unknownEntryFields", () => {
+  test("names each entry's keys outside the closed vocabulary; every field the writer records is known", () => {
+    const lines = [
+      `    "a.md": ${entryBody({ class: "starter" })}`,
+      `    "b.md": ${entryBody({ class: "managed", hash: "h" })}`,
+      `    ${JSON.stringify(MANIFEST_NAME)}: ${entryBody({ class: "managed", commit: "c" })}`,
+      `    "c.md": ${entryBody({ class: "split", grammar: "managed-region", begin: "# b", end: "# e", hash: "h" })}`,
+      `    "d.md": ${entryBody({ class: "link", hash: "h" })}`,
+    ];
+    const rendered = parseManifestFiles(`{"files": {\n${lines.join(",\n")}\n}}`);
     expect(rendered.problem).toBeNull();
     expect(unknownEntryFields(rendered.files ?? {})).toEqual([]);
     expect(
@@ -74,114 +85,5 @@ describe("unknownEntryFields", () => {
       { path: "x.yml", fields: ["withheld"] },
       { path: "z.yml", fields: ["note", "withheld"] },
     ]);
-  });
-});
-
-describe("entryLine", () => {
-  // The exact bytes are the contract: a stamped manifest must differ from
-  // the raw render in the hash/commit token values alone, so any layout
-  // movement here shows up as a fleet-wide manifest diff on the next sync.
-  test("emits the pinned one-line layout per class and grammar", () => {
-    expect(entryLine("CLAUDE.md", { class: "managed" })).toBe(
-      '    "CLAUDE.md": {"class": "managed", "hash": null}',
-    );
-    expect(entryLine(".gitleaks.toml", { class: "starter" })).toBe(
-      '    ".gitleaks.toml": {"class": "starter"}',
-    );
-    expect(
-      entryLine("AGENTS.md", {
-        class: "split",
-        grammar: "managed-region",
-        begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-        end: "<!-- END REPO-PLATFORM MANAGED -->",
-      }),
-    ).toBe(
-      '    "AGENTS.md": {"class": "split", "grammar": "managed-region", ' +
-        '"begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", ' +
-        '"end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}',
-    );
-    expect(
-      entryLine(".gitignore", {
-        class: "split",
-        grammar: "managed-region",
-        begin: "# BEGIN REPO-PLATFORM MANAGED",
-        end: "# END REPO-PLATFORM MANAGED",
-      }),
-    ).toBe(
-      '    ".gitignore": {"class": "split", "grammar": "managed-region", ' +
-        '"begin": "# BEGIN REPO-PLATFORM MANAGED", ' +
-        '"end": "# END REPO-PLATFORM MANAGED", "hash": null}',
-    );
-  });
-
-  test("the manifest's own entry carries the null provenance-commit slot", () => {
-    expect(entryLine(MANIFEST_NAME, { class: "managed" })).toBe(
-      `    ${JSON.stringify(MANIFEST_NAME)}: {"class": "managed", "hash": null, "commit": null}`,
-    );
-  });
-
-  test("every grammar's wire round-trips: splitEntries reads back what entryLine wrote", () => {
-    // The runtime weld on the GRAMMAR row's wire columns: the emitter
-    // writes the wireFields and the sync parse
-    // reconstructs the declaration from them, so a row whose columns and
-    // parser disagree (a field emitted but not parsed, or parsed but
-    // never emitted) fails HERE, not at fleet sync time. One case per
-    // GrammarId, enforced by the Record type: a new grammar cannot land
-    // without joining this round-trip.
-    const declarations: { [K in GrammarId]: SplitShapes[K] } = {
-      "managed-region": {
-        grammar: "managed-region",
-        begin: "# BEGIN REPO-PLATFORM MANAGED",
-        end: "# END REPO-PLATFORM MANAGED",
-      },
-    };
-    for (const declaration of Object.values(declarations)) {
-      const line = entryLine("some/file", { class: "split", ...declaration });
-      const manifest = `{"files": {\n${line}\n}}`;
-      expect(splitEntries(manifest, "round-trip")).toEqual([{ path: "some/file", ...declaration }]);
-    }
-  });
-});
-
-describe("parseEntry", () => {
-  // The whole decomposition is the contract: the stamper rewrites the body
-  // and reassembles the pieces, so every field must come back exact,
-  // escape handling in the path included.
-  const lines: [string, string, ParsedEntryLine][] = [
-    [
-      "an emitted managed line, no comma",
-      entryLine("dir/file.md", { class: "managed" }),
-      {
-        indent: "    ",
-        path: "dir/file.md",
-        quotedPath: '"dir/file.md"',
-        body: '{"class": "managed", "hash": null}',
-        comma: "",
-      },
-    ],
-    [
-      "a trailing comma and an escaped quote in the path",
-      `${entryLine('we"ird.md', { class: "starter" })},`,
-      {
-        indent: "    ",
-        path: 'we"ird.md',
-        quotedPath: String.raw`"we\"ird.md"`,
-        body: '{"class": "starter"}',
-        comma: ",",
-      },
-    ],
-  ];
-  test.each(lines)("reads %s back, byte-faithfully decomposed", (_reason, line, expected) => {
-    const parsed = parseEntry(line);
-    expect(parsed).toEqual(expected);
-    // Reassembling the pieces reproduces the input byte for byte - the
-    // property the stamper's in-place rewrite depends on.
-    expect(`${parsed?.indent}${parsed?.quotedPath}: ${parsed?.body}${parsed?.comma}`).toBe(line);
-  });
-
-  test("returns null for structural lines", () => {
-    for (const line of ["{", '  "files": {', "  }", "}", "", '"no-colon"']) {
-      expect(parseEntry(line)).toBeNull();
-    }
   });
 });

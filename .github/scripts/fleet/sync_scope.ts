@@ -30,9 +30,9 @@ export type Scope =
   | { kind: "all" }
   | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string>; modules: Set<string>[] };
 
-/** The whole fleet for "" and "all", else the folded list. `roster` is the template's module
- *  list (scripts/lib/module_manifests.ts's MODULE_ORDER): a filter naming anything else is refused
- *  here, before any repository is probed. Messages carry counts, never entries: a dispatch entry
+/** The whole fleet for "" and "all", else the folded list. `roster` is files.yml's module list
+ *  (sync/modules.ts's moduleRoster): a filter naming anything else is refused here, before any
+ *  repository is probed. Messages carry counts, never entries: a dispatch entry
  *  may be a private slug and the caller's log is public. */
 export function parseScope(
   raw: string,
@@ -93,7 +93,7 @@ export function parseScope(
   if (unknownModules > 0) {
     return {
       kind: "error",
-      message: `${unknownModules} of ${moduleNames} module names in the modules: filters ${unknownModules === 1 ? "is not a module" : "are not modules"} of this template (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`,
+      message: `${unknownModules} of ${moduleNames} module names in the modules: filters ${unknownModules === 1 ? "is not a module" : "are not modules"} files.yml knows (values withheld - this log is public); the modules are: ${[...roster].join(", ")}`,
     };
   }
   return { kind: "list", visibility, slugs, modules };
@@ -162,26 +162,6 @@ export function scopeRefusal(
     if (hidden > 0) {
       return `${hidden} of ${slugs.length} scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${source.sha.slice(0, 12)})`;
     }
-  }
-  return null;
-}
-
-/** Why a dispatch naming a `branch` cannot run, or null: the branch mode
- *  renders onto ONE repository's branch, so the scope must be exactly one
- *  slug (no tokens, no list, not all), and a recovery re-render has no PR
- *  to hold for review. Value-free like every other refusal here. */
-export function branchScopeRefusal(scope: Scope, branch: string, recover: string): string | null {
-  if (branch === "") return null;
-  if (recover === "recopy") {
-    return "branch cannot combine with recover=recopy: a recovery re-render is delivered through a manual-review PR, and the branch mode pushes onto an existing branch instead";
-  }
-  if (
-    scope.kind === "all" ||
-    scope.visibility.size > 0 ||
-    scope.modules.length > 0 ||
-    scope.slugs.size !== 1
-  ) {
-    return "branch needs repo to name exactly one owner/name: the sync renders onto that repository's branch instead of opening its own PR, so a list, a visibility or modules: token, all, or an empty repo cannot carry it";
   }
   return null;
 }

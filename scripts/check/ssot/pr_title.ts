@@ -7,6 +7,10 @@ import { canonical, type Mismatch } from "./comparison.ts";
 import { asRecord, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
+/** The pr-title module's managed workflow and settings layer, as the writer copies them. */
+export const PR_TITLE_WORKFLOW = "files/pr-title/.github/workflows/pr-title.yml";
+export const PR_TITLE_LAYER = "files/pr-title/settings.yml";
+
 /** The pr-title module's natively-required check, pinned at its three sources.
  *  The workflow runs on every judged event PLUS synchronize (a required check
  *  must exist at the PR's NEWEST head, or the merge box waits forever), its job
@@ -20,9 +24,9 @@ export function prTitleWorkflowMismatches(
   baselineText: string,
   moduleLayerText: string,
 ): Mismatch[] {
-  const wfRel = "templates/pr-title/.github/workflows/pr-title.yml.jinja";
+  const wfRel = PR_TITLE_WORKFLOW;
   const baselineRel = ".github/settings-baseline.yml";
-  const moduleRel = "templates/pr-title/settings.yml";
+  const moduleRel = PR_TITLE_LAYER;
   const mismatches: Mismatch[] = [];
   const lines = workflowText.split("\n");
   const pins: readonly [string, string][] = [
@@ -176,9 +180,9 @@ export const prTitleRules: Rule[] = [
     name: "pr-title-workflow",
     run: () =>
       prTitleWorkflowMismatches(
-        read("templates/pr-title/.github/workflows/pr-title.yml.jinja"),
+        read(PR_TITLE_WORKFLOW),
         read(".github/settings-baseline.yml"),
-        read("templates/pr-title/settings.yml"),
+        read(PR_TITLE_LAYER),
       ),
   },
 ];

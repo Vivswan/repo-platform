@@ -5,17 +5,16 @@
 // a column width. A violation is a line that merely continues the previous
 // line's text; the fix is always joining it onto that line.
 //
-// Scope: every tracked file that renders to .md (plain .md plus .jinja
-// markdown templates, filename gates stripped), and the agents-* fragments
-// (markdown prose spliced into AGENTS.md.jinja by the composer). Symlinks
-// are skipped (their targets are scanned directly). Vendored and generated
-// texts keep their upstream formatting: LICENSE*, CHANGELOG*.
+// Scope: every tracked .md file, and the writer's markdown block files
+// (`<name>.md.block.<value>`, spliced into a markdown file at sync).
+// Symlinks are skipped (their targets are scanned directly). Vendored and
+// generated texts keep their upstream formatting: LICENSE*, CHANGELOG*.
 //
 // Ignored regions, where multi-line content is structural rather than
 // wrapped prose: YAML frontmatter, fenced code blocks, HTML comment
 // interiors, GFM tables (header + delimiter row), headings (ATX and
-// setext), thematic breaks, link reference definitions, bare HTML tag
-// lines, and jinja statement/comment lines. Indented (four-space) code
+// setext), thematic breaks, link reference definitions, and bare HTML tag
+// lines. Indented (four-space) code
 // blocks are outside the house dialect - use fenced code - and are
 // reported as wrapped prose.
 //
@@ -51,7 +50,6 @@ export function classify(raw: string): LineKind {
   if (/^\[[^\]]+\]:\s/.test(t)) return "structural"; // link reference definition
   if (t.startsWith("<!--")) return "structural"; // comment (opener; interior is skipped)
   if (HTML_TAG_LINE.test(t)) return "structural"; // bare HTML tag line (<details>, ...)
-  if (/^\{[%#].*[%#]\}$/.test(t)) return "structural"; // jinja statement/comment line
   if (/^([*_-][ \t]*){3,}$/.test(t)) return "structural"; // thematic break / setext level 2
   if (/^([-*+]|\d+[.)])\s/.test(t)) return "list";
   return "prose";
@@ -171,28 +169,22 @@ export function scanMarkdown(content: string): {
   return { hits, unterminated: fence !== null ? "fence" : inComment ? "comment" : null };
 }
 
-/** True when the tracked path renders to a .md file: plain .md, or a
- *  .jinja template whose name (filename gates stripped) ends in .md. */
-export function rendersToMarkdown(path: string): boolean {
-  return renderedName(path).endsWith(".md");
+/** True when the tracked path is markdown: a plain .md file, or a writer
+ *  block file spliced into one (`<name>.md.block.<value>`). */
+export function isMarkdown(path: string): boolean {
+  return markdownName(path).endsWith(".md");
 }
 
-/** The filename a template renders to: trailing .jinja and filename-gate
- *  jinja syntax stripped. */
-function renderedName(path: string): string {
+/** The markdown filename a path stands for: a block file's suffix
+ *  stripped, anything else as is. */
+function markdownName(path: string): string {
   const base = path.split("/").pop() ?? "";
-  const name = base.endsWith(".jinja") ? base.slice(0, -".jinja".length) : base;
-  return name.replace(/\{%[^}]*%\}/g, "").replace(/\{\{[^}]*\}\}/g, "");
-}
-
-/** agents-* fragments are markdown prose spliced into AGENTS.md.jinja. */
-export function isAgentsFragment(path: string): boolean {
-  return /^templates\/[^/]+\/fragments\/agents-[^/]+\.jinja$/.test(path);
+  return base.replace(/\.block\.[^/]+$/, "");
 }
 
 /** Vendored/generated texts keep their upstream formatting. */
 export function isExempt(path: string): boolean {
-  const name = renderedName(path);
+  const name = markdownName(path);
   return name.startsWith("LICENSE") || name.startsWith("CHANGELOG");
 }
 
@@ -207,7 +199,7 @@ function main(): void {
   const tracked = proc.stdout.split("\0").filter(Boolean);
   const failures: string[] = [];
   for (const path of tracked) {
-    if (!(rendersToMarkdown(path) || isAgentsFragment(path)) || isExempt(path)) continue;
+    if (!isMarkdown(path) || isExempt(path)) continue;
     const full = join(REPO_ROOT, path);
     if (lstatSync(full).isSymbolicLink()) continue;
     const { hits, unterminated } = scanMarkdown(readFileSync(full, "utf-8"));

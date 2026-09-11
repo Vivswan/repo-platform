@@ -1,6 +1,6 @@
-// Private-repo redaction for the fleet's public run logs (the model:
-// docs/private-repos.md). repo-platform is public, so everything the plan
-// and select jobs and the per-repo legs print is world-readable, and a
+// Private-repo redaction for the settings apply's public run logs
+// (docs/settings.md). repo-platform is public, so everything its plan and
+// select jobs and the per-repo legs print is world-readable, and a
 // private managed repo must not appear there by name or detail. Two
 // mechanisms live here:
 //
@@ -10,7 +10,7 @@
 // - verifyTag: matrix values become public job names and reusable-workflow
 //   inputs are auto-printed, so a private row carries the hint plus an HMAC
 //   tag instead of the slug, and the leg re-discovers the fleet and picks
-//   the unique match (resolve_private_repo.ts). Keyed by a value derived
+//   the unique match. Keyed by a value derived
 //   from the fleet PAT (domain-separated, never the raw PAT) and bound to
 //   GITHUB_RUN_ID, the tag is safe to print: it cannot be brute-forced into
 //   a name without the PAT and fingerprints nothing across runs.
@@ -23,10 +23,11 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { fail } from "../shared/gha.ts";
 import { parseWith } from "../shared/json.ts";
+import type { DiscoveredRepo } from "./discovery.ts";
 
 // One implementation for both sides: the plan job tags rows here and the
-// per-repo legs import verifyTag (fleet/resolve_private_repo.ts), so the
-// truncation length lives in this file alone.
+// per-repo legs import verifyTag, so the truncation length lives in this
+// file alone.
 export const VERIFY_HEX_LENGTH = 32;
 
 // Domain-separation label for deriving the tag key from the fleet PAT, so
@@ -89,11 +90,6 @@ export function verifyTag(pat: string, runId: string, slug: string): string {
     .update(`${runId}\0${slug.toLowerCase()}`)
     .digest("hex")
     .slice(0, VERIFY_HEX_LENGTH);
-}
-
-export interface DiscoveredRepo {
-  repo: string;
-  private: boolean;
 }
 
 // The redaction invariant as a type: a private row is a hint plus a resolution
@@ -167,21 +163,6 @@ export function enrich(
             }
           : { repo: entry.repo, private: false, display: entry.repo, verify: "" },
     );
-}
-
-// The discovered list a caller hands to `enrich`. Fail closed at the
-// parse already: an entry without an explicit boolean `private` is
-// rejected outright rather than defaulted, and one bad entry rejects the
-// whole list - a silently dropped row would skip its repo's redaction
-// decision. Loose on the rest: extra discovery fields pass through.
-const discoveredListSchema = z.array(z.looseObject({ repo: z.string(), private: z.boolean() }));
-
-/** Parse a discovered list at the trust boundary; null when the shape is
- * wrong (the caller then fails without quoting the payload, which can
- * carry private repo names). */
-export function parseDiscoveredList(data: unknown): DiscoveredRepo[] | null {
-  const result = discoveredListSchema.safeParse(data);
-  return result.success ? result.data : null;
 }
 
 function main(args: string[]): void {

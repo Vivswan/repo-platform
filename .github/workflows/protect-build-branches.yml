@@ -1,6 +1,6 @@
 # Auto-close pull requests targeting the generated build branch. `build`
 # is published by post-green.yml's publish-build job; nothing merges into it via PRs -
-# changes go to templates/ (and actions/) on main. (The retired `template`
+# changes go to files/ (and actions/) on main. (The retired `template`
 # and `actions` refs were deleted 2026-08-29 and are no longer matched.)
 # pull_request_target (not pull_request) so fork PRs are handled too; safe
 # because the PR's code is never checked out or executed here.
@@ -30,7 +30,7 @@ jobs:
           header: repo-platform/protect-build-branches
           message: >-
             `build` is a generated build branch (append-only output of the post-green publish);
-            nothing merges into it. Template changes go to `templates/` on `main`, action changes
+            nothing merges into it. File changes go to `files/` on `main`, action changes
             to `actions/` on `main`. Closing.
 
       - name: Close the PR

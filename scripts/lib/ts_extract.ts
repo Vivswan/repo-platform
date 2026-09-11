@@ -10,10 +10,9 @@
 // Error discipline mirrors check_ssot's split between mustMatch and
 // matchAll/includes: the single-fact anchors (the const and argv-run
 // readers) THROW naming the file and the fact when the anchor is lost,
-// while the collection and presence helpers (literalMatches,
-// argvFlagLeads, wrappedArgvLabels, the type/property probes) return
-// empty or false and the RULE consuming them owns its anchor-lost throw
-// - exactly where the emptiness checks live today.
+// while the presence helpers (templateCarries, the type/property probes,
+// moduleSpecifiers) return empty or false and the RULE consuming them
+// owns its anchor-lost throw - exactly where the emptiness checks live.
 
 import {
   type CallExpression,
@@ -191,53 +190,6 @@ function regexBody(text: string, anchor: ConstAnchor, subject: string): string {
   return text.slice(1, close);
 }
 
-/** The pattern body of the regex literal a zod `.regex(...)` call pins
- *  under the object property `key` - the shape of an inline schema copy of
- *  a regex some other file exports as a const. Read off the property's own
- *  method chain (`z.string().regex(...).optional()`), never its arguments,
- *  so a `.regex()` nested in `.meta({...})` or a refinement is not the
- *  pin. Exactly one such property in the file, its chain carrying exactly
- *  one `.regex(<literal>)`, flagless like constRegexSource; anything else
- *  is a lost anchor. */
-export function propertyRegexSource(source: string, key: string, anchor: ConstAnchor): string {
-  const chainRegexCalls = (initializer: Expression | undefined) => {
-    const calls: CallExpression[] = [];
-    let node = initializer === undefined ? undefined : unwrapExpression(initializer);
-    while (node !== undefined && Node.isCallExpression(node)) {
-      const callee = unwrapExpression(node.getExpression());
-      if (!Node.isPropertyAccessExpression(callee)) break;
-      if (callee.getName() === "regex") calls.push(node);
-      node = unwrapExpression(callee.getExpression());
-    }
-    return calls;
-  };
-  const properties = parseTs(source)
-    .forEachDescendantAsArray()
-    .filter((node): node is PropertyAssignment => Node.isPropertyAssignment(node))
-    .filter((property) => property.getName() === key)
-    .filter((property) => chainRegexCalls(property.getInitializer()).length > 0);
-  if (properties.length !== 1) {
-    anchorLost(
-      anchor.where,
-      anchor.what,
-      `expected exactly one property ${key} whose chain carries a .regex() call, found ${properties.length}`,
-    );
-  }
-  const calls = chainRegexCalls(properties[0].getInitializer());
-  if (calls.length !== 1) {
-    anchorLost(anchor.where, anchor.what, `property ${key} carries ${calls.length} .regex() calls`);
-  }
-  const literal = calls[0].getArguments()[0];
-  if (literal === undefined || !Node.isRegularExpressionLiteral(literal)) {
-    anchorLost(
-      anchor.where,
-      anchor.what,
-      `property ${key} .regex() argument is not a regex literal`,
-    );
-  }
-  return regexBody(literal.getText(), anchor, `property ${key}`);
-}
-
 /** Whether any TEMPLATE literal in `source` carries `needle` in its RAW
  *  spelling, reconstructed token by token with interpolations contributing
  *  raw text only when they are plain IDENTIFIERS (the only shape the pinned
@@ -267,110 +219,6 @@ export function templateCarries(source: string, needle: string): boolean {
         );
       return canonical.includes(needle);
     });
-}
-
-/** Every match of `pattern` inside the string/template LITERAL TEXT of
- *  `source`, in traversal order - the literal-only counterpart of a
- *  whole-file matchAll. Template interpolations are skipped as such
- *  (their comments are not literal text; a string INSIDE one is its own
- *  literal and is matched once, as itself), so a mention in a comment is
- *  never a reference. */
-export function literalMatches(source: string, pattern: RegExp): string[] {
-  const raw = (node: Node) => source.slice(node.getStart(), node.getEnd());
-  const found: string[] = [];
-  const collect = (text: string) => {
-    for (const match of text.matchAll(pattern)) found.push(match[0]);
-  };
-  for (const node of parseTs(source).forEachDescendantAsArray()) {
-    if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node)) {
-      collect(raw(node));
-    } else if (Node.isTemplateExpression(node)) {
-      collect(raw(node.getHead()));
-      for (const span of node.getTemplateSpans()) collect(raw(span.getLiteral()));
-    }
-  }
-  return found;
-}
-
-/** Every array literal's elements, for the argv-shaped extractions. */
-function arrayElements(source: string) {
-  return parseTs(source)
-    .forEachDescendantAsArray()
-    .filter(Node.isArrayLiteralExpression)
-    .map((array) => array.getElements());
-}
-
-const stringValue = (node: Node | undefined): string | null =>
-  node !== undefined && Node.isStringLiteral(node) ? node.getLiteralValue() : null;
-
-/** The string element that follows `anchor` in some array literal, with
- *  the elements after it matching `trailing` exactly - the shape of a
- *  pinned argv run like `"--vcs-ref", <ref>, "--defaults", "--trust"`.
- *  First match wins; none is a lost anchor. */
-export function argvStringAfter(
-  source: string,
-  anchorValue: string,
-  trailing: string[],
-  anchor: { where: string; what: string },
-): string {
-  for (const elements of arrayElements(source)) {
-    for (const [index, element] of elements.entries()) {
-      if (stringValue(element) !== anchorValue) continue;
-      const value = stringValue(elements[index + 1]);
-      if (value === null) continue;
-      if (trailing.every((word, at) => stringValue(elements[index + 2 + at]) === word)) {
-        return value;
-      }
-    }
-  }
-  anchorLost(
-    anchor.where,
-    anchor.what,
-    `no argv run '${anchorValue}', <value>, ${trailing.map((w) => `'${w}'`).join(", ")}`,
-  );
-}
-
-/** The leading literal text of each argv element following `flag` in any
- *  array literal: a string's whole value, or a template's head text (the
- *  part before its first interpolation) - the piece that carries a
- *  `key=` prefix in a copier `-d` answer. Non-literal followers are
- *  skipped, like any other non-matching shape. */
-export function argvFlagLeads(source: string, flag: string): string[] {
-  const leads: string[] = [];
-  for (const elements of arrayElements(source)) {
-    for (const [index, element] of elements.entries()) {
-      if (stringValue(element) !== flag) continue;
-      const next = elements[index + 1];
-      if (next === undefined) continue;
-      if (Node.isStringLiteral(next) || Node.isNoSubstitutionTemplateLiteral(next)) {
-        leads.push(next.getLiteralValue());
-      } else if (Node.isTemplateExpression(next)) {
-        leads.push(next.getHead().getLiteralText());
-      }
-    }
-  }
-  return leads;
-}
-
-/** The label elements of wrapper-invoking argv arrays: in any array
- *  literal, an element that is a CALL whose last argument is a string
- *  ending in `scriptSuffix` (the join(...) locating the wrapper script),
- *  followed by a string label, followed by the literal "--" separator -
- *  the run_hidden argv shape. Returns the labels in traversal order. */
-export function wrappedArgvLabels(source: string, scriptSuffix: string): string[] {
-  const labels: string[] = [];
-  for (const elements of arrayElements(source)) {
-    for (const [index, element] of elements.entries()) {
-      if (!Node.isCallExpression(element)) continue;
-      const last = element.getArguments().at(-1);
-      const script = last === undefined ? null : stringValue(last);
-      if (script === null || !script.endsWith(scriptSuffix)) continue;
-      const label = stringValue(elements[index + 1]);
-      if (label === null || stringValue(elements[index + 2]) !== "--") continue;
-      labels.push(label);
-    }
-  }
-  return labels;
 }
 
 /** Whether any intersection type in `source` carries a member spelled

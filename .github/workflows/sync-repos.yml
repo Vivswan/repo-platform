@@ -5,11 +5,12 @@
 # no secret; the fleet PAT lives here alone.
 #
 # The public log carries the operator's vocabulary and nothing else
-# (docs/sync.md, "The operator"; docs/private-repos.md): the matrix holds
-# row indexes, the row's resolve step masks the name before any other step
-# prints, every later run step writes to $RUNNER_TEMP files, and the
-# details land in the target repository itself (the PR body, or a failure
-# issue). The same job runs for public and private targets.
+# (docs/sync.md, "The operator"): the matrix holds row indexes, the
+# selector writes its rows to a $RUNNER_TEMP file and prints counts, the
+# row's resolve step masks the name before any other step prints, every
+# later run step writes to $RUNNER_TEMP files, and the details land in the
+# target repository itself (the PR body, or a failure issue). The same job
+# runs for public and private targets.
 #
 # The `sync-repos` concurrency group makes this the single automated writer
 # of every target's automation branch: rows fan out in parallel, each to a
@@ -154,8 +155,6 @@ jobs:
 
       - name: Print the plan
         id: plan
-        env:
-          ROWS: ${{ steps.select.outputs.repos }}
         run: bun .github/scripts/sync/verdict.ts plan
 
   # One job per row index; the job name never carries a repository name.
@@ -213,16 +212,15 @@ jobs:
           TARGET_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_sync_repos.ts > "$RUNNER_TEMP/select.log" 2>&1
 
-      # The only step that sees the name in the clear: it registers every
-      # form with the masker before writing anything, then hands the name
-      # on through GITHUB_ENV (TARGET) alone.
+      # The only step that sees the name in the clear: it reads its row
+      # from the selector's file, registers every form with the masker
+      # before writing anything, then hands the name on through GITHUB_ENV
+      # (TARGET) alone.
       - name: Resolve the row's target
         id: target
         env:
-          ROWS: ${{ steps.select.outputs.repos }}
           ROW: ${{ matrix.row }}
           PLANNED: ${{ needs.plan.outputs.count }}
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/resolve_row.ts
 
       # A captured clone, not actions/checkout: git quotes target file text

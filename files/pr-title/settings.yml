@@ -1,0 +1,24 @@
+---
+# The pr-title module's settings layer (layer 3 of the settings merge,
+# docs/settings.md): merged for every repository that selects the module.
+#
+# One key on purpose: this flips the baseline's DISABLED pr-title ruleset
+# (.github/settings-baseline.yml, which carries the full shape - the
+# required `pr-title` check the managed pr-title.yml workflow creates) to
+# active. A same-name ruleset merges key by key across layers, so
+# selection activates the requirement and deselection lets the baseline's
+# disabled copy heal it back through the ordinary apply - the apply never
+# deletes a whole undeclared ruleset, so a full copy living only here
+# would outlive the module and wedge every PR on a check nothing creates.
+#
+# It is the module's OWN ruleset, not a rule in `main`: rules append
+# across layers KEYED BY TYPE, and the override layer already declares
+# main's required_status_checks rule - a same-type rule from a lower
+# layer would be replaced by it, never merged. Active rulesets on one
+# branch union their required checks. Requiring the check is module
+# policy, owned at the module level; only fleet invariants live in the
+# override.
+
+rulesets:
+  - name: pr-title
+    enforcement: active

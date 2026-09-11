@@ -21,14 +21,17 @@ import {
   nameKeyedUnion,
   repoSourceFrom,
 } from "../../.github/scripts/fleet/merge_settings_layers";
-import { type Label, managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
+import {
+  type Label,
+  loadModules,
+  managedSettings,
+} from "../../.github/scripts/fleet/render_managed_settings";
 import {
   type MergedSettings,
   type MergedValue,
   parseSettingsDoc,
   type SettingsLayer,
 } from "../../.github/scripts/fleet/settings_document";
-import { loadManifests } from "../../scripts/lib/module_manifests";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -779,10 +782,9 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // own settings.yml (layer 5) can still declare a copilot_code_review
   // rule: the identity starter declares no ruleset, so the rule leaves the
   // payload only once the repo file stops carrying it.
-  const manifests = loadManifests();
   const privateFleet = managedSettings(
     { modules: [], private: true, trackingLabels: [], prTitleWorkflowPresent: false },
-    manifests,
+    loadModules(),
   );
   const mainRuleTypes = (repoText: string) => {
     const result = mergeOutcome(

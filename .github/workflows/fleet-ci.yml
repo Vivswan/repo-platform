@@ -60,7 +60,7 @@ permissions:
   contents: read
 
 jobs:
-  # The one read of the registration: a sparse checkout of the two files
+  # The one read of the registration: a sparse checkout of the one file
   # the plan resolves from, and the outputs every later job keys on. The
   # visibility rides the event's repository object; the action asks the API
   # when an event carries none.
@@ -77,9 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: |
-            .repo-platform.yml
-            .github/.copier-answers.yml
+          sparse-checkout: .repo-platform.yml
           sparse-checkout-cone-mode: false
       - uses: Vivswan/repo-platform/actions/plan@build
         id: plan
@@ -88,12 +86,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
-  # behind the build branch) only informs. The action DEFERS the integrity
-  # step so the findings comment is posted before the gate goes red. The
-  # nightly schedule carries only the jobs that ask for it; the nightly
-  # scan itself rides fleet-nightly.yml.
-  validate-template:
+  # The platform's files against the manifest the last sync stamped: the
+  # action DEFERS the failure so the findings comment is posted before the
+  # gate goes red. The nightly schedule carries only the jobs that ask for
+  # it; the nightly scan itself rides fleet-nightly.yml.
+  validate-managed-files:
     needs: [plan]
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -104,16 +101,16 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/validate-template-report@build
-        id: template
+      - uses: Vivswan/repo-platform/actions/validate-managed-files@build
+        id: validate
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       # Fail-closed: != 'success' re-raises on 'failure' AND on an output
       # that resolved empty (a broken mapping must never read as green).
-      - name: Fail on an integrity finding
-        if: steps.template.outputs.integrity != 'success'
+      - name: Fail on a finding
+        if: steps.validate.outputs.integrity != 'success'
         run: |
-          echo "::error::validate-template's integrity check failed; see the findings on this PR (or the job summary) and the step log above."
+          echo "::error::validate-managed-files failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
   # The seven base checks in one job for every visibility (a standalone job

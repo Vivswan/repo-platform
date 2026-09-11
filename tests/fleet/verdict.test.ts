@@ -5,7 +5,12 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DELIVERY_VERDICTS, UNRESOLVED, VERDICT_FILE } from "../../.github/scripts/sync/verdict.ts";
+import {
+  DELIVERY_VERDICTS,
+  ROWS_FILE,
+  UNRESOLVED,
+  VERDICT_FILE,
+} from "../../.github/scripts/sync/verdict.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -29,13 +34,20 @@ interface Run {
   outputs: string;
 }
 
-function run(mode: string, env: Record<string, string>, verdict?: string): Run {
+function run(
+  mode: string,
+  env: Record<string, string>,
+  files: { verdict?: string; rows?: string } = {},
+): Run {
   const root = temp.dir("verdict-");
   const runnerTemp = join(root, "temp");
   mkdirSync(runnerTemp);
   const outputFile = join(root, "output.txt");
   writeFileSync(outputFile, "");
-  if (verdict !== undefined) writeFileSync(join(runnerTemp, VERDICT_FILE), `${verdict}\n`);
+  if (files.verdict !== undefined) {
+    writeFileSync(join(runnerTemp, VERDICT_FILE), `${files.verdict}\n`);
+  }
+  if (files.rows !== undefined) writeFileSync(join(runnerTemp, ROWS_FILE), files.rows);
   const result = boundedSpawnSync(["bun", SCRIPT, mode], {
     env: {
       PATH: process.env.PATH,
@@ -62,20 +74,27 @@ describe("verdict.ts", () => {
     expect(result.exitCode).not.toBe(0);
   };
 
-  test("plan prints the row count and derives the index matrix", () => {
-    const result = run("plan", { ROWS: '[{"repo":"a"},{"repo":"h**-s**r"}]' });
+  test("plan prints the row count from the selector's file and derives the index matrix", () => {
+    const result = run(
+      "plan",
+      {},
+      { rows: '[{"repo":"o/a","private":false},{"repo":"o/b","private":true}]' },
+    );
     speaks(result, "plan: 2 rows");
     expect(result.outputs).toBe("count=2\nindexes=[0,1]\n");
+    // The names stay in the file: the printer's line never carries one.
+    expect(result.stdout).not.toContain("o/");
   });
 
   test("an empty plan is zero rows and an empty matrix", () => {
-    const result = run("plan", { ROWS: "[]" });
+    const result = run("plan", {}, { rows: "[]" });
     speaks(result, "plan: 0 rows");
     expect(result.outputs).toBe("count=0\nindexes=[]\n");
   });
 
-  test("a plan over a non-list is silent and red", () => {
-    silent(run("plan", { ROWS: '{"repo":"a"}' }));
+  test("a plan over a non-list or a missing rows file is silent and red", () => {
+    silent(run("plan", {}, { rows: '{"repo":"a"}' }));
+    silent(run("plan", {}));
   });
 
   test("a row whose target was never resolved says so", () => {
@@ -90,7 +109,7 @@ describe("verdict.ts", () => {
     { verdict: "refreshed", line: "row 0: PR refreshed" },
     { verdict: "failed", line: "row 0: failed, report filed in the target repository" },
   ])("a delivered row prints the $verdict line", ({ verdict, line }) => {
-    speaks(run("row", { ROW: "0", TARGET: "o/r" }, verdict), line);
+    speaks(run("row", { ROW: "0", TARGET: "o/r" }, { verdict }), line);
   });
 
   test("the delivery verdicts are exactly the four lines above", () => {
@@ -99,7 +118,7 @@ describe("verdict.ts", () => {
 
   test("a resolved row with no verdict, or an unknown one, is silent and red", () => {
     silent(run("row", { ROW: "1", TARGET: "o/r" }));
-    silent(run("row", { ROW: "1", TARGET: "o/r" }, "exploded"));
+    silent(run("row", { ROW: "1", TARGET: "o/r" }, { verdict: "exploded" }));
   });
 
   test("an unknown mode or a bad row index is silent and red", () => {

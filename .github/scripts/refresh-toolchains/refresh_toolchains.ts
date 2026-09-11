@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 // Weekly refresher for the toolchain version pins: fetch each pinned
 // toolchain's latest upstream version (bun's latest GitHub release, Node's
-// newest LTS line, Deno's latest stable release), rewrite the manifests'
-// pin version lines and files.yml's pin entries in place (line-targeted,
-// so comments and layout survive), and regenerate the derived outputs (the
-// pinned dotfiles under templates/ and files/, the validator/docs regions,
-// the dogfood copies). The workflow around it commits and opens the PR,
-// mirroring refresh-gitignore.
+// newest LTS line, Deno's latest stable release), rewrite files.yml's pin
+// entries in place (line-targeted, so comments and layout survive), and
+// regenerate the pinned dotfiles from them. The workflow around it commits
+// and opens the PR, mirroring refresh-gitignore.
 //
 // Emits to GITHUB_OUTPUT: `bumps=<prose list>` (empty when everything is
 // already current), e.g. "bun to 1.3.15 and deno to 2.9.6", and
@@ -21,7 +19,7 @@
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
+import { toolchainPins } from "../../../scripts/generate/toolchain_pins.ts";
 import { must } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -71,8 +69,8 @@ export function latestDenoVersion(payload: unknown): string {
   return versionFrom(tag, /^v(\d+\.\d+\.\d+)$/, "denoland/deno latest release tag");
 }
 
-/** Upstream source per pinned module. A pinned manifest without an entry
- *  here (or a stale entry without a pinned manifest) fails the run. */
+/** Upstream source per pinned module. A files.yml pin without an entry
+ *  here (or a stale entry without a pin) fails the run. */
 export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown) => string }> = {
   bun: {
     url: "https://api.github.com/repos/oven-sh/bun/releases/latest",
@@ -84,33 +82,6 @@ export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown
     parse: latestDenoVersion,
   },
 };
-
-/** Rewrite the manifest's `version:` line inside its `pin:` block, leaving
- *  every other byte (comments, layout, key order) untouched. The line must
- *  be exactly `version: X.Y.Z` - a quoted value or a trailing comment
- *  fails loudly rather than being skipped or half-rewritten. */
-export function bumpPinVersion(text: string, version: string, where: string): string {
-  const lines = text.split("\n");
-  const pinAt = lines.findIndex((line) => /^\s*pin:\s*$/.test(line));
-  if (pinAt === -1) throw new Error(`${where}: no pin block found`);
-  const pinIndent = lines[pinAt].length - lines[pinAt].trimStart().length;
-  for (let i = pinAt + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const indent = line.length - line.trimStart().length;
-    if (line.trim() !== "" && indent <= pinIndent) break;
-    if (!line.trim().startsWith("version:")) continue;
-    const match = /^(\s*version: )\d+\.\d+\.\d+$/.exec(line);
-    if (!match) {
-      throw new Error(
-        `${where}: the pin version line must be exactly 'version: X.Y.Z' ` +
-          `(no quotes, no trailing comment), got '${line.trim()}'`,
-      );
-    }
-    lines[i] = `${match[1]}${version}`;
-    return lines.join("\n");
-  }
-  throw new Error(`${where}: pin block has no version line`);
-}
 
 /** Rewrite files.yml's `pin: {file: X, version: Y}` line under
  *  `modules.<module>`, leaving every other byte untouched. The line must be
@@ -211,28 +182,29 @@ export async function fetchJson(url: string): Promise<unknown> {
 }
 
 async function main(): Promise<number> {
-  const pinned = loadManifests().flatMap((m) =>
-    m.toolchain?.pin ? [{ module: m.module, pin: m.toolchain.pin }] : [],
-  );
+  const filesPath = join(REPO_ROOT, "files.yml");
+  let filesText = readFileSync(filesPath, "utf-8");
+  const pinned = toolchainPins(filesText).map(({ module, file, version }) => ({
+    module,
+    pin: { file, version },
+  }));
   for (const { module } of pinned) {
     if (!(module in PIN_SOURCES)) {
       throw new Error(
-        `templates/${module}/module.yml declares a toolchain pin but ` +
-          "refresh_toolchains.ts has no upstream source for it - add a " +
-          "PIN_SOURCES entry",
+        `files.yml modules.${module} declares a pin but refresh_toolchains.ts has no ` +
+          "upstream source for it - add a PIN_SOURCES entry",
       );
     }
   }
   for (const module of Object.keys(PIN_SOURCES)) {
     if (!pinned.some((p) => p.module === module)) {
       throw new Error(
-        `PIN_SOURCES names '${module}', which declares no toolchain pin - ` +
-          "remove the stale entry",
+        `PIN_SOURCES names '${module}', which declares no pin in files.yml - remove the stale entry`,
       );
     }
   }
 
-  // Fetch and parse EVERY source before touching any manifest, so a bad
+  // Fetch and parse EVERY source before touching files.yml, so a bad
   // upstream cannot abort the run mid-write. A single failing source is a
   // warning (the others still refresh); only a total blackout aborts.
   const latests: { module: string; pin: { file: string; version: string }; latest: string }[] = [];
@@ -250,10 +222,7 @@ async function main(): Promise<number> {
   }
 
   // Compute every rewrite before writing anything, for the same reason.
-  const writes: { path: string; next: string }[] = [];
   const bumps: Bump[] = [];
-  const filesPath = join(REPO_ROOT, "files.yml");
-  let filesText = readFileSync(filesPath, "utf-8");
   for (const { module, pin, latest } of latests) {
     const decision = decideBump(pin.version, latest);
     if (decision === "current") {
@@ -267,22 +236,13 @@ async function main(): Promise<number> {
       );
       continue;
     }
-    const manifestPath = join(REPO_ROOT, "templates", module, "module.yml");
-    const where = `templates/${module}/module.yml`;
-    writes.push({
-      path: manifestPath,
-      next: bumpPinVersion(readFileSync(manifestPath, "utf-8"), latest, where),
-    });
     filesText = bumpFilesPin(filesText, module, latest, "files.yml");
     console.log(`${module}: ${pin.version} -> ${latest}`);
     bumps.push({ module, from: pin.version, version: latest });
   }
-  if (bumps.length > 0) writes.push({ path: filesPath, next: filesText });
-  for (const { path, next } of writes) writeFileSync(path, next);
-
   if (bumps.length > 0) {
-    must(["bun", "run", "generate"], { cwd: REPO_ROOT });
-    must(["bun", "run", "dogfood"], { cwd: REPO_ROOT });
+    writeFileSync(filesPath, filesText);
+    must(["bun", "run", "pins"], { cwd: REPO_ROOT });
   } else {
     console.log("all toolchain pins are current; nothing to regenerate");
   }

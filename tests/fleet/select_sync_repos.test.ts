@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
-import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
+import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
+import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -14,15 +15,15 @@ const temp = tempDirs();
 // skip notice, revoked push access (a public repo stays discovered and
 // prints one notice per plan whose scope selects it; a private one
 // vanishes from GET /user/repos, so the stubs admit hidden-gone only in
-// the control run), and PRIVATE repos whose every public surface (log,
-// matrix, roster) carries the hint. The matrix rows are the job's output
-// contract: a private row holds {repo: <hint>, private: true, verify}.
+// the control run), the operator repository (discovered, never a row),
+// and PRIVATE repos, which the public log never names: their skips are
+// counted, and the rows file alone carries their slugs.
 //
 // Two personas join only the modules-filter runs (they would select in
 // every other run and shift each exact row list): badlist (public, its
 // modules list unreadable: a filter cannot judge it, so it is reported by
-// slug and left out) and hidden-nomods (PRIVATE, the same defect, reported
-// by hint). Declared selections: steady [uv, pages], hidden-server [pages,
+// slug and left out) and hidden-nomods (PRIVATE, the same defect, counted).
+// Declared selections: steady [uv, pages], hidden-server [pages,
 // release-please], every other adopted persona [uv].
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
@@ -36,6 +37,7 @@ describe("select_sync_repos.ts", () => {
     { repo: "Vivswan/hidden-server", private: true },
     { repo: "Vivswan/hidden-locked", private: true },
     { repo: "Vivswan/locked", private: false },
+    { repo: "Vivswan/repo-platform", private: false },
   ];
   const HIDDEN_GONE = { repo: "Vivswan/hidden-gone", private: true };
   const HIDDEN_NOMODS = { repo: "Vivswan/hidden-nomods", private: true };
@@ -52,7 +54,7 @@ describe("select_sync_repos.ts", () => {
         '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
         "    ;;",
-        // A redacted repo whose adoption check fails hard, with the slug
+        // A private repo whose adoption check fails hard, with the slug
         // and bare name woven through the error text (a URL, a sentence,
         // a repeat, a case variant): the selector must scrub them all. The
         // partial body left on stdout (as a timed-out raw read leaves it)
@@ -100,6 +102,7 @@ describe("select_sync_repos.ts", () => {
     stdout: string;
     stderr: string;
     output: string;
+    rows: { repo: string; private: boolean }[] | null;
   }
 
   // Same spawn-heavy harness and bounds as select_settings_repos.test.ts
@@ -128,10 +131,9 @@ describe("select_sync_repos.ts", () => {
         PATH: `${bin}:${process.env.PATH}`,
         PAT: "stub-token",
         GH_TOKEN: "stub-token",
-        GITHUB_RUN_ID: "8675309",
         OWNER: "Vivswan",
+        GITHUB_REPOSITORY: "Vivswan/repo-platform",
         ONLY_REPO: "",
-        RECOVER: "",
         // Neutralize the real event payload CI runs carry; the dispatch
         // tests set their own.
         GITHUB_EVENT_PATH: "",
@@ -152,11 +154,13 @@ describe("select_sync_repos.ts", () => {
           `${proc.stdout.toString()}${proc.stderr.toString()}`,
       );
     }
+    const rowsFile = join(work, "temp", ROWS_FILE);
     return {
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString(),
       stderr: proc.stderr.toString(),
       output: readFileSync(outputFile, "utf-8"),
+      rows: existsSync(rowsFile) ? JSON.parse(readFileSync(rowsFile, "utf-8")) : null,
     };
   }
 
@@ -165,26 +169,22 @@ describe("select_sync_repos.ts", () => {
     main = run("main");
   }, TEST_TIMEOUT_MS);
 
-  function reposOf(result: Run): Record<string, unknown>[] {
-    const line = result.output.split("\n").find((l) => l.startsWith("repos="));
-    if (line === undefined) throw new Error(`no repos= line in: ${result.output}`);
-    return JSON.parse(line.slice("repos=".length));
-  }
+  const HIDDEN_SERVER_ROW = { repo: "Vivswan/hidden-server", private: true };
+  const STEADY_ROW = { repo: "Vivswan/steady", private: false };
 
   test("selects adopted repos and exits 0", () => {
     expect(main.stderr).not.toContain("::error::");
     expect(main.exitCode).toBe(0);
   });
 
-  test("matrix rows carry the private flag; private rows carry the hint", () => {
-    expect(reposOf(main)).toEqual([
-      {
-        repo: "h**-s**r",
-        private: true,
-        verify: expect.stringMatching(/^[0-9a-f]{32}$/),
-      },
-      { repo: "Vivswan/steady", private: false, verify: "" },
-    ]);
+  test("the rows file carries the real slugs, sorted, with the visibility; the output carries the count alone", () => {
+    expect(main.rows).toEqual([HIDDEN_SERVER_ROW, STEADY_ROW]);
+    expect(main.output).toBe("count=2\n");
+  });
+
+  test("the operator repository is discovered but never a row", () => {
+    expect(main.rows?.map((row) => row.repo)).not.toContain("Vivswan/repo-platform");
+    expect(main.stdout).not.toContain("Vivswan/repo-platform");
   });
 
   test("no private slug reaches stdout, stderr, or the job output", () => {
@@ -194,8 +194,8 @@ describe("select_sync_repos.ts", () => {
     }
   });
 
-  test("skip notices print hints for private repos and slugs for public ones", () => {
-    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("h**-l**d")}`);
+  test("skip notices name public repos by slug and count private ones", () => {
+    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("a private repository")}`);
     expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("Vivswan/locked")}`);
     expect(main.stdout).toContain("::notice::Vivswan/unadopted: skipped - no .repo-platform.yml");
   });
@@ -211,17 +211,19 @@ describe("select_sync_repos.ts", () => {
         HIDDEN_GONE,
       ]);
       expect(control.exitCode).toBe(0);
-      expect(reposOf(control).map((row) => row.repo)).toEqual(["h**-g**", "h**-s**r"]);
+      expect(control.rows?.map((row) => row.repo)).toEqual([
+        "Vivswan/hidden-gone",
+        "Vivswan/hidden-server",
+      ]);
       for (const channel of [main.stdout, main.stderr, main.output]) {
         expect(channel).not.toContain("hidden-gone");
-        expect(channel).not.toContain("h**-g**");
       }
     },
     TEST_TIMEOUT_MS,
   );
 
-  test("the roster line lists hints, not slugs", () => {
-    expect(main.stdout).toContain("syncing: h**-s**r, Vivswan/steady");
+  test("the roster line names public repos and counts private ones", () => {
+    expect(main.stdout).toContain("syncing: Vivswan/steady and 1 private repository");
   });
 
   test(
@@ -236,7 +238,8 @@ describe("select_sync_repos.ts", () => {
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-server");
       }
-      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
+      expect(r.rows).toEqual([HIDDEN_SERVER_ROW]);
+      expect(r.stdout).toContain("syncing: 1 private repository\n");
     },
     TEST_TIMEOUT_MS,
   );
@@ -252,65 +255,17 @@ describe("select_sync_repos.ts", () => {
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-servr");
       }
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "recover=recopy with an empty repo input is rejected before selection",
-    () => {
-      // The real fat-finger shape: a dispatch payload whose repo input was
-      // left blank, not the harness's empty GITHUB_EVENT_PATH short-circuit.
-      const eventFile = join(root, "recover-unscoped-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "recopy" } }));
-      const r = run("recover-unscoped", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain(
-        "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name>",
-      );
-      expect(r.output).not.toContain("repos=");
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "recover=none (the dispatch default) with an empty repo selects normally",
-    () => {
-      const eventFile = join(root, "recover-none-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "none" } }));
-      const r = run("recover-none", { GITHUB_EVENT_PATH: eventFile, RECOVER: "none" });
-      expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "repo=all with recover=recopy fans out to the whole selected fleet",
-    () => {
-      // The real dispatch shape: repo arrives via the event payload,
-      // recover via the RECOVER step env.
-      const eventFile = join(root, "recover-all-event.json");
-      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "all", recover: "recopy" } }));
-      const r = run("recover-all", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-      expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+      expect(r.rows).toBeNull();
     },
     TEST_TIMEOUT_MS,
   );
 
   // The called path (post-green's sync-fleet leg): the scope is public text
   // off the judged main commit, so a private repo rides only under the
-  // token. Whole outcome per row: every log line, the matrix, exit code.
-  const HIDDEN_SERVER_ROW = {
-    repo: "h**-s**r",
-    private: true,
-    verify: expect.stringMatching(/^[0-9a-f]{32}$/),
-  };
-  const STEADY_ROW = { repo: "Vivswan/steady", private: false, verify: "" };
+  // token. Whole outcome per row: every log line, the rows, exit code.
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
-  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d")}`;
+  const LOCKED = `::notice::${pushProbeSkipNotice("a private repository")}`;
   const LOCKED_PUBLIC = `::notice::${pushProbeSkipNotice("Vivswan/locked")}`;
   const NO_FLEET_REPO = (missing: number, total: number) =>
     `::error::${missing} of ${total} scoped repos matched no fleet repository (values withheld - ` +
@@ -321,43 +276,43 @@ describe("select_sync_repos.ts", () => {
     reason: string;
     scope: string;
     discoveredList: typeof discovered;
-    repos: ReturnType<typeof reposOf>;
+    rows: Run["rows"];
     stdout: string;
   }>([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
       scope: "Vivswan/steady,Vivswan/unadopted",
       discoveredList: discovered,
-      repos: [STEADY_ROW],
+      rows: [STEADY_ROW],
       stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
       reason: "public selects the public repos (the revoked public one drops with its notice)",
       scope: "public",
       discoveredList: discovered,
-      repos: [STEADY_ROW],
+      rows: [STEADY_ROW],
       stdout: lines(LOCKED_PUBLIC, UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
-      reason: "private selects the private repos, by hint (the locked one drops on its probe)",
+      reason: "private selects the private repos, counted (the locked one drops on its probe)",
       scope: "private",
       discoveredList: discovered,
-      repos: [HIDDEN_SERVER_ROW],
-      stdout: lines(LOCKED, "syncing: h**-s**r"),
+      rows: [HIDDEN_SERVER_ROW],
+      stdout: lines(LOCKED, "syncing: 1 private repository"),
     },
     {
       reason: "a token unions with a slug",
       scope: "private, Vivswan/steady",
       discoveredList: discovered,
-      repos: [HIDDEN_SERVER_ROW, STEADY_ROW],
-      stdout: lines(LOCKED, "syncing: h**-s**r, Vivswan/steady"),
+      rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      stdout: lines(LOCKED, "syncing: Vivswan/steady and 1 private repository"),
     },
     {
       reason:
         "a repo discovery did not list is not in the fleet: public simply never sees it, no warning",
       scope: "public",
       discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
-      repos: [],
+      rows: [],
       stdout: lines(
         LOCKED_PUBLIC,
         UNADOPTED,
@@ -366,20 +321,19 @@ describe("select_sync_repos.ts", () => {
     },
   ])(
     "called with $scope: $reason",
-    ({ scope, discoveredList, repos, stdout }) => {
+    ({ scope, discoveredList, rows, stdout }) => {
       const r = run(
         `called-${Bun.hash(scope + discoveredList.length).toString(16)}`,
         { ONLY_REPO: scope, TARGET_SHA: SHA },
         discoveredList,
       );
-      expect({ ...r, output: r.output.split("\n")[0].slice(0, "repos=".length) }).toEqual({
+      expect(r).toEqual({
         exitCode: 0,
         stdout,
         stderr: "",
-        output: "repos=",
+        output: `count=${rows?.length ?? 0}\n`,
+        rows,
       });
-      expect(r.output.split("\n")).toHaveLength(2);
-      expect(reposOf(r)).toEqual(repos);
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-server");
       }
@@ -424,7 +378,7 @@ describe("select_sync_repos.ts", () => {
         { ONLY_REPO: scope, TARGET_SHA: SHA },
         discoveredList,
       );
-      expect(r).toEqual({ exitCode: 1, stdout, stderr: "", output: "" });
+      expect(r).toEqual({ exitCode: 1, stdout, stderr: "", output: "", rows: null });
       if (withheld !== null) {
         for (const channel of [r.stdout, r.stderr, r.output]) {
           expect(channel).not.toContain(withheld);
@@ -436,10 +390,10 @@ describe("select_sync_repos.ts", () => {
 
   // The modules: filters, dispatched (the typed input arrives via the event
   // payload). Whole outcome per case: every log line in row order, the
-  // matrix, and the exit code; a filter judges each adopted candidate's
+  // rows, and the exit code; a filter judges each adopted candidate's
   // declared list, reports (never skips) one it cannot read, counts the
   // ones it leaves out, and admits a slug as typed.
-  const BADLIST_ROW = { repo: "Vivswan/badlist", private: false, verify: "" };
+  const BADLIST_ROW = { repo: "Vivswan/badlist", private: false };
   const UNREADABLE = (display: string) =>
     `::warning::${display}: its .repo-platform.yml has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`;
   const LEFT_OUT = (count: number) =>
@@ -448,42 +402,42 @@ describe("select_sync_repos.ts", () => {
   test.each<{
     reason: string;
     repo: string;
-    repos: ReturnType<typeof reposOf>;
+    rows: Run["rows"];
     stdout: string;
   }>([
     {
       reason:
-        "one module selects every visibility that selects it; the two unreadable lists are reported, by hint for the private one (case folds)",
+        "one module selects every visibility that selects it; the two unreadable lists are reported, the private one counted (case folds)",
       repo: "Modules: Pages",
-      repos: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
         LOCKED,
-        UNREADABLE("h**-n**s"),
+        UNREADABLE("a private repository"),
         LOCKED_PUBLIC,
         UNADOPTED,
         LEFT_OUT(0),
-        "syncing: h**-s**r, Vivswan/steady",
+        "syncing: Vivswan/steady and 1 private repository",
       ),
     },
     {
       reason: "AND: every named module must be selected",
       repo: "modules:pages+release-please",
-      repos: [HIDDEN_SERVER_ROW],
+      rows: [HIDDEN_SERVER_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
         LOCKED,
-        UNREADABLE("h**-n**s"),
+        UNREADABLE("a private repository"),
         LOCKED_PUBLIC,
         UNADOPTED,
         LEFT_OUT(1),
-        "syncing: h**-s**r",
+        "syncing: 1 private repository",
       ),
     },
     {
       reason: "a visibility token intersects: only public candidates are probed and judged",
       repo: "public,modules:pages",
-      repos: [STEADY_ROW],
+      rows: [STEADY_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
         LOCKED_PUBLIC,
@@ -495,10 +449,10 @@ describe("select_sync_repos.ts", () => {
     {
       reason: "a filter no private candidate passes selects nothing, green",
       repo: "private,modules:uv",
-      repos: [],
+      rows: [],
       stdout: lines(
         LOCKED,
-        UNREADABLE("h**-n**s"),
+        UNREADABLE("a private repository"),
         LEFT_OUT(1),
         "::notice::no adopted repos selected; nothing to sync.",
       ),
@@ -506,45 +460,44 @@ describe("select_sync_repos.ts", () => {
     {
       reason: "a slug unions in as typed: its unreadable list is not judged",
       repo: "Vivswan/badlist,modules:release-please",
-      repos: [BADLIST_ROW, HIDDEN_SERVER_ROW],
+      rows: [BADLIST_ROW, HIDDEN_SERVER_ROW],
       stdout: lines(
         LOCKED,
-        UNREADABLE("h**-n**s"),
+        UNREADABLE("a private repository"),
         LOCKED_PUBLIC,
         UNADOPTED,
         LEFT_OUT(1),
-        "syncing: Vivswan/badlist, h**-s**r",
+        "syncing: Vivswan/badlist and 1 private repository",
       ),
     },
     {
       reason: "two filters union: a repo passing either selects",
       repo: "modules:uv,modules:release-please",
-      repos: [HIDDEN_SERVER_ROW, STEADY_ROW],
+      rows: [HIDDEN_SERVER_ROW, STEADY_ROW],
       stdout: lines(
         UNREADABLE("Vivswan/badlist"),
         LOCKED,
-        UNREADABLE("h**-n**s"),
+        UNREADABLE("a private repository"),
         LOCKED_PUBLIC,
         UNADOPTED,
         LEFT_OUT(0),
-        "syncing: h**-s**r, Vivswan/steady",
+        "syncing: Vivswan/steady and 1 private repository",
       ),
     },
   ])(
     "dispatched with $repo: $reason",
-    ({ repo, repos, stdout }) => {
+    ({ repo, rows, stdout }) => {
       const name = `filter-${Bun.hash(repo).toString(16)}`;
       const eventFile = join(root, `${name}-event.json`);
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo } }));
       const r = run(name, { GITHUB_EVENT_PATH: eventFile }, FILTER_FLEET);
-      expect({ ...r, output: r.output.split("\n")[0].slice(0, "repos=".length) }).toEqual({
+      expect(r).toEqual({
         exitCode: 0,
         stdout,
         stderr: "",
-        output: "repos=",
+        output: `count=${rows?.length ?? 0}\n`,
+        rows,
       });
-      expect(r.output.split("\n")).toHaveLength(2);
-      expect(reposOf(r)).toEqual(repos);
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-server");
         expect(channel).not.toContain("hidden-nomods");
@@ -554,55 +507,38 @@ describe("select_sync_repos.ts", () => {
   );
 
   test(
-    "a filter naming no module of the template fails before any probe, naming the roster",
+    "a filter naming no module files.yml knows fails before any probe, naming the roster",
     () => {
       const eventFile = join(root, "filter-unknown-event.json");
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "public,modules:pagez" } }));
       const r = run("filter-unknown", { GITHUB_EVENT_PATH: eventFile }, FILTER_FLEET);
       expect(r).toEqual({
         exitCode: 1,
-        stdout: `::error::1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}\n`,
+        stdout: `::error::1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}\n`,
         stderr: "",
         output: "",
+        rows: null,
       });
     },
     TEST_TIMEOUT_MS,
   );
 
   test(
-    "repo=all without recover selects the same fleet as an empty repo",
+    "repo=all selects the same fleet as an empty repo",
     () => {
       const r = run("all-plain", { ONLY_REPO: "all" });
       expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+      expect(r.rows).toEqual(main.rows);
     },
     TEST_TIMEOUT_MS,
   );
 
   test(
-    "a single-repo recovery keeps its scope and never prints the slug",
-    () => {
-      const eventFile = join(root, "recover-single-event.json");
-      writeFileSync(
-        eventFile,
-        JSON.stringify({ inputs: { repo: "Vivswan/hidden-server", recover: "recopy" } }),
-      );
-      const r = run("recover-single", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-      expect(r.exitCode).toBe(0);
-      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
-      for (const channel of [r.stdout, r.stderr, r.output]) {
-        expect(channel).not.toContain("hidden-server");
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "a redacted repo's hard adoption failure prints only the hint, wherever the slug hid",
+    "a private repo's hard adoption failure names no slug, wherever the slug hid",
     () => {
       // The stub's error text carries the slug in a URL, the bare name, and
       // an uppercase variant; the failure must surface (exit 1) with every
-      // spelling scrubbed to the hint.
+      // spelling scrubbed.
       const eventFile = join(root, "hidden-blocked-event.json");
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-blocked" } }));
       const r = run("hidden-blocked", { GITHUB_EVENT_PATH: eventFile }, [
@@ -610,8 +546,8 @@ describe("select_sync_repos.ts", () => {
         { repo: "Vivswan/hidden-blocked", private: true },
       ]);
       expect(r.exitCode).not.toBe(0);
-      expect(r.stdout).toContain("adoption check failed for h**-b**d");
-      expect(r.stdout).toContain("https://api.github.com/repos/h**-b**d failed");
+      expect(r.stdout).toContain("adoption check failed for a private repository");
+      expect(r.stdout).toContain("https://api.github.com/repos/a private repository failed");
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel.toLowerCase()).not.toContain("hidden-blocked");
         expect(channel.toLowerCase()).not.toContain("hidden-billing");

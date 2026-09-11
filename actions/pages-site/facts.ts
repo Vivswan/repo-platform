@@ -6,10 +6,10 @@
 // throws, because a broken checkout is a build fault, not a missing fact.
 //
 // Identity (description, homepage, topics) comes from .github/settings.yml's
-// repository block first: the copier answers only seed that file, and the
-// repository edits its identity there afterwards (the file is repo-owned
-// after its first render). The answers files fill in only the keys the
-// settings file lacks, or everything when it is absent or malformed.
+// repository block: the repository edits its identity there (the file is
+// repo-owned once written). A description the settings file lacks falls
+// back to the registration's project.description, so a tag from before the
+// settings file existed still shows one.
 
 export interface ProjectFacts {
   /** owner/name */
@@ -48,10 +48,7 @@ export type FactsReader = (path: string) => string | null;
 
 const SETTINGS_FILE = ".github/settings.yml";
 
-/** The copier answers file a managed repository carries, then
- *  repo-platform's own equivalent (the operator renders no copier
- *  answers of its own). */
-const ANSWERS_FILES = [".github/.copier-answers.yml", ".repo-platform-answers.yml"];
+const REGISTRATION_FILE = ".repo-platform.yml";
 
 const LICENSE_FILE = "LICENSE.md";
 const LICENSE_HEAD_LINES = 20;
@@ -129,7 +126,7 @@ function looksLikeHost(text: string): boolean {
   return authority !== null && (authority[1].includes(".") || authority[2] !== undefined);
 }
 
-/** The homepage answer has no URL validator: a bare host gets https://,
+/** The homepage value has no URL validator: a bare host gets https://,
  *  anything that is neither a URL nor a host reads as no homepage. */
 function homepageUrl(value: unknown): string | null {
   const text = nonEmptyString(value);
@@ -138,8 +135,8 @@ function homepageUrl(value: unknown): string | null {
   return looksLikeHost(text) ? httpUrl(`https://${text}`) : null;
 }
 
-/** Copier stores the topics answer as one comma-separated string; the
- *  settings file also accepts a YAML list, like the settings apply does. */
+/** Topics as one comma-separated string or a YAML list, the two shapes
+ *  the settings apply accepts. */
 function splitTopics(value: unknown): string[] {
   const entries = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
   return entries
@@ -171,27 +168,26 @@ function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null
   return settings === null ? null : asRecord(settings.repository);
 }
 
-function readAnswers(read: FactsReader): Record<string, unknown> {
-  for (const path of ANSWERS_FILES) {
-    const text = read(path);
-    if (text === null) continue;
-    const answers = parseYamlRecord(text);
-    if (answers !== null) return answers;
-  }
-  return {};
+/** The registration's project.description, or undefined when the file is
+ *  absent, malformed, or carries no project block. */
+function readRegistrationDescription(read: FactsReader): unknown {
+  const text = read(REGISTRATION_FILE);
+  if (text === null) return undefined;
+  const registration = parseYamlRecord(text);
+  return registration === null ? undefined : asRecord(registration.project)?.description;
 }
 
-/** Each key from the settings block when it declares the key at all (an
- *  empty value there means empty, not "ask the answers"), else from the
- *  answers. */
+/** Each key from the settings block; the description falls back to the
+ *  registration only when the block does not declare the key at all (an
+ *  empty value there means empty). */
 function readIdentity(read: FactsReader): Identity {
   const settings = readSettingsIdentity(read) ?? {};
-  const answers = readAnswers(read);
-  const pick = (key: string) => (key in settings ? settings[key] : answers[key]);
   return {
-    description: nonEmptyString(pick("description")),
-    homepage: homepageUrl(pick("homepage")),
-    topics: splitTopics(pick("topics")),
+    description: nonEmptyString(
+      "description" in settings ? settings.description : readRegistrationDescription(read),
+    ),
+    homepage: homepageUrl(settings.homepage),
+    topics: splitTopics(settings.topics),
   };
 }
 

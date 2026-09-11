@@ -3,7 +3,6 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  branchScopeRefusal,
   classifyEntry,
   modulesAdmit,
   modulesFilterFor,
@@ -14,14 +13,14 @@ import {
   scopeRefusal,
   scopeSelects,
 } from "../../.github/scripts/fleet/sync_scope.ts";
-import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
+import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 
 const CALL: ScopeSource = { kind: "call", sha: "8096c4920f84ec4122d14c5bd884703dd0d382ba" };
 const DISPATCH: ScopeSource = { kind: "dispatch" };
 
 // The real roster: the filter tests name real modules so a renamed module
 // fails here, not in a fleet run.
-const ROSTER = new Set(MODULE_ORDER);
+const ROSTER = new Set(moduleRoster());
 
 const ALL: Scope = { kind: "all" };
 const list = (
@@ -123,14 +122,14 @@ describe("parseScope", () => {
       raw: "modules:pagez",
       expected: {
         kind: "error",
-        message: `1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
+        message: `1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
       },
     },
     {
       raw: "modules:pages+Vivswan/secret, modules:o/hidden",
       expected: {
         kind: "error",
-        message: `2 of 3 module names in the modules: filters are not modules of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
+        message: `2 of 3 module names in the modules: filters are not modules files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
       },
     },
   ])("$raw", ({ raw, expected }) => {
@@ -141,7 +140,7 @@ describe("parseScope", () => {
     expect(parseScope("modules:pages", new Set(["uv", "rust"]))).toEqual({
       kind: "error",
       message:
-        "1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: uv, rust",
+        "1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: uv, rust",
     });
   });
 });
@@ -350,85 +349,5 @@ describe("scopeRefusal", () => {
     },
   ])("$reason", ({ scope, source, expected }) => {
     expect(scopeRefusal(scope, known, source, "o")).toBe(expected);
-  });
-});
-
-describe("branchScopeRefusal", () => {
-  const ONE_SLUG =
-    "branch needs repo to name exactly one owner/name: the sync renders onto that repository's branch instead of opening its own PR, so a list, a visibility or modules: token, all, or an empty repo cannot carry it";
-  const RECOVERY =
-    "branch cannot combine with recover=recopy: a recovery re-render is delivered through a manual-review PR, and the branch mode pushes onto an existing branch instead";
-  test.each<{
-    reason: string;
-    scope: Scope;
-    branch: string;
-    recover: string;
-    expected: string | null;
-  }>([
-    {
-      reason: "no branch: nothing to judge, whatever the scope",
-      scope: ALL,
-      branch: "",
-      recover: "recopy",
-      expected: null,
-    },
-    {
-      reason: "one slug carries a branch",
-      scope: list([], ["o/a"]),
-      branch: "feat",
-      recover: "",
-      expected: null,
-    },
-    {
-      reason: "one slug with the recovery default 'none' still carries it",
-      scope: list([], ["o/a"]),
-      branch: "feat",
-      recover: "none",
-      expected: null,
-    },
-    {
-      reason: "the whole fleet cannot",
-      scope: ALL,
-      branch: "feat",
-      recover: "",
-      expected: ONE_SLUG,
-    },
-    {
-      reason: "a visibility token cannot",
-      scope: list(["public"], []),
-      branch: "feat",
-      recover: "",
-      expected: ONE_SLUG,
-    },
-    {
-      reason: "a token beside the slug cannot",
-      scope: list(["private"], ["o/a"]),
-      branch: "feat",
-      recover: "",
-      expected: ONE_SLUG,
-    },
-    {
-      reason: "two slugs cannot",
-      scope: list([], ["o/a", "o/b"]),
-      branch: "feat",
-      recover: "",
-      expected: ONE_SLUG,
-    },
-    {
-      reason: "a modules: filter beside the one slug cannot (it names a set of repositories)",
-      scope: list([], ["o/a"], [["uv"]]),
-      branch: "feat",
-      recover: "",
-      expected: ONE_SLUG,
-    },
-    {
-      reason: "a recovery re-render cannot land on a branch",
-      scope: list([], ["o/a"]),
-      branch: "feat",
-      recover: "recopy",
-      expected: RECOVERY,
-    },
-  ])("$reason", ({ scope, branch, recover, expected }) => {
-    expect(branchScopeRefusal(scope, branch, recover)).toBe(expected);
   });
 });

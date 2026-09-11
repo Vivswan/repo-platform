@@ -20,9 +20,3 @@ export const BUILD_IDENTITY: GitIdentity = {
   name: "repo-platform-build",
   email: "repo-platform-build@users.noreply.github.com",
 };
-
-/** Per-invocation `-c` config arguments, for git commands that must not
- * write the identity into the repository's config. */
-export function identityArgs(identity: GitIdentity): string[] {
-  return ["-c", `user.name=${identity.name}`, "-c", `user.email=${identity.email}`];
-}

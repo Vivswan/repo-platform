@@ -6,27 +6,19 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { verifyTag } from "../../.github/scripts/fleet/redact.ts";
 import { maskForms, resolveRow } from "../../.github/scripts/sync/resolve_row.ts";
+import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/resolve_row.ts");
-const PAT = "resolver-test-pat";
-const RUN_ID = "31337";
 const PUBLIC = "Vivswan/pub-repo";
 const HIDDEN = "Vivswan/Hidden-Server";
-const HIDDEN_TWIN = "Vivswan/hidden-twin";
 
-const discovered = [
+const rows = [
   { repo: PUBLIC, private: false },
   { repo: HIDDEN, private: true },
-  { repo: HIDDEN_TWIN, private: true },
-];
-const rows = [
-  { repo: PUBLIC, private: false, verify: "" },
-  { repo: "H**-S**r", private: true, verify: verifyTag(PAT, RUN_ID, HIDDEN) },
 ];
 
 interface Run {
@@ -37,11 +29,11 @@ interface Run {
   outputs: string;
 }
 
-function run(env: Record<string, string>, list = discovered): Run {
+function run(env: Record<string, string>, list: unknown = rows): Run {
   const root = temp.dir("resolve-row-");
   const runnerTemp = join(root, "temp");
   mkdirSync(runnerTemp);
-  writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(list));
+  writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(list));
   const envFile = join(root, "env.txt");
   const outputFile = join(root, "output.txt");
   writeFileSync(envFile, "");
@@ -53,9 +45,6 @@ function run(env: Record<string, string>, list = discovered): Run {
       RUNNER_TEMP: runnerTemp,
       GITHUB_ENV: envFile,
       GITHUB_OUTPUT: outputFile,
-      GITHUB_RUN_ID: RUN_ID,
-      PAT,
-      ROWS: JSON.stringify(rows),
       PLANNED: String(rows.length),
       ...env,
     },
@@ -87,7 +76,7 @@ describe("resolve_row.ts", () => {
     expect(result.outputs).toBe("");
   });
 
-  test("a private row resolves through its tag to the discovered repository", () => {
+  test("a private row resolves the same way, its visibility riding GITHUB_ENV", () => {
     const result = run({ ROW: "1" });
     expect(result.exitCode).toBe(0);
     const masked = maskedValues(result.stdout);
@@ -114,8 +103,9 @@ describe("resolve_row.ts", () => {
     const result = run(env);
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain("re-run the workflow");
     expect(result.stdout).not.toContain(MASK);
-    for (const name of ["pub-repo", "Hidden-Server", "hidden-twin"]) {
+    for (const name of ["pub-repo", "Hidden-Server"]) {
       expect(result.stdout).not.toContain(name);
       expect(result.stderr).not.toContain(name);
     }
@@ -123,10 +113,11 @@ describe("resolve_row.ts", () => {
     expect(result.outputs).toBe("");
   });
 
-  test("a tag matching no discovered repository (a rename or a rotated PAT) is refused", () => {
-    const result = run({ ROW: "1" }, [discovered[0]]);
+  test("a rows file off the selector's shape is refused, naming no value", () => {
+    const result = run({ ROW: "0" }, [{ repo: HIDDEN }]);
     expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).toContain("matched 0 discovered repositories");
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).not.toContain("Hidden-Server");
     expect(result.env).toBe("");
   });
 });
@@ -155,18 +146,23 @@ describe("maskForms", () => {
 });
 
 describe("resolveRow", () => {
-  const tagOf = (slug: string) => verifyTag(PAT, RUN_ID, slug);
-
-  test("a tag two discovered repositories share is refused rather than guessed", () => {
-    const twin = { repo: "h**-t**n", private: true, verify: tagOf(HIDDEN_TWIN) };
-    const doubled = [...discovered, { repo: HIDDEN_TWIN, private: true }];
-    expect(() => resolveRow([twin], 0, doubled, tagOf)).toThrow(
-      "matched 2 discovered repositories",
-    );
+  test("the row at the index, when the count matches the plan", () => {
+    expect(resolveRow(rows, 1, 2)).toEqual({ target: rows[1] });
   });
 
-  test("a public discovered repository never matches a private row's tag", () => {
-    const row = { repo: "p**-r**o", private: true, verify: tagOf(PUBLIC) };
-    expect(() => resolveRow([row], 0, discovered, tagOf)).toThrow("matched 0");
+  test("a count that moved since the plan is a refusal naming counts only", () => {
+    expect(resolveRow(rows, 0, 3)).toEqual({
+      refusal:
+        "the selection changed since the plan job ran (2 rows now, 3 planned): the fleet or a repository's registration moved mid-run",
+    });
+  });
+
+  test("an index outside the rows is a refusal", () => {
+    expect(resolveRow(rows, 2, 2)).toEqual({
+      refusal: "ROW must be an index into the plan's 2 rows",
+    });
+    expect(resolveRow(rows, Number.NaN, 2)).toEqual({
+      refusal: "ROW must be an index into the plan's 2 rows",
+    });
   });
 });

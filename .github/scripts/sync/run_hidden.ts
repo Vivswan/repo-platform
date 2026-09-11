@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Safe-output boundary for steps that process a hide-details target's
-// checkout. Tools reading that tree (copier, the template validator, the
-// retired-file cleanup) print target paths, file content, and parser
+// checkout. Tools reading that tree (the settings render, the validator)
+// print target paths, file content, and parser
 // diagnostics that a public log must not carry for a private repository -
 // and their failure paths print the most. Wrapping the command captures
 // everything and publishes only a generic outcome; the captured output

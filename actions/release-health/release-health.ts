@@ -82,9 +82,9 @@ export interface TrackingLabels {
 }
 
 /** Parse the tracking-label list: TRACKING_LABELS split on commas (labels
- *  cannot contain commas - the copier answers share LABEL_RE's shape), plus
- *  the deprecated FUZZ_LABEL folded in so a workflow rendered before the
- *  rename keeps its fuzz gate until template sync re-renders it. Deduped
+ *  cannot contain commas - the registration's labels share LABEL_RE's
+ *  shape), plus the deprecated FUZZ_LABEL folded in so a workflow written
+ *  before the rename keeps its fuzz gate until the sync rewrites it. Deduped
  *  the way GitHub deduplicates label names: case-insensitively. */
 export function parseTrackingLabels(env: NodeJS.ProcessEnv): TrackingLabels {
   const seen = new Set<string>();

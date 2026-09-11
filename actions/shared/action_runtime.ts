@@ -4,8 +4,6 @@
 // own directory on the build branch, where nothing else of the repository
 // tree exists to import from.
 
-import { closeSync, openSync } from "node:fs";
-
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
@@ -93,25 +91,6 @@ export function failureDetail(result: RunResult): string {
     .find((l) => l.trim() !== "")
     ?.trim();
   return line || `exit ${result.exit.code}`;
-}
-
-/** capture() with stdout streamed to a file instead of a string: for
- *  binary payloads (a tarball) that a string round trip would corrupt. */
-export function download(command: string[], toFile: string, options: RunOptions): RunResult {
-  const fd = openSync(toFile, "w");
-  try {
-    const proc = Bun.spawnSync(command, {
-      cwd: options.cwd,
-      env: options.env ? { ...process.env, ...options.env } : undefined,
-      stdout: fd,
-      stderr: "pipe",
-      timeout: options.timeoutMs,
-      killSignal: "SIGKILL",
-    });
-    return { exit: childExit(proc), stdout: "", stderr: proc.stderr.toString() };
-  } finally {
-    closeSync(fd);
-  }
 }
 
 /** A child whose output belongs in the job log as it happens (stdio

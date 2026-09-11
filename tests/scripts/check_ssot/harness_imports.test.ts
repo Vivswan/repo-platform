@@ -10,22 +10,22 @@ import {
 } from "../../../scripts/check/ssot/harness_imports.ts";
 import { read, walkFiles } from "../../../scripts/check/ssot/inputs.ts";
 
-const LEG = "tests/ci/upgrade_path/13_probe.test.ts";
+const LEG = "tests/ci/sync_end_to_end/13_probe.test.ts";
 const CLEAN_LEG = [
   'import { test } from "bun:test";',
   'import { join } from "node:path";',
   'import { parse } from "yaml";',
   'import { boundedSpawn } from "../../shared/bounded_spawn";',
-  'import { PENDING_RUNGS } from "./rungs";',
-  'const script = new URL("../../../.github/scripts/sync/apply_update.ts", import.meta.url);',
-  'test("x", () => join(script.pathname, parse("a: 1").a, boundedSpawn, PENDING_RUNGS));',
+  'import { FIXTURES } from "./fixtures";',
+  'const script = new URL("../../../.github/scripts/sync/writer/sync.ts", import.meta.url);',
+  'test("x", () => join(script.pathname, parse("a: 1").a, boundedSpawn, FIXTURES));',
 ].join("\n");
 
 describe("resolvedImport", () => {
   test.each([
     { specifier: "../../shared/temp_dir.ts", resolved: "tests/shared/temp_dir" },
     { specifier: "../../../.github/scripts/sync/x.ts", resolved: ".github/scripts/sync/x" },
-    { specifier: "./rungs", resolved: "tests/ci/upgrade_path/rungs" },
+    { specifier: "./fixtures", resolved: "tests/ci/sync_end_to_end/fixtures" },
     { specifier: "bun:test", resolved: null },
     { specifier: "node:fs", resolved: null },
     { specifier: "yaml", resolved: null },
@@ -40,12 +40,12 @@ describe("harnessImportMismatches", () => {
   });
 
   test("an injected import from .github/scripts is a mismatch naming the import", () => {
-    const injected = `import { applyUpdate } from "../../../.github/scripts/sync/apply_update.ts";\n${CLEAN_LEG}`;
+    const injected = `import { applyUpdate } from "../../../.github/scripts/sync/writer/sync.ts";\n${CLEAN_LEG}`;
     expect(harnessImportMismatches({ [LEG]: injected }, [])).toEqual([
       {
         file: LEG,
         expected: expect.stringContaining("through subprocesses"),
-        got: 'an import of "../../../.github/scripts/sync/apply_update.ts"',
+        got: 'an import of "../../../.github/scripts/sync/writer/sync.ts"',
       },
     ]);
   });

@@ -1,7 +1,7 @@
 ---
 # This repository's OWN settings, applied by {{github_username}}/repo-platform
 # (its central settings run: after every green main merge there and
-# nightly). Rendered once, repo-owned: template sync never rewrites it.
+# nightly). Written once, repo-owned: the sync never rewrites it.
 # Fleet defaults merge UNDER this file - keys here win, null opts out,
 # labels replace by name, rulesets MERGE by name; both must stay lists.
 # The fleet invariants (squash-only merging, the protection rulesets)

@@ -6,8 +6,8 @@ import { parse as parseYaml } from "yaml";
 import { loadOverrideLayer } from "../../../.github/scripts/fleet/merge_settings_layers.ts";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
-import { canonical, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
-import { asRecord, ciJobs, packageScripts, read, repoCi } from "./inputs.ts";
+import { canonical, escapeRegExp, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
+import { asRecord, ciJobs, packageScripts, read, readSource, repoCi } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** The check-run lookup template's leading text, backtick included: the
@@ -134,7 +134,6 @@ export function expandCheckChain(
  *  every other job gates. */
 export const ALL_GREEN_ROSTER = [
   "actionlint",
-  "actionlint-binary",
   "gitleaks",
   "dependency-review",
   "allgreen-judgment",
@@ -145,16 +144,12 @@ export const ALL_GREEN_ROSTER = [
   "commit-names",
   "typecheck",
   "action-refs",
-  "compose",
-  "validate-template",
-  "golden-renders",
+  "invariants",
+  "build-tree",
   "script-tests",
   "validate-skills",
   "skills-discovery",
-  "smoke-generate",
-  "upgrade-path",
   "pages-site-build",
-  "rehearse-fleet",
   "codeql-javascript",
   "zizmor",
   "typos",
@@ -370,6 +365,162 @@ export function allGreenGateMismatches(
   return mismatches;
 }
 
+/** The managed skeleton's gate, judged on the parsed document: `all-green`
+ *  needs exactly the two callers and judges through the published action
+ *  under `if: always()`; the `ci` caller is unconditional and `checks`
+ *  skips only on the schedule (the schedule run is the fleet callers');
+ *  `nightly` runs on the schedule alone and gates nothing; every other job
+ *  needs `all-green` (directly or through a job that does) and every job
+ *  needing it directly spells the gate clause in its condition. Pure, for
+ *  the forcing tests: a skeleton with `needs: [checks]` would let a green
+ *  checks job vouch for a red fleet run. */
+export function skeletonGateMismatches(
+  skeleton: Record<string, unknown>,
+  jobsFile: string = SKELETON,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const jobs = ciJobs(skeleton, jobsFile);
+  const at = (job: string) => `${jobsFile} job '${job}'`;
+  const needsOf = (name: string): string[] => {
+    const needs = asRecord(jobs[name] ?? {}, name).needs;
+    if (typeof needs === "string") return [needs];
+    return Array.isArray(needs) ? needs.map(String) : [];
+  };
+  const condition = (name: string): string =>
+    String(asRecord(jobs[name] ?? {}, name).if ?? "")
+      .split(/\s+/)
+      .join(" ")
+      .trim();
+  for (const name of ["checks", "ci", "nightly", "all-green"]) {
+    if (!(name in jobs)) {
+      mismatches.push({ file: at(name), expected: "the job present", got: "no such job" });
+    }
+  }
+  if (mismatches.length > 0) return mismatches;
+  const gate = asRecord(jobs["all-green"], "all-green");
+  if (canonical([...needsOf("all-green")].sort()) !== canonical(["checks", "ci"])) {
+    mismatches.push({
+      file: at("all-green"),
+      expected:
+        "needs: [checks, ci] (both callers; a dropped caller lets the other one's green vouch for a red run)",
+      got: canonical(needsOf("all-green")),
+    });
+  }
+  if (condition("all-green") !== "always()") {
+    mismatches.push({
+      file: at("all-green"),
+      expected: "exactly `if: always()` (a failed caller must FAIL the gate, not skip it)",
+      got: gate.if === undefined ? "no condition" : String(gate.if),
+    });
+  }
+  const steps = (gate.steps as Record<string, unknown>[] | undefined) ?? [];
+  const judge = steps.find((step) =>
+    /\/repo-platform\/actions\/all-green@build$/.test(String(step.uses ?? "")),
+  );
+  if (
+    steps.length !== 1 ||
+    judge === undefined ||
+    judge.if !== undefined ||
+    judge["continue-on-error"] !== undefined ||
+    String(asRecord(judge.with ?? {}, "all-green with").needs ?? "") !== "${{ toJSON(needs) }}"
+  ) {
+    mismatches.push({
+      file: at("all-green"),
+      expected:
+        "one unconditioned, unsoftened step, uses: <owner>/repo-platform/actions/all-green@build with needs: toJSON(needs)",
+      got: canonical(
+        steps.map((step) => ({
+          uses: step.uses ?? null,
+          with: step.with ?? null,
+          if: step.if ?? null,
+          "continue-on-error": step["continue-on-error"] ?? null,
+        })),
+      ),
+    });
+  }
+  const calls = (name: string, workflow: string) => {
+    const uses = String(asRecord(jobs[name] ?? {}, name).uses ?? "");
+    if (
+      !new RegExp(`/repo-platform/\\.github/workflows/${escapeRegExp(workflow)}@build$`).test(uses)
+    ) {
+      mismatches.push({
+        file: at(name),
+        expected: `uses: <owner>/repo-platform/.github/workflows/${workflow}@build`,
+        got: uses || "no uses:",
+      });
+    }
+  };
+  calls("ci", "fleet-ci.yml");
+  calls("nightly", "fleet-nightly.yml");
+  if (condition("ci") !== "") {
+    mismatches.push({
+      file: at("ci"),
+      expected: "no job-level if: (a skipped caller stands down in the gate)",
+      got: condition("ci"),
+    });
+  }
+  if (condition("checks") !== "github.event_name != 'schedule'") {
+    mismatches.push({
+      file: at("checks"),
+      expected:
+        "exactly `if: github.event_name != 'schedule'` (the schedule run is the fleet callers' alone)",
+      got: condition("checks") || "no condition",
+    });
+  }
+  if (condition("nightly") !== "github.event_name == 'schedule'" || needsOf("nightly").length > 0) {
+    mismatches.push({
+      file: at("nightly"),
+      expected: "exactly `if: github.event_name == 'schedule'` and no needs (it gates nothing)",
+      got: `if: ${condition("nightly") || "none"}, needs: ${canonical(needsOf("nightly"))}`,
+    });
+  }
+  const reachesGate = (name: string, seen = new Set<string>()): boolean =>
+    needsOf(name).some(
+      (dep) => dep === "all-green" || (!seen.has(dep) && reachesGate(dep, seen.add(dep))),
+    );
+  for (const name of Object.keys(jobs)) {
+    if (["checks", "ci", "nightly", "all-green"].includes(name)) continue;
+    if (!reachesGate(name)) {
+      mismatches.push({
+        file: at(name),
+        expected: "needs reaching all-green (every leg after the callers rides behind the gate)",
+        got: canonical(needsOf(name)),
+      });
+    }
+    if (needsOf(name).includes("all-green")) {
+      // The same closed alphabet as the operator's gate: an &&-chain
+      // whose every clause is a known narrowing, so an || arm or a status
+      // function cannot release the leg off a red gate.
+      const clauses = condition(name)
+        .split("&&")
+        .map((clause) => clause.trim());
+      if (
+        !clauses.includes(DOWNSTREAM_GATE_CLAUSE) ||
+        clauses.some((clause) => !SKELETON_CLAUSES.some((allowed) => allowed.test(clause)))
+      ) {
+        mismatches.push({
+          file: at(name),
+          expected: `an &&-chain of the skeleton's leg clauses including ${DOWNSTREAM_GATE_CLAUSE} (needing the gate orders the job; the clause gates it, and no other clause shape may weaken it)`,
+          got: condition(name) || "no condition",
+        });
+      }
+    }
+  }
+  return mismatches;
+}
+
+/** The clauses a skeleton leg's `if:` may be composed of, joined by `&&`
+ *  only: the gate clause, the main-push scoping, `!cancelled()`, the hook's
+ *  result, and the module tests on the plan's compact JSON output. */
+const SKELETON_CLAUSES: readonly RegExp[] = [
+  /^needs\.all-green\.result == 'success'$/,
+  /^needs\.post-green\.result == 'success'$/,
+  /^github\.event_name == 'push'$/,
+  /^github\.ref == 'refs\/heads\/main'$/,
+  /^!cancelled\(\)$/,
+  /^!?contains\(needs\.ci\.outputs\.modules, '"[a-z-]+"'\)$/,
+];
+
 /** The clause every downstream job's condition must carry. */
 export const DOWNSTREAM_GATE_CLAUSE = "needs.all-green.result == 'success'";
 
@@ -389,7 +540,7 @@ export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
  *  plan is the first job, whose outputs every other job keys on. */
 export const FLEET_CI_ROSTER = [
   "plan",
-  "validate-template",
+  "validate-managed-files",
   "base-checks",
   "dependency-review",
   "zizmor",
@@ -409,10 +560,10 @@ export const FLEET_CI_ROSTER = [
  *  scan with no per-repo diff. */
 export const FLEET_NIGHTLY_ROSTER = ["plan", "trivy-nightly"];
 
-/** The rendered skeleton every fleet repository runs, byte-identical across
- *  selections (the smoke matrix proves it against this golden), so its
- *  caller jobs' grants are the ceilings the called workflows live under. */
-export const SKELETON_RENDER = "tests/golden-renders/minimal/.github/workflows/ci.yml";
+/** The managed ci.yml every fleet repository runs, byte-identical across
+ *  selections (the writer copies it whole), so its caller jobs' grants are
+ *  the ceilings the called workflows live under. */
+export const SKELETON = "files/base/.github/workflows/ci.yml";
 
 /** Each fleet-facing called workflow and the skeleton job that calls it:
  *  the caller job's permissions are the ceiling every job of the called
@@ -565,18 +716,11 @@ export const allGreenRules: Rule[] = [
         // per-run TMPDIR (scripts/run_tests.ts): a bare `bun test` step
         // would pass the forward pass and leak fixtures on the runner.
         "bun run test",
-        "bun run generate:check",
-        "bun run dogfood:check",
+        "bun run pins:check",
+        "bun run theme:check",
         "bun run gitignore:topology",
-        "bun actions/validate-template-report/validator/validate_generated_files.ts --self .",
-        // The copier-render oracle for the generated dogfood copies: its
-        // only home is a step of the smoke-generate job (dogfood-oracle
-        // row), so losing the step would fail the gate open silently.
-        "bun .github/scripts/ci/verify_dogfood_oracle.ts",
-        // The fleet rehearsal gate lives only as a step of its
-        // all-green-needed job: trimming the step would leave a green
-        // checkout/setup/install job and fail the gate open.
-        "bun .github/scripts/ci/rehearse_fleet_gate.ts",
+        "bun run files:check",
+        "bun run validate",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({
@@ -596,6 +740,13 @@ export const allGreenRules: Rule[] = [
     // This is where a deleted or un-needed gate goes loud.
     name: "all-green-roster",
     run: () => allGreenGateMismatches(repoCi(), ALL_GREEN_ROSTER),
+  },
+  {
+    // The managed skeleton every fleet repository runs: its gate must need
+    // both callers, judge through the published action under always(),
+    // and every leg after it must ride behind the gate clause.
+    name: "skeleton-gate",
+    run: () => skeletonGateMismatches(asRecord(parseYaml(readSource(SKELETON)), SKELETON)),
   },
   {
     // Every judge probe is a jq call under errexit; a substitution outside
@@ -673,15 +824,15 @@ export const allGreenRules: Rule[] = [
     // the check runs here, before the build branch ships the edit.
     name: "fleet-caller-ceilings",
     run: () => {
-      const skeleton = asRecord(parseYaml(read(SKELETON_RENDER)), SKELETON_RENDER);
-      const callers = ciJobs(skeleton, SKELETON_RENDER);
+      const skeleton = asRecord(parseYaml(readSource(SKELETON)), SKELETON);
+      const callers = ciJobs(skeleton, SKELETON);
       return Object.entries(FLEET_CALLERS).flatMap(([rel, job]) =>
         callerCeilingMismatches(
           { rel, text: read(rel) },
           {
-            rel: SKELETON_RENDER,
+            rel: SKELETON,
             job,
-            permissions: asRecord(callers[job], `${SKELETON_RENDER} job '${job}'`).permissions,
+            permissions: asRecord(callers[job], `${SKELETON} job '${job}'`).permissions,
           },
         ),
       );
@@ -694,8 +845,8 @@ export const allGreenRules: Rule[] = [
     // waiting forever while every job stays green. Its independently-authored
     // homes: the shared predicate's CHECK_NAME (which must also feed its own
     // check-run lookup), the all-green JOB id in this ci.yml and in the
-    // template's (a job's check run is named by its id; the roster rules pin
-    // that neither carries name:), the override layer, and docs/all-green.md.
+    // managed one (a job's check run is named by its id; the roster rules
+    // pin that neither carries name:), the override layer, and docs/all-green.md.
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -723,22 +874,17 @@ export const allGreenRules: Rule[] = [
         );
       }
 
-      // The job whose check run carries the name, at both sources. The
-      // repo side is structural (the parsed doc); the template side is a
-      // line anchor (the file is jinja).
-      if (!(gateName in ciJobs(repoCi(), "ci.yml"))) {
-        mismatches.push({
-          file: ".github/workflows/ci.yml",
-          expected: `a job id '${gateName}' (the job's own check run is the required context)`,
-          got: "no such job",
-        });
+      // The job whose check run carries the name, at both sources, on the
+      // parsed documents.
+      for (const rel of [".github/workflows/ci.yml", SKELETON]) {
+        if (!(gateName in ciJobs(asRecord(parseYaml(readSource(rel)), rel), rel))) {
+          mismatches.push({
+            file: rel,
+            expected: `a job id '${gateName}' (the job's own check run is the required context)`,
+            got: "no such job",
+          });
+        }
       }
-      mustMatch(
-        read("templates/base/.github/workflows/ci.yml.jinja"),
-        new RegExp(`^  ${gateName}:$`, "m"),
-        "templates/base/.github/workflows/ci.yml.jinja",
-        `the '${gateName}' gate job id`,
-      );
 
       // The operator-facing contract's CANONICAL sentence must quote the
       // same name: anchored with mustMatch (the doc mentions all-green in

@@ -2,8 +2,8 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
+import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { declaredModules } from "../../actions/plan/registration.ts";
-import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -729,7 +729,7 @@ describe("select_settings_repos.ts", () => {
       const r = run("filter-unknown", { env: { GITHUB_EVENT_PATH: eventFile } });
       expect(r).toEqual({
         exitCode: 1,
-        stdout: `::error::1 of 2 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}\n`,
+        stdout: `::error::1 of 2 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}\n`,
         stderr: "",
         output: "",
         summary: "",

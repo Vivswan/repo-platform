@@ -25,10 +25,10 @@
 import { appendFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { declaredModules } from "../../../actions/plan/registration.ts";
-import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
+import { moduleRoster } from "../sync/modules.ts";
 import {
   captureNetwork,
   discoverOwnerRepos,
@@ -58,7 +58,7 @@ const selfRepo = requireEnv("GITHUB_REPOSITORY");
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
 // lives with readDispatchRepo. A list is validated against the discovered
 // fleet once the rows are known (below).
-const scope = parseScope(readDispatchRepo(owner), new Set(MODULE_ORDER));
+const scope = parseScope(readDispatchRepo(owner), new Set(moduleRoster()));
 if (scope.kind === "error") {
   console.log(`::error::${scope.message}`);
   process.exit(1);

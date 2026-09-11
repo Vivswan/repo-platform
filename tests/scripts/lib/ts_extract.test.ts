@@ -6,20 +6,16 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  argvFlagLeads,
-  argvStringAfter,
   constNumberValue,
   constRegexSource,
   constStringValue,
   intersectionCarriesType,
-  literalMatches,
+  moduleSpecifiers,
   parseTs,
   propertyAssignmentCarries,
-  propertyRegexSource,
   rootIdentifier,
   templateCarries,
   unwrapExpression,
-  wrappedArgvLabels,
 } from "../../../scripts/lib/ts_extract.ts";
 
 const anchor = { where: "f.ts", what: "the pinned fact" };
@@ -119,59 +115,7 @@ describe("constRegexSource", () => {
   });
 });
 
-describe("propertyRegexSource", () => {
-  const schema = (pattern: string) =>
-    `const s = z.strictObject({\n  answer: z.string().regex(/^[a-z]+$/, "x"),\n  label: z.string().regex(${pattern}, "y"),\n});\n`;
-
-  test("returns the body of the .regex() literal under the named property", () => {
-    expect(propertyRegexSource(schema("/^[A-Z]+$/"), "label", anchor)).toBe("^[A-Z]+$");
-    // A .regex() call reached through a wrapping chain still belongs to the property.
-    expect(
-      propertyRegexSource("const s = { k: z.string().min(1).regex(/^a$/).optional() };\n", "k", anchor),
-    ).toBe("^a$");
-  });
-
-  test.each([
-    { reason: "no such property", key: "missing", source: schema("/^x$/") },
-    { reason: "the property carries no .regex() call", key: "k", source: "const s = { k: z.string() };\n" },
-    {
-      reason: "two properties of that name carry one",
-      key: "label",
-      source: `${schema("/^x$/")}const t = { label: z.string().regex(/^y$/) };\n`,
-    },
-  ])("$reason is a lost anchor", ({ key, source }) => {
-    expect(() => propertyRegexSource(source, key, anchor)).toThrow("whose chain carries a .regex() call");
-  });
-
-  test("a non-literal argument, two .regex() calls, or flags are lost anchors", () => {
-    expect(() =>
-      propertyRegexSource('const s = { k: z.string().regex(new RegExp("x")) };\n', "k", anchor),
-    ).toThrow("not a regex literal");
-    expect(() =>
-      propertyRegexSource("const s = { k: z.string().regex(/a/).regex(/b/) };\n", "k", anchor),
-    ).toThrow("carries 2 .regex() calls");
-    expect(() => propertyRegexSource(schema("/^x$/i"), "label", anchor)).toThrow("regex flags");
-  });
-
-  test("a .regex() nested in an argument is not the property's pin", () => {
-    // The chain is z.string().meta(...): the regex inside meta's object is an
-    // argument, so the property carries no pin and the anchor is lost.
-    const nested =
-      "const s = { k: z.string().meta({ nested: z.string().regex(/^[a-z]+$/) }) };\n";
-    expect(() => propertyRegexSource(nested, "k", anchor)).toThrow("found 0");
-    // With a pin on the chain, the nested one neither adds to nor replaces it.
-    const both =
-      "const s = { k: z.string().regex(/^x$/).meta({ n: z.string().regex(/^y$/) }) };\n";
-    expect(propertyRegexSource(both, "k", anchor)).toBe("^x$");
-  });
-
-  test("a decoy in a comment or a string is not a property", () => {
-    const source = '// label: z.string().regex(/^decoy$/)\nconst s = { note: "label: .regex(/^d$/)" };\n';
-    expect(() => propertyRegexSource(source, "label", anchor)).toThrow("found 0");
-  });
-});
-
-describe("templateCarries and literalMatches", () => {
+describe("templateCarries", () => {
   test("finds the needle in string and template literals only - comments are not references", () => {
     const needle = "contents/${path}?ref=${ref}";
     const active = "const url = `repos/${repo}/contents/${path}?ref=${ref}`;\n";
@@ -219,61 +163,6 @@ describe("templateCarries and literalMatches", () => {
       false,
     );
   });
-
-  test("literalMatches skips interpolation code - comments there are not references, and an inner string matches once as itself", () => {
-    const source = [
-      "const a = `${dir /* hidden-comment-decoy.log */}/hidden-real.log`;",
-      'const b = `${"hidden-inner.log"}`;',
-    ].join("\n");
-    expect(literalMatches(source, /hidden-[A-Za-z0-9-]+\.log/g)).toEqual([
-      "hidden-real.log",
-      "hidden-inner.log",
-    ]);
-  });
-
-  test("literalMatches collects pattern hits from literals in source order, never from comments", () => {
-    const source = [
-      "// mentions hidden-decoy.log in prose",
-      'const a = join(dir, "hidden-first.log");',
-      "const b = `${dir}/hidden-second.log`;",
-    ].join("\n");
-    expect(literalMatches(source, /hidden-[A-Za-z0-9-]+\.log/g)).toEqual([
-      "hidden-first.log",
-      "hidden-second.log",
-    ]);
-  });
-});
-
-describe("argvStringAfter", () => {
-  const source = [
-    "must([",
-    '  "copier",',
-    '  "copy",',
-    '  "--vcs-ref",',
-    '  "HEAD",',
-    '  "--defaults",',
-    '  "--trust",',
-    '  "-d",',
-    '  "project_name=Smoke Test",',
-    "]);",
-  ].join("\n");
-
-  test("returns the element after the anchor when the trailing run matches", () => {
-    expect(argvStringAfter(source, "--vcs-ref", ["--defaults", "--trust"], anchor)).toBe("HEAD");
-  });
-
-  test("a broken trailing run or a commented copy is a lost anchor", () => {
-    expect(() => argvStringAfter(source, "--vcs-ref", ["--trust", "--defaults"], anchor)).toThrow(
-      "anchor for the pinned fact not found",
-    );
-    const commented = source
-      .split("\n")
-      .map((line) => `// ${line}`)
-      .join("\n");
-    expect(() =>
-      argvStringAfter(commented, "--vcs-ref", ["--defaults", "--trust"], anchor),
-    ).toThrow("anchor for the pinned fact not found");
-  });
 });
 
 describe("parseTs refuses recovered trees", () => {
@@ -282,57 +171,7 @@ describe("parseTs refuses recovered trees", () => {
     expect(() => parseTs(broken)).toThrow("unauditable");
     expect(() => constStringValue(broken, "BRANCH", anchor)).toThrow("unauditable");
     expect(() => templateCarries(broken, "x")).toThrow("unauditable");
-    expect(() => argvFlagLeads(broken, "-d")).toThrow("unauditable");
-    expect(() => literalMatches(broken, /x/g)).toThrow("unauditable");
-  });
-});
-
-describe("argvFlagLeads", () => {
-  test("collects string values and template heads after each flag", () => {
-    const source = [
-      "must([",
-      '  "-d",',
-      '  "project_name=X",',
-      '  "-d",',
-      "  `modules=${modules}`,",
-      '  "-d",',
-      "  dynamic,",
-      "]);",
-    ].join("\n");
-    expect(argvFlagLeads(source, "-d")).toEqual(["project_name=X", "modules="]);
-  });
-
-  test("a commented or string-quoted flag pair yields nothing", () => {
-    expect(argvFlagLeads('// must(["-d", "project_name=X"]);\n', "-d")).toEqual([]);
-    expect(argvFlagLeads('const doc = \'["-d", "project_name=X"]\';\n', "-d")).toEqual([]);
-  });
-});
-
-describe("wrappedArgvLabels", () => {
-  test("reads the label between the wrapper call and the -- separator", () => {
-    const source = [
-      "const ok = passthrough([",
-      '  "bun",',
-      '  join(import.meta.dir, "run_hidden.ts"),',
-      '  "template validation",',
-      '  "--",',
-      '  "bun",',
-      '  "validator.ts",',
-      "]);",
-    ].join("\n");
-    expect(wrappedArgvLabels(source, "run_hidden.ts")).toEqual(["template validation"]);
-  });
-
-  test("a missing -- separator, a different script, or a comment copy yields nothing", () => {
-    expect(
-      wrappedArgvLabels('f([join(d, "run_hidden.ts"), "label", "bun"]);\n', "run_hidden.ts"),
-    ).toEqual([]);
-    expect(
-      wrappedArgvLabels('f([join(d, "other.ts"), "label", "--"]);\n', "run_hidden.ts"),
-    ).toEqual([]);
-    expect(
-      wrappedArgvLabels('// f([join(d, "run_hidden.ts"), "label", "--"]);\n', "run_hidden.ts"),
-    ).toEqual([]);
+    expect(() => moduleSpecifiers(broken)).toThrow("unauditable");
   });
 });
 
