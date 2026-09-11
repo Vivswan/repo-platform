@@ -14,9 +14,6 @@
  * (BLOCKER_LABEL), and open Dependabot alerts at or above
  * SECURITY_SEVERITY. Without the override label failures are ::error and
  * exit 1; with it they become ::warning plus a loud ::notice and exit 0.
- *
- * Inputs come from the environment as action.yml sets them; FUZZ_LABEL is
- * the deprecated single-label spelling of TRACKING_LABELS, folded in.
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -57,10 +54,6 @@ export interface Config {
   repo: string;
   /** Tracking-issue stream labels; empty disables the tracking gates. */
   trackingLabels: string[];
-  /** Set when the deprecated FUZZ_LABEL input supplied a label on its own;
-   *  runHealthCheck emits a notice so lagging rendered workflows
-   *  self-identify (the alias can be removed once none fire it). */
-  legacyFuzzLabel: string | undefined;
   blockerLabel: string;
   overrideLabel: string;
   security: SecurityThreshold;
@@ -75,37 +68,21 @@ function parseLabel(name: string, value: string): string {
   return value;
 }
 
-export interface TrackingLabels {
-  labels: string[];
-  /** The FUZZ_LABEL value when it contributed a label TRACKING_LABELS did
-   *  not already carry; undefined when the alias was absent or redundant. */
-  legacyFuzzLabel: string | undefined;
-}
-
-/** Parse the tracking-label list: TRACKING_LABELS split on commas (labels
- *  cannot contain commas - the registration's labels share LABEL_RE's
- *  shape), plus the deprecated FUZZ_LABEL folded in so a workflow written
- *  before the rename keeps its fuzz gate until the sync rewrites it. Deduped
- *  the way GitHub deduplicates label names: case-insensitively. */
-export function parseTrackingLabels(env: NodeJS.ProcessEnv): TrackingLabels {
+/** A label cannot contain a comma: the registration's labels share LABEL_RE's shape.
+ *  GitHub deduplicates label names case-insensitively, so the list does too. */
+export function parseTrackingLabels(env: NodeJS.ProcessEnv): string[] {
   const seen = new Set<string>();
   const labels: string[] = [];
-  const push = (label: string): boolean => {
-    const key = label.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    labels.push(label);
-    return true;
-  };
   for (const token of (env.TRACKING_LABELS ?? "").split(",")) {
     const label = token.trim();
-    if (label !== "") push(parseLabel("TRACKING_LABELS", label));
+    if (label === "") continue;
+    parseLabel("TRACKING_LABELS", label);
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
   }
-  const legacy = env.FUZZ_LABEL ? parseLabel("FUZZ_LABEL", env.FUZZ_LABEL) : undefined;
-  return {
-    labels,
-    legacyFuzzLabel: legacy !== undefined && push(legacy) ? legacy : undefined,
-  };
+  return labels;
 }
 
 /** Parse the environment into a Config, or throw naming the first problem. */
@@ -138,12 +115,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     );
   }
 
-  const tracking = parseTrackingLabels(env);
   return {
     context,
     repo,
-    trackingLabels: tracking.labels,
-    legacyFuzzLabel: tracking.legacyFuzzLabel,
+    trackingLabels: parseTrackingLabels(env),
     blockerLabel: parseLabel("BLOCKER_LABEL", env.BLOCKER_LABEL || "release-blocker"),
     overrideLabel: parseLabel("OVERRIDE_LABEL", env.OVERRIDE_LABEL || "release-override"),
     security: security as SecurityThreshold,
@@ -363,11 +338,6 @@ export async function runHealthCheck(
   out: (line: string) => void,
   setOutput: (name: string, value: string) => void,
 ): Promise<number> {
-  if (cfg.legacyFuzzLabel !== undefined) {
-    out(
-      `::notice::tracking label '${cfg.legacyFuzzLabel}' arrived via the deprecated fuzz-label input; this workflow render predates the tracking-labels input, and the next template sync moves the label there`,
-    );
-  }
   let override: Override;
   if (cfg.context.mode === "release") {
     const { pr, unmerged } = await findReleasePr(run, cfg.repo, cfg.context.sha);

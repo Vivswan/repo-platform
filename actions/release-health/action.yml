@@ -23,13 +23,6 @@ inputs:
       issue carrying any of them blocks. Empty disables the tracking gates.
     required: false
     default: ""
-  fuzz-label:
-    description: >-
-      Deprecated single-label spelling of tracking-labels, folded into it
-      (kept so workflows rendered before the rename keep their fuzz gate
-      until the next sync rewrites them)
-    required: false
-    default: ""
   blocker-label:
     description: An open issue carrying this label blocks the release
     required: false
@@ -66,7 +59,6 @@ runs:
       env:
         MODE: ${{ inputs.mode }}
         TRACKING_LABELS: ${{ inputs.tracking-labels }}
-        FUZZ_LABEL: ${{ inputs.fuzz-label }}
         BLOCKER_LABEL: ${{ inputs.blocker-label }}
         OVERRIDE_LABEL: ${{ inputs.override-label }}
         SECURITY_SEVERITY: ${{ inputs.security-severity }}
