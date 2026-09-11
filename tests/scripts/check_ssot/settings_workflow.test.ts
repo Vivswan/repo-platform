@@ -388,10 +388,10 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: ./actions/validate-template-report
-        id: template
+      - uses: ./actions/validate-managed-files
+        id: validate
       - name: Fail on an integrity finding
-        if: steps.template.outputs.integrity != 'success'
+        if: steps.validate.outputs.integrity != 'success'
         ${extra}
         run: ${JSON.stringify(run)}
 `;
@@ -416,7 +416,7 @@ jobs:
             {
               file: "fleet-ci.yml",
               expected: 'step "Fail on an integrity finding" tests step outputs positively',
-              got: "steps.template.outputs.integrity != 'success' (a step that did not run has an ABSENT output, which passes)",
+              got: "steps.validate.outputs.integrity != 'success' (a step that did not run has an ABSENT output, which passes)",
             },
           ]
         : [],

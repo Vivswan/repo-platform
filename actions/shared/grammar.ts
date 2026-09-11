@@ -126,7 +126,7 @@ export function markerLineCount(content: string, marker: string): number {
   return splitLines(content).filter((line) => isMarkerLine(line.text, marker)).length;
 }
 
-/** Substring occurrences, the way validate_generated_files counts. */
+/** Substring occurrences, the way validate_managed_files counts. */
 export function substringCount(content: string, marker: string): number {
   return content.split(marker).length - 1;
 }
