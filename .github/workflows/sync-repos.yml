@@ -82,9 +82,6 @@ concurrency:
 
 jobs:
   plan:
-    # The weekly run is paused while one repository proves the new ci.yml
-    # skeleton; a directive sync carries that repository until it returns.
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # The provenance rebuild plus the probe bounds at ten adopted repos:
     # discovery 2 x 120 s, selection's two 300 s stages, 10 x 2 x 120 s.

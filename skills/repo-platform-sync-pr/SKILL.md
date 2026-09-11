@@ -28,7 +28,7 @@ Work in this order, always:
 
 - A copy, not a merge. The writer copies each selected file from repo-platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. Nothing is three-way merged and no conflict marker ever lands in the branch.
 - The writer tells its own previous write from a local edit through `.github/repo-platform-manifest.json`, which records a hash per managed file and per split region. A managed file, or a split region, whose content is neither the recorded hash nor the new content is replaced and reported with a diff.
-- The head branch is rewritten on every sync run (a dispatch, a merge directive, or the weekly cron once the fleet cutover re-arms it). Commits parked on it between runs are replaced; fix-then-merge promptly.
+- The head branch is rewritten on every sync run (a dispatch, a merge directive, or the weekly cron). Commits parked on it between runs are replaced; fix-then-merge promptly.
 - A PR whose report holds nothing arms auto-merge and lands once the required check passes (`all-green`, plus `pr-title` where selected). A run dispatched with `manual=true`, or any hold reason, waits for a human.
 
 Find and open the PR from the repo:

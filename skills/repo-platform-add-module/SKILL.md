@@ -110,7 +110,7 @@ The run's job log (`gh run view <id> --log`) reads `plan: 1 rows` and then `row 
 
 Anything the module diff does not explain is reviewed with the `repo-platform-sync-pr` skill before merging.
 
-`row 0: unchanged` with no PR means the repo already holds every file of the new selection. `failed, report filed in the target repository` means the `[repo-platform] sync failed` issue in the repo has the error. Today the dispatch is the way to get the files: the weekly run is paused while the first repository proves the new `ci.yml`, and comes back when repo-platform lifts that guard after the cutover.
+`row 0: unchanged` with no PR means the repo already holds every file of the new selection. `failed, report filed in the target repository` means the `[repo-platform] sync failed` issue in the repo has the error. Without a dispatch, the Tuesday cron delivers the files on its own.
 
 ### 3. Finish the companion steps
 

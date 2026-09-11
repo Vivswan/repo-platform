@@ -256,7 +256,7 @@ The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/del
 
 ## The operator
 
-[sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private repositories](#private-repositories)).
+[sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. It wakes on the Tuesday cron (the weekly heal), on a dispatch, or as the called leg of a merge's post-green run ([all-green.md](all-green.md#after-the-gate)). The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private repositories](#private-repositories)).
 
 | Step | Script | What it does |
 | --- | --- | --- |
