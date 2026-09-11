@@ -54,7 +54,7 @@ describe("the repo's own build-branch ruleset", () => {
 
 describe("the repo's own stable-tag ruleset", () => {
   test("the stable tag is undeletable and otherwise unruled, so the lease move stays allowed", () => {
-    const stableTag = readRulesets(".github/settings.yml").find((r) => r.name === "stable-tag");
+    const stableTag = readRulesets(OWN_OVERLAY).find((r) => r.name === "stable-tag");
     expect(stableTag).toBeDefined();
     expect(stableTag?.target).toBe("tag");
     expect(stableTag?.enforcement).toBe("active");
