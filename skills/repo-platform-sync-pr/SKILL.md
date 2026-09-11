@@ -45,12 +45,29 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 | Section | Content | What to verify |
 |---|---|---|
 | header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
-| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` names why nothing was written (a symbolic link at the path, a placeholder with no value). A starter is only ever `created`, `unchanged`, or `held` (nothing written) |
+| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` wrote nothing and its Detail says why (the list below). A starter is only ever `created`, `unchanged`, or `held` |
 | Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
 | Retired | one row per file the platform no longer writes: `deleted`, `region removed`, `held`, `kept`, `moved` | `deleted` removed the platform's own content; `region removed` took the managed region and its markers out of a split file and left the repository-owned content as a plain file (the record leaves with it, so the row appears once); `held` left a file with content it did not write, for your decision; `kept` is a starter (yours); `moved` is a git rename |
-| Registration notes | a module name `files.yml` does not know (dropped for this sync), an unreadable manifest, or a `cutover:` note: `.repo-platform.yml` was derived from `.github/.copier-answers.yml` | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A cutover note means the sync rewrote `.repo-platform.yml`: review the derived keys in the diff |
+| Registration notes | one line per note: an unknown module dropped, an unreadable manifest, a placeholder with no value, a manifest record dropped or ignored, or a `cutover:` note (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now. A cutover note means the sync rewrote `.repo-platform.yml`: review the derived keys in the diff |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits` (its diff below), `replaced` with a detail naming what was removed | `replaced local edits`: decide per diff like a managed file; `replaced`: a directory stood at the target or a file where a directory had to be, and the diff shows what went. A declaration the writer cannot honour never reaches the report: the sync fails instead (the failure path below) |
 | Review | `Hold for review: yes` with one line per reason, or `no` | Every listed reason resolved before merging |
+
+The Registration notes, exactly:
+
+- ``dropped unknown module `<name>` (files.yml does not know it)``: dropped for this sync
+- `.github/repo-platform-manifest.json <problem>; every existing file is judged as unrecorded`: the manifest could not be read, so this sync rewrites it
+- ``placeholder `{{<name>}}` has no value: set <key> in .repo-platform.yml``: every file rendering that placeholder is `held`; an empty value counts as none
+- ``manifest record for `<path>` dropped: its class or shape is not one the writer records``: a class the writer does not record, or a `split` record with no `begin` and `end` markers
+- ``manifest record for `<path>` ignored: the path <problem>``: an unclean path
+- ``manifest record for `<path>` dropped: no mirror in .repo-platform.yml reaches it now, so the file is the repository's own (a mirror declared again adopts it while it still holds the source's content)``
+- `cutover: .repo-platform.yml was derived from .github/.copier-answers.yml (<keys>); review it before merging`, and ``cutover: dropped unknown module `<name>` from .repo-platform.yml (files.yml does not know it)`` for each module the old registration named that `files.yml` does not know
+
+The `held` details of a Written row, exactly:
+
+- `a symbolic link sits where a file is declared` (a managed or split entry; the writer never reads through a link)
+- `a regular file sits where a link is declared`
+- `no value for {{<placeholder>}}` (a Registration note names the key to set)
+- `class changed from <old> to <new>, and <reason>`: `files.yml` moved the path to another class, and the file is not provably the platform's last write (its content differs, its record is a starter's or carries no hash, or a split file has repository-owned content outside the region), so the new class was not applied
 
 The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `retirement of <path>: the managed region was removed and the repository-owned content kept`, `mirror <target> replaced: <detail>`, `registration: <note>`.
 
@@ -78,9 +95,23 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Removed region | A retired split file carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
 | Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the copy's way (`replaced`, the detail names it) | Read the diff; the platform copy stays. Content worth keeping moves to a path no declaration names |
 | Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
-| Cutover | The first sync after the platform changed shape: `.repo-platform.yml` rewritten from `.github/.copier-answers.yml` (a `cutover:` Registration note holds the PR; the file has no Written row), a Written row for every managed file whose content changed (`updated` where the manifest recorded the old content, `replaced local edits` with a diff where it did not; `ci.yml` among them), a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`). The issue forms were starters: nothing retires them, they stay in place with no row | Review the derived registration key by key; check every `held` retirement; expect the CI job list to change on the next push to main |
+| Cutover | The first sync after the platform changed shape: `.repo-platform.yml` rewritten from `.github/.copier-answers.yml` (a `cutover:` Registration note holds the PR; the file has no Written row), a Written row for every managed file whose content changed (`updated` where the manifest recorded the old content, `replaced local edits` with a diff where it did not; `ci.yml` among them), a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`). The issue forms were starters: nothing retires them, they stay in place with no row | Review the derived registration key by key; check every `held` retirement; run [the repository-owned markdown check](#repository-owned-markdown-after-a-cutover) before merging; expect the CI job list to change on the next push to main |
 
 Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
+
+## Repository-owned markdown after a cutover
+
+The platform no longer writes the community health files; GitHub serves the account's defaults from Vivswan/.github, and a default shows ONLY when the repository has no file of the same name. A cutover sync PR retires the platform's `CONTRIBUTING.md` and `.github/SECURITY.md`, and a repository-owned tail left in either one (a `held` retirement, or a file the platform never recorded, which stays in place with no row at all) hides the complete default behind a fragment. Before merging, decide each file:
+
+| File left behind | Either delete it | Or make it complete |
+|---|---|---|
+| `CONTRIBUTING.md` | Move the repo-specific content into `README.md` and delete the file, so the account default shows | It states the Conventional Commit PR-title rule and the CI gate (`all-green` as the required check) |
+| `.github/SECURITY.md` | Move anything repo-specific into `README.md` and delete the file | It lists the supported versions and the private reporting route |
+
+The same PR retires `release.yml` and reshapes the CI legs, so grep the repository's own markdown and workflow comments for the retired names and rewrite every hit: `release.yml`, the push deploy in `pages.yml`, `copier` and `.copier-answers.yml`, and "template sync". A comment that names a workflow the repository no longer has is a false statement about the repository.
+
+- The fix is ONE commit pushed onto `automation/repo-platform` BEFORE merging, never a separate PR: the branch is rewritten on the next run, and a follow-up PR leaves the merged tree wrong in between.
+- Repeat the check on every later sync PR that retires or reshapes a file: each retirement can leave a tail, and each reshaped workflow can orphan a comment that named the old shape.
 
 ## The repo-owned tail
 
