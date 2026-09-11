@@ -27,6 +27,7 @@ const OWNED: OwnedPaths = {
     ".github/repo-platform-manifest.json",
   ]),
   retires: new Set(["SECURITY.md", "old/SECURITY.md"]),
+  stale: new Set(["docs/GONE.md"]),
 };
 
 describe("ownedPaths", () => {
@@ -55,6 +56,7 @@ retired:
         ".github/repo-platform-manifest.json",
       ]),
       retires: new Set(["SECURITY.md", "OLD.md"]),
+      stale: new Set(),
     });
     expect(ownedPaths(config, { modules: ["pages"], private: true }).sources).toEqual(
       new Set(["LICENSE.md", "AGENTS.md", "docs/NOTES.md", "private.yml"]),
@@ -78,6 +80,8 @@ describe("mirrorPathProblem", () => {
     ["docs-site/README.md", null],
     ["SECURITY.md/copy.md", "sits under 'SECURITY.md', a path files.yml retires"],
     ["old", "is a path prefix of 'old/SECURITY.md', a path files.yml retires"],
+    ["docs/GONE.md", "is a path a stale manifest record retires"],
+    ["docs/GONE.md/x", "sits under 'docs/GONE.md', a path a stale manifest record retires"],
   ])("%s -> %p", (path, problem) => {
     expect(mirrorPathProblem(path, OWNED)).toBe(problem);
   });
@@ -145,7 +149,10 @@ describe("mirrorDeclarationProblems", () => {
     const problems = mirrorDeclarationProblems(
       [
         { source: "LICENSE.md", targets: ["*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"] },
-        { source: "AGENTS.md", targets: ["*.yml", "*/README.md", "skills/*/LICENSE.md", "*/x"] },
+        {
+          source: "AGENTS.md",
+          targets: ["*.yml", "*/README.md", "docs/*", "skills/*/LICENSE.md", "*/x"],
+        },
         { source: "AGENTS.md", targets: ["skills/*/AGENTS.md", ".github/*"] },
       ],
       OWNED,
@@ -160,6 +167,8 @@ describe("mirrorDeclarationProblems", () => {
       A("*.yml", "the pattern matches '.repo-platform.yml', the registration"),
       A("*.yml", "the pattern matches 'nightly.yml', a path files.yml writes"),
       A("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),
+      A("docs/*", "the pattern matches 'docs/README.md', a path files.yml writes"),
+      A("docs/*", "the pattern matches 'docs/GONE.md', a path a stale manifest record retires"),
       A(
         "skills/*/LICENSE.md",
         "the pattern matches 'skills/a/LICENSE.md', a target of another source",

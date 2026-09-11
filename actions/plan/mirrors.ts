@@ -18,6 +18,9 @@ export interface OwnedPaths {
   writes: ReadonlySet<string>;
   /** Every path files.yml retires. */
   retires: ReadonlySet<string>;
+  /** Every recorded path the run retires as no longer selected: the
+   *  writer's alone (it reads the manifest), empty at the plan. */
+  stale: ReadonlySet<string>;
 }
 
 export function ownedPaths(
@@ -33,7 +36,16 @@ export function ownedPaths(
     ),
     writes: new Set([...entries.map((entry) => entry.path), MANIFEST_NAME]),
     retires: new Set(config.retired.map((entry) => entry.path)),
+    stale: new Set(),
   };
+}
+
+function reserved(owned: OwnedPaths): [ReadonlySet<string>, string][] {
+  return [
+    [owned.writes, "a path files.yml writes"],
+    [owned.retires, "a path files.yml retires"],
+    [owned.stale, "a path a stale manifest record retires"],
+  ];
 }
 
 /** The path among `others` that `path` sits under, or that sits under
@@ -62,16 +74,13 @@ export function mirrorPathProblem(path: string, owned: OwnedPaths): string | nul
   if (path === REGISTRATION_PATH) return "is the registration itself";
   if (path.startsWith(`${REGISTRATION_PATH}/`)) return "sits under the registration";
   if (path.toLowerCase().startsWith(".github/workflows/")) return "sits under .github/workflows/";
-  for (const [paths, verb] of [
-    [owned.writes, "writes"],
-    [owned.retires, "retires"],
-  ] as const) {
-    if (paths.has(path)) return `is a path files.yml ${verb}`;
+  for (const [paths, what] of reserved(owned)) {
+    if (paths.has(path)) return `is ${what}`;
     const nested = nestedWith(path, paths);
     if (nested !== null) {
       return "under" in nested
-        ? `sits under '${nested.under}', a path files.yml ${verb}`
-        : `is a path prefix of '${nested.above}', a path files.yml ${verb}`;
+        ? `sits under '${nested.under}', ${what}`
+        : `is a path prefix of '${nested.above}', ${what}`;
     }
   }
   return null;
@@ -165,8 +174,7 @@ export function mirrorDeclarationProblems(mirrors: Mirrors, owned: OwnedPaths): 
   }
   const known: [ReadonlySet<string>, string][] = [
     [new Set([REGISTRATION_PATH]), "the registration"],
-    [owned.writes, "a path files.yml writes"],
-    [owned.retires, "a path files.yml retires"],
+    ...reserved(owned),
   ];
   for (const { source, target } of clean) {
     if (!isGlob(target)) continue;

@@ -742,10 +742,15 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
         "mirrors:",
         "  - {source: LICENSE.md, targets: [copies/a, copies/a/b, .github/repo-platform-manifest.json]}",
         "  - {source: README.md, targets: [skills/*/README.md]}",
-        "  - {source: LICENSE.md, targets: [SECURITY.md, docs/**/LICENSE.md]}",
+        "  - {source: LICENSE.md, targets: [SECURITY.md, docs/GONE.md, docs/**/LICENSE.md]}",
         "",
       ].join("\n"),
     );
+    // A managed record of a module no longer selected: the run retires it,
+    // and no mirror may land there.
+    const stale = `{\n  "files": {\n    "docs/GONE.md": {"class": "managed", "hash": "${sha256("gone\n")}"}\n  }\n}\n`;
+    mkdirSync(join(target, ".github"));
+    writeFileSync(join(target, MANIFEST), stale);
     const result = spawnSync(target, join(temp.dir("sync-e2e-mirror-summary-"), "summary.json"));
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe("");
@@ -758,6 +763,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
           "the source is not a managed or split file files.yml writes for this repository",
         ),
         error("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
+        error("LICENSE.md", "docs/GONE.md", "the target is a path a stale manifest record retires"),
         error("LICENSE.md", "docs/**/LICENSE.md", "the pattern uses '**'"),
         error(
           "LICENSE.md",
@@ -767,7 +773,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
         error("LICENSE.md", "copies/a/b", "the target sits under another target 'copies/a'"),
       ].join("\n")}\n`,
     );
-    expect(existsSync(join(target, MANIFEST))).toBe(false);
+    expect(readFileSync(join(target, MANIFEST), "utf-8")).toBe(stale);
     expect(existsSync(join(target, "copies"))).toBe(false);
   });
 

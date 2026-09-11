@@ -322,7 +322,7 @@ export function runSync(options: SyncOptions): SyncReport {
           options.target,
           registration.mirrors,
           written,
-          { ...owned, retires: new Set([...owned.retires, ...stale]) },
+          { ...owned, stale: new Set(stale) },
           records,
         );
   for (const [path, hash] of mirrors.hashes) next.set(path, { class: "mirror", hash });

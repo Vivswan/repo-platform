@@ -45,11 +45,17 @@ function tree(files: Record<string, string>): string {
 }
 
 /** What files.yml claims: every source is written, plus the manifest. */
-function owned(sources: string[], writes: string[] = [], retires: string[] = []): OwnedPaths {
+function owned(
+  sources: string[],
+  writes: string[] = [],
+  retires: string[] = [],
+  stale: string[] = [],
+): OwnedPaths {
   return {
     sources: new Set(sources),
     writes: new Set([...sources, ...writes, ".github/repo-platform-manifest.json"]),
     retires: new Set(retires),
+    stale: new Set(stale),
   };
 }
 
@@ -227,18 +233,19 @@ describe("applyMirrors", () => {
         root,
         [
           { source: "LICENSE.md", targets: ["copies/a", "copies/a/b", "good/COPY.md"] },
-          { source: "LICENSE.md", targets: ["LICENSE.md", "SECURITY.md", "docs/**/x"] },
+          { source: "LICENSE.md", targets: ["LICENSE.md", "SECURITY.md", "GONE.md", "docs/**/x"] },
           { source: "LICENSE.md", targets: [".repo-platform.yml/copy.md"] },
           { source: "README.md", targets: ["skills/*/README.md"] },
         ],
         bytes({ "LICENSE.md": "L\n" }),
-        owned(["LICENSE.md"], [], ["SECURITY.md"]),
+        owned(["LICENSE.md"], [], ["SECURITY.md"], ["GONE.md"]),
         {},
       ),
     );
     expect(failures).toEqual([
       failure("LICENSE.md", "LICENSE.md", "the target is a path files.yml writes"),
       failure("LICENSE.md", "SECURITY.md", "the target is a path files.yml retires"),
+      failure("LICENSE.md", "GONE.md", "the target is a path a stale manifest record retires"),
       failure("LICENSE.md", "docs/**/x", "the pattern uses '**'"),
       failure("LICENSE.md", ".repo-platform.yml/copy.md", "the target sits under the registration"),
       failure(
@@ -479,6 +486,25 @@ describe("applyMirrors", () => {
         .filter((path) => patternMatches(pattern, path))
         .sort(),
     ).toEqual(refused);
+  });
+
+  test("a glob path whose literal directory segment is a regular file fails by that ancestor", () => {
+    const root = tree({ "skills/a/sub": "", "skills/b/README.md": "" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [{ source: "L.md", targets: ["skills/*/sub/L.md"] }],
+        bytes({ "L.md": "L\n" }),
+        owned(["L.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      failure("L.md", "skills/a/sub/L.md", "the target's ancestor 'skills/a/sub' is a file"),
+      failure("L.md", "skills/b/sub/L.md", "the target's directory 'skills/b/sub' does not exist"),
+    ]);
+    expect(readFileSync(join(root, "skills/a/sub"), "utf-8")).toBe("");
+    expect(existsSync(join(root, "skills/b/sub"))).toBe(false);
   });
 
   test("two globs of different sources landing on one path fail both sides", () => {

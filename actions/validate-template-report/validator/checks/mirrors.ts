@@ -26,8 +26,8 @@ export function checkMirrors(ctx: Context): Finding[] {
     if (bytes === null) {
       findings.push(
         error(
-          `${REGISTRATION_PATH}: mirror source '${source}' is ${found.kind === "file" ? "" : found.what} ` +
-            "in the repository, so its copies cannot be judged - the source must be a file files.yml " +
+          `${REGISTRATION_PATH}: mirror source '${source}' is ${found.kind === "file" ? "" : found.what}, ` +
+            "so its copies cannot be judged - the source must be a file files.yml " +
             "writes here (the plan job rejects any other); fix the declaration",
         ),
       );

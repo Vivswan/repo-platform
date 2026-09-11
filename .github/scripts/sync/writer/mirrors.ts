@@ -159,8 +159,8 @@ interface Claim {
 
 /** Copies every declared mirror. `written` maps the managed and split paths
  *  written this run to their bytes, `owned` is what files.yml claims here
- *  (its `retires` including the stale records the run retires), and
- *  `records` are the previous sync's, read for the last mirror hash.
+ *  plus the stale records the run retires, and `records` are the previous
+ *  sync's, read for the last mirror hash.
  *  Literal targets are written before any `*` pattern expands, so a
  *  directory a literal creates is matched in the same run. Every path of a
  *  pass is judged before the pass writes; a path that cannot be written

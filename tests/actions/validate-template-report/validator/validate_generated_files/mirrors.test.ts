@@ -111,7 +111,7 @@ describe("declared mirror targets", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toBe(
-      "error: .repo-platform.yml: mirror source 'nope.md' is missing from the repo in the repository, so its " +
+      "error: .repo-platform.yml: mirror source 'nope.md' is missing from the repo, so its " +
         "copies cannot be judged - the source must be a file files.yml writes here (the plan job rejects " +
         "any other); fix the declaration\n\n1 error(s).\n",
     );

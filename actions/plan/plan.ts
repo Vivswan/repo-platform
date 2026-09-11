@@ -1,33 +1,28 @@
 // The fleet's plan: resolves one managed repository's CI configuration at
-// run time from the repository's registration (.repo-platform.yml, with
-// the recorded copier answers as the fallback for values it does not
-// carry) and files.yml, the module data shipped at the build branch root
-// beside this action. Every managed ci.yml is byte-identical; what differs
-// per repository is computed here and handed to the jobs as step outputs.
+// run time from its registration (.repo-platform.yml, the recorded copier
+// answers filling values it does not carry) and files.yml, the module data
+// beside this action at the build branch root. Every managed ci.yml is
+// byte-identical; what differs per repository is computed here as step outputs.
 //
-// Two modes. `default` resolves what fleet-ci.yml's jobs key on: the
-// selection in canonical order, the visibility, the skills directory, the
-// CodeQL languages, the tracking labels, and whether a scheduled run is
-// the week's CodeQL rescan. `pages` resolves the deploy
-// configuration reusable-pages.yml consumes (mounts, toolchain, commands,
-// registration-configured: the plan resolves all eight from its
-// .repo-platform.yml. Both stay supported (repo-platform's own docs-site.yml
-// is caller-configured: this repository carries no registration).
-// Fail closed:
-// an unknown module, an unknown key, a malformed value, a mirror
-// declaration files.yml proves unwritable (mirrors.ts), or a missing
-// registration fails the step - nothing here ever defaults an invalid
-// registration into a green run.
+// `default` mode resolves what fleet-ci.yml's jobs key on: the selection in
+// canonical order, the visibility, the skills directory, the CodeQL
+// languages, the tracking labels, and whether a scheduled run is the week's
+// CodeQL rescan; it also rejects a mirror declaration files.yml proves
+// unwritable (mirrors.ts). `pages` mode resolves the deploy configuration
+// reusable-pages.yml consumes (mounts, setup toolchains, install and build
+// commands, output directory, site title, link-rot label) from the
+// registration; with CALLER_MOUNTS set the caller configured the deploy
+// itself: its CALLER_* values pass the setup grammar check and are
+// published unchanged, the registration unread. Fail closed: an unknown
+// module or key, a malformed value, or a missing registration fails the
+// step; nothing here defaults an invalid registration into a green run.
 //
 // Env: MODE (default|pages), PRIVATE ("true"/"false"; empty asks the API
 // for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
-// files.yml, whose `modules` keys are the vocabulary in canonical order
-// and whose values carry every default the registration may leave unset),
-// RESERVED_LABELS_FILE (the labels the template manages, which no tracking
-// stream may reuse), GITHUB_OUTPUT. In pages mode a non-empty CALLER_MOUNTS
-// means the caller configured the deploy itself: the CALLER_* values are
-// published unchanged after the setup grammar check and the registration
-// is not read. Runs in the caller's checkout.
+// files.yml: `modules` keys are the vocabulary in canonical order, values
+// the defaults the registration may leave unset), RESERVED_LABELS_FILE
+// (labels the template manages, which no tracking stream may reuse),
+// GITHUB_OUTPUT. Runs in the caller's checkout.
 
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
