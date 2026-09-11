@@ -62,7 +62,7 @@ The report lists what the writer did; the diff is what lands. Compare them befor
 gh pr diff <number> --name-only
 ```
 
-Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted` or `moved`, a Mirrors row reading `written`, `.github/repo-platform-manifest.json` (rewritten every sync, no row), or `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either). Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying the warning `The report was cut here to fit GitHub's body limit` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
+Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted` or `moved`, a Mirrors row reading `written`, `.github/repo-platform-manifest.json` (rewritten every sync, no row), or `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either). Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
 
 ```bash
 git fetch origin main automation/repo-platform
@@ -83,7 +83,7 @@ Something that matches none of the above: do not merge. The branch is rewritten 
 
 ## The repo-owned tail
 
-A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`, `.github/dependabot.yml`) has one managed region between `BEGIN REPO-PLATFORM MANAGED` and `END REPO-PLATFORM MANAGED`. Everything above BEGIN and below END is the repository's own and rides through every sync byte-for-byte. A file that never mentions the markers gets the region placed above its content, so its whole prior content becomes the tail.
+A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) has one managed region between `BEGIN REPO-PLATFORM MANAGED` and `END REPO-PLATFORM MANAGED`. Everything above BEGIN and below END is the repository's own and rides through every sync byte-for-byte. A file that never mentions the markers gets the region placed above its content, so its whole prior content becomes the tail.
 
 - For override-by-position formats (`.editorconfig`, `CODEOWNERS`, `.gitignore`) put overrides below END, where later entries win.
 - Content inside the region is the platform's; an edit there is replaced on the next sync and reported under Replaced local edits, exactly like a managed file.

@@ -66,7 +66,7 @@ retired:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data, the keys in canonical module order: the same names as the module manifests, in the same order (the `files-modules` ssot rule). Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
+| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
@@ -115,7 +115,7 @@ The three links carry no `when`: every repository gets them.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)); the Node source three toolchains declare is byte-identical in each, so it lands once |
+| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` together with `files/base/.gitignore`; the Node source three toolchains declare is byte-identical in each, so it lands once |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
@@ -124,16 +124,16 @@ The three links carry no `when`: every repository gets them.
 | --- | --- | --- |
 | `description` | the module's one-line description | docs and the PR body |
 | `codeql_language` | the CodeQL language the toolchain contributes | the fleet plan |
-| `pin` | `{file, version}` of the toolchain's version dotfile; equal to the manifest's `toolchain.pin` (the `files-pins` ssot rule) and bumped with it by the toolchain refresh | the toolchain refresh |
-| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others; equal to the manifest's `pages` (the `files-pages` ssot rule) | the fleet plan and the registration cutover |
+| `pin` | `{file, version}` of the toolchain's version dotfile: `bun run pins` writes `files/<module>/<file>` from it (and the `.bun-version` copies beside the actions and at this repository's root), and the toolchain refresh bumps it | the pin writer and the toolchain refresh |
+| `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others | the fleet plan and the registration cutover |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
 | `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
-| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder and the plan's `skills-dir` output fall back to when the registration sets no `skills.dir`; equal to copier.yml's `skills_dir` default (the `files-defaults` ssot rule) | the writer and the fleet plan |
-| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist`; equal to copier.yml's `pages_dist_dir` default (the `files-defaults` ssot rule) | the fleet plan and the registration cutover |
-| `path` | the `docs-site` module only: the URL segment the docs mount under when the `pages` module also renders a website, unless the registration sets `docs_site.path`; equal to copier.yml's `docs_site_path` default (the `files-defaults` ssot rule) | the fleet plan and the registration cutover |
+| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder and the plan's `skills-dir` output fall back to when the registration sets no `skills.dir` | the writer and the fleet plan |
+| `dist` | the `pages` module only: the build output directory a pages repository publishes unless its registration sets `pages.dist` | the fleet plan and the registration cutover |
+| `path` | the `docs-site` module only: the URL segment the docs mount under when the `pages` module also publishes a website, unless the registration sets `docs_site.path` | the fleet plan and the registration cutover |
 | `settings_layers` | the settings layer files the module contributes | the settings apply |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder | the fleet plan, the settings baseline, and the writer |
 
@@ -249,15 +249,15 @@ The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/del
 
 ## The operator
 
-[sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private-repos.md](private-repos.md)).
+[sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private repositories](#private-repositories)).
 
 | Step | Script | What it does |
 | --- | --- | --- |
 | plan: resolve the build | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) | the build tip, proven the builder's output of a green main commit ([build-provenance.md](build-provenance.md)) and carrying `files.yml`; every row checks out exactly this commit |
-| plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform, narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)) |
+| plan: discover and select | [fleet/discover_repos.ts](../.github/scripts/fleet/discover_repos.ts), [fleet/select_sync_repos.ts](../.github/scripts/fleet/select_sync_repos.ts) | the rows: the repositories the fleet token can push to that have adopted the platform (this repository excepted), narrowed by the dispatch `repo` input or the called `repos` scope ([fleet/sync_scope.ts](../.github/scripts/fleet/sync_scope.ts)), written sorted to `$RUNNER_TEMP/rows.json`; the log names the public slugs and counts the private ones |
 | plan: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `plan` | `plan: <N> rows`; the matrix is the indexes `0..N-1` |
 | row 1: check out | actions/checkout | repo-platform, then the build at the plan's commit under `build/` |
-| row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | discovery and selection re-run with the plan's inputs (their output in `$RUNNER_TEMP` files), the row count checked against the plan, the index mapped to a repository; every form of the name is registered with the masker before anything else prints, and the name rides `GITHUB_ENV` (which the runner never echoes) from here |
+| row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | discovery and selection re-run with the plan's inputs (their output in `$RUNNER_TEMP` files), the row count checked against the plan, the index read off the rows file; every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` (which the runner never echoes) from here |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
 | row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) `--cutover true` | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
 | row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
@@ -279,9 +279,41 @@ row <i>: failed before the target was resolved; re-run the workflow
 - The `operator-verdict-only` rule (`scripts/check/ssot/sync_operator.ts`) pins the shape: an index-only matrix, every row `run:` step one bun command redirected to a `$RUNNER_TEMP` file except the resolver and the printer, only the checkout and setup-bun actions and never a checkout of another repository, no target name in a step's declared env, the target clone after the resolver, the row job's selector carrying the plan's exact env, the writer step carrying its own `timeout-minutes`, and the row job's `timeout-minutes` at least the budget `row_budget.ts` sums from its steps' bounds (a row the runner kills at its timeout files no failure report).
 - Rows are re-derived, not carried: a repository renamed, enrolled, or archived between the plan and a row shifts the indexes. The row count guard catches a changed count; a same-count change is the residual, and its worst case is one repository synced twice (two rows rewrite the same branch and PR, the later one winning) or once too few (the next run heals it).
 
+## Private repositories
+
+repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step headers, and annotations are as readable as the repository they run in. The operator therefore never lets a private repository's name or content reach that log. Four rules carry the whole model; the job shape enforces them, not a per-step discipline.
+
+| Rule | Where it lives |
+| --- | --- |
+| **Index-only names.** The matrix and the job names carry row indexes (`sync (row 3)`), never repository names. The plan names public repositories and counts private ones. | [sync-repos.yml](../.github/workflows/sync-repos.yml); the `operator-verdict-only` rule pins it |
+| **Mask at the boundary.** One step per row reads its index off the selector's rows file and registers every form of the name (slug, bare name, both URL spellings, lower-cased) with the runner's masker before anything else prints. The name then rides `GITHUB_ENV` alone, which the runner never echoes; the target is cloned by a script whose git output is captured, never by the checkout action. | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts), [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) |
+| **Logs to files.** Every later `run:` step writes its whole output to a `$RUNNER_TEMP` file; the writer's report and the delivery log never touch stdout. The only lines printed are the operator's vocabulary above. | the row job's step shape |
+| **Details in the target repository.** The report becomes the sync PR's body; a failure's log tails become one reused `[repo-platform] sync failed` issue there. Both are exactly as private as the repository. | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) |
+
+The same job runs for public and private targets: nothing is conditional on visibility except the report's `Visibility` cell.
+
+What a run still shows:
+
+- `plan: <N> rows` and one `row <i>: ...` line per row.
+- The build commit the run ships and its stamped main commit: those name THIS repository's builds, not a target.
+- A step's exit status, and the red step's own error when a row failed before its target was resolved (nothing target-derived exists yet at that point).
+- The plan job's selection line, which names public repositories in the clear and counts the private ones.
+
+The settings apply ([settings-repos.yml](../.github/workflows/settings-repos.yml)) keeps its own model: github-settings-as-code's `private-repos: redact` placeholders inside the apply, and a report issue in the target for a redacted target's full report ([settings.md](settings.md)).
+
+Limits, stated plainly:
+
+- Run logs from before this model still contain slugs; delete old runs if that matters.
+- The masker is substring-based, so a private repository's bare name is registered only from four characters (masking `api` would garble every innocent occurrence of those letters); the file-and-target rules do not depend on the mask.
+- Inside one row job, an innocent occurrence of the repository's name (a dependency sharing it) renders as `***` too. Cosmetic, and scoped to that job.
+- Mask registration is a snapshot: a repository renamed while its row runs surfaces under its new name, which no mask covers.
+- The `repo=` input typed into a dispatch stays off the log: the plan reads it from the event payload, never from step env, and refusals count entries instead of quoting them.
+- The failure issue and the PR body are write-forward: a report delivered while the repository was private stays in the issue's edit history forever. Flipping a repository public publishes it; delete the report issue before a deliberate flip.
+- The [pages module](pages.md) publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.
+
 ### Cutover
 
-A repository still registered the old way (`.repo-platform.yml` holding only `modules`, its render recorded in `.github/.copier-answers.yml`) is converted by the writer's `--cutover true` flag ([sync/writer/cutover.ts](../.github/scripts/sync/writer/cutover.ts)) before the registration is read, once:
+A repository still registered the old way (`.repo-platform.yml` holding only `modules`, its files recorded in `.github/.copier-answers.yml`) is converted by the writer's `--cutover true` flag ([sync/writer/cutover.ts](../.github/scripts/sync/writer/cutover.ts)) before the registration is read, once:
 
 | Written | From |
 | --- | --- |
