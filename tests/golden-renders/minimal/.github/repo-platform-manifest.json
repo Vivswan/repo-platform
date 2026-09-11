@@ -5,8 +5,6 @@
     ".gitattributes": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "92725e53e7a53a282e02b075a56e2bf59424be384c53d7bf7d1116f1f8a9141e"},
     ".github/.copier-answers.yml": {"class": "managed", "hash": "b1b21779813683152c842df1b583ef443597a9225f58499bcaea955a03dada74"},
     ".github/CODEOWNERS": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "331b950ff34c80af626de9342204f19c460a6fa0ae94a646d6618be66934b302"},
-    ".github/CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
-    ".github/SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "fd896f287eeca0e7c328ec0a23021dbf6db268e1fb0198828d26e388407080ba"},
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/agents.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/copilot-instructions.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
@@ -28,7 +26,6 @@
     ".yamllint": {"class": "managed", "hash": "1e533293401ff3d0ee4662292995fd932d2998142ce594fb14e65a8d3a3140fb"},
     "AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "32c3174a415011dd8caead5d8424aa9d8305c51a8cbe6eb07ca2746025dd8019"},
     "CLAUDE.md": {"class": "managed", "hash": "a54ff182c7e8acf56acfd6e4b9c3ff41e2c41a31c9b211b2deb9df75d9a478f9"},
-    "CONTRIBUTING.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "9b9c271a190bcf64b6be1feef9466dd81e976a1edcf3fd996c1d50e5c416781b"},
     "LICENSE.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "0e0021c02bd052ae62b6c7632725dc38e703cec53fa6102fbc4e513ece827295"}
   }
 }

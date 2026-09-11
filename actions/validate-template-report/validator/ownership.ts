@@ -61,7 +61,6 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
   { path: ".github/.copier-answers.yml", kind: "header" },
   { path: ".github/agents.md", kind: "class-only" },
   { path: ".github/copilot-instructions.md", kind: "class-only" },
-  { path: ".github/CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
   {
     path: ".github/CODEOWNERS",
     kind: "region",
@@ -70,12 +69,6 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
   },
   { path: ".github/dependabot.yml", kind: "header" },
   { path: ".github/instructions/review.instructions.md", kind: "header" },
-  {
-    path: ".github/SECURITY.md",
-    kind: "region",
-    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-    end: "<!-- END REPO-PLATFORM MANAGED -->",
-  },
   { path: ".github/workflows/auto-assign.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   {
@@ -93,13 +86,6 @@ export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [
     end: "<!-- END REPO-PLATFORM MANAGED -->",
   },
   { path: "CLAUDE.md", kind: "class-only" },
-  {
-    path: "CONTRIBUTING.md",
-    kind: "region",
-    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-    end: "<!-- END REPO-PLATFORM MANAGED -->",
-    when: { publicOnly: true },
-  },
   {
     path: "LICENSE.md",
     kind: "region",

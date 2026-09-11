@@ -129,21 +129,6 @@ describe("ownership self-declarations", () => {
     expect(exitCode).toBe(0);
   });
 
-  test(".github/CODE_OF_CONDUCT.md needs the header only on public renders", () => {
-    const coc = { ".github/CODE_OF_CONDUCT.md": "# Contributor Covenant Code of Conduct\n" };
-    const publicRender = runValidator(coc);
-    expect(publicRender.exitCode).toBe(1);
-    expect(publicRender.stderr).toContain(".github/CODE_OF_CONDUCT.md: does not open");
-    // A private render never gets the managed file, so a repo-authored one
-    // is its own business.
-    const privateRender = runValidator({
-      ...coc,
-      ".github/.copier-answers.yml": `${BASELINE[".github/.copier-answers.yml"]}private: true\n`,
-    });
-    expect(privateRender.stderr).toBe("");
-    expect(privateRender.exitCode).toBe(0);
-  });
-
   test("LICENSE.md needs the region markers unless custom-license owns licensing", () => {
     const fleet = runValidator({ "LICENSE.md": "# License\n" });
     expect(fleet.exitCode).toBe(1);

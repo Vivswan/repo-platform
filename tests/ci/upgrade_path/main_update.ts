@@ -66,6 +66,7 @@ export const RETIRED_FILES: Record<string, string> = {
 export const LOCAL_NOTES = {
   settings: "# local settings note",
   securityTail: "Scope note: upgrade-local security tail",
+  contributingTail: "## Local contributing docs\n\nupgrade-local contributing tail",
   checks: "# local checks note",
   ci: "# local ci note",
   issueForm: "# local issue form note",
@@ -109,11 +110,13 @@ export function renderMainProject(fx: Fixture): MainProject {
  * custom-license module selected; retired files gain edits so their
  * deletion provably comes from the cleanup; src/keep_me.txt is
  * never-rendered content; .repo-platform.yml still names the pre-fold
- * modules the fold rung must drop; SECURITY.md's tail feeds the move rung. */
+ * modules the fold rung must drop; SECURITY.md's tail feeds the move rung
+ * and CONTRIBUTING.md's the removed-splits keep. */
 export function plantMainModifications(mp: MainProject): void {
   const at = (rel: string) => join(mp.project, rel);
   appendText(at(".github/settings.yml"), `${LOCAL_NOTES.settings}\n`);
   appendText(at("SECURITY.md"), `\n${LOCAL_NOTES.securityTail}\n`);
+  appendText(at("CONTRIBUTING.md"), `\n${LOCAL_NOTES.contributingTail}\n`);
   appendText(at(".github/workflows/checks.yml"), `${LOCAL_NOTES.checks}\n`);
   // A MANAGED file with a local trailing comment: copier's three-way merge
   // keeps it (the control), the managed delivery must replace the file.

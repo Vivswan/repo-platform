@@ -39,12 +39,9 @@ export const BASELINE: Record<string, string> = {
   ".editorconfig": `${HB}\nroot = true\n${HE}\n`,
   ".gitattributes": `${HB}\n* text=auto eol=lf\n${HE}\n`,
   ".github/CODEOWNERS": `${HB}\n* @vivswan\n${HE}\n`,
-  ".github/SECURITY.md": `${B}\n# Security policy\n${E}\n`,
-  ".github/CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
   ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
   ".typography-allow": MANAGED_HEADER,
   ".yamllint": `${MANAGED_HEADER}extends: default\n`,
-  "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
   "LICENSE.md": `${B}\n# License\n${E}\n`,
   "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
   "CLAUDE.md": "AGENTS.md\n",
@@ -80,14 +77,10 @@ export const MANIFEST = ".github/repo-platform-manifest.json";
 // pair is what tells the validator the answers file has been retired.
 export const V2_REGISTRATION =
   "# Generated once by repo-platform and repo-owned from then on.\nmodules: [uv]\nproject:\n  name: Demo\n  slug: demo\n  description: A demo\n";
-// What the cutover takes out of BASELINE: the answers file itself, and the
-// public-only files, which stand down once no answers record the
-// visibility (the writer retires both anyway).
-export const CUT_OVER_OMIT = [
-  ".github/.copier-answers.yml",
-  ".github/CODE_OF_CONDUCT.md",
-  "CONTRIBUTING.md",
-];
+// What the cutover takes out of BASELINE: the answers file itself. The
+// template renders no public-only file, so nothing else stands down once no
+// answers record the visibility (registration_and_gate.test.ts pins that).
+export const CUT_OVER_OMIT = [".github/.copier-answers.yml"];
 
 // Absence and provenance checks are STRICT (every build ships the
 // manifest, and the roster cross-check errors on any roster path the
@@ -121,10 +114,7 @@ export const MIRROR_BASE: MirrorEntry[] = [
   { path: ".gitignore", kind: "region", begin: HB, end: HE },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
-  { path: ".github/CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
-  { path: "CONTRIBUTING.md", kind: "region", begin: B, end: E, publicOnly: true },
   { path: "LICENSE.md", kind: "region", begin: B, end: E, withoutModule: "custom-license" },
-  { path: ".github/SECURITY.md", kind: "region", begin: B, end: E },
 ];
 export const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   bun: [

@@ -128,13 +128,13 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      ".github/SECURITY.md":
+      "AGENTS.md":
         `{"class": "split", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
-      ".github/SECURITY.md": `${region}tail\n`,
+      "AGENTS.md": `${region}tail\n`,
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("lacks the split grammar field every render stamps");
@@ -161,7 +161,7 @@ describe("ownership-manifest byte parity", () => {
     {
       reason: ".repo-platform.yml classed managed with a stale hash",
       path: ".repo-platform.yml",
-      content: `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: .github/SECURITY.md\n    targets: [copies/SECURITY.md]\n`,
+      content: `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: AGENTS.md\n    targets: [copies/AGENTS.md]\n`,
     },
     { reason: "any other unlisted path", path: "docs/pinned.md", content: "drifted\n" },
   ])("a drifted managed entry fails parity: $reason", ({ path, content }) => {

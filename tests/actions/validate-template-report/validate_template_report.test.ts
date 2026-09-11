@@ -439,7 +439,7 @@ describe("the action's reporting script", () => {
       {
         verdict: { kind: "findings", findings: drift, advisories: codeql },
         latestFindings:
-          "#### Errors (2)\n\n- ci.yml drifted\n- .github/SECURITY.md is missing - the template always generates it\n",
+          "#### Errors (2)\n\n- ci.yml drifted\n- AGENTS.md is missing - the template always generates it\n",
         latestAdvisories:
           "#### Advisories (2)\n\n- consider a codeql job\n- pin actions/setup-node\n",
       },
@@ -449,17 +449,17 @@ describe("the action's reporting script", () => {
         body: bodyOf(
           findingsOf(drift),
           FRESH,
-          `\n\n${codeql}${upcoming("- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node")}`,
+          `\n\n${codeql}${upcoming("- AGENTS.md is missing - the template always generates it\n- pin actions/setup-node")}`,
         ),
       },
     ],
     [
       "latest-only findings on a clean tree warn, comment, and still pass",
-      { latestFindings: "#### Errors (1)\n\n- .github/SECURITY.md is missing\n" },
+      { latestFindings: "#### Errors (1)\n\n- AGENTS.md is missing\n" },
       {
         integrity: "success",
         report: "findings",
-        body: bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing")),
+        body: bodyOf(PASSED, FRESH, upcoming("- AGENTS.md is missing")),
       },
     ],
     [

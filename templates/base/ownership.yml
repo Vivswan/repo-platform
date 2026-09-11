@@ -22,7 +22,6 @@ ownership:
   # render (copier preserves them via _preserve_symlinks).
   - { path: .github/agents.md, class: managed, headerless: true }
   - { path: .github/copilot-instructions.md, class: managed, headerless: true }
-  - { path: .github/CODE_OF_CONDUCT.md, class: managed }
   - path: .github/CODEOWNERS
     class: split
     grammar: managed-region
@@ -30,11 +29,6 @@ ownership:
     end: "# END REPO-PLATFORM MANAGED"
   - { path: .github/dependabot.yml, class: managed }
   - { path: .github/instructions/review.instructions.md, class: managed }
-  - path: .github/SECURITY.md
-    class: split
-    grammar: managed-region
-    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
-    end: "<!-- END REPO-PLATFORM MANAGED -->"
   # The identity starter the settings apply merges the fleet layers under:
   # repo-owned after the first render (docs/settings.md).
   - { path: .github/settings.yml, class: starter }
@@ -67,11 +61,6 @@ ownership:
     begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
     end: "<!-- END REPO-PLATFORM MANAGED -->"
   - { path: CLAUDE.md, class: managed, headerless: true }
-  - path: CONTRIBUTING.md
-    class: split
-    grammar: managed-region
-    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
-    end: "<!-- END REPO-PLATFORM MANAGED -->"
   - path: LICENSE.md
     class: split
     grammar: managed-region

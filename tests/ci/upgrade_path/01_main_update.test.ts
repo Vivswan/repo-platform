@@ -198,8 +198,8 @@ describeLeg("01 main update", () => {
       expect(readText(work("migrations.md"))).toContain("MODULE FOLD");
       // No rung held the PR for review on a routine update.
       expect(isEmptyFile(work("migrations-review.md"))).toBe(true);
-      // The pending rung moved the policy (tail included), so the split-file
-      // rebuild finds the previous copy at the new path.
+      // The pending rung moved the policy (tail included) to a path the new
+      // render never touches.
       expect(lexists(at("SECURITY.md"))).toBe(false);
       expect(readText(at(".github/SECURITY.md"))).toBe(securityBeforeMove);
       expect(readText(work("migrations.md"))).toContain("SECURITY POLICY MOVE");
@@ -241,7 +241,7 @@ describeLeg("01 main update", () => {
   );
 
   legTest(
-    "the updated project records the new build, carries the arrivals, and keeps every repo-owned edit",
+    "the updated project records the new build, carries the arrivals, keeps the repo-owned edits, and drops the retired health files",
     () => {
       // _commit is the new build commit's full sha (the stamp hook rewrites
       // copier's describe output from vcs_ref_hash).
@@ -284,26 +284,37 @@ describeLeg("01 main update", () => {
       expect(readYaml(at(".repo-platform.yml"))).toHaveProperty("modules");
       expect(readText(at("src/keep_me.txt"))).toBe(`${LOCAL_NOTES.keepMe}\n`);
       expect(readText(at(".github/workflows/checks.yml"))).toContain(LOCAL_NOTES.checks);
-      // _skip_if_exists must hold for the generated-once issue form.
-      expect(readText(at(".github/ISSUE_TEMPLATE/bug_report.yml"))).toContain(
-        LOCAL_NOTES.issueForm,
-      );
+      // The issue form left the render (the account's .github defaults serve
+      // the forms): its _skip_if_exists pattern keeps it off the retired list,
+      // but copier's update drops the tailored copy and this sync restores no
+      // starter, so the repository inherits the defaults.
+      expect(retiredPaths(mp.work)).not.toContain(".github/ISSUE_TEMPLATE/bug_report.yml");
+      expect(lexists(at(".github/ISSUE_TEMPLATE/bug_report.yml"))).toBe(false);
       // LICENSE.md opted out via custom-license survives the update, the
       // de-render, and the retired-file cleanup.
       expect(readText(at("LICENSE.md"))).toBe(`${LOCAL_NOTES.license}\n`);
-      // Public-only community files arrive via the update; CODE_OF_CONDUCT.md
-      // lands under .github/ and leaves the root through the re-render plus
-      // retired-file cleanup.
-      expect(existsSync(at("CONTRIBUTING.md"))).toBe(true);
-      expect(existsSync(at(".github/CODE_OF_CONDUCT.md"))).toBe(true);
-      expect(lexists(at("CODE_OF_CONDUCT.md"))).toBe(false);
-      // SECURITY.md's repository-owned tail rode the rung's move, and the
-      // rename must not read as a split-file deletion.
-      expect(existsSync(at(".github/SECURITY.md"))).toBe(true);
+      // The community health files left the template for the account's
+      // .github defaults: the managed CODE_OF_CONDUCT.md goes with the retired
+      // paths; CONTRIBUTING.md (split at HEAD) leaves with its repository-owned
+      // tail and the removed-splits hold names that tail, so the PR waits for
+      // review.
+      expect(retiredPaths(mp.work)).toContain(".github/CODE_OF_CONDUCT.md");
+      expect(lexists(at(".github/CODE_OF_CONDUCT.md"))).toBe(false);
+      expect(retiredPaths(mp.work)).toContain("CONTRIBUTING.md");
+      expect(lexists(at("CONTRIBUTING.md"))).toBe(false);
+      expect(manifestEntry(mp.project, "CONTRIBUTING.md")).toBeUndefined();
+      const removedSplits = readText(work("removed-splits.md"));
+      expect(removedSplits).toContain("`CONTRIBUTING.md`");
+      expect(removedSplits).toContain("upgrade-local contributing tail");
+      // SECURITY.md's repository-owned tail rode the rung's move to
+      // .github/SECURITY.md, a path neither render carries, so the update
+      // leaves the moved file as the repository's own (outside the manifest)
+      // and the rename must not read as a split-file deletion.
       expect(lexists(at("SECURITY.md"))).toBe(false);
+      expect(readText(at(".github/SECURITY.md"))).toBe(securityBeforeMove);
       expect(readText(at(".github/SECURITY.md"))).toContain(LOCAL_NOTES.securityTail);
-      expect(existsSync(work("removed-splits.md"))).toBe(true);
-      expect(readText(work("removed-splits.md"))).not.toContain("`SECURITY.md`");
+      expect(manifestEntry(mp.project, ".github/SECURITY.md")).toBeUndefined();
+      expect(removedSplits).not.toContain("`SECURITY.md`");
     },
   );
 

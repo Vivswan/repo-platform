@@ -5,8 +5,8 @@
 // migration-ladder ssot rule reads this table: a rung on the ladder with
 // no entry here has no upgrade-path case.
 
-import { renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { editText, insertAfterLine, insertBeforeLine, linesOf, replaceOnce } from "./edits";
 
 export interface PendingRung {
@@ -17,9 +17,51 @@ export interface PendingRung {
 
 export const MANIFEST_TEMPLATE = "template/.github/repo-platform-manifest.json.jinja";
 
-/** Wraps the manifest template's entry for `landedPath` in a module gate,
- * the way the pre-fold template rendered a module's entries. */
-function gateManifestEntry(oldTree: string, landedPath: string, module: string): void {
+/** The one managed-region marker pair the markdown split files use. */
+export const HTML_MARKERS = {
+  begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+  end: "<!-- END REPO-PLATFORM MANAGED -->",
+} as const;
+
+/** A split manifest entry on the HTML marker pair, as the template spells it. */
+export function htmlSplitEntry(landedPath: string): string {
+  return (
+    `"${landedPath}": {"class": "split", "grammar": "managed-region", ` +
+    `"begin": "${HTML_MARKERS.begin}", "end": "${HTML_MARKERS.end}", "hash": null}`
+  );
+}
+
+/** Adds an ungated manifest entry to a build tree's manifest template
+ * (before AGENTS.md's, the one every build carries). */
+export function plantManifestEntry(tree: string, entry: string): void {
+  editText(join(tree, MANIFEST_TEMPLATE), (text) =>
+    insertBeforeLine(
+      text,
+      (line) => line.includes('"AGENTS.md":'),
+      [`{%- set _ = entries.append('    ${entry}') -%}`],
+      `plant the old fixture's manifest entry ${entry.slice(0, 40)}`,
+    ),
+  );
+}
+
+/** Plants a file the current template no longer renders into a build tree,
+ * with its manifest entry. */
+export function plantTemplateFile(tree: string, rel: string, content: string, entry: string): void {
+  const path = join(tree, "template", rel);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+  plantManifestEntry(tree, entry);
+}
+
+/** The jinja condition a module's selection renders under. */
+export function selected(module: string): string {
+  return `'${module}' in modules`;
+}
+
+/** Wraps the manifest template's entry for `landedPath` in a jinja gate
+ * (a module's selection, a visibility), the way the old template rendered
+ * a conditional entry. */
+export function gateManifestEntry(oldTree: string, landedPath: string, condition: string): void {
   const needle = `"${landedPath}":`;
   editText(join(oldTree, MANIFEST_TEMPLATE), (text) =>
     insertBeforeLine(
@@ -27,11 +69,11 @@ function gateManifestEntry(oldTree: string, landedPath: string, module: string):
         text,
         (line) => line.includes(needle),
         ["{%- endif -%}"],
-        `gate the old fixture's manifest entry for ${landedPath} on ${module}`,
+        `gate the old fixture's manifest entry for ${landedPath} on ${condition}`,
       ),
       (line) => line.includes(needle),
-      [`{%- if '${module}' in modules -%}`],
-      `gate the old fixture's manifest entry for ${landedPath} on ${module}`,
+      [`{%- if ${condition} -%}`],
+      `gate the old fixture's manifest entry for ${landedPath} on ${condition}`,
     ),
   );
 }
@@ -67,21 +109,16 @@ const AGENTS_PATHS = [
 const SETTINGS_SYNC_WORKFLOW = ".github/workflows/settings-sync.yml";
 
 export const PENDING_RUNGS: Readonly<Record<string, PendingRung>> = {
-  // The build predates the security policy's move: SECURITY.md rendered
-  // and manifest-classed at the root.
+  // The build predates the security policy's move: a split SECURITY.md
+  // rendered and manifest-classed at the root (the template renders no
+  // security policy at all today; the account's .github defaults serve it).
   m0001_security_policy_to_github: {
     model(oldTree) {
-      renameSync(
-        join(oldTree, "template/.github/SECURITY.md.jinja"),
-        join(oldTree, "template/SECURITY.md.jinja"),
-      );
-      editText(join(oldTree, MANIFEST_TEMPLATE), (text) =>
-        replaceOnce(
-          text,
-          '".github/SECURITY.md"',
-          '"SECURITY.md"',
-          "model the pre-move manifest entry for the root SECURITY.md",
-        ),
+      plantTemplateFile(
+        oldTree,
+        "SECURITY.md.jinja",
+        `${HTML_MARKERS.begin}\n# Security policy\n${HTML_MARKERS.end}\n`,
+        htmlSplitEntry("SECURITY.md"),
       );
     },
   },
@@ -133,7 +170,7 @@ export const PENDING_RUNGS: Readonly<Record<string, PendingRung>> = {
         }
         return gated.join("\n");
       });
-      for (const path of AGENTS_PATHS) gateManifestEntry(oldTree, path, "agents");
+      for (const path of AGENTS_PATHS) gateManifestEntry(oldTree, path, selected("agents"));
       // Planted before the gates wrap the manifest entries, so it rides its own gate.
       writeFileSync(
         join(oldTree, "template", SETTINGS_SYNC_WORKFLOW),
@@ -148,9 +185,9 @@ export const PENDING_RUNGS: Readonly<Record<string, PendingRung>> = {
           "model the old fixture's manifest entry for settings-sync.yml beside auto-assign.yml's",
         ),
       );
-      gateManifestEntry(oldTree, ".github/workflows/auto-assign.yml", "auto-assign");
+      gateManifestEntry(oldTree, ".github/workflows/auto-assign.yml", selected("auto-assign"));
       for (const path of [".github/settings.yml", SETTINGS_SYNC_WORKFLOW]) {
-        gateManifestEntry(oldTree, path, "settings-sync");
+        gateManifestEntry(oldTree, path, selected("settings-sync"));
       }
     },
   },

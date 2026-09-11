@@ -24,7 +24,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -33,8 +32,16 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn";
 import { type TempDirs, tempDirs } from "../../shared/temp_dir";
-import { dropLinesContaining, editText, linesOf, replaceOnce } from "./edits";
-import { MANIFEST_TEMPLATE, PENDING_RUNGS } from "./rungs";
+import { dropLinesContaining, editText, insertAfterLine, linesOf } from "./edits";
+import {
+  gateManifestEntry,
+  HTML_MARKERS,
+  htmlSplitEntry,
+  MANIFEST_TEMPLATE,
+  PENDING_RUNGS,
+  plantTemplateFile,
+  selected,
+} from "./rungs";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
@@ -347,27 +354,58 @@ function assembleBuildTree(dest: string): void {
  * a retired interface. */
 function modelOldBuild(tree: string): void {
   const manifestTemplate = join(tree, MANIFEST_TEMPLATE);
-  // Before the community health files left the root: CODE_OF_CONDUCT.md
-  // rendered and manifest-classed there (a plain re-render plus
-  // retired-file cleanup moves it, no rung).
-  renameSync(
-    join(tree, "template/.github/CODE_OF_CONDUCT.md.jinja"),
-    join(tree, "template/CODE_OF_CONDUCT.md.jinja"),
-  );
+  // Before the community health files moved to the account's .github
+  // defaults: a managed CODE_OF_CONDUCT.md and a split CONTRIBUTING.md
+  // rendered on public repositories only, and an issue-form starter under
+  // the _skip_if_exists pattern rendered with the issue-templates module
+  // (the pre-move root SECURITY.md is m0001's model). Each file's gate is
+  // modelled as the old template generated it: an _exclude entry plus a
+  // manifest gate. Retirement plus the removed-splits hold carry the
+  // transition; no rung.
+  const form = ".github/ISSUE_TEMPLATE/bug_report.yml";
+  const gated: { rel: string; landed: string; content: string; entry: string; gate: string }[] = [
+    {
+      rel: ".github/CODE_OF_CONDUCT.md.jinja",
+      landed: ".github/CODE_OF_CONDUCT.md",
+      content:
+        "<!-- This file is managed by {{ github_username }}/repo-platform. -->\n# Code of conduct\n",
+      entry: '".github/CODE_OF_CONDUCT.md": {"class": "managed", "hash": null}',
+      gate: "not private",
+    },
+    {
+      rel: "CONTRIBUTING.md.jinja",
+      landed: "CONTRIBUTING.md",
+      content: `${HTML_MARKERS.begin}\n# Contributing\n${HTML_MARKERS.end}\n`,
+      entry: htmlSplitEntry("CONTRIBUTING.md"),
+      gate: "not private",
+    },
+    {
+      rel: form,
+      landed: form,
+      content: "name: Bug report\ndescription: Something isn't working\nbody: []\n",
+      entry: `"${form}": {"class": "starter"}`,
+      gate: selected("issue-templates"),
+    },
+  ];
+  for (const file of gated) {
+    plantTemplateFile(tree, file.rel, file.content, file.entry);
+    gateManifestEntry(tree, file.landed, file.gate);
+  }
+  // The generator anchors a root-level exclude with a leading slash.
+  const excludePattern = (landed: string): string => (landed.includes("/") ? landed : `/${landed}`);
   editText(join(tree, "copier.yml"), (text) =>
-    replaceOnce(
-      text,
-      "%}.github/CODE_OF_CONDUCT.md{%",
-      "%}/CODE_OF_CONDUCT.md{%",
-      "point the old fixture's CODE_OF_CONDUCT.md exclude at the root path",
-    ),
-  );
-  editText(manifestTemplate, (text) =>
-    replaceOnce(
-      text,
-      '".github/CODE_OF_CONDUCT.md"',
-      '"CODE_OF_CONDUCT.md"',
-      "model the pre-move manifest entry for the root CODE_OF_CONDUCT.md",
+    insertAfterLine(
+      insertAfterLine(
+        text,
+        (line) => line === "_skip_if_exists:",
+        [`  - ${dirname(form)}/*.yml`],
+        "model the old fixture's issue-form skip pattern",
+      ),
+      (line) => line.startsWith("  # BEGIN GENERATED: conditional-excludes"),
+      gated.map(
+        (file) => `  - "{% if not (${file.gate}) %}${excludePattern(file.landed)}{% endif %}"`,
+      ),
+      "model the old fixture's community health file gates",
     ),
   );
   for (const [id, rung] of Object.entries(PENDING_RUNGS)) {

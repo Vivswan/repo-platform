@@ -58,22 +58,22 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      ".github/SECURITY.md":
+      "AGENTS.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const sidesEdited = runValidator({
       [MANIFEST]: manifestOf(entries),
-      ".github/SECURITY.md": `repo-owned preamble, freely edited\n${region}repo-owned tail, freely edited\n`,
+      "AGENTS.md": `repo-owned preamble, freely edited\n${region}repo-owned tail, freely edited\n`,
     });
     expect(sidesEdited.stderr).toBe("");
     expect(sidesEdited.exitCode).toBe(0);
     const regionEdited = runValidator({
       [MANIFEST]: manifestOf(entries),
-      ".github/SECURITY.md": `${B}\n# Security, reworded\n${E}\ntail\n`,
+      "AGENTS.md": `${B}\n# Security, reworded\n${E}\ntail\n`,
     });
     expect(regionEdited.exitCode).toBe(1);
-    expect(regionEdited.stderr).toContain(".github/SECURITY.md: its managed region does");
+    expect(regionEdited.stderr).toContain("AGENTS.md: its managed region does");
   });
 
   test("an unstamped managed entry is an error naming the stamp hook", () => {
@@ -286,20 +286,7 @@ describe("ownership-manifest byte parity", () => {
   // One condition judges a roster-covered entry whose render condition is
   // off (the path is covered by SOME render, not this one): such an entry
   // cannot come from the template, so it is manifest drift.
-  const PRIVATE_ANSWERS = ANSWERS("private: true\n");
   test.each<{ reason: string; path: string; tree: Record<string, string> }>([
-    {
-      reason: "a public-only file (CONTRIBUTING.md) listed on a private render",
-      path: "CONTRIBUTING.md",
-      tree: {
-        ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-        [MANIFEST]: manifestOf({
-          ...stampedBaseline(),
-          ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(PRIVATE_ANSWERS)}"}`,
-          "CONTRIBUTING.md": splitEntry("managed-region", B, E, "a".repeat(64)),
-        }),
-      },
-    },
     {
       reason:
         "the fleet LICENSE.md listed with custom-license selected (the repo owns its license)",
@@ -346,10 +333,7 @@ describe("ownership-manifest byte parity", () => {
       ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
       ".typography-allow": `${MANAGED_HEADER}`,
       ".yamllint": `${MANAGED_HEADER}extends: default\n`,
-      ".github/CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
-      "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
       "LICENSE.md": `${B}\n# License\n${E}\n`,
-      ".github/SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
       ".github/instructions/review.instructions.md":
         '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review rules\n',
@@ -379,7 +363,7 @@ describe("ownership-manifest byte parity", () => {
 
   // One roster cross-check condition judges a region entry's present
   // metadata: begin, end, and grammar must each match the DECLARED pair
-  // (.github/SECURITY.md's is the HTML form), or parity would cover a skewed
+  // (AGENTS.md's is the HTML form), or parity would cover a skewed
   // region. Each row's hash matches the region ITS OWN pair slices, so
   // parity is not what reports the disagreement.
   test.each([
@@ -407,8 +391,8 @@ describe("ownership-manifest byte parity", () => {
     "split metadata disagreeing with the declared pair fails the cross-check: $reason",
     ({ entry, body }) => {
       const { exitCode, stderr } = runValidator({
-        [MANIFEST]: manifestOf({ ...stampedBaseline(), ".github/SECURITY.md": entry }),
-        ".github/SECURITY.md": body,
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), "AGENTS.md": entry }),
+        "AGENTS.md": body,
       });
       expect(exitCode).toBe(1);
       expect(stderr).toContain(
@@ -421,13 +405,13 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      ".github/SECURITY.md":
+      "AGENTS.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
-      ".github/SECURITY.md": `${region}repo tail\n`,
+      "AGENTS.md": `${region}repo tail\n`,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
