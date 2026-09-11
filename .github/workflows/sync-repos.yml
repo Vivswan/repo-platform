@@ -44,8 +44,8 @@ on:
   # The opt-in path: post-green.yml's sync-fleet leg calls this workflow
   # from the merge's CI run. Named `repos`, not `repo`, on purpose - the
   # dispatch input may be a private slug and never rides in step env,
-  # while this value is text off a public main commit and is passed as
-  # ONLY_REPO below. The dispatch-only `manual` keeps its default here.
+  # while this value is public text off the merged PRs of a main range and
+  # is passed as ONLY_REPO below. The dispatch-only `manual` keeps its default here.
   workflow_call:
     inputs:
       repos:
@@ -137,8 +137,8 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/discover_repos.ts
 
-      # ONLY_REPO carries only the workflow_call scope (public text off a
-      # main commit; empty on cron and dispatch runs). The typed dispatch
+      # ONLY_REPO carries only the workflow_call scope (public text off the
+      # merged PRs of a main range; empty on cron and dispatch runs). The typed dispatch
       # input never rides here: it may be a private slug, and the runner
       # prints step env values into this public log - the script reads it
       # from the event payload instead.

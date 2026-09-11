@@ -103,10 +103,11 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
 
-  # The merged PRs' opt-in to an immediate fleet sync, read off every commit
-  # since the last published build (fleet_sync_marker.ts) and handed to
-  # sync-fleet. State-shaped: mutates nothing; the range covers the merges
-  # whose runs this run evicted. A bad directive fails the leg on the judged
+  # The merged PRs' opt-in to an immediate fleet sync, read off the merged
+  # pull request of every commit since the last published build (the squash
+  # commit carries the title alone; a direct push is read from its message:
+  # fleet_sync_marker.ts) and handed to sync-fleet. State-shaped: mutates
+  # nothing; the range covers the merges whose runs this run evicted. A bad directive fails the leg on the judged
   # commit only; an older one already failed its own run and warns here.
   read-directives:
     if: github.event_name != 'workflow_dispatch'
@@ -114,6 +115,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       armed: ${{ steps.directives.outputs.armed }}
       repos: ${{ steps.directives.outputs.repos }}
@@ -134,6 +136,7 @@ jobs:
       - name: Read the directives blocks since the last published green main
         id: directives
         env:
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.sha }}
           BEFORE_SHA: ${{ inputs.before }}
         run: bun .github/scripts/fleet/fleet_sync_marker.ts

@@ -744,9 +744,12 @@ jobs:
       needs.all-green.result == 'success' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
+    # The ceiling for every post-green.yml job (the caller-ceilings ssot
+    # rule): pull-requests read is read-directives' merged-PR lookup.
     permissions:
       contents: read
       checks: read
+      pull-requests: read
     uses: ./.github/workflows/post-green.yml
     with:
       sha: ${{ github.sha }}

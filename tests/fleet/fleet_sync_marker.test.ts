@@ -1,6 +1,7 @@
 // The directives grammar as one table of whole messages and FULL parse
-// results; the main() rows run the script on scratch clones and assert the
-// whole outcome (exit code, GITHUB_OUTPUT, every log line).
+// results; the main() rows run the script on scratch clones, with `gh`
+// stubbed to answer each commit's pull request lookup from a file, and
+// assert the whole outcome (exit code, GITHUB_OUTPUT, every log line).
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,6 +9,7 @@ import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
+import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -17,7 +19,8 @@ const SUBJECT = "feat: ship the thing (#12)";
 const PROSE = "## How\n\nThe thing ships.\n\n## Proof\n\n- bun run check green";
 const TRAILERS = "Co-authored-by: A <a@x.test>\nSigned-off-by: B <b@x.test>";
 
-/** A squash-merge message: the subject, then each paragraph in order. */
+/** A message as the reader sees it (a pull request's title and body, or a direct push's commit
+ *  message): the subject, then each paragraph in order. */
 function message(...paras: string[]): string {
   return [SUBJECT, ...paras].join("\n\n");
 }
@@ -126,7 +129,7 @@ describe("parseDirectives", () => {
       expected: FLEET,
     },
     {
-      reason: "git trailers GitHub appends on squash follow the body as before",
+      reason: "trailer lines at the end of a body change nothing",
       body: message("[fleet-sync: all] every repo's ci.yml changed", PROSE, TRAILERS),
       expected: FLEET,
     },
@@ -293,7 +296,7 @@ describe("parseDirectives", () => {
     },
     {
       reason:
-        "the same span wrapped over three lines (GitHub's 72-column squash body) is still one code span",
+        "the same span wrapped over three lines (a 72-column-wrapped commit message) is still one code span",
       body: message(
         PROSE,
         '``::error::33fa6d9769d2: "[fleet-sync]": syncing every repo needs a\njustification; use `public` unless private repos need this now - write\n[fleet-sync: all] <why every repo needs this now>``',
@@ -860,6 +863,59 @@ describe("main", () => {
   const ordered = commit(message("[fleet-sync: Vivswan/a, private]", PROSE));
   const mention = commit(message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."));
 
+  // The squash commits of the current fleet policy carry the title alone: the block lives in the
+  // pull request the stub answers with. A commit without a file answers `[]` (a direct push).
+  const pulls = join(root, "pulls");
+  mkdirSync(pulls);
+  const gh = argvStub(root, "gh", [
+    'path="$2"; sha="${path#repos/*/commits/}"; sha="${sha%/pulls}"',
+    `if [ -f "${pulls}/$sha.json" ]; then cat "${pulls}/$sha.json"; else printf '[]'; fi`,
+  ]);
+  type Pull = {
+    number: number;
+    title: string;
+    body: string | null;
+    merge_commit_sha: string | null;
+  };
+  function squash(title: string, answer: (sha: string) => Pull[]): string {
+    const sha = commit(title);
+    writeFileSync(join(pulls, `${sha}.json`), JSON.stringify(answer(sha)));
+    return sha;
+  }
+  const viaPull = squash("feat: title-only squash (#40)", (sha) => [
+    {
+      number: 40,
+      title: "feat: title-only squash (#40)",
+      body: `[fleet-sync: public]\n\n${PROSE}`,
+      merge_commit_sha: sha,
+    },
+  ]);
+  const twoPulls = squash("feat: reopened after a closed attempt (#41)", (sha) => [
+    {
+      number: 39,
+      title: "feat: first attempt",
+      body: `[fleet-sync: all] the wrong one\n\n${PROSE}`,
+      merge_commit_sha: "0123456789abcdef0123456789abcdef01234567",
+    },
+    {
+      number: 41,
+      title: "feat: reopened after a closed attempt (#41)",
+      body: `\`[fleet-sync: Vivswan/c]\`\n\n${PROSE}`,
+      merge_commit_sha: sha,
+    },
+  ]);
+  const emptyPull = squash("chore: no body (#42)", (sha) => [
+    { number: 42, title: "chore: no body (#42)", body: null, merge_commit_sha: sha },
+  ]);
+  const redPull = squash("feat: a typo in the block (#43)", (sha) => [
+    {
+      number: 43,
+      title: "feat: a typo in the block (#43)",
+      body: `[fleet-sync]\n\n${PROSE}`,
+      merge_commit_sha: sha,
+    },
+  ]);
+
   /** A clone whose origin carries main plus, when `stamp` is given, a
    *  build branch of one orphan commit stamped like publish.ts stamps. */
   function cloneWithBuild(name: string, stamp: string | null): string {
@@ -892,15 +948,30 @@ describe("main", () => {
   const publishedWhole = cloneWithBuild("published-whole", whole);
   const publishedMixed = cloneWithBuild("published-mixed", mixed);
 
-  function run(cwd: string, sha: string, before: string): BoundedSpawnResult & { output: string } {
+  function run(
+    cwd: string,
+    sha: string,
+    before: string,
+    extra: Record<string, string> = {},
+  ): BoundedSpawnResult & { output: string } {
     const outputFile = join(root, `out-${Bun.hash(cwd + sha + before).toString(16)}.txt`);
     writeFileSync(outputFile, "");
     const proc = boundedSpawnSync(["bun", script], {
       cwd,
-      env: { ...process.env, SOURCE_SHA: sha, BEFORE_SHA: before, GITHUB_OUTPUT: outputFile },
+      env: {
+        ...process.env,
+        PATH: `${gh.bin}:${process.env.PATH}`,
+        GH_TOKEN: "t",
+        GITHUB_REPOSITORY: "o/r",
+        SOURCE_SHA: sha,
+        BEFORE_SHA: before,
+        GITHUB_OUTPUT: outputFile,
+        ...extra,
+      },
     });
     return { ...proc, output: readFileSync(outputFile, "utf-8") };
   }
+  const lookup = (sha: string) => ["gh", "api", `repos/o/r/commits/${sha}/pulls`];
 
   const short = (sha: string) => sha.slice(0, 12);
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
@@ -1136,6 +1207,59 @@ describe("main", () => {
       expect(channel).not.toContain("SecretOrg");
       expect(channel).not.toContain("PrivateRepo");
     }
+  });
+
+  test.each([
+    {
+      reason: "a title-only squash commit: the block is read from its pull request's body",
+      sha: viaPull,
+      exitCode: 0,
+      output: "armed=true\nrepos=public\n",
+      stdout: (base: string, sha: string) =>
+        lines(pushAlone(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
+    },
+    {
+      reason: "two pull requests list the commit: the one it is the merge of wins",
+      sha: twoPulls,
+      exitCode: 0,
+      output: "armed=true\nrepos=vivswan/c\n",
+      stdout: (base: string, sha: string) =>
+        lines(pushAlone(sha, base), directive(sha, "vivswan/c"), syncing(base, sha, "vivswan/c")),
+    },
+    {
+      reason: "a pull request with a null body carries no block",
+      sha: emptyPull,
+      exitCode: 0,
+      output: "armed=false\n",
+      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+    },
+    {
+      reason: "a malformed block in the pull request's body is red the same way",
+      sha: redPull,
+      exitCode: 1,
+      output: "",
+      stdout: (base: string, sha: string) =>
+        lines(pushAlone(sha, base), `::error::${short(sha)}: "[fleet-sync]": ${NEEDS_REASON}`),
+    },
+  ])("the pull request as the source, $reason", ({ sha, exitCode, output, stdout }) => {
+    const before = git(unpublished, ["rev-parse", `${sha}~1`]);
+    const seen = gh.calls().length;
+    const result = run(unpublished, sha, before);
+    expect(result).toEqual({ exitCode, output, stdout: stdout(before, sha), stderr: "" });
+    expect(gh.calls().slice(seen)).toEqual([lookup(sha)]);
+  });
+
+  test("a failed pull request lookup is red for the whole range, never a quiet armed=false", () => {
+    // The stamped range is listA then prose1; the first lookup fails and names its commit.
+    const seen = gh.calls().length;
+    const result = run(publishedSeed, prose1, listA, { STUB_EXIT: "22" });
+    expect(result).toEqual({
+      exitCode: 1,
+      output: "",
+      stdout: `::error::${short(listA)}: repos/o/r/commits/${listA}/pulls could not be read (gh api exit 22)\n`,
+      stderr: "",
+    });
+    expect(gh.calls().slice(seen)).toEqual([lookup(listA)]);
   });
 
   test("a truncated judged sha is refused with no output line", () => {
