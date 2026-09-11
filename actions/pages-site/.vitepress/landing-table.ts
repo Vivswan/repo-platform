@@ -119,8 +119,9 @@ const ATTRIBUTE_ESCAPES: Record<string, string> = {
   ">": "&gt;",
 };
 
-/** One pass over the four characters a double-quoted attribute value cannot
- *  carry raw. */
+/** One pass over the four characters HTML attribute values are conventionally
+ *  escaped: the quote that would end the value, the ampersand that could start
+ *  a character reference, and the angle brackets. */
 function escapeAttribute(value: string): string {
   return value.replace(/[&"<>]/g, (char) => ATTRIBUTE_ESCAPES[char]);
 }

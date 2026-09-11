@@ -80,30 +80,43 @@ describe("actions/semgrep", () => {
   });
 
   // The drop step against a SARIF copy: a result carrying a suppression
-  // (semgrep's shape for a nosemgrep-marked finding) leaves; the rest stay.
-  const drop = (results: object[] | null) => {
+  // (semgrep's shape for a nosemgrep-marked finding) leaves; everything
+  // else in the document (version, tool, invocations, every run) stays.
+  const suppressed = (ruleId: string) => ({ ruleId, suppressions: [{ kind: "inSource" }] });
+  const sarifWith = (firstRunResults: object[]) => ({
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: { driver: { name: "Semgrep OSS", semanticVersion: "1.0.0", rules: [{ id: "r" }] } },
+        invocations: [{ executionSuccessful: true, toolExecutionNotifications: [] }],
+        results: firstRunResults,
+      },
+      {
+        tool: { driver: { name: "second" } },
+        results: [{ ruleId: "s" }, suppressed("s")],
+      },
+    ],
+  });
+  const drop = (sarif: object | null) => {
     const root = temp.dir("semgrep-drop-");
-    if (results !== null) {
-      writeFileSync(join(root, "semgrep.sarif"), JSON.stringify({ runs: [{ results }] }));
-    }
+    const path = join(root, "semgrep.sarif");
+    if (sarif !== null) writeFileSync(path, JSON.stringify(sarif));
     const run = runBashStep(stepNamed(action, "Drop the marked findings from the SARIF"), {
       cwd: root,
       root,
       env: { RUNNER_TEMP: root },
     });
-    const sarif = join(root, "semgrep.sarif");
-    return {
-      run,
-      kept: existsSync(sarif) ? JSON.parse(readFileSync(sarif, "utf-8")).runs[0].results : null,
-    };
+    return { run, kept: existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : null };
   };
 
-  test("drop: a suppressed result leaves the SARIF, an unsuppressed or empty-suppressions one stays", () => {
-    const marked = { ruleId: "r", suppressions: [{ kind: "inSource" }] };
+  test("drop: the suppressed results leave every run, the rest of the document survives whole", () => {
     const plain = { ruleId: "r" };
     const unsuppressed = { ruleId: "r", suppressions: [] };
-    const { run, kept } = drop([marked, plain, unsuppressed, marked]);
-    expect([run.exitCode, kept]).toEqual([0, [plain, unsuppressed]]);
+    const { run, kept } = drop(sarifWith([suppressed("r"), plain, unsuppressed, suppressed("r")]));
+    const expected = sarifWith([plain, unsuppressed]);
+    expected.runs[1].results = [{ ruleId: "s" }];
+    expect([run.exitCode, kept]).toEqual([0, expected]);
   });
 
   test("drop: no SARIF (a scan that never wrote one) passes and writes nothing", () => {
