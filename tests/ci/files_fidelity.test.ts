@@ -189,6 +189,27 @@ function goldenText(selection: Selection, path: string): string {
   return reworded(readFileSync(join(RENDERS, selection, path), "utf-8"));
 }
 
+const NO_DISPATCH =
+  "the filed issue is no longer handed to auto-assign by a token dispatch (the fuzz-issue action assigns the owner at creation);" +
+  " actions: write goes, issues: write moves to the filing job";
+
+const ISSUES_WRITE =
+  "    # issues: write lets the fuzz-issue action file and close the tracking\n" +
+  "    # issue. The action assigns the owner at creation, so nothing else runs.\n";
+
+/** `golden` without the dispatch step (whose `if:` starts with `guard`)
+ *  and without the step id only that step read. */
+function withoutDispatch(golden: string, guard: string): string {
+  const step =
+    /\n {6}# A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign\.\n(?: {6}.*\n)+/.exec(
+      golden,
+    );
+  if (step === null || !step[0].includes(`if: ${guard}steps.file-issue.outputs.issue-number`)) {
+    throw new Error("the golden carries no auto-assign dispatch step");
+  }
+  return golden.replace(step[0], "").replace("        id: file-issue\n", "");
+}
+
 const KNOWN: Record<string, Known> = {
   ".gitignore": {
     selections: SELECTIONS,
@@ -221,6 +242,29 @@ const KNOWN: Record<string, Known> = {
       golden.replace(
         "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n      - name: No repository checks yet",
         "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n\n      - name: No repository checks yet",
+      ),
+  },
+  ".github/workflows/nightly-fuzz.yml": {
+    selections: ["all-modules"],
+    reason: NO_DISPATCH,
+    expected: (golden) =>
+      withoutDispatch(golden, "failure() && ").replace(
+        "# issues: write lets the fuzz-issue action file/close the tracking issue;\n" +
+          "# actions: write lets the failure path dispatch auto-assign at it.\n" +
+          "permissions:\n  contents: read\n  issues: write\n  actions: write\n\njobs:\n  fuzz:\n    runs-on: ubuntu-latest\n",
+        "permissions:\n  contents: read\n\njobs:\n  fuzz:\n    runs-on: ubuntu-latest\n" +
+          `${ISSUES_WRITE}    permissions:\n      contents: read\n      issues: write\n`,
+      ),
+  },
+  ".github/workflows/nightly.yml": {
+    selections: ["all-modules"],
+    reason: NO_DISPATCH,
+    expected: (golden) =>
+      withoutDispatch(golden, "").replace(
+        "    # issues: write lets the fuzz-issue action file/close the tracking issue;\n" +
+          "    # actions: write lets the red path dispatch auto-assign at it.\n" +
+          "    permissions:\n      issues: write\n      actions: write\n",
+        `${ISSUES_WRITE}    permissions:\n      issues: write\n`,
       ),
   },
   "AGENTS.md": {
