@@ -182,8 +182,9 @@ function soleLocalCallerProblem(callers: WorkflowCaller[], expectedSite: string)
  *  (allGreenGateMismatches judges that edge). A second caller would run
  *  every post-green leg - the fleet writers included - behind whatever
  *  that workflow's trigger is. Its only other way in, a workflow_dispatch,
- *  runs the publish leg alone (tests/build-branches/publish_wiring.test.ts
- *  pins that) behind publish.ts's own in-script gate. */
+ *  runs the two delivery legs alone, publish-build and move-stable
+ *  (tests/build-branches/publish_wiring.test.ts pins that), each behind its
+ *  script's own in-script gate. */
 export function postGreenCallerMismatches(
   workflows: Record<string, string>,
   owner: string,

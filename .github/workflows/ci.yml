@@ -470,7 +470,9 @@ jobs:
   # called workflow's publish job holds the build-branches-publish lane (a
   # lane this caller must never hold, or the call deadlocks against
   # itself), and ci.yml's run-level concurrency already serializes main
-  # runs, so no caller lane is needed.
+  # runs, so no caller lane is needed. contents: write is the ceiling the
+  # called move-stable job needs for its tag push; every other called job
+  # declares read.
   post-green:
     needs: [all-green]
     if: >-
@@ -480,7 +482,7 @@ jobs:
     # The ceiling for every post-green.yml job (the caller-ceilings ssot
     # rule): pull-requests read is read-directives' merged-PR lookup.
     permissions:
-      contents: read
+      contents: write
       checks: read
       pull-requests: read
     uses: ./.github/workflows/post-green.yml

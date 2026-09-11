@@ -3,13 +3,13 @@
 // SOURCE_SHA must track the sha input on both ways in (github.sha in
 // ci.yml's post-green caller - same run, so it IS the judged commit - and
 // the operator's sha on a dispatch, never a re-derived ref), a dispatch
-// must run the publish leg ALONE, the single publisher lane must stay one
-// literal repo-scoped group (and NO lane on the caller), and a publish
-// must COMMIT exactly when the composed tree changed or the tip's stamp
-// needs recovery - never an empty commit in normal operation (no
-// content-free fleet _commit bumps), never a silent skip that strands a
-// broken stamp (the stamp-health guard keeps dispatch as a real escape
-// hatch).
+// must run the two delivery legs (publish-build and move-stable) ALONE,
+// each delivery lane must stay one literal repo-scoped group (and NO lane
+// on the caller), and a publish must COMMIT exactly when the composed tree
+// changed or the tip's stamp needs recovery - never an empty commit in
+// normal operation (no content-free fleet _commit bumps), never a silent
+// skip that strands a broken stamp (the stamp-health guard keeps dispatch
+// as a real escape hatch).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -97,14 +97,29 @@ function evaluateCondition(expression: string, context: Record<string, string>):
 /** The jobs that run under `event`, by GitHub's rules: a job's condition
  * is evaluated against its needs' results (an unrun need is `skipped`
  * with empty outputs), and a condition without a status function carries
- * the implicit success() - every need must have run. `outputs` stands in
- * for the step outputs of every job that ran. */
+ * the implicit success(), read over the WHOLE ancestry: "a failure or skip
+ * applies to all jobs in the dependency chain from the point of failure
+ * or skip onwards", through a job that a status function let continue.
+ * `outputs` stands in for the step outputs of every job that ran. */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
+  // Jobs that run and go red: their dependents see result failure and
+  // empty outputs, and only a status-function condition lets them run.
+  failed: string[] = [],
 ): string[] {
   const ran = new Set<string>();
+  const ancestors = (id: string): Set<string> => {
+    const seen = new Set<string>();
+    const stack = [...(jobs[id].needs ?? [])];
+    for (let need = stack.pop(); need !== undefined; need = stack.pop()) {
+      if (seen.has(need)) continue;
+      seen.add(need);
+      stack.push(...(jobs[need].needs ?? []));
+    }
+    return seen;
+  };
   const pending = Object.keys(jobs);
   while (pending.length > 0) {
     const id = pending.shift() as string;
@@ -114,18 +129,23 @@ function jobsRunning(
       pending.push(id);
       continue;
     }
+    if (failed.includes(id)) continue;
     const context: Record<string, string> = { "github.event_name": event };
     for (const need of needs) {
-      context[`needs.${need}.result`] = ran.has(need) ? "success" : "skipped";
+      context[`needs.${need}.result`] = ran.has(need)
+        ? "success"
+        : failed.includes(need)
+          ? "failure"
+          : "skipped";
       for (const [name, value] of Object.entries(outputs)) {
         context[`needs.${need}.outputs.${name}`] = ran.has(need) ? value : "";
       }
     }
     const condition = job.if ?? "";
     const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
-    const needsRan = needs.every((need) => ran.has(need));
+    const chainRan = [...ancestors(id)].every((need) => ran.has(need));
     const passes = condition === "" || evaluateCondition(condition, context);
-    if (passes && (statusFunction || needsRan)) ran.add(id);
+    if (passes && (statusFunction || chainRan)) ran.add(id);
   }
   return [...ran];
 }
@@ -174,7 +194,7 @@ describe("post-green publish wiring", () => {
     }
   });
 
-  test("a dispatch runs the publish leg ALONE; the call runs every leg", () => {
+  test("a dispatch runs the two delivery legs ALONE; the call runs every leg", () => {
     // Evaluated by GitHub's own rules on the parsed job graph (a
     // condition without a status function implies success() over the
     // needs; an unrun need is skipped with empty outputs), so a reworded
@@ -182,18 +202,64 @@ describe("post-green publish wiring", () => {
     // whatever its spelling. The call arm is the moved control: with the
     // caller's push event and every output armed, every leg runs.
     const jobs = postGreenDoc.jobs;
-    expect(jobsRunning(jobs, "workflow_dispatch", { armed: "true" })).toEqual(["publish-build"]);
-    expect(jobsRunning(jobs, "push", { armed: "true" }).sort()).toEqual(Object.keys(jobs).sort());
+    const armed = { armed: "true", previous: "a".repeat(40) };
+    expect(jobsRunning(jobs, "workflow_dispatch", armed).sort()).toEqual([
+      "move-stable",
+      "publish-build",
+    ]);
+    expect(jobsRunning(jobs, "push", armed).sort()).toEqual(Object.keys(jobs).sort());
     // No directive skips the sync and nothing else: the settings apply
     // runs on every call, its targets never derived from the sync's.
-    expect(jobsRunning(jobs, "push", { armed: "false" }).sort()).toEqual([
+    expect(jobsRunning(jobs, "push", { ...armed, armed: "false" }).sort()).toEqual([
+      "move-stable",
       "publish-build",
       "read-directives",
       "settings-fleet",
     ]);
-    // And the publisher itself has no condition to get wrong.
-    expect(jobs["publish-build"].if).toBeUndefined();
-    expect(jobs["publish-build"].needs).toBeUndefined();
+    // A mover that moved nothing reports no base - a replay at the tag's own
+    // commit, or a re-run of this commit's jobs after a newer commit moved
+    // the tag past it - and the read still runs and syncs on its fallback
+    // base: re-running every job after a failed sync must recover it, and a
+    // newer run's range (exclusive at its base, which can be this commit)
+    // need not have held it. The mover has no word that stands the read
+    // down, so its condition reads none of the mover's outputs.
+    expect(jobsRunning(jobs, "push", { armed: "true", previous: "" }).sort()).toEqual(
+      Object.keys(jobs).sort(),
+    );
+    expect(jobs["read-directives"].if).not.toContain("needs.move-stable.outputs");
+    // A red mover (a lost lease) leaves the read on its fallback base
+    // instead of losing this commit's directive, and the sync it arms
+    // still runs: the publish and the opt-in are judged by name.
+    expect(jobsRunning(jobs, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
+      "publish-build",
+      "read-directives",
+      "settings-fleet",
+      "sync-fleet",
+    ]);
+    // That sync runs on the strength of sync-fleet's !cancelled() alone:
+    // the red mover is its ancestor through read-directives, so the
+    // implicit success() a bare condition carries would skip it, however
+    // green its direct needs. The mutant dropping the status function is
+    // red here, which is what proves the simulator reads the whole chain.
+    const mutant = structuredClone(jobs);
+    mutant["sync-fleet"].if = (mutant["sync-fleet"].if ?? "").replace("!cancelled() && ", "");
+    expect(mutant["sync-fleet"].if).not.toContain("cancelled()");
+    expect(jobsRunning(mutant, "push", { armed: "true" }, ["move-stable"]).sort()).toEqual([
+      "publish-build",
+      "read-directives",
+      "settings-fleet",
+    ]);
+    // The control for that failure model: a red publish still skips the sync.
+    expect(jobsRunning(jobs, "push", armed, ["publish-build"]).sort()).toEqual([
+      "move-stable",
+      "read-directives",
+      "settings-fleet",
+    ]);
+    // And the two delivery legs have no condition to get wrong.
+    for (const leg of ["publish-build", "move-stable"]) {
+      expect(jobs[leg].if).toBeUndefined();
+      expect(jobs[leg].needs).toBeUndefined();
+    }
   });
 
   test("post-green releases only on the gate's OWN green result, on a push to main", () => {
@@ -218,18 +284,60 @@ describe("post-green publish wiring", () => {
     const jobs = postGreenDoc.jobs;
     expect(Object.keys(jobs)).toEqual([
       "publish-build",
+      "move-stable",
       "read-directives",
       "sync-fleet",
       "settings-fleet",
     ]);
+    // move-stable's own verification is move_stable.ts's (main history,
+    // the all-green check at the sha, the lease). Its wiring: the sha
+    // input as the one source, the default token as the push credential
+    // (contents: write, under ci.yml's caller ceiling), a full-history
+    // checkout for the ancestry reads, and the one output the directives
+    // leg consumes.
+    const moveSteps = jobs["move-stable"].steps ?? [];
+    const moveStep = moveSteps.find((step) =>
+      (step.run ?? "").includes("post-green/move_stable.ts"),
+    );
+    if (moveStep === undefined) throw new Error("move-stable has no move_stable.ts step");
+    const moveCheckout = moveSteps.find((step) =>
+      (step.uses ?? "").startsWith("actions/checkout@"),
+    );
+    if (moveCheckout === undefined) throw new Error("move-stable has no checkout step");
+    expect({
+      id: moveStep.id,
+      env: moveStep.env,
+      checkout: moveCheckout.with,
+      permissions: (jobs["move-stable"] as unknown as { permissions: unknown }).permissions,
+      outputs: jobs["move-stable"].outputs,
+    }).toEqual({
+      id: "move",
+      env: { GH_TOKEN: "${{ github.token }}", SOURCE_SHA: "${{ inputs.sha }}" },
+      checkout: { "fetch-depth": 0 },
+      permissions: { contents: "write", checks: "read" },
+      outputs: {
+        previous: "${{ steps.move.outputs.previous }}",
+      },
+    });
+    // A called job cannot exceed its caller's grant, so ci.yml's post-green
+    // job carries the write ceiling the tag push needs.
+    const ci = parseYaml(ciYml) as {
+      jobs: Record<string, { permissions?: unknown }>;
+    };
+    expect(ci.jobs["post-green"].permissions).toEqual({
+      contents: "write",
+      checks: "read",
+    });
     // read-directives mutates nothing; it reads every commit since the last
     // published build (never a re-derived ref) into the two outputs
     // sync-fleet consumes. The whole wiring of that range read is pinned as
-    // one shape: the judged sha and the push's `before` (judged_range.ts's
+    // one shape: the judged sha and the base (the commit the tag named
+    // before this run moved it, else the push's `before` - judged_range.ts's
     // fallback base) as the step's env, the read token its pull request
-    // lookups need (the squash commit carries the title alone), and a
+    // lookups need (the squash commit carries the title alone), a
     // full-history checkout, since the stamped base can sit many commits
-    // below the judged one.
+    // below the judged one, and a condition that stands down for no mover
+    // result (the scenarios above).
     const readSteps = jobs["read-directives"].steps ?? [];
     const readStep = readSteps.find((step) =>
       (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
@@ -238,15 +346,19 @@ describe("post-green publish wiring", () => {
     const checkout = readSteps.find((step) => (step.uses ?? "").startsWith("actions/checkout@"));
     if (checkout === undefined) throw new Error("read-directives has no checkout step");
     expect({
+      needs: jobs["read-directives"].needs,
+      if: jobs["read-directives"].if,
       env: readStep.env,
       permissions: jobs["read-directives"].permissions,
       checkout: checkout.with,
       outputs: jobs["read-directives"].outputs,
     }).toEqual({
+      needs: ["move-stable"],
+      if: "github.event_name != 'workflow_dispatch' && !cancelled()",
       env: {
         GH_TOKEN: "${{ github.token }}",
         SOURCE_SHA: "${{ inputs.sha }}",
-        BEFORE_SHA: "${{ inputs.before }}",
+        BEFORE_SHA: "${{ needs.move-stable.outputs.previous || inputs.before }}",
       },
       permissions: { contents: "read", "pull-requests": "read" },
       checkout: { ref: "${{ inputs.sha }}", "fetch-depth": 0 },
@@ -261,10 +373,15 @@ describe("post-green publish wiring", () => {
     // and given the PAT the sync writes with.
     const syncFleet = jobs["sync-fleet"];
     expect(syncFleet.needs).toEqual(["publish-build", "read-directives"]);
-    expect(syncFleet.if).toBe("needs.read-directives.outputs.armed == 'true'");
+    expect(syncFleet.if).toBe(
+      "!cancelled() && needs.publish-build.result == 'success' && needs.read-directives.outputs.armed == 'true'",
+    );
     // The fleet's single-writer lane is held HERE (the raw group census
     // below cannot tell which job holds it).
-    expect(syncFleet.concurrency).toEqual({ group: "sync-repos", "cancel-in-progress": false });
+    expect(syncFleet.concurrency).toEqual({
+      group: "sync-repos",
+      "cancel-in-progress": false,
+    });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
     // The sync is handed THIS commit, never main's live HEAD: a refused
     // called scope names the judged commit (select_sync_repos.ts).
@@ -286,7 +403,10 @@ describe("post-green publish wiring", () => {
       "cancel-in-progress": false,
     });
     expect(settingsFleet.uses).toBe("./.github/workflows/settings-repos.yml");
-    expect(settingsFleet.with).toEqual({ repos: "all", sha: "${{ inputs.sha }}" });
+    expect(settingsFleet.with).toEqual({
+      repos: "all",
+      sha: "${{ inputs.sha }}",
+    });
     expect(settingsFleet.secrets).toEqual({
       REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
@@ -357,22 +477,31 @@ describe("post-green publish wiring", () => {
     });
   });
 
-  test("ONE publisher lane: a literal group on the publish job, and no lane on the caller", () => {
-    // The group must be a literal - NEVER derived from github.workflow,
+  test("ONE lane per delivery ref: a literal group on each delivery job, and no lane on the caller", () => {
+    // The groups must be literals - NEVER derived from github.workflow,
     // which inside a workflow_call'd workflow resolves to the CALLER's
-    // name and would split the lane between called and dispatched runs.
+    // name and would split a lane between called and dispatched runs.
     // ci.yml legitimately keys its RUN-level serialization on
     // github.workflow (a trigger workflow, never workflow_call'd).
     expect(postGreenDoc.jobs["publish-build"].concurrency).toEqual({
       group: "build-branches-publish",
       "cancel-in-progress": false,
     });
+    expect(postGreenDoc.jobs["move-stable"].concurrency).toEqual({
+      group: "stable-tag-move",
+      "cancel-in-progress": false,
+    });
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos", "settings-repos"]);
+    expect(groupsOf(postGreen)).toEqual([
+      "build-branches-publish",
+      "stable-tag-move",
+      "sync-repos",
+      "settings-repos",
+    ]);
     for (const group of groupsOf(postGreen)) {
       expect(group).not.toContain("github.workflow");
     }
-    // Publishers never cancel a running publish: an interrupted publish
+    // Delivery legs never cancel a running one: an interrupted publish
     // between commit and push is exactly the wedge the CAS exists for.
     expect(postGreen).not.toContain("cancel-in-progress: true");
     // No self-deadlock: ci.yml's post-green job must hold no job-level
@@ -381,7 +510,9 @@ describe("post-green publish wiring", () => {
     // serializes main runs) - and above all never the publisher lane the
     // called job waits for. Asserted structurally on the parsed job
     // (comments may NAME the lane while explaining this very rule).
-    const doc = parseYaml(ciYml) as { jobs: Record<string, Record<string, unknown>> };
+    const doc = parseYaml(ciYml) as {
+      jobs: Record<string, Record<string, unknown>>;
+    };
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
   });

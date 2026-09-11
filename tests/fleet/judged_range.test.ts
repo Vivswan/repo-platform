@@ -70,6 +70,12 @@ describe("resolveBase", () => {
   const unpublished = cloneWithBuild("unpublished", null);
   const publishedC1 = cloneWithBuild("published-c1", [c1]);
   const publishedC1C3 = cloneWithBuild("published-c1-c3", [c1, c3]);
+  const publishedC0C1 = cloneWithBuild("published-c0-c1", [c0, c1]);
+  // A later commit published after the judged one: its legs re-run against a tip stamped with a
+  // descendant, with and without the judged commit's own publish between.
+  const publishedC1C3C4 = cloneWithBuild("published-c1-c3-c4", [c1, c3, c4]);
+  const publishedC1C4 = cloneWithBuild("published-c1-c4", [c1, c4]);
+  const publishedC4 = cloneWithBuild("published-c4", [c4]);
   // A long unstamped run above the one real stamp: the walk must reach it.
   const deepStamp = cloneWithBuild("deep", [c1, ...Array.from({ length: 30 }, () => "")]);
   const tamperedStamp = cloneWithBuild("tampered", [side]);
@@ -100,6 +106,32 @@ describe("resolveBase", () => {
     {
       reason: "a build tip already stamped with the judged sha (this run's publish landed first)",
       cwd: publishedC1C3,
+      sha: c3,
+      before: c2,
+      base: { kind: "build-stamp", base: c1 },
+      commits: [c2, c3],
+    },
+    {
+      reason: "the newest of several ancestor stamps, not the oldest",
+      cwd: publishedC0C1,
+      sha: c3,
+      before: c2,
+      base: { kind: "build-stamp", base: c1 },
+      commits: [c2, c3],
+    },
+    {
+      reason:
+        "a re-run after a later commit published: the tip stamps a descendant, the judged commit's own stamp is skipped, the newest ancestor stamp is the base",
+      cwd: publishedC1C3C4,
+      sha: c3,
+      before: c2,
+      base: { kind: "build-stamp", base: c1 },
+      commits: [c2, c3],
+    },
+    {
+      reason:
+        "a re-run after a later commit published when the judged commit's own publish was skipped (no tree change)",
+      cwd: publishedC1C4,
       sha: c3,
       before: c2,
       base: { kind: "build-stamp", base: c1 },
@@ -164,6 +196,14 @@ describe("resolveBase", () => {
       sha: c3,
       before: c2,
       error: notAncestor("the build tip's stamped source", side, c3),
+    },
+    {
+      reason:
+        "a build branch whose only stamp is a descendant of the judged commit (no ancestor stamp to fall back to), naming the tip's stamp",
+      cwd: publishedC4,
+      sha: c3,
+      before: c2,
+      error: notAncestor("the build tip's stamped source", c4, c3),
     },
     {
       reason:

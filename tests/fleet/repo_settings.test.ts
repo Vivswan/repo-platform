@@ -1,4 +1,4 @@
-// Pins this repository's OWN build-branch protection in
+// Pins this repository's OWN build-branch and stable-tag protection in
 // .github/settings.yml, the same way merge_settings_layers.test.ts pins
 // the override layer's protection policy. The `build` ref is executable
 // fleet-wide - rendered workflows pin `uses: ...@build` and run its
@@ -50,6 +50,22 @@ describe("the repo's own build-branch ruleset", () => {
     // Declared EMPTY, never omitted: only the explicit empty list lets
     // the nightly heal clear an out-of-band bypass actor.
     expect(buildBranches?.bypass_actors).toEqual([]);
+  });
+});
+
+describe("the repo's own stable-tag ruleset", () => {
+  test("the stable tag is undeletable and otherwise unruled, so the lease move stays allowed", () => {
+    const stableTag = readRulesets(".github/settings.yml").find((r) => r.name === "stable-tag");
+    expect(stableTag).toBeDefined();
+    expect(stableTag?.target).toBe("tag");
+    expect(stableTag?.enforcement).toBe("active");
+    expect(stableTag?.conditions?.ref_name?.include).toEqual(["stable"]);
+    expect(stableTag?.conditions?.ref_name?.exclude).toEqual([]);
+    // Deletion ONLY: git classifies every update of an existing tag as a
+    // forced update, so an update or non_fast_forward rule would block
+    // the mover (docs/build-provenance.md).
+    expect(stableTag?.rules?.map((r) => r.type)).toEqual(["deletion"]);
+    expect(stableTag?.bypass_actors).toEqual([]);
   });
 });
 

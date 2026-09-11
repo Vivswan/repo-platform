@@ -73,3 +73,21 @@ rulesets:
     # explicit empty list is what lets the nightly heal clear an
     # out-of-band bypass actor added to these rules.
     bypass_actors: []
+
+  # The fleet's coming delivery ref (docs/build-provenance.md): post-green
+  # moves it forward along main with a lease push after the all-green gate.
+  # Deletion only, like github-settings-as-code's own `latest-tag` ruleset:
+  # a lease move onto an existing tag is a force-class update to git, so an
+  # update or non_fast_forward rule would need a bypass for the mover.
+  - name: stable-tag
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - stable
+        exclude: []
+    rules:
+      - type: deletion
+    # Declared empty so the nightly heal clears an out-of-band bypass actor.
+    bypass_actors: []
