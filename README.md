@@ -8,7 +8,7 @@ Everything originates here. This repo pushes standards files into managed repos 
 
 Sources on `main`, a published build branch, sync PRs into each repo:
 
-- [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`, `link`), the module or visibility condition it lands under, and its source under `files/`. The `modules` section holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, settings layers, tracking label, pages commands).
+- [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`, `link`), the module or visibility condition it lands under, and its source under `files/`. The `modules` section holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, settings layers, tracking label).
 - Every green `main` commit rebuilds the orphan `build` branch, the one delivery channel: `files.yml` and `files/` for the writer, `actions/` for the composite actions the written workflows pin `@build`, and the fleet-facing reusable workflows. Every path is extraction-safe.
 - [sync-repos.yml](.github/workflows/sync-repos.yml) copies the published build's files into each managed repo on a dispatch, a merge directive, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
@@ -32,7 +32,7 @@ The measure of the design is the cost of a simple change, not the number of chec
 
 ## Modules
 
-Modules (pick any combination): `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
+Modules (pick any combination): `bun`, `node`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
 
 ## Onboarding a repo
 
@@ -50,9 +50,9 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | --- | --- |
 | `Vivswan/a,Vivswan/b` | those repos |
 | `public` or `private` | every managed repo of that visibility |
-| `modules:pages+release-please` | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names) |
-| `modules:pages,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the pages.yml or release-please starters lands in |
-| `public,modules:pages` | the public repos selecting pages: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:pages`) adds as typed |
+| `modules:site+release-please` | every managed repo whose `.repo-platform.yml` selects BOTH modules (`+` ANDs the names) |
+| `modules:site,modules:release-please` | every managed repo selecting EITHER module (filters union): the repos a change to the site or release-please files lands in |
+| `public,modules:site` | the public repos selecting site: a visibility token intersects with the filter, and a slug (`Vivswan/a,modules:site`) adds as typed |
 | `all` or empty | the whole fleet |
 
 - A module name outside `files.yml` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning and left out, and the plan prints how many repos the filter left out.
@@ -68,7 +68,7 @@ Managed repos need no secret. One optional feature carries its own token: a `bun
 
 ## Going deeper
 
-- Guides: [new repo](docs/new-repo.md), [sync](docs/sync.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [pages module](docs/pages.md), [docs-site module](docs/docs-site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md).
+- Guides: [new repo](docs/new-repo.md), [sync](docs/sync.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [site module](docs/site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md).
 - The file list and its grammar: [files.yml](files.yml) and [docs/sync.md](docs/sync.md#filesyml); the writer's code under [.github/scripts/sync/writer](.github/scripts/sync/writer).
 - Working in this repo - generators, editing rules, local gates: [AGENTS.md](AGENTS.md).
 - [`skills/`](skills/): portable agent skills for driving the platform from other repos - new project, sync-PR handling, module add/remove - installed with `npx skills`; never synced to managed repos.

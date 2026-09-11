@@ -15,10 +15,10 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
 | Change a repository's settings or labels | [Settings](settings.md) |
 | Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
-| Publish a site to GitHub Pages | [Pages](pages.md) |
-| Serve a Pages site from my own domain | [Pages: custom domain](pages.md#custom-domain) |
-| Publish my repo's docs/ as a website | [Docs site](docs-site.md) |
-| Translate docs (zh-cn/, ja/, ...) | [Docs site: content conventions](docs-site.md#content-conventions) |
+| Publish a site to GitHub Pages: the repo's own website, its docs/, or both | [Site](site.md) |
+| Fill in the site-build hook that builds my website | [Site: the hook](site.md#the-hook-githubactionssite-buildactionyml) |
+| Serve the site from my own domain | [Site: custom domain](site.md#custom-domain) |
+| Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](site.md#docs-conventions) |
 | Host agent skills other repos can install | [Skills](skills.md) |
 | Fix a skill that validates green but never ships | [Skills: publishing](skills.md#publishing-a-skill) |
 | Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
@@ -48,17 +48,16 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 ### Modules
 
-5. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest served tag, latest/ = main).
-6. [Docs site](docs-site.md) - the repo's docs/ markdown as a versioned VitePress site under the central fleet theme.
-7. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
-8. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
-9. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
+5. [Site](site.md) - one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
+6. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
+7. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
+8. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
 
 ### Fleet operations
 
-10. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
-11. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
-12. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, docs-site, and security streams share: lifecycle, release gating, renaming.
-13. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking fixable-CRITICAL gate, the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
-14. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-15. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+9. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+12. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking fixable-CRITICAL gate, the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
+13. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

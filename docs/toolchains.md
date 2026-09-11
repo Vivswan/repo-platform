@@ -11,13 +11,13 @@ One version per toolchain, fleet-wide. Each pin lives in `files.yml` (`modules.<
 
 The pinned versions are the `pin` entries of the `bun`, `node`, and `deno` modules in [files.yml](../files.yml) (`{file, version}`: `.bun-version`, `.node-version`, `.dvmrc`); nothing else records them, so the file is the roster and the refresh below is the only writer.
 
-Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI (its module data deliberately carries no `pin`), so rust version selection stays repository-owned; the Pages build runner installs stable as the rustup default, and a `rust-toolchain.toml` in the tree still wins there.
+Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI (its module data deliberately carries no `pin`), so rust version selection stays repository-owned.
 
 ## How the pin reaches repositories
 
 - The dotfiles are MANAGED files (deliberately not starters): in a repo selecting the module, every sync updates them, and no registration key overrides them - the fleet shares one version per toolchain.
 - Managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`, `node-version-file: .node-version`, `deno-version-file: .dvmrc`).
-- The [pages module's](pages.md) `reusable-pages.yml` makes one full checkout and resolves each dotfile with a `hashFiles()` fallback at the checkout root - every tier (historical tags included) builds with that one pin, and no dotfile leaves the input unset (the setup action floats on its default).
+- The [site module's](site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 - validate-managed-files' parity check fails a repo whose dotfile differs from the one its last sync wrote.
 - repo-platform's own composite actions (under `actions/`) pin their bun too, from an action-local `.bun-version` beside each action.yml that `bun run pins` writes from the same pin:
   - Each action carries one step calling the shared `actions/bun-setup` action, ahead of any step that uses an action or touches bun (`uses: Vivswan/repo-platform/actions/bun-setup@build` with `pin` set to the action's own `.bun-version`, resolved against `github.action_path`): it reuses a bun already on PATH at the pin, installs it with oven-sh/setup-bun otherwise (one retry for the known network flake), and records the absolute path of the bun that prints the pin as `path`. Every later step runs that path, never `bun` by name, because a later setup-bun can put another bun first on PATH.

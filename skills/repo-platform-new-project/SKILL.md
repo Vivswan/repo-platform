@@ -54,18 +54,13 @@ modules: [uv, release-please, issue-templates, pr-title]
 Full:
 
 ```yaml
-modules: [bun, pages, docs-site, release-please, issue-templates, pr-title, skills, fuzzer, nightly]
+modules: [bun, site, release-please, issue-templates, pr-title, skills, fuzzer, nightly]
 project:
   name: My Project
   slug: my-project
   description: One line for the repository description
   copyright_holder: Vivswan Shah (https://github.com/Vivswan)
-pages:
-  setup: bun
-  install: bun install --frozen-lockfile
-  build: bun run build:web
-  dist: apps/web/dist
-docs_site:
+site:
   path: docs
   include:
     - { path: skills, mount: skills, page: SKILL.md }
@@ -74,13 +69,13 @@ skills:
 labels:
   fuzzer: fuzz-nightly
   nightly: nightly-failure
-  docs_site: docs-link-rot
+  site: docs-link-rot
 mirrors:
   - source: LICENSE.md
     targets: [skills/*/LICENSE.md]
 ```
 
-Commit it to the default branch (or open a PR for an existing repository). The `plan` job of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync.
+Commit it to the default branch (or open a PR for an existing repository). The `plan` job of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync. With `site` selected and a `docs/` directory present, commit `docs/README.md` (the landing page) alongside: the `docs-check` gate job builds `docs/` on every PR from then on.
 
 ### 3. Grant the fleet token
 
@@ -130,6 +125,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.github/workflows/post-green.yml` | green-gated work on a push to main, before the release |
 | `.github/workflows/update-release.yml` | release-please: mutate the draft release (assets, notes) |
 | `.github/workflows/update-release-pr.yml` | release-please: regenerate files that ride in the release commit |
+| `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |
 | `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
 | `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
 | `.claude-plugin/plugin.json` | skills: list each published skill in `skills` |
@@ -137,10 +133,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
-Two modules need content of yours before their first run on main:
-
-- `docs-site`: `docs/README.md` (the landing page) must exist; the build refuses an absent `docs/` tree. Links resolve inside `docs/` or are absolute. repo-platform's [docs/docs-site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/docs-site.md) has the content conventions.
-- `pages`: `pages.build` in the registration must produce `pages.dist`.
+A `site` repository that publishes its own website needs one more thing of yours before the first run on main: the website build in `.github/actions/site-build/action.yml` (seeded as a no-op, which is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing). repo-platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
 
 ### 7. Watch the first CI run
 
@@ -153,8 +146,7 @@ Push any commit to main after the merge and read the run. The jobs are the same 
 | `all-green` | the required check | judged |
 | `post-green` | skipped | runs your hook |
 | `release`, `update-release`, `publish-release`, `update-release-pr` | skipped | run only with `release-please` selected |
-| `pages` | skipped | runs only with `pages` selected |
-| `docs-site` | skipped | runs only with `docs-site` and without `pages` |
+| `site` | skipped | runs only with `site` selected (on the nightly schedule and a dispatch too) |
 
 A grey leg on main has three ordinary causes: its module is not in `modules`, the gate before it (`all-green`, `post-green`) did not succeed, or the push created no release (`update-release`, `publish-release`) or no release PR (`update-release-pr`). Check the module list before reading grey as a failure.
 
@@ -166,14 +158,14 @@ Repository settings (labels, rulesets, fields) are rendered into the managed `.g
 gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-- The sync renders the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys (the module's default when a key is unset) into the file; the apply declares them on the repository.
+- The sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when a key is unset) into the file; the apply declares them on the repository.
 - Your own labels, rulesets, and identity keys go in `.github/settings.local.yml`; an edit there lands in the rendered file on the next sync PR (`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project -f manual=true` brings it at once). A hand edit of `.github/settings.yml` is replaced by the next sync and reds the managed files check before that.
 - Until the sync PR carrying the rendered file has merged, the apply skips the repository with a notice.
 
 ## Owner actions (need repository-settings access)
 
 - Grant the fleet PAT access to the repo (step 3).
-- `pages` or `docs-site`: enable Pages with Source: GitHub Actions before the first deploy, in the repo's Settings -> Pages, or `gh api -X POST repos/Vivswan/my-project/pages -f build_type=workflow`.
+- `site`: the module's settings layer enables Pages on the first settings apply (step 8); for a deploy before it, enable Pages with Source: GitHub Actions in the repo's Settings -> Pages, or `gh api -X POST repos/Vivswan/my-project/pages -f build_type=workflow`.
 - `bun`: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
 
 ## Private repositories

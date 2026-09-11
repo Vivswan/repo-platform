@@ -35,7 +35,7 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-`modules` is any combination of `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
+`modules` is any combination of `bun`, `node`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the published `build` branch, whose tip is provenance-verified against a rebuild from its stamped main commit before any row consumes it ([build provenance](build-provenance.md#the-provenance-proof)).
 
@@ -70,6 +70,7 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.github/workflows/post-green.yml` | starter | always |
 | `.github/workflows/update-release.yml` | starter | always |
 | `.github/workflows/update-release-pr.yml` | starter | always |
+| `.github/actions/site-build/action.yml` | starter | always |
 | `.github/workflows/copilot-setup-steps.yml` | starter | always |
 | `.gitleaks.toml` | starter | always |
 | `.yamllint` | managed | always |
@@ -90,8 +91,6 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.node-version` | managed | modules: `node` |
 | `.dvmrc` | managed | modules: `deno` |
 | `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
-| `.github/workflows/pages.yml` | managed | modules: `pages` |
-| `.github/workflows/docs-site.yml` | managed | modules: `docs-site` |
 | `.release-please-manifest.json` | starter | modules: `release-please` |
 | `release-please-config.json` | starter | modules: `release-please` |
 | `.claude-plugin/marketplace.json` | starter | modules: `skills` |
@@ -130,6 +129,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 | `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work (applying settings, refreshing generated artifacts): the managed `post-green` job calls it on every push to main whose gate passed, with the judged sha, before the release leg ([after the gate](all-green.md#after-the-gate)). Seeded as a no-op |
 | `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not, because GitHub resolves a called `./` workflow at run creation ([the release pipeline](#the-release-pipeline-release-please)) |
+| `.github/actions/site-build/action.yml` | repo-owned (a starter, written once) | the site-build hook the `site` leg runs from the checkout before the fleet deploys: the repository's own website build goes there; seeded as a no-op in every repository, module or not ([site.md](site.md#the-hook-githubactionssite-buildactionyml)) |
 
 A starter is written once and never touched by a sync after that, so when the platform INTRODUCES a starter at a path a repository already owns a file at (post-green.yml on its rollout), the writer leaves the repository's file alone and reports the row `unchanged`. Check the kept file against the interface its callers expect (the [sync-PR skill](https://github.com/Vivswan/repo-platform/blob/main/skills/repo-platform-sync-pr/SKILL.md) has the triage row).
 
