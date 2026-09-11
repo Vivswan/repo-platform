@@ -1,7 +1,4 @@
-// The settings generator: this repository's own .github/settings.yml is
-// the writer's render of the layers, the registration, and the overlay;
-// --check reds on a one-byte edit and greens after a rewrite; an overlay
-// the render cannot stand on is refused by name.
+// The one-byte edit is the drift check's negative control.
 
 import { describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,8 +15,7 @@ const SCRIPT = "scripts/generate/settings_document.ts";
 const RENDERED = ".github/settings.yml";
 const OVERLAY = ".github/settings.local.yml";
 
-/** A copy of everything the generator reads, so a test can edit or break
- *  an input without touching the repository. */
+/** Every input the generator reads, copied so a test can break one. */
 function scratchRoot(): string {
   const root = temp.dir("settings-document-");
   for (const rel of ["files.yml", "files", ".repo-platform.yml", OVERLAY, RENDERED]) {
@@ -49,7 +45,7 @@ describe("renderOwnSettings", () => {
       repository: Record<string, unknown>;
       rulesets: { name: string }[];
     };
-    // The overlay's identity keys ride through; the override's merge policy lands above them.
+    // The override's merge policy lands above the overlay's identity keys.
     expect(doc.repository).toMatchObject({
       ...overlay.repository,
       allow_merge_commit: false,

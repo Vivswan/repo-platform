@@ -1,9 +1,8 @@
 ---
-# Vivswan/repo-platform's OWN settings overlay, hand-written and
-# repo-owned. `bun run settings` renders .github/settings.yml from the
-# fleet layers, .repo-platform.yml, and this file (the sync never targets
-# this repository); edit this file, never the rendered one. The override
-# layer merges ABOVE it, so main and non-bypassable are not redeclared.
+# Vivswan/repo-platform's OWN settings overlay, hand-written and repo-owned.
+# Edit this file, never the rendered .github/settings.yml.
+# The sync never targets this repository, so `bun run settings` renders it.
+# The override layer merges ABOVE this file: main and non-bypassable are not redeclared.
 
 repository:
   description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
@@ -14,9 +13,9 @@ repository:
   private: false
 
 rulesets:
-  # The generated build branch is append-only for everyone, the publisher
-  # included. A publish-only ruleset with an Integration bypass actor is
-  # rejected on a user-owned repository (docs/settings.md).
+  # The generated build branch is append-only for everyone, the publisher included.
+  # A publish-only ruleset is not expressible: GitHub rejects an Integration
+  # bypass actor on a user-owned repository (docs/settings.md).
   - name: build-branches
     target: branch
     enforcement: active
