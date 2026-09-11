@@ -130,6 +130,8 @@ function seedTarget(): string {
       "  - {source: .gitattributes, targets: [docs/gitattributes.txt]}",
       "  - {source: LICENSE.md, targets: [SECURITY.md, skills/new/LICENSE.md, nowhere/*/LICENSE.md]}",
       "  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}",
+      // Targets nested with each other, under a file, and at a directory: refused rows, never a throw.
+      "  - {source: LICENSE.md, targets: [copies/a, copies/a/b, skills/alpha/README.md/LICENSE.md, plain]}",
       "",
     ].join("\n"),
     ".github/workflows/ci.yml": LOCAL_CI,
@@ -152,6 +154,7 @@ function seedTarget(): string {
     "skills/delta/README.md": "delta\n",
     "skills/delta/LICENSE.md": NEW_LICENSE,
     "docs/old-mirror.md": OLD_LICENSE,
+    "plain/keep.md": "keep\n",
     ".editorconfig": OLD_EDITORCONFIG,
     ".gitattributes": OLD_GITATTRIBUTES,
     ".yamllint": OLD_YAMLLINT,
@@ -432,20 +435,38 @@ describe("sync.ts end to end", () => {
       outcome,
       detail,
     });
-    // Each pass (literals, then globs) reports its pattern refusals first.
+    // Rows follow the declarations, literals first; a glob's pattern
+    // refusal is reported as the pass expands it, before any concrete row.
     expect(summary.mirrors).toEqual([
-      mirror("LICENSE.md", MANIFEST, "refused", "the pattern is a path files.yml writes"),
-      mirror("LICENSE.md", "SECURITY.md", "refused", "the pattern is a path files.yml retires"),
+      mirror("LICENSE.md", MANIFEST, "refused", "the target is a path files.yml writes"),
       mirror(
         ".gitattributes",
         "docs/gitattributes.txt",
         "refused",
         "the source is not a file this sync writes",
       ),
+      mirror("LICENSE.md", "SECURITY.md", "refused", "the target is a path files.yml retires"),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "written"),
-      mirror("LICENSE.md", "skills/loop/LICENSE.md", "refused", LOOP_REFUSAL),
+      mirror(
+        "LICENSE.md",
+        "copies/a",
+        "refused",
+        "the target is a path prefix of another target 'copies/a/b'",
+      ),
+      mirror(
+        "LICENSE.md",
+        "copies/a/b",
+        "refused",
+        "the target sits under another target 'copies/a'",
+      ),
+      mirror(
+        "LICENSE.md",
+        "skills/alpha/README.md/LICENSE.md",
+        "refused",
+        "the target's ancestor 'skills/alpha/README.md' is a file",
+      ),
+      mirror("LICENSE.md", "plain", "refused", "the target is a directory"),
       mirror("LICENSE.md", "nowhere/*/LICENSE.md", "refused", "the pattern matches nothing"),
-      mirror("AGENTS.md", "skills/loop/AGENTS.md", "refused", LOOP_REFUSAL),
       mirror("LICENSE.md", "skills/alpha/LICENSE.md", "written"),
       mirror(
         "LICENSE.md",
@@ -460,14 +481,19 @@ describe("sync.ts end to end", () => {
         "refused",
         "the target holds content that is not the previous mirror",
       ),
+      mirror("LICENSE.md", "skills/loop/LICENSE.md", "refused", LOOP_REFUSAL),
       mirror("LICENSE.md", "skills/new/LICENSE.md", "current"),
       mirror("AGENTS.md", "skills/alpha/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/beta/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/delta/AGENTS.md", "written"),
       mirror("AGENTS.md", "skills/gamma/AGENTS.md", "written"),
+      mirror("AGENTS.md", "skills/loop/AGENTS.md", "refused", LOOP_REFUSAL),
       mirror("AGENTS.md", "skills/new/AGENTS.md", "written"),
     ]);
     expect(existsSync(join(target, "docs/gitattributes.txt"))).toBe(false);
+    expect(existsSync(join(target, "copies"))).toBe(false);
+    expect(read("skills/alpha/README.md")).toBe("alpha\n");
+    expect(read("plain/keep.md")).toBe("keep\n");
     // The retired path was moved, never rewritten by its mirror.
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
     expect(read("skills/new/AGENTS.md")).toBe(read("AGENTS.md"));
@@ -614,14 +640,18 @@ describe("sync.ts end to end", () => {
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
       "retirement of LEGACY.md held: the record carries no hash",
-      `mirror ${MANIFEST} refused: the pattern is a path files.yml writes`,
-      "mirror SECURITY.md refused: the pattern is a path files.yml retires",
+      `mirror ${MANIFEST} refused: the target is a path files.yml writes`,
       "mirror docs/gitattributes.txt refused: the source is not a file this sync writes",
-      `mirror skills/loop/LICENSE.md refused: ${LOOP_REFUSAL}`,
+      "mirror SECURITY.md refused: the target is a path files.yml retires",
+      "mirror copies/a refused: the target is a path prefix of another target 'copies/a/b'",
+      "mirror copies/a/b refused: the target sits under another target 'copies/a'",
+      "mirror skills/alpha/README.md/LICENSE.md refused: the target's ancestor 'skills/alpha/README.md' is a file",
+      "mirror plain refused: the target is a directory",
       "mirror nowhere/*/LICENSE.md refused: the pattern matches nothing",
-      `mirror skills/loop/AGENTS.md refused: ${LOOP_REFUSAL}`,
       "mirror skills/beta/LICENSE.md refused: the target holds content that is not the previous mirror",
       "mirror skills/gamma/LICENSE.md refused: the target holds content that is not the previous mirror",
+      `mirror skills/loop/LICENSE.md refused: ${LOOP_REFUSAL}`,
+      `mirror skills/loop/AGENTS.md refused: ${LOOP_REFUSAL}`,
       "registration: dropped unknown module `uv` (files.yml does not know it)",
       "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",

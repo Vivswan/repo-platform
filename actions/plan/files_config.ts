@@ -170,7 +170,16 @@ export function pathProblem(path: string): string | null {
     return "carries an empty, '.', or '..' segment";
   }
   if (segments.some((segment) => segment.toLowerCase() === ".git")) return "carries a .git segment";
+  if ([...path].some(isControl)) return "carries a control character";
+  if (segments.some((segment) => Buffer.byteLength(segment) > 255)) {
+    return "has a segment over 255 bytes";
+  }
   return null;
+}
+
+function isControl(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code < 0x20 || code === 0x7f;
 }
 
 /** The repository path a link at `path` with `target` resolves to. */

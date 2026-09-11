@@ -276,6 +276,11 @@ describe("pathProblem", () => {
     ["a//b", "carries an empty, '.', or '..' segment"],
     [".git/config", "carries a .git segment"],
     ["a\\b", "contains a backslash"],
+    // Names the filesystem rejects (a stat of either throws) are judged here instead.
+    ["a/b\u0000c", "carries a control character"],
+    ["a/b\tc", "carries a control character"],
+    [`a/${"b".repeat(255)}`, null],
+    [`a/${"b".repeat(256)}`, "has a segment over 255 bytes"],
   ])("%s -> %p", (path, problem) => {
     expect(pathProblem(path)).toBe(problem);
   });

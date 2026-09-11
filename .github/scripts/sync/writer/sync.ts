@@ -34,7 +34,7 @@ import {
   sha256,
   writeManifest,
 } from "./manifest.ts";
-import { applyMirrors, linkedAncestor } from "./mirrors.ts";
+import { applyMirrors, blockedAncestor } from "./mirrors.ts";
 import {
   missingPlaceholders,
   type PlaceholderName,
@@ -336,7 +336,7 @@ export function runSync(options: SyncOptions): SyncReport {
   for (const [path, entry] of Object.entries(records)) {
     if (entry.class !== "mirror" || next.has(path) || pathProblem(path) !== null) continue;
     if (
-      linkedAncestor(options.target, path) === null &&
+      blockedAncestor(options.target, path)?.is !== "a symbolic link" &&
       lstatOrNull(join(options.target, path)) === null
     ) {
       continue;

@@ -1,15 +1,22 @@
-// Mirrors: the pattern grammar, the refusals (unwritten source, unsafe or
-// platform-written targets, foreign content), and the byte copies.
+// Mirrors: the pattern grammar, the refusals (unwritten source, unsafe,
+// platform-written, or nested targets, foreign content), and the byte copies.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
 import {
   applyMirrors,
+  blockedAncestor,
+  blockedPrefix,
   expandPattern,
-  linkedAncestor,
-  linkedPrefix,
   type MirrorRow,
   mirrorPathProblem,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
@@ -74,37 +81,53 @@ describe("mirrorPathProblem", () => {
     ["LICENSE.md", "is a path files.yml writes"],
     ["nightly.yml", "is a path files.yml writes"],
     ["SECURITY.md", "is a path files.yml retires"],
+    ["LICENSE.md/copy.md", "sits under 'LICENSE.md', a path files.yml writes"],
+    ["docs", "is a path prefix of 'docs/README.md', a path files.yml writes"],
+    ["docs-site/README.md", null],
+    ["SECURITY.md/copy.md", "sits under 'SECURITY.md', a path files.yml retires"],
+    ["old", "is a path prefix of 'old/SECURITY.md', a path files.yml retires"],
   ])("%s -> %p", (path, problem) => {
     // The selected set carries every selected path, a starter included; the
     // retired set every listed or stale retirement.
     expect(
-      mirrorPathProblem(path, new Set(["LICENSE.md", "nightly.yml"]), new Set(["SECURITY.md"])),
+      mirrorPathProblem(
+        path,
+        new Set(["LICENSE.md", "nightly.yml", "docs/README.md"]),
+        new Set(["SECURITY.md", "old/SECURITY.md"]),
+      ),
     ).toBe(problem);
   });
 });
 
-describe("linkedPrefix", () => {
-  test("names the first symlinked literal directory before the star, or null", () => {
+describe("blockedPrefix", () => {
+  test("names the first linked or file literal directory before the star, or null", () => {
     const root = tree({ "outside/secret.txt": "", "real/a/x": "" });
     symlinkSync("outside", join(root, "docs"));
-    expect(linkedPrefix(root, "docs/*")).toBe("docs");
-    expect(linkedPrefix(root, "docs/sub/*/x")).toBe("docs");
-    expect(linkedPrefix(root, "docs/file.md")).toBe("docs");
-    expect(linkedPrefix(root, "real/*/x")).toBeNull();
-    expect(linkedPrefix(root, "*/x")).toBeNull();
-    expect(linkedPrefix(root, "missing/*")).toBeNull();
+    const link = { dir: "docs", is: "a symbolic link" } as const;
+    expect(blockedPrefix(root, "docs/*")).toEqual(link);
+    expect(blockedPrefix(root, "docs/sub/*/x")).toEqual(link);
+    expect(blockedPrefix(root, "docs/file.md")).toEqual(link);
+    expect(blockedPrefix(root, "real/a/x/*")).toEqual({ dir: "real/a/x", is: "a file" });
+    expect(blockedPrefix(root, "real/*/x")).toBeNull();
+    expect(blockedPrefix(root, "*/x")).toBeNull();
+    expect(blockedPrefix(root, "missing/*")).toBeNull();
   });
 });
 
-describe("linkedAncestor", () => {
-  test("names the shallowest symlinked directory above a concrete path, or null", () => {
+describe("blockedAncestor", () => {
+  test("names the shallowest linked or file directory above a concrete path, or null", () => {
     const root = tree({ "outside/secret.txt": "", "real/a/x": "" });
     symlinkSync("outside", join(root, "docs"));
     symlinkSync("../../outside", join(root, "real/a/sub"));
-    expect(linkedAncestor(root, "docs/sub/x")).toBe("docs");
-    expect(linkedAncestor(root, "real/a/sub/x")).toBe("real/a/sub");
-    expect(linkedAncestor(root, "real/a/x")).toBeNull();
-    expect(linkedAncestor(root, "x")).toBeNull();
+    expect(blockedAncestor(root, "docs/sub/x")).toEqual({ dir: "docs", is: "a symbolic link" });
+    expect(blockedAncestor(root, "real/a/sub/x")).toEqual({
+      dir: "real/a/sub",
+      is: "a symbolic link",
+    });
+    expect(blockedAncestor(root, "real/a/x/y/z")).toEqual({ dir: "real/a/x", is: "a file" });
+    expect(blockedAncestor(root, "real/a/x")).toBeNull();
+    expect(blockedAncestor(root, "real/new/deeper/x")).toBeNull();
+    expect(blockedAncestor(root, "x")).toBeNull();
   });
 });
 
@@ -205,13 +228,13 @@ describe("applyMirrors", () => {
         source: "LICENSE.md",
         target: "LICENSE.md",
         outcome: "refused",
-        detail: "the pattern is a path files.yml writes",
+        detail: "the target is a path files.yml writes",
       },
       {
         source: "LICENSE.md",
         target: "starter.yml",
         outcome: "refused",
-        detail: "the pattern is a path files.yml writes",
+        detail: "the target is a path files.yml writes",
       },
       {
         source: "LICENSE.md",
@@ -234,29 +257,114 @@ describe("applyMirrors", () => {
     expect(readFileSync(join(root, "skills/d/LICENSE.md"), "utf-8")).toBe("v2\n");
   });
 
+  test("a target nested with another path, a file, or a directory is refused, and the rest is written", () => {
+    const root = tree({ "afile.txt": "", "adir/keep.md": "", "docs/keep.md": "" });
+    const written = new Map([
+      ["LICENSE.md", Buffer.from("L\n")],
+      ["NOTICE.md", Buffer.from("N\n")],
+    ]);
+    const rows = applyMirrors(
+      root,
+      [
+        // Two targets of one source nest; a target nests with another source's.
+        { source: "LICENSE.md", targets: ["copies/a", "copies/a/b", "copies/c/d", "good/COPY.md"] },
+        { source: "NOTICE.md", targets: ["copies/c", "afile.txt/COPY.md", "adir", "afile.txt"] },
+        // A literal makes a directory that a glob then names as a file.
+        { source: "LICENSE.md", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
+        // The source itself, with a `selected` that does not list it.
+        { source: "NOTICE.md", targets: ["LICENSE.md"] },
+        // A contested literal under a nested one: refused for every claimant,
+        // and a glob of one claimant cannot take the settled path later.
+        { source: "LICENSE.md", targets: ["docs/a", "d*/a"] },
+        { source: "NOTICE.md", targets: ["docs/a"] },
+        { source: "HELD.md", targets: ["docs/a/b"] },
+      ],
+      written,
+      new Set(),
+      {},
+    );
+    const refused = (source: string, path: string, detail: string) => ({
+      source,
+      target: path,
+      outcome: "refused" as const,
+      detail,
+    });
+    const written_ = (source: string, path: string) => ({
+      source,
+      target: path,
+      outcome: "written" as const,
+      detail: "",
+    });
+    const above = (other: string) => `the target is a path prefix of another target '${other}'`;
+    const under = (other: string) => `the target sits under another target '${other}'`;
+    // Rows follow the declarations, literals first; every path is settled
+    // before the pass writes, so a refusal never depends on what an earlier
+    // row of the same pass did.
+    expect(rows).toEqual([
+      refused("LICENSE.md", "copies/a", above("copies/a/b")),
+      refused("LICENSE.md", "copies/a/b", under("copies/a")),
+      refused("LICENSE.md", "copies/c/d", under("copies/c")),
+      written_("LICENSE.md", "good/COPY.md"),
+      refused("NOTICE.md", "copies/c", above("copies/c/d")),
+      refused("NOTICE.md", "afile.txt/COPY.md", "the target's ancestor 'afile.txt' is a file"),
+      refused("NOTICE.md", "adir", "the target is a directory"),
+      refused("NOTICE.md", "afile.txt", above("afile.txt/COPY.md")),
+      written_("LICENSE.md", "skills/LICENSE.md/x"),
+      refused("NOTICE.md", "LICENSE.md", "the target is a path files.yml writes"),
+      refused("LICENSE.md", "docs/a", above("docs/a/b")),
+      refused("NOTICE.md", "docs/a", above("docs/a/b")),
+      refused("HELD.md", "docs/a/b", under("docs/a")),
+      refused("LICENSE.md", "adir/LICENSE.md", under("adir")),
+      written_("LICENSE.md", "docs/LICENSE.md"),
+      written_("LICENSE.md", "good/LICENSE.md"),
+      refused("LICENSE.md", "skills/LICENSE.md", "the target is a directory"),
+      refused("LICENSE.md", "docs/a", above("docs/a/b")),
+    ]);
+    expect(existsSync(join(root, "copies"))).toBe(false);
+    expect(existsSync(join(root, "docs/a"))).toBe(false);
+    expect(readFileSync(join(root, "good/COPY.md"), "utf-8")).toBe("L\n");
+    expect(readFileSync(join(root, "afile.txt"), "utf-8")).toBe("");
+    expect(readFileSync(join(root, "adir/keep.md"), "utf-8")).toBe("");
+  });
+
   test("a matched path under a linked directory is refused by name, and the pass goes on", () => {
     const root = tree({
       "deep/alpha/README.md": "",
       "deep/beta/sub/README.md": "",
       "outside/keep.md": "",
+      "outside/locked/x.md": "",
       "outside/sub/x.md": "",
       "skills/a/README.md": "",
     });
     symlinkSync("../../outside", join(root, "deep/alpha/sub"));
     symlinkSync("../outside", join(root, "skills/link"));
     symlinkSync("loop", join(root, "skills/loop"));
-    const rows = applyMirrors(
-      root,
-      [
-        {
-          source: "LICENSE.md",
-          targets: ["deep/*/sub/LICENSE.md", "skills/*/LICENSE.md", "skills/*/sub/*.md"],
-        },
-      ],
-      new Map([["LICENSE.md", Buffer.from("L\n")]]),
-      new Set(),
-      {},
-    );
+    // Links that cannot be looked through: a name no filesystem holds
+    // (ENAMETOOLONG) and a file behind a directory nobody may traverse
+    // (EACCES; root traverses anything, so that case is skipped for root).
+    symlinkSync("n".repeat(256), join(root, "skills/long"));
+    const denied = process.getuid?.() !== 0;
+    if (denied) {
+      symlinkSync("../outside/locked/x.md", join(root, "skills/denied"));
+      chmodSync(join(root, "outside/locked"), 0o000);
+    }
+    let rows: MirrorRow[];
+    try {
+      rows = applyMirrors(
+        root,
+        [
+          {
+            source: "LICENSE.md",
+            targets: ["deep/*/sub/LICENSE.md", "skills/*/LICENSE.md", "skills/*/sub/*.md"],
+          },
+        ],
+        new Map([["LICENSE.md", Buffer.from("L\n")]]),
+        new Set(),
+        {},
+      );
+    } finally {
+      chmodSync(join(root, "outside/locked"), 0o755);
+    }
     const refused = (path: string, dir: string) => ({
       source: "LICENSE.md",
       target: path,
@@ -264,15 +372,16 @@ describe("applyMirrors", () => {
       detail: `the target's ancestor '${dir}' is a symbolic link`,
     });
     // The star after a linked directory is never expanded (outside/sub/x.md
-    // is not listed), and a link loop is refused rather than followed.
+    // is not listed), and a link loop or an unresolvable link is refused
+    // rather than followed.
+    const unreadable = denied ? ["skills/denied"] : [];
+    const links = [...unreadable, "skills/link", "skills/long", "skills/loop"];
     expect(rows).toEqual([
       refused("deep/alpha/sub/LICENSE.md", "deep/alpha/sub"),
-      refused("skills/link/LICENSE.md", "skills/link"),
-      refused("skills/loop/LICENSE.md", "skills/loop"),
-      refused("skills/link/sub/*.md", "skills/link"),
-      refused("skills/loop/sub/*.md", "skills/loop"),
       { source: "LICENSE.md", target: "deep/beta/sub/LICENSE.md", outcome: "written", detail: "" },
       { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+      ...links.map((link) => refused(`${link}/LICENSE.md`, link)),
+      ...links.map((link) => refused(`${link}/sub/*.md`, link)),
     ]);
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/sub/LICENSE.md"))).toBe(false);
