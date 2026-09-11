@@ -9,7 +9,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `modules` | The selected modules, a list of names from the roster below. Required: an absent key is refused. An empty list is accepted and deselects every module, so the next sync retires their files | - |
 | `project.name` | Human-readable project name (`AGENTS.md`, the docs site title, the plugin manifest). `project` is all-or-nothing: `name`, `slug`, and `description` are required together whenever the block is present. Values are substituted into every managed file and split region on each sync; an existing starter keeps its content | the repository name |
 | `project.slug` | Kebab-case identifier (the skills plugin name) | the repository name |
-| `project.description` | One-line repository description, written into the settings starter; while it is empty the writer holds that starter (`no value for description`) and the PR waits | empty |
+| `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | empty |
 | `project.copyright_holder` | Licensor named in the fleet license's Required Notice; the one optional `project` key | the repository owner |
 | `pages.setup` | Comma-separated toolchain tokens the Pages build installs (`bun`, `uv`, ...), or `none` | the selected toolchain modules, joined by commas; `none` when no toolchain is selected |
 | `pages.install` | Install command of the Pages build | the install command of the first `pages.setup` toolchain in roster order; empty with `none` |
@@ -50,9 +50,9 @@ The files each module brings are listed in the `repo-platform-add-module` skill 
 
 - `fuzzer`, `nightly`, and `docs-site` each file one tracking issue per failure stream and dedup and auto-close by label. When several are selected, their labels must differ (case-insensitively).
 - The fuzzer and nightly starters carry the label in their `label:` inputs as it was when the starter was first written (`labels.*` or the default). A later change to `labels.*` needs the same edit in the repo-owned starter.
-- The settings apply reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from `labels.*` (the module's default when a key is unset) and declares them; the same keys reach the starters' `label:` inputs when they are first written, and the plan's `tracking-labels` output feeds release-health's gate.
+- The sync renders the tracking labels of `fuzzer`, `nightly`, and `docs-site` from `labels.*` (the module's default when a key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; the same keys reach the starters' `label:` inputs when they are first written, and the plan's `tracking-labels` output feeds release-health's gate.
 - A `labels.<key>` whose module is not selected fails the plan (`labels.nightly names no selected tracking stream`): remove the key together with the module.
 
 ## Visibility
 
-Visibility is read from GitHub, not from this file. Public repositories get CodeQL and dependency-review jobs and the public settings starter; private ones do not.
+Visibility is read from GitHub, not from this file. Public repositories get CodeQL and dependency-review jobs and the public variant of the settings overlay starter; private ones do not. The starter seeds `repository.private` from that reading, and from then on the rendered `.github/settings.yml` follows the value your `.github/settings.local.yml` declares.

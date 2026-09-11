@@ -1,0 +1,51 @@
+---
+# Vivswan/repo-platform's OWN settings overlay, hand-written and
+# repo-owned. `bun run settings` renders .github/settings.yml from the
+# fleet layers, .repo-platform.yml, and this file (the sync never targets
+# this repository); edit this file, never the rendered one. The override
+# layer merges ABOVE it, so main and non-bypassable are not redeclared.
+
+repository:
+  description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
+  # Declared empty so the apply owns the field and clears an out-of-band value.
+  homepage: ""
+  topics: github-actions, reusable-workflows, standards
+  # Declared so the apply heals an out-of-band flip to private.
+  private: false
+
+rulesets:
+  # The generated build branch is append-only for everyone, the publisher
+  # included. A publish-only ruleset with an Integration bypass actor is
+  # rejected on a user-owned repository (docs/settings.md).
+  - name: build-branches
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - build
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+    # Declared EMPTY: only the explicit empty list lets the nightly heal
+    # clear an out-of-band bypass actor.
+    bypass_actors: []
+
+  # The fleet's coming delivery ref (docs/build-provenance.md).
+  # Post-green moves it forward along main with a lease push after the all-green gate.
+  # Deletion only, like github-settings-as-code's own `latest-tag` ruleset.
+  # A lease move onto an existing tag is a force-class update to git.
+  # An update or non_fast_forward rule would need a bypass for the mover.
+  - name: stable-tag
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - stable
+        exclude: []
+    rules:
+      - type: deletion
+    # Declared empty so the nightly heal clears an out-of-band bypass actor.
+    bypass_actors: []

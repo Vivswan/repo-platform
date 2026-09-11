@@ -3,7 +3,8 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
-    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:skills && bun run ssot:check && bun run files:check && bun run gitignore:topology && bun run pins:check && bun run theme:check && bun run build:check && bun run test",
+    "check": "bun scripts/bootstrap.ts --if-missing && bun run docs:check && bun run lint && bun run lint:actions && bun run lint:secrets && bun run typecheck && bun run typography && bun run file-size && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:skills && bun run ssot:check && bun run files:check && bun run gitignore:topology && bun run pins:check && bun run theme:check && bun run settings:check && bun run build:check && bun run test",
+    "regen": "bun run pins && bun run theme && bun run settings && bun scripts/files_table.ts docs/new-repo.md",
     "bootstrap": "bun scripts/bootstrap.ts",
     "docs:check": "bun scripts/docs_check.ts",
     "check:fix": "bun x biome check --write .",
@@ -25,6 +26,8 @@
     "pins:check": "bun scripts/generate/toolchain_pins.ts --check",
     "theme": "bun scripts/generate/theme_tokens.ts",
     "theme:check": "bun scripts/generate/theme_tokens.ts --check",
+    "settings": "bun scripts/generate/settings_document.ts",
+    "settings:check": "bun scripts/generate/settings_document.ts --check",
     "build:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
     "test": "bun scripts/run_tests.ts",
     "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
