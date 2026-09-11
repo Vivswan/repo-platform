@@ -6,7 +6,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { maskForms, resolveRow } from "../../.github/scripts/sync/resolve_row.ts";
+import { maskForms } from "../../.github/scripts/shared/mask.ts";
+import { resolveRow } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -119,29 +120,6 @@ describe("resolve_row.ts", () => {
     expect(result.stdout).toContain("::error::");
     expect(result.stdout).not.toContain("Hidden-Server");
     expect(result.env).toBe("");
-  });
-});
-
-describe("maskForms", () => {
-  test("carries the slug, both URL spellings, the bare name, and their lower-case forms once each", () => {
-    expect(maskForms("Vivswan/Hidden-Server")).toEqual([
-      "Vivswan/Hidden-Server",
-      "vivswan/hidden-server",
-      "https://github.com/Vivswan/Hidden-Server",
-      "https://github.com/vivswan/hidden-server",
-      "https://github.com/Vivswan/Hidden-Server.git",
-      "https://github.com/vivswan/hidden-server.git",
-      "git@github.com:Vivswan/Hidden-Server.git",
-      "git@github.com:vivswan/hidden-server.git",
-      "Hidden-Server",
-      "hidden-server",
-    ]);
-  });
-
-  test("a short bare name is not masked on its own (it would garble every innocent occurrence)", () => {
-    const forms = maskForms("Vivswan/api");
-    expect(forms).toContain("Vivswan/api");
-    expect(forms).not.toContain("api");
   });
 });
 

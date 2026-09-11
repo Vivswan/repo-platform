@@ -86,6 +86,22 @@ export interface DiscoveredRepo {
   private: boolean;
 }
 
+/** How a private repository is named in a selector's public log. */
+export const PRIVATE_DISPLAY = "a private repository";
+
+/** A selector's one line naming what it selected: public repositories by
+ *  slug, private ones as a count; `none` when nothing was. */
+export function selectedLine(rows: DiscoveredRepo[], prefix: string, none: string): string {
+  if (rows.length === 0) return none;
+  const publicSlugs = rows.filter((row) => !row.private).map((row) => row.repo);
+  const hidden = rows.length - publicSlugs.length;
+  const parts = [
+    ...(publicSlugs.length > 0 ? [publicSlugs.join(", ")] : []),
+    ...(hidden > 0 ? [`${hidden} private ${hidden === 1 ? "repository" : "repositories"}`] : []),
+  ];
+  return `${prefix}: ${parts.join(" and ")}`;
+}
+
 /** The discovered fleet scoped to `owner` and projected to the {repo,
  * private} rows the selection pipeline consumes. Visibility rides along
  * fail-closed - anything but private: false counts as private - because
@@ -206,4 +222,11 @@ export function pushProbeSkipNotice(display: string): string {
 export function notAdoptedNotice(display: string, consequence?: string): string {
   const inserted = consequence === undefined ? "" : `${consequence} `;
   return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform. ${inserted}Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.`;
+}
+
+/** Skip notice for a target whose .github/settings.yml the sync has not
+ * rendered yet: the apply reads that file, and a hand-written one applied
+ * alone would delete every fleet label it does not list. */
+export function notRenderedNotice(display: string): string {
+  return `${display}: skipped - its .github/settings.yml is not yet rendered; the sync PR carrying the rendered settings has not merged.`;
 }

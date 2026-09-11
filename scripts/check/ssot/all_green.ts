@@ -925,11 +925,11 @@ export const allGreenRules: Rule[] = [
       const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
       mismatches.push(
         ...setMismatch(
-          ".github/settings-override.yml main ruleset required checks",
+          "files/settings/override.yml main ruleset required checks",
           [gateName],
           contexts(
             (override.rulesets ?? []) as Record<string, unknown>[],
-            ".github/settings-override.yml",
+            "files/settings/override.yml",
           ),
         ),
       );

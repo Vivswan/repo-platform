@@ -15,28 +15,12 @@ import { join } from "node:path";
 import { z } from "zod";
 import { addMask, fail, requireEnv } from "../shared/gha.ts";
 import { parseJson, parseWith } from "../shared/json.ts";
+import { maskForms } from "../shared/mask.ts";
 import { ROWS_FILE } from "./verdict.ts";
 
 /** A selector row: the repository and its visibility. */
 const planRowSchema = z.object({ repo: z.string().min(1), private: z.boolean() });
 export type PlanRow = z.infer<typeof planRowSchema>;
-
-/** The bare name is masked from four characters: a shorter one appears
- *  inside too many innocent words for a substring masker. */
-export const MIN_MASKED_NAME = 4;
-
-/** Every spelling of `slug` a log line could carry, deduplicated. */
-export function maskForms(slug: string): string[] {
-  const name = slug.split("/").pop() ?? slug;
-  const forms = [
-    slug,
-    `https://github.com/${slug}`,
-    `https://github.com/${slug}.git`,
-    `git@github.com:${slug}.git`,
-  ];
-  if (name.length >= MIN_MASKED_NAME) forms.push(name);
-  return [...new Set(forms.flatMap((form) => [form, form.toLowerCase()]))];
-}
 
 /** The repository row `index` names, or the reason the plan's rows cannot
  *  be trusted (the re-run selection disagrees with the plan's count, or

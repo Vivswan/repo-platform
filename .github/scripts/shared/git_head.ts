@@ -17,10 +17,9 @@
 
 /** A VALUE-FREE failure for a HEAD probe: the git subcommand and its exit
  *  code only - never the path, the repository root, or git's stderr, each
- *  of which can name private-repo content. Defense in depth behind the
- *  callers' run_hidden.ts wrapping: the message stays safe even if a future
- *  caller logs it unwrapped. Same discipline as shared/json.ts; the withheld
- *  git detail is reproduced locally (docs/private-repos.md). */
+ *  of which can name private-repo content: the message stays safe wherever
+ *  a caller logs it. Same discipline as shared/json.ts; the withheld git
+ *  detail is reproduced locally (docs/private-repos.md). */
 import { capture, DEFAULT_HANG_BOUND_MS, timeoutExitCode } from "./proc.ts";
 
 function headProbeFailed(subcommand: "ls-tree" | "cat-file", exitCode: number | null): Error {
