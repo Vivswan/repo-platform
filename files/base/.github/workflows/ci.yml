@@ -108,7 +108,8 @@ jobs:
   # job reads outputs only from its direct dependencies. The release runs
   # downstream of the gate AND the repo-owned hook, so the repository's own
   # green-gated work lands before the tag is minted.
-  # No lane here: a caller-side lane keeps one pending call and cancels the older one, which is how a release merge lost its tag.
+  # No lane here: a shared lane keeps one pending call and cancels the older one,
+  # so a release commit's call could be cancelled.
   # The called job holds its own lane keyed by the judged commit, so only a re-run of the same commit ever waits.
   release:
     needs: [ci, all-green, post-green]

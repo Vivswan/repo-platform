@@ -56,7 +56,8 @@ export function inlineFunctionCopies(text: string, name: string): string[] {
  *  A rename or a dropped `id:` on any side reads as an empty output, which is not "true": every run would skip the cut, silently.
  *  A release-please step outside those two, or a cut step without its condition, would tag on every push run.
  *  The cut job's lane is keyed by the judged commit and the skeleton's caller holds none.
- *  A shared or caller-side lane keeps one pending call and cancels the older one, which is how a release merge lost its tag. */
+ *  A shared lane keeps one pending call and cancels the older one,
+ *  so a release commit's call could be cancelled. */
 export function releaseCutWiringMismatches(files: {
   workflow: string;
   action: string;

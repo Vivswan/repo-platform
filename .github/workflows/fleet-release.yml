@@ -3,8 +3,6 @@
 #   cut: the judged commit is a release-PR merge. release-please tags that merge commit (never the branch head) and drafts the release; no PR work.
 #   release-pr: any other push. release-please proposes or refreshes the release PR, only while main's head is still the judged commit.
 # Refreshing the release PR is newest-wins work: a run whose commit is no longer main's head skips it instead of racing the newer run's refresh.
-# One job, not two: the caller reads release_created and tag_name off the cut step and prs_created and pr off the propose step.
-# Both stay this job's outputs; two jobs would need a third for the health check and re-plumb every output.
 # The job lane is keyed by the judged commit: no other run shares it, so nothing can cancel a pending cut.
 # A re-run of the same commit waits its turn and finds the release already cut.
 # Known limit: two release PRs merged before either is cut are both tagged by the first cut run (release-please builds every pending release PR).
@@ -57,7 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Keyed by the judged commit: no other run shares the lane, so nothing can cancel a pending cut.
-    # A caller-side lane must not exist: GitHub keeps one pending job per lane and cancels the older one, which is how a release merge lost its tag.
+    # The caller holds no lane: a shared lane keeps one pending call and cancels the older one,
+    # so a release commit's call could be cancelled.
     concurrency:
       group: release-cut-${{ inputs.sha || github.sha }}
       cancel-in-progress: false
