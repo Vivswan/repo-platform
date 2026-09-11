@@ -1,20 +1,24 @@
 name: Semgrep
 description: >-
   The fleet's static analysis: semgrep's default registry ruleset over the
-  caller's checkout, every finding uploaded to code scanning as SARIF, and
-  the step failing on an ERROR-severity finding. Public repositories only:
-  the registry needs no token, but code scanning needs a public repository
-  or Advanced Security. The only bypass is semgrep's own `// nosemgrep:
-  rule-id` comment on the finding, with a reason; semgrep keeps a marked
-  finding in its SARIF as a suppressed result and code scanning shows a
-  suppressed result as an open alert, so the upload drops suppressed results
-  first. Two registry rules are excluded from the scan: mutable-action-tag
-  duplicates zizmor's unpinned-uses (one tool owns each finding class),
-  permanently; secrets-inherit only until the fleet cutover, because
-  managed repositories still run the old rendered ci.yml and release.yml,
-  whose `secrets: inherit` lines carry no nosemgrep marker (the writer's
-  ci.yml marks each one with its reason), and the rule would fail every
-  fleet repository until the writer replaces them.
+  caller's checkout, at ERROR severity only. The ERROR findings are uploaded
+  to code scanning as SARIF, and one of them fails the step. WARNING and
+  INFO rules do not run, so their findings appear nowhere. An earlier upload
+  may have opened lower-severity alerts; code scanning marks them fixed once
+  a later upload for the same category and branch lacks them. Public
+  repositories only: the registry needs no token, but code scanning needs a
+  public repository or Advanced Security.
+  The only bypass is semgrep's own `// nosemgrep: rule-id` comment on the
+  finding, with a reason; semgrep keeps a marked finding in its SARIF as a
+  suppressed result and code scanning shows a suppressed result as an open
+  alert, so the upload drops suppressed results first. Two registry rules
+  are excluded from the scan: mutable-action-tag duplicates zizmor's
+  unpinned-uses (one tool owns each finding class), permanently;
+  secrets-inherit only until the fleet cutover, because managed repositories
+  still run the old rendered ci.yml and release.yml, whose `secrets: inherit`
+  lines carry no nosemgrep marker (the writer's ci.yml marks each one with
+  its reason), and the rule would fail every fleet repository until the
+  writer replaces them.
 
 runs:
   using: composite
@@ -23,17 +27,14 @@ runs:
       shell: bash
       run: python3 -m pip install --quiet semgrep==1.176.1
 
-    # No --error: the JSON copy is judged by severity below, so WARNING and
-    # INFO findings reach code scanning without blocking. The excluded rules
-    # are the two the description names: zizmor's, and the one the fleet's
-    # old renders cannot mark until the writer cutover. The exit status is
-    # a step output, not the step's result, so a fatal scan (a config or
-    # engine error) reaches the judge and reads red with its reason.
+    # --severity ERROR filters the rules: the SARIF and the JSON copy carry ERROR findings only.
+    # No --error: the exit status means "did the scan complete"; the judge below is the verdict.
+    # The status is a step output, not the step's result, so a fatal scan still reaches the judge.
     - name: Scan
       id: scan
       shell: bash
       run: |
-        semgrep scan --config p/default --metrics=off \
+        semgrep scan --config p/default --metrics=off --severity ERROR \
           --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag \
           --exclude-rule=yaml.github-actions.security.secrets-inherit.secrets-inherit \
           --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" . \
@@ -59,10 +60,7 @@ runs:
         sarif_file: ${{ runner.temp }}/semgrep.sarif
         category: semgrep
 
-    # The verdict: a scan that did not exit 0 fails first, naming its status.
-    # Then the JSON copy: ERROR-severity findings and fatal analysis errors
-    # fail; partial parses and timeouts (level warn) only annotate, so a
-    # WARNING or INFO finding reaches code scanning unblocked.
+    # Warn-level analysis errors (partial parses, timeouts) only annotate: they are semgrep's limits, not the repository's findings.
     - name: Fail on an ERROR finding
       if: ${{ !cancelled() }}
       shell: bash

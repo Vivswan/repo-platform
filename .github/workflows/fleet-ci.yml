@@ -256,9 +256,7 @@ jobs:
       - if: steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'
         run: echo "::notice::knip stood down, the install inputs are missing (package.json, plus package-lock.json or npm-shrinkwrap.json for npm ci)"
 
-  # Semgrep's default registry ruleset; every finding to code scanning, an
-  # ERROR finding fails the job. Public only: code scanning is where the
-  # findings go (!= 'true' as above).
+  # Public only: code scanning is where the findings go (!= 'true' as above).
   semgrep:
     needs: [plan]
     if: needs.plan.outputs.private != 'true' && github.event_name != 'schedule'
