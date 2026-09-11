@@ -103,7 +103,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 ## File size caps
 
-- Rule: no file over its hard line cap and no code line over 256 characters; a comment block over 10 lines, or a file header comment over 25, warns. The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
+- Rule: no file over its hard line cap, and in a source, test, workflow, or shell file no line over 256 code points, comment lines included (a `//` line past the cap is a width finding whatever block it sits in): the width cap reads every line and leaves alone only a generated region, an unbreakable one-token line, and (warn tier only) a line that is one string, template, or regex literal, each spelled out under exempt by construction below. A comment block over 10 lines, or a file header comment over 25, warns. The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
 
 | Kind | Which files | Hard cap (fails) | Warn cap (annotates) |
 |---|---|---|---|
