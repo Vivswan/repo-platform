@@ -34,5 +34,6 @@ describe("walkFiles", () => {
     writeFileSync(join(root, "node_modules"), "a file, not a directory");
     writeFileSync(join(root, "kept.txt"), "kept");
     expect(walkFiles(root)).toEqual(["kept.txt"]);
+    expect(walkFiles(root, new Set())).toEqual(["kept.txt", "node_modules"]);
   });
 });

@@ -26,7 +26,11 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { parseFilesConfig } from "../../actions/plan/files_config.ts";
+import {
+  blockSourcePath,
+  blockValueOf,
+  parseFilesConfig,
+} from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
 import { gateExpression } from "../compose/exclude.ts";
 import { loadManifests, type ModuleManifest } from "../lib/module_manifests.ts";
@@ -57,6 +61,7 @@ function byModule(manifests: ModuleManifest[]): {
 }
 
 const ANCHOR = "gitignore";
+const GITIGNORE = ".gitignore";
 
 const DEFAULT_LOCAL_BODY =
   "# Repository-specific ignore patterns go outside the managed region:\n" +
@@ -91,14 +96,14 @@ function fragmentOutput(module: string): string {
 }
 
 /** The name a github/gitignore path takes in its section heading and, on
- *  the files/ side, in its block file's suffix: the file's stem. */
+ *  the files/ side, as its block file's value: the file's stem. */
 export function blockName(path: string): string {
   return (path.split("/").pop() as string).replace(/\.gitignore$/, "");
 }
 
 /** The files/-relative block file the writer reads for one module's source. */
 export function blockRel(module: string, path: string): string {
-  return `${module}/.gitignore.block.${blockName(path)}`;
+  return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
 }
 
 /** Generated gitignore fragments whose module no longer declares
@@ -290,7 +295,7 @@ export function strayBlockFiles(entries: [string, string[]][], filesDir: string)
     if (!existsSync(dir) || module === "base") continue;
     for (const name of readdirSync(dir).sort()) {
       const rel = `${module}/${name}`;
-      if (name.startsWith(".gitignore.block.") && !expected.has(rel)) strays.push(`files/${rel}`);
+      if (blockValueOf(GITIGNORE, name) !== null && !expected.has(rel)) strays.push(`files/${rel}`);
     }
   }
   return strays;

@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { blockSourcePath } from "../../actions/plan/files_config";
 import { sectionsIn, templateRegionBody } from "../../scripts/generate/build_gitignore";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -341,17 +342,17 @@ function occurrences(run: Run, path: string, needle: string): number {
   return readFileSync(join(run.target, path), "utf-8").split(needle).length - 1;
 }
 
-const block = (module: string, name: string) =>
-  readFileSync(join(FILES_TREE, module, name), "utf-8");
+const block = (module: string, entryPath: string, value: string) =>
+  readFileSync(join(FILES_TREE, module, blockSourcePath(entryPath, value)), "utf-8");
 
 describe("blocks land once per distinct content, in module order", () => {
   const TOOLCHAINS = ["bun", "node", "deno", "uv", "rust"];
   const STEPS = ["bun", "node", "deno", "uv"];
 
   test("the three toolchains sharing the Node gitignore source ship one byte-identical block", () => {
-    const node = block("bun", ".gitignore.block.Node");
-    expect(block("node", ".gitignore.block.Node")).toBe(node);
-    expect(block("deno", ".gitignore.block.Node")).toBe(node);
+    const node = block("bun", ".gitignore", "Node");
+    expect(block("node", ".gitignore", "Node")).toBe(node);
+    expect(block("deno", ".gitignore", "Node")).toBe(node);
   });
 
   test("every module selected: Node lands once, each toolchain's own blocks land", () => {
@@ -362,7 +363,7 @@ describe("blocks land once per distinct content, in module order", () => {
     for (const module of TOOLCHAINS) {
       expect({
         module,
-        bullets: occurrences(run, "AGENTS.md", block(module, "AGENTS.md.block.toolchain")),
+        bullets: occurrences(run, "AGENTS.md", block(module, "AGENTS.md", "toolchain")),
       }).toEqual({ module, bullets: 1 });
     }
     for (const ecosystem of ["github-actions", "bun", "npm", "deno", "uv", "cargo"]) {
@@ -374,7 +375,7 @@ describe("blocks land once per distinct content, in module order", () => {
     for (const path of ["checks.yml", "copilot-setup-steps.yml", "auto-format.yml"]) {
       const text = readFileSync(join(run.target, ".github/workflows", path), "utf-8");
       const at = STEPS.map((module) =>
-        text.indexOf(block(module, `.github/workflows/${path}.block.toolchain`)),
+        text.indexOf(block(module, `.github/workflows/${path}`, "toolchain")),
       );
       expect({ path, at }).toEqual({ path, at: [...at].sort((a, b) => a - b) });
       expect({ path, found: at.every((index) => index > 0) }).toEqual({ path, found: true });
@@ -391,8 +392,8 @@ describe("blocks land once per distinct content, in module order", () => {
     expect(occurrences(run, ".gitignore", "\n## Python (")).toBe(0);
     expect(occurrences(run, ".github/dependabot.yml", "package-ecosystem: ")).toBe(2);
     expect(occurrences(run, ".github/dependabot.yml", 'package-ecosystem: "bun"')).toBe(1);
-    expect(occurrences(run, "AGENTS.md", block("bun", "AGENTS.md.block.toolchain"))).toBe(1);
-    expect(occurrences(run, "AGENTS.md", block("uv", "AGENTS.md.block.toolchain"))).toBe(0);
+    expect(occurrences(run, "AGENTS.md", block("bun", "AGENTS.md", "toolchain"))).toBe(1);
+    expect(occurrences(run, "AGENTS.md", block("uv", "AGENTS.md", "toolchain"))).toBe(0);
     for (const path of ["checks.yml", "copilot-setup-steps.yml", "auto-format.yml"]) {
       const counts = Object.fromEntries(
         STEPS.map((module) => [
@@ -400,7 +401,7 @@ describe("blocks land once per distinct content, in module order", () => {
           occurrences(
             run,
             `.github/workflows/${path}`,
-            block(module, `.github/workflows/${path}.block.toolchain`),
+            block(module, `.github/workflows/${path}`, "toolchain"),
           ),
         ]),
       );

@@ -72,7 +72,7 @@ retired:
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
 | `files[].when` | The selection condition (below). Absent means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path>.block.<value>`. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `retired[].path` | A path the platform no longer writes. |
 | `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
@@ -115,10 +115,10 @@ The three links carry no `when`: every repository gets them.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.gitignore.block.<Source>`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)); the Node source three toolchains declare is byte-identical in each, so it lands once |
-| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.yml.block.<ecosystem>`, appended at the anchor line that ends the source |
-| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.md.block.toolchain`, the module's Toolchain bullets, appended after the region body |
-| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<file>.block.toolchain`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
+| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template each, written by `scripts/generate/build_gitignore.ts` beside the template fragments ([compose.md](compose.md)); the Node source three toolchains declare is byte-identical in each, so it lands once |
+| `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
+| `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
+| `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
 
 | Module data key | Meaning | Reader |
 | --- | --- | --- |

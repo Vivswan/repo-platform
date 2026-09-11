@@ -10,8 +10,8 @@
 // than inside `bun run check` (which must work offline).
 //
 // Scanned: workflow YAML, composite action manifests, template .jinja
-// sources, and the sync writer's files/ sources (workflow block files
-// included). Skipped: local `./` paths and refs carrying template
+// sources, and the sync writer's files/ sources (its workflow block files
+// are plain .yml). Skipped: local `./` paths and refs carrying template
 // expressions (resolved only at render time). A comment naming a branch
 // (`# master`) is not judged: branch heads move by design.
 
@@ -113,7 +113,7 @@ function* walk(dir: string): Generator<string> {
     // and templates/base/ ships the agent-file symlinks on purpose) must not throw.
     const entry = lstatSync(path);
     if (entry.isDirectory()) yield* walk(path);
-    else if (entry.isFile() && /\.(ya?ml|jinja)$|\.ya?ml\.block\./.test(name)) yield path;
+    else if (entry.isFile() && /\.(ya?ml|jinja)$/.test(name)) yield path;
   }
 }
 

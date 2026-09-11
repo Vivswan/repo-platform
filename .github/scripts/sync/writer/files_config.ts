@@ -6,6 +6,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  BLOCK_VALUE_RE,
+  blockSourcePath,
   checkFilesConfig,
   type FileEntry,
   type FilesConfig,
@@ -22,6 +24,7 @@ import {
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
 import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
+import { walkFiles } from "../walk.ts";
 import {
   blocksAnchorProblem,
   isPlaceholderName,
@@ -41,9 +44,6 @@ export interface WriterFilesConfig extends FilesConfig {
 export function mentionsMarkers(text: string, markers: RegionMarkers): boolean {
   return [markers.begin, markers.end].some((marker) => substringCount(text, marker) > 0);
 }
-
-/** A block value names a file suffix, so it is one path-safe word. */
-const BLOCK_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 /** The placeholders whose value the registration may leave unset, so a
  *  module must declare their default before a source may use them. */
@@ -120,13 +120,13 @@ export function blockCandidates(
     if (!modules.includes(module)) continue;
     const values = config.modules[module][entry.blocks];
     if (values === undefined) continue;
-    if (!Array.isArray(values) || values.some((value) => !BLOCK_NAME_RE.test(String(value)))) {
+    if (!Array.isArray(values) || values.some((value) => !BLOCK_VALUE_RE.test(String(value)))) {
       throw new Error(
-        `files.yml: modules.${module}.${entry.blocks} must be a list of block names (letters, digits, . _ -)`,
+        `files.yml: modules.${module}.${entry.blocks} must be a list of block names (letters, digits, _ -)`,
       );
     }
     for (const value of values as string[]) {
-      candidates.push({ module, value, source: `${module}/${entry.path}.block.${value}` });
+      candidates.push({ module, value, source: `${module}/${blockSourcePath(entry.path, value)}` });
     }
   }
   return candidates;
@@ -162,7 +162,9 @@ interface SourceUse {
 }
 
 /** Every source the config can ever read from the tree exists and carries
- *  only listed placeholders. */
+ *  only listed placeholders, and the tree carries nothing else: a file no
+ *  entry or block name reads (a block file under a retired name) would
+ *  otherwise sit there unnoticed. */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
   // Source -> every region grammar it feeds; a split source must not mention
@@ -215,6 +217,14 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
           `source ${SOURCE_PREFIX}${source} mentions the ${region} region markers the writer adds itself`,
         );
       }
+    }
+  }
+  // Nothing is skipped by name, so a stray under a vendored-looking name is
+  // reported too; symlinks are not walked (the tree holds none and nothing
+  // writes one). A missing tree has each source reported missing above.
+  for (const rel of existsSync(tree) ? walkFiles(tree, new Set()) : []) {
+    if (!sources.has(rel)) {
+      problems.push(`${SOURCE_PREFIX}${rel} is read by no entry or block name`);
     }
   }
   if (problems.length > 0) throw new FilesConfigError(label, problems);
