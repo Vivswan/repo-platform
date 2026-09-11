@@ -20,20 +20,12 @@
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
-/** Report head shown per failure; the body is a summary, not a log. */
+/** Report head shown per failure when an uploaded artifact carries the rest. */
 const REPORT_LINES = 60;
-/**
- * GitHub caps an issue or comment body at 65,536 characters. Stay comfortably
- * under it and let the truncation notice and the uploaded artifacts carry the
- * rest.
- */
+/** GitHub caps an issue or comment body at 65,536 characters; stay comfortably under it. */
 const MAX_BODY = 60_000;
-/**
- * Hard per-block character cap after line truncation, so one very long single
- * line (which line truncation cannot shorten) cannot dominate the body. Small
- * enough that the fixed header/footer/notice plus at least one full block
- * always fit inside MAX_BODY.
- */
+/** Per-block character cap when an artifact carries the rest.
+ *  Small enough that the header, footer, notice, and one full block always fit inside MAX_BODY. */
 const MAX_BLOCK_CHARS = 8_000;
 /** Contract v1: failure directory names are plain identifiers. */
 const DIR_NAME = /^[A-Za-z0-9._-]+$/;
@@ -91,20 +83,35 @@ export function failureDirs(root: string): string[] {
 }
 
 /**
- * The first `limit` lines of `text`, with a marker naming how many were cut. A
- * single trailing newline is not counted as a line, so text of exactly `limit`
- * lines plus a trailing newline is returned whole rather than reporting one
- * phantom extra line.
+ * The first lines of `text` within `lines` lines and `chars` characters,
+ * whole lines only, with a marker naming how many were cut.
+ * The first line is kept even when it alone overflows `chars`: capChars cuts
+ * an unbreakable line, and a block must never lose all its content.
+ * A single trailing newline is not a line, so text of exactly `lines` lines
+ * plus a trailing newline is returned whole.
  */
-export function head(text: string, limit: number): string {
-  const lines = text.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop(); // a trailing newline splits to an empty final element; drop it
+export function head(text: string, lines: number, chars: number): string {
+  const all = text.split("\n");
+  if (all.length > 0 && all[all.length - 1] === "") {
+    all.pop();
   }
-  if (lines.length <= limit) {
+  if (all.length <= lines && all.join("\n").length <= chars) {
     return text.trimEnd();
   }
-  return `${lines.slice(0, limit).join("\n")}\n... (${lines.length - limit} more lines)`;
+  const marker = (cut: number) => `\n... (${cut} more lines)`;
+  // Reserved at the largest count it can name, so the marker never overflows.
+  const reserve = marker(all.length).length;
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of all) {
+    const next = used + line.length + (kept.length > 0 ? 1 : 0);
+    if (kept.length >= lines || (kept.length > 0 && next + reserve > chars)) {
+      break;
+    }
+    kept.push(line);
+    used = next;
+  }
+  return `${kept.join("\n")}${marker(all.length - kept.length)}`;
 }
 
 /**
@@ -212,33 +219,42 @@ export function buildBody(
 
   const header = `${words.run} on ${date} produced ${dirs.length} ${words.report}(s).\n`;
   const footer = url ? `\nRun: ${url}` : "";
-  const artifactsNote = artifactName
+  // With an artifact the body is a summary and the artifact carries the rest.
+  // Without one the body is the only record: every report rides whole, cut
+  // only at its share of the body limit, and nothing points at an artifact.
+  const summary = artifactName !== "";
+  const artifactsNote = summary
     ? `\nThe full ${words.artifacts}${words.artifactsDetail} are attached to the run as \`${artifactName}\`.`
-    : `\nThe full ${words.artifacts} are attached to the run; see its artifacts list.`;
-  // The omission notice is only present when some blocks are dropped, but its
-  // length is reserved up front so the running total stays a real character
-  // budget whether or not it ends up shown. Padded for the count digits.
+    : "";
+  // Reserved up front at its largest count, whether or not it is shown.
   const omissionNotice = (count: number) =>
-    `\n${count} more ${words.report}(s) omitted to stay under the GitHub body limit; see the attached artifacts.`;
+    `\n${count} more ${words.report}(s) omitted to stay under the GitHub body limit${summary ? "; see the attached artifacts" : ""}.`;
   const noticeReserve = omissionNotice(dirs.length).length;
 
   // Every block (including the first) is character-capped and
   // budget-checked, so no single report can push the body past GitHub's
   // limit and break the filing itself.
   const budget = MAX_BODY - header.length - footer.length - artifactsNote.length - noticeReserve;
+  const lineCap = summary ? REPORT_LINES : Number.POSITIVE_INFINITY;
+  // Each report's share of the budget, never below the summary cap: many
+  // small reports keep their content and the omission notice counts the rest.
+  // -1 for the "\n" join between blocks.
+  const blockCap = summary
+    ? MAX_BLOCK_CHARS
+    : Math.max(MAX_BLOCK_CHARS, Math.floor(budget / dirs.length) - 1);
   const blocks: string[] = [];
   let used = 0;
   let shown = 0;
   for (const dir of dirs) {
     const reportPath = join(dir, "report.md");
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-    const title = blockTitle(dir, report);
+    const heading = `## ${blockTitle(dir, report)}\n`;
     // The report's own heading is dropped (the block heading replaces it);
     // the rest of the head carries the replay command per the contract.
     const rest = report.split("\n").slice(1).join("\n").trim();
     const block = capChars(
-      [`## ${title}`, "", ...(rest ? [head(rest, REPORT_LINES), ""] : [])].join("\n"),
-      MAX_BLOCK_CHARS,
+      rest ? `${heading}\n${head(rest, lineCap, blockCap - heading.length - 2)}\n` : heading,
+      blockCap,
     );
     // +1 for the "\n" join between blocks.
     if (used + block.length + 1 > budget) {

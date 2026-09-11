@@ -150,7 +150,7 @@ broken internal links (page -> link):
 
 ## Link rot
 
-The nightly run crawls the deployed site's EXTERNAL links after publishing (internal ones are fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (default `docs-link-rot`), listing every broken URL with up to five of the pages linking it, closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch. The check runs on the schedule alone, so a fixed link closes the issue on the next clean night, never on a push.
+The nightly run crawls the deployed site's EXTERNAL links after publishing (internal ones are fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the label of the `labels.site` registration key (default `docs-link-rot`), listing every broken URL with up to five of the pages linking it (a list past GitHub's issue body limit is cut at whole lines, naming how many are missing), closed automatically on the first clean night. While it is open it holds releases on repositories with the release-please module; `release-override` is the escape hatch. The check runs on the schedule alone, so a fixed link closes the issue on the next clean night, never on a push.
 
 ## Module parameters (registration keys)
 

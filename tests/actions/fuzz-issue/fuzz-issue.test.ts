@@ -46,18 +46,54 @@ beforeAll(() => setSystemTime(new Date(`${date}T12:00:00Z`)));
 afterAll(() => setSystemTime());
 
 describe("head", () => {
-  test("returns the text unchanged when under the limit", () => {
-    expect(head("a\nb\nc", 5)).toBe("a\nb\nc");
-  });
+  const five = ["1", "2", "3", "4", "5"].join("\n");
+  const cases: { text: string; lines: number; chars: number; expected: string; reason: string }[] =
+    [
+      { text: "a\nb\nc", lines: 5, chars: 100, expected: "a\nb\nc", reason: "within both limits" },
+      {
+        text: `${["1", "2", "3"].join("\n")}\n`,
+        lines: 3,
+        chars: 100,
+        expected: "1\n2\n3",
+        reason: "a single trailing newline is not a line",
+      },
+      {
+        text: five,
+        lines: 2,
+        chars: 100,
+        expected: "1\n2\n... (3 more lines)",
+        reason: "the line cap",
+      },
+      {
+        text: five,
+        lines: 10,
+        chars: 9,
+        expected: five,
+        reason: "text that exactly fills the character cap needs no marker",
+      },
+      {
+        text: Array(5).fill("abcdefghij").join("\n"),
+        lines: 10,
+        // Two lines (21 chars) plus the reserved "\n... (5 more lines)" marker (19) fit; a third would not.
+        chars: 45,
+        expected: "abcdefghij\nabcdefghij\n... (3 more lines)",
+        reason: "the character cap keeps whole lines and counts the cut ones",
+      },
+      {
+        text: `${"x".repeat(50)}\nshort`,
+        lines: 10,
+        chars: 20,
+        expected: `${"x".repeat(50)}\n... (1 more lines)`,
+        reason: "a first line over the cap is kept for capChars to cut",
+      },
+    ];
 
-  test("truncates and names how many lines were cut", () => {
-    expect(head(["1", "2", "3", "4", "5"].join("\n"), 2)).toBe("1\n2\n... (3 more lines)");
-  });
-
-  test("a single trailing newline is not counted as an extra line", () => {
-    const text = `${["1", "2", "3"].join("\n")}\n`;
-    expect(head(text, 3)).toBe("1\n2\n3");
-  });
+  test.each(cases)(
+    "keeps the head within $lines lines and $chars chars ($reason)",
+    ({ text, lines, chars, expected }) => {
+      expect(head(text, lines, chars)).toBe(expected);
+    },
+  );
 });
 
 describe("capChars", () => {
@@ -143,21 +179,24 @@ describe("buildBody", () => {
     utimesSync(orphan, new Date(2_000_000), new Date(2_000_000));
   });
 
-  test.each([
+  const trailers: { artifactName: string; reason: string; trailer: string[] }[] = [
     {
       artifactName: "fuzz-failures-1",
       reason: "names the uploaded artifact",
-      artifactsLine:
+      trailer: [
         "The full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.",
+      ],
     },
     {
       artifactName: "",
-      reason: "no artifact name points at the run's artifacts list",
-      artifactsLine: "The full failure artifacts are attached to the run; see its artifacts list.",
+      reason: "no artifact, no sentence pointing at one",
+      trailer: [],
     },
-  ])(
+  ];
+
+  test.each(trailers)(
     "one block per failure, oldest first, then the artifacts note and run ($reason)",
-    ({ artifactName, artifactsLine }) => {
+    ({ artifactName, trailer }) => {
       expect(buildBody(failureDirs(root), env, artifactName)).toBe(
         [
           `Nightly fuzz run on ${date} produced 2 failure report(s).`,
@@ -172,12 +211,92 @@ describe("buildBody", () => {
           "",
           "## mcp_jsonrpc (no report.md)",
           "",
-          artifactsLine,
+          ...trailer,
           "Run: https://github.com/o/r/actions/runs/42",
         ].join("\n"),
       );
     },
   );
+
+  // The link-rot shape: one report listing every broken URL with its
+  // referring page, 83 lines for 40 URLs, more than the 60-line summary head.
+  const linkRotReport = (urls: number) => [
+    `# ${urls} broken external links`,
+    "",
+    "The nightly link check found external links in the deployed site that no longer resolve.",
+    "The site still deployed; fix or remove the links in the source markdown.",
+    "",
+    ...Array.from({ length: urls }, (_, i) => [
+      `- https://gone.example/page-${i} (status 404)`,
+      `  - linked from /docs/page-${i}.html`,
+    ]).flat(),
+    "",
+  ];
+  const linkRotRoot = (urls: number) => {
+    const root = temp.dir("link-rot-");
+    mkdirSync(join(root, "external-links"));
+    writeFileSync(join(root, "external-links", "report.md"), linkRotReport(urls).join("\n"));
+    return root;
+  };
+
+  const linkRotBodies: {
+    artifactName: string;
+    reason: string;
+    body: (report: string[]) => string[];
+  }[] = [
+    {
+      artifactName: "",
+      reason: "no artifact: the body is the only record and carries all 40",
+      body: (report: string[]) => [
+        ...report.slice(1, -1),
+        "",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ],
+    },
+    {
+      artifactName: "link-rot-1",
+      reason: "an artifact: the 60-line head, the count, and the artifact sentence",
+      body: (report: string[]) => [
+        ...report.slice(1, 62),
+        "... (23 more lines)",
+        "",
+        "The full reports are attached to the run as `link-rot-1`.",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ],
+    },
+  ];
+
+  test.each(linkRotBodies)("a 40-URL link-rot report ($reason)", ({ artifactName, body }) => {
+    const report = linkRotReport(40);
+    expect(buildBody(failureDirs(linkRotRoot(40)), env, artifactName, "generic")).toBe(
+      [
+        `Nightly run on ${date} produced 1 report(s).`,
+        "",
+        "## 40 broken external links",
+        ...body(report),
+      ].join("\n"),
+    );
+  });
+
+  test("without an artifact a report past the body limit is cut at whole lines with an honest count and no artifact sentence", () => {
+    const urls = 1500;
+    const body = buildBody(failureDirs(linkRotRoot(urls)), env, "", "generic");
+    // The whole 60,000-char budget is used, less than one report line spare:
+    // the 8,000-char summary cap would leave a body a seventh this size.
+    expect(body.length).toBeGreaterThan(59_800);
+    expect(body.length).toBeLessThan(60_000);
+    expect(body).not.toContain("artifact");
+    expect(body).not.toContain("omitted");
+    const cut = /\n\.\.\. \((\d+) more lines\)\n\nRun: /.exec(body);
+    const kept = body.split("\n").filter((line) => line.startsWith("- https://")).length;
+    // Every URL is either in the body or counted; the parent lines are the rest of the count.
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(urls);
+    const shown = body
+      .split("\n")
+      .filter((line) => line.startsWith("- ") || line.startsWith("  - ")).length;
+    expect(shown + Number(cut?.[1])).toBe(2 * urls);
+  });
 
   test("caps the body under the GitHub limit and says how many were omitted", () => {
     const bigRoot = temp.dir("big-");
@@ -192,18 +311,50 @@ describe("buildBody", () => {
     expect(body).toContain("omitted to stay under the GitHub body limit");
   });
 
-  test("a single giant single-line report still produces a body under the limit", () => {
-    // One report that is a single 70,000-char line, which line truncation
-    // cannot shorten. The character cap must keep the whole body under
-    // GitHub's 65,536 limit so the filing itself does not fail.
-    const giantRoot = temp.dir("giant-");
-    const dir = join(giantRoot, "handshake");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "report.md"), `# handshake crashed\n${"x".repeat(70_000)}`);
-    const body = buildBody(failureDirs(giantRoot), env, "a");
-    expect(body.length).toBeLessThan(65_536);
-    expect(body).toContain("## handshake crashed");
+  test("without an artifact many reports keep their content whole and the rest are counted as omitted", () => {
+    // 100 reports of ~700 chars: a bare share of the budget (~600 chars each)
+    // would cut every one, so the share floors at the summary cap and the
+    // budget runs out on whole blocks instead.
+    const manyRoot = temp.dir("many-");
+    const line = "x".repeat(68);
+    for (let i = 0; i < 100; i++) {
+      const dir = join(manyRoot, `r${String(i).padStart(3, "0")}`);
+      mkdirSync(dir);
+      writeFileSync(
+        join(dir, "report.md"),
+        `# report ${i}\n\n${Array(10).fill(line).join("\n")}\n`,
+      );
+    }
+    const body = buildBody(failureDirs(manyRoot), env, "", "generic");
+    const shown = (body.match(/^## report \d+$/gm) ?? []).length;
+    expect(body.length).toBeGreaterThan(59_000);
+    expect(body.length).toBeLessThan(60_000);
+    expect(body).not.toContain("more lines");
+    expect(body).not.toContain("truncated");
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(100);
+    expect(body.split("\n").filter((candidate) => candidate === line)).toHaveLength(shown * 10);
+    expect(body).toEndWith(
+      `\n${100 - shown} more report(s) omitted to stay under the GitHub body limit.\nRun: https://github.com/o/r/actions/runs/42`,
+    );
   });
+
+  test.each(["a", ""])(
+    "a single giant single-line report still produces a body under the limit (artifact %j)",
+    (artifactName) => {
+      // One report that is a single 70,000-char line, which line truncation
+      // cannot shorten. The character cap must keep the whole body under
+      // GitHub's 65,536 limit so the filing itself does not fail.
+      const giantRoot = temp.dir("giant-");
+      const dir = join(giantRoot, "handshake");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "report.md"), `# handshake crashed\n${"x".repeat(70_000)}`);
+      const body = buildBody(failureDirs(giantRoot), env, artifactName);
+      expect(body.length).toBeLessThan(65_536);
+      expect(body).toContain("## handshake crashed");
+      expect(body).toContain("... (truncated)");
+    },
+  );
 
   test("files a bare notice when there are no failure dirs", () => {
     expect(buildBody([], env, "a")).toBe(

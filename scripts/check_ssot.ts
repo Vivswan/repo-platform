@@ -29,6 +29,7 @@ import { prTitleRules } from "./check/ssot/pr_title.ts";
 import { processDisciplineRules } from "./check/ssot/process_discipline.ts";
 import { RULE_ROSTER, type Rule, ruleRosterMismatches } from "./check/ssot/rule_roster.ts";
 import { settingsWorkflowRules } from "./check/ssot/settings_workflow.ts";
+import { siteConfigRules } from "./check/ssot/site_config.ts";
 import { skillRules } from "./check/ssot/skills.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
 import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
@@ -50,6 +51,7 @@ const rules: Rule[] = [
   ...processDisciplineRules,
   ...harnessImportRules,
   ...syncOperatorRules,
+  ...siteConfigRules,
 ];
 
 function main(): number {

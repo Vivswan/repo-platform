@@ -62,6 +62,7 @@ export const RULE_ROSTER = [
   "stream-write-sync",
   "ci-harness-imports",
   "operator-verdict-only",
+  "site-config-parity",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the live

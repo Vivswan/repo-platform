@@ -34,7 +34,11 @@ inputs:
     required: false
     default: ""
   artifact-name:
-    description: Name of the uploaded workflow artifact to point readers at (optional)
+    description: >-
+      Name of the uploaded workflow artifact carrying the full reports; the
+      issue body then summarizes each report's head and points at it. Empty
+      means the issue body is the only record: every report rides whole, cut
+      only at GitHub's body limit, and nothing points at an artifact.
     required: false
     default: ""
   label-color:
