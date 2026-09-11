@@ -6,14 +6,11 @@ description: >-
   .github/zizmor.yml. Two passes of the pinned upstream action: the first
   uploads every finding of medium severity or above to code scanning as
   SARIF (public repositories only, as private personal repositories have no
-  code scanning), the second fails the step on any high finding. Each pass
-  runs once more when its first attempt fails, because zizmor exits the
-  same way on an error as on a finding and one transient GitHub API error
-  in the online known-vulnerable-actions audit has failed a run: a high
-  finding fails both judging attempts alike, a transient error passes the
-  second. The only
-  bypass is zizmor's own: an inline `# zizmor: ignore[rule]` comment or a
-  config ignore entry, in the repository, with a reason.
+  code scanning), the second fails the step on any high finding. zizmor
+  exits non-zero alike on an audit error and on a finding, so a failed
+  attempt of either pass runs once more and only the retry's result counts.
+  The only bypass is zizmor's own: an inline `# zizmor: ignore[rule]`
+  comment or a config ignore entry, in the repository, with a reason.
 
 inputs:
   upload-sarif:
