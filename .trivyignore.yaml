@@ -1,0 +1,11 @@
+vulnerabilities:
+  - id: CVE-2026-53571
+    paths:
+      - actions/pages-site/bun.lock
+    statement: >-
+      vitepress 1.x pins vite 5, which has no fixed release (the fix ships in
+      6.4.3, 7.3.5, and 8.0.16); no stable vitepress release depends on a fixed
+      vite yet. The finding is a server.fs.deny bypass on a Windows dev server;
+      the pages-site action only runs the static build, and no vite dev server
+      runs in CI or production.
+    expired_at: 2026-12-11

@@ -67,12 +67,11 @@ jobs:
           # the floor so CI honors the same config local runs do.
           GITLEAKS_VERSION: "8.30.1"
 
-  # Fails when a PR introduces dependencies with known vulnerabilities, by
-  # diffing the dependency graph between base and head. Only PR events have
-  # a diff to review, so the skip lives on the steps: the all-green verdict
-  # treats a skipped job as standing down, so a job-level skip would fail
-  # open - gating jobs stay unconditional (the all-green-roster ssot rule
-  # pins this) and event conditions go on their steps.
+  # Fails when a PR introduces a dependency with a high or critical advisory.
+  # Only PR events have a dependency diff to review, so the skip lives on the steps:
+  # all-green treats a skipped job as standing down, so a job-level skip would fail open.
+  # Gating jobs stay unconditional (the all-green-roster ssot rule pins this);
+  # event conditions go on their steps.
   dependency-review:
     runs-on: ubuntu-latest
     timeout-minutes: 10

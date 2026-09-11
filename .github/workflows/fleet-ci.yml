@@ -186,10 +186,10 @@ jobs:
           echo "$failed"
           exit 1
 
-  # Fails a PR introducing dependencies with known vulnerabilities. Public
-  # only (the dependency-graph API is free just there); PR events only:
-  # nothing else has a diff. != 'true' so an empty visibility output runs
-  # the check and fails loudly rather than standing the gate down.
+  # Fails a PR introducing a dependency with a high or critical advisory.
+  # Public only: the dependency-graph API is free just there.
+  # PR events only: nothing else has a diff.
+  # != 'true' so an empty visibility output runs the check and fails loudly.
   dependency-review:
     needs: [plan]
     if: ${{ needs.plan.outputs.private != 'true' && github.event_name == 'pull_request' }}

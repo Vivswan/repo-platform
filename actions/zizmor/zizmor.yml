@@ -8,8 +8,8 @@ rules:
         # (docs/build-provenance.md): a moving ref on purpose.
         Vivswan/repo-platform/*: ref-pin
         "*": hash-pin
-    # A tag pin reaches code scanning as a medium alert but does not block
-    # while the fleet still pins by tag; the gate blocks at high.
+    # A tag pin is a medium finding while the fleet still pins by tag.
+    # Both passes run at high, so it neither blocks nor surfaces.
     remap:
       severity: medium
   dangerous-triggers:
