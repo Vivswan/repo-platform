@@ -975,8 +975,8 @@ describe("main", () => {
 
   const short = (sha: string) => sha.slice(0, 12);
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
-  const pushAlone = (sha: string, before: string) =>
-    `::notice::no build stamp older than ${short(sha)} exists (nothing published before this run); reading the push alone, from ${short(before)}`;
+  const fallback = (sha: string, before: string) =>
+    `::notice::no build stamp older than ${short(sha)} exists (nothing published before this run); reading from the fallback base, ${short(before)}`;
   const noBlock = (base: string, sha: string) =>
     `::notice::${short(base)}..${short(sha)} carries no directives block; the fleet picks it up on the weekly sync`;
   const directive = (sha: string, scope: string) =>
@@ -1001,7 +1001,7 @@ describe("main", () => {
     expect(pushOnly).toEqual({
       exitCode: 0,
       output: "armed=false\n",
-      stdout: lines(pushAlone(prose2, prose1), noBlock(prose1, prose2)),
+      stdout: lines(fallback(prose2, prose1), noBlock(prose1, prose2)),
       stderr: "",
     });
   });
@@ -1099,7 +1099,7 @@ describe("main", () => {
       sha: prose1,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+      stdout: (base: string, sha: string) => lines(fallback(sha, base), noBlock(base, sha)),
     },
     {
       reason: "public: armed=true, repos=public",
@@ -1107,7 +1107,7 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=public\n",
       stdout: (base: string, sha: string) =>
-        lines(pushAlone(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
+        lines(fallback(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
     },
     {
       reason: "the justified all-scope: armed=true, repos=all",
@@ -1115,7 +1115,7 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=all\n",
       stdout: (base: string, sha: string) =>
-        lines(pushAlone(sha, base), directive(sha, "all"), syncing(base, sha, "all")),
+        lines(fallback(sha, base), directive(sha, "all"), syncing(base, sha, "all")),
     },
     {
       reason: "a list: repos is the folded comma list",
@@ -1124,7 +1124,7 @@ describe("main", () => {
       output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           directive(sha, "vivswan/b,vivswan/a"),
           syncing(base, sha, "vivswan/b,vivswan/a"),
         ),
@@ -1136,7 +1136,7 @@ describe("main", () => {
       output: "",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           `::error::${short(sha)}: "\`[fleet-sync: all]\`": ${NEEDS_REASON}`,
         ),
     },
@@ -1147,7 +1147,7 @@ describe("main", () => {
       output: "",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           `::error::${short(sha)}: "[fleet-sync: public] the ci changed" carries text after the directive: only [fleet-sync: all] takes a justification`,
         ),
     },
@@ -1156,14 +1156,14 @@ describe("main", () => {
       sha: context,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+      stdout: (base: string, sha: string) => lines(fallback(sha, base), noBlock(base, sha)),
     },
     {
       reason: "a code-span mention in later prose (the #94 body shape): armed=false",
       sha: mention,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+      stdout: (base: string, sha: string) => lines(fallback(sha, base), noBlock(base, sha)),
     },
     {
       reason: "a slug before a token: repos= carries tokens first, then slugs",
@@ -1172,7 +1172,7 @@ describe("main", () => {
       output: "armed=true\nrepos=private,vivswan/a\n",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           directive(sha, "private,vivswan/a"),
           syncing(base, sha, "private,vivswan/a"),
         ),
@@ -1184,7 +1184,7 @@ describe("main", () => {
       output: "",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           `::error::${short(sha)}: [fleet-sync] scope: the scope has an empty entry: pass owner/name slugs, public, or private separated by commas, with no stray or trailing comma`,
         ),
     },
@@ -1195,7 +1195,7 @@ describe("main", () => {
       output: "",
       stdout: (base: string, sha: string) =>
         lines(
-          pushAlone(sha, base),
+          fallback(sha, base),
           `::error::${short(sha)}: misplaced directive "[fleet-sync]": ${POSITION}`,
         ),
     },
@@ -1216,7 +1216,7 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=public\n",
       stdout: (base: string, sha: string) =>
-        lines(pushAlone(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
+        lines(fallback(sha, base), directive(sha, "public"), syncing(base, sha, "public")),
     },
     {
       reason: "two pull requests list the commit: the one it is the merge of wins",
@@ -1224,14 +1224,14 @@ describe("main", () => {
       exitCode: 0,
       output: "armed=true\nrepos=vivswan/c\n",
       stdout: (base: string, sha: string) =>
-        lines(pushAlone(sha, base), directive(sha, "vivswan/c"), syncing(base, sha, "vivswan/c")),
+        lines(fallback(sha, base), directive(sha, "vivswan/c"), syncing(base, sha, "vivswan/c")),
     },
     {
       reason: "a pull request with a null body carries no block",
       sha: emptyPull,
       exitCode: 0,
       output: "armed=false\n",
-      stdout: (base: string, sha: string) => lines(pushAlone(sha, base), noBlock(base, sha)),
+      stdout: (base: string, sha: string) => lines(fallback(sha, base), noBlock(base, sha)),
     },
     {
       reason: "a malformed block in the pull request's body is red the same way",
@@ -1239,7 +1239,7 @@ describe("main", () => {
       exitCode: 1,
       output: "",
       stdout: (base: string, sha: string) =>
-        lines(pushAlone(sha, base), `::error::${short(sha)}: "[fleet-sync]": ${NEEDS_REASON}`),
+        lines(fallback(sha, base), `::error::${short(sha)}: "[fleet-sync]": ${NEEDS_REASON}`),
     },
   ])("the pull request as the source, $reason", ({ sha, exitCode, output, stdout }) => {
     const before = git(unpublished, ["rev-parse", `${sha}~1`]);

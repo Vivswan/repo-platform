@@ -48,6 +48,9 @@ interface Scenario {
   /** A git on PATH whose ancestry probe against the tag's commit errors
    * (exit 128) instead of answering: the look that must never read as a no. */
   ancestryProbeErrors?: boolean;
+  /** A git on PATH whose commit probe of the source errors (exit 128)
+   * instead of answering: an errored look, not a source off main. */
+  sourceProbeErrors?: boolean;
 }
 
 interface Outcome {
@@ -112,6 +115,11 @@ function run(scenario: Scenario): Outcome {
   if (scenario.ancestryProbeErrors === true) {
     stubbedGit.push(
       `if [ "$1" = merge-base ] && [ "$4" != origin/main ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
+    );
+  }
+  if (scenario.sourceProbeErrors === true) {
+    stubbedGit.push(
+      `if [ "$1" = rev-parse ] && [ "$3" = --quiet ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
     );
   }
   if (stubbedGit.length > 0) {
@@ -271,6 +279,17 @@ describe("move_stable.ts behavior (real git)", () => {
     expect(r.output).toContain("could not answer");
     expect(r.outputs).toEqual({});
     expect(r.originTag()).toBe(r.m3);
+  });
+
+  test("a source probe that errors is fatal, never read as a source off main", () => {
+    // Read as a no, exit 128 would send the operator after the sha with the
+    // wrong diagnostic; the errored look names itself instead.
+    const r = run({ tag: "m1", sourceProbeErrors: true });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("could not answer");
+    expect(r.output).not.toContain("is not a commit on main");
+    expect(r.outputs).toEqual({});
+    expect(r.originTag()).toBe(r.m1);
   });
 
   test("a lease from a stale read loses the race - exit red, tag untouched", () => {

@@ -154,11 +154,11 @@ describe("resolveBase", () => {
       commits: [c2, c3],
     },
     {
-      reason: "no build branch: the push's own before, with a notice-worthy kind",
+      reason: "no build branch: the fallback before, with a notice-worthy kind",
       cwd: unpublished,
       sha: c3,
       before: c2,
-      base: { kind: "push-before", base: c2 },
+      base: { kind: "fallback", base: c2 },
       commits: [c3],
     },
     {
@@ -184,11 +184,11 @@ describe("resolveBase", () => {
   test.each([
     {
       reason:
-        "a push base that is no ancestor of the judged commit (a foreign or force-pushed payload)",
+        "a fallback base that is no ancestor of the judged commit (a foreign or force-pushed payload)",
       cwd: unpublished,
       sha: c3,
       before: side,
-      error: notAncestor("the push base", side, c3),
+      error: notAncestor("the fallback base", side, c3),
     },
     {
       reason: "a build stamp naming a commit off main (tampered), even with a sound before",
@@ -215,23 +215,23 @@ describe("resolveBase", () => {
         "the build branch carries no stamped source in its whole history: publish.ts stamps every build commit, so this branch was not published by it - reset it (dispatch post-green.yml with sha=<green main commit>) before the post-green legs read it",
     },
     {
-      reason: "a push base equal to the judged commit (an empty range)",
+      reason: "a fallback base equal to the judged commit (an empty range)",
       cwd: unpublished,
       sha: c3,
       before: c3,
-      error: `the push base ${short(c3)} is the judged commit itself: an empty range says nothing about the push`,
+      error: `the fallback base ${short(c3)} is the judged commit itself: an empty range reads nothing`,
     },
   ])("$reason is refused", ({ cwd, sha, before, error }) => {
     expect(() => resolveBase(cwd, sha, before)).toThrow(error);
   });
 
   test("a base the checkout cannot see is refused, never read as an empty or a full range", () => {
-    // A depth-1 checkout lacks the push base; reading against a missing
+    // A depth-1 checkout lacks the fallback base; reading against a missing
     // commit must fail loudly rather than degrade either way.
     const shallow = join(root, "shallow");
     git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
     expect(() => resolveBase(shallow, c4, c2)).toThrow(
-      `the push base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
+      `the fallback base ${short(c2)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
     );
   });
 

@@ -31,11 +31,6 @@ if (ref !== "" && ref !== "refs/heads/main") {
   );
 }
 
-function resolves(revspec: string): string {
-  const probe = capture(["git", "rev-parse", "--verify", "--quiet", revspec]);
-  return probe.exitCode === 0 ? probe.stdout.trimEnd() : "";
-}
-
 /** The tag's value on origin (the ref itself, a tag object for an
  * annotated tag), "" when ABSENT (ls-remote --exit-code returns 2). Any
  * other failure is operational and fatal: a blip must never read as a
@@ -60,7 +55,7 @@ if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
 }
 const short = sourceSha.slice(0, 12);
 if (
-  resolves(`${sourceSha}^{commit}`) === "" ||
+  !gitAnswersYes(["rev-parse", "--verify", "--quiet", `${sourceSha}^{commit}`]) ||
   !gitAnswersYes(["merge-base", "--is-ancestor", sourceSha, "origin/main"])
 ) {
   fail(
@@ -84,9 +79,8 @@ if (previous !== "") {
 }
 // The output is written at the terminal points only, so a failed push (a
 // lost lease) reports nothing and the directives read keeps its fallback.
-// Neither no-move case stands that read down (a called run's leg): a newer
-// commit's run reads from ITS base, exclusive, which can be this very commit,
-// so only this run is sure to read this commit's directives.
+// A no-move reports "" and no stand-down: that read runs on every mover
+// result (docs/all-green.md).
 if (previousCommit === sourceSha) {
   notice(`stable already names ${short} - nothing to move`);
   setOutput("previous", "");

@@ -375,7 +375,7 @@ function main(): number {
   }
   if (base.kind !== "build-stamp") {
     notice(
-      `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading the push alone, from ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
+      `no build stamp older than ${sha.slice(0, 12)} exists (nothing published before this run); reading from the fallback base, ${base.kind === "empty-tree" ? "the empty tree" : before.slice(0, 12)}`,
     );
   }
   let armed = false;

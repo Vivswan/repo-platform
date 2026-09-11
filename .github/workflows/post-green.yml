@@ -151,11 +151,9 @@ jobs:
   # fleet_sync_marker.ts) and handed to sync-fleet. State-shaped: mutates
   # nothing; the range covers the merges whose runs this run evicted. A bad directive fails the leg on the judged
   # commit only; an older one already failed its own run and warns here.
-  # Ordered behind the mover for its base: the commit the tag named before
-  # this run moved it, else the push's `before`. No mover result stands it
-  # down: a newer run's range starts after ITS base, which can be this very
-  # commit, so only this run is sure to read it; a mover that moved nothing
-  # or went red leaves the read on the fallback base (a failed sync recovers).
+  # Needs-ordered behind the mover for its fallback base (the tag's previous
+  # commit, else the push's `before`) and run on every mover result: only
+  # this run is sure to read this commit (docs/all-green.md).
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()

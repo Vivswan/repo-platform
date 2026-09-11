@@ -1,6 +1,7 @@
 // The range the read-directives leg covers: (newest ancestor build stamp, judged commit], so a
 // push whose CI run was evicted is still read (docs/all-green.md).
-// Env (judgedRangeEnv): SOURCE_SHA, BEFORE_SHA (the push's `before`, all zeros on branch creation).
+// Env (judgedRangeEnv): SOURCE_SHA, BEFORE_SHA (the fallback base: the stable tag's previous
+// commit, else the push's `before`, all zeros on branch creation).
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
@@ -20,11 +21,11 @@ export function judgedRangeEnv(): { sha: string; before: string } {
 
 export type DiffBase =
   | { kind: "build-stamp"; base: string }
-  | { kind: "push-before"; base: string }
+  | { kind: "fallback"; base: string }
   | { kind: "empty-tree"; base: string };
 
 /** The newest build stamp that is a strict ancestor of `sha`, verified in the checkout at `cwd`;
- *  the push's `before` (the empty tree when all zeros) only when no build branch exists or its
+ *  the fallback `before` (the empty tree when all zeros) only when no build branch exists or its
  *  every stamp is `sha` itself (the first publish ever, landed by this run). An unstamped build
  *  branch, or one with no ancestor stamp at all, is refused. */
 export function resolveBase(cwd: string, sha: string, before: string): DiffBase {
@@ -36,18 +37,18 @@ export function resolveBase(cwd: string, sha: string, before: string): DiffBase 
       base: mustCapture(["git", "-C", cwd, "hash-object", "-t", "tree", "/dev/null"]),
     };
   }
-  const what = "the push base";
+  const what = "the fallback base";
   requireInCheckout(cwd, what, before);
   // --is-ancestor is inclusive; an equal base is an empty range.
   if (before === sha) {
     throw new Error(
-      `${what} ${before.slice(0, 12)} is the judged commit itself: an empty range says nothing about the push`,
+      `${what} ${before.slice(0, 12)} is the judged commit itself: an empty range reads nothing`,
     );
   }
   if (!gitAnswersYes(["merge-base", "--is-ancestor", before, sha], { cwd })) {
     throw new Error(notAncestor(what, before, sha));
   }
-  return { kind: "push-before", base: before };
+  return { kind: "fallback", base: before };
 }
 
 // The build tip is not always this run's publish: a re-run of an older commit's legs finds the
