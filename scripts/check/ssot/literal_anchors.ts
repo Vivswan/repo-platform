@@ -3,8 +3,10 @@
 // and inlined twin functions.
 
 import { parse as parseYaml } from "yaml";
+import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
-import { type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
+import { SKELETON_SOURCE } from "./all_green.ts";
+import { canonical, type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
 import {
   asRecord,
   ciJobs,
@@ -46,18 +48,27 @@ export function inlineFunctionCopies(text: string, name: string): string[] {
   return [...text.matchAll(block)].map((match) => match[0]);
 }
 
-/** Pinned on the parsed documents, not a grep: a commented-out write or a stray literal would still match as text.
- *  A renamed output or a dropped `id:` on any side reads as an empty output, which is not "true": every run skips the tag phase and no release ever cuts, silently.
- *  The script writes the output only in release mode, so the health step's `mode: release` is pinned too: any other mode is the same empty output. */
+/** The release-cut wiring across its four files, pinned on the parsed documents, not a grep.
+ *  A commented-out write or a stray literal would still match as text.
+ *  release-health.ts writes the output only in release mode, so the health step's `mode: release` is pinned too.
+ *  action.yml declares the output off the step that runs the script.
+ *  fleet-release.yml runs release-please twice off it: the cut step tags only when it reads "true", the propose step never tags.
+ *  A rename or a dropped `id:` on any side reads as an empty output, which is not "true": every run would skip the cut, silently.
+ *  A release-please step outside those two, or a cut step without its condition, would tag on every push run.
+ *  The cut job's lane is keyed by the judged commit and the skeleton's caller holds none.
+ *  A shared lane keeps one pending call and cancels the older one,
+ *  so a release commit's call could be cancelled. */
 export function releaseCutWiringMismatches(files: {
   workflow: string;
   action: string;
   script: string;
+  skeleton: string;
 }): Mismatch[] {
   const mismatches: Mismatch[] = [];
   const workflowRel = ".github/workflows/fleet-release.yml";
   const actionRel = "actions/release-health/action.yml";
   const scriptRel = "actions/release-health/release-health.ts";
+  const skeletonRel = "files/base/.github/workflows/ci.yml";
 
   if (!callCarriesLiteral(files.script, "setOutput", "release-cut")) {
     mismatches.push({
@@ -95,8 +106,8 @@ export function releaseCutWiringMismatches(files: {
   }
 
   const jobs = ciJobs(asRecord(parseYaml(files.workflow), workflowRel), workflowRel);
-  const steps = (asRecord(jobs["release-please"] ?? {}, `${workflowRel} release-please`).steps ??
-    []) as Record<string, unknown>[];
+  const job = asRecord(jobs["release-please"] ?? {}, `${workflowRel} release-please`);
+  const steps = (job.steps ?? []) as Record<string, unknown>[];
   const health = steps.find((step) =>
     String(step.uses ?? "").startsWith("Vivswan/repo-platform/actions/release-health@"),
   );
@@ -117,16 +128,86 @@ export function releaseCutWiringMismatches(files: {
       });
     }
   }
-  const release = steps.find((step) => step.id === "release");
-  const skip = String(
-    asRecord(release?.with ?? {}, `${workflowRel} release.with`)["skip-github-release"] ?? "",
+  const releasePlease = steps.filter((step) =>
+    String(step.uses ?? "").startsWith("googleapis/release-please-action@"),
   );
-  const expectedSkip = "${{ steps.health.outputs.release-cut != 'true' }}";
-  if (skip !== expectedSkip) {
+  for (const step of releasePlease) {
+    if (step.id !== "cut" && step.id !== "propose") {
+      mismatches.push({
+        file: `${workflowRel} release-please`,
+        expected:
+          "every release-please step is the cut or the propose step (a third one would tag on every push run)",
+        got: `a release-please step with id: ${String(step.id ?? "")}`,
+      });
+    }
+  }
+  const cut = releasePlease.find((step) => step.id === "cut");
+  const cutIf = "steps.health.outputs.release-cut == 'true'";
+  if (String(cut?.if ?? "").trim() !== cutIf) {
     mismatches.push({
-      file: `${workflowRel} release-please step 'release'`,
-      expected: `skip-github-release: ${expectedSkip}`,
-      got: skip === "" ? "no skip-github-release input" : skip,
+      file: `${workflowRel} release-please step 'cut'`,
+      expected: `if: ${cutIf}`,
+      got:
+        cut === undefined ? "no cut step" : cut.if === undefined ? "no condition" : String(cut.if),
+    });
+  }
+  const cutWith = asRecord(cut?.with ?? {}, `${workflowRel} cut.with`);
+  if (
+    cutWith["skip-github-pull-request"] !== true ||
+    cutWith["skip-github-release"] !== undefined
+  ) {
+    mismatches.push({
+      file: `${workflowRel} release-please step 'cut'`,
+      expected:
+        "skip-github-pull-request: true and no skip-github-release (the cut tags and does no PR work)",
+      got: canonical(cut?.with ?? null),
+    });
+  }
+  const propose = releasePlease.find((step) => step.id === "propose");
+  const proposeClauses = String(propose?.if ?? "")
+    .split("&&")
+    .map((clause) => clause.trim());
+  if (!proposeClauses.includes("steps.health.outputs.release-cut == 'false'")) {
+    mismatches.push({
+      file: `${workflowRel} release-please step 'propose'`,
+      expected:
+        "an if: carrying steps.health.outputs.release-cut == 'false' (the propose step stands down on a release-PR merge; a positive test, since an absent output passes !=)",
+      got:
+        propose === undefined
+          ? "no propose step"
+          : propose.if === undefined
+            ? "no condition"
+            : String(propose.if),
+    });
+  }
+  if (
+    asRecord(propose?.with ?? {}, `${workflowRel} propose.with`)["skip-github-release"] !== true
+  ) {
+    mismatches.push({
+      file: `${workflowRel} release-please step 'propose'`,
+      expected: "skip-github-release: true (the propose step never tags)",
+      got: canonical(propose?.with ?? null),
+    });
+  }
+  const lane = asRecord(job.concurrency ?? {}, `${workflowRel} release-please.concurrency`);
+  const expectedLane = "release-cut-${{ inputs.sha || github.sha }}";
+  if (lane.group !== expectedLane || lane["cancel-in-progress"] !== false) {
+    mismatches.push({
+      file: `${workflowRel} release-please`,
+      expected: `concurrency group ${expectedLane} with cancel-in-progress: false (a lane no other run shares, so nothing cancels a pending cut)`,
+      got: job.concurrency === undefined ? "no job lane" : canonical(job.concurrency),
+    });
+  }
+
+  const skeletonText = substitute(files.skeleton, { github_username: "owner" });
+  const skeletonJobs = ciJobs(asRecord(parseYaml(skeletonText), skeletonRel), skeletonRel);
+  const caller = asRecord(skeletonJobs.release ?? {}, `${skeletonRel} release`);
+  if (caller.concurrency !== undefined) {
+    mismatches.push({
+      file: `${skeletonRel} job 'release'`,
+      expected:
+        "no concurrency lane on the caller (a caller-side lane keeps one pending call and cancels the older one, so a release merge would lose its tag)",
+      got: canonical(caller.concurrency),
     });
   }
   return mismatches;
@@ -389,6 +470,7 @@ export const literalAnchorRules: Rule[] = [
         workflow: read(".github/workflows/fleet-release.yml"),
         action: read("actions/release-health/action.yml"),
         script: read("actions/release-health/release-health.ts"),
+        skeleton: read(SKELETON_SOURCE),
       }),
   },
   {

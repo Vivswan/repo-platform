@@ -71,8 +71,9 @@ describe("resolveBase", () => {
   const publishedC1 = cloneWithBuild("published-c1", [c1]);
   const publishedC1C3 = cloneWithBuild("published-c1-c3", [c1, c3]);
   const publishedC0C1 = cloneWithBuild("published-c0-c1", [c0, c1]);
-  // A later commit published after the judged one: its legs re-run against a tip stamped with a
-  // descendant, with and without the judged commit's own publish between.
+  // A later commit published after the judged one (its legs re-run, or a neighbouring run's publish
+  // landed first: main runs overlap): a tip stamped with a descendant, with and without the judged
+  // commit's own publish between, and with no older stamp at all.
   const publishedC1C3C4 = cloneWithBuild("published-c1-c3-c4", [c1, c3, c4]);
   const publishedC1C4 = cloneWithBuild("published-c1-c4", [c1, c4]);
   const publishedC4 = cloneWithBuild("published-c4", [c4]);
@@ -130,12 +131,21 @@ describe("resolveBase", () => {
     },
     {
       reason:
-        "a re-run after a later commit published when the judged commit's own publish was skipped (no tree change)",
+        "a later commit published and the judged commit's own publish was skipped (a re-run after no tree change, or a neighbouring run's newer publish tops the branch): walked past to the newest ancestor stamp",
       cwd: publishedC1C4,
       sha: c3,
       before: c2,
       base: { kind: "build-stamp", base: c1 },
       commits: [c2, c3],
+    },
+    {
+      reason:
+        "every stamp is a newer publish (the first publish ever, landed by a neighbouring run): the fallback before",
+      cwd: publishedC4,
+      sha: c3,
+      before: c2,
+      base: { kind: "fallback", base: c2 },
+      commits: [c3],
     },
     {
       reason: "thirty unstamped build commits above the one real stamp (no walk bound)",
@@ -196,14 +206,6 @@ describe("resolveBase", () => {
       sha: c3,
       before: c2,
       error: notAncestor("the build tip's stamped source", side, c3),
-    },
-    {
-      reason:
-        "a build branch whose only stamp is a descendant of the judged commit (no ancestor stamp to fall back to), naming the tip's stamp",
-      cwd: publishedC4,
-      sha: c3,
-      before: c2,
-      error: notAncestor("the build tip's stamped source", c4, c3),
     },
     {
       reason:

@@ -1,15 +1,16 @@
-# The fleet's release cut, called by every managed ci.yml downstream of
-# the all-green gate: release-please tags the merged release PR's merge
-# commit, draft-first because published releases freeze (a late upload
-# gets 422). The caller then runs its own update-release hook and
-# fleet-release-publish.yml.
-# Without REPO_PLATFORM_TOKEN the release PR is created by GITHUB_TOKEN
-# and its checks wait in the Actions tab for "Approve and run" (or start
-# on the PR's next push). If the pipeline dies after the draft exists, a
-# rerun cannot recreate it (the tag is forced): re-run the failed jobs,
-# or finish by hand with
-# `gh release upload <tag> <assets> --clobber` and
-# `gh release edit <tag> --draft=false`.
+# The fleet's release stage, called by every managed ci.yml downstream of the all-green gate, on the run that judged the commit.
+# Two paths in one job, told apart by release-health's release-cut output:
+#   cut: the judged commit is a release-PR merge. release-please tags that merge commit (never the branch head) and drafts the release; no PR work.
+#   release-pr: any other push. release-please proposes or refreshes the release PR, only while main's head is still the judged commit.
+# Refreshing the release PR is newest-wins work: a run whose commit is no longer main's head skips it instead of racing the newer run's refresh.
+# The job lane is keyed by the judged commit: no other run shares it, so nothing can cancel a pending cut.
+# A re-run of the same commit waits its turn and finds the release already cut.
+# Known limit: two release PRs merged before either is cut are both tagged by the first cut run (release-please builds every pending release PR).
+# Draft-first because published releases freeze (a late upload gets 422); the caller then runs its update-release hook and fleet-release-publish.yml.
+# Without REPO_PLATFORM_TOKEN the release PR is created by GITHUB_TOKEN.
+# Its checks then wait in the Actions tab for "Approve and run", or start on the PR's next push.
+# If the pipeline dies after the draft exists, a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
+# `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
 
 name: Fleet Release
 
@@ -17,7 +18,9 @@ on:
   workflow_call:
     inputs:
       sha:
-        description: The judged commit this release run vouches for; empty falls back to github.sha.
+        description: >-
+          The judged commit this run vouches for; keys the job's lane and the
+          release-PR path's head check. Empty falls back to github.sha.
         required: false
         type: string
         default: ""
@@ -51,6 +54,12 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Keyed by the judged commit: no other run shares the lane, so nothing can cancel a pending cut.
+    # The caller holds no lane: a shared lane keeps one pending call and cancels the older one,
+    # so a release commit's call could be cancelled.
+    concurrency:
+      group: release-cut-${{ inputs.sha || github.sha }}
+      cancel-in-progress: false
     # Caps a caller that grants more; the read keys feed release-health.
     permissions:
       contents: write
@@ -58,13 +67,13 @@ jobs:
       issues: read
       vulnerability-alerts: read
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.cut.outputs.release_created }}
+      tag_name: ${{ steps.cut.outputs.tag_name }}
       # pr is unset when no PR was proposed; the && short-circuit keeps
       # fromJSON off the empty string.
-      prs_created: ${{ steps.release.outputs.prs_created }}
-      pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
-      pr_head_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
+      prs_created: ${{ steps.propose.outputs.prs_created }}
+      pr_number: ${{ steps.propose.outputs.pr && fromJSON(steps.propose.outputs.pr).number }}
+      pr_head_branch: ${{ steps.propose.outputs.pr && fromJSON(steps.propose.outputs.pr).headBranchName }}
     steps:
       # The release PR's CI health check can be stale by merge time, so
       # the same gate re-runs here; release mode self-scopes to
@@ -76,20 +85,41 @@ jobs:
           tracking-labels: ${{ inputs.tracking-labels }}
         env:
           GH_TOKEN: ${{ github.token }}
-      # release-please tags the merged release PR's own merge commit, never the branch head.
-      # Only the run that judged that merge tags it; every other push run gets the propose phase alone.
+      # The cut: only the run that judged the release-PR merge tags it, whatever main does afterwards.
+      # A re-run finds the merged PR already labelled tagged and cuts nothing.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: release
+        id: cut
+        if: steps.health.outputs.release-cut == 'true'
         with:
           # github.token may not create a ref or release on a commit whose .github/workflows differ from main's head (that needs workflows: write).
           # Once a later commit changes a workflow file on main, only the PAT can still tag the release commit.
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-          skip-github-release: ${{ steps.health.outputs.release-cut != 'true' }}
+          skip-github-pull-request: true
+      # gh api, not an anonymous ls-remote, so private repositories work.
+      - name: Check main still stands at the judged commit
+        id: head
+        if: steps.health.outputs.release-cut == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JUDGED: ${{ inputs.sha || github.sha }}
+        run: |
+          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)"
+          if [ "$head" != "$JUDGED" ]; then
+            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run refreshes the release PR"
+          fi
+          echo "current=$([ "$head" = "$JUDGED" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: propose
+        if: steps.health.outputs.release-cut == 'false' && steps.head.outputs.current == 'true'
+        with:
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          skip-github-release: true
       # release-please's propose phase silently ABORTS - green - while a
       # merged PR still wears "autorelease: pending". Checked AFTER the
       # action so its recovery phase runs first; 30 minutes covers labels
       # legitimately pending right after a merge.
       - name: Fail when a stale pending release PR parks release-please
+        if: steps.health.outputs.release-cut == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

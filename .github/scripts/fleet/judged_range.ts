@@ -26,8 +26,9 @@ export type DiffBase =
 
 /** The newest build stamp that is a strict ancestor of `sha`, verified in the checkout at `cwd`;
  *  the fallback `before` (the empty tree when all zeros) only when no build branch exists or its
- *  every stamp is `sha` itself (the first publish ever, landed by this run). An unstamped build
- *  branch, or one with no ancestor stamp at all, is refused. */
+ *  every stamp is `sha` itself or a newer commit (the first publish ever, landed by this run or a
+ *  neighbouring one: main runs overlap). An unstamped build branch, or one with no ancestor stamp
+ *  once those are set aside, is refused. */
 export function resolveBase(cwd: string, sha: string, before: string): DiffBase {
   const stamped = stampedBase(cwd, sha);
   if (stamped !== undefined) return stamped;
@@ -52,7 +53,8 @@ export function resolveBase(cwd: string, sha: string, before: string): DiffBase 
 }
 
 // The build tip is not always this run's publish: a re-run of an older commit's legs finds the
-// tip stamped with a later commit, and an older stamp is still a sound base for that commit.
+// tip stamped with a later commit, and so does a run whose neighbour published first (main runs
+// overlap); an older stamp is still a sound base for that commit.
 function stampedBase(cwd: string, sha: string): DiffBase | undefined {
   if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${BUILD_REF}^{commit}`], { cwd })) {
     return undefined;
@@ -65,7 +67,7 @@ function stampedBase(cwd: string, sha: string): DiffBase | undefined {
       "the build branch carries no stamped source in its whole history: publish.ts stamps every build commit, so this branch was not published by it - reset it (dispatch post-green.yml with sha=<green main commit>) before the post-green legs read it",
     );
   }
-  const candidates = stamps.filter((stamped) => stamped !== sha);
+  const candidates = stamps.filter((stamped) => !publishedAtOrAfter(cwd, sha, stamped));
   if (candidates.length === 0) return undefined;
   const what = "the build tip's stamped source";
   for (const stamped of candidates) {
@@ -75,6 +77,16 @@ function stampedBase(cwd: string, sha: string): DiffBase | undefined {
     }
   }
   throw new Error(notAncestor(what, candidates[0], sha));
+}
+
+/** Whether `stamped` is `sha` or a descendant of it: a publish that says nothing about the pushes before `sha`.
+ *  A stamp the checkout cannot see is not walked past: stampedBase reports it. */
+function publishedAtOrAfter(cwd: string, sha: string, stamped: string): boolean {
+  if (stamped === sha) return true;
+  if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${stamped}^{commit}`], { cwd })) {
+    return false;
+  }
+  return gitAnswersYes(["merge-base", "--is-ancestor", sha, stamped], { cwd });
 }
 
 function requireInCheckout(cwd: string, what: string, commit: string): void {
