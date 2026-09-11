@@ -375,6 +375,18 @@ ${APPLY_WITH}
       expected: `uses: ${SETTINGS_ACTION_USES}`,
     },
     {
+      // YAML reads this comment as the scalar's own trailing comment; the
+      // release-tag verification reads the version off the uses line alone.
+      reason: "the version comment on the next line, indented under the uses key",
+      text: valid.replace(" # v2.0.0\n", "\n          # v2.0.0\n"),
+      expected: `uses: ${SETTINGS_ACTION_USES}`,
+    },
+    {
+      reason: "the version comment on the next line at the uses key's indentation",
+      text: valid.replace(" # v2.0.0\n", "\n        # v2.0.0\n"),
+      expected: `uses: ${SETTINGS_ACTION_USES}`,
+    },
+    {
       reason:
         "the uses value folded into a block scalar, beside a decoy scalar spelling the pinned line",
       text: valid
