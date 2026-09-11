@@ -61,8 +61,9 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.github/dependabot.yml` | managed | always |
 | `.github/actionlint.yaml` | starter | always |
 | `.github/instructions/review.instructions.md` | managed | always |
-| `.github/settings.yml` | starter | public |
-| `.github/settings.yml` | starter | private |
+| `.github/settings.local.yml` | starter | public |
+| `.github/settings.local.yml` | starter | private |
+| `.github/settings.yml` | managed | always |
 | `.github/workflows/ci.yml` | managed | always |
 | `.github/workflows/checks.yml` | starter | always |
 | `.github/workflows/post-green.yml` | starter | always |

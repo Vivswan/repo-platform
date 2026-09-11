@@ -181,7 +181,7 @@ describe("blockSources and verifySources", () => {
     }
   });
 
-  test("a file no entry, block name, or settings_layers declaration reads is a load error", () => {
+  test("a file no entry or block name reads is a load error; a layer-named file is judged by its declaration", () => {
     const tree = temp.dir("writer-files-stray-");
     writeTree(tree, {
       "base/.github/workflows/ci.yml": "",
@@ -204,11 +204,11 @@ describe("blockSources and verifySources", () => {
     }
     expect(problems).toEqual([
       "files/bun/.gitignore.block.Node is read by no entry or block name",
-      "files/bun/settings.yml is read by no entry or block name",
+      "files/bun/settings.yml is a settings layer file files.yml modules.bun.settings_layers does not declare - the render never reads an undeclared layer, so its labels would leave the roster and the apply delete them; declare it or delete the file",
     ]);
   });
 
-  test("a missing source, an unlisted placeholder, or a marker mention is a load error", () => {
+  test("a missing source or layer, an unlisted placeholder, or a marker mention is a load error", () => {
     const tree = temp.dir("writer-files-config-");
     writeTree(tree, {
       "base/.github/workflows/ci.yml": "name: {{project_name}} {{owner}}\n",
@@ -229,7 +229,100 @@ describe("blockSources and verifySources", () => {
       "source files/base/.github/workflows/ci.yml uses unlisted placeholder(s) {{owner}}",
       "source files/bun/.block.Node.gitignore mentions the hash region markers the writer adds itself",
       "source files/fuzzer/.github/workflows/nightly-fuzz.yml is missing from the tree",
+      "settings layer files/pages/settings.yml is missing from the tree - a deleted layer file must leave the declaration in the same change, or the render would silently drop its labels and the apply delete them",
     ]);
+  });
+
+  describe("the settings layers", () => {
+    const SETTINGS = [
+      "placeholders: []",
+      "modules:",
+      "  bun: { settings_layers: [settings.yml] }",
+      "  pages: {}",
+      "settings:",
+      "  baseline: files/settings/baseline.yml",
+      "  public: files/settings/public.yml",
+      "  private: files/settings/private.yml",
+      "  override: files/settings/override.yml",
+      "files:",
+      "  - { path: .github/settings.local.yml, class: starter }",
+      "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml }",
+      "",
+    ].join("\n");
+    const LAYERS: Record<string, string> = {
+      "base/.github/settings.local.yml": "repository: {}\n",
+      "settings/baseline.yml": "labels: []\n",
+      "settings/public.yml": "repository: {}\n",
+      "settings/private.yml": "repository: {}\n",
+      "settings/override.yml": "rulesets: []\n",
+      "bun/settings.yml": "labels: []\n",
+    };
+    const problemsOf = (files: Record<string, string>) => {
+      const root = temp.dir("writer-files-layers-");
+      writeTree(root, { "files.yml": SETTINGS });
+      writeTree(join(root, "files"), files);
+      return loadProblemsOf(join(root, "files.yml"), join(root, "files"));
+    };
+
+    test("the declared layer files pass the tree walk and the rendered entry needs no source", () => {
+      expect(problemsOf(LAYERS)).toEqual([]);
+    });
+
+    test("a tracking label without its color and description is refused once settings render", () => {
+      const root = temp.dir("writer-files-tracking-tuple-");
+      writeTree(root, {
+        "files.yml": SETTINGS.replace(
+          "  pages: {}",
+          "  fuzzer: { tracking_label: { key: fuzzer, default: fuzz-nightly, color: B60205 } }",
+        ),
+      });
+      writeTree(join(root, "files"), LAYERS);
+      expect(loadProblemsOf(join(root, "files.yml"), join(root, "files"))).toEqual([
+        "modules.fuzzer.tracking_label: needs a color and a description - the settings render writes the label with them",
+      ]);
+      // The control: without a settings block the tuple is the placeholder default alone.
+      writeTree(root, {
+        "plain.yml":
+          "placeholders: [fuzzer_label]\nmodules:\n  fuzzer: { tracking_label: { key: fuzzer, default: fuzz-nightly } }\nfiles: []\n",
+      });
+      mkdirSync(join(root, "empty"));
+      expect(loadProblemsOf(join(root, "plain.yml"), join(root, "empty"))).toEqual([]);
+    });
+
+    test.each([
+      [
+        "a declared fleet layer missing",
+        Object.fromEntries(
+          Object.entries(LAYERS).filter(([rel]) => rel !== "settings/private.yml"),
+        ),
+        "settings layer files/settings/private.yml is missing from the tree - a deleted layer file must leave the declaration in the same change, or the render would silently drop its labels and the apply delete them",
+      ],
+      [
+        "a declared module layer missing",
+        Object.fromEntries(Object.entries(LAYERS).filter(([rel]) => rel !== "bun/settings.yml")),
+        "settings layer files/bun/settings.yml is missing from the tree - a deleted layer file must leave the declaration in the same change, or the render would silently drop its labels and the apply delete them",
+      ],
+      [
+        "an undeclared module layer present",
+        { ...LAYERS, "bun/settings-public.yml": "repository: {}\n" },
+        "files/bun/settings-public.yml is a settings layer file files.yml modules.bun.settings_layers does not declare - " +
+          "the render never reads an undeclared layer, so its labels would leave the roster and the apply delete them; declare it or delete the file",
+      ],
+      [
+        "a layer that is not a mapping",
+        { ...LAYERS, "settings/public.yml": "# nothing declared\n" },
+        "files/settings/public.yml: not a YAML mapping",
+      ],
+      [
+        "a layer whose labels are not a list",
+        { ...LAYERS, "bun/settings.yml": "labels: {javascript: x}\n" },
+        expect.stringContaining(
+          "files/bun/settings.yml: labels: labels must be a list of mappings",
+        ),
+      ],
+    ])("%s is a load problem naming the file", (_reason, files, problem) => {
+      expect(problemsOf(files)).toEqual([problem]);
+    });
   });
 
   test("the anchor is one whole line, and only a blocks entry or no block file may carry it", () => {

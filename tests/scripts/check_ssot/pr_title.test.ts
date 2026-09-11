@@ -183,7 +183,7 @@ describe("prTitleWorkflowMismatches", () => {
   const livePrTitle = () =>
     prTitleWorkflowMismatches(
       readFileSync("files/pr-title/.github/workflows/pr-title.yml", "utf-8"),
-      readFileSync(".github/settings-baseline.yml", "utf-8"),
+      readFileSync("files/settings/baseline.yml", "utf-8"),
       readFileSync("files/pr-title/settings.yml", "utf-8"),
     );
 

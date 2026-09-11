@@ -4,7 +4,9 @@
 # order is the canonical module order) for each repository's defaults. Every
 # source lives under files/; the writer copies it, splices the selected
 # modules' block files in at its {{blocks}} line, substitutes the
-# placeholders below, and nothing else.
+# placeholders below, and nothing else. The one exception is the rendered
+# settings document: the writer folds the settings layers below with each
+# module's settings_layers files and the repository's own overlay.
 
 placeholders:
   - project_name
@@ -98,6 +100,15 @@ modules:
   custom-license:
     description: repo carries its own license in LICENSE.md; the fleet license is not written
 
+# The four fleet settings layers (docs/settings.md), folded under each
+# repository's .github/settings.local.yml overlay into its rendered
+# .github/settings.yml; the override merges above the overlay.
+settings:
+  baseline: files/settings/baseline.yml
+  public: files/settings/public.yml
+  private: files/settings/private.yml
+  override: files/settings/override.yml
+
 files:
   # --- base: every repository
   - {path: .editorconfig, class: split, region: hash}
@@ -107,8 +118,12 @@ files:
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/actionlint.yaml, class: starter}
   - {path: .github/instructions/review.instructions.md, class: managed}
-  - {path: .github/settings.yml, class: starter, when: {private: false}}
-  - {path: .github/settings.yml, class: starter, when: {private: true}, source: files/base/.github/settings.private.yml}
+  # The overlay starters precede the rendered document, which reads the
+  # overlay they seed; the displacement moves a repository's pre-render
+  # settings.yml to the overlay path before either is written.
+  - {path: .github/settings.local.yml, class: starter, when: {private: false}}
+  - {path: .github/settings.local.yml, class: starter, when: {private: true}, source: files/base/.github/settings.local.private.yml}
+  - {path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}
   - {path: .github/workflows/ci.yml, class: managed}
   - {path: .github/workflows/checks.yml, class: starter, blocks: toolchain_steps}
   - {path: .github/workflows/post-green.yml, class: starter}

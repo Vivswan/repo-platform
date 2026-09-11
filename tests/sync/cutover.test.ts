@@ -15,6 +15,7 @@ import {
 } from "../../.github/scripts/sync/writer/cutover.ts";
 import {
   placeholderDefaults,
+  trackingTuples,
   type WriterFilesConfig,
 } from "../../.github/scripts/sync/writer/files_config.ts";
 import { parseFilesConfig } from "../../actions/plan/files_config.ts";
@@ -30,7 +31,11 @@ const REPOSITORY = { owner: "Vivswan", name: "demo" };
  *  defaults the module data declares. */
 const load = (yaml: string): WriterFilesConfig => {
   const config = parseFilesConfig(yaml);
-  return { ...config, defaults: placeholderDefaults(config).defaults };
+  return {
+    ...config,
+    defaults: placeholderDefaults(config).defaults,
+    trackingTuples: trackingTuples(config).tuples,
+  };
 };
 const CONFIG_YAML = `
 placeholders: [skills_dir, fuzzer_label, docs_site_label]

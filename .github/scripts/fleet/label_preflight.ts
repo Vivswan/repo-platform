@@ -23,6 +23,7 @@
 import { readFileSync } from "node:fs";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
+import { isMapping, parseSettingsDoc } from "../sync/writer/settings_document.ts";
 import { captureNetwork } from "./discovery.ts";
 import {
   collectReferences,
@@ -34,8 +35,21 @@ import {
   referenceFilesFromDir,
   referenceFilesFromFetch,
 } from "./label_references.ts";
-import { fetchRepoFile } from "./render_managed_settings.ts";
-import { isMapping, parseSettingsDoc } from "./settings_document.ts";
+
+/** One file from a target, AT A PINNED REF, so every read of one target
+ *  sees one commit: a 404 is absence, any other failure throws. */
+function fetchRepoFile(repo: string, path: string, ref: string): string | null {
+  const proc = captureNetwork([
+    "gh",
+    "api",
+    `repos/${repo}/contents/${path}?ref=${ref}`,
+    "-H",
+    "Accept: application/vnd.github.raw",
+  ]);
+  if (proc.exitCode === 0) return proc.stdout;
+  if (proc.stderr.includes("HTTP 404")) return null;
+  throw new Error(`${repo}/${path}@${ref}: fetch failed (${proc.stderr.trim().split("\n")[0]})`);
+}
 
 /** The references whose label is LIVE on the repository but absent from
  *  the post-apply names (finalLabelNames): exactly the set the apply

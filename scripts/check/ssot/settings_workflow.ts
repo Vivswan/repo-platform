@@ -7,15 +7,15 @@ import { join } from "node:path";
 import { Node } from "ts-morph";
 import { parse as parseYaml } from "yaml";
 import {
-  identityKeyIssues,
-  loadOverrideLayer,
-} from "../../../.github/scripts/fleet/merge_settings_layers.ts";
-import {
   LAYER_STEPS,
   type LayerStep,
   type LayerStepFacts,
   layerStepArgv,
 } from "../../../.github/scripts/fleet/settings_layer_step.ts";
+import {
+  identityKeyIssues,
+  loadOverrideLayer,
+} from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
 import {
   intersectionCarriesType,
   parseTs,
@@ -254,8 +254,8 @@ export function settingsIdentityMismatches(repository: Record<string, unknown>):
 
 /** The settings starters the writer seeds, one per visibility. */
 export const SETTINGS_STARTERS = [
-  "files/base/.github/settings.yml",
-  "files/base/.github/settings.private.yml",
+  "files/base/.github/settings.local.yml",
+  "files/base/.github/settings.local.private.yml",
 ];
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
@@ -308,7 +308,7 @@ export const settingsWorkflowRules: Rule[] = [
       // merges ABOVE every repo layer - so a repo (this one included)
       // redeclaring one would be silently overridden. Assert the override
       // owns them and no repo layer duplicates them.
-      const override = loadOverrideLayer();
+      const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
       const overrideRulesets = (override.rulesets ?? []) as Record<string, unknown>[];
       for (const name of ["main", "non-bypassable"]) {
         if (!overrideRulesets.some((ruleset) => ruleset.name === name)) {
@@ -333,20 +333,12 @@ export const settingsWorkflowRules: Rule[] = [
       // or the workflow, so those are pinned here: the ref has to reach
       // the API URL, and the fetch call has to carry the render's output.
       const mismatches: Mismatch[] = [];
-      const render = read(".github/scripts/fleet/render_managed_settings.ts");
-      if (!templateCarries(render, "contents/${path}?ref=${ref}")) {
+      const preflight = read(".github/scripts/fleet/label_preflight.ts");
+      if (!templateCarries(preflight, "contents/${path}?ref=${ref}")) {
         mismatches.push({
-          file: ".github/scripts/fleet/render_managed_settings.ts",
+          file: ".github/scripts/fleet/label_preflight.ts",
           expected: "the contents URL carries ?ref=, or every fact reads the moving branch",
           got: "no ?ref= on the fetch URL",
-        });
-      }
-      const merge = read(".github/scripts/fleet/merge_settings_layers.ts");
-      if (!templateCarries(merge, "contents/.github/settings.yml?ref=${ref}")) {
-        mismatches.push({
-          file: ".github/scripts/fleet/merge_settings_layers.ts",
-          expected: "the repo-layer URL carries ?ref=",
-          got: "no ?ref= on the repo-layer fetch",
         });
       }
       // The merge step hands the layer step the render's published ref,

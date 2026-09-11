@@ -15,6 +15,7 @@ import {
   type ModuleData,
   parseFilesConfig,
   type RegionKind,
+  SETTINGS_LAYER_ORDER,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
 import {
@@ -32,12 +33,22 @@ import {
   type PlaceholderValues,
   unknownPlaceholders,
 } from "./placeholders.ts";
+import { declaredLayers, readLayers } from "./settings_layers.ts";
+
+/** The color and description a tracking stream's label is written with. */
+export interface TrackingTuple {
+  color: string;
+  description: string;
+}
 
 /** The data file as the writer runs on it: the grammar plus the
  *  module-declared fallback for each placeholder the registration may
- *  leave unset (tracking labels, the skills directory). */
+ *  leave unset (tracking labels, the skills directory), and each tracking
+ *  stream's label tuple, complete for every module that declares one when
+ *  the data file renders settings. */
 export interface WriterFilesConfig extends FilesConfig {
   defaults: PlaceholderValues;
+  trackingTuples: Record<string, TrackingTuple>;
 }
 
 /** Whether `text` contains either marker string anywhere. */
@@ -99,6 +110,34 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
   return { defaults, problems };
 }
 
+export interface TrackingTuples {
+  /** By module name, for every module whose tuple is complete. */
+  tuples: Record<string, TrackingTuple>;
+  problems: string[];
+}
+
+/** The settings render writes each selected stream's tracking label as a
+ *  label tuple, so a `tracking_label` needs its color and description
+ *  whenever the data file renders settings. Problems are returned rather
+ *  than thrown so the load reports them beside the document's other
+ *  problems. */
+export function trackingTuples(config: FilesConfig): TrackingTuples {
+  const tuples: Record<string, TrackingTuple> = {};
+  const problems: string[] = [];
+  for (const [module, data] of Object.entries<ModuleData>(config.modules)) {
+    const tracking = data.tracking_label;
+    if (tracking === undefined) continue;
+    if (tracking.color !== undefined && tracking.description !== undefined) {
+      tuples[module] = { color: tracking.color, description: tracking.description };
+    } else if (config.settings !== null) {
+      problems.push(
+        `modules.${module}.tracking_label: needs a color and a description - the settings render writes the label with them`,
+      );
+    }
+  }
+  return { tuples, problems };
+}
+
 export interface BlockSource {
   module: string;
   value: string;
@@ -114,7 +153,7 @@ export function blockCandidates(
   entry: FileEntry,
   modules: string[],
 ): BlockSource[] {
-  if (entry.class === "link" || entry.blocks === undefined) return [];
+  if (entry.class === "link" || "render" in entry || entry.blocks === undefined) return [];
   const candidates: BlockSource[] = [];
   for (const module of Object.keys(config.modules)) {
     if (!modules.includes(module)) continue;
@@ -163,10 +202,10 @@ interface SourceUse {
 
 /** Every source the config can ever read from the tree exists and carries
  *  only listed placeholders, and the tree carries nothing else: a file no
- *  entry or block name reads (a block file under a retired name) would
- *  otherwise sit there unnoticed. The settings layers the module data
- *  declares sit in the tree for the settings render, not the writer, so
- *  they are known but not judged here. */
+ *  entry, block name, or layer declaration reads (a block file under a
+ *  retired name) would otherwise sit there unnoticed. The settings layers
+ *  are held against their declaration in both directions
+ *  (settings_layers.ts). */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
   // Source -> every region grammar it feeds; a split source must not mention
@@ -183,7 +222,7 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
   };
   const allModules = Object.keys(config.modules);
   for (const entry of config.files) {
-    if (entry.class === "link") continue;
+    if (entry.class === "link" || "render" in entry) continue;
     const own = use(entry.source);
     own.entries += 1;
     if (entry.blocks !== undefined) own.withBlocks += 1;
@@ -221,17 +260,25 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
       }
     }
   }
-  const settingsLayers = new Set(
-    Object.entries(config.modules).flatMap(([module, data]) =>
-      (data.settings_layers ?? []).map((name) => `${module}/${name}`),
-    ),
-  );
+  // Layer-named files in a module directory are judged by the layer check
+  // below, declared or not, so an undeclared one is reported once.
+  const layers = new Set(declaredLayers(config));
+  const layerNamed = (rel: string) => {
+    const [module, name, ...rest] = rel.split("/");
+    return (
+      rest.length === 0 &&
+      module !== undefined &&
+      module in config.modules &&
+      (SETTINGS_LAYER_ORDER as readonly string[]).includes(name ?? "")
+    );
+  };
   // A missing tree has each source reported missing above.
   for (const rel of existsSync(tree) ? walkFiles(tree) : []) {
-    if (!sources.has(rel) && !settingsLayers.has(rel)) {
+    if (!sources.has(rel) && !layers.has(rel) && !layerNamed(rel)) {
       problems.push(`${SOURCE_PREFIX}${rel} is read by no entry or block name`);
     }
   }
+  problems.push(...readLayers(config, tree).problems);
   if (problems.length > 0) throw new FilesConfigError(label, problems);
 }
 
@@ -275,11 +322,17 @@ export function loadFilesConfig(
   const label = "files.yml";
   const { config, problems } = checkFilesConfig(readFileSync(filesPath, "utf-8"), label);
   const { defaults, problems: placeholderProblems } = placeholderDefaults(config);
-  const all = [...placeholderProblems, ...problems, ...manifestPathProblems(config)];
+  const tracking = trackingTuples(config);
+  const all = [
+    ...placeholderProblems,
+    ...tracking.problems,
+    ...problems,
+    ...manifestPathProblems(config),
+  ];
   if (all.length > 0) throw new FilesConfigError(label, all);
   verifySources(config, tree);
   if (previousPath !== undefined) {
     checkRetirements(parseFilesConfig(readFileSync(previousPath, "utf-8"), previousPath), config);
   }
-  return { ...config, defaults };
+  return { ...config, defaults, trackingTuples: tracking.tuples };
 }

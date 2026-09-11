@@ -39,7 +39,7 @@ rulesets:
   #   fleet does not carry, so the private overlay stays silent.
   #
   # Rules of a same-name ruleset APPEND across layers keyed by `type`, so
-  # this adds to the main ruleset that .github/settings-override.yml
+  # this adds to the main ruleset that files/settings/override.yml
   # declares rather than replacing it. severity `warnings`: quality
   # warnings gate merges once Code Quality analysis exists on a repo
   # (matching copilot-env's live rule, the fleet's one specimen).

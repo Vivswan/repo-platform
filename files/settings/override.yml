@@ -1,9 +1,9 @@
 ---
 # Layer 6 of the settings merge: the TOP of the stack (docs/settings.md).
 # This is the only layer a repository cannot beat - it merges ABOVE the
-# repository's own .github/settings.yml, so a repo that declares one of
-# these keys, or nulls it out, still gets the fleet value. Everything a
-# repository is allowed to tune lives in .github/settings-baseline.yml
+# repository's own .github/settings.local.yml, so a repo that declares one
+# of these keys, or nulls it out, still gets the fleet value. Everything a
+# repository is allowed to tune lives in files/settings/baseline.yml
 # instead.
 #
 # Keep this file to genuine fleet invariants: the merge-method policy and
