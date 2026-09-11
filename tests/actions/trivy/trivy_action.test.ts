@@ -64,7 +64,7 @@ describe("the trivy action", () => {
     expect(new Set(scans.map((scan) => scan.with?.version)).size).toBe(1);
   });
 
-  test("the blocking scan fails on a fixable HIGH or CRITICAL finding and nothing else", () => {
+  test("the blocking scan fails on a fixable HIGH or CRITICAL vulnerability or any HIGH or CRITICAL misconfiguration, and nothing else", () => {
     const [blocking] = scans;
     expect(blocking.if).toBe("inputs.mode == 'blocking'");
     expect(blocking.with).toEqual(

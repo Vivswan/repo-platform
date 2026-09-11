@@ -353,7 +353,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # The blocking half of the security scan (docs/security-scans.md); the configuration lives in the action.
-  # A fixable HIGH or CRITICAL finding in any lockfile, Dockerfile, or infrastructure file fails the gate for every visibility.
+  # A fixable HIGH or CRITICAL vulnerability in any lockfile, or any HIGH or CRITICAL misconfiguration in a Dockerfile or infrastructure file, fails the gate for every visibility.
   # The only bypass is the repository's .trivyignore.yaml, statement and expiry per entry.
   trivy:
     needs: [plan]

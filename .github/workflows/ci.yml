@@ -413,7 +413,7 @@ jobs:
         run: bun .github/scripts/ci/bun_setup_smoke.ts judge
 
   # The same blocking scan the fleet runs, by local path.
-  # A fixable HIGH or CRITICAL finding in any committed lockfile fails here first.
+  # A fixable HIGH or CRITICAL vulnerability in any committed lockfile, or any HIGH or CRITICAL misconfiguration, fails here first.
   trivy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
