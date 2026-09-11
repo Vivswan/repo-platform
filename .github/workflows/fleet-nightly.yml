@@ -41,11 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The nightly half of the security scan (docs/security-scans.md): every
-  # severity, never red. The findings become the one security-nightly
-  # tracking issue (release-health blocks while it is open), closed on a
-  # clean night; the SARIF reaches code scanning where the repository is
-  # public (personal-account code scanning is public-only).
+  # The nightly half of the security scan (docs/security-scans.md): HIGH and CRITICAL, never red.
+  # The findings become the one security-nightly tracking issue.
+  # release-health blocks while that issue is open; a clean night closes it.
+  # The SARIF reaches code scanning where the repository is public (personal-account code scanning is public-only).
   trivy-nightly:
     needs: [plan]
     runs-on: ubuntu-latest

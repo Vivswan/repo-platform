@@ -9,13 +9,13 @@ Every managed repository is scanned by [Trivy](https://trivy.dev) through the sk
 
 | Half | Job | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
-| Blocking | `trivy` in fleet-ci.yml | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), CRITICAL severity, fixable only | yes: the job fails, so `all-green` fails | the job log |
-| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger | the same plus secrets, every severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
+| Blocking | `trivy` in fleet-ci.yml | every push and pull request | lockfiles, Dockerfiles, infrastructure files (`vuln,misconfig` scanners), HIGH and CRITICAL severity, fixable only | yes: the job fails, so `all-green` fails | the job log |
+| Nightly | `trivy-nightly` in fleet-nightly.yml | the `schedule` trigger | the same plus secrets, HIGH and CRITICAL severity | no: the job is green whatever it finds | one `security-nightly` tracking issue per repository, plus code scanning (public repositories) |
 
 ## The blocking half
 
-- The gate is `trivy fs .` with `--severity CRITICAL --ignore-unfixed --exit-code 1`. A vulnerability blocks only when the advisory is CRITICAL and a fixed version exists, so its fix is a dependency bump; `--ignore-unfixed` filters vulnerabilities only, so a CRITICAL misconfiguration (a Dockerfile, an infrastructure file) blocks too, and its fix is the file or a bypass entry.
-- Unfixed CRITICAL vulnerabilities and everything HIGH or below never block; they surface in the nightly issue.
+- The gate is `trivy fs .` with `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. A vulnerability blocks only when the advisory is HIGH or CRITICAL and a fixed version exists, so its fix is a dependency bump; `--ignore-unfixed` filters vulnerabilities only, so a HIGH or CRITICAL misconfiguration (a Dockerfile, an infrastructure file) blocks too, and its fix is the file or a bypass entry.
+- Unfixed HIGH and CRITICAL vulnerabilities never block; they surface in the nightly issue. MEDIUM and below neither block nor surface: both scans run at `--severity HIGH,CRITICAL`.
 - The same job runs in repo-platform's own CI (`trivy` in [ci.yml](../.github/workflows/ci.yml), a gating job), so a lockfile here is held to the same bar.
 
 ## Bypassing a finding: `.trivyignore.yaml`

@@ -3,10 +3,11 @@ description: >-
   The fleet's GitHub Actions security audit: zizmor over every workflow and
   action.yml in the caller's checkout, under the fleet policy shipped
   beside this action unless the repository carries its own
-  .github/zizmor.yml. Two passes of the pinned upstream action: the first
-  uploads every finding of medium severity or above to code scanning as
+  .github/zizmor.yml. Two passes of the pinned upstream action, both at
+  high severity: the first uploads the high findings to code scanning as
   SARIF (public repositories only, as private personal repositories have no
-  code scanning), the second fails the step on any high finding. zizmor
+  code scanning), the second fails the step on any high finding. A medium
+  or low finding neither blocks nor surfaces. zizmor
   exits non-zero alike on an audit error and on a finding, so a failed
   attempt of either pass runs once more and only the retry's result counts.
   The only bypass is zizmor's own: an inline `# zizmor: ignore[rule]`
@@ -40,7 +41,7 @@ runs:
     # SARIF mode never fails the step on a finding (zizmor suppresses its
     # finding exit codes there), hence the judging pass below. A retry keys
     # on its first attempt's outcome, 'skipped' when that attempt was skipped.
-    - name: Upload every finding to code scanning
+    - name: Upload the high findings to code scanning
       id: sarif
       if: inputs.upload-sarif == 'true'
       continue-on-error: true
@@ -48,16 +49,16 @@ runs:
       with:
         config: ${{ steps.policy.outputs.path }}
         version: 1.30.1
-        min-severity: medium
+        min-severity: high
         advanced-security: true
 
-    - name: Upload every finding to code scanning (retry)
+    - name: Upload the high findings to code scanning (retry)
       if: steps.sarif.outcome == 'failure'
       uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
       with:
         config: ${{ steps.policy.outputs.path }}
         version: 1.30.1
-        min-severity: medium
+        min-severity: high
         advanced-security: true
 
     - name: Fail on a high finding

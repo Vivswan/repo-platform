@@ -1,13 +1,11 @@
-// The trivy action's contract: the bypass check runs before either scan,
-// both scans ride ONE pinned wrapper and ONE Trivy version, the blocking
-// scan carries exactly the fleet's gate (fixable CRITICAL, vuln and
-// misconfig scanners, exit 1), and the nightly scan reports every severity
-// without failing. A loosened flag is a deliberate edit here.
+// The trivy action's contract. A loosened flag is a deliberate edit here.
+// The nightly inputs are pinned to report.ts's constants: the replay command must see what the scan saw.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { SCAN_SEVERITY, SCANNERS } from "../../../actions/trivy/report";
 
 const ACTION_YML = join(import.meta.dir, "../../../actions/trivy/action.yml");
 
@@ -66,13 +64,13 @@ describe("the trivy action", () => {
     expect(new Set(scans.map((scan) => scan.with?.version)).size).toBe(1);
   });
 
-  test("the blocking scan fails on a fixable CRITICAL finding and nothing else", () => {
+  test("the blocking scan fails on a fixable HIGH or CRITICAL finding and nothing else", () => {
     const [blocking] = scans;
     expect(blocking.if).toBe("inputs.mode == 'blocking'");
     expect(blocking.with).toEqual(
       expect.objectContaining({
         "scanners": "vuln,misconfig",
-        "severity": "CRITICAL",
+        "severity": "HIGH,CRITICAL",
         "ignore-unfixed": "true",
         "exit-code": "1",
       }),
@@ -80,17 +78,18 @@ describe("the trivy action", () => {
     expect(blocking.with?.format).toBeUndefined();
   });
 
-  test("the nightly scan reports every severity as JSON without failing, then the report and SARIF steps read it", () => {
+  test("the nightly scan reports HIGH and CRITICAL as JSON without failing, then the report and SARIF steps read it", () => {
     const [, nightly] = scans;
     expect(nightly.if).toBe("inputs.mode == 'nightly'");
     expect(nightly.with).toEqual(
       expect.objectContaining({
-        scanners: "vuln,misconfig,secret",
+        scanners: SCANNERS,
+        severity: SCAN_SEVERITY,
         format: "json",
         output: "${{ runner.temp }}/trivy.json",
       }),
     );
-    for (const key of ["severity", "ignore-unfixed", "exit-code"]) {
+    for (const key of ["ignore-unfixed", "exit-code"]) {
       expect(nightly.with?.[key]).toBeUndefined();
     }
     const report = byId("report");

@@ -2,17 +2,18 @@ name: Trivy
 description: >-
   The fleet's Trivy scan of the caller's checkout (lockfiles, Dockerfiles,
   infrastructure files), so the configuration lives here once and no
-  managed repository carries a Trivy file. Mode blocking fails on a
+  managed repository carries a Trivy file. Mode blocking fails on a HIGH or
   CRITICAL finding with a fix available. Mode nightly scans everything at
-  every severity, never fails, and leaves the findings as the fuzz-issue
-  action's report directory plus a SARIF file for code scanning. Both modes
+  HIGH and CRITICAL severity, never fails, and leaves the findings as the
+  fuzz-issue action's report directory plus a SARIF file for code scanning.
+  A MEDIUM or LOW finding neither blocks nor surfaces. Both modes
   honor the repository's .trivyignore.yaml only when every entry carries a
   statement and an expired_at date (Trivy drops expired entries, so a
   bypass undoes itself); the plain .trivyignore format is refused.
 
 inputs:
   mode:
-    description: blocking (fixable CRITICAL fails) or nightly (every severity, reported, never fails)
+    description: blocking (fixable HIGH or CRITICAL fails) or nightly (HIGH and CRITICAL reported, never fails)
     required: false
     default: blocking
 
@@ -51,7 +52,7 @@ runs:
 
     # The database cache lives outside the workspace so the scan never
     # walks it; the wrapper restores it by date.
-    - name: Scan for fixable critical findings
+    - name: Scan for fixable high and critical findings
       if: inputs.mode == 'blocking'
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
@@ -59,13 +60,13 @@ runs:
         scan-type: fs
         scan-ref: .
         scanners: vuln,misconfig
-        severity: CRITICAL
+        severity: HIGH,CRITICAL
         ignore-unfixed: "true"
         exit-code: "1"
         trivyignores: ${{ steps.bypass.outputs.ignorefile }}
         cache-dir: ${{ runner.temp }}/trivy-cache
 
-    - name: Scan everything
+    - name: Scan everything at high and critical
       if: inputs.mode == 'nightly'
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
@@ -73,6 +74,7 @@ runs:
         scan-type: fs
         scan-ref: .
         scanners: vuln,misconfig,secret
+        severity: HIGH,CRITICAL
         format: json
         output: ${{ runner.temp }}/trivy.json
         trivyignores: ${{ steps.bypass.outputs.ignorefile }}
