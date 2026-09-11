@@ -1,5 +1,5 @@
-# Nightly CI starter: generated once by {{github_username}}/repo-platform,
-# never overwritten by template sync. Replace the placeholder step; the
+# Nightly CI starter: written once by {{github_username}}/repo-platform,
+# never overwritten by a later sync. Replace the placeholder step; the
 # report job files one label-deduplicated tracking issue on a red night
 # and closes it on a green one (docs/nightly.md).
 name: Nightly
@@ -43,14 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
-    # issues: write lets the fuzz-issue action file/close the tracking issue;
-    # actions: write lets the red path dispatch auto-assign at it.
+    # issues: write lets the fuzz-issue action file and close the tracking
+    # issue. The action assigns the owner at creation, so nothing else runs.
     permissions:
       issues: write
-      actions: write
     steps:
       - name: File or update the nightly issue
-        id: file-issue
         if: needs.checks.result == 'failure' || needs.checks.result == 'cancelled'
         uses: {{github_username}}/repo-platform/actions/fuzz-issue@build
         with:
@@ -62,17 +60,6 @@ jobs:
           # used only at creation and matches the settings layer's.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
-
-      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
-      - name: Trigger auto-assign for the filed issue
-        if: steps.file-issue.outputs.issue-number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # This job has no checkout, so gh has no working tree to infer the
-          # repository from; name it explicitly.
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
-        run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success'

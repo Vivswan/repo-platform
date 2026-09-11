@@ -1,5 +1,5 @@
 # This file is managed by {{github_username}}/repo-platform.
-# Local edits may be replaced during template updates.
+# Local edits are replaced on the next sync.
 #
 # Advisory on purpose: npx needs the network and can flake, and an
 # advisory red must never block merges; the offline structural validation

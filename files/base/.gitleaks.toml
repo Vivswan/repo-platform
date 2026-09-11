@@ -1,4 +1,4 @@
-# Repo-owned: seeded once by repo-platform's template, never overwritten
+# Repo-owned: written once by repo-platform's sync, never overwritten
 # by sync. [extend] pulls in gitleaks' default ruleset - without it this
 # file would REPLACE the defaults. minVersion is honored only by binaries
 # new enough to know it, so the CI job pins GITLEAKS_VERSION past it.

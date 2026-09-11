@@ -1,5 +1,5 @@
-# Repo-owned: generated once by {{github_username}}/repo-platform, never
-# overwritten by template sync. Regenerate files that must ride in the
+# Repo-owned: written once by {{github_username}}/repo-platform, never
+# overwritten by a later sync. Regenerate files that must ride in the
 # release commit here; releases never wait on this path. Pushes made with
 # github.token do NOT re-trigger the PR's checks; REPO_PLATFORM_TOKEN does.
 

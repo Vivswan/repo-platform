@@ -1,5 +1,5 @@
 # Baseline attributes from {{github_username}}/repo-platform; this
-# section is replaced on template sync.
+# section is replaced on every sync.
 
 # Normalize all detected text files to LF in the repository.
 * text=auto eol=lf
@@ -21,5 +21,5 @@ CLAUDE.md -text
 *.zip binary
 
 # Repository-specific attributes (binary globs, linguist overrides) go
-# below the END marker; they stay yours across template updates, and the
+# below the END marker; they stay yours across every sync, and the
 # LAST matching line wins, so entries there override the managed ones.
