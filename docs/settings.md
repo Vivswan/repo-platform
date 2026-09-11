@@ -153,7 +153,7 @@ A repository whose `.github/settings.yml` predates the render (the hand-written 
 | The repository's `.github/settings.yml` | Outcome |
 | --- | --- |
 | a regular file, recorded as a starter or unrecorded, and `.github/settings.local.yml` absent | `git mv` to `.github/settings.local.yml`, verbatim, comments kept; the rendered document is created at the old path; the row reads `moved` with the detail `to .github/settings.local.yml`, and the PR holds once with the reason `.github/settings.yml: the repository's file moved to .github/settings.local.yml and the rendered document replaced it`. When the render refuses the moved file as an overlay (a label named twice, a document that does not parse), the move has still happened and the row reads `held` with the reason; fix the overlay and the next sync renders |
-| the same, but `.github/settings.local.yml` already exists | `held` with `class changed from starter to managed, and .github/settings.local.yml already exists, so the file was not moved over it`; both files stay untouched, decide which is the overlay and delete the other |
+| the same, but something is already at `.github/settings.local.yml` | `held` with `class changed from starter to managed, and .github/settings.local.yml is already taken by <what>, so the file was not moved over it` (`<what>` is a regular file, a symbolic link, a directory, or something that is not a regular file); both files stay untouched, decide which is the overlay and delete the other |
 | a symbolic link | `held`: the writer never reads through a link |
 
 Until that PR merges, the apply skips the repository with the un-rendered notice, so the old file is never applied alone.
