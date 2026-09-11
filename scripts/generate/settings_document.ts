@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // This repository's own .github/settings.yml through the sync writer's render.
-// The sync never targets the operator (its files are the sources), so the
-// operator renders itself.
+// The sync never targets the operator: its files are the sources.
+// So the operator renders its own document.
 //
 // Usage: bun scripts/generate/settings_document.ts [--check] [--root <dir>]
 
@@ -48,8 +48,8 @@ export function renderOwnSettings(root: string): OwnSettings {
     );
   }
   const overlay = readFileSync(overlayAbs, "utf-8");
-  // The sync falls back to the operator's visibility fact; the generator
-  // has no GitHub to ask, so the overlay must say.
+  // The sync falls back to its visibility fact when the overlay is silent.
+  // The generator has no GitHub to ask, so the overlay must declare it.
   const visibility = declaredPrivate(parseSettingsDoc(overlay, overlayPath));
   if (visibility === null) {
     throw new Error(

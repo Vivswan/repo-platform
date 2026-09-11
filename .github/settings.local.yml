@@ -14,8 +14,8 @@ repository:
 
 rulesets:
   # The generated build branch is append-only for everyone, the publisher included.
-  # A publish-only ruleset is not expressible: GitHub rejects an Integration
-  # bypass actor on a user-owned repository (docs/settings.md).
+  # A publish-only ruleset is not expressible (docs/settings.md).
+  # GitHub rejects an Integration bypass actor on a user-owned repository.
   - name: build-branches
     target: branch
     enforcement: active
@@ -27,8 +27,8 @@ rulesets:
     rules:
       - type: deletion
       - type: non_fast_forward
-    # Declared EMPTY: only the explicit empty list lets the nightly heal
-    # clear an out-of-band bypass actor.
+    # Declared EMPTY on purpose.
+    # Only the explicit empty list lets the nightly heal clear an out-of-band bypass actor.
     bypass_actors: []
 
   # The fleet's coming delivery ref (docs/build-provenance.md).

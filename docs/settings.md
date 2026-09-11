@@ -51,7 +51,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 |---|---|
 | The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | every target is applied on every green main run, after the run's fleet sync when a directive armed one - the apply is idempotent, so no diff decides it |
 | Nightly cron | heals out-of-band drift |
-| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, `modules:<a>+<b>` (the targets whose `.repo-platform.yml` selects every listed module; a visibility token intersects with it), a comma list of them, or `all` - an entry naming no enrolled repo or no module of `files.yml` fails the run; an enrolled repo without a `.repo-platform.yml` or without a rendered `.github/settings.yml` is skipped with a notice |
+| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, `modules:<a>+<b>` (the targets whose `.repo-platform.yml` selects every listed module; a visibility token intersects with it), a comma list of them, or `all` - an entry naming no discovered fleet repository or no module of `files.yml` fails the run; a discovered repository whose push probe is refused, that is not adopted, has no `.repo-platform.yml`, or has no rendered `.github/settings.yml` is skipped with a notice |
 
 ### The green-commit gate
 
