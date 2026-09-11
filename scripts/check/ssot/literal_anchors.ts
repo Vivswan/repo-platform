@@ -3,7 +3,7 @@
 // and inlined twin functions.
 
 import { parse as parseYaml } from "yaml";
-import { constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
+import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
 import {
   asRecord,
@@ -44,6 +44,86 @@ export function inlineFunctionCopies(text: string, name: string): string[] {
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   const block = new RegExp(`^( *)async function ${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\1\\}`, "gm");
   return [...text.matchAll(block)].map((match) => match[0]);
+}
+
+/** The release-cut wiring across its three files, compared on the PARSED
+ *  documents: release-health.ts writes the output, action.yml declares it
+ *  off the step that runs the script, and fleet-release.yml turns
+ *  release-please's tag phase off unless it reads "true". A rename or a
+ *  dropped `id:` on any side reads as an empty output, which is not
+ *  "true": every run would skip the tag phase and no release would ever
+ *  cut, silently. */
+export function releaseCutWiringMismatches(files: {
+  workflow: string;
+  action: string;
+  script: string;
+}): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const workflowRel = ".github/workflows/fleet-release.yml";
+  const actionRel = "actions/release-health/action.yml";
+  const scriptRel = "actions/release-health/release-health.ts";
+
+  if (!callCarriesLiteral(files.script, "setOutput", "release-cut")) {
+    mismatches.push({
+      file: scriptRel,
+      expected: 'a setOutput("release-cut", ...) write in release mode',
+      got: "no such write",
+    });
+  }
+
+  const action = asRecord(parseYaml(files.action), actionRel);
+  const outputs = asRecord(action.outputs ?? {}, `${actionRel} outputs`);
+  const releaseCut = asRecord(outputs["release-cut"] ?? {}, `${actionRel} outputs.release-cut`);
+  const expectedValue = "${{ steps.check.outputs.release-cut }}";
+  if (releaseCut.value !== expectedValue) {
+    mismatches.push({
+      file: `${actionRel} outputs.release-cut`,
+      expected: expectedValue,
+      got: releaseCut.value === undefined ? "no such output" : String(releaseCut.value),
+    });
+  }
+  const actionSteps = (asRecord(action.runs ?? {}, `${actionRel} runs`).steps ?? []) as Record<
+    string,
+    unknown
+  >[];
+  if (
+    !actionSteps.some(
+      (step) => step.id === "check" && /release-health\.ts/.test(String(step.run ?? "")),
+    )
+  ) {
+    mismatches.push({
+      file: `${actionRel} runs.steps`,
+      expected: "the step running release-health.ts carries id: check",
+      got: "no such step",
+    });
+  }
+
+  const jobs = ciJobs(asRecord(parseYaml(files.workflow), workflowRel), workflowRel);
+  const steps = (asRecord(jobs["release-please"] ?? {}, `${workflowRel} release-please`).steps ??
+    []) as Record<string, unknown>[];
+  const health = steps.find((step) =>
+    String(step.uses ?? "").startsWith("Vivswan/repo-platform/actions/release-health@"),
+  );
+  if (health === undefined || health.id !== "health") {
+    mismatches.push({
+      file: `${workflowRel} release-please`,
+      expected: "the release-health step carries id: health",
+      got: health === undefined ? "no release-health step" : `id: ${String(health.id ?? "")}`,
+    });
+  }
+  const release = steps.find((step) => step.id === "release");
+  const skip = String(
+    asRecord(release?.with ?? {}, `${workflowRel} release.with`)["skip-github-release"] ?? "",
+  );
+  const expectedSkip = "${{ steps.health.outputs.release-cut != 'true' }}";
+  if (skip !== expectedSkip) {
+    mismatches.push({
+      file: `${workflowRel} release-please step 'release'`,
+      expected: `skip-github-release: ${expectedSkip}`,
+      got: skip === "" ? "no skip-github-release input" : skip,
+    });
+  }
+  return mismatches;
 }
 
 /** Whether the owner-slug rule's match at `index` (its owner segment in
@@ -294,6 +374,16 @@ export const literalAnchorRules: Rule[] = [
       }
       return mismatches;
     },
+  },
+  {
+    // Why the wiring is pinned is on releaseCutWiringMismatches.
+    name: "release-cut-wiring",
+    run: () =>
+      releaseCutWiringMismatches({
+        workflow: read(".github/workflows/fleet-release.yml"),
+        action: read("actions/release-health/action.yml"),
+        script: read("actions/release-health/release-health.ts"),
+      }),
   },
   {
     // The CODEOWNERS assignee-resolution function is inlined twice: once

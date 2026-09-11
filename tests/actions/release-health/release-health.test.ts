@@ -577,9 +577,20 @@ describe("findReleasePr", () => {
 });
 
 describe("runHealthCheck", () => {
-  function collect(): { out: (line: string) => void; lines: string[] } {
+  function collect(): {
+    out: (line: string) => void;
+    lines: string[];
+    setOutput: (name: string, value: string) => void;
+    outputs: string[];
+  } {
     const lines: string[] = [];
-    return { out: (line) => lines.push(line), lines };
+    const outputs: string[] = [];
+    return {
+      out: (line) => lines.push(line),
+      lines,
+      setOutput: (name, value) => outputs.push(`${name}=${value}`),
+      outputs,
+    };
   }
 
   // The advice each gate family attaches to its ::error line, pinned
@@ -592,17 +603,19 @@ describe("runHealthCheck", () => {
 
   test("all gates green is a one-line success", async () => {
     const { run } = fakeGh({ issues: {}, alerts: [], prViewLabels: [] });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(prConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput, outputs } = collect();
+    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
     expect(lines).toEqual([
       "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: no open Dependabot alerts at or above high)",
     ]);
+    // Only release mode reports a verdict to the caller.
+    expect(outputs).toEqual([]);
   });
 
   test("an empty tracking-label list runs no tracking gate", async () => {
     const { run, calls } = fakeGh({ issues: {}, alerts: [], prViewLabels: [] });
-    const { out } = collect();
-    expect(await runHealthCheck(prConfig({ trackingLabels: [] }), run, out)).toBe(0);
+    const { out, setOutput } = collect();
+    expect(await runHealthCheck(prConfig({ trackingLabels: [] }), run, out, setOutput)).toBe(0);
     const issueLists = calls.filter((c) => c[0] === "issue");
     expect(issueLists).toHaveLength(1);
     expect(issueLists[0]?.[issueLists[0].indexOf("--label") + 1]).toBe("release-blocker");
@@ -614,8 +627,10 @@ describe("runHealthCheck", () => {
       alerts: [],
       prViewLabels: [],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(prConfig({ legacyFuzzLabel: "fuzz-nightly" }), run, out)).toBe(1);
+    const { out, lines, setOutput } = collect();
+    expect(
+      await runHealthCheck(prConfig({ legacyFuzzLabel: "fuzz-nightly" }), run, out, setOutput),
+    ).toBe(1);
     expect(lines).toEqual([
       "::notice::tracking label 'fuzz-nightly' arrived via the deprecated fuzz-label input; this workflow render predates the tracking-labels input, and the next template sync moves the label there",
       `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
@@ -628,9 +643,9 @@ describe("runHealthCheck", () => {
       alerts: [],
       prViewLabels: [],
     });
-    const { out, lines } = collect();
+    const { out, lines, setOutput } = collect();
     const cfg = prConfig({ trackingLabels: ["fuzz-nightly", "nightly-failure"] });
-    expect(await runHealthCheck(cfg, run, out)).toBe(1);
+    expect(await runHealthCheck(cfg, run, out, setOutput)).toBe(1);
     const queried = calls.filter((c) => c[0] === "issue").map((c) => c[c.indexOf("--label") + 1]);
     expect(queried).toEqual(["fuzz-nightly", "nightly-failure", "release-blocker"]);
     expect(lines).toEqual([
@@ -640,8 +655,8 @@ describe("runHealthCheck", () => {
 
   test("security off runs no security gate", async () => {
     const { run, calls } = fakeGh({ issues: {}, prViewLabels: [] });
-    const { out } = collect();
-    expect(await runHealthCheck(prConfig({ security: "off" }), run, out)).toBe(0);
+    const { out, setOutput } = collect();
+    expect(await runHealthCheck(prConfig({ security: "off" }), run, out, setOutput)).toBe(0);
     expect(calls.some((c) => c[1]?.includes("/dependabot/"))).toBe(false);
   });
 
@@ -651,8 +666,8 @@ describe("runHealthCheck", () => {
       alerts: [11],
       prViewLabels: [],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(prConfig(), run, out)).toBe(1);
+    const { out, lines, setOutput } = collect();
+    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(1);
     expect(lines).toEqual([
       `::error::tracking:fuzz-nightly gate failed: 1 open 'fuzz-nightly' issue(s): #2. To release: ${TRACKING_ADVICE}`,
       `::error::blocker gate failed: 1 open 'release-blocker' issue(s): #7. To release: ${BLOCKER_ADVICE}`,
@@ -666,8 +681,8 @@ describe("runHealthCheck", () => {
       alerts: [5],
       prViewLabels: ["release-override"],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(prConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput } = collect();
+    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
     // Every gate is queried even though the override makes the result moot,
     // so the report is complete.
     expect(calls).toEqual([
@@ -696,8 +711,9 @@ describe("runHealthCheck", () => {
         },
       ],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput, outputs } = collect();
+    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
+    expect(outputs).toEqual(["release-cut=true"]);
     expect(lines).toEqual([
       "::warning::blocker gate failed: 1 open 'release-blocker' issue(s): #7",
       "::notice::OVERRIDE: the 'release-override' label on release PR #21 bypassed 1 failing gate(s) (blocker); this release ships despite them",
@@ -717,8 +733,9 @@ describe("runHealthCheck", () => {
         },
       ],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out)).toBe(1);
+    const { out, lines, setOutput, outputs } = collect();
+    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(1);
+    expect(outputs).toEqual(["release-cut=true"]);
     expect(calls).toEqual([
       COMMIT_PULLS_CALL,
       issueListCall("fuzz-nightly"),
@@ -731,14 +748,15 @@ describe("runHealthCheck", () => {
   });
 
   test("release mode: a push that is not a release-PR merge is not gated at all", async () => {
-    // Release-please runs on every main push but only cuts a release from a
-    // release-PR merge; an open blocker must not paint ordinary pushes red.
+    // An open blocker must not paint ordinary pushes red; the "false" verdict
+    // is what keeps this run from tagging a release merge it never judged.
     const { run, calls } = fakeGh({
       issues: { "release-blocker": [7] },
       commitPulls: [{ number: 3, head: { ref: "feature/x" }, labels: [] }],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput, outputs } = collect();
+    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
+    expect(outputs).toEqual(["release-cut=false"]);
     expect(lines).toEqual([
       "::notice::release health: abc123 is not a release-PR merge; nothing to gate",
     ]);
@@ -760,8 +778,9 @@ describe("runHealthCheck", () => {
         },
       ],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(releaseConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput, outputs } = collect();
+    expect(await runHealthCheck(releaseConfig(), run, out, setOutput)).toBe(0);
+    expect(outputs).toEqual(["release-cut=false"]);
     expect(lines).toEqual([
       "::notice::release health: abc123 is not a release-PR merge; nothing to gate (open release PR(s) associated: #9)",
     ]);
@@ -774,8 +793,8 @@ describe("runHealthCheck", () => {
       alertsError: "gh api failed (1): HTTP 403: Resource not accessible by integration",
       prViewLabels: [],
     });
-    const { out, lines } = collect();
-    expect(await runHealthCheck(prConfig(), run, out)).toBe(0);
+    const { out, lines, setOutput } = collect();
+    expect(await runHealthCheck(prConfig(), run, out, setOutput)).toBe(0);
     expect(lines).toEqual([
       "::notice::security gate skipped: gh api failed (1): HTTP 403: Resource not accessible by integration",
       "release health: all gates passed (tracking:fuzz-nightly: no open 'fuzz-nightly' issues; blocker: no open 'release-blocker' issues; security: skipped)",
@@ -784,7 +803,7 @@ describe("runHealthCheck", () => {
 
   test("a failed override lookup errors the run instead of gating blind", async () => {
     const { run } = fakeGh({ issues: {}, alerts: [], prViewLabels: undefined });
-    const { out } = collect();
-    expect(runHealthCheck(prConfig(), run, out)).rejects.toThrow("gh pr view failed");
+    const { out, setOutput } = collect();
+    expect(runHealthCheck(prConfig(), run, out, setOutput)).rejects.toThrow("gh pr view failed");
   });
 });
