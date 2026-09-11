@@ -5,7 +5,7 @@
 // Judged over the tracked files of a checkout.
 // .file-size-allow.local exempts a path; its `# reason` is mandatory.
 // `comment-cap: ignore <reason>` exempts one comment block.
-// Policy: docs/new-repo.md.
+// Policy: docs/fleet-guidelines.md.
 // Comments and literals are exactly what the file's tree-sitter grammar tokenizes.
 // Comment tokens are comments; every other token, ERROR included, is code.
 // A file whose grammar is missing or failed to load gets neither judgement.

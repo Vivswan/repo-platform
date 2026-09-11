@@ -19,6 +19,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | [Copilot review comments are advisory](#copilot-review-comments-are-advisory) | the managed `.github/instructions/review.instructions.md`; no ruleset requires Copilot's approval |
 | [No backwards-compatibility code](#no-backwards-compatibility-code) | review |
 | [Short comments](#short-comments) | the `file-size` step's comment caps (warn only); review for content |
+| [File size caps](#file-size-caps) | the `file-size` step (a hard cap fails the step; fleet-ci.yml carries `continue-on-error` on it for now, repo-platform's own ci.yml gates) |
 | [How to bypass a check](#how-to-bypass-a-check) | each tool's own per-finding, in-repo bypass; no job-level switch exists |
 
 ## Sticky PR comments
@@ -48,7 +49,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - Rule: PR titles and commit subjects are [Conventional Commits](https://www.conventionalcommits.org/); PRs squash-merge, so the PR title becomes the commit subject.
 - Why: release-please derives versions and changelogs from the subjects.
-- How: `fix(sync): ...`, `feat(templates)!: ...`, `docs: ...`.
+- How: `fix(sync): ...`, `feat(writer)!: ...`, `docs: ...`.
 - Enforced by: the [`pr-title` check](settings.md#the-pr-title-ruleset) on the PR title (pr-title module); the `commit-names` job (actions/validate-commit-names) on the subjects; squash-only merging with the PR title as subject is the [settings override layer](settings.md), applied to every managed repository.
 
 ## Plain ASCII punctuation
@@ -98,7 +99,35 @@ Conventions every managed repository follows, whether the file is managed by syn
 - Rule: a comment says what the code cannot show, in one to three lines; a comment block over 10 lines, or a file header comment over 25, is a warning.
 - Why: a comment grown into a paragraph is narration (delete it) or a workaround defense (fix the code); the code is the single source of truth.
 - How: cut the comment to its constraint. A block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone; the reason is mandatory, and a bare marker warns.
-- Enforced by: the comment caps of the `file-size` step ([the file size caps](new-repo.md#file-size-caps)), warn only, never a failure. Comment lines are what the file's tree-sitter grammar tokenizes as comments (a string holding `//` is a string, an unterminated `/*` is a syntax error), and a file whose extension has no working grammar is named as unjudged in the step summary instead of being guessed at.
+- Enforced by: the comment caps of the `file-size` step ([file size caps](#file-size-caps)), warn only, never a failure. Comment lines are what the file's tree-sitter grammar tokenizes as comments (a string holding `//` is a string, an unterminated `/*` is a syntax error), and a file whose extension has no working grammar is named as unjudged in the step summary instead of being guessed at.
+
+## File size caps
+
+- Rule: no file over its hard line cap and no code line over 256 characters; a comment block over 10 lines, or a file header comment over 25, warns. The caps live in [check-file-size.ts](../actions/check-file-size/check-file-size.ts):
+
+| Kind | Which files | Hard cap (fails) | Warn cap (annotates) |
+|---|---|---|---|
+| source | `.ts`, `.js`, `.py`, `.rs`, `.go`, `.swift`, `.kt`, `.java`, `.c`, `.cpp`, and their sibling extensions | 2000 lines | 1600 lines |
+| test | a source file named `*.test.*`, `*_test.*`, `*.spec.*`, `*_spec.*`, `test_*`, Rust's `*_tests.rs`, `tests.rs`, `proptests.rs`, or under `test/`, `tests/`, `__tests__/` | 3200 lines | 2560 lines |
+| workflow | yaml under `.github/workflows/`, and any `action.yml` or `action.yaml` | 1000 lines | 800 lines |
+| shell | `.sh`, `.bash`, `.zsh` | 1000 lines | 800 lines |
+| markdown | `.md` | 1300 lines | 1040 lines |
+| line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
+| comment block | a run of lines holding nothing but comment tokens as the file's grammar tokenizes them (a multi-line comment counts every line between its delimiters; a string or here-doc holding comment syntax is code); a blank line or a code line ends the run, a line with code on it is code (an inline comment after it is not a block), and markdown is prose | never fails | 10 lines; 25 for the file header (the first block, when nothing but a shebang or a generated region precedes it) |
+
+- Why: a file past these sizes is several files wearing one name; a line past the width is unreadable in any review pane; a comment past its cap is narration or a workaround defense, and the code is the source of truth. The caps are generous on purpose: they catch drift, not style.
+- Exempt by construction:
+  - lockfiles, json, and non-workflow yaml (no kind); anything under `node_modules/`, `vendor/`, `third_party/`, `goldens/`, or `__snapshots__/`
+  - a file whose first ten lines carry a comment declaring it generated (`generated by X`, `do not edit`; a comment that merely names a generator is not a declaration), and the lines inside a `BEGIN GENERATED`/`END GENERATED` region
+  - a file carrying repo-platform's managed header (the repository cannot fix it; the summary counts them)
+  - a line that is one whitespace-free token (a URL, a sha, an expression): unbreakable, so it passes both width tiers; a literal assigned on the same line is two tokens and does not
+  - a line that is one string, template, or regex literal with nothing but punctuation and keywords beside it (assigned, returned, keyed, a sole argument, a line inside a multi-line literal): passes the warn width tier only, since wrapping it means splitting the literal
+- How: split the file, wrap the line, shorten the comment. Two per-finding bypasses exist, both repo-owned and visible in the diff:
+  - A comment block that must stay long (a license text, an upstream-shaped header) carries a comment line `comment-cap: ignore <reason>` inside it or directly above it, which exempts that block alone. A bare marker exempts nothing and warns itself.
+  - A file that must stay large goes in `.file-size-allow.local`, one `path # reason` per line (blank lines and `#` comment lines are skipped), which exempts every finding on that path in both tiers. The reason is mandatory and must be one a reader accepts: vendored or upstream-shaped, generated but missed by the header exemption, a split that would break an external contract, a file that predates the cap and names the PR its split waits on. "Large" or "legacy" alone is not a reason.
+  - An allowlist entry without a reason fails the check, and so does a stale one: a path with no finding left (under every cap, no bare marker) or not a tracked file.
+  - A repository that packages from its root (a VS Code extension's VSIX, an npm package with no `files` field) lists the allowlist in its packaging ignore file (`.vscodeignore`, `.npmignore`), or it ships as content.
+- Enforced by: the `file-size` step of fleet-ci.yml's `base-checks` job ([actions/check-file-size](../actions/check-file-size/action.yml)), which parses every judged file with web-tree-sitter and prebuilt wasm grammars for TypeScript, JavaScript, Python, Rust, Go, Kotlin, Java, C, C++, shell, and yaml; an extension without a working grammar (today Swift, whose prebuilt grammar keeps scanner state across files) gets no comment judgement and no literal exemption, and the step summary names it as unjudged. A hard-cap finding or an allowlist defect fails the step; across the fleet the step carries `continue-on-error` for now, so it annotates and comments without turning the PR red (the judge step reports it as `advisory`), while repo-platform's own ci.yml gates on it. The step summary is written on every outcome (findings, clean, or an error that stopped the check), findings also go to the log annotations, and on pull requests to one sticky PR comment, deleted when the tree is clean.
 
 ## How to bypass a check
 
@@ -119,12 +148,12 @@ Conventions every managed repository follows, whether the file is managed by syn
 | yamllint | base-checks | any finding (strict) | a `# yamllint disable-line rule:<name>` comment on the line (`.yamllint` itself is managed) |
 | gitleaks | base-checks | any leak | the finding's fingerprint in `.gitleaksignore`; an allowlist rule in the repo-owned `.gitleaks.toml` |
 | typography | base-checks | any non-ASCII look-alike | the file's path prefix in `.typography-allow.local` |
-| file-size | base-checks | nothing (advisory) | a `comment-cap: ignore <reason>` line inside or above the block |
+| file-size | base-checks | a hard-cap finding or an allowlist defect fails the step; the fleet-ci step carries `continue-on-error` for now, so the PR stays green (repo-platform's own ci.yml gates) | the path in the repo-owned `.file-size-allow.local` with a `# reason` (every finding on that path); a `comment-cap: ignore <reason>` line inside or above a comment block ([file size caps](#file-size-caps)) |
 | commit-names | base-checks | a non-conventional subject | none: reword the commit |
 | typos | base-checks | any finding | an entry in the repo-owned `_typos.toml` (or `typos.toml`, `.typos.toml`), which typos layers under the fleet config: `[default.extend-words]` for the repository's vocabulary, `[files] extend-exclude` for fixture paths spelled wrong on purpose, `[default.extend-identifiers]` for one identifier; or `# typos: ignore` or `// typos: ignore` at the end of the line for a one-off |
 | zizmor | zizmor | a high finding (zizmor exits non-zero alike on an audit error and on a finding, so a failed attempt runs once more and only the retry's result counts) | a `# zizmor: ignore[rule]` comment on the finding's line with the reason beside it; a `rules.<rule>.ignore` entry naming the file in the repo-owned `.github/zizmor.yml` |
 | knip | knip (bun or node repos with a package.json to install from; `npm ci` also needs package-lock.json or npm-shrinkwrap.json, and a repo without them stands down with a notice) | any finding | an `ignore*` entry in the repo-owned `knip.json` or a `@public` JSDoc tag on the export |
-| semgrep | semgrep (public repos) | an ERROR finding, or a scan that did not complete (its exit status is named) | a `// nosemgrep: rule-id` comment (`# nosemgrep: rule-id` in YAML) on the finding's line or the line above it, with the reason beside it; the upload drops a marked finding from the SARIF, because code scanning shows a suppressed SARIF result as an open alert |
+| semgrep | semgrep (public repos) | an ERROR finding, or a scan that did not complete (its exit status is named) | a `// nosemgrep: <rule-id>` comment (`# nosemgrep: <rule-id>` in YAML) on the finding's line or the line above it, with the reason beside it; the rule set, the excluded rules, and what the upload drops are in [security-scans.md](security-scans.md#semgrep) |
 | dependency-review | dependency-review | a vulnerable dependency at or above low | none: upgrade or drop the dependency |
 | Trivy | trivy (every event but the schedule; `trivy-nightly` on the schedule reports without blocking) | a CRITICAL vulnerability with a fix available, or any CRITICAL misconfiguration | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
 | CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |

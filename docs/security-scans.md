@@ -5,7 +5,7 @@ group: Fleet operations
 
 # Security scans
 
-Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository: the configuration lives in the [trivy action](../actions/trivy/action.yml), the blocking job in [fleet-ci.yml](../.github/workflows/fleet-ci.yml), and the nightly job in [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml). Two halves:
+Every managed repository is scanned by [Trivy](https://trivy.dev) through the skeleton ci.yml's fleet callers, with zero Trivy files in the repository (public repositories also run [semgrep](#semgrep)): the configuration lives in the [trivy action](../actions/trivy/action.yml), the blocking job in [fleet-ci.yml](../.github/workflows/fleet-ci.yml), and the nightly job in [fleet-nightly.yml](../.github/workflows/fleet-nightly.yml). Two halves:
 
 | Half | Job | Runs on | Scans | Blocking? | Findings go to |
 |---|---|---|---|---|---|
@@ -45,3 +45,18 @@ misconfigurations:
 - Findings: the action writes one report per scanned target in the [fuzz-issue action's](../actions/fuzz-issue/action.yml) report-directory contract ([fuzzer.md](fuzzer.md#the-failure-report-contract-v1)), and the job files or updates the one open issue labeled `security-nightly`; a clean night closes it ([tracking-issues.md](tracking-issues.md)). The full JSON rides the run's artifact.
 - Code scanning: the SARIF is uploaded under the `trivy` category when the repository is public (personal-account code scanning is public-only).
 - Release gating: `security-nightly` is fleet data, not a module answer. The [settings baseline](../.github/settings-baseline.yml) declares the label on every repository, [actions/plan](../actions/plan/plan.ts) appends it to every repository's `tracking-labels`, and `release-health` refuses to release while the issue is open ([tracking-issues.md](tracking-issues.md#release-gating)).
+
+## Semgrep
+
+Public repositories also run [semgrep](https://semgrep.dev) as fleet-ci.yml's `semgrep` job, through the [semgrep action](../actions/semgrep/action.yml): the registry needs no token, but code scanning needs a public repository.
+
+- Rules: the registry's `p/default` set, with two rules excluded:
+
+| Excluded rule | Why | Until |
+|---|---|---|
+| `github-actions-mutable-action-tag` | zizmor's `unpinned-uses` owns action pinning: one tool per finding class | permanent |
+| `secrets-inherit` | managed repositories still run the old ci.yml and release.yml, whose `secrets: inherit` lines carry no marker, so the rule would fail every fleet repository; the writer's ci.yml marks each of its three lines with its reason (the called workflows are the repository's own) | the fleet cutover, once the writer has replaced them |
+
+- Verdict: a scan that did not exit 0 fails first, naming its exit status, because there is no verdict without a completed scan. Then the JSON copy is judged by severity: ERROR findings and fatal analysis errors fail the job; WARNING and INFO findings (`detect-non-literal-regexp` among them) reach code scanning without blocking; partial parses and timeouts only annotate.
+- Bypass: semgrep's own marker on the finding's line or the line above it, `// nosemgrep: <rule-id>` (`# nosemgrep: <rule-id>` in YAML), with the reason beside it. Which WARNING findings to mark is the repository's own call.
+- Upload: every finding goes to code scanning as SARIF under the `semgrep` category. A marked finding stays in semgrep's SARIF as a suppressed result, and code scanning ignores the suppressions field and would show it as an open alert, so the action drops suppressed results from the SARIF before the upload. A scan that wrote no SARIF leaves nothing to filter, and the upload fails on the missing file.
