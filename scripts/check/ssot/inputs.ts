@@ -1,20 +1,41 @@
 // The repository inputs more than one rule group keys on: the repo root,
-// file and tree readers, and the parsed documents (the manifests and
-// copier.yml memoized, the rest re-read per call).
+// the owner, file and tree readers, and the parsed documents (files.yml
+// memoized, the rest re-read per call).
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { allLayerLabels } from "../../../.github/scripts/fleet/render_managed_settings.ts";
-import { capture } from "../../../.github/scripts/shared/proc.ts";
-import { trackingStreams } from "../../generate/copier_questions.ts";
-import type { JinjaVars } from "../../lib/jinja_subset.ts";
 import {
-  loadManifests as loadManifestsFresh,
-  type ModuleManifest,
-} from "../../lib/module_manifests.ts";
+  allLayerLabels,
+  loadModules,
+  type Module,
+} from "../../../.github/scripts/fleet/render_managed_settings.ts";
+import { capture } from "../../../.github/scripts/shared/proc.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
+
+/** The GitHub owner of this repository and of every fleet member: the
+ *  owner slot every fleet-facing pin and PAT URL spells. */
+export const OWNER = "Vivswan";
+
+/** A writer source with its `{{name}}` placeholders replaced by a plain
+ *  word and its blocks anchor line by a comment, line count preserved, so
+ *  the YAML parses the way the written file will (a bare `{{` opens a flow
+ *  mapping); `${{ }}` expressions are not placeholders and ride through. */
+export function neutralizePlaceholders(text: string): string {
+  return text
+    .replace(/^\{\{blocks\}\}$/gm, "# blocks")
+    .replace(/(\$?)\{\{[A-Za-z_][A-Za-z0-9_]*\}\}/g, (token, dollar: string) =>
+      dollar === "" ? "placeholder" : token,
+    );
+}
+
+/** A writer source read for parsing: placeholders neutralized under files/,
+ *  every other path verbatim. */
+export function readSource(rel: string): string {
+  const text = read(rel);
+  return rel.startsWith("files/") ? neutralizePlaceholders(text) : text;
+}
 
 export function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
@@ -48,7 +69,8 @@ function memoize<T>(compute: () => T): () => T {
   };
 }
 
-export const loadManifests = memoize(loadManifestsFresh);
+/** files.yml's modules in canonical order, with their data. */
+export const modules = memoize((): Module[] => loadModules(join(REPO_ROOT, "files.yml")));
 
 export function asRecord(value: unknown, where: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -57,37 +79,47 @@ export function asRecord(value: unknown, where: string): Record<string, unknown>
   return value as Record<string, unknown>;
 }
 
-export const copierConfig = memoize(
-  (): Record<string, unknown> => asRecord(parseYaml(read("copier.yml")), "copier.yml"),
-);
-
-/** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
- *  source the hand-written copier questions and doc constants are anchored
- *  to. The list comes from scripts/generate/copier_questions.ts's trackingStreams (which throws when
- *  no manifest declares one), so every rule keyed on it fails loudly rather
- *  than passing vacuously and can never disagree with the generated
- *  tracking-labels regions. */
-export function trackingManifests(): {
+/** One tracking stream: the module and its files.yml tracking_label,
+ *  color and description included. */
+export interface TrackingStream {
   module: string;
-  tracking: NonNullable<ModuleManifest["tracking_label"]>;
-}[] {
-  return trackingStreams(loadManifests()).map((m) => ({
-    module: m.module,
-    tracking: m.tracking_label,
-  }));
+  key: string;
+  default: string;
+  color: string;
+  description: string;
 }
 
-export function jinjaVars(): JinjaVars {
-  const username = asRecord(copierConfig().github_username, "copier.yml github_username").default;
-  if (typeof username !== "string" || username === "") {
-    throw new Error("copier.yml: github_username has no string default");
-  }
-  const holder = asRecord(copierConfig().copyright_holder, "copier.yml copyright_holder").default;
-  if (typeof holder !== "string" || holder === "") {
-    throw new Error("copier.yml: copyright_holder has no string default");
-  }
+/** files.yml's tracking_label streams (fuzzer, nightly, ...), in canonical
+ *  order, the single source the doc constants and the label tuples are
+ *  anchored to; throws when no module declares one or a stream lacks its
+ *  tuple, so every rule keyed on it fails loudly. */
+export function trackingStreams(): TrackingStream[] {
+  const streams = modules().flatMap((m): TrackingStream[] => {
+    const tracking = m.tracking_label;
+    if (tracking === undefined) return [];
+    if (tracking.color === undefined || tracking.description === undefined) {
+      throw new Error(
+        `files.yml modules.${m.name}.tracking_label: no color or description - anchor lost`,
+      );
+    }
+    return [
+      {
+        module: m.name,
+        key: tracking.key,
+        default: tracking.default,
+        color: tracking.color,
+        description: tracking.description,
+      },
+    ];
+  });
+  if (streams.length === 0) throw new Error("files.yml declares no tracking_label - anchor lost");
+  return streams;
+}
+
+/** The repository slug (package.json's name) beside the owner. */
+export function repoSlug(): string {
   const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
-  return { username, slug: String(pkg.name), copyrightHolder: holder };
+  return String(pkg.name);
 }
 
 export function packageScripts(): Record<string, string> {
@@ -127,9 +159,9 @@ export interface Label {
 }
 
 /** Every label tuple any settings LAYER can emit for ANY selection and
- *  either visibility - tracking labels excluded (they render from
- *  per-repo answers). The single roster the doc-constant and issue-form
- *  rules key on. */
+ *  either visibility - tracking labels excluded (they come from each
+ *  repository's registration). The single roster the doc-constant rules
+ *  key on. */
 export function managedLabelRoster(): Label[] {
-  return allLayerLabels(loadManifests());
+  return allLayerLabels(modules());
 }

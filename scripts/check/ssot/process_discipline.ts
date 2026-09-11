@@ -307,8 +307,6 @@ export function spawnSyncHazard(options: string | null): string | null {
 // an improvement, so the laundering must fail by introducing a name this pin
 // does not carry. Residual: an alias of Bun escapes both scans, Bun["spawn"] this one.
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
-  ".github/scripts/sync/rehearse_fleet.ts":
-    "implements its own manual deadline: the async Subprocess type has no built-in timeout, so a timer SIGKILLs an overrunning lane (the comment at its Bun.spawn call is the reference statement of why async needs one)",
   "actions/fuzz-issue/fuzz-issue.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "actions/release-health/release-health.ts":

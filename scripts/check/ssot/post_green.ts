@@ -6,7 +6,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { escapeRegExp, type Mismatch } from "./comparison.ts";
-import { asRecord, copierConfig, REPO_ROOT, read } from "./inputs.ts";
+import { OWNER, REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** settings-repos.yml's green gate, judged on the parsed workflow (exported
@@ -457,14 +457,11 @@ export const postGreenRules: Rule[] = [
           .filter((name) => /\.ya?ml$/.test(name))
           .map((name) => [`.github/workflows/${name}`, read(`.github/workflows/${name}`)]),
       );
-      const owner = String(
-        asRecord(copierConfig().github_username, "copier.yml github_username").default,
-      );
       return [
-        ...postGreenCallerMismatches(workflows, owner),
+        ...postGreenCallerMismatches(workflows, OWNER),
         ...fleetTokenHolderMismatches(workflows),
         ...Object.keys(FLEET_WRITERS).flatMap((rel) =>
-          fleetWriterMismatches(rel, read(rel), workflows, owner),
+          fleetWriterMismatches(rel, read(rel), workflows, OWNER),
         ),
       ];
     },

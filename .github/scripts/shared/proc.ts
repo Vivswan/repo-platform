@@ -19,7 +19,7 @@ import { constants } from "node:os";
 
 /** The default hang bound: a BOUND ON HANGING, not an operational
  * deadline. Generous enough that no legitimate subprocess ever hits it
- * (whole-tree pushes, validators, copier renders all run well under it),
+ * (whole-tree pushes, validators, and writer runs all run well under it),
  * small enough to fire with room to spare inside the 10-minute job
  * timeouts, so a wedged call dies loudly and named instead of as a
  * runner-level kill. Call sites with a real operational deadline pass

@@ -30,8 +30,8 @@ describe("bunLockDirs", () => {
       "actions/release-health",
       "actions/trivy",
       "actions/validate-commit-names",
+      "actions/validate-managed-files",
       "actions/validate-skills",
-      "actions/validate-template-report",
     ]);
   });
 

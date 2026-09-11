@@ -5,10 +5,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   classify,
-  isAgentsFragment,
   isExempt,
+  isMarkdown,
   quoteDepth,
-  rendersToMarkdown,
   scanMarkdown,
 } from "../../../scripts/check/check_markdown_wrap";
 
@@ -26,8 +25,6 @@ describe("classify", () => {
     expect(classify("<user@example.com>")).toBe("prose");
     expect(classify("[ref]: https://example.com")).toBe("structural");
     expect(classify("<!-- a comment -->")).toBe("structural");
-    expect(classify("{% if private %}")).toBe("structural");
-    expect(classify("{# compose:agents-toolchain #}")).toBe("structural");
     expect(classify("---")).toBe("structural");
     expect(classify("- bullet text")).toBe("list");
     expect(classify("1. numbered item")).toBe("list");
@@ -247,33 +244,20 @@ describe("scanMarkdown", () => {
 });
 
 describe("scan scope", () => {
-  test("rendersToMarkdown handles plain, template, and gated names", () => {
-    expect(rendersToMarkdown("docs/guide.md")).toBe(true);
-    expect(rendersToMarkdown("templates/base/AGENTS.md.jinja")).toBe(true);
-    expect(
-      rendersToMarkdown(
-        "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
-      ),
-    ).toBe(true);
-    expect(rendersToMarkdown("scripts/generate.ts")).toBe(false);
-    expect(rendersToMarkdown("templates/base/.gitignore.jinja")).toBe(false);
+  test("isMarkdown takes plain .md files and the writer's markdown block files", () => {
+    expect(isMarkdown("docs/guide.md")).toBe(true);
+    expect(isMarkdown("files/base/AGENTS.md")).toBe(true);
+    expect(isMarkdown("files/deno/AGENTS.md.block.toolchain")).toBe(true);
+    expect(isMarkdown("scripts/files_table.ts")).toBe(false);
+    expect(isMarkdown("files/base/.gitignore")).toBe(false);
+    expect(isMarkdown("files/deno/.gitignore.block.Deno")).toBe(false);
   });
 
-  test("agents fragments are in scope; other fragments are not", () => {
-    expect(isAgentsFragment("templates/deno/fragments/agents-toolchain.jinja")).toBe(true);
-    expect(isAgentsFragment("templates/deno/fragments/gitignore.jinja")).toBe(false);
-    expect(isAgentsFragment("templates/deno/other/agents-toolchain.jinja")).toBe(false);
-  });
-
-  test("vendored/generated texts are exempt, gated license template included", () => {
+  test("vendored/generated texts are exempt, the writer's license source included", () => {
     expect(isExempt("LICENSE.md")).toBe(true);
     expect(isExempt("CHANGELOG.md")).toBe(true);
     expect(isExempt("skills/repo-platform-sync-pr/LICENSE.md")).toBe(true);
-    expect(
-      isExempt(
-        "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
-      ),
-    ).toBe(true);
+    expect(isExempt("files/base/LICENSE.md")).toBe(true);
     expect(isExempt("docs/settings.md")).toBe(false);
   });
 });

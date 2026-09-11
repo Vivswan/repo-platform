@@ -16,7 +16,6 @@ import {
   type LayerStepFacts,
   layerStepArgv,
 } from "../../../.github/scripts/fleet/settings_layer_step.ts";
-import { normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
 import {
   intersectionCarriesType,
   parseTs,
@@ -25,7 +24,7 @@ import {
   unwrapExpression,
 } from "../../lib/ts_extract.ts";
 import type { Mismatch } from "./comparison.ts";
-import { asRecord, jinjaVars, REPO_ROOT, read } from "./inputs.ts";
+import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 interface WorkflowStep {
@@ -253,47 +252,50 @@ export function settingsIdentityMismatches(repository: Record<string, unknown>):
   }));
 }
 
+/** The settings starters the writer seeds, one per visibility. */
+export const SETTINGS_STARTERS = [
+  "files/base/.github/settings.yml",
+  "files/base/.github/settings.private.yml",
+];
+
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const settingsWorkflowRules: Rule[] = [
   {
-    // The base settings starter and repo-platform's own .github/settings.yml
-    // are the two independently-authored repo layers this repo controls; the
+    // The settings starters and repo-platform's own .github/settings.yml
+    // are the independently-authored repo layers this repo controls; the
     // managed baseline document is the single home of the fleet-generic
-    // content, so no baseline pair exists to compare here. The starter must
-    // seed all four identity keys, repo-platform's own file must declare them
-    // with valid shapes, and its hand-written non-bypassable override must
-    // stay byte-equivalent to the baseline entry it replaces wholesale (a
-    // drifted override would silently weaken the ruleset the baseline promises).
+    // content, so no baseline pair exists to compare here. Each starter
+    // must seed all four identity keys, repo-platform's own file must
+    // declare them with valid shapes, and the override layer must own the
+    // protection rulesets no repo layer redeclares.
     name: "settings-starter",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const vars = jinjaVars();
-      const starter = asRecord(
-        parseYaml(
-          placeholderJinja(normalizeJinja(read("templates/base/.github/settings.yml.jinja"), vars)),
-        ),
-        "settings.yml.jinja",
-      );
-      const starterRepository = asRecord(starter.repository, "settings.yml.jinja repository");
-      for (const key of ["description", "homepage", "topics", "private"]) {
-        if (!(key in starterRepository)) {
-          mismatches.push({
-            file: "templates/base/.github/settings.yml.jinja",
-            expected: `repository.${key} seeded from the copier answers`,
-            got: "missing - the starter must declare all four identity keys",
-          });
+      for (const rel of SETTINGS_STARTERS) {
+        // The placeholders sit inside quoted scalars, so the source parses
+        // as the YAML the writer emits.
+        const starter = asRecord(parseYaml(read(rel)), rel);
+        const starterRepository = asRecord(starter.repository, `${rel} repository`);
+        for (const key of ["description", "homepage", "topics", "private"]) {
+          if (!(key in starterRepository)) {
+            mismatches.push({
+              file: rel,
+              expected: `repository.${key} seeded by the writer`,
+              got: "missing - the starter must declare all four identity keys",
+            });
+          }
         }
-      }
-      // The starter is a repo layer: a labels or rulesets section in it
-      // would seed every new repo with a shadowing copy of baseline
-      // entries (frozen at render time, overriding baseline evolution).
-      for (const section of ["labels", "rulesets"]) {
-        if (starter[section] !== undefined) {
-          mismatches.push({
-            file: "templates/base/.github/settings.yml.jinja",
-            expected: `no ${section} section (the managed baseline supplies it; the starter only shows commented examples)`,
-            got: "declared",
-          });
+        // The starter is a repo layer: a labels or rulesets section in it
+        // would seed every new repo with a shadowing copy of baseline
+        // entries (frozen at the first write, overriding baseline evolution).
+        for (const section of ["labels", "rulesets"]) {
+          if (starter[section] !== undefined) {
+            mismatches.push({
+              file: rel,
+              expected: `no ${section} section (the managed baseline supplies it; the starter only shows commented examples)`,
+              got: "declared",
+            });
+          }
         }
       }
 

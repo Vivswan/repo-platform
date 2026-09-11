@@ -3,7 +3,6 @@ import { parse } from "yaml";
 import {
   declaredModules,
   parseRegistration,
-  readModuleOrder,
   readModules,
   registrationSchema,
 } from "../../../actions/plan/registration.ts";
@@ -262,21 +261,5 @@ describe("declaredModules (the fleet plans' text reader)", () => {
     expect(declaredModules("modules: []\n")).toEqual([]);
     expect(declaredModules("modules: notalist\n")).toBeNull();
     expect(declaredModules(": broken\n")).toBeNull();
-  });
-});
-
-describe("readModuleOrder", () => {
-  test("the choice values in the generated block's order", () => {
-    const data = {
-      modules: { choices: { "bun - x": "bun", "uv - y": "uv", "pages - z": "pages" } },
-    };
-    expect(readModuleOrder(data)).toEqual({ choices: ["bun", "uv", "pages"], errors: [] });
-  });
-
-  test("no modules question is an error, not an empty vocabulary", () => {
-    expect(readModuleOrder({ project_name: {} })).toEqual({
-      choices: null,
-      errors: ["copier.yml: no `modules` question found"],
-    });
   });
 });

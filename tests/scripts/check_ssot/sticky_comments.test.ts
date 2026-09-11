@@ -3,26 +3,23 @@
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
-  fragmentHosts,
   STICKY_COMMENT_ACTION,
   type StickyScope,
+  sourceWorkflowStem,
   stickyCommentMismatches,
   stickyScopeOf,
   stickyTreeMismatches,
-  stickyYamlOf,
-  templateWorkflowStem,
 } from "../../../scripts/check/ssot/sticky_comments.ts";
 
 describe("sticky-pr-comments", () => {
   const SHA = "5770ad5eb8f42dd2c4f34da00c94c5381e49af88";
   const PIN = `${STICKY_COMMENT_ACTION}@${SHA} # v3.0.5`;
-  const WORKFLOW = "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja";
-  const GATED =
-    "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja";
-  const FRAGMENT = "templates/bun/fragments/auto-format.jinja";
+  const WORKFLOW = "files/bun/.github/workflows/dependabot-bun-lockfile.yml";
+  const VARIANT = "files/base/.github/workflows/auto-assign.codeql.yml";
+  const BLOCK = "files/bun/.github/workflows/auto-format.yml.block.toolchain";
   const REPO_WORKFLOW = ".github/workflows/protect-build-branches.yml";
   const ACTION = "actions/check-file-size/action.yml";
-  const SCRIPT = "actions/validate-template-report/src/report.ts";
+  const SCRIPT = "actions/validate-managed-files/src/report.ts";
   const HOST = "dependabot-bun-lockfile";
   const HEADER = `repo-platform/${HOST}`;
   const strict = (...hosts: string[]): StickyScope => ({ hosts, postMayFail: false });
@@ -48,119 +45,29 @@ describe("sticky-pr-comments", () => {
 
   test.each([
     { rel: WORKFLOW, stem: HOST },
-    { rel: GATED, stem: "auto-format" },
-    { rel: FRAGMENT, stem: null },
-    { rel: "templates/bun/.github/dependabot.yml.jinja", stem: null },
+    { rel: VARIANT, stem: "auto-assign" },
+    { rel: BLOCK, stem: "auto-format" },
+    { rel: "files/bun/.github/dependabot.yml.block.bun", stem: null },
+    { rel: "files/bun/.gitignore.block.Node", stem: null },
     { rel: REPO_WORKFLOW, stem: null },
-  ])("templateWorkflowStem($rel) -> $stem", ({ rel, stem }) => {
-    expect(templateWorkflowStem(rel)).toBe(stem);
-  });
-
-  test("fragmentHosts maps anchor lines to their workflows; toolchain-setup inherits its targets'", () => {
-    const hosts = fragmentHosts([
-      [GATED, "steps:\n{# compose:auto-format #}\n{# compose:shared -#}\n"],
-      [
-        "templates/base/.github/workflows/checks.yml.jinja",
-        "{# compose:checks-examples #}\n{# compose:shared #}\n  {# compose:indented #}\n",
-      ],
-    ]);
-    expect([...hosts.entries()].sort()).toEqual([
-      ["auto-format", ["auto-format"]],
-      ["checks-examples", ["checks"]],
-      ["shared", ["auto-format", "checks"]],
-      ["toolchain-setup", ["auto-format"]],
-    ]);
-    expect(() => fragmentHosts([[FRAGMENT, ""]])).toThrow(/not a template workflow source/);
+  ])("sourceWorkflowStem($rel) -> $stem", ({ rel, stem }) => {
+    expect(sourceWorkflowStem(rel)).toBe(stem);
   });
 
   // Only a composite action's post may fail: it runs under the caller's
   // token, which a fork PR grants no pull-requests write.
   test.each([
     { rel: WORKFLOW, scope: strict(HOST) },
-    { rel: GATED, scope: strict("auto-format") },
-    { rel: FRAGMENT, scope: strict("auto-format", "checks") },
-    { rel: "templates/bun/fragments/gitignore.jinja", scope: strict() },
+    { rel: VARIANT, scope: strict("auto-assign") },
+    { rel: BLOCK, scope: strict("auto-format") },
+    { rel: "files/bun/.gitignore.block.Node", scope: strict() },
     { rel: REPO_WORKFLOW, scope: strict("protect-build-branches") },
     { rel: ACTION, scope: lenient("check-file-size") },
-    { rel: SCRIPT, scope: lenient("validate-template-report") },
-    { rel: "templates/bun/.github/dependabot.yml.jinja", scope: strict() },
+    { rel: SCRIPT, scope: lenient("validate-managed-files") },
+    { rel: "files/bun/.github/dependabot.yml.block.bun", scope: strict() },
     { rel: "scripts/check_ssot.ts", scope: strict() },
   ])("stickyScopeOf($rel)", ({ rel, scope }) => {
-    const anchors = new Map([["auto-format", ["auto-format", "checks"]]]);
-    expect(stickyScopeOf(rel, anchors)).toEqual(scope);
-  });
-
-  // The jinja source as the YAML it renders, both branches of an else kept
-  // and comment lines blanked in place so reported lines stay the source's;
-  // a source the shared subset cannot normalize comes back untouched.
-  test("stickyYamlOf renders jinja for the scanner", () => {
-    const vars = { username: "Vivswan", slug: "s", copyrightHolder: "c" };
-    const source = [
-      "{# a two-line comment",
-      "   ends here #}",
-      "name: {{ github_username }}",
-      "{% if 'docs-site' in modules %}",
-      "mounts: a",
-      "{% else %}",
-      "mounts: b",
-      "{% endif %}",
-      "x: {% raw %}${{ github.token }}{% endraw %} {{ pages_setup }}",
-    ].join("\n");
-    expect(stickyYamlOf("templates/x/.github/workflows/w.yml.jinja", source, vars)).toBe(
-      [
-        "",
-        "",
-        "name: Vivswan",
-        "",
-        "mounts: a",
-        "",
-        "mounts: b",
-        "",
-        'x: ${{ github.token }} "JINJA"',
-      ].join("\n"),
-    );
-    expect(stickyYamlOf(".github/workflows/w.yml", source, vars)).toBe(source);
-  });
-
-  // Whitespace-control tags eat the newline beside them in jinja; the
-  // scanner reads them as plain tags so every source line keeps its
-  // number, and a planted post below one is reported at ITS line.
-  test("stickyYamlOf keeps every source newline past a `{%-` tag", () => {
-    const vars = { username: "Vivswan", slug: "s", copyrightHolder: "c" };
-    const rel = "templates/x/.github/workflows/w.yml.jinja";
-    const source = [
-      "steps:",
-      "  - run: echo one",
-      "{%- if enable_codeql %}",
-      "  - run: echo two",
-      "{%- endif %}",
-      "  - run: gh pr comment 1 --body hi",
-    ].join("\n");
-    const yaml = stickyYamlOf(rel, source, vars);
-    expect(yaml.split("\n").length).toBe(source.split("\n").length);
-    expect(stickyCommentMismatches(rel, yaml, strict("w"))).toEqual({
-      stickySteps: 0,
-      mismatches: [{ file: `${rel}:6`, expected: handRolled, got: "gh pr comment 1 --body hi" }],
-    });
-  });
-
-  // A tag the subset cannot normalize leaves the source to the text
-  // scanner, comments already blanked: a post quoted in a jinja comment
-  // is not a post, the same text outside one is.
-  test("stickyYamlOf's fallback keeps jinja comments blanked", () => {
-    const vars = { username: "Vivswan", slug: "s", copyrightHolder: "c" };
-    const rel = "templates/x/f.jinja";
-    const commented = "{# gh pr comment 1 --body hi #}\n{% for x in y %}a{% endfor %}";
-    expect(stickyYamlOf(rel, commented, vars)).toBe("\n{% for x in y %}a{% endfor %}");
-    expect(stickyCommentMismatches(rel, stickyYamlOf(rel, commented, vars), strict())).toEqual({
-      stickySteps: 0,
-      mismatches: [],
-    });
-    const bare = "gh pr comment 1 --body hi\n{% for x in y %}a{% endfor %}";
-    expect(stickyCommentMismatches(rel, stickyYamlOf(rel, bare, vars), strict())).toEqual({
-      stickySteps: 0,
-      mismatches: [{ file: `${rel}:1`, expected: handRolled, got: "gh pr comment 1 --body hi" }],
-    });
+    expect(stickyScopeOf(rel)).toEqual(scope);
   });
 
   test.each([
@@ -457,7 +364,7 @@ describe("sticky-pr-comments", () => {
         {
           file: `${REPO_WORKFLOW}:2`,
           expected:
-            "the sticky action used by a step in a parseable YAML step list (workflow, composite action, or step fragment)",
+            "the sticky action used by a step in a parseable YAML step list (workflow, composite action, or block file)",
           got: "the sticky action named in a source with no parseable steps",
         },
       ],
@@ -582,26 +489,27 @@ describe("sticky-pr-comments", () => {
       mismatches: [{ file: `${WORKFLOW}:1`, expected: swallowed, got: "continue-on-error set" }],
     },
     {
-      reason: "a fragment spliced into two workflows",
-      rel: "templates/bun/fragments/toolchain-setup.jinja",
+      reason:
+        "a scope handed two hosts (no source has one today; the shape is judged, not the path)",
+      rel: BLOCK,
       scope: strict("auto-format", "copilot-setup-steps"),
       text: step("repo-platform/auto-format"),
       mismatches: [
         {
-          file: "templates/bun/fragments/toolchain-setup.jinja:3",
+          file: `${BLOCK}:3`,
           expected: "a source with exactly one host workflow or action (the header names it)",
           got: "2 hosts (auto-format, copilot-setup-steps)",
         },
       ],
     },
     {
-      reason: "a fragment no workflow anchor splices",
-      rel: "templates/bun/fragments/gitignore.jinja",
+      reason: "a block file no workflow lands",
+      rel: "files/bun/.gitignore.block.Node",
       scope: strict(),
       text: step("repo-platform/auto-format"),
       mismatches: [
         {
-          file: "templates/bun/fragments/gitignore.jinja:3",
+          file: "files/bun/.gitignore.block.Node:3",
           expected: "a source with exactly one host workflow or action (the header names it)",
           got: "0 hosts ()",
         },
@@ -611,37 +519,29 @@ describe("sticky-pr-comments", () => {
     expect(stickyCommentMismatches(rel, text, scope)).toEqual({ mismatches, stickySteps: 1 });
   });
 
-  test("stickyTreeMismatches: hosts from the RAW anchors, every source scanned as its YAML, both anchors enforced", () => {
-    const host = "steps:\n{# compose:auto-format #}\n";
-    const blankJinjaComments = (_rel: string, text: string) =>
-      text.replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""));
+  test("stickyTreeMismatches: every source scanned under its own scope, both anchors enforced", () => {
     const actionStep = step("repo-platform/check-file-size", PIN, [
       "        continue-on-error: true",
     ]);
     expect(
-      stickyTreeMismatches(
-        [
-          [WORKFLOW, `{# gh pr comment 1 --body hi #}\n${step(HEADER)}`],
-          [GATED, host],
-          [FRAGMENT, step("repo-platform/auto-format")],
-          [REPO_WORKFLOW, step("repo-platform/protect-build-branches")],
-          [ACTION, actionStep],
-          ["actions/check-file-size/check-file-size.ts", "// gh pr comment is not used here\n"],
-        ],
-        blankJinjaComments,
-      ),
+      stickyTreeMismatches([
+        [WORKFLOW, step(HEADER)],
+        [BLOCK, step("repo-platform/auto-format")],
+        [REPO_WORKFLOW, step("repo-platform/protect-build-branches")],
+        [ACTION, actionStep],
+        ["actions/check-file-size/check-file-size.ts", "// gh pr comment is not used here\n"],
+      ]),
     ).toEqual([]);
     expect(
       stickyTreeMismatches([
-        [GATED, host],
-        [FRAGMENT, step(HEADER)],
+        [BLOCK, step(HEADER)],
         [REPO_WORKFLOW, "steps:\n  - run: gh pr comment 1 --body hi\n"],
         ["actions/check-file-size/action.yml", step("repo-platform/check-file-size", PIN)],
-        ["actions/validate-template-report/action.yml", actionStep],
+        ["actions/validate-managed-files/action.yml", actionStep],
       ]),
     ).toEqual([
       {
-        file: `${FRAGMENT}:3`,
+        file: `${BLOCK}:3`,
         expected: "with.header: repo-platform/auto-format",
         got: `with.header: ${HEADER}`,
       },
@@ -651,26 +551,26 @@ describe("sticky-pr-comments", () => {
         got: "gh pr comment 1 --body hi",
       },
       {
-        file: "actions/validate-template-report/action.yml:3",
-        expected: "with.header: repo-platform/validate-template-report",
+        file: "actions/validate-managed-files/action.yml:3",
+        expected: "with.header: repo-platform/validate-managed-files",
         got: "with.header: repo-platform/check-file-size",
       },
     ]);
     expect(
       stickyTreeMismatches([
-        [GATED, host],
-        ["templates/bun/fragments/gitignore.jinja", step(HEADER)],
-        ["templates/bun/.github/dependabot.yml.jinja", step(HEADER)],
+        [WORKFLOW, "steps:\n  - run: echo hi\n"],
+        ["files/bun/.gitignore.block.Node", step(HEADER)],
+        ["files/bun/.github/dependabot.yml.block.bun", step(HEADER)],
       ]).map((m) => [m.file, m.got]),
     ).toEqual([
-      ["templates/bun/fragments/gitignore.jinja:3", "0 hosts ()"],
-      ["templates/bun/.github/dependabot.yml.jinja:3", "0 hosts ()"],
+      ["files/bun/.gitignore.block.Node:3", "0 hosts ()"],
+      ["files/bun/.github/dependabot.yml.block.bun:3", "0 hosts ()"],
     ]);
-    expect(() =>
-      stickyTreeMismatches([[WORKFLOW, `{#\n${step(HEADER)}\n#}\n`]], blankJinjaComments),
-    ).toThrow(/no marocchino\/sticky-pull-request-comment step .* anchor lost/);
-    expect(() => stickyTreeMismatches([[FRAGMENT, step(HEADER)]])).toThrow(
-      /no template workflow sources found - anchor lost/,
+    expect(() => stickyTreeMismatches([[WORKFLOW, "steps:\n  - run: echo hi\n"]])).toThrow(
+      /no marocchino\/sticky-pull-request-comment step .* anchor lost/,
+    );
+    expect(() => stickyTreeMismatches([[REPO_WORKFLOW, step(HEADER)]])).toThrow(
+      /no writer workflow sources found - anchor lost/,
     );
   });
 });

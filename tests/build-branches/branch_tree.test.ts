@@ -21,15 +21,13 @@ import {
   FILES_CONFIG,
   FILES_DIR,
   FLEET_WORKFLOWS,
-  MIGRATIONS_SRC_REL,
   parseArgs,
   RESERVED_LABELS_FILE,
+  reservedLabelNames,
   SHARED_DIR,
   TEST_FILE_SUFFIX,
   UsageError,
 } from "../../.github/scripts/build-branches/branch_tree";
-import { reservedLabelNames } from "../../scripts/generate/copier_questions.ts";
-import { loadManifests } from "../../scripts/lib/module_manifests.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -87,7 +85,7 @@ describe("destOverlapsRepo", () => {
     ["/", true, "the filesystem root is an ancestor ('/' + '/' must not read as '//')"],
     ["/home", true, "a distant ancestor"],
     ["/home/user", true, "the immediate parent"],
-    [`${REPO}/template`, true, "a path inside the repository"],
+    [`${REPO}/files`, true, "a path inside the repository"],
     ["/home/user/repo-platform-scratch", false, "a sibling sharing the name as a prefix"],
     ["/tmp/build-tree", false, "an unrelated path"],
     ["/home/other", false, "a sibling of an ancestor"],
@@ -183,10 +181,10 @@ describe("copyActions", () => {
   });
 
   test("the shared library zone ships without an action.yml, but satisfies no roster", () => {
-    // actions/shared/ is imported by path (the actions' relative imports,
-    // copier's stamp hook), never resolved as an action, so it is the one
-    // directory exempt from the action.yml guard - and a tree holding ONLY
-    // it still counts as having no actions to publish.
+    // actions/shared/ is imported by path (the actions' relative imports),
+    // never resolved as an action, so it is the one directory exempt from
+    // the action.yml guard - and a tree holding ONLY it still counts as
+    // having no actions to publish.
     const root = actionsFixture();
     mkdirSync(join(root, "actions", SHARED_DIR), { recursive: true });
     writeFileSync(join(root, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
@@ -259,24 +257,19 @@ describe("copyActions", () => {
 });
 
 describe("assembleBranchTree", () => {
-  // One real assembly shared by the layout and extraction-safety tests
-  // (compose runs once; the tree is read-only afterwards).
+  // One real assembly shared by the layout tests (the tree is read-only
+  // afterwards).
   const dest = temp.dir("branch-tree-real-");
   assembleBranchTree(dest);
 
-  test("the branch root carries exactly the unified layout, actions/ mirroring the checkout", () => {
-    // The stamp hook is no root byte-copy any more: it ships inside
-    // actions/shared/ at the same relative path copier.yml's hooks name.
+  test("the branch root carries exactly the delivery layout, actions/ mirroring the checkout", () => {
     expect(readdirSync(dest).sort()).toEqual([
       ".github",
       "README.md",
       "actions",
-      "copier.yml",
       "files",
       "files.yml",
-      "migrations",
       "reserved-labels.yml",
-      "template",
     ]);
     // Every action directory of this checkout ships (the shared zone
     // included) and nothing else does.
@@ -288,29 +281,15 @@ describe("assembleBranchTree", () => {
         .some((segment) => EXCLUDED_DIRS.has(segment)),
     );
     expect(excluded).toEqual([]);
-    // The anchors the fleet resolves by path: the composed copier tree, an
-    // action manifest, and the shared zone the validator's relative imports
-    // and the stamp hook resolve against on the extracted branch.
+    // The anchors the fleet resolves by path: an action manifest, the
+    // shared zone the actions' relative imports resolve against on the
+    // extracted branch, and the writer's data beside them.
     for (const anchor of [
-      join("template", "AGENTS.md.jinja"),
       join("actions", "check-typography", "action.yml"),
       join("actions", SHARED_DIR, "grammar.ts"),
-      join("actions", SHARED_DIR, "stamp_manifest.ts"),
+      join("files", "base", ".github", "workflows", "ci.yml"),
     ]) {
       expect(existsSync(join(dest, anchor))).toBe(true);
-    }
-  });
-
-  test("migrations/ is the source directory's rung files, byte for byte", () => {
-    // A rung is its own marker and runs from the build commit that carries
-    // it, so the branch must ship exactly the source files: a missing rung
-    // would run for nobody, an altered one would not be the reviewed code.
-    const src = join(REPO_ROOT, MIGRATIONS_SRC_REL);
-    const shipped = readdirSync(join(dest, "migrations")).sort();
-    expect(shipped).toEqual(readdirSync(src).sort());
-    expect(shipped.length).toBeGreaterThan(0);
-    for (const name of shipped) {
-      expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
   });
 
@@ -332,42 +311,31 @@ describe("assembleBranchTree", () => {
     }
   });
 
-  test("reserved-labels.yml is the managed label roster copier.yml's validators reject", () => {
-    // The plan action refuses a registration label on this list the way
-    // copier refuses the same recorded answer; a short roster would let a
-    // tracking stream take over a managed label.
+  test("reserved-labels.yml is the managed label roster, lowercased and deduped", () => {
+    // The plan action refuses a registration label on this list; a short
+    // roster would let a tracking stream take over a managed label.
     const shipped = parseYaml(readFileSync(join(dest, RESERVED_LABELS_FILE), "utf8"));
-    expect(shipped).toEqual(reservedLabelNames(loadManifests()));
+    expect(shipped).toEqual(reservedLabelNames(REPO_ROOT));
     expect(shipped).toContain("bug");
     expect(shipped).toContain("autorelease: pending");
+    expect(shipped).toContain("javascript");
+    expect(new Set(shipped).size).toBe(shipped.length);
+    for (const name of shipped) expect(name).toBe(name.toLowerCase());
   });
 
-  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, the validator inside the report action", () => {
+  test("actions/ holds only actions: every directory but the shared zone carries an action.yml, no dependencies, no tests", () => {
     const actions = actionDirNames(REPO_ROOT);
     const manifestFree = actions.filter(
       (name) => !existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
     );
     expect(manifestFree).toEqual([SHARED_DIR]);
-    // The retired script directory is gone (the report action's presence is
-    // the control); validator/ ships as a plain script directory, package
-    // files only at the action root, no dependencies, no tests.
-    expect(actions).not.toContain("validate-template");
-    expect(actions).toContain("validate-template-report");
-    const report = join(dest, "actions", "validate-template-report");
+    expect(actions).toContain("validate-managed-files");
+    const validator = join(dest, "actions", "validate-managed-files");
     expect(
-      [
-        "action.yml",
-        "bun.lock",
-        ".bun-version",
-        "package.json",
-        "src/report.ts",
-        "validator/validate_generated_files.ts",
-        "validator/bun.lock",
-        "validator/.bun-version",
-        "validator/package.json",
-        "node_modules",
-      ].map((name) => existsSync(join(report, name))),
-    ).toEqual([true, true, true, true, true, true, false, false, false, false]);
+      ["action.yml", "bun.lock", ".bun-version", "package.json", "node_modules"].map((name) =>
+        existsSync(join(validator, name)),
+      ),
+    ).toEqual([true, true, true, true, false]);
     expect(walk(join(dest, "actions")).filter((path) => path.endsWith(TEST_FILE_SUFFIX))).toEqual(
       [],
     );
@@ -387,15 +355,10 @@ describe("assembleBranchTree", () => {
     expect(listing(join(plantedDest, "actions", "probe"))).toEqual(["action.yml"]);
   });
 
-  test("no assembled path carries a jinja expression (tarball extraction safety)", () => {
-    // THE invariant that lets one branch serve both copier and `uses:`
-    // refs: a uses: ref downloads the whole branch tarball, and
-    // extraction dies on path segments like
-    // "{% if 'agents' in modules %}CLAUDE.md{% endif %}". The WHOLE real
-    // tree is the input here - template/ included, which is exactly the
-    // part the retired split-branch design existed to keep out. All
-    // three jinja delimiters count: a {# comment #} or {{ var }} segment
-    // is just as unextractable as a {% if %} gate.
+  test("no assembled path carries a placeholder or expression (tarball extraction safety)", () => {
+    // A uses: ref downloads the whole branch tarball, and extraction dies
+    // on path segments carrying braces; the writer substitutes
+    // placeholders in file CONTENT only, so no path may carry one.
     const offenders = walk(dest).filter((path) =>
       ["{%", "{{", "{#"].some((delimiter) => path.includes(delimiter)),
     );
@@ -404,8 +367,7 @@ describe("assembleBranchTree", () => {
 
   test("every symlink on the branch resolves inside the tree (no dangling links)", () => {
     // The runner's tarball staging dies on a DANGLING symlink anywhere in
-    // the downloaded tree, so branch links keep their .jinja targets (the
-    // rendered repo gets the stripped target from the stamp hook).
+    // the downloaded tree.
     const links = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
         const path = join(dir, entry.name);
@@ -435,7 +397,7 @@ describe("copyFleetWorkflows", () => {
   // The other direction of the shipping guard: the branch is pushed with a
   // PAT (whose pushes CAN trigger workflows), so "nothing can run on the
   // build branch" holds only while every shipped workflow is
-  // workflow_call-only. A non-inert trigger must fail the compose loudly,
+  // workflow_call-only. A non-inert trigger must fail the assembly loudly,
   // naming the file and the trigger.
   /** A checkout whose rostered workflows each carry distinct content (so a
    *  copy that swaps or rewrites one is visible), fleet-ci's given. */

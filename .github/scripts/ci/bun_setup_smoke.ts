@@ -60,7 +60,7 @@ export function smokeProblems(reading: SmokeReading): string[] {
 }
 
 function plant(): number {
-  const current = readFileSync(join(REPO_ROOT, "templates/bun/.bun-version"), "utf8").trim();
+  const current = readFileSync(join(REPO_ROOT, "files/bun/.bun-version"), "utf8").trim();
   const previous = earlierRelease(current);
   const root = join(requireEnv("RUNNER_TEMP"), "bun-setup-smoke");
   for (const [name, version] of [

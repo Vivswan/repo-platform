@@ -18,12 +18,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # This repository's own workflows, then the workflows the fleet receives:
+  # the sources under files/ carry placeholders actionlint cannot read, so
+  # the writer lands them in two scratch repositories (every module, none)
+  # and the binary the first step put on PATH lints each from its own root,
+  # where the starter actionlint.yaml's path-scoped ignores apply.
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - name: Write the fleet's workflows
+        run: bun .github/scripts/ci/write_fleet_lint_tree.ts "$RUNNER_TEMP/fleet-lint"
+      - name: actionlint the written workflows
+        run: |
+          for target in all none; do
+            (cd "$RUNNER_TEMP/fleet-lint/$target" && actionlint -color)
+          done
 
   # The action scans the event's commit range (fetch-depth: 0 so any
   # range resolves). Same job the base template ships to every managed
@@ -122,11 +139,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The rendered goldens are judged too, managed-file skip off: an
-      # oversize render fails here, at its source.
       - uses: ./actions/check-file-size
-        with:
-          rendered-dir: tests/golden-renders/all-modules
 
   commit-names:
     runs-on: ubuntu-latest
@@ -175,26 +188,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun .github/scripts/ci/resolve_action_refs.ts
 
-  # template/ is no longer committed; prove composition succeeds (collisions,
-  # orphan anchors, manifest errors all hard-fail) and is deterministic.
-  compose:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --silent
-      - name: Build twice and compare
-        run: |
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b
-          diff -r --no-dereference /tmp/tree-a /tmp/tree-b
-          echo "build tree is deterministic"
-
-  validate-template:
+  # The offline invariants, each the twin of a `bun run check` gate (the
+  # local-gates rule pins the pairing both ways).
+  invariants:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -205,29 +201,28 @@ jobs:
       - name: Install dependencies
         run: |
           bun install --frozen-lockfile --silent
-          bun install --frozen-lockfile --silent --cwd actions/validate-template-report
-      - name: Validate repo-platform against its own conventions
-        run: bun actions/validate-template-report/validator/validate_generated_files.ts --self .
+          bun install --frozen-lockfile --silent --cwd actions/validate-managed-files
+      - name: Validate this repository's own managed files
+        run: bun run validate
       - name: Check single-source-of-truth invariants
         run: bun run ssot:check
-      - name: Check generated regions against the module manifests
-        run: bun run generate:check
       - name: Check the files table in docs/new-repo.md against files.yml
         run: bun run files:check
-      - name: Check generated dogfood copies against their template twins
-        run: bun run dogfood:check
-      # Offline and sub-second: fragments must match the manifests'
+      # Offline and sub-second: the block files must match files.yml's
       # gitignore_sources on the PR that edits them, not a week later.
-      - name: Check gitignore topology against the module manifests
+      - name: Check the gitignore copies against files.yml
         run: bun run gitignore:topology
+      - name: Check the toolchain pin dotfiles against files.yml
+        run: bun run pins:check
+      - name: Check the theme CSS against its token data
+        run: bun run theme:check
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
-  # Committed golden renders (tests/golden-renders/) must match a fresh
-  # copier render of the canonical selection matrix, so every template or
-  # composer change shows its fleet-facing rendered diff in the PR
-  # (scripts/generate/render_goldens.ts has the matrix and determinism contract).
-  golden-renders:
+  # The build tree the fleet consumes, assembled twice and compared: the
+  # post-green publish ships exactly this, so a failing or
+  # non-deterministic assembly fails here first.
+  build-tree:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -237,10 +232,12 @@ jobs:
           bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      - name: Install copier
-        run: pipx install copier
-      - name: Check the golden renders against a fresh render
-        run: bun run renders:check
+      - name: Assemble twice and compare
+        run: |
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b
+          diff -r --no-dereference /tmp/tree-a /tmp/tree-b
+          echo "build tree is deterministic"
 
   script-tests:
     runs-on: ubuntu-latest
@@ -287,9 +284,9 @@ jobs:
   # CLI discovery for the same catalog. Fleet repos get this as the
   # advisory validate-skills.yml (npx needs the npm registry, and managed
   # repos must not block on a registry hiccup); here it GATES, per this
-  # repo's all-jobs-gate convention - CI is not network-shy (smoke-generate
-  # already downloads copier) and a listing regression in
-  # the action this repo ships should block its own merges.
+  # repo's all-jobs-gate convention - CI is not network-shy (action-refs
+  # already resolves upstream refs) and a listing regression in the action
+  # this repo ships should block its own merges.
   skills-discovery:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -299,224 +296,6 @@ jobs:
         with:
           skills-dir: skills
           mode: discovery
-
-  # The smoke legs lint their rendered workflows with the actionlint
-  # binary. Fetched here ONCE per run and handed to the legs as an
-  # artifact: each leg fetching it itself meant one unpinned download of
-  # rhysd/actionlint@main's install script per matrix row per push
-  # (observed connection-reset flake, and unpinned third-party code). The
-  # install script rides the same pinned release tag as the binary it
-  # installs; curl retries transient resets as belt-and-braces.
-  actionlint-binary:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Download actionlint
-        env:
-          ACTIONLINT_VERSION: 1.7.12
-        run: |
-          # --retry-all-errors: plain --retry skips connection resets (the
-          # observed failure) - it only retries timeouts and a few HTTP
-          # codes. -f turns HTTP errors into curl failures so they retry
-          # too and still fail the step; -S keeps errors visible under -s.
-          curl -fsSL --retry 3 --retry-all-errors -o /tmp/download-actionlint.bash \
-            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
-          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: actionlint-binary
-          path: actionlint
-          if-no-files-found: error
-
-  smoke-generate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # For the actionlint-binary artifact the lint step downloads.
-    needs: [actionlint-binary]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Module combos covering the risky branches. `modules` is a YAML
-          # STRING here (quoted) and parsed by copier as a YAML list.
-          # custom-license rides on the everything row so the LICENSE
-          # opt-out (no fleet license rendered) is exercised; every other
-          # row covers the default fleet-license render.
-          - name: everything
-            modules: "[bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, fuzzer, nightly, custom-license]"
-            private: "false"
-          - name: bun-typical
-            modules: "[bun, release-please, issue-templates, pr-title]"
-            private: "false"
-          # node and deno each as the sole toolchain: codeql-javascript and
-          # the javascript/deno labels must render from the module alone,
-          # without bun in the selection. skills rides on this thin row
-          # with a non-default skills_dir, so the module's dir answer is
-          # exercised end-to-end (the everything row covers the default).
-          - name: node-typical
-            modules: "[node, skills]"
-            private: "false"
-            extra_data: "-d skills_dir=lib/skills"
-          # pages rides along on a non-bun toolchain (the everything row's
-          # selection heads with bun).
-          - name: deno-typical
-            modules: "[deno, pages]"
-            private: "false"
-          # bun + node co-selected: the only render exercising the shared
-          # javascript label or-gate and the shared javascript-typescript
-          # CodeQL group (the exact-count check must see one job), plus the
-          # Node.gitignore guard's bun+node leg (one section, the node copy
-          # suppressed).
-          - name: bun-node
-            modules: "[bun, node]"
-            private: "false"
-          # deno co-selected with each earlier Node.gitignore declarer:
-          # deno's two-operand suppression guard must render the shared
-          # section exactly once when exactly ONE of bun/node is also
-          # selected. An and->or slip in the guard passes bun-node and the
-          # everything row but duplicates the section on these rows.
-          - name: bun-deno
-            modules: "[bun, deno]"
-            private: "false"
-          - name: node-deno
-            modules: "[node, deno]"
-            private: "false"
-          # The only public row where uv is the sole toolchain: AGENTS.md's
-          # Toolchain section must render the uv bullet alone. nightly rides
-          # along as the only fuzzer-free nightly render (stream
-          # independence: the fuzz starter must not render here).
-          - name: uv-typical
-            modules: "[uv, nightly, release-please]"
-            private: "false"
-          # rust + fuzzer must render cargo dependabot + the Rust gitignore
-          # and nothing toolchain-gated (no auto-format starter): rust is
-          # deliberately outside has_toolchain, so the AGENTS.md Toolchain
-          # section is exercised with rust as the only toolchain module.
-          # Deliberately nightly-free (the fuzzer-present, nightly-absent
-          # leg; uv-typical covers the mirror).
-          - name: rust-fuzzer
-            modules: "[rust, fuzzer, release-please]"
-            private: "false"
-          - name: uv-pages-private
-            # The private: true render of the settings.yml starter is
-            # exercised for uv (bun-private covers bun).
-            modules: "[uv, pages]"
-            private: "true"
-          # The only row where bun renders private: settings.yml must
-          # declare `private: true` (uv-pages-private covers the uv side),
-          # and pr-title proves the module's own required workflow renders
-          # on a private row too.
-          - name: bun-private
-            modules: "[bun, pr-title]"
-            private: "true"
-          # pages as the whole selection, with the pages answers overridden:
-          # the questions' validators must accept a toolchain-free build.
-          - name: pages-bare
-            modules: "[pages]"
-            private: "false"
-            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh"
-          # docs-site alone: the module's OWN Pages-enablement layer is
-          # asserted without the pages module's identical layer masking it.
-          - name: docs-only
-            modules: "[docs-site]"
-            private: "false"
-          # Proves the declared _min_copier_version still supports the
-          # multiselect + when features the template uses (serialized
-          # multiselect answers landed in copier 9.8.0).
-          - name: none
-            modules: "[]"
-            private: "false"
-            copier_spec: "copier==9.8.0"
-          # Renders with this repository's own answers
-          # (.repo-platform-answers.yml - the ssot dogfood-oracle-row rule
-          # and the oracle step both fail if this row drifts from that
-          # file) so the committed dogfood copies can be byte-compared
-          # against real copier output. The trailing project_name overrides
-          # the harness default (copier keeps the last -d occurrence);
-          # description stays the harness default - EXTRA_DATA cannot carry
-          # whitespace and no generated pair renders it.
-          - name: dogfood-oracle
-            modules: "[bun, skills, pr-title, docs-site]"
-            private: "false"
-            extra_data: "-d project_name=repo-platform"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      # copier invokes the stamp hook with bun during copy/update.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install copier
-        env:
-          COPIER_SPEC: ${{ matrix.copier_spec || 'copier' }}
-        run: pipx install "$COPIER_SPEC"
-      - name: Generate ${{ matrix.name }}
-        env:
-          MODULES: ${{ matrix.modules }}
-          PRIVATE: ${{ matrix.private }}
-          EXTRA_DATA: ${{ matrix.extra_data }}
-        run: bun .github/scripts/ci/smoke_generate.ts
-      - name: Validate generated output
-        run: |
-          bun install --frozen-lockfile --silent --cwd actions/validate-template-report
-          bun actions/validate-template-report/validator/validate_generated_files.ts /tmp/smoke
-      - name: Verify module/visibility gating
-        env:
-          SMOKE_DIR: /tmp/smoke
-          MODULES: ${{ matrix.modules }}
-          PRIVATE: ${{ matrix.private }}
-          EXTRA_DATA: ${{ matrix.extra_data }}
-        run: bun run test tests/ci/smoke_gating/smoke_gating.test.ts
-      # The dogfood-oracle row rendered with this repo's own answers, so
-      # real copier output must byte-match the committed generated copies
-      # (closing the TS-renderer-vs-copier gap render_dogfood leaves open).
-      - name: Compare dogfood copies against the copier render
-        if: matrix.name == 'dogfood-oracle'
-        run: bun .github/scripts/ci/verify_dogfood_oracle.ts
-      # Rendered workflows are invisible to the repo-level actionlint job
-      # (.jinja files are not YAML pre-render), so lint the smoke output
-      # with the binary the actionlint-binary job fetched once for the run.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: actionlint-binary
-      - name: actionlint rendered workflows
-        run: |
-          # The artifact zip drops the executable bit.
-          chmod +x "$GITHUB_WORKSPACE/actionlint"
-          # git init + render-root cwd, or the render's actionlint.yaml
-          # ignores never apply: project discovery needs the .git dir, and
-          # the config's path globs match cwd-relative paths.
-          git -C /tmp/smoke init -q
-          (cd /tmp/smoke && "$GITHUB_WORKSPACE/actionlint" -color .github/workflows/*.yml)
-
-  # Generate from a previous build tree, then `copier update` to a fresh
-  # build - the path every managed repo takes (tests/ci/upgrade_path/).
-  upgrade-path:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      # copier invokes the stamp hook with bun during copy/update.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --silent
-      - name: Install copier
-        run: pipx install copier
-      - name: Update from a previous build tree to a fresh build
-        # The legs skip without copier; here a missing copier must fail.
-        env:
-          REQUIRE_COPIER: "1"
-        run: bun run test tests/ci/upgrade_path
-      # The one bun test that needs real copier: the stamp hook runs on the
-      # destination exactly once per copy, update, and recopy (the
-      # script-tests job has no copier and skips it).
-      - name: Count stamp hook invocations per render
-        run: bun run test tests/actions/stamp_hook_invocations.test.ts
 
   # The pages-site action's vitepress build, end to end in the runner's
   # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
@@ -536,52 +315,11 @@ jobs:
       - name: Build the fixture site and assert the artifact
         run: bun run test tests/ci/pages_site_build
 
-  # Dry-run sync against every fleet repo's REAL current state (no push, no
-  # PR, private repos hard-skipped by rehearse_fleet.ts's fail-closed
-  # visibility rule): the class of bug the synthetic rows above cannot see
-  # (a real repo's local edits, stale markers, recorded answers) goes red
-  # here instead of during a live sync. The job stays unconditional (a
-  # job-level skip would stand this gate down in the all-green verdict); the
-  # steps skip when the fleet PAT is absent from the event's secrets
-  # (Dependabot-triggered runs) - the push run after merge still rehearses.
-  rehearse-fleet:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      HAS_FLEET_PAT: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.HAS_FLEET_PAT == 'true'
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: env.HAS_FLEET_PAT == 'true'
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        if: env.HAS_FLEET_PAT == 'true'
-        run: bun install --frozen-lockfile --silent
-      # copier invokes the stamp hook with bun during the rehearsal update.
-      - name: Install copier
-        if: env.HAS_FLEET_PAT == 'true'
-        run: pipx install copier
-      - name: Rehearse the fleet sync
-        if: env.HAS_FLEET_PAT == 'true'
-        env:
-          # The PAT, not github.token: fleet discovery and the enrollment
-          # probe answer for the fleet token, exactly as production's
-          # plan job does.
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bun .github/scripts/ci/rehearse_fleet_gate.ts
-      - name: Note the tokenless skip
-        if: env.HAS_FLEET_PAT != 'true'
-        run: |
-          echo "::notice::rehearse-fleet skipped - this event's secrets carry no REPO_PLATFORM_TOKEN (a Dependabot-triggered run);"\
-            "the post-merge push run rehearses the same tree."
-
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the
   # called workflow, so the scan permissions are granted here. This repo is
-  # TypeScript-only (the actions, scripts, and template tooling), so one
-  # language leg suffices; the name matches the template's per-language jobs.
+  # TypeScript-only (the actions, scripts, and writer tooling), so one
+  # language leg suffices; the name matches fleet-ci's per-language jobs.
   codeql-javascript:
     permissions:
       contents: read
@@ -635,7 +373,7 @@ jobs:
       - uses: ./actions/semgrep
 
   # The shared bun-setup action dogfooded from the working tree: the runner
-  # gets the manifests' bun, then one call per planted pin (that version:
+  # gets the pinned bun, then one call per planted pin (that version:
   # reused, not installed; an earlier release: installed), judged by ci/.
   bun-setup-smoke:
     runs-on: ubuntu-latest
@@ -695,7 +433,6 @@ jobs:
   all-green:
     needs:
       - actionlint
-      - actionlint-binary
       - gitleaks
       - dependency-review
       - allgreen-judgment
@@ -706,16 +443,12 @@ jobs:
       - commit-names
       - typecheck
       - action-refs
-      - compose
-      - validate-template
-      - golden-renders
+      - invariants
+      - build-tree
       - script-tests
       - validate-skills
       - skills-discovery
-      - smoke-generate
-      - upgrade-path
       - pages-site-build
-      - rehearse-fleet
       - codeql-javascript
       - zizmor
       - typos
@@ -762,8 +495,8 @@ jobs:
   # behind post-green so the deploy runs after this run republished the
   # build branch its pipeline consumes (@build), gated on the all-green
   # result alone: !cancelled() keeps a red fleet leg from holding the site
-  # back. The mount is spelled out: this repository carries no
-  # registration for the called workflow to read.
+  # back. The mount is spelled out: this repository's registration drives
+  # its settings, not the called workflow.
   docs-site:
     needs: [all-green, post-green]
     if: >-

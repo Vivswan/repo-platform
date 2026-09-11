@@ -1,8 +1,8 @@
 // The fleet's plan: resolves one managed repository's CI configuration at
-// run time from its registration (.repo-platform.yml, the recorded copier
-// answers filling values it does not carry) and files.yml, the module data
-// beside this action at the build branch root. Every managed ci.yml is
-// byte-identical; what differs per repository is computed here as step outputs.
+// run time from the repository's registration (.repo-platform.yml) and
+// files.yml, the module data shipped at the build branch root beside this
+// action. Every managed ci.yml is byte-identical; what differs per
+// repository is computed here and handed to the jobs as step outputs.
 //
 // `default` mode resolves what fleet-ci.yml's jobs key on: the selection in
 // canonical order, the visibility, the skills directory, the CodeQL
@@ -21,7 +21,7 @@
 // for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
 // files.yml: `modules` keys are the vocabulary in canonical order, values
 // the defaults the registration may leave unset), RESERVED_LABELS_FILE
-// (labels the template manages, which no tracking stream may reuse),
+// (labels the platform manages, which no tracking stream may reuse),
 // GITHUB_OUTPUT. Runs in the caller's checkout.
 
 import { randomBytes } from "node:crypto";
@@ -52,7 +52,6 @@ import {
   type Registration,
 } from "./registration.ts";
 
-export const ANSWERS_PATH = ".github/.copier-answers.yml";
 export const MODES = ["default", "pages"] as const;
 export type Mode = (typeof MODES)[number];
 
@@ -101,8 +100,7 @@ export interface DefaultSource {
 
 /** The defaults the plan cannot do without, by PlanDefaults key: the module
  *  and key must be there, or the build tree is broken and no repository
- *  plans. This repository's checks iterate the same list, so a default
- *  added here is pinned to its copier question without a second list. */
+ *  plans. */
 export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
   skillsDir: { module: "skills", key: "skills_dir.default", pick: (d) => d.skills_dir?.default },
   pagesDist: { module: "pages", key: "dist", pick: (d) => d.dist },
@@ -148,13 +146,11 @@ export function loadModuleData(text: string, label = "files.yml"): TemplateData 
 
 export interface PlanInput {
   registration: Registration;
-  /** The recorded copier answers; empty when the file is absent. */
-  answers: Record<string, unknown>;
   modules: Module[];
   defaults: PlanDefaults;
   files: FileEntry[];
   retired: RetiredEntry[];
-  /** Lowercased names of the labels the template manages (the settings
+  /** Lowercased names of the labels the platform manages (the settings
    *  layers' labels): a tracking stream reusing one would let a green night
    *  close unrelated issues and every settings apply fight over it. */
   reservedLabels: ReadonlySet<string>;
@@ -178,7 +174,7 @@ export function selectModules(input: PlanInput): Module[] {
     throw new PlanError(
       unknown.map(
         (name) =>
-          `${REGISTRATION_PATH}: module "${name}" is not a module this template offers ` +
+          `${REGISTRATION_PATH}: module "${name}" is not a module files.yml offers ` +
           `(known: ${[...known.keys()].join(", ")})`,
       ),
     );
@@ -187,53 +183,13 @@ export function selectModules(input: PlanInput): Module[] {
   return input.modules.filter((module) => selected.has(module.name));
 }
 
-/** A recorded answer as a string; a present non-string answer fails (a
- *  blank `key:` is null, not absent, and must not read as the default). */
-function answer(answers: Record<string, unknown>, key: string): string | undefined {
-  const value = answers[key];
-  if (value === undefined) return undefined;
-  if (typeof value !== "string") {
-    throw new PlanError([`${ANSWERS_PATH}: ${key} must be a string`]);
-  }
-  return value;
-}
-
-/** One value with two possible sources: the registration's `where` and the
- *  recorded answer. Both present and different fails: the settings roster
- *  and today's rendered workflows still read the answer, so a registration
- *  value that disagrees would split the repository's identity between
- *  them. Otherwise whichever exists, else the fallback. */
-function resolved(
-  input: PlanInput,
-  where: string,
-  declared: string | undefined,
-  answerKey: string,
-  fallback: string | undefined,
-): string | undefined {
-  const recorded = answer(input.answers, answerKey);
-  if (declared !== undefined && recorded !== undefined && declared !== recorded) {
-    throw new PlanError([
-      `${REGISTRATION_PATH}: ${where} is ${JSON.stringify(declared)} but ${ANSWERS_PATH} records ` +
-        `${answerKey}: ${JSON.stringify(recorded)}; the two must agree while both exist`,
-    ]);
-  }
-  return declared ?? recorded ?? fallback;
-}
-
 /** Each selected tracking stream's label, in canonical order: the
- *  registration's `labels.<key>`, else the recorded answer, else the
- *  module's default. A `labels` key naming no selected stream fails: it
- *  would silently label nothing. */
+ *  registration's `labels.<key>`, else the module's default. A `labels`
+ *  key naming no selected stream fails: it would silently label nothing. */
 export function trackingLabels(input: PlanInput, selected: Module[]): string[] {
   const streams = selected.flatMap((module) =>
     module.tracking_label
-      ? [
-          {
-            key: module.tracking_label.key,
-            default: module.tracking_label.default,
-            answer: `${module.tracking_label.key}_label`,
-          },
-        ]
+      ? [{ key: module.tracking_label.key, default: module.tracking_label.default }]
       : [],
   );
   const declared = input.registration.labels ?? {};
@@ -248,25 +204,16 @@ export function trackingLabels(input: PlanInput, selected: Module[]): string[] {
       ),
     );
   }
-  const labels = streams.map(
-    (stream) =>
-      resolved(
-        input,
-        `labels.${stream.key}`,
-        declared[stream.key],
-        stream.answer,
-        stream.default,
-      ) ?? stream.default,
-  );
+  const labels = streams.map((stream) => declared[stream.key] ?? stream.default);
   for (const [index, value] of labels.entries()) {
     if (!LABEL_RE.test(value)) {
       throw new PlanError([
-        `${ANSWERS_PATH}: ${streams[index].answer} is not a plain label: ${value}`,
+        `files.yml: the ${streams[index].key} tracking label default is not a plain label: ${value}`,
       ]);
     }
     if (input.reservedLabels.has(value.toLowerCase())) {
       throw new PlanError([
-        `tracking label "${value}" (${streams[index].key}) is a label the template already manages; ` +
+        `tracking label "${value}" (${streams[index].key}) is a label the platform already manages; ` +
           "a green night would close whatever issues carry it and every settings apply would fight over it",
       ]);
     }
@@ -324,14 +271,7 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   return {
     modules: selected.map((module) => module.name),
     private: input.private,
-    skillsDir:
-      resolved(
-        input,
-        "skills.dir",
-        input.registration.skills?.dir,
-        "skills_dir",
-        input.defaults.skillsDir,
-      ) ?? input.defaults.skillsDir,
+    skillsDir: input.registration.skills?.dir ?? input.defaults.skillsDir,
     codeqlLanguages: codeqlLanguages(selected, input.private),
     trackingLabels: [...trackingLabels(input, selected), SECURITY_LABEL],
     weekly: weekly(now),
@@ -411,14 +351,7 @@ export function planPages(input: PlanInput): PagesPlan {
     ]);
   }
   const tokens = input.modules.filter((m) => m.pages !== undefined).map((m) => m.name);
-  const docsPath =
-    resolved(
-      input,
-      "docs_site.path",
-      input.registration.docs_site?.path,
-      "docs_site_path",
-      input.defaults.docsPath,
-    ) ?? input.defaults.docsPath;
+  const docsPath = input.registration.docs_site?.path ?? input.defaults.docsPath;
   const include = input.registration.docs_site?.include;
   const docsMount = (path: string): Mount => ({
     path,
@@ -437,38 +370,24 @@ export function planPages(input: PlanInput): PagesPlan {
   let distDir = input.defaults.pagesDist;
   if (pages) {
     const declared = input.registration.pages ?? {};
-    setup =
-      resolved(input, "pages.setup", declared.setup, "pages_setup", defaultSetup(selected)) ??
-      defaultSetup(selected);
+    setup = declared.setup ?? defaultSetup(selected);
     const problem = setupProblem(setup, tokens);
     if (problem !== null) throw new PlanError([`${REGISTRATION_PATH}: ${problem}`]);
     const defaults = defaultCommands(input.modules, setup);
-    installCommand =
-      resolved(
-        input,
-        "pages.install",
-        declared.install,
-        "pages_install_command",
-        defaults.install,
-      ) ?? defaults.install;
-    buildCommand =
-      resolved(input, "pages.build", declared.build, "pages_build_command", defaults.build) ??
-      defaults.build;
+    installCommand = declared.install ?? defaults.install;
+    buildCommand = declared.build ?? defaults.build;
     if (buildCommand === "") {
       throw new PlanError([
-        `${REGISTRATION_PATH}: the pages module needs a build command (pages.build, or the recorded pages_build_command)`,
+        `${REGISTRATION_PATH}: the pages module needs a build command (pages.build, or a selected toolchain module with a default)`,
       ]);
     }
-    distDir =
-      resolved(input, "pages.dist", declared.dist, "pages_dist_dir", input.defaults.pagesDist) ??
-      input.defaults.pagesDist;
+    distDir = declared.dist ?? input.defaults.pagesDist;
   }
   let siteTitle = "";
   let linkRotLabel = "";
   if (docsSite) {
     // Empty stays empty: pages-site then titles the site by repository name.
-    siteTitle =
-      resolved(input, "project.name", input.registration.project?.name, "project_name", "") ?? "";
+    siteTitle = input.registration.project?.name ?? "";
     const labels = trackingLabels(input, selected);
     const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
     linkRotLabel = labels[streams.indexOf("docs-site")];
@@ -527,17 +446,6 @@ export function outputsOf(plan: CiPlan | PagesPlan | CallerPages): Record<string
     "tracking-labels": plan.trackingLabels.join(","),
     "weekly": String(plan.weekly),
   };
-}
-
-/** The recorded answers at root, a mapping or absent; anything else fails. */
-export function readAnswers(root: string): Record<string, unknown> {
-  const path = join(root, ANSWERS_PATH);
-  if (!existsSync(path)) return {};
-  const data: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" });
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    throw new PlanError([`${ANSWERS_PATH}: must be a YAML mapping`]);
-  }
-  return data as Record<string, unknown>;
 }
 
 /** files.yml's text, or an error naming the path. */
@@ -615,7 +523,6 @@ function main(): number {
   const root = process.cwd();
   const input: PlanInput = {
     registration: readRegistration(root),
-    answers: readAnswers(root),
     ...template,
     reservedLabels: readReservedLabels(requireEnv("RESERVED_LABELS_FILE")),
     private:

@@ -302,7 +302,6 @@ describe("spawnSyncHazard", () => {
 describe("asyncSpawnMismatches", () => {
   test("the enumeration pins the exact landed set, by name", () => {
     expect(Object.keys(ASYNC_SPAWN_FILES).sort()).toEqual([
-      ".github/scripts/sync/rehearse_fleet.ts",
       "actions/fuzz-issue/fuzz-issue.ts",
       "actions/release-health/release-health.ts",
       "scripts/run_tests.ts",
@@ -415,7 +414,7 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
       // actions/ belongs to the no-tests-under-actions rule, test-named or not.
       "actions/x/x.test.ts": bare,
       "actions/x/x.ts": bare,
-      "tests/golden-renders/a/README.md": "mkdtempSync in prose\n",
+      "tests/fixtures/a/README.md": "mkdtempSync in prose\n",
     };
     const read = (rel: string) => {
       if (rel === "tests/shared/leaky.ts") throw new Error("a symlink's target must not be read");
@@ -426,7 +425,7 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
       // Non-test-named, so a selection keyed on the test pattern alone
       // would let it through unread.
       { path: "tests/shared/leaky.ts", symlink: true },
-      { path: "tests/golden-renders/a/CLAUDE.md", symlink: true },
+      { path: "tests/fixtures/a/CLAUDE.md", symlink: true },
     ];
     const found = tempDirTreeMismatches(files, read);
     expect(found.map((m) => [m.file, m.got])).toEqual([
@@ -443,7 +442,7 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
       { path: "actions/x/x.ts" },
       { path: "actions/x/lib/helper.ts" },
       { path: "actions/x/test.ts" },
-      { path: "actions/shared/stamp_manifest.ts" },
+      { path: "actions/shared/manifest.ts" },
     ];
     expect(actionTestFileMismatches(clean)).toEqual([]);
     const planted = [

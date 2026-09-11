@@ -1,7 +1,7 @@
 {
   "name": "plan",
   "private": true,
-  "description": "Dependency manifest for the plan action: yaml reads the registration, the recorded answers, and the module data; zod holds the registration schema the sync shares.",
+  "description": "Dependency manifest for the plan action: yaml reads the registration and files.yml; zod holds the registration schema the sync shares.",
   "dependencies": {
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

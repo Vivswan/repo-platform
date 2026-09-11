@@ -37,23 +37,20 @@ const EMPTY_FACTS: ProjectFacts = {
   hue: 3,
 };
 
-const COPIER_ANSWERS = [
-  "# This file is managed by Vivswan/repo-platform.",
-  "_commit: xxxxxxxx",
-  "_src_path: ./tree",
-  "description: A fixture repository",
-  "homepage: https://example.test/docs",
-  "topics: bun, docs ,, tooling",
-  "project_name: Fixture",
+const REGISTRATION = [
+  "modules: [bun]",
+  "project:",
+  "  name: Fixture",
+  "  slug: fixture-repo",
+  "  description: A fixture repository",
   "",
 ].join("\n");
 
-const OPERATOR_ANSWERS = [
-  "project_name: repo-platform",
-  "description: The operator's own answers",
-  "private: false",
-  "modules:",
-  "  - bun",
+const IDENTITY_SETTINGS = [
+  "repository:",
+  "  description: A fixture repository",
+  "  homepage: https://example.test/docs",
+  "  topics: bun, docs ,, tooling",
   "",
 ].join("\n");
 
@@ -68,7 +65,7 @@ const SETTINGS = [
 ].join("\n");
 
 const FULL_TREE: Record<string, string> = {
-  ".github/.copier-answers.yml": COPIER_ANSWERS,
+  ".github/settings.yml": IDENTITY_SETTINGS,
   ".bun-version": "1.4.0\n",
   ".node-version": "v24.19.0\n",
   ".dvmrc": "2.9.5\n",
@@ -79,7 +76,7 @@ const FULL_TREE: Record<string, string> = {
 };
 
 describe("collectFacts", () => {
-  test("reads every fact from a fully populated copier-managed tree", () => {
+  test("reads every fact from a fully populated tree", () => {
     expect(collectFacts(treeOf(FULL_TREE), HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
       description: "A fixture repository",
@@ -96,14 +93,11 @@ describe("collectFacts", () => {
     });
   });
 
-  test("falls back to the operator's answers file when the copier one is absent", () => {
-    const tree = treeOf({
-      ".repo-platform-answers.yml": OPERATOR_ANSWERS,
-      ".bun-version": "1.4.0",
-    });
+  test("falls back to the registration's description when there is no settings file", () => {
+    const tree = treeOf({ ".repo-platform.yml": REGISTRATION, ".bun-version": "1.4.0" });
     expect(collectFacts(tree, HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
-      description: "The operator's own answers",
+      description: "A fixture repository",
       toolchains: [{ name: "Bun", version: "1.4.0" }],
     });
   });
@@ -113,8 +107,8 @@ describe("collectFacts", () => {
     expect(
       collectFacts(
         treeOf({
-          ".github/.copier-answers.yml": "- just\n- a list\n",
-          ".repo-platform-answers.yml": ": [",
+          ".github/settings.yml": "- just\n- a list\n",
+          ".repo-platform.yml": ": [",
         }),
         HEAD_INPUT,
       ),
@@ -123,9 +117,9 @@ describe("collectFacts", () => {
 
   test.each<[string, string, Record<string, string>, Partial<ProjectFacts>]>([
     [
-      "settings.yml wins over the answers seed",
+      "settings.yml wins over the registration's description",
       SETTINGS,
-      { ".github/.copier-answers.yml": COPIER_ANSWERS },
+      { ".repo-platform.yml": REGISTRATION },
       {
         description: "Edited after the first render",
         homepage: "https://docs.example.test",
@@ -133,20 +127,16 @@ describe("collectFacts", () => {
       },
     ],
     [
-      "a declared-empty settings key means empty, not the answers' value",
-      "repository:\n  description: Only this\n  homepage: ''\n  topics: ''\n",
-      { ".github/.copier-answers.yml": COPIER_ANSWERS },
-      { description: "Only this", homepage: null, topics: [] },
+      "a declared-empty description means empty, not the registration's value",
+      "repository:\n  description: ''\n  homepage: ''\n  topics: ''\n",
+      { ".repo-platform.yml": REGISTRATION },
+      { description: null, homepage: null, topics: [] },
     ],
     [
-      "keys the settings block lacks come from the answers",
+      "a description the settings block lacks comes from the registration; homepage and topics never do",
       "repository:\n  private: true\n  topics: settings\n",
-      { ".github/.copier-answers.yml": COPIER_ANSWERS },
-      {
-        description: "A fixture repository",
-        homepage: "https://example.test/docs",
-        topics: ["settings"],
-      },
+      { ".repo-platform.yml": REGISTRATION },
+      { description: "A fixture repository", homepage: null, topics: ["settings"] },
     ],
     [
       "a YAML-list topics value, as the settings apply accepts",
@@ -155,23 +145,25 @@ describe("collectFacts", () => {
       { topics: ["bun", "docs"] },
     ],
     [
-      "a malformed settings.yml falls back to the answers",
+      "a malformed settings.yml falls back to the registration's description",
       "repository: [",
-      { ".github/.copier-answers.yml": COPIER_ANSWERS },
-      {
-        description: "A fixture repository",
-        homepage: "https://example.test/docs",
-        topics: ["bun", "docs", "tooling"],
-      },
+      { ".repo-platform.yml": REGISTRATION },
+      { description: "A fixture repository" },
     ],
     [
-      "a settings.yml without a repository block falls back to the answers",
+      "a settings.yml without a repository block falls back to the registration's description",
       "labels:\n  - name: docs\n",
-      { ".repo-platform-answers.yml": OPERATOR_ANSWERS },
-      { description: "The operator's own answers" },
+      { ".repo-platform.yml": REGISTRATION },
+      { description: "A fixture repository" },
     ],
     [
-      "settings.yml alone, without any answers file",
+      "a registration without a project block adds nothing",
+      "labels:\n  - name: docs\n",
+      { ".repo-platform.yml": "modules: [bun]\n" },
+      {},
+    ],
+    [
+      "settings.yml alone, without a registration",
       SETTINGS,
       {},
       {
@@ -180,8 +172,8 @@ describe("collectFacts", () => {
         topics: ["settings", "first"],
       },
     ],
-  ])("reads identity with %s", (_case, settings, answers, identity) => {
-    const tree = treeOf({ ".github/settings.yml": settings, ...answers });
+  ])("reads identity with %s", (_case, settings, registration, identity) => {
+    const tree = treeOf({ ".github/settings.yml": settings, ...registration });
     expect(collectFacts(tree, HEAD_INPUT)).toEqual({ ...EMPTY_FACTS, ...identity });
   });
 
@@ -222,9 +214,9 @@ describe("collectFacts", () => {
     ["   ", []],
     ["bun", ["bun"]],
     [" bun , docs,,tooling ", ["bun", "docs", "tooling"]],
-  ])("splits the topics answer %j into %j", (raw, topics) => {
-    const answers = `description: ''\nhomepage: ''\ntopics: ${JSON.stringify(raw)}\n`;
-    expect(collectFacts(treeOf({ ".github/.copier-answers.yml": answers }), HEAD_INPUT)).toEqual({
+  ])("splits the topics value %j into %j", (raw, topics) => {
+    const settings = `repository:\n  topics: ${JSON.stringify(raw)}\n`;
+    expect(collectFacts(treeOf({ ".github/settings.yml": settings }), HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
       topics,
     });
@@ -253,9 +245,9 @@ describe("collectFacts", () => {
     ["a URL with a space in the host", "https://exa mple.com", null],
     ["a URL with a path", "https://example.com/docs", "https://example.com/docs"],
     ["blank", "  ", null],
-  ])("normalizes the homepage answer %s", (_case, raw, homepage) => {
-    const answers = `description: ''\nhomepage: ${JSON.stringify(raw)}\ntopics: ''\n`;
-    expect(collectFacts(treeOf({ ".github/.copier-answers.yml": answers }), HEAD_INPUT)).toEqual({
+  ])("normalizes the homepage value %s", (_case, raw, homepage) => {
+    const settings = `repository:\n  homepage: ${JSON.stringify(raw)}\n`;
+    expect(collectFacts(treeOf({ ".github/settings.yml": settings }), HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
       homepage,
     });

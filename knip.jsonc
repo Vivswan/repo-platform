@@ -26,18 +26,9 @@
         "@tree-sitter-grammars/tree-sitter-yaml"
       ]
     },
-    "actions/module-render": {
-      "entry": ["src/admit.ts", "src/render.ts"],
-      "project": ["**/*.{ts,mts}"]
-    },
-    "actions/validate-template-report": {
-      // The three orchestrator scripts and the validator directory action.yml runs.
-      "entry": [
-        "src/aligned/fetch.ts",
-        "src/aligned/judge.ts",
-        "src/report.ts",
-        "validator/validate_generated_files.ts"
-      ],
+    "actions/validate-managed-files": {
+      // The two orchestrator scripts and the validator directory action.yml runs.
+      "entry": ["src/run.ts", "src/report.ts", "validator/validate_managed_files.ts"],
       "project": ["**/*.{ts,mts}"]
     },
     "actions/pages-site": {

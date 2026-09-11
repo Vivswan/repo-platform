@@ -1,8 +1,6 @@
-// The Mismatch shape every rule reports, the recorded divergences, and the
-// comparison primitives (semantic lines, canonical JSON, set and line diffs,
-// loud anchors) the rule modules under this directory build on.
-
-import { MARKER_TOKENS } from "../../generate/markers.ts";
+// The Mismatch shape every rule reports and the comparison primitives
+// (canonical JSON, set and line diffs, loud anchors) the rule modules under
+// this directory build on.
 
 export interface Mismatch {
   file: string;
@@ -10,29 +8,15 @@ export interface Mismatch {
   got: string;
 }
 
-// Intentional, recorded divergences between a repo file and its templates/
-// counterpart: the OPERATOR copy carries a line the template lacks. Each
-// entry excuses, from the operator side only, AT MOST ONE line matching
-// `skip` sitting immediately before a line matching `before` (trimmed, after
-// semanticLines dropped comments and blanks), so a second copy or a migrated
-// line still mismatches. A template side carrying the same anchored line, or
-// an entry that excused nothing, is reported as stale, so an excuse can never
-// mask the template catching up. Honored only by the semantic-mode dogfood-parity pairs.
-export const RECORDED_DIVERGENCES: {
-  file: string;
-  reason: string;
-  skip: RegExp;
-  before: RegExp;
-}[] = [];
+/** The marker tokens a generated markdown region is fenced with:
+ *  `<!-- BEGIN GENERATED: <name> ... -->` through `<!-- END GENERATED: <name> -->`. */
+export const MARKER_TOKENS = { begin: "BEGIN GENERATED:", end: "END GENERATED:" } as const;
 
 /** A markdown doc with its generated regions removed (and how many), so a
  *  doc-quoted constant must live in HAND prose to satisfy a rule: a value
- *  inside a generated region has the manifests as its author
- *  (generate:check polices those). The marker grammar is built from
- *  scripts/generate/markers.ts's MARKER_TOKENS, so renaming the marker text there
- *  cannot leave this stripper matching nothing. Markers are parsed
- *  pairwise - a duplicate BEGIN, a mismatched name, a dangling END, or an
- *  unclosed region all throw. */
+ *  inside a generated region has its generator as its author (files:check
+ *  polices those). Markers are parsed pairwise - a duplicate BEGIN, a
+ *  mismatched name, a dangling END, or an unclosed region all throw. */
 export function stripGeneratedRegions(
   text: string,
   where: string,
@@ -86,64 +70,6 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
  *  the backslash included, escaped. */
 export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Non-blank, non-comment lines (right-trimmed) - the shape compared for
- *  workflow/dotfile parity, where comments are where copies legitimately
- *  tell their own story. */
-export function semanticLines(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.replace(/\s+$/, ""))
-    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
-}
-
-export const usedDivergences = new Set<number>();
-
-/** Excuse recorded divergences for one parity pair: drop, from the ACTUAL
- *  (operator) side only, at most one line per entry matching `skip` that
- *  sits immediately before a line matching `before`. When the EXPECTED
- *  (template) side carries the same anchored line, the entry is stale -
- *  returned as a mismatch with nothing excused, so both sides keep the
- *  line and the drift is named instead of silently excused twice. Entries
- *  and the used-set are injectable for tests. */
-export function applyDivergences(
-  file: string,
-  expected: string[],
-  actual: string[],
-  entries: typeof RECORDED_DIVERGENCES = RECORDED_DIVERGENCES,
-  used: Set<number> = usedDivergences,
-): { expected: string[]; actual: string[]; mismatches: Mismatch[] } {
-  const mismatches: Mismatch[] = [];
-  const drop = new Set<number>();
-  const findAnchored = (lines: string[], entry: (typeof entries)[number], taken?: Set<number>) =>
-    lines.findIndex(
-      (line, i) =>
-        !taken?.has(i) &&
-        entry.skip.test(line.trim()) &&
-        entry.before.test(lines[i + 1]?.trim() ?? ""),
-    );
-  for (const [index, entry] of entries.entries()) {
-    if (entry.file !== file) continue;
-    if (findAnchored(expected, entry) !== -1) {
-      used.add(index);
-      mismatches.push({
-        file,
-        expected: `no template line matching ${entry.skip} before ${entry.before}`,
-        got: "the template now carries this line - drop the RECORDED_DIVERGENCES entry",
-      });
-      continue;
-    }
-    const at = findAnchored(actual, entry, drop);
-    if (at === -1) continue;
-    drop.add(at);
-    used.add(index);
-  }
-  return {
-    expected,
-    actual: drop.size === 0 ? actual : actual.filter((_, i) => !drop.has(i)),
-    mismatches,
-  };
 }
 
 /** JSON with recursively sorted object keys, for order-insensitive

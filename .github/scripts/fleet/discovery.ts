@@ -1,9 +1,8 @@
 // Machinery shared by the fleet plan selectors (select_sync_repos.ts,
-// select_settings_repos.ts) and the per-repo leg resolver
-// (resolve_private_repo.ts). Their logs, step summaries, and matrices are
-// publicly readable, so the redaction-sensitive pieces live here once: a
-// fix to the discovery contract, the dispatch-input read, or the slug
-// scrub protects every consumer at the same time (docs/private-repos.md).
+// select_settings_repos.ts). Their logs, step summaries, and matrices are
+// publicly readable, so the privacy-sensitive pieces live here once: a fix
+// to the discovery contract, the dispatch-input read, or the slug scrub
+// protects every consumer at the same time (docs/sync.md).
 
 import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
@@ -18,7 +17,7 @@ import { classifyEntry, type ScopeSource } from "./sync_scope.ts";
  * user/repos listing (serial, 100 repos per page), so two minutes covers
  * the fleet growing to several hundred repos. Without it a hung connection
  * blocks the plan job until the runner's job timeout, whose timeout-minutes
- * is sized from this. Well under rehearse's 300s whole-copier-run deadline. */
+ * is sized from this. */
 export const NETWORK_TIMEOUT_MS = 120_000;
 
 /** capture() with the fleet network deadline applied; `timeoutMs` is
@@ -82,18 +81,34 @@ export function discoverWritableRepos(label: string) {
   return pages.flat().filter((repo) => !repo.archived && repo.permissions?.push === true);
 }
 
+export interface DiscoveredRepo {
+  repo: string;
+  private: boolean;
+}
+
 /** The discovered fleet scoped to `owner` and projected to the {repo,
- * private} rows the selection pipeline consumes (redact.ts's enrich).
- * Visibility rides along fail-closed - anything but private: false counts
- * as private - because the flag drives the selectors' redaction of their
- * public logs (docs/private-repos.md). */
-export function discoverOwnerRepos(
-  owner: string,
-  label: string,
-): { repo: string; private: boolean }[] {
+ * private} rows the selection pipeline consumes. Visibility rides along
+ * fail-closed - anything but private: false counts as private - because
+ * the flag decides what the selectors' public logs may name. */
+export function discoverOwnerRepos(owner: string, label: string): DiscoveredRepo[] {
   return discoverWritableRepos(label)
     .filter((repo) => repo.owner.login === owner)
     .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
+}
+
+// The discovered list a selector reads back. Fail closed at the parse
+// already: an entry without an explicit boolean `private` is rejected
+// outright rather than defaulted, and one bad entry rejects the whole list
+// - a silently dropped row would skip its repo's visibility decision.
+// Loose on the rest: extra discovery fields pass through.
+const discoveredListSchema = z.array(z.looseObject({ repo: z.string(), private: z.boolean() }));
+
+/** Parse a discovered list at the trust boundary; null when the shape is
+ * wrong (the caller then fails without quoting the payload, which can
+ * carry private repo names). */
+export function parseDiscovered(data: unknown): DiscoveredRepo[] | null {
+  const result = discoveredListSchema.safeParse(data);
+  return result.success ? result.data : null;
 }
 
 // Only the dispatch input's slot is pinned; unrelated event fields pass
@@ -103,31 +118,21 @@ export function discoverOwnerRepos(
 // (parseWith's diagnostic names paths only, never the value, which may be
 // a private slug).
 const dispatchEvent = z.object({
-  inputs: z.object({ repo: z.string().optional(), branch: z.string().optional() }).nullish(),
+  inputs: z.object({ repo: z.string().optional() }).nullish(),
 });
 
-/** One typed dispatch input off the event payload (empty when the event
- * carries none), read from the runner's disk rather than step env: the
- * value may name a private repository's branch, and step env prints into
- * the public log group. */
-function dispatchInput(name: "repo" | "branch"): string {
+/** The typed `repo` dispatch input off the event payload (empty when the
+ * event carries none), read from the runner's disk rather than step env:
+ * the value may name a private repository, and step env prints into the
+ * public log group. */
+function dispatchInput(): string {
   if (env("GITHUB_EVENT_PATH") === "") return "";
   const event = parseJsonWith(
     dispatchEvent,
     readFileSync(env("GITHUB_EVENT_PATH"), "utf-8"),
-    `readDispatch${name === "repo" ? "Repo" : "Branch"}: event payload`,
+    "readDispatchRepo: event payload",
   );
-  return event.inputs?.[name] ?? "";
-}
-
-/** The dispatch's `branch` input, trimmed: the branch the sync renders
- * onto instead of opening its own PR (empty on cron, on the post-green
- * call, and on an ordinary dispatch). A non-empty TARGET_BRANCH env
- * overrides the payload, for the test harnesses and local runs, the way
- * ONLY_REPO does for the scope. */
-export function readDispatchBranch(): string {
-  const override = env("TARGET_BRANCH");
-  return (override !== "" ? override : dispatchInput("branch")).trim();
+  return event.inputs?.repo ?? "";
 }
 
 /** The repo scope, case-folded (GitHub identity is case-insensitive, so it
@@ -141,7 +146,7 @@ export function readDispatchBranch(): string {
  * disk is not logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
-  if (repo === "") repo = dispatchInput("repo");
+  if (repo === "") repo = dispatchInput();
   // Empty entries survive on purpose (",", "a/b,,c/d"): the scope parser
   // rejects them loudly, where dropping one here would silently widen or
   // narrow the scope.
@@ -175,11 +180,11 @@ function replaceAllFoldingCase(text: string, needle: string, replacement: string
   return text.replace(new RegExp(escaped, "gi"), () => replacement);
 }
 
-/** Scrub a captured error detail of a redacted repo's identity before it
+/** Scrub a captured error detail of a private repo's identity before it
  * reaches a public log: every occurrence of the slug, then of the bare
  * name, in any casing, becomes the display. A no-op when the display IS
- * the slug (an unredacted row) - the bare-name pass there would EXPAND
- * bare names into slugs instead of hiding anything. Substring-based on
+ * the slug (a public row) - the bare-name pass there would EXPAND bare
+ * names into slugs instead of hiding anything. Substring-based on
  * purpose: garbling an innocent embedding is cosmetic, printing a private
  * name is not. */
 export function scrubSlug(detail: string, slug: string, display: string): string {
@@ -200,5 +205,5 @@ export function pushProbeSkipNotice(display: string): string {
  * branch. The settings heal inserts a consequence sentence. */
 export function notAdoptedNotice(display: string, consequence?: string): string {
   const inserted = consequence === undefined ? "" : `${consequence} `;
-  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. ${inserted}Generate it with copier (see the repo-platform README) to opt in, or revoke the fleet token's write access to leave the fleet.`;
+  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform. ${inserted}Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.`;
 }

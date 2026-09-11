@@ -138,8 +138,8 @@ describe("syncOperatorMismatches", () => {
 
   test("the resolver's own env is judged too: a TARGET there names that step", () => {
     const text = mutate(
-      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n        run: bun .github/scripts/sync/resolve_row.ts",
-      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          PLANNED: ${{ needs.plan.outputs.count }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          PLANNED: ${{ needs.plan.outputs.count }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
     );
     expect(syncOperatorMismatches(text)).toEqual([
       {

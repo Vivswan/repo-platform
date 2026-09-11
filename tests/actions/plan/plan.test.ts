@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { reservedLabelNames } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import {
   callerConfiguredPages,
   codeqlLanguages,
@@ -28,8 +29,6 @@ import {
   weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
-import { reservedLabelNames } from "../../../scripts/generate/copier_questions.ts";
-import { loadManifests } from "../../../scripts/lib/module_manifests.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -56,7 +55,7 @@ function stagedReservedLabels(): string {
   const path = join(temp.dir("plan-reserved-"), "reserved-labels.yml");
   writeFileSync(
     path,
-    reservedLabelNames(loadManifests())
+    reservedLabelNames(REPO_ROOT)
       .map((name) => `- ${JSON.stringify(name)}\n`)
       .join(""),
   );
@@ -70,15 +69,9 @@ function registration(text: string): Registration {
   return read.registration;
 }
 
-function input(
-  text: string,
-  answers: Record<string, unknown> = {},
-  isPrivate = false,
-  modules: Module[] = MODULES,
-): PlanInput {
+function input(text: string, isPrivate = false, modules: Module[] = MODULES): PlanInput {
   return {
     registration: registration(text),
-    answers,
     modules,
     defaults: TEMPLATE.defaults,
     files: TEMPLATE.files,
@@ -89,8 +82,23 @@ function input(
 }
 
 describe("loadModuleData", () => {
-  test("the real files.yml in its key order, which is the manifests' order, with the data and defaults the plan reads", () => {
-    expect(MODULES.map((m) => m.name)).toEqual(loadManifests().map((m) => m.module));
+  test("the real files.yml in its key order, with the data and defaults the plan reads", () => {
+    expect(MODULES.map((m) => m.name)).toEqual([
+      "bun",
+      "node",
+      "deno",
+      "uv",
+      "rust",
+      "pages",
+      "docs-site",
+      "release-please",
+      "issue-templates",
+      "skills",
+      "pr-title",
+      "fuzzer",
+      "nightly",
+      "custom-license",
+    ]);
     const byName = new Map(MODULES.map((m) => [m.name, m]));
     expect(byName.get("bun")?.codeql_language).toBe("javascript-typescript");
     expect(byName.get("uv")?.codeql_language).toBe("python");
@@ -205,33 +213,23 @@ describe("planCi", () => {
     expect(planCi(input("modules: []"), THURSDAY).weekly).toBe(false);
   });
 
-  test("recorded answers win over defaults; a registration value stands in for an absent answer", () => {
-    const answers = {
-      skills_dir: "lib/skills",
-      fuzzer_label: "fuzz: nightly",
-      nightly_label: "night",
-    };
-    expect(planCi(input("modules: [skills, fuzzer, nightly]", answers))).toMatchObject({
-      skillsDir: "lib/skills",
-      trackingLabels: ["fuzz: nightly", "night", "security-nightly"],
-    });
+  test("registration values win over the module defaults, per key", () => {
     const text =
       "modules: [skills, fuzzer, nightly]\nskills:\n  dir: agents\nlabels:\n  nightly: nightly-red\n";
-    expect(planCi(input(text, { fuzzer_label: "fuzz: nightly" }))).toMatchObject({
-      skillsDir: "agents",
-      trackingLabels: ["fuzz: nightly", "nightly-red", "security-nightly"],
-    });
-    // Both agreeing is fine: the same value from two sources is one identity.
-    expect(
-      planCi(input(text, { skills_dir: "agents", nightly_label: "nightly-red" })),
-    ).toMatchObject({
+    expect(planCi(input(text))).toMatchObject({
       skillsDir: "agents",
       trackingLabels: ["fuzz-nightly", "nightly-red", "security-nightly"],
+    });
+    expect(
+      planCi(input("modules: [skills, fuzzer, nightly]\nlabels: { fuzzer: 'fuzz: nightly' }\n")),
+    ).toMatchObject({
+      skillsDir: "skills",
+      trackingLabels: ["fuzz: nightly", "nightly-failure", "security-nightly"],
     });
   });
 
   test("CodeQL is off for a private repository and where no module analyzes", () => {
-    expect(planCi(input("modules: [bun, uv]", {}, true)).codeqlLanguages).toEqual([]);
+    expect(planCi(input("modules: [bun, uv]", true)).codeqlLanguages).toEqual([]);
     expect(planCi(input("modules: [rust, pages]")).codeqlLanguages).toEqual([]);
     // Shared language, one entry: bun and node both analyze as JS/TS.
     expect(codeqlLanguages(selectModules(input("modules: [node, bun]")), false)).toEqual([
@@ -250,11 +248,11 @@ describe("planCi", () => {
     });
   });
 
-  test.each<{ reason: string; text: string; answers?: Record<string, unknown>; error: string }>([
+  test.each<{ reason: string; text: string; error: string }>([
     {
       reason: "an unknown module name",
       text: "modules: [bun, agents]",
-      error: '.repo-platform.yml: module "agents" is not a module this template offers',
+      error: '.repo-platform.yml: module "agents" is not a module files.yml offers',
     },
     {
       reason: "a label for a stream that is not selected",
@@ -263,52 +261,14 @@ describe("planCi", () => {
         ".repo-platform.yml: labels.nightly names no selected tracking stream (selected: fuzzer)",
     },
     {
-      reason: "a recorded label that is not a plain label",
-      text: "modules: [fuzzer]",
-      answers: { fuzzer_label: "-bad" },
-      error: ".github/.copier-answers.yml: fuzzer_label is not a plain label: -bad",
-    },
-    {
-      reason: "a recorded answer of the wrong type",
-      text: "modules: [skills]",
-      answers: { skills_dir: 3 },
-      error: ".github/.copier-answers.yml: skills_dir must be a string",
-    },
-    {
-      reason: "a blank recorded answer (null is a value, not an absence)",
-      text: "modules: [fuzzer]",
-      answers: { fuzzer_label: null },
-      error: ".github/.copier-answers.yml: fuzzer_label must be a string",
-    },
-    {
-      reason: "a registration value disagreeing with the recorded answer",
-      text: "modules: [docs-site]\nlabels:\n  docs_site: rot\n",
-      answers: { docs_site_label: "docs-link-rot" },
-      error:
-        '.repo-platform.yml: labels.docs_site is "rot" but .github/.copier-answers.yml records docs_site_label: "docs-link-rot"; the two must agree while both exist',
-    },
-    {
-      reason: "a registration skills dir disagreeing with the recorded answer",
-      text: "modules: [skills]\nskills: { dir: agents }\n",
-      answers: { skills_dir: "skills" },
-      error:
-        '.repo-platform.yml: skills.dir is "agents" but .github/.copier-answers.yml records skills_dir: "skills"',
-    },
-    {
       reason: "two streams sharing one label",
       text: "modules: [fuzzer, nightly]\nlabels:\n  fuzzer: Same\n  nightly: same\n",
       error: 'tracking label "same" is shared by two streams',
     },
     {
-      reason: "a registration label the template manages (copier refuses the same answer)",
+      reason: "a registration label the platform manages",
       text: "modules: [fuzzer]\nlabels:\n  fuzzer: Bug\n",
-      error: 'tracking label "Bug" (fuzzer) is a label the template already manages',
-    },
-    {
-      reason: "a recorded label the template manages",
-      text: "modules: [nightly]",
-      answers: { nightly_label: "dependencies" },
-      error: 'tracking label "dependencies" (nightly) is a label the template already manages',
+      error: 'tracking label "Bug" (fuzzer) is a label the platform already manages',
     },
     {
       reason:
@@ -336,9 +296,9 @@ describe("planCi", () => {
         ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a': the target is a path prefix of another target 'copies/a/b'\n" +
         ".repo-platform.yml: mirrors: source 'LICENSE.md', target 'copies/a/b': the target sits under another target 'copies/a'",
     },
-  ])("fails closed on $reason", ({ text, answers, error }) => {
-    expect(() => planCi(input(text, answers))).toThrow(PlanError);
-    expect(() => planCi(input(text, answers))).toThrow(error);
+  ])("fails closed on $reason", ({ text, error }) => {
+    expect(() => planCi(input(text))).toThrow(PlanError);
+    expect(() => planCi(input(text))).toThrow(error);
   });
 
   test("a sound mirror declaration plans exactly like the registration without it", () => {
@@ -348,7 +308,16 @@ describe("planCi", () => {
     expect(planCi(input(text), THURSDAY).modules).toEqual(["bun", "skills"]);
   });
 
-  test("the reserved roster is the template's managed labels, lowercased (the copier validators' list)", () => {
+  test("a tracking label default files.yml spells outside the label grammar fails, naming the data file", () => {
+    const modules = MODULES.map((m) =>
+      m.name === "fuzzer" ? { ...m, tracking_label: { key: "fuzzer", default: "-bad" } } : m,
+    );
+    expect(() => planCi(input("modules: [fuzzer]", false, modules))).toThrow(
+      "files.yml: the fuzzer tracking label default is not a plain label: -bad",
+    );
+  });
+
+  test("the reserved roster is the platform's managed labels, lowercased", () => {
     expect(RESERVED.has("bug")).toBe(true);
     expect(RESERVED.has("autorelease: pending")).toBe(true);
     expect(RESERVED.has("fuzz-nightly")).toBe(false);
@@ -369,16 +338,14 @@ describe("planCi", () => {
 
 describe("planPages", () => {
   test("pages with docs-site: the website unversioned at /, the docs mount versioned", () => {
-    const answers = {
-      project_name: "My Project",
-      pages_setup: "bun",
-      pages_install_command: "bun install --frozen-lockfile",
-      pages_build_command: "bun run build",
-      pages_dist_dir: "dist",
-      docs_site_path: "docs",
-      docs_site_label: "docs-link-rot",
-    };
-    expect(outputsOf(planPages(input("modules: [bun, pages, docs-site]", answers)))).toEqual({
+    const text = [
+      "modules: [bun, pages, docs-site]",
+      "project: { name: My Project, slug: my-project, description: d }",
+      "pages: { setup: bun, install: bun install --frozen-lockfile, build: bun run build, dist: dist }",
+      "docs_site: { path: docs }",
+      "labels: { docs_site: docs-link-rot }",
+    ].join("\n");
+    expect(outputsOf(planPages(input(text)))).toEqual({
       mounts:
         '[{"path":"/","source":"command","versioned":false},{"path":"/docs/","source":"vitepress","versioned":true}]',
       setup: "bun",
@@ -392,13 +359,9 @@ describe("planPages", () => {
   });
 
   test("pages alone: one versioned command mount, no title, no link-rot label", () => {
-    const answers = {
-      pages_setup: "deno",
-      pages_install_command: "deno ci",
-      pages_build_command: "deno task build",
-      pages_dist_dir: "out",
-    };
-    expect(outputsOf(planPages(input("modules: [deno, pages]", answers)))).toEqual({
+    const text =
+      "modules: [deno, pages]\npages: { setup: deno, install: deno ci, build: deno task build, dist: out }\n";
+    expect(outputsOf(planPages(input(text)))).toEqual({
       mounts: '[{"path":"/","source":"command","versioned":true}]',
       setup: "deno",
       install_command: "deno ci",
@@ -410,9 +373,8 @@ describe("planPages", () => {
     });
   });
 
-  test("docs-site with no project name anywhere: an empty title, which pages-site fills with the repository name", () => {
+  test("docs-site with no project name: an empty title, which pages-site fills with the repository name", () => {
     expect(planPages(input("modules: [docs-site]")).siteTitle).toBe("");
-    expect(planPages(input("modules: [docs-site]", { project_name: "" })).siteTitle).toBe("");
   });
 
   test("docs_site.include rides on the vitepress mount verbatim, in both mount shapes", () => {
@@ -444,8 +406,9 @@ describe("planPages", () => {
   });
 
   test("docs-site alone: one versioned vitepress mount at the root, no toolchain", () => {
-    const answers = { project_name: "Docs Only", docs_site_label: "rot" };
-    expect(outputsOf(planPages(input("modules: [docs-site]", answers)))).toEqual({
+    const text =
+      "modules: [docs-site]\nproject: { name: Docs Only, slug: docs-only, description: d }\nlabels: { docs_site: rot }\n";
+    expect(outputsOf(planPages(input(text)))).toEqual({
       mounts: '[{"path":"/","source":"vitepress","versioned":true}]',
       setup: "none",
       install_command: "",
@@ -457,7 +420,7 @@ describe("planPages", () => {
     });
   });
 
-  test("the v2 registration carries everything; the defaults derive from the selected toolchains", () => {
+  test("the registration carries everything; the defaults derive from the selected toolchains", () => {
     const text = [
       "modules: [uv, rust, pages, docs-site]",
       "project: { name: Site, slug: site, description: d }",
@@ -486,7 +449,7 @@ describe("planPages", () => {
       buildCommand: "mdbook build -d dist",
       distDir: "book",
     });
-    // An explicit empty install skips the install, as copier's answer does.
+    // An explicit empty install skips the install.
     expect(
       planPages(input(`${text}\npages: { install: "", build: ./build.sh, setup: none }`)),
     ).toMatchObject({
@@ -496,7 +459,7 @@ describe("planPages", () => {
     });
   });
 
-  test.each<{ reason: string; text: string; answers?: Record<string, unknown>; error: string }>([
+  test.each<{ reason: string; text: string; error: string }>([
     {
       reason: "neither pages nor docs-site",
       text: "modules: [bun]",
@@ -518,27 +481,12 @@ describe("planPages", () => {
       error: "setup 'none' cannot be combined with toolchain tokens",
     },
     {
-      reason: "a recorded setup with spaces",
-      text: "modules: [bun, pages]",
-      answers: { pages_setup: "bun, node", pages_build_command: "x" },
+      reason: "a setup with spaces",
+      text: "modules: [bun, pages]\npages: { setup: 'bun, node', build: x }",
       error: "invalid setup value 'bun, node'",
     },
-    {
-      reason: "a registration build command disagreeing with the recorded answer",
-      text: "modules: [bun, pages]\npages: { build: bun run site }",
-      answers: { pages_build_command: "bun run build" },
-      error:
-        '.repo-platform.yml: pages.build is "bun run site" but .github/.copier-answers.yml records pages_build_command: "bun run build"',
-    },
-    {
-      reason: "a registration project name disagreeing with the recorded answer",
-      text: "modules: [docs-site]\nproject: { name: New, slug: new, description: d }",
-      answers: { project_name: "Old" },
-      error:
-        '.repo-platform.yml: project.name is "New" but .github/.copier-answers.yml records project_name: "Old"',
-    },
-  ])("fails closed on $reason", ({ text, answers, error }) => {
-    expect(() => planPages(input(text, answers))).toThrow(error);
+  ])("fails closed on $reason", ({ text, error }) => {
+    expect(() => planPages(input(text))).toThrow(error);
   });
 });
 
@@ -567,9 +515,9 @@ describe("setupProblem (the grammar the shared deploy used to check in shell)", 
     expect(defaultSetup(selectModules(input("modules: [pages]")))).toBe("none");
   });
 
-  test("the command defaults follow the setup tokens across ALL modules, as copier derives them", () => {
-    // setup may name a toolchain the selection does not carry: copier's
-    // pages_install_command default keys on pages_setup alone.
+  test("the command defaults follow the setup tokens across ALL modules", () => {
+    // setup may name a toolchain the selection does not carry: the
+    // install default keys on the setup tokens alone.
     expect(defaultCommands(MODULES, "bun,node")).toEqual({
       install: "bun install --frozen-lockfile",
       build: "bun run build",
@@ -640,9 +588,9 @@ describe("resolvePrivate", () => {
   });
 });
 
-// The script as the action runs it: a caller checkout with the two files,
-// the checkout's files.yml as the build branch ships it, and GITHUB_OUTPUT
-// collecting the rows.
+// The script as the action runs it: a caller checkout with its
+// registration, the checkout's files.yml as the build branch ships it, and
+// GITHUB_OUTPUT collecting the rows.
 describe("plan.ts as a child", () => {
   function run(
     files: Record<string, string>,
@@ -674,15 +622,9 @@ describe("plan.ts as a child", () => {
     };
   }
 
-  const ANSWERS =
-    "_commit: abc\nproject_name: Demo\nskills_dir: skills\nfuzzer_label: fuzz-nightly\n";
-
   test("default mode writes the six fleet-ci rows and echoes them", () => {
     const result = run(
-      {
-        ".repo-platform.yml": "modules: [bun, fuzzer, release-please]\n",
-        ".github/.copier-answers.yml": ANSWERS,
-      },
+      { ".repo-platform.yml": "modules: [bun, fuzzer, release-please]\n" },
       { PRIVATE: "false" },
     );
     expect(result.exitCode).toBe(0);
@@ -703,13 +645,13 @@ describe("plan.ts as a child", () => {
   test("pages mode writes the eight deploy rows", () => {
     const result = run(
       {
-        ".repo-platform.yml": "modules: [bun, pages]\n",
-        ".github/.copier-answers.yml": `${ANSWERS}pages_setup: bun\npages_build_command: bun run build\n`,
+        ".repo-platform.yml":
+          "modules: [bun, pages]\npages: { setup: bun, build: bun run build }\n",
       },
       { MODE: "pages" },
     );
     expect(result.exitCode).toBe(0);
-    // No recorded install command: the setup token's module supplies it.
+    // No declared install command: the setup token's module supplies it.
     expect(result.output).toBe(
       [
         'mounts=[{"path":"/","source":"command","versioned":true}]',
@@ -746,7 +688,7 @@ describe("plan.ts as a child", () => {
     const unknown = run({ ".repo-platform.yml": "modules: [bun, agents]\n" }, { PRIVATE: "false" });
     expect(unknown.exitCode).toBe(1);
     expect(unknown.stdout).toContain(
-      '::error::.repo-platform.yml: module "agents" is not a module this template offers',
+      '::error::.repo-platform.yml: module "agents" is not a module files.yml offers',
     );
     expect(unknown.output).toBe("");
   });
@@ -756,7 +698,6 @@ describe("plan.ts as a child", () => {
       {
         ".repo-platform.yml":
           "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [copies/a, copies/a/b, skills/*/LICENSE.md]}\n",
-        ".github/.copier-answers.yml": ANSWERS,
       },
       { PRIVATE: "false" },
     );
@@ -789,8 +730,8 @@ describe("plan.ts as a child", () => {
   test("a multi-line build command rides the delimited output form", () => {
     const result = run(
       {
-        ".repo-platform.yml": "modules: [bun, pages]\n",
-        ".github/.copier-answers.yml": `${ANSWERS}pages_setup: bun\npages_build_command: |-\n  bun run generate\n  bun run build\n`,
+        ".repo-platform.yml":
+          "modules: [bun, pages]\npages:\n  setup: bun\n  build: |-\n    bun run generate\n    bun run build\n",
       },
       { MODE: "pages" },
     );
@@ -890,7 +831,7 @@ describe("plan.ts as a child", () => {
     expect(missing.output).toBe("");
   });
 
-  test("the answers file is optional: a v2 registration plans alone", () => {
+  test("a private registration plans without CodeQL and with its own skills directory", () => {
     const result = run(
       { ".repo-platform.yml": "modules: [uv, skills]\nskills: { dir: agents }\n" },
       { PRIVATE: "true" },

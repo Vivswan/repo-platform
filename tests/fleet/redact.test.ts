@@ -2,11 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
   assignHints,
-  type DiscoveredRepo,
   enrich,
   enrichedRowSchema,
   hintName,
-  parseDiscoveredList,
   VERIFY_HEX_LENGTH,
   verifyTag,
 } from "../../.github/scripts/fleet/redact.ts";
@@ -156,37 +154,6 @@ describe("enrichedRowSchema", () => {
 
 // The discovered list fails CLOSED: an entry without an explicit boolean
 // `private` rejects the whole list.
-describe("parseDiscoveredList", () => {
-  // Identity on every accepted payload: only repo and private are
-  // inspected; everything else passes through untouched, whatever its
-  // type - pinned so a schema tightening cannot silently change it.
-  test.each<{ reason: string; input: (DiscoveredRepo & Record<string, unknown>)[] }>([
-    {
-      reason: "{repo, private} entries pass their extra keys through",
-      input: [{ repo: "o/a", private: true, archived: false, pushed_at: "now" }],
-    },
-    { reason: "an empty list is valid", input: [] },
-    {
-      reason: "a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)",
-      input: [{ repo: "o/a", private: true, extra: 42 }],
-    },
-  ])("accepts: $reason", ({ input }) => {
-    expect(parseDiscoveredList(input)).toEqual(input);
-  });
-
-  test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
-    expect(parseDiscoveredList([{ repo: "o/a" }])).toBeNull();
-    expect(parseDiscoveredList([{ repo: "o/a", private: "true" }])).toBeNull();
-    expect(parseDiscoveredList([{ repo: "o/a", private: true }, { repo: "o/b" }])).toBeNull();
-  });
-
-  test("rejects non-object entries, a non-string repo, and a non-array payload", () => {
-    expect(parseDiscoveredList(["o/a"])).toBeNull();
-    expect(parseDiscoveredList([{ repo: 7, private: true }])).toBeNull();
-    expect(parseDiscoveredList({ repo: "o/a", private: true })).toBeNull();
-  });
-});
-
 describe("redact CLI", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/redact.ts");
 

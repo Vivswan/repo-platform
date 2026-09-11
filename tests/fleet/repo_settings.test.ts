@@ -58,12 +58,12 @@ describe("every settings layer", () => {
     const layerFiles = [
       // dot: true, or the glob silently skips the dotted .github/ paths.
       ...new Bun.Glob(".github/settings*.yml").scanSync({ dot: true }),
-      ...new Bun.Glob("templates/*/settings*.yml").scanSync(),
+      ...new Bun.Glob("files/*/settings*.yml").scanSync(),
     ].sort();
     // Controls: the scan must reach the layers known to carry bypass
     // actors, or an empty glob would pass vacuously.
     expect(layerFiles).toContain(".github/settings-override.yml");
-    expect(layerFiles).toContain("templates/release-please/settings.yml");
+    expect(layerFiles).toContain("files/release-please/settings.yml");
     let actorsSeen = 0;
     const violations = layerFiles.flatMap((file) =>
       readRulesets(file).flatMap((ruleset) =>

@@ -1,178 +1,281 @@
-// Unit tests for build_gitignore's fragment planning: unshared sources are
-// emitted plain (today's whole fleet), and a source declared by two modules
-// (the future bun+node Node.gitignore share) stays plain in the first
-// module's fragment, gets guard-wrapped in the later one, and appears once
-// in the self output. The guard tests pin the RENDER contract: a true guard
-// yields exactly the unguarded bytes, a false guard yields nothing at all.
-// The stray-fragment tests pin the orphan guard: a generated fragment must
-// not outlive its module's gitignore_sources declaration.
-// The argv tests pin the two-mode shape: the script takes only --topology,
-// and the retired pin flags are rejected before any network call - the one
-// part of main() that can run offline. The files/ tests pin the writer's
-// side: the block files and files/base/.gitignore are derived from the
-// same sections as the fragments and the template, and the offline check
-// reads them back from those outputs.
+// Unit tests for build_gitignore's pure pieces: the source grammar (a
+// files.yml name is a github/gitignore root stem, block files are named
+// after it), the three outputs derived from one section map, and the
+// offline topology check that every copy of a section agrees. The argv
+// tests pin the two-mode shape: the script takes only --topology, and any
+// other flag is rejected before any network call. The CI workspace tests
+// prove the section's patterns against git itself.
 
-import { beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
 import {
+  ALWAYS,
   blockName,
   blockRel,
   buildBlock,
   buildFilesBase,
-  buildFragment,
-  buildTemplate,
+  buildSelf,
   CI_WORKSPACE_SECTION,
-  filesSideProblems,
-  fragmentGuardExpressions,
-  fragmentPlans,
-  fragmentSourcePaths,
-  guardExpressionFor,
+  existingLocalSides,
+  gitignoreSources,
   main,
-  missingFragmentFiles,
+  missingBlockFiles,
   sectionsIn,
   selfSources,
   strayBlockFiles,
-  strayFragmentFiles,
-  templateRegionBody,
+  topologyProblems,
+  upstreamPath,
 } from "../../../scripts/generate/build_gitignore";
-import type { ModuleManifest } from "../../../scripts/lib/module_manifests";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
 const SECTIONS: Record<string, string> = {
+  "Global/Windows.gitignore": "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n",
+  "Global/macOS.gitignore": "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\n",
+  "Global/Linux.gitignore": "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n",
   "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
-  "bun.gitignore": "## bun (github/gitignore bun.gitignore)\nbun.lockb.orig\n",
+  "bun.gitignore": "## bun (github/gitignore bun.gitignore)\nbun.lockb\n",
+  "Python.gitignore": "## Python (github/gitignore Python.gitignore)\n__pycache__/\n\n*.py[cod]\n",
 };
 
-const GATES = new Map([
-  ["bun", "'bun' in modules"],
-  ["node", "'node' in modules"],
-]);
+const FILES_YML = [
+  "placeholders: [project_name]",
+  "modules:",
+  "  bun:",
+  "    description: bun",
+  "    gitignore_sources: [Node, bun]",
+  "  uv:",
+  "    description: uv",
+  "    gitignore_sources: [Python]",
+  "  pages:",
+  "    description: pages",
+  "files:",
+  "  - {path: .gitignore, class: split, region: hash, blocks: gitignore_sources}",
+  "",
+].join("\n");
 
-const SHARED: [string, string[]][] = [
+const ENTRIES: [string, string[]][] = [
   ["bun", ["Node.gitignore", "bun.gitignore"]],
-  ["node", ["Node.gitignore"]],
+  ["uv", ["Python.gitignore"]],
 ];
 
-/** Renders the exact chunk shape buildFragment emits - inline
- *  `{% if G %}<inner>{% endif %}` blocks owning no whitespace of their own -
- *  the way jinja does: a true guard keeps the inner bytes verbatim, a false
- *  guard drops the whole block. */
-function render(fragment: string, guardTrue: boolean): string {
-  return fragment.replace(/\{% if .+? %\}([\s\S]*?)\{% endif %\}/g, (_, inner: string) =>
-    guardTrue ? inner : "",
+/** A files/ tree holding every output the generator writes for ENTRIES,
+ *  plus this repository's .gitignore beside it. */
+function generated(): { filesDir: string; selfPath: string } {
+  const root = temp.dir("build-gitignore-");
+  const filesDir = join(root, "files");
+  const write = (rel: string, content: string) => {
+    const abs = join(filesDir, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  };
+  write("base/.gitignore", buildFilesBase(SECTIONS));
+  for (const [module, sources] of ENTRIES) {
+    for (const path of sources) write(blockRel(module, path), buildBlock(SECTIONS[path]));
+  }
+  const selfPath = join(root, ".gitignore");
+  writeFileSync(
+    selfPath,
+    buildSelf(SECTIONS, selfSources(ENTRIES), { above: "# mine\n\n", below: "\n# after\n" }),
   );
+  return { filesDir, selfPath };
 }
 
-describe("fragmentPlans", () => {
-  test("unshared sources carry no guards", () => {
-    expect(fragmentPlans([["bun", ["Node.gitignore", "bun.gitignore"]]])).toEqual([
-      {
-        module: "bun",
-        parts: [
-          { path: "Node.gitignore", earlier: [] },
-          { path: "bun.gitignore", earlier: [] },
-        ],
-      },
+const readSelf = (path: string) => capture(["cat", path], {}).stdout;
+
+describe("the source grammar", () => {
+  test("a files.yml name is a github/gitignore root stem, and the block file carries it", () => {
+    expect(upstreamPath("Node")).toBe("Node.gitignore");
+    expect(blockName("Global/macOS.gitignore")).toBe("macOS");
+    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.gitignore.block.Node");
+  });
+
+  test("gitignoreSources reads the declaring modules in files.yml order", () => {
+    expect(gitignoreSources(FILES_YML)).toEqual(ENTRIES);
+  });
+
+  test("a non-list declaration is refused by name", () => {
+    expect(() => gitignoreSources(FILES_YML.replace("[Python]", "Python"))).toThrow(
+      "modules.uv.gitignore_sources must be a list of names",
+    );
+  });
+
+  test("selfSources lists every distinct source once, in first-declaration order", () => {
+    expect(selfSources([...ENTRIES, ["node", ["Node.gitignore"]]])).toEqual([
+      "Node.gitignore",
+      "bun.gitignore",
+      "Python.gitignore",
+    ]);
+  });
+});
+
+describe("the outputs", () => {
+  test("files/base/.gitignore is the header, the two local sections, and the OS sections", () => {
+    const base = buildFilesBase(SECTIONS);
+    expect(base.startsWith("# Generated from github/gitignore")).toBe(true);
+    expect(base).toContain(CI_WORKSPACE_SECTION);
+    expect(Object.keys(sectionsIn(base))).toEqual(ALWAYS);
+  });
+
+  test("a block file is its section plus one blank line", () => {
+    expect(buildBlock(SECTIONS["Node.gitignore"])).toBe(
+      "## Node (github/gitignore Node.gitignore)\nnode_modules/\n\n",
+    );
+  });
+
+  test("the self output keeps both sides and carries the base body plus every source once", () => {
+    const self = buildSelf(SECTIONS, selfSources(ENTRIES), {
+      above: "# mine\n",
+      below: "# after\n",
+    });
+    expect(self.startsWith("# mine\n# BEGIN REPO-PLATFORM MANAGED\n")).toBe(true);
+    expect(self.endsWith("# END REPO-PLATFORM MANAGED\n# after\n")).toBe(true);
+    expect(Object.keys(sectionsIn(self))).toEqual([...ALWAYS, ...selfSources(ENTRIES)]);
+  });
+
+  test("sectionsIn reads each section back, blank lines inside a body kept", () => {
+    const text = `${buildBlock(SECTIONS["Python.gitignore"])}${SECTIONS["Node.gitignore"]}`;
+    expect(sectionsIn(text)).toEqual({
+      "Python.gitignore": SECTIONS["Python.gitignore"],
+      "Node.gitignore": SECTIONS["Node.gitignore"],
+    });
+  });
+
+  test("existingLocalSides keeps the sides of a clean file and refuses a malformed region", () => {
+    const { selfPath } = generated();
+    expect(existingLocalSides(selfPath)).toEqual({ above: "# mine\n\n", below: "\n# after\n" });
+    expect(existingLocalSides(join(temp.dir("no-self-"), ".gitignore")).below).toBe("");
+    writeFileSync(selfPath, `${readSelf(selfPath)}# BEGIN REPO-PLATFORM MANAGED\n`);
+    expect(() => existingLocalSides(selfPath)).toThrow(
+      "no single clean REPO-PLATFORM MANAGED region",
+    );
+  });
+});
+
+describe("the offline topology check", () => {
+  test("the generator's own outputs pass", () => {
+    const { filesDir, selfPath } = generated();
+    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual([]);
+    expect(missingBlockFiles(ENTRIES, filesDir)).toEqual([]);
+    expect(topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) })).toEqual(
+      [],
+    );
+  });
+
+  test("a block no source names is a stray; a declared source without its block is missing", () => {
+    const { filesDir } = generated();
+    writeFileSync(join(filesDir, "uv/.gitignore.block.Old"), "x\n");
+    expect(strayBlockFiles(ENTRIES, filesDir)).toEqual(["files/uv/.gitignore.block.Old"]);
+    expect(missingBlockFiles([...ENTRIES, ["rust", ["Rust.gitignore"]]], filesDir)).toEqual([
+      "files/rust/.gitignore.block.Rust",
     ]);
   });
 
-  test("a shared source lists its earlier owners only in later modules", () => {
-    expect(fragmentPlans(SHARED)).toEqual([
-      {
-        module: "bun",
-        parts: [
-          { path: "Node.gitignore", earlier: [] },
-          { path: "bun.gitignore", earlier: [] },
-        ],
-      },
-      { module: "node", parts: [{ path: "Node.gitignore", earlier: ["bun"] }] },
+  test("a block whose heading names another source, a hand-edited block, and two modules' copies that differ are named", () => {
+    const { filesDir, selfPath } = generated();
+    const selfText = readSelf(selfPath);
+    writeFileSync(
+      join(filesDir, "bun/.gitignore.block.bun"),
+      buildBlock(SECTIONS["Node.gitignore"]),
+    );
+    writeFileSync(join(filesDir, "uv/.gitignore.block.Python"), SECTIONS["Python.gitignore"]);
+    const problems = topologyProblems({ entries: ENTRIES, filesDir, selfText });
+    expect(problems.map((p) => p.split(";")[0])).toEqual([
+      "files/bun/.gitignore.block.bun encodes [Node.gitignore] but its name stands for bun.gitignore",
+      "files/uv/.gitignore.block.Python is not exactly its section plus one blank line",
+      "no block file carries [bun.gitignore], so .gitignore cannot be checked against them",
     ]);
-  });
-});
-
-describe("buildFragment", () => {
-  const [bunPlan, nodePlan] = fragmentPlans(SHARED);
-
-  test("the first sharing module's fragment is unchanged by the share", () => {
-    expect(buildFragment(SECTIONS, bunPlan.parts, GATES)).toBe(
-      `\n${SECTIONS["Node.gitignore"]}\n${SECTIONS["bun.gitignore"]}`,
+    const shared: [string, string[]][] = [...ENTRIES, ["node", ["Node.gitignore"]]];
+    writeFileSync(
+      join(filesDir, "bun/.gitignore.block.bun"),
+      buildBlock(SECTIONS["bun.gitignore"]),
     );
-  });
-
-  test("a shared chunk is one exact inline guard block: true renders the unguarded bytes, false nothing", () => {
-    // The whole chunk is pinned, not just its opening tag: a stray
-    // newline or a lost endif inside the block would survive a prefix check.
-    // The guard negates the earlier owner's gate.
-    const guarded = buildFragment(SECTIONS, nodePlan.parts, GATES);
-    expect(guarded).toBe(
-      `{% if not ('bun' in modules) %}\n${SECTIONS["Node.gitignore"]}{% endif %}`,
+    writeFileSync(
+      join(filesDir, "uv/.gitignore.block.Python"),
+      buildBlock(SECTIONS["Python.gitignore"]),
     );
-    const unguarded = buildFragment(SECTIONS, [{ path: "Node.gitignore", earlier: [] }], GATES);
-    expect(render(guarded, true)).toBe(unguarded);
-    expect(render(guarded, false)).toBe("");
-    // The guard reads the owner's gate expression from the map, not a
-    // spelling of its own.
-    const custom = new Map([...GATES, ["bun", "'bun' in modules or legacy"]]);
-    expect(buildFragment(SECTIONS, nodePlan.parts, custom)).toBe(
-      `{% if not ('bun' in modules or legacy) %}\n${SECTIONS["Node.gitignore"]}{% endif %}`,
+    mkdirSync(join(filesDir, "node"));
+    writeFileSync(
+      join(filesDir, "node/.gitignore.block.Node"),
+      buildBlock("## Node (github/gitignore Node.gitignore)\nnode_modules/\ndist/\n"),
     );
-  });
-
-  test("a missing gate expression fails loudly", () => {
-    expect(() => buildFragment(SECTIONS, nodePlan.parts, new Map())).toThrow("bun");
-  });
-});
-
-describe("selfSources", () => {
-  test("a shared source appears once in the self output's section list", () => {
-    expect(selfSources(SHARED)).toEqual(["Node.gitignore", "bun.gitignore"]);
-  });
-});
-
-describe("strayFragmentFiles", () => {
-  const templates = temp.dir("gitignore-strays-");
-  beforeAll(() => {
-    for (const module of ["bun", "uv"]) {
-      mkdirSync(join(templates, module, "fragments"), { recursive: true });
-      writeFileSync(join(templates, module, "fragments", "gitignore.jinja"), "\n## stale\n");
-    }
-    mkdirSync(join(templates, "agents"), { recursive: true });
-  });
-
-  const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
-    module,
-    description: `the ${module} module`,
-    ...(gitignore_sources ? { gitignore_sources } : {}),
-  });
-
-  test("declaring modules and fragment-less modules pass", () => {
     expect(
-      strayFragmentFiles(
-        [
-          manifest("bun", ["Node.gitignore"]),
-          manifest("uv", ["Python.gitignore"]),
-          manifest("agents"),
-        ],
-        templates,
+      topologyProblems({ entries: shared, filesDir, selfText }).map((p) => p.split(";")[0]),
+    ).toEqual([
+      "files/node/.gitignore.block.Node differs from another module's copy of Node.gitignore",
+      ".gitignore's managed region differs from files/base/.gitignore plus the block files",
+    ]);
+  });
+
+  test("a base and a self region that both dropped an OS section are named, not rebuilt to themselves", () => {
+    const { filesDir, selfPath } = generated();
+    const without = Object.fromEntries(
+      Object.entries(SECTIONS).filter(([path]) => path !== "Global/Windows.gitignore"),
+    );
+    writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(without));
+    const selfText = buildSelf(without, selfSources(ENTRIES), { above: "", below: "" });
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+    ).toEqual(["files/base/.gitignore lacks the section(s) [Global/Windows.gitignore]"]);
+    // The self copy alone dropping it is named too.
+    writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(SECTIONS));
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+    ).toEqual([".gitignore's managed region lacks the section(s) [Global/Windows.gitignore]"]);
+    // A block file gone: the self comparison cannot run and says so.
+    rmSync(join(filesDir, "bun/.gitignore.block.bun"));
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
+        (p) => p.split(";")[0],
       ),
-    ).toEqual([]);
+    ).toEqual([
+      "no block file carries [bun.gitignore], so .gitignore cannot be checked against them",
+    ]);
   });
 
-  test("a fragment outliving its module's gitignore_sources key is flagged", () => {
+  test("a stale base, a self region missing a section, and a missing base are named", () => {
+    const { filesDir, selfPath } = generated();
+    const selfText = readSelf(selfPath);
+    writeFileSync(join(filesDir, "base/.gitignore"), `${buildFilesBase(SECTIONS)}extra\n`);
     expect(
-      strayFragmentFiles([manifest("bun", ["Node.gitignore"]), manifest("uv")], templates),
-    ).toEqual(["templates/uv/fragments/gitignore.jinja"]);
+      topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
+    ).toEqual([
+      "files/base/.gitignore is not the header, the agent and CI workspace sections, and exactly the OS sections [Global/Windows.gitignore, Global/macOS.gitignore, Global/Linux.gitignore]",
+      ".gitignore's managed region differs from files/base/.gitignore plus the block files",
+    ]);
+    writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(SECTIONS));
+    const lacking = buildSelf(SECTIONS, ["Node.gitignore"], { above: "", below: "" });
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir, selfText: lacking }).map(
+        (p) => p.split(";")[0],
+      ),
+    ).toEqual([
+      ".gitignore's managed region lacks the section(s) [bun.gitignore, Python.gitignore]",
+    ]);
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir: temp.dir("empty-files-"), selfText }),
+    ).toEqual([
+      "files/base/.gitignore is missing; run 'bun scripts/generate/build_gitignore.ts' to regenerate every copy",
+    ]);
+  });
+
+  test("the committed copies agree (the live topology gate)", async () => {
+    const original = console.log;
+    console.log = () => {};
+    try {
+      expect(await main(["--topology"])).toBe(0);
+    } finally {
+      console.log = original;
+    }
   });
 });
 
 describe("argument parsing", () => {
-  /** main() with arguments never reaches the fetch, so this stays offline;
-   *  the returned message is captured rather than printed. */
+  /** main() with unknown arguments never reaches the fetch, so this stays
+   *  offline; the returned message is captured rather than printed. */
   async function reject(argv: string[]): Promise<{ code: number; message: string }> {
     const original = console.error;
     let message = "";
@@ -187,8 +290,8 @@ describe("argument parsing", () => {
   }
 
   test.each<{ argv: string[]; reason: string }>([
-    { argv: ["--locked"], reason: "the retired --locked pin mode" },
-    { argv: ["--check"], reason: "the retired --check pin mode" },
+    { argv: ["--locked"], reason: "a retired pin mode" },
+    { argv: ["--check"], reason: "the other generators' check flag" },
     { argv: ["--dry-run", "x"], reason: "any other argument, several at once" },
   ])("$reason is rejected naming the argument(s), not silently ignored", async ({ argv }) => {
     const { code, message } = await reject(argv);
@@ -197,250 +300,6 @@ describe("argument parsing", () => {
   });
 });
 
-describe("missingFragmentFiles", () => {
-  // The topology check's second direction: a module NEWLY declaring
-  // gitignore_sources has no fragment until the generator runs, and
-  // composition would render nothing for it. Historically the refresh
-  // workflow's `git diff --quiet` could not see this either, because the new
-  // fragment was untracked; the topology check is what closed that.
-  const templates = temp.dir("gitignore-missing-");
-  beforeAll(() => {
-    mkdirSync(join(templates, "bun", "fragments"), { recursive: true });
-    writeFileSync(join(templates, "bun", "fragments", "gitignore.jinja"), "\n## bun\n");
-    mkdirSync(join(templates, "deno"), { recursive: true });
-  });
-
-  const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
-    module,
-    description: `the ${module} module`,
-    ...(gitignore_sources ? { gitignore_sources } : {}),
-  });
-
-  test("present fragments and undeclaring modules pass", () => {
-    expect(
-      missingFragmentFiles([manifest("bun", ["Node.gitignore"]), manifest("deno")], templates),
-    ).toEqual([]);
-  });
-
-  test("a declared gitignore_sources without its fragment is flagged", () => {
-    expect(
-      missingFragmentFiles(
-        [manifest("bun", ["Node.gitignore"]), manifest("deno", ["Deno.gitignore"])],
-        templates,
-      ),
-    ).toEqual(["templates/deno/fragments/gitignore.jinja"]);
-  });
-});
-
-describe("fragment guard expressions match the manifests", () => {
-  // The topology check's fourth direction: shared-source chunks embed the
-  // EARLIER owners' gate expressions as jinja guards, so a changed module
-  // gate leaves a stale fragment whose next build emits duplicate shared
-  // sections. Expected and actual guards come from ONE constructor
-  // (guardExpressionFor), so a generated fragment always matches.
-  const sections = {
-    "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
-  };
-  const parts = [{ path: "Node.gitignore", earlier: ["bun"] }];
-
-  test("a regenerated fragment's guards match the manifests' expectation", () => {
-    const gates = new Map([["bun", '"bun" in modules']]);
-    const fragment = buildFragment(sections, parts, gates);
-    expect(fragmentGuardExpressions(fragment)).toEqual([guardExpressionFor(["bun"], gates)]);
-  });
-
-  test("a changed module gate makes the stale fragment's guards mismatch", () => {
-    // Both sides pinned positively: the mismatch is a consequence of two
-    // exact values, so a broken extractor (returning [] or garbage) cannot
-    // pass as "the gate changed".
-    const oldGates = new Map([["bun", '"bun" in modules']]);
-    const staleFragment = buildFragment(sections, parts, oldGates);
-    const newGates = new Map([["bun", '"bun" in modules or "node" in modules']]);
-    expect(fragmentGuardExpressions(staleFragment)).toEqual(['not ("bun" in modules)']);
-    expect(guardExpressionFor(["bun"], newGates)).toBe(
-      'not ("bun" in modules or "node" in modules)',
-    );
-  });
-
-  test("an unguarded fragment expects no guards", () => {
-    const gates = new Map([["bun", '"bun" in modules']]);
-    const fragment = buildFragment(sections, [{ path: "Node.gitignore", earlier: [] }], gates);
-    expect(fragmentGuardExpressions(fragment)).toEqual([]);
-  });
-});
-
-describe("fragmentSourcePaths", () => {
-  // The topology check's third direction: an EDITED gitignore_sources
-  // list (source added, removed, replaced, or reordered) must not pass on
-  // fragment presence alone - the fragment's own section headings encode
-  // its sources, offline.
-  test("reads the encoded sources in order, guarded chunks included", () => {
-    const fragment =
-      "\n## Node (github/gitignore Node.gitignore)\nnode_modules/\n" +
-      '{% if not ("bun" in modules) %}\n## Python (github/gitignore Python.gitignore)\n__pycache__/\n{% endif %}';
-    expect(fragmentSourcePaths(fragment)).toEqual(["Node.gitignore", "Python.gitignore"]);
-  });
-
-  test("community subdirectory paths round-trip whole", () => {
-    const fragment = "\n## Nix (github/gitignore community/Nix.gitignore)\nresult\n";
-    expect(fragmentSourcePaths(fragment)).toEqual(["community/Nix.gitignore"]);
-  });
-
-  test("a heading-free fragment reads as no sources (mismatch, not a crash)", () => {
-    expect(fragmentSourcePaths("# not a generated fragment\n")).toEqual([]);
-  });
-});
-
-describe("the files/ side", () => {
-  const sections: Record<string, string> = {
-    ...SECTIONS,
-    "Global/macOS.gitignore": "## macOS (github/gitignore Global/macOS.gitignore)\n.DS_Store\n",
-    "Global/Windows.gitignore":
-      "## Windows (github/gitignore Global/Windows.gitignore)\nThumbs.db\n",
-    "Global/Linux.gitignore": "## Linux (github/gitignore Global/Linux.gitignore)\n*~\n",
-    "Python.gitignore":
-      "## Python (github/gitignore Python.gitignore)\n__pycache__/\n\n*.py[cod]\n",
-  };
-  const entries: [string, string[]][] = [
-    ["bun", ["Node.gitignore", "bun.gitignore"]],
-    ["uv", ["Python.gitignore"]],
-  ];
-  const filesModules = {
-    bun: { gitignore_sources: ["Node", "bun"] },
-    uv: { gitignore_sources: ["Python"] },
-    pages: {},
-  };
-  const [bunPlan, uvPlan] = fragmentPlans(entries);
-  const fragments = new Map([
-    ["bun", buildFragment(sections, bunPlan.parts, GATES)],
-    ["uv", buildFragment(sections, uvPlan.parts, GATES)],
-  ]);
-  const templateText = buildTemplate(sections);
-
-  test("blockName is the source file's stem, subdirectory dropped", () => {
-    expect(blockName("Node.gitignore")).toBe("Node");
-    expect(blockName("Global/macOS.gitignore")).toBe("macOS");
-    expect(blockRel("bun", "Node.gitignore")).toBe("bun/.block.Node.gitignore");
-  });
-
-  test("files/base/.gitignore is exactly the template's region body", () => {
-    expect(templateRegionBody(templateText)).toBe(buildFilesBase(sections));
-    expect(buildFilesBase(sections).startsWith("# Generated from github/gitignore")).toBe(true);
-    expect(buildFilesBase(sections).endsWith(`${sections["Global/Linux.gitignore"]}\n`)).toBe(true);
-    expect(() => templateRegionBody("# no markers\n")).toThrow("compose anchor");
-  });
-
-  test("sectionsIn reads each section back from a fragment, guards removed and blank lines inside a body kept", () => {
-    const shared = buildFragment(
-      sections,
-      [
-        { path: "Node.gitignore", earlier: ["bun"] },
-        { path: "Python.gitignore", earlier: [] },
-      ],
-      GATES,
-    );
-    expect(sectionsIn(shared)).toEqual({
-      "Node.gitignore": sections["Node.gitignore"],
-      "Python.gitignore": sections["Python.gitignore"],
-    });
-    expect(sectionsIn("# not a fragment\n")).toEqual({});
-  });
-
-  test("a block file is the section plus the blank line the composed fragment carried", () => {
-    expect(buildBlock(sections["bun.gitignore"])).toBe(`${sections["bun.gitignore"]}\n`);
-  });
-
-  /** A files/ tree holding exactly the outputs the generator would write. */
-  function generatedTree(): string {
-    const dir = temp.dir("gitignore-files-");
-    mkdirSync(join(dir, "base"), { recursive: true });
-    writeFileSync(join(dir, "base", ".gitignore"), buildFilesBase(sections));
-    for (const [module, paths] of entries) {
-      mkdirSync(join(dir, module), { recursive: true });
-      for (const path of paths) {
-        writeFileSync(join(dir, blockRel(module, path)), buildBlock(sections[path]));
-      }
-    }
-    mkdirSync(join(dir, "pages"));
-    return dir;
-  }
-
-  const problems = (
-    filesDir: string,
-    overrides: Partial<Parameters<typeof filesSideProblems>[0]> = {},
-  ) =>
-    filesSideProblems({
-      entries,
-      filesModules,
-      templateText,
-      fragmentText: (module) => fragments.get(module) ?? "",
-      filesDir,
-      ...overrides,
-    });
-
-  test("the generator's own outputs pass, shared sources landing once per module", () => {
-    expect(problems(generatedTree())).toEqual([]);
-    expect(strayBlockFiles(entries, generatedTree())).toEqual([]);
-  });
-
-  test("a block file that differs from its fragment's section is stale", () => {
-    const dir = generatedTree();
-    writeFileSync(
-      join(dir, "uv", ".block.Python.gitignore"),
-      "## Python (github/gitignore Python.gitignore)\nold\n\n",
-    );
-    const found = problems(dir);
-    expect(found).toHaveLength(1);
-    expect(found[0]).toContain(
-      "files/uv/.block.Python.gitignore differs from its section in templates/uv/fragments/gitignore.jinja",
-    );
-  });
-
-  test("a missing block file and a stale base are named", () => {
-    const dir = generatedTree();
-    rmSync(join(dir, "bun", ".block.bun.gitignore"));
-    writeFileSync(join(dir, "base", ".gitignore"), "# old\n");
-    expect(problems(dir).map((problem) => problem.split(";")[0])).toEqual([
-      "files/base/.gitignore differs from templates/base/.gitignore.jinja's region body",
-      "files/bun/.block.bun.gitignore is missing (its section in templates/bun/fragments/gitignore.jinja)",
-    ]);
-  });
-
-  test("files.yml must name the manifests' sources as block names, module for module", () => {
-    const dir = generatedTree();
-    expect(
-      problems(dir, {
-        filesModules: { ...filesModules, uv: { gitignore_sources: ["Python", "uv"] } },
-      })[0],
-    ).toContain(
-      'files.yml modules.uv.gitignore_sources is ["Python","uv"] but templates/uv/module.yml declares ["Python"]',
-    );
-    expect(
-      problems(dir, {
-        filesModules: { ...filesModules, pages: { gitignore_sources: ["Node"] } },
-      })[0],
-    ).toContain(
-      'files.yml modules.pages.gitignore_sources is ["Node"] but templates/pages/module.yml declares undefined',
-    );
-    const { uv: _, ...withoutUv } = filesModules;
-    expect(problems(dir, { filesModules: withoutUv })).toEqual([
-      "files.yml has no modules.uv entry for a module declaring gitignore_sources",
-    ]);
-  });
-
-  test("a block file no manifest source names is a stray; base is never scanned", () => {
-    const dir = generatedTree();
-    writeFileSync(join(dir, "uv", ".block.Node.gitignore"), "## Node\n");
-    writeFileSync(join(dir, "base", ".block.Node.gitignore"), "## Node\n");
-    expect(strayBlockFiles(entries, dir)).toEqual(["files/uv/.block.Node.gitignore"]);
-  });
-});
-
-// The CI workspace section judged by git itself: every path a fleet
-// workflow step creates inside the checked-out workspace is ignored at the
-// root, a plain file of a directory pattern's name is not, a nested source
-// folder of the same name is never swallowed, and a legitimate root folder
-// no checked-out step creates (assets/) stays visible.
 describe("CI workspace section", () => {
   /** A fresh repository whose .gitignore is exactly the section, holding
    *  one path of the given kind; returns git's ignore verdict for it. */

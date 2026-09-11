@@ -8,8 +8,8 @@
 # Vivswan/github-settings-as-code in
 # single-repo mode once per repository in a fail-fast-free matrix. Targets
 # are enrolled, adopted repos (a readable .repo-platform.yml is the
-# opt-in) plus this repository itself (its baseline facts come from
-# .repo-platform-answers.yml). Repos heal independently: one target's
+# opt-in) plus this repository itself (its facts come from its own
+# .repo-platform.yml). Repos heal independently: one target's
 # failure is its own red "apply (<repo>)" job and never blocks the others.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS

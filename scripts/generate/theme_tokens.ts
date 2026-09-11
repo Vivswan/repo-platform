@@ -1,10 +1,15 @@
+#!/usr/bin/env bun
 // Renders the theme's token data (actions/pages-site/.vitepress/theme/
 // tokens.ts) into tokens.css: the shared tokens on :root and .dark with
 // their media overrides, the light palette on :root, the dark one on .dark,
 // one block per hue slot and mode, and the print overrides on html:root
 // (which outranks :root, .dark and the hue blocks at equal or higher
 // specificity, so it must come last).
+//
+// Usage: bun scripts/generate/theme_tokens.ts [--check]
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   HUE_TOKENS,
   HUES,
@@ -16,11 +21,17 @@ import {
   type SharedValue,
   type TokenName,
 } from "../../actions/pages-site/.vitepress/theme/tokens.ts";
-import { markerLines } from "./markers.ts";
 
+const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 export const THEME_TOKENS_CSS = "actions/pages-site/.vitepress/theme/tokens.css";
 const THEME_TOKENS_SOURCE = "actions/pages-site/.vitepress/theme/tokens.ts";
 const BOTH_MODES = ":root,\n.dark";
+
+/** The generated file's fence: a reader sees where the bytes come from. */
+const MARKER = {
+  begin: `/* BEGIN GENERATED: theme-tokens (scripts/generate/theme_tokens.ts - edit ${THEME_TOKENS_SOURCE}, not this block) */`,
+  end: "/* END GENERATED: theme-tokens */",
+};
 
 function block(
   selector: string,
@@ -46,14 +57,13 @@ function modeBlock(selector: string, mode: Mode, indent = ""): string[] {
 }
 
 export function themeTokensCss(): string {
-  const marker = markerLines("theme-tokens", "/*", "*/", THEME_TOKENS_SOURCE);
   const shared = Object.values(SHARED_TOKENS).flatMap(
     (group) => Object.entries(group) as [TokenName, SharedValue][],
   );
   const base = (value: SharedValue): string => (typeof value === "string" ? value : value.base);
   const overrides = (value: SharedValue): readonly MediaOverride[] =>
     typeof value === "string" ? [] : value.overrides;
-  const lines: string[] = [marker.begin, ""];
+  const lines: string[] = [MARKER.begin, ""];
   lines.push(
     ...block(
       BOTH_MODES,
@@ -73,6 +83,36 @@ export function themeTokensCss(): string {
     lines.push("", ...block(`html.dark[data-fleet-hue="${slot}"]`, hueDeclarations(hue.dark)));
   });
   lines.push("", "@media print {", ...modeBlock("html:root,\nhtml:root.dark", "print", "  "), "}");
-  lines.push("", marker.end, "");
+  lines.push("", MARKER.end, "");
   return lines.join("\n");
 }
+
+/** Whether the CSS at `path` is exactly the rendered token data. */
+export function themeCssCurrent(path: string): boolean {
+  return existsSync(path) && readFileSync(path, "utf-8") === themeTokensCss();
+}
+
+function main(argv: string[]): number {
+  const check = argv.includes("--check");
+  const unknown = argv.filter((arg) => arg !== "--check");
+  if (unknown.length > 0) {
+    console.error(`error: unrecognized argument(s): ${unknown.join(" ")}`);
+    return 2;
+  }
+  const path = join(REPO_ROOT, THEME_TOKENS_CSS);
+  if (themeCssCurrent(path)) {
+    console.log(`${THEME_TOKENS_CSS} matches ${THEME_TOKENS_SOURCE}`);
+    return 0;
+  }
+  if (check) {
+    console.log(
+      `${THEME_TOKENS_CSS} is stale: its content does not match the token data in ${THEME_TOKENS_SOURCE}; run bun run theme to rewrite it`,
+    );
+    return 1;
+  }
+  writeFileSync(path, themeTokensCss());
+  console.log(`rewrote ${THEME_TOKENS_CSS}`);
+  return 0;
+}
+
+if (import.meta.main) process.exit(main(process.argv.slice(2)));

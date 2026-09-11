@@ -26,8 +26,3 @@ CLAUDE.md -text
 # LAST matching line wins, so entries there override the managed ones.
 # END REPO-PLATFORM MANAGED
 
-# The template sources' agent-file symlinks stay symlinks too (copier
-# preserves them via _preserve_symlinks; see CLAUDE.md's editing rules).
-templates/base/CLAUDE.md -text
-templates/base/.github/copilot-instructions.md -text
-templates/base/.github/agents.md -text

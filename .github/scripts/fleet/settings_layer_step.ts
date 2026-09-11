@@ -3,10 +3,11 @@
 // run_hidden.ts: all three run BEFORE the settings action, so its own
 // private-repos redaction cannot cover what they print, and all three
 // quote repo-owned content when they fail. The operator repository IS
-// this checkout, so its facts and its layer are read from disk (the
-// render took its facts from the same working tree, and fetching would
-// reintroduce the race the pin removes); every other target is fetched,
-// pinned to the commit the render published (PINNED).
+// this checkout, so its facts (its own .repo-platform.yml) and its layer
+// are read from disk (the render took its facts from the same working
+// tree, and fetching would reintroduce the race the pin removes); every
+// other target is fetched, pinned to the commit the render published
+// (PINNED).
 //
 // Usage: settings_layer_step.ts render|merge|labels
 // Env: TARGET, GITHUB_REPOSITORY, RUNNER_TEMP; PINNED (merge, labels); MODE (labels).
@@ -44,7 +45,7 @@ const LEGS: Record<LayerStep, (facts: LayerStepFacts) => { label: string; comman
       join(SCRIPTS, "fleet", "render_managed_settings.ts"),
       "--repo",
       facts.target,
-      ...(facts.operator ? ["--operator-answers", ".repo-platform-answers.yml"] : []),
+      ...(facts.operator ? ["--target-dir", "."] : []),
       "--out",
       `${facts.runnerTemp}/managed-settings.yml`,
     ],

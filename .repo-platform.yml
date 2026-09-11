@@ -1,0 +1,14 @@
+# repo-platform's own registration: the operator is a fleet member whose
+# settings its own settings-repos.yml manages, read from this checkout.
+# The sync never targets this repository (its files are the sources).
+modules:
+  - bun
+  - skills
+  - pr-title
+  - docs-site
+project:
+  name: repo-platform
+  slug: repo-platform
+  description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
+labels:
+  docs_site: docs-link-rot
