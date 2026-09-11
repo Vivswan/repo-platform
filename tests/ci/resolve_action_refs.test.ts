@@ -54,29 +54,29 @@ describe("collectRefs", () => {
       ],
     },
     {
-      reason: "local ./ paths and template-expression refs are skipped",
+      reason: "local ./ paths and placeholder-owner refs are skipped",
       files: [
         {
-          path: "d.jinja",
+          path: "d.yml",
           text: [
             "      - uses: ./actions/check-typography",
-            "      - uses: {{ github_username }}/repo-platform/actions/fuzz-issue@{{ uses_ref }}",
+            "      - uses: {{github_username}}/repo-platform/actions/fuzz-issue@build",
             "      - uses: gitleaks/gitleaks-action@v3",
           ].join("\n"),
         },
       ],
       expected: [
-        { repo: "gitleaks/gitleaks-action", ref: "v3", version: null, sources: ["d.jinja"] },
+        { repo: "gitleaks/gitleaks-action", ref: "v3", version: null, sources: ["d.yml"] },
       ],
     },
     {
       reason: "distinct refs of one action stay distinct pins, sorted by ref",
       files: [
         { path: "e.yml", text: "      - uses: actions/cache@v6\n" },
-        { path: "f.jinja", text: "      - uses: actions/cache@v4\n" },
+        { path: "f.yaml", text: "      - uses: actions/cache@v4\n" },
       ],
       expected: [
-        { repo: "actions/cache", ref: "v4", version: null, sources: ["f.jinja"] },
+        { repo: "actions/cache", ref: "v4", version: null, sources: ["f.yaml"] },
         { repo: "actions/cache", ref: "v6", version: null, sources: ["e.yml"] },
       ],
     },
@@ -135,21 +135,15 @@ function runOver(
     ].join("\n"),
   );
   chmodSync(gh, 0o755);
-  for (const dir of [
-    ".github/workflows",
-    "files/m/.github/workflows",
-    "actions/x",
-    "templates/t",
-  ]) {
+  for (const dir of [".github/workflows", "files/m/.github/workflows", "actions/x"]) {
     mkdirSync(join(root, dir), { recursive: true });
   }
   // One file per scanned root, the sync writer's workflow block file
-  // included: a plain .yml, its block value before the extension.
+  // included: its block value sits before the .yml extension.
   const files: Record<string, string[]> = {
     ".github/workflows/a.yml": [],
     "files/m/.github/workflows/c.block.toolchain.yml": [],
     "actions/x/action.yml": [],
-    "templates/t/b.yml.jinja": [],
   };
   const names = Object.keys(files);
   Object.entries(pins).forEach(([action, ref], index) => {
@@ -215,7 +209,7 @@ describe("resolve_action_refs.ts over a scratch tree", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr.trimEnd().split("\n")).toEqual([
       `::error::action-refs: actions/cache@${SHA} # v6.1.0: v6.1.0 is commit ${OTHER}, not ${SHA} (pinned in files/m/.github/workflows/c.block.toolchain.yml). Re-pin the sha the comment names, or fix the comment.`,
-      `::error::action-refs: actions/setup-node@v7.0.999 (the comment beside ${DEAD}) does not resolve to any commit, tag, or branch upstream (pinned in .github/workflows/a.yml). Name the release the pinned sha is.`,
+      `::error::action-refs: actions/setup-node@v7.0.999 (the comment beside ${DEAD}) does not resolve to any commit, tag, or branch upstream (pinned in files/m/.github/workflows/c.block.toolchain.yml). Name the release the pinned sha is.`,
       "::error::action-refs: astral-sh/setup-uv@v9 does not resolve to any commit, tag, or branch upstream (pinned in actions/x/action.yml). Check the repository's published tags and pin one that exists.",
       `::error::action-refs: could not verify oven-sh/setup-bun@${OTHER} (gh: Internal Server Error (HTTP 500)). This is an API problem (rate limit, auth, outage), not evidence the pin is wrong - re-run the job.`,
     ]);

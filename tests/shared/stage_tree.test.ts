@@ -245,33 +245,25 @@ describe("stageComposedTreeArgv", () => {
   test("every composed-tree staging site stages through the ONE shared argv", () => {
     // The agreement holds BY CONSTRUCTION only while every composed-tree
     // site calls the helper, so a site quietly reverting to a raw `add`
-    // argv is the regression this pin makes loud. Sites whose staged tree
-    // only has to EQUAL the published one (smoke source, golden renders,
-    // the sync rehearsal) are covered too: a composed tree that grew an
-    // ignore-matching file would make them validate a different tree than
-    // production publishes. Both raw spellings (`-A`, `--all`) match, and
+    // argv is the regression this pin makes loud. The provenance rebuild
+    // is covered too: a tree that grew an ignore-matching file would make
+    // it verify a different tree than production publishes. Both raw
+    // spellings (`-A`, `--all`) match, and
     // deliberately-raw sites are pinned per call so a swap cannot pass.
     const rawAdd = /"add",\s*"(?:-A|--all)"/g;
     const sites: { rel: string; composed: boolean; allowedPlainAdds?: string[] }[] = [
       { rel: ".github/scripts/build-branches/publish.ts", composed: true },
       { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
-      { rel: ".github/scripts/ci/smoke_generate.ts", composed: true },
-      { rel: "scripts/generate/render_goldens.ts", composed: true },
       // The plain adds stage managed-repo trees whose own ignore rules must
       // keep applying: --force would smuggle ignored files, so these sites
       // must never adopt the helper.
-      {
-        rel: ".github/scripts/sync/rehearse.ts",
-        composed: true,
-        allowedPlainAdds: ['"-C", targetDir, "add", "-A"'],
-      },
       {
         rel: ".github/scripts/shared/open_automation_pr.ts",
         composed: false,
         allowedPlainAdds: ['["git", "add", "-A"]'],
       },
       {
-        rel: ".github/scripts/sync/commit_push.ts",
+        rel: ".github/scripts/sync/deliver.ts",
         composed: false,
         allowedPlainAdds: ['git("add", "--all")'],
       },

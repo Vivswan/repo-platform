@@ -1,6 +1,6 @@
-# Weekly: regenerate the gitignore outputs (base skeleton, toolchain
-# fragments, the sync writer's files/ copies, this repo's own .gitignore)
-# from github/gitignore's current HEAD
+# Weekly: regenerate the gitignore outputs (files/base/.gitignore, the
+# per-module block files, this repo's own .gitignore) from
+# github/gitignore's current HEAD
 # and open a PR when upstream changed anything we consume. This workflow is
 # the only place that fetches upstream: nothing is pinned and no CI job
 # verifies the outputs, so the diff below IS the upstream change.
@@ -48,14 +48,14 @@ jobs:
       - name: Detect changes
         id: changes
         # add -A first: `git diff --quiet` ignores UNTRACKED files, so a
-        # brand-new fragment (a module newly declaring gitignore_sources)
+        # brand-new block file (a module newly declaring gitignore_sources)
         # would read as no-change and never land - and this workflow is
         # the generator's only caller. open_automation_pr.ts re-adds
         # everything itself, so the staging here is only the probe's.
         run: |
           git add -A
           if git diff --cached --quiet; then
-            echo "gitignore templates are up to date."
+            echo "gitignore outputs are up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -102,10 +102,10 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: automation/gitignore-refresh
-          PR_TITLE: "chore: refresh gitignore templates from github/gitignore"
-          COMMIT_MESSAGE: "chore: refresh gitignore templates from github/gitignore"
-          PR_BODY: "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, the sync
-            writer's `files/` copies, this repo's own `.gitignore`) from
+          PR_TITLE: "chore: refresh gitignore outputs from github/gitignore"
+          COMMIT_MESSAGE: "chore: refresh gitignore outputs from github/gitignore"
+          PR_BODY: "Automated regeneration of the gitignore outputs (`files/base/.gitignore`, the per-module
+            block files, this repo's own `.gitignore`) from
             [github/gitignore](https://github.com/github/gitignore)'s current HEAD. The diff
             is the upstream change to the sections we consume. Merging this rebuilds the build branch; the next
             sync pushes it to the fleet."

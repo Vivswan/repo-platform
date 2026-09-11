@@ -1,19 +1,11 @@
 // Rules pinning the bun toolchain: package homes and lockfiles, the
 // @types/bun coupling, version-file setup steps, the composite actions' bun
-// guard, the local runtime, dependabot's action directories, and files.yml's
-// copy of every toolchain pin, of the pages defaults, and of the defaults
-// copier.yml still answers for.
+// guard, the local runtime, and dependabot's action directories.
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../../../.github/scripts/build-branches/branch_tree.ts";
-import { type ModuleData, parseFilesConfig } from "../../../actions/plan/files_config.ts";
-import {
-  type DefaultSource,
-  type PlanDefaults,
-  REQUIRED_DEFAULTS,
-} from "../../../actions/plan/plan.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
@@ -21,16 +13,14 @@ import {
   BUN_SETUP_ACTION,
   usesBunSetup,
   usesSetupBun,
-} from "../../generate/toolchain_pins.ts";
-import { normalizeJinja } from "../../lib/jinja_subset.ts";
-import { canonical, type Mismatch, mustMatch } from "./comparison.ts";
+} from "../../lib/action_steps.ts";
+import { type Mismatch, mustMatch } from "./comparison.ts";
 import { actionManifestFiles, DELIVERY_REF } from "./delivery_pins.ts";
 import {
   asRecord,
   ciJobs,
-  copierConfig,
-  jinjaVars,
-  loadManifests,
+  modules,
+  OWNER,
   packageScripts,
   REPO_ROOT,
   read,
@@ -138,7 +128,7 @@ export function bunTypesAheadMismatches(
     if (major > runtimeMajor || (major === runtimeMajor && minor > runtimeMinor)) {
       mismatches.push({
         file,
-        expected: `@types/bun at MAJOR.MINOR ${runtimeMajor}.${runtimeMinor} or older (templates/bun/module.yml pins the runtime at ${runtimeVersion})`,
+        expected: `@types/bun at MAJOR.MINOR ${runtimeMajor}.${runtimeMinor} or older (files.yml pins the bun runtime at ${runtimeVersion})`,
         got: `${version} - types ahead of the runtime; bump the toolchain pin first (refresh-toolchains owns it)`,
       });
     }
@@ -168,7 +158,7 @@ export function lockedTypesBunVersion(lockText: string, where: string): string {
  *  self-cleaning --check); a drift to a bare `bun test` would stay green. */
 export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
   test: "bun scripts/run_tests.ts",
-  "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
+  "build:check": "bun .github/scripts/build-branches/branch_tree.ts --check",
   "docs:check": "bun scripts/docs_check.ts",
 };
 
@@ -255,86 +245,7 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
-/** The runner scratch root a setup-bun pin may sit under instead of the
- *  action path. */
-export const FETCHED_TREE_PIN_ANCHOR = "${{ runner.temp }}/";
-
-/** A clean path under the runner scratch root: every segment drawn from
- *  [A-Za-z0-9._-], not a dot or dot-dot, and not ending in a period (a
- *  traversal would reach the caller's checkout, a `$` would expand in the
- *  shell; Windows strips trailing periods and spaces and reads a backslash
- *  as a separator, so the whitelist is what closes the class, not a list
- *  of spellings). */
-function cleanScratchPath(value: unknown): value is string {
-  if (typeof value !== "string" || !value.startsWith(FETCHED_TREE_PIN_ANCHOR)) return false;
-  return value
-    .slice(FETCHED_TREE_PIN_ANCHOR.length)
-    .split("/")
-    .every((s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== "." && s !== ".." && !s.endsWith("."));
-}
-
-/** A setup-bun pin under the runner scratch root, accepted only as a clean
- *  path to a .bun-version dotfile there. */
-export function fetchedTreePin(value: unknown): boolean {
-  return cleanScratchPath(value) && value.endsWith("/.bun-version");
-}
-
-/** Whether `condition` is a pure `&&`-conjunction carrying `atom` as one of
- *  its terms; any `||`, negation, or parenthesis anywhere means the setup
- *  may run without that term, so the answer is no. */
-function conjunctionRequires(condition: string, atom: string): boolean {
-  if (/\|\||[()]|!(?!=)/.test(condition)) return false;
-  return condition
-    .split("&&")
-    .map((term) => term.trim())
-    .includes(atom);
-}
-
-/** Inherited shell variables that could skip or rewrite a bash step's lines
- *  before they run; a clearing step must carry each one emptied. */
-export const NEUTRALIZED_SHELL_ENV = ["BASH_ENV", "SHELLOPTS"];
-
-/** The paths a bash step removes beyond a caller's reach: the shell knobs
- *  above emptied, and ONE non-blank non-comment line `/bin/rm -rf "<clean
- *  scratch path>" ...` (no rm from PATH, no operand the shell could expand
- *  or a caller could point elsewhere); else nothing. One rm for every path
- *  is what fails closed: it attempts each removal and exits nonzero when
- *  any failed, whatever the shell's options, where a line per path stops
- *  at the first failure or masks it behind the last. */
-function pathsClearedBy(step: Record<string, unknown>): string[] {
-  const stepEnv =
-    typeof step.env === "object" && step.env !== null ? (step.env as Record<string, unknown>) : {};
-  const neutralized = NEUTRALIZED_SHELL_ENV.every((name) => stepEnv[name] === "");
-  if (step.shell !== "bash" || !neutralized || typeof step.run !== "string") return [];
-  const lines = step.run.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line));
-  if (lines.length !== 1) return [];
-  // Operands are space-separated: bash joins adjacent quoted strings into
-  // one word.
-  const removed = /^\s*\/bin\/rm -rf (?:-- )?("[^"]+"(?: "[^"]+")*)\s*$/.exec(lines[0]);
-  if (removed === null) return [];
-  const operands = removed[1].match(/"([^"]+)"/g)?.map((quoted) => quoted.slice(1, -1)) ?? [];
-  return operands.every(cleanScratchPath) ? operands : [];
-}
-
-/** Clearing evidence for a runner-scratch pin: a step before `index` that
- *  removes a path the pin sits under (any prefix of a clean pin is clean)
- *  and whose success the setup step's own condition requires. */
-export function pinRootCleared(
-  pin: string,
-  steps: Record<string, unknown>[],
-  index: number,
-): boolean {
-  const setupIf = String(steps[index]?.if ?? "");
-  return steps
-    .slice(0, index)
-    .some(
-      (step) =>
-        conjunctionRequires(setupIf, `steps.${String(step.id)}.outcome == 'success'`) &&
-        pathsClearedBy(step).some((root) => pin.startsWith(`${root}/`)),
-    );
-}
-
-/** The action-local pin a composite action's bun setup reads: the generated
+/** The action-local pin a composite action's bun setup reads: the
  *  .bun-version beside its action.yml. */
 export const ACTION_BUN_PIN = "${{ github.action_path }}/.bun-version";
 
@@ -343,7 +254,7 @@ export const RESOLVER_STEP_ID = "action-bun";
 
 /** The one spelling of the shared bun-setup step's `uses:`: this repository's
  *  published action at the delivery ref. */
-export const BUN_SETUP_USES = `Vivswan/repo-platform/${BUN_SETUP_ACTION}@${DELIVERY_REF}`;
+export const BUN_SETUP_USES = `${OWNER}/repo-platform/${BUN_SETUP_ACTION}@${DELIVERY_REF}`;
 
 const stepName = (step: Record<string, unknown>): string =>
   String(step.name ?? step.id ?? step.uses ?? "<unnamed>");
@@ -451,8 +362,6 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       got: line,
     });
   }
-  // The one other pin anchor: a tree the action fetched under the runner's
-  // scratch root is no more the caller's than the action path is.
   const pinValue = isSharedSetup ? "${{ inputs.pin }}" : ACTION_BUN_PIN;
   const pinLine = `bun-version-file: ${pinValue}`;
   for (const step of setupSteps) {
@@ -462,158 +371,25 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
         ? (withBlock as Record<string, unknown>)["bun-version-file"]
         : undefined;
     if (value === pinValue) continue;
-    if (fetchedTreePin(value)) {
-      // The scratch path is predictable, so a caller could plant the pin
-      // before the action runs; only an earlier step of THIS action
-      // clearing the pin's root makes the path the action's own.
-      if (pinRootCleared(value as string, steps, steps.indexOf(step))) continue;
-      mismatches.push({
-        file,
-        expected:
-          `a step before the setup-bun pinned at '${value}' that clears that pin's runner-scratch root ` +
-          "(a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf " +
-          "of clean paths under that root, and whose success this setup's condition requires)",
-        got: "no such step - a caller could plant that pin before the action runs",
-      });
-      continue;
-    }
     mismatches.push({
       file,
-      expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
-      got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
+      expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
+      got: "a setup-bun step pinned to something other than the action-local dotfile - anything else can resolve the CALLER repository's bun version files",
     });
   }
   return mismatches;
 }
 
-/** One manifest's value for a module-data key files.yml copies. */
-export interface ManifestValue {
-  module: string;
-  value: unknown;
-}
-
-/** files.yml's `modules.<m>.<key>` against the manifests' `<twin>` values,
- *  both directions: the manifest is the source until the cutover, so a
- *  value present, absent, or different on one side is a stale copy the
- *  fleet would read (a pin the refresh bumped on one side only; pages
- *  defaults the cutover would then write into every registration as if
- *  the repository had chosen them). */
-export function filesModuleDataMismatches(
-  key: string,
-  twin: string,
-  manifestValues: ManifestValue[],
-  filesModules: Record<string, Record<string, unknown>>,
-): Mismatch[] {
-  const mismatches: Mismatch[] = [];
-  for (const { module, value } of manifestValues) {
-    const declared = filesModules[module]?.[key];
-    if (canonical(declared) !== canonical(value)) {
-      mismatches.push({
-        file: `files.yml modules.${module}.${key}`,
-        expected: `${canonical(value)} (templates/${module}/module.yml's ${twin})`,
-        got: declared === undefined ? `no ${key}` : canonical(declared),
-      });
-    }
-  }
-  const declaring = new Set(manifestValues.map(({ module }) => module));
-  for (const [module, data] of Object.entries(filesModules)) {
-    if (data[key] !== undefined && !declaring.has(module)) {
-      mismatches.push({
-        file: `files.yml modules.${module}.${key}`,
-        expected: `no ${key} (templates/${module}/module.yml declares no ${twin})`,
-        got: canonical(data[key]),
-      });
-    }
-  }
-  return mismatches;
-}
-
-/** The copier question each default the plan reads still answers for, by
- *  PlanDefaults key: the plan and the registration cutover read files.yml,
- *  copier's question keeps the recorded answers' default, and the two must
- *  agree until the question goes. Keyed on the plan's own type, so a
- *  default the plan gains without a question here fails to typecheck. */
-export const COPIER_QUESTIONS: Readonly<Record<keyof PlanDefaults, string>> = {
-  skillsDir: "skills_dir",
-  pagesDist: "pages_dist_dir",
-  docsPath: "docs_site_path",
-};
-
-/** A files.yml module-data default the plan reads, with the copier
- *  question it mirrors. */
-export interface CopierBackedDefault extends DefaultSource {
-  question: string;
-}
-
-/** The plan's required defaults, each with its copier question. */
-export const COPIER_BACKED_DEFAULTS: readonly CopierBackedDefault[] = (
-  Object.keys(COPIER_QUESTIONS) as (keyof PlanDefaults)[]
-).map((name) => ({ ...REQUIRED_DEFAULTS[name], question: COPIER_QUESTIONS[name] }));
-
-/** files.yml's copy of one copier-backed default against the question's
- *  default. */
-export function filesDefaultMismatches(
-  backed: CopierBackedDefault,
-  copierDefault: string,
-  filesModules: Record<string, ModuleData>,
-): Mismatch[] {
-  const module = filesModules[backed.module];
-  const declared = module === undefined ? undefined : backed.pick(module);
-  if (declared === copierDefault) return [];
-  return [
-    {
-      file: `files.yml modules.${backed.module}.${backed.key}`,
-      expected: `${canonical(copierDefault)} (copier.yml's ${backed.question} default)`,
-      got: declared === undefined ? `no ${backed.key}` : canonical(declared),
-    },
-  ];
-}
-
-/** One copier question's non-empty string default. */
-export function copierDefault(
-  question: string,
-  copier: Record<string, unknown> = copierConfig(),
-): string {
-  const value = asRecord(copier[question], `copier.yml ${question}`).default;
-  if (typeof value !== "string" || value === "") {
-    throw new Error(`copier.yml: ${question} has no string default`);
-  }
-  return value;
+/** The bun module's runtime pin in files.yml, the single source every
+ *  .bun-version dotfile is written from. */
+export function bunRuntimePin(): string {
+  const pin = modules().find((m) => m.name === "bun")?.pin;
+  if (pin === undefined) throw new Error("files.yml modules.bun declares no pin - anchor lost");
+  return pin.version;
 }
 
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const toolchainRules: Rule[] = [
-  {
-    name: "files-pins",
-    run: () =>
-      filesModuleDataMismatches(
-        "pin",
-        "toolchain.pin",
-        loadManifests().flatMap((m) =>
-          m.toolchain?.pin ? [{ module: m.module, value: m.toolchain.pin }] : [],
-        ),
-        parseFilesConfig(read("files.yml")).modules,
-      ),
-  },
-  {
-    name: "files-pages",
-    run: () =>
-      filesModuleDataMismatches(
-        "pages",
-        "pages",
-        loadManifests().flatMap((m) => (m.pages ? [{ module: m.module, value: m.pages }] : [])),
-        parseFilesConfig(read("files.yml")).modules,
-      ),
-  },
-  {
-    name: "files-defaults",
-    run: () => {
-      const modules = parseFilesConfig(read("files.yml")).modules;
-      return COPIER_BACKED_DEFAULTS.flatMap((backed) =>
-        filesDefaultMismatches(backed, copierDefault(backed.question), modules),
-      );
-    },
-  },
   {
     // Lockfiles come from the bootstrap's recursive walk, the other homes
     // from one level down: a package nested inside an action fails here.
@@ -643,19 +419,14 @@ export const toolchainRules: Rule[] = [
   },
   {
     // The INSTALLED @types/bun (each lockfile's resolved entry, root plus the
-    // actions/ packages declaring it, the bun-dirs directories) against the
-    // manifests' bun runtime pin, ahead-direction only
+    // actions/ packages declaring it, the bun-dirs directories) against
+    // files.yml's bun runtime pin, ahead-direction only
     // (bunTypesAheadMismatches says why). The lock is the compared side on
     // purpose: package.json's caret range is only a floor, so a lock resolving
     // a newer MINOR while the range stays put would typecheck against APIs the
-    // pinned runtime lacks and previously passed here. The runtime side reads
-    // the manifest itself, the single source the .bun-version dotfiles come from.
+    // pinned runtime lacks and previously passed here.
     name: "bun-types-pin",
     run: () => {
-      const bun = loadManifests().find((m) => m.module === "bun");
-      if (bun?.toolchain?.pin === undefined) {
-        throw new Error("templates/bun/module.yml declares no toolchain.pin - anchor lost");
-      }
       const types: { file: string; version: string }[] = [];
       for (const dir of [".", ...actionDirsCarrying("package.json")]) {
         const pkgRel = dir === "." ? "package.json" : `${dir}/package.json`;
@@ -673,24 +444,25 @@ export const toolchainRules: Rule[] = [
       if (types.length === 0) {
         throw new Error("no package.json declares @types/bun - anchor lost");
       }
-      return bunTypesAheadMismatches(bun.toolchain.pin.version, types);
+      return bunTypesAheadMismatches(bunRuntimePin(), types);
     },
   },
   {
     // Every pinned-toolchain setup step must read its version dotfile: the
-    // manifest pin and the generated dotfile only govern anything while the
-    // workflows actually pass the version-file input. Real steps are matched
-    // structurally (the key inside that step's own with: block); commented
-    // starter examples are checked as comment text and can never satisfy the
-    // per-action anchors. actions/ is out of scope but not unpinned: each
-    // composite action reads its own generated .bun-version (the actions-bun-guard
-    // rule pins that, action_path-anchored so the CALLER's dotfiles never pick the version).
+    // pin dotfiles only govern anything while the workflows actually pass
+    // the version-file input. Real steps are matched structurally (the key
+    // inside that step's own with: block); commented starter examples are
+    // checked as comment text and can never satisfy the per-action
+    // anchors. actions/ is out of scope but not unpinned: each composite
+    // action reads its own .bun-version (the actions-bun-guard rule pins
+    // that, action_path-anchored so the CALLER's dotfiles never pick the
+    // version).
     name: "toolchain-version-files",
     run: () => {
       const mismatches: Mismatch[] = [];
       const files = [
         ...walkFiles(".github/workflows").map((f) => f.path),
-        ...walkFiles("templates")
+        ...walkFiles("files")
           .filter((f) => !f.symlink)
           .map((f) => f.path),
       ];
@@ -740,46 +512,9 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    name: "dependabot-actions-block",
-    run: () => {
-      // The repo entry covers "/" plus its composite actions/ dirs (which
-      // downstream repos do not have), so compare the shared shape with the
-      // directory coverage held out, and pin each side's coverage of "/".
-      // groups IS compared: one-PR-per-cycle grouping is shared policy.
-      const rootActionsEntry = (rel: string, text: string, wantDirs: (d: unknown) => boolean) => {
-        const doc = asRecord(parseYaml(text), rel);
-        const entries = (doc.updates as Record<string, unknown>[]).filter(
-          (entry) => entry["package-ecosystem"] === "github-actions",
-        );
-        if (entries.length !== 1)
-          throw new Error(`${rel}: expected exactly one github-actions dependabot entry`);
-        const { directory, directories, ...shape } = entries[0];
-        if (!wantDirs(directory ?? directories))
-          throw new Error(`${rel}: github-actions entry does not cover "/"`);
-        return shape;
-      };
-      const expected = rootActionsEntry(
-        "templates/base/.github/dependabot.yml.jinja",
-        normalizeJinja(read("templates/base/.github/dependabot.yml.jinja"), jinjaVars()),
-        (d) => d === "/",
-      );
-      const got = rootActionsEntry(
-        ".github/dependabot.yml",
-        read(".github/dependabot.yml"),
-        (d) => d === "/" || (Array.isArray(d) && d.includes("/")),
-      );
-      if (canonical(expected) === canonical(got)) return [];
-      return [
-        { file: ".github/dependabot.yml", expected: canonical(expected), got: canonical(got) },
-      ];
-    },
-  },
-  {
     // Every composite-action package must sit in the github-actions
     // block's directories list, or its upstream pins quietly stop
-    // receiving dependabot bumps. Nothing else guards the list: the
-    // dogfood comparison above deliberately holds directories out
-    // (downstream repos have no actions/ dirs).
+    // receiving dependabot bumps.
     name: "dependabot-action-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -809,8 +544,8 @@ export const toolchainRules: Rule[] = [
   },
   {
     // Every bun-touching composite action carries exactly one bun setup
-    // reading its own generated .bun-version, never the CALLER checkout's
-    // (whose older bun cannot parse the lockfiles repo-platform's writes).
+    // reading its own .bun-version, never the CALLER checkout's (whose
+    // older bun cannot parse the lockfiles repo-platform's writes).
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();
@@ -823,11 +558,11 @@ export const toolchainRules: Rule[] = [
   },
   {
     // The LOCAL bun runtime must be the pinned MAJOR.MINOR (.bun-version,
-    // the dogfooded templates/bun pin): a full local `bun run check` under
-    // a different runtime is unreliable evidence - it once passed clean
-    // under 1.3.14 while CI's 1.4.0 went red on the same commit. In CI
-    // this rule can never fire (setup-bun installs from bun-version-file),
-    // so it exists exclusively as a local-gate guard.
+    // the files.yml bun pin): a full local `bun run check` under a different
+    // runtime is unreliable evidence - it once passed clean under 1.3.14
+    // while CI's 1.4.0 went red on the same commit. In CI this rule can
+    // never fire (setup-bun installs from bun-version-file), so it exists
+    // exclusively as a local-gate guard.
     name: "local-bun-runtime",
     run: () => bunRuntimeMismatches(Bun.version, read(".bun-version").trim()),
   },

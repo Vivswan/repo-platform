@@ -1,10 +1,10 @@
 // The registration file's grammar (.repo-platform.yml), shared by every
-// reader: the module list the fleet plans and the sync select on, the
-// template's module vocabulary it is checked against (copier.yml's
-// choices), and the strict full document the plan action resolves a
-// repository's CI from. It lives inside the plan action because it needs
-// yaml and zod, which the dependency-free actions/shared zone cannot carry;
-// the sync imports it by relative path.
+// reader: the module list the fleet plans and the sync select on (checked
+// against files.yml's modules by the reader that has it), and the strict
+// full document the plan action resolves a repository's CI from. It lives
+// inside the plan action because it needs yaml and zod, which the
+// dependency-free actions/shared zone cannot carry; the sync imports it by
+// relative path.
 
 import { parse } from "yaml";
 import { z } from "zod";
@@ -83,30 +83,7 @@ export function declaredModules(registrationText: string): string[] | null {
   return readModules(data).modules;
 }
 
-/** The module vocabulary of a template ref: copier.yml's `modules` choice
- *  values, in the order the generated block lists them (the canonical
- *  module order). */
-export function readModuleOrder(
-  data: unknown,
-  label = "copier.yml",
-): { choices: string[] | null; errors: string[] } {
-  if (!isPlainObject(data) || !isPlainObject(data.modules)) {
-    return { choices: null, errors: [`${label}: no \`modules\` question found`] };
-  }
-  const raw = data.modules.choices;
-  const values = Array.isArray(raw) ? raw : isPlainObject(raw) ? Object.values(raw) : null;
-  if (values === null || !values.every((value) => typeof value === "string" && value !== "")) {
-    return {
-      choices: null,
-      errors: [`${label}: modules.choices must map choice labels to module-name strings`],
-    };
-  }
-  return { choices: values, errors: [] };
-}
-
-// The shape constraints copier.yml's validators state for the same
-// answers, so a registration value is refused exactly where a recorded
-// answer would have been.
+// The shape constraints every value the writer substitutes must meet.
 const slug = z
   .string()
   .regex(
@@ -139,7 +116,7 @@ const plainText = (what: string) =>
   z.string().refine((value) => !/["\\\p{Cc}]/u.test(value), {
     message: `${what} must not contain double quotes, backslashes, or control characters`,
   });
-/** The label shape the fuzz-issue action and the copier validators enforce. */
+/** The label shape the fuzz-issue action enforces. */
 export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 const label = z
   .string()
@@ -149,8 +126,8 @@ const label = z
   );
 
 /** The full registration document. Module names, `pages.setup` tokens, and
- *  `labels` keys are checked against the template's module data by the
- *  reader that has it (the plan action); the schema pins the shapes. */
+ *  `labels` keys are checked against files.yml's module data by the reader
+ *  that has it (the plan action); the schema pins the shapes. */
 export const registrationSchema = z.strictObject({
   modules: z.array(z.unknown()),
   project: z

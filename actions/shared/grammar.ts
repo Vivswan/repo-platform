@@ -14,8 +14,8 @@
 // marker line with one trailing space down a different path than the others.
 //
 // DEPENDENCY-FREE ZONE: actions/shared/ ships on the build branch and runs
-// where no node_modules exist (copier's stamp hook inside fresh renders,
-// composite actions before their own installs), so node builtins and
+// where no node_modules exist (composite actions before their own
+// installs), so node builtins and
 // zone-internal relative imports only; tests/actions/shared_zone.test.ts
 // enforces it.
 
@@ -59,23 +59,6 @@ export const HTML_REGION_MARKERS: RegionMarkers = {
   end: "<!-- END REPO-PLATFORM MANAGED -->",
 };
 
-/** One grammar's behavior columns. Every column is total on purpose: a new
- *  grammar must answer each question explicitly, never inherit a
- *  fallthrough. The declaration-reading columns take the fields WITHOUT
- *  the discriminant, so a caller holding the marker strings alone reads
- *  the same row. */
-export interface GrammarSpec<Declaration> {
-  /** Every marker string a declaration of this grammar owns, in the
-   *  grammar's in-file order. */
-  markers: (declaration: Omit<Declaration, "grammar">) => readonly string[];
-  /** The declaration's marker-string fields in the manifest wire's field
-   *  order: the emitter (actions/shared/manifest.ts) writes them under
-   *  these names, and the sync parse plus the validator's manifest check
-   *  require each as a string - so no spelling of the split fields exists
-   *  outside this table. */
-  wireFields: readonly Exclude<keyof Declaration, "grammar">[];
-}
-
 /** A type that compiles only when `T` is never: the exhaustiveness pin for
  *  each wire-field tuple below (a declaration field missing from its tuple
  *  is a compile error, not a runtime gap). */
@@ -92,51 +75,19 @@ export type ManagedRegionWireFieldsExhaustive = AssertNever<
   Exclude<Exclude<keyof ManagedRegionSplit, "grammar">, (typeof MANAGED_REGION_WIRE_FIELDS)[number]>
 >;
 
-export const GRAMMAR: { [K in GrammarId]: GrammarSpec<SplitShapes[K]> } = {
-  "managed-region": {
-    markers: (declaration) => [declaration.begin, declaration.end],
-    wireFields: MANAGED_REGION_WIRE_FIELDS,
-  },
-};
-
-/** The one row lookup, loud on a miss: the type bridge makes a missing row
- *  a compile error, so a miss at runtime means data reached here past the
- *  type system (a cast, raw JSON) and must never fall through quietly.
- *  Own-property lookup: an inherited name ("constructor") must read as
- *  unknown, not as an Object.prototype function. */
-export function grammarSpec<K extends GrammarId>(grammar: K): GrammarSpec<SplitShapes[K]> {
-  const spec = Object.hasOwn(GRAMMAR, grammar) ? GRAMMAR[grammar] : undefined;
-  if (spec === undefined) {
-    throw new Error(
-      `unknown split grammar '${String(grammar)}' - add its row to the GRAMMAR ` +
-        "table (actions/shared/grammar.ts) together with its ownership-schema arm",
-    );
-  }
-  return spec;
-}
-
-/** The marker strings a split declaration owns, via its grammar's row. */
-export function grammarMarkers<K extends GrammarId>(
-  grammar: K,
-  declaration: SplitShapes[K],
-): readonly string[] {
-  return grammarSpec(grammar).markers(declaration);
-}
+/** The grammar ids the manifest may name, as runtime data for the
+ *  UNTRUSTED-input check below. */
+export const GRAMMAR_IDS: readonly GrammarId[] = ["managed-region"];
 
 /** Table membership for UNTRUSTED data (manifest text riding through a
  *  target checkout): the value narrowed to a GrammarId, or null. One
  *  narrowing owner, so the sync parse and the validator cannot disagree
- *  on what counts as a known grammar. Own-property lookup, like
- *  grammarSpec. */
+ *  on what counts as a known grammar. */
 export function knownGrammar(value: unknown): GrammarId | null {
-  return typeof value === "string" && Object.hasOwn(GRAMMAR, value) ? (value as GrammarId) : null;
+  return typeof value === "string" && (GRAMMAR_IDS as readonly string[]).includes(value)
+    ? (value as GrammarId)
+    : null;
 }
-
-/** How many opening lines may hold the managed header: template sources
- *  keep it at the top, at most below a short jinja preamble that rendering
- *  collapses. One constant for the template-side decoration checks
- *  (scripts/ownership/decoration_checks.ts) and the validator's rendered-file check. */
-export const HEADER_WINDOW = 10;
 
 // --- split-file line semantics ------------------------------------------------
 
@@ -175,7 +126,7 @@ export function markerLineCount(content: string, marker: string): number {
   return splitLines(content).filter((line) => isMarkerLine(line.text, marker)).length;
 }
 
-/** Substring occurrences, the way validate_generated_files counts. */
+/** Substring occurrences, the way validate_managed_files counts. */
 export function substringCount(content: string, marker: string): number {
   return content.split(marker).length - 1;
 }

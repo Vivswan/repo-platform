@@ -8,8 +8,8 @@
 # Vivswan/github-settings-as-code in
 # single-repo mode once per repository in a fail-fast-free matrix. Targets
 # are enrolled, adopted repos (a readable .repo-platform.yml is the
-# opt-in) plus this repository itself (its baseline facts come from
-# .repo-platform-answers.yml). Repos heal independently: one target's
+# opt-in) plus this repository itself (its facts come from its own
+# .repo-platform.yml). Repos heal independently: one target's
 # failure is its own red "apply (<repo>)" job and never blocks the others.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
@@ -173,7 +173,7 @@ jobs:
     # target-derived output for every step after it.
     env:
       HIDE_DETAILS: ${{ matrix.private }}
-      # Distinct from the template sync's report: failure_issue.ts matches
+      # Distinct from the sync's report: failure_issue.ts matches
       # by exact title, so a shared one would let either workflow's green
       # run close the other's open report.
       SETTINGS_REPORT_TITLE: "[automated] repo-platform settings: private failure report"
@@ -209,12 +209,11 @@ jobs:
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The managed baseline for THIS repository's facts, then the repo's own
-      # settings.yml merged over it (settings_layer_step.ts: the operator
-      # row reads its checkout, every other target is fetched at the pinned
-      # commit). Scratch filenames are fixed and neutral: a redacted slug
-      # reaches the scripts only through env (already masked); the operator
-      # repo has no .repo-platform.yml to fetch, so its facts come from its
-      # recorded answers in this checkout. Both run BEFORE the settings
+      # settings.yml merged over it. settings_layer_step.ts picks the source:
+      # the operator row reads its own checkout's .repo-platform.yml and
+      # layer, every other target is fetched at the pinned commit. Scratch
+      # filenames are fixed and neutral: a redacted slug reaches the scripts
+      # only through env (already masked). Both run BEFORE the settings
       # action, so its own private-repos redaction cannot cover what they
       # print, and both quote repo-owned content when they fail;
       # run_hidden.ts captures that for a private target.
@@ -332,7 +331,7 @@ jobs:
       # of this public log, which means the detail only exists in
       # RUNNER_TEMP. Without this step it would die with the runner and
       # the operator would see an exit code and nothing else, breaking the
-      # private-detail contract in docs/private-repos.md. TARGET comes
+      # private-target contract in docs/settings.md. TARGET comes
       # from the resolve step via GITHUB_ENV.
       - name: Deliver hidden failure diagnostics
         if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
@@ -344,11 +343,11 @@ jobs:
         run: bun .github/scripts/sync/failure_issue.ts deliver
 
       # Without this the issue stays open after a recovered run, and the
-      # template sync's own green run could close a report the settings
-      # apply is still failing on - which is why the two carry different
-      # titles. A green job is not enough on its own: a MOVED target means
-      # this run never checked the settings, so an open report stays open
-      # until a run actually applies. The two skips are terminal - the repo
+      # sync's own green run could close a report the settings apply is
+      # still failing on - which is why the two carry different titles. A
+      # green job is not enough on its own: a MOVED target means this run
+      # never checked the settings, so an open report stays open until a
+      # run actually applies. The two skips are terminal - the repo
       # opted out, or has no settings.yml to layer yet - so they resolve.
       - name: Resolve the settings failure report
         if: >-

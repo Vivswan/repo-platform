@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Directives, parseDirectives } from "../../.github/scripts/fleet/fleet_sync_marker.ts";
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
-import { MODULE_ORDER } from "../../scripts/lib/module_manifests.ts";
+import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -545,7 +545,7 @@ describe("parseDirectives", () => {
       expected: {
         kind: "error",
         errors: [
-          `[fleet-sync] scope: 1 of 1 module names in the modules: filters is not a module of this template (values withheld - this log is public); the modules are: ${MODULE_ORDER.join(", ")}`,
+          `[fleet-sync] scope: 1 of 1 module names in the modules: filters is not a module files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
         ],
       },
     },

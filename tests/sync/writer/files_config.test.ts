@@ -22,7 +22,7 @@ const BASE = `
 placeholders: [project_name, year]
 modules:
   bun: { gitignore_sources: [Node, Bun] }
-  pages: {}
+  pages: { settings_layers: [settings.yml] }
   docs-site: {}
   fuzzer: {}
 files:
@@ -114,8 +114,8 @@ describe("blockSources and verifySources", () => {
   const gitignore = config.files[1];
   const three = parseFilesConfig(
     BASE.replace(
-      "  pages: {}",
-      "  node: { gitignore_sources: [Node] }\n  deno: { gitignore_sources: [Deno, Node] }\n  pages: {}",
+      "  pages:",
+      "  node: { gitignore_sources: [Node] }\n  deno: { gitignore_sources: [Deno, Node] }\n  pages:",
     ),
   );
   const tree = temp.dir("writer-files-blocks-tree-");
@@ -181,7 +181,7 @@ describe("blockSources and verifySources", () => {
     }
   });
 
-  test("a file no entry or block name reads is a load error: a block file under the extension-first name", () => {
+  test("a file no entry, block name, or settings_layers declaration reads is a load error", () => {
     const tree = temp.dir("writer-files-stray-");
     writeTree(tree, {
       "base/.github/workflows/ci.yml": "",
@@ -189,6 +189,8 @@ describe("blockSources and verifySources", () => {
       "bun/.block.Node.gitignore": "## Node\n",
       "bun/.block.Bun.gitignore": "## Bun\n",
       "bun/.gitignore.block.Node": "## Node\n",
+      "bun/settings.yml": "labels: []\n",
+      "pages/settings.yml": "labels: []\n",
       "docs-site/docs-site.standalone.yml": "",
       "docs-site/docs-site.with-pages.yml": "",
       "fuzzer/.github/workflows/nightly-fuzz.yml": "",
@@ -200,7 +202,10 @@ describe("blockSources and verifySources", () => {
       if (!(error instanceof FilesConfigError)) throw error;
       problems = error.problems;
     }
-    expect(problems).toEqual(["files/bun/.gitignore.block.Node is read by no entry or block name"]);
+    expect(problems).toEqual([
+      "files/bun/.gitignore.block.Node is read by no entry or block name",
+      "files/bun/settings.yml is read by no entry or block name",
+    ]);
   });
 
   test("a missing source, an unlisted placeholder, or a marker mention is a load error", () => {

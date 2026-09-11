@@ -1,4 +1,4 @@
-# This repo's counterpart of the template's dependabot.yml.
+# This repository's own dependabot configuration.
 
 version: 2
 updates:
@@ -7,9 +7,8 @@ updates:
   # (`@<sha> # vX.Y.Z`, the shape dependabot bumps comment included), and
   # the catch-all group folds every action bump across every listed
   # directory into ONE PR per cycle (multi-directory alone still opens one
-  # PR per directory). Pins inside templates/**.jinja and files/** are
-  # invisible to dependabot and must be bumped BY HAND in that PR before
-  # all-green passes.
+  # PR per directory). Pins inside files/** are invisible to dependabot
+  # and must be bumped BY HAND in that PR before all-green passes.
   - package-ecosystem: "github-actions"
     directories:
       - "/"
@@ -30,7 +29,7 @@ updates:
       - "/actions/typos"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
-      - "/actions/validate-template-report"
+      - "/actions/validate-managed-files"
       - "/actions/yamllint"
       - "/actions/zizmor"
     groups:
@@ -173,11 +172,11 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # The validate-template-report action: the validator's yaml runtime
+  # The validate-managed-files action: the validator's yaml runtime
   # dependency plus its dev-only typing manifest. It commits bun.lock, so
   # the bun ecosystem keeps both manifest and lockfile current.
   - package-ecosystem: "bun"
-    directory: "/actions/validate-template-report"
+    directory: "/actions/validate-managed-files"
     schedule:
       interval: "monthly"
     cooldown:

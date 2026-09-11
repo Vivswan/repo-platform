@@ -1,46 +1,42 @@
 #!/usr/bin/env bun
 // Selects the push-sync fan-out: every discovered repo the token can
 // ACTUALLY push to (probed per repo - the PAT's grant is the only
-// membership fact) that has adopted the template. Invoked by sync-repos.yml's
-// plan job after discovery wrote $RUNNER_TEMP/discovered.json.
+// membership fact) that has adopted the platform (a readable
+// .repo-platform.yml). Invoked by sync-repos.yml's plan job after
+// discovery wrote $RUNNER_TEMP/discovered.json, and again by every row job
+// (its output to a file) so row indexes mean the plan's repositories.
 //
-// This job's log and matrix are publicly readable, so private repos appear
-// only by their redaction hint (redact.ts): a private matrix row carries
-// {repo: <hint>, verify} instead of the slug. No ::add-mask:: here: the
-// runner silently drops a job output containing a masked substring, which
-// would kill the matrix.
+// The rows go to $RUNNER_TEMP/rows.json with their real slugs; the job
+// output carries the count alone. This log is publicly readable, so a
+// private repository is never named here: its skips are counted, a public
+// one's are noticed by slug. The operator repository is never a row (its
+// files are the sources).
 //
 // Scope (sync_scope.ts owns the grammar): owner/name slugs, public/private,
 // modules:<a>+<b> filters (judged over each adopted repo's declared list
 // below), or the literal "all", an explicit whole-fleet scope (never
-// ambiguous, since real slugs are always owner/name). RECOVER=recopy requires
-// a scope: a recovery re-render clobbers local edits in template-managed
-// files and must never fan out across the fleet by accident, so an empty
-// repo is rejected.
-// Only the input's PRESENCE is judged (its value may be a private slug and
-// this log is public); sync-repos.yml fast-fails the same check before
-// checkout, and the copy here is the tested backstop. Env: PAT, GH_TOKEN,
-// GITHUB_RUN_ID, OWNER, RUNNER_TEMP, GITHUB_OUTPUT, RECOVER, GITHUB_EVENT_PATH.
+// ambiguous, since real slugs are always owner/name).
+// Env: PAT, GH_TOKEN, OWNER, GITHUB_REPOSITORY, RUNNER_TEMP, GITHUB_OUTPUT,
+// GITHUB_EVENT_PATH; ONLY_REPO and TARGET_SHA (the workflow_call scope).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { declaredModules } from "../../../actions/plan/registration.ts";
-import { MODULE_ORDER } from "../../../scripts/lib/module_manifests.ts";
-import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
+import { moduleRoster } from "../sync/modules.ts";
+import { ROWS_FILE } from "../sync/verdict.ts";
 import {
   captureNetwork,
   notAdoptedNotice,
+  parseDiscovered,
   pushProbeSkipNotice,
-  readDispatchBranch,
   readDispatchRepo,
   scopeSource,
   scrubSlug,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
-import { enrich, parseDiscoveredList, verifyTag } from "./redact.ts";
 import {
-  branchScopeRefusal,
   modulesAdmit,
   modulesFilterFor,
   modulesLeftOutLine,
@@ -49,42 +45,40 @@ import {
   scopeSelects,
 } from "./sync_scope.ts";
 
+/** How a private repository is named in this public log. */
+const PRIVATE_DISPLAY = "a private repository";
+
+/** The one line naming what was selected: public repositories by slug,
+ *  private ones as a count. */
+function selectedLine(rows: { repo: string; private: boolean }[]): string {
+  if (rows.length === 0) return "no adopted repos selected; nothing to sync.";
+  const publicSlugs = rows.filter((row) => !row.private).map((row) => row.repo);
+  const hidden = rows.length - publicSlugs.length;
+  const parts = [
+    ...(publicSlugs.length > 0 ? [publicSlugs.join(", ")] : []),
+    ...(hidden > 0 ? [`${hidden} private ${hidden === 1 ? "repository" : "repositories"}`] : []),
+  ];
+  return `syncing: ${parts.join(" and ")}`;
+}
+
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
-const runId = requireEnv("GITHUB_RUN_ID");
 const owner = requireEnv("OWNER");
+const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
-const scopeInput = readDispatchRepo();
-
-// Recovery scope guard (full contract in the header above): recopy needs
-// an explicit repo scope, and "all" is the deliberate whole-fleet form.
-if (env("RECOVER") === "recopy" && scopeInput === "") {
-  error(
-    "recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository, or repo=all to fan the recovery out across every managed repo.",
-  );
-  process.exit(1);
-}
-
-const scope = parseScope(scopeInput, new Set(MODULE_ORDER));
+const scope = parseScope(readDispatchRepo(), new Set(moduleRoster()));
 if (scope.kind === "error") {
   error(scope.message);
-  process.exit(1);
-}
-// The branch mode's scope guard (sync_scope.ts states the rule; the
-// reusable sync judges the branch itself against the target).
-const branchRefusal = branchScopeRefusal(scope, readDispatchBranch(), env("RECOVER"));
-if (branchRefusal !== null) {
-  error(branchRefusal);
   process.exit(1);
 }
 
 // The whole discovered fleet becomes rows, then the scope applies to them:
 // the visibility tokens need every row, and a slug must name a discovered
 // repo or the run fails (below). Visibility is discovery's, fail-closed
-// (parseDiscoveredList rejects an entry without an explicit private flag).
+// (parseDiscovered rejects an entry without an explicit private flag).
 // parseJson, not a raw JSON.parse: discovered.json carries real slugs, and
 // a SyntaxError echoing them would leak into this public log.
-const discovered = parseDiscoveredList(
+const discovered = parseDiscovered(
   parseJson(
     readFileSync(join(runnerTemp, "discovered.json"), "utf-8"),
     "select_sync_repos: discovered list",
@@ -94,19 +88,20 @@ if (discovered === null) {
   error("select_sync_repos: the discovered list must be a JSON array of {repo, private} objects");
   process.exit(1);
 }
-const rows = enrich(discovered, (slug) => verifyTag(pat, runId, slug));
-const known = new Map(rows.map((row) => [row.repo.toLowerCase(), row.private]));
+const known = new Map(discovered.map((row) => [row.repo.toLowerCase(), row.private]));
 const refusal = scopeRefusal(scope, known, scopeSource("TARGET_SHA"), owner);
 if (refusal !== null) {
   error(refusal);
   process.exit(1);
 }
 
-const repos: Record<string, unknown>[] = [];
+const rows: { repo: string; private: boolean }[] = [];
 let leftOut = 0;
-for (const row of rows) {
-  const { repo: slug, display } = row;
-  if (!scopeSelects(scope, slug, row.private)) continue;
+for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
+  const slug = entry.repo;
+  const display = entry.private ? PRIVATE_DISPLAY : slug;
+  if (slug.toLowerCase() === selfRepo.toLowerCase()) continue;
+  if (!scopeSelects(scope, slug, entry.private)) continue;
   const probeCode = pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
     notice(pushProbeSkipNotice(display));
@@ -139,7 +134,7 @@ for (const row of rows) {
     process.exit(1);
   }
   // A filter judges the declared list; a list it cannot read is reported
-  // and left out (the leg's own selection would fail on it), a repo it
+  // and left out (the writer's own selection would fail on it), a repo it
   // leaves out is counted, never named (it may be private).
   const filters = modulesFilterFor(scope, slug);
   if (filters !== null) {
@@ -155,16 +150,13 @@ for (const row of rows) {
       continue;
     }
   }
-  // The display IS the slug for public rows (enrichedRowSchema holds
-  // that invariant), so every matrix row can emit it as its repo.
-  repos.push({ repo: row.display, private: row.private, verify: row.verify });
+  rows.push({ repo: slug, private: entry.private });
 }
 
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
-setOutput("repos", JSON.stringify(repos));
-if (repos.length === 0) {
-  notice("no adopted repos selected; nothing to sync.");
-} else {
-  console.log(`syncing: ${repos.map((row) => row.repo).join(", ")}`);
-}
+writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(rows));
+setOutput("count", String(rows.length));
+const line = selectedLine(rows);
+if (rows.length === 0) notice(line);
+else console.log(line);

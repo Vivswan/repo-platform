@@ -28,7 +28,7 @@ describe("report_skipped_target.ts", () => {
       reason: "the merge skipped (no settings.yml yet)",
       env: { RENDER_SKIPPED: "false", MERGE_SKIPPED: "true" },
       notice:
-        "settings apply skipped for h**-s**r: it has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings starter seeds the file on its next template sync.",
+        "settings apply skipped for h**-s**r: it has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings starter seeds the file on its next sync.",
     },
     {
       reason: "neither skipped (the branch moved)",

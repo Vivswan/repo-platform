@@ -2,53 +2,41 @@
 // Selects and merges settings LAYERS 1 to 4 for a repository (the six-layer
 // model: docs/settings.md). No settings VALUES live here: every layer is a
 // plain settings-as-code document (the fleet baseline and its visibility
-// overlay under .github/, each selected module's settings.yml and overlay
-// beside its module.yml), and this script only picks the ones a repo's
-// facts select and merges them; merge_settings_layers.ts owns the dialect
-// and adds the repo's own settings.yml and the fleet override on top. No
-// layer file is ever synced into a client repo. Facts: the module selection
-// (.repo-platform.yml - every repository carrying one is a settings
-// target), effective visibility (private repos reject the public-only
-// layers with a 422), and the tracking labels the fleet plan resolves from
-// the registration's `labels` block (the recorded `<key>_label` answer
-// while .github/.copier-answers.yml still exists, else the module default).
+// overlay under .github/, each selected module's layer files under
+// files/<module>/, declared in files.yml's settings_layers), and this
+// script only picks the ones a repo's facts select and merges them;
+// merge_settings_layers.ts owns the dialect and adds the repo's own
+// settings.yml and the fleet override on top. No layer file is ever synced
+// into a client repo. Facts: the module selection and the tracking labels
+// (.repo-platform.yml, the one registration every fleet member carries,
+// this repository included) and the effective visibility (private repos
+// reject the public-only layers with a 422).
 // CLI: bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
-//   --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
+//   --out managed.yml [--target-dir <checkout>]
 // By default the facts come from the target's default branch via gh api
 // (env: GH_TOKEN), visibility the DECLARED repository.private in its
 // settings.yml, live-probed when undeclared; --target-dir reads a local
-// checkout (the smoke gate); --operator-answers reads the operator repo's
-// recorded answers (repo-platform is the one fleet member with no
-// .repo-platform.yml, so settings-repos.yml passes it for the self target).
+// checkout (the operator repository is its own checkout).
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
-  loadModuleData,
-  type PlanInput,
-  trackingLabels as planTrackingLabels,
-  selectModules,
-} from "../../../actions/plan/plan.ts";
-import { parseRegistration, readModules } from "../../../actions/plan/registration.ts";
-import { parseAnswers } from "../../../scripts/generate/render_dogfood.ts";
-import {
-  loadManifests,
-  type ModuleManifest,
-  SETTINGS_LAYER_FILES,
+  type ModuleData,
+  parseFilesConfig,
+  SETTINGS_LAYER_ORDER,
   type SettingsLayerName,
-} from "../../../scripts/lib/module_manifests.ts";
+} from "../../../actions/plan/files_config.ts";
+import { parseRegistration } from "../../../actions/plan/registration.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
-import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
 import { captureNetwork } from "./discovery.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 import {
   isMapping,
   type MergedSettings,
   parseLayerFile,
-  parseYamlMapping,
   type SettingsLayer,
 } from "./settings_document.ts";
 
@@ -67,7 +55,7 @@ export interface RepoFacts {
   /** Effective visibility (declared repository.private, else live):
    *  private repos reject the public-only blocks. */
   private: boolean;
-  /** The resolved tracking labels, one per SELECTED stream module. */
+  /** Resolved tracking labels, one per SELECTED stream module. */
   trackingLabels: { module: string; label: string }[];
   /** Whether the pinned revision carries the pr-title module's managed
    *  workflow (PR_TITLE_WORKFLOW). Selecting the module activates its
@@ -80,39 +68,52 @@ export interface RepoFacts {
   prTitleWorkflowPresent: boolean;
 }
 
+/** One module of files.yml, named. */
+export type Module = ModuleData & { name: string };
+
 // --- the settings layers ----------------------------------------------------
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
-/** The module data file the fleet plan resolves a repository's labels
- *  from; the build tree ships the same file at its root. */
 export const FILES_CONFIG = join(REPO_ROOT, "files.yml");
-
-/** The module-level layer filenames, next to each templates/<module>/
- *  module.yml, bound by ROLE (never by list position) from the manifest
- *  loader's roster. compose/entries.ts skips them: they are read here,
- *  never rendered into a repository. */
-const MODULE_LAYER = SETTINGS_LAYER_FILES.module;
-const MODULE_PUBLIC_LAYER = SETTINGS_LAYER_FILES.public;
-const MODULE_PRIVATE_LAYER = SETTINGS_LAYER_FILES.private;
+export const FILES_DIR = join(REPO_ROOT, "files");
 
 export const BASELINE_LAYER = join(REPO_ROOT, ".github/settings-baseline.yml");
 export const FLEET_PUBLIC_LAYER = join(REPO_ROOT, ".github/settings-public.yml");
 export const FLEET_PRIVATE_LAYER = join(REPO_ROOT, ".github/settings-private.yml");
 
-function moduleLayerPath(module: string, name: string): string {
-  return join(REPO_ROOT, "templates", module, name);
+const [MODULE_LAYER, MODULE_PUBLIC_LAYER, MODULE_PRIVATE_LAYER] = SETTINGS_LAYER_ORDER;
+
+/** files.yml's modules in canonical order, the roster every fact and layer
+ *  selection is checked against. */
+export function loadModules(path: string = FILES_CONFIG): Module[] {
+  const modules = parseFilesConfig(readFileSync(path, "utf-8"), path).modules;
+  return Object.entries(modules).map(([name, data]) => ({ ...data, name }));
 }
 
-/** The three fleet layer files, unconditional by design; a missing one is a
- *  hard error before any layer is read. The MODULE layer files carry no
- *  existence check here: the manifest loader holds each module.yml's
- *  settings_layers declaration and the tree together in both directions on
- *  every load (assertSettingsLayerFiles), so a deleted-but-declared or
- *  present-but-undeclared module layer never reaches this render. `exists`
- *  is injectable so a test can prove a deletion fails loudly without
- *  deleting anything. */
-export function assertFleetLayerFiles(exists: (path: string) => boolean = existsSync): void {
+function moduleLayerPath(module: string, name: SettingsLayerName, filesDir: string): string {
+  return join(filesDir, module, name);
+}
+
+/** A module directory's entries, none when it does not exist. */
+function listDir(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir) : [];
+}
+
+/** The three fleet layer files, unconditional by design, and every layer
+ *  file the modules declare, in BOTH directions: a declared file that is
+ *  missing and a present layer file no declaration names are each a hard
+ *  error before any layer is read, because selecting by existence would
+ *  fail OPEN (a deleted layer or a dropped declaration silently shrinks
+ *  the stack, and the apply's delete-undeclared pass then removes its
+ *  labels fleet-wide). `exists` and `list` are injectable so a test can
+ *  prove either failure without touching files/. */
+export function assertLayerFiles(
+  modules: Module[],
+  exists: (path: string) => boolean = existsSync,
+  filesDir: string = FILES_DIR,
+  list: (dir: string) => string[] = listDir,
+): void {
   for (const path of [BASELINE_LAYER, FLEET_PUBLIC_LAYER, FLEET_PRIVATE_LAYER]) {
     if (!exists(path)) {
       throw new Error(
@@ -121,41 +122,61 @@ export function assertFleetLayerFiles(exists: (path: string) => boolean = exists
       );
     }
   }
+  for (const module of modules) {
+    for (const name of module.settings_layers ?? []) {
+      const path = moduleLayerPath(module.name, name, filesDir);
+      if (!exists(path)) {
+        throw new Error(
+          `${path}: declared in files.yml modules.${module.name}.settings_layers but missing - ` +
+            "a deleted layer file must retire its settings_layers entry in the same change, " +
+            "or the render would silently drop the module's labels and the apply delete them",
+        );
+      }
+    }
+    const declared = new Set<string>(module.settings_layers ?? []);
+    for (const name of list(join(filesDir, module.name))) {
+      if ((SETTINGS_LAYER_ORDER as readonly string[]).includes(name) && !declared.has(name)) {
+        throw new Error(
+          `${join(filesDir, module.name, name)}: a settings layer file files.yml ` +
+            `modules.${module.name}.settings_layers does not declare - the render never reads ` +
+            "an undeclared layer, so its labels would leave the roster and the apply delete " +
+            "them; declare it or delete the file",
+        );
+      }
+    }
+  }
 }
 
 /** Every layer file a repository's facts select, LOW to HIGH: the fleet
  *  baseline, the fleet visibility overlay, each selected module's own layer,
  *  then each module's visibility overlay (the repo's settings.yml and the
  *  override are layers 5 and 6, merged at apply time). Which module files
- *  exist is DECLARED (each manifest's settings_layers), never discovered:
- *  selecting by existence fails OPEN - a deleted layer file silently shrinks
- *  the stack, and the apply's delete-undeclared pass then removes its labels
- *  fleet-wide. */
+ *  exist is DECLARED (files.yml's settings_layers), never discovered. */
 export function layerPaths(
   facts: RepoFacts,
-  manifests: ModuleManifest[],
+  modules: Module[],
   exists: (path: string) => boolean = existsSync,
+  filesDir: string = FILES_DIR,
+  list: (dir: string) => string[] = listDir,
 ): string[] {
-  assertFleetLayerFiles(exists);
+  assertLayerFiles(modules, exists, filesDir, list);
   const visibility = facts.private ? MODULE_PRIVATE_LAYER : MODULE_PUBLIC_LAYER;
-  const selected = manifests.filter((m) => facts.modules.includes(m.module));
-  const declares = (m: ModuleManifest, name: SettingsLayerName) =>
-    (m.settings_layers ?? []).includes(name);
+  const selected = modules.filter((m) => facts.modules.includes(m.name));
+  const declares = (m: Module, name: SettingsLayerName) => (m.settings_layers ?? []).includes(name);
   // pr-title's layer is the enforcement flip of the baseline's disabled
   // required-check ruleset, so it additionally waits for the managed
   // workflow to exist at the pinned revision (the RepoFacts field has the
   // race): activating a required check nothing creates wedges every PR.
-  const activatable = (m: ModuleManifest) =>
-    m.module !== "pr-title" || facts.prTitleWorkflowPresent;
+  const activatable = (m: Module) => m.name !== "pr-title" || facts.prTitleWorkflowPresent;
   return [
     BASELINE_LAYER,
     facts.private ? FLEET_PRIVATE_LAYER : FLEET_PUBLIC_LAYER,
     ...selected
       .filter((m) => declares(m, MODULE_LAYER) && activatable(m))
-      .map((m) => moduleLayerPath(m.module, MODULE_LAYER)),
+      .map((m) => moduleLayerPath(m.name, MODULE_LAYER, filesDir)),
     ...selected
       .filter((m) => declares(m, visibility))
-      .map((m) => moduleLayerPath(m.module, visibility)),
+      .map((m) => moduleLayerPath(m.name, visibility, filesDir)),
   ];
 }
 
@@ -167,19 +188,21 @@ export function loadLayer(path: string): SettingsLayer {
 }
 
 /** Every label tuple any layer can emit, for ANY module selection and
- *  either visibility; tracking labels excluded (those render from the
- *  very answers the copier validators check). The single roster
- *  scripts/generate/copier_questions.ts and check_ssot.ts key on. Reads exactly the
- *  DECLARED layer files (each manifest's settings_layers, which the
- *  loader holds against the tree), so a deleted layer fails the load
- *  loudly instead of quietly shrinking this roster. */
-export function allLayerLabels(manifests: ModuleManifest[] = loadManifests()): Label[] {
-  assertFleetLayerFiles();
+ *  either visibility; tracking labels excluded (those come from each
+ *  repository's registration). The single roster the reserved-label
+ *  derivation and the checks key on. Reads exactly the DECLARED layer
+ *  files, so a deleted layer fails the load loudly instead of quietly
+ *  shrinking this roster. */
+export function allLayerLabels(
+  modules: Module[] = loadModules(),
+  filesDir: string = FILES_DIR,
+): Label[] {
+  assertLayerFiles(modules, existsSync, filesDir);
   const labels: Label[] = [];
   const paths = [BASELINE_LAYER, FLEET_PUBLIC_LAYER, FLEET_PRIVATE_LAYER];
-  for (const m of manifests) {
+  for (const m of modules) {
     for (const name of m.settings_layers ?? []) {
-      paths.push(moduleLayerPath(m.module, name));
+      paths.push(moduleLayerPath(m.name, name, filesDir));
     }
   }
   for (const path of paths) {
@@ -198,10 +221,10 @@ export function allLayerLabels(manifests: ModuleManifest[] = loadManifests()): L
   return labels;
 }
 
-/** Every label NAME any layer can emit; the reserved-label roster the
- *  tracking-label validators are generated from. */
-export function managedLabelNames(manifests: ModuleManifest[] = loadManifests()): string[] {
-  return allLayerLabels(manifests).map((label) => label.name);
+/** Every label NAME any layer can emit: the roster no tracking label may
+ *  reuse (the plan action refuses one, from the build branch's copy). */
+export function managedLabelNames(modules: Module[] = loadModules()): string[] {
+  return allLayerLabels(modules).map((label) => label.name);
 }
 
 /** Two layers declaring one name is fine (the merge folds them); two
@@ -227,29 +250,20 @@ function assertUniqueNames(
 
 /** The repo's tracking labels: the ONE settings contribution no layer
  *  file can express, because the label NAME is the repository's own
- *  (its registration's `labels` block) while the color and description
- *  tuple lives in the module manifest. */
-export function trackingLabels(facts: RepoFacts, manifests: ModuleManifest[]): Label[] {
-  const byModule = new Map(manifests.map((m) => [m.module, m]));
+ *  (its registration's labels.<key>, else the module default) while the
+ *  color and description tuple lives in files.yml. */
+export function trackingLabels(facts: RepoFacts, modules: Module[]): Label[] {
+  const byName = new Map(modules.map((m) => [m.name, m]));
   return facts.trackingLabels.map(({ module, label }) => {
-    const tracking = byModule.get(module)?.tracking_label;
-    if (!tracking) {
+    const tracking = byName.get(module)?.tracking_label;
+    if (tracking?.color === undefined || tracking.description === undefined) {
       throw new Error(
-        `tracking label recorded for '${module}', but templates/${module}/module.yml ` +
-          "declares no tracking_label - the facts and the manifests disagree",
+        `tracking label recorded for '${module}', but files.yml modules.${module} declares no ` +
+          "tracking_label with a color and description - the facts and the data file disagree",
       );
     }
     return { name: label, color: tracking.color, description: tracking.description };
   });
-}
-
-/** copier.yml's computed enable_codeql from the same inputs: a public
- *  repository with at least one selected toolchain module. */
-export function enableCodeql(facts: RepoFacts, manifests: ModuleManifest[]): boolean {
-  return (
-    !facts.private &&
-    manifests.some((m) => m.toolchain !== undefined && facts.modules.includes(m.module))
-  );
 }
 
 /** The managed settings document for a repo's facts: layers 1 to 4 merged
@@ -258,12 +272,13 @@ export function enableCodeql(facts: RepoFacts, manifests: ModuleManifest[]): boo
  *  merges OVER this document. */
 export function managedSettings(
   facts: RepoFacts,
-  manifests: ModuleManifest[] = loadManifests(),
+  modules: Module[] = loadModules(),
+  filesDir: string = FILES_DIR,
 ): MergedSettings {
-  const merged = mergeLayers(layerPaths(facts, manifests).map(loadLayer));
+  const merged = mergeLayers(layerPaths(facts, modules, existsSync, filesDir).map(loadLayer));
   const labels = [
     ...(Array.isArray(merged.labels) ? (merged.labels as Label[]) : []),
-    ...trackingLabels(facts, manifests),
+    ...trackingLabels(facts, modules),
   ];
   // Appended AFTER the merge, which is safe without re-hardening the
   // document: `merged` is a MergedSettings already, and a Label is three
@@ -281,132 +296,96 @@ export function managedSettings(
 }
 
 /** The merged label roster for a repo's facts. */
-export function managedLabels(facts: RepoFacts, manifests: ModuleManifest[]): Label[] {
-  const labels = managedSettings(facts, manifests).labels;
+export function managedLabels(facts: RepoFacts, modules: Module[]): Label[] {
+  const labels = managedSettings(facts, modules).labels;
   return Array.isArray(labels) ? (labels as Label[]) : [];
 }
 
 /** The merged rulesets for a repo's facts. */
-export function managedRulesets(
-  facts: RepoFacts,
-  manifests: ModuleManifest[],
-): Record<string, unknown>[] {
-  const rulesets = managedSettings(facts, manifests).rulesets;
+export function managedRulesets(facts: RepoFacts, modules: Module[]): Record<string, unknown>[] {
+  const rulesets = managedSettings(facts, modules).rulesets;
   return Array.isArray(rulesets) ? (rulesets as Record<string, unknown>[]) : [];
 }
 
 // --- fact resolution --------------------------------------------------------
 
-/** The module selection of a .repo-platform.yml text, read with the
- *  sync's own registration grammar (readModules: one list, string entries,
- *  no duplicates) and VALIDATED against the manifest roster. A malformed
- *  list throws - the baseline cannot be computed from a guess - and so does
- *  an unknown name: layerPaths simply finds no layer files for it, so a
- *  typo would yield a perfectly valid-looking document missing that
- *  module's labels, and the apply's delete-undeclared pass would then
- *  remove them from the live repository. */
-export function modulesFrom(
-  registrationText: string,
+/** The registration facts of a .repo-platform.yml text, read with the
+ *  plan's own grammar (fail-closed: a YAML error, an unknown key, a
+ *  malformed list) and VALIDATED against the module roster. An unknown
+ *  name throws: layerPaths simply finds no layer files for it, so a typo
+ *  would yield a perfectly valid-looking document missing that module's
+ *  labels, and the apply's delete-undeclared pass would then remove them
+ *  from the live repository. `reserved` is the lower-cased roster of every
+ *  label the layers manage (managedLabelNames), injectable for tests. */
+export function registrationFacts(
+  text: string,
   where: string,
-  manifests: ModuleManifest[] = loadManifests(),
-): string[] {
-  const { modules } = readModules(parseYamlMapping(registrationText, where), where);
-  if (modules === null) throw new Error(`${where}: no readable top-level modules list`);
-  return assertKnownModules(modules, where, manifests);
+  modules: Module[],
+  reserved: ReadonlySet<string> = new Set(
+    managedLabelNames(modules).map((name) => name.toLowerCase()),
+  ),
+): { modules: string[]; trackingLabels: { module: string; label: string }[] } {
+  const read = parseRegistration(text, where);
+  if ("errors" in read) throw new Error(read.errors.join("\n"));
+  const selected = assertKnownModules(read.registration.modules, where, modules);
+  const declared = read.registration.labels ?? {};
+  const streams = modules.filter(
+    (m) => m.tracking_label !== undefined && selected.includes(m.name),
+  );
+  const keys = new Set(streams.map((m) => m.tracking_label?.key));
+  const stray = Object.keys(declared).filter((key) => !keys.has(key));
+  if (stray.length > 0) {
+    throw new Error(
+      `${where}: labels.${stray[0]} names no selected tracking stream ` +
+        `(selected: ${[...keys].join(", ") || "none"})`,
+    );
+  }
+  const trackingLabels = streams.map((m) => {
+    const tracking = m.tracking_label;
+    if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
+    return { module: m.name, key: tracking.key, label: declared[tracking.key] ?? tracking.default };
+  });
+  // The same two refusals the plan action makes: a stream label the layers
+  // already manage would have a green night close unrelated issues and
+  // every apply fight over it, and one label shared by two streams (GitHub
+  // folds label case) would have each stream close the other's issues.
+  const lowered = new Map<string, string>();
+  for (const { key, label } of trackingLabels) {
+    if (reserved.has(label.toLowerCase())) {
+      throw new Error(
+        `${where}: tracking label "${label}" (${key}) is a label the platform already manages; ` +
+          "a green night would close whatever issues carry it and every settings apply would fight over it",
+      );
+    }
+    const other = lowered.get(label.toLowerCase());
+    if (other !== undefined) {
+      throw new Error(
+        `${where}: tracking label "${label}" is shared by two streams (${other}, ${key}); ` +
+          "GitHub label names are case-insensitive, so each stream needs its own",
+      );
+    }
+    lowered.set(label.toLowerCase(), key);
+  }
+  return {
+    modules: selected,
+    trackingLabels: trackingLabels.map(({ module, label }) => ({ module, label })),
+  };
 }
 
 /** Every selection reaching the render goes through here, against the SAME
- *  manifest array the render uses - a validator keyed on its own roster
+ *  module roster the render uses - a validator keyed on its own roster
  *  could pass a name the render then finds no layers for. */
-export function assertKnownModules(
-  modules: string[],
-  where: string,
-  manifests: ModuleManifest[],
-): string[] {
-  const known = new Set(manifests.map((m) => m.module));
-  const unknown = modules.filter((name) => !known.has(name));
+export function assertKnownModules(selected: string[], where: string, modules: Module[]): string[] {
+  const known = new Set(modules.map((m) => m.name));
+  const unknown = selected.filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new Error(
       `${where}: unknown module(s) ${unknown.map((n) => JSON.stringify(n)).join(", ")} - not a ` +
-        "template module. Applying the settings without them would compute a roster missing " +
-        "their labels, and the apply deletes undeclared labels. A name the template retired " +
-        "leaves the file with the repository's pending sync PR (its migration rung rewrites " +
-        "the list); merge that PR first.",
+        "module files.yml knows. Applying the settings without them would compute a roster " +
+        "missing their labels, and the apply deletes undeclared labels; fix the modules list.",
     );
   }
-  return modules;
-}
-
-/** The selected stream modules' labels for a registration text, resolved
- *  by the fleet plan's own function (actions/plan): the registration's
- *  `labels.<key>`, else the recorded `<key>_label` answer while the
- *  answers file exists, else the module default files.yml declares. The
- *  plan's refusals (a `labels` key naming no selected stream, a label the
- *  settings layers already manage, two streams sharing one name) apply
- *  here unchanged, so the settings roster and fleet-ci agree on every
- *  repository. */
-export function trackingLabelsOf(
-  registrationText: string,
-  answersText: string | null,
-  isPrivate: boolean,
-  manifests: ModuleManifest[],
-  where: { registration: string; answers: string },
-): { module: string; label: string }[] {
-  const read = parseRegistration(registrationText, where.registration);
-  if ("errors" in read) throw new Error(read.errors.join("\n"));
-  const data = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"), FILES_CONFIG);
-  const input: PlanInput = {
-    registration: read.registration,
-    answers: answersText === null ? {} : parseYamlMapping(answersText, where.answers),
-    modules: data.modules,
-    defaults: data.defaults,
-    files: data.files,
-    retired: data.retired,
-    reservedLabels: new Set(managedLabelNames(manifests).map((name) => name.toLowerCase())),
-    private: isPrivate,
-  };
-  const selected = selectModules(input);
-  const labels = planTrackingLabels(input, selected);
-  return selected
-    .filter((module) => module.tracking_label !== undefined)
-    .map((module, index) => ({ module: module.name, label: labels[index] }));
-}
-
-/** The selected stream modules' tracking-label answers from the operator's
- *  own answers file, the one fact source with no registration: the file is
- *  maintained by hand, so an absent or unreadable answer is a defect, never
- *  a pending render. */
-export function trackingLabelsFrom(
-  answersText: string,
-  modules: string[],
-  manifests: ModuleManifest[],
-  where: string,
-): { module: string; label: string }[] {
-  const streams = manifests.filter(
-    (m) => m.tracking_label !== undefined && modules.includes(m.module),
-  );
-  if (streams.length === 0) return [];
-  const answers = parseYamlMapping(answersText, where);
-  return streams.map((m) => {
-    const tracking = m.tracking_label;
-    if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
-    if (!Object.hasOwn(answers, tracking.answer)) {
-      throw new Error(
-        `${where}: the ${m.module} module is selected but the file records no ` +
-          `${tracking.answer} answer - no sync PR records this file, so the tracking label ` +
-          "cannot be resolved; record the answer",
-      );
-    }
-    const value = answers[tracking.answer];
-    if (typeof value !== "string" || value === "") {
-      throw new Error(
-        `${where}: the ${m.module} module is selected but its ${tracking.answer} answer is ` +
-          "not readable (recorded, but not a non-empty string) - the tracking label cannot " +
-          "be resolved; fix the answers file",
-      );
-    }
-    return { module: m.module, label: value };
-  });
+  return selected;
 }
 
 /** One file from a target, AT A PINNED REF. Every fact and the repo layer
@@ -453,8 +432,8 @@ export function resolveTargetRef(repo: string): string {
 /** The commit a LOCAL fact source read from: the checkout's head. A local
  *  snapshot is no less stale than a fetched one - the branch it came from
  *  keeps moving - so it is pinned the same way and checked the same way.
- *  Empty when the directory is not a git checkout (the smoke harness
- *  renders a bare copier output), which check_target_fresh.ts refuses. */
+ *  Empty when the directory is not a git checkout, which
+ *  check_target_fresh.ts refuses. */
 export function localHeadSha(dir: string): string {
   const proc = capture(["git", "-C", dir, "rev-parse", "HEAD"]);
   const sha = proc.stdout.trim();
@@ -500,33 +479,8 @@ export function declaredPrivate(settingsText: string | null): boolean | null {
  *  revision gates the required-check activation (RepoFacts has the race). */
 export const PR_TITLE_WORKFLOW = ".github/workflows/pr-title.yml";
 
-/** Facts for the operator repository itself: it is not generated from the
- *  template (no .repo-platform.yml, no .github/.copier-answers.yml), so its module
- *  selection and visibility come from the recorded operator answers file -
- *  the same answers the dogfood render uses (render_dogfood.ts pins its
- *  private answer to the in-repo settings.yml declaration). */
-export function factsFromOperatorAnswers(
-  answersPath: string,
-  manifests: ModuleManifest[] = loadManifests(),
-): RepoFacts {
-  const answersText = readFileSync(answersPath, "utf-8");
-  const answers = parseAnswers(answersText, answersPath);
-  // The operator repository is ALWAYS a settings target, so an unknown
-  // name here is the same destructive path as one in a client repo's
-  // .repo-platform.yml: no layer files are found, the roster comes out
-  // short, and the apply deletes the missing labels off this repository.
-  const modules = assertKnownModules([...answers.modules], answersPath, manifests);
-  return {
-    modules,
-    private: answers.private,
-    // The answers file records a selected stream module's label under the
-    // same key copier asks for (docs_site_label today - the dogfood
-    // answers schema is strict, so selecting another stream module means
-    // teaching that schema its answer first).
-    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath),
-    prTitleWorkflowPresent: existsSync(join(dirname(resolve(answersPath)), PR_TITLE_WORKFLOW)),
-  };
-}
+export const REGISTRATION_FILE = ".repo-platform.yml";
+export const SETTINGS_FILE = ".github/settings.yml";
 
 /** Facts fetched from the target's default branch (gh api), or null when it
  *  carries no .repo-platform.yml at `ref` (it left management between the
@@ -538,73 +492,49 @@ export function factsFromOperatorAnswers(
  *  a deliberate flip. */
 export function factsFromFetch(
   repo: string,
-  manifests: ModuleManifest[],
+  modules: Module[],
   ref: string,
   fetch: RepoFileFetcher = fetchRepoFile,
 ): RepoFacts | null {
-  const registration = fetch(repo, ".repo-platform.yml", ref);
+  const registration = fetch(repo, REGISTRATION_FILE, ref);
   if (registration === null) return null;
-  const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`, manifests);
-  const isPrivate =
-    declaredPrivate(fetch(repo, ".github/settings.yml", ref)) ?? fetchRepoIsPrivate(repo);
-  // Resolved for every selection, streams or none: a `labels` key naming an
-  // unselected stream is the plan's refusal, and skipping it here would
-  // render a roster without that label for the apply to delete. A cut-over
-  // repository has no answers file, and null is its normal state.
-  const trackingLabels = trackingLabelsOf(
-    registration,
-    fetch(repo, ANSWERS_PATH, ref),
-    isPrivate,
-    manifests,
-    { registration: `${repo}/.repo-platform.yml`, answers: `${repo}/${ANSWERS_PATH}` },
-  );
+  const facts = registrationFacts(registration, `${repo}/${REGISTRATION_FILE}`, modules);
+  const isPrivate = declaredPrivate(fetch(repo, SETTINGS_FILE, ref)) ?? fetchRepoIsPrivate(repo);
   // Probed only where it can matter (the module selected): a 404 is a
   // genuine absence (fetch returns null), any other failure throws - a
   // presence misread must never silently flip the required check.
   const prTitleWorkflowPresent =
-    modules.includes("pr-title") && fetch(repo, PR_TITLE_WORKFLOW, ref) !== null;
-  return { modules, private: isPrivate, trackingLabels, prTitleWorkflowPresent };
+    facts.modules.includes("pr-title") && fetch(repo, PR_TITLE_WORKFLOW, ref) !== null;
+  return { ...facts, private: isPrivate, prTitleWorkflowPresent };
 }
 
-/** Facts read from a local checkout: the smoke gate (--target-dir) and the
- *  sync's referenced-label check (referenced_labels.ts) read a tree this
- *  way. Null when the
- *  checkout carries no .repo-platform.yml (it is not a settings target),
- *  like the fetched source. The private fact prefers the checkout's
- *  DECLARED repository.private (the same precedence as the fetch path),
- *  falling back to the recorded answer while the answers file exists; a
- *  cut-over checkout declares it or the visibility cannot be computed. */
-export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): RepoFacts | null {
-  const where = (name: string) => `${join(dir, name)}`;
-  if (!existsSync(join(dir, ".repo-platform.yml"))) return null;
-  const registrationText = readFileSync(join(dir, ".repo-platform.yml"), "utf-8");
-  const modules = modulesFrom(registrationText, where(".repo-platform.yml"), manifests);
-  const answersText = existsSync(join(dir, ANSWERS_PATH))
-    ? readAnswersBytes(dir).toString("utf-8")
-    : null;
-  const settingsPath = join(dir, ".github/settings.yml");
+/** Facts read from a local checkout: the operator repository reads its own
+ *  this way (settings_layer_step.ts passes --target-dir . for it). Null
+ *  when the checkout carries no .repo-platform.yml (it is not a settings
+ *  target), like the fetched source. The visibility is the checkout's
+ *  DECLARED repository.private; a checkout declaring none cannot have its
+ *  visibility-gated blocks computed and throws. */
+export function factsFromTargetDir(dir: string, modules: Module[]): RepoFacts | null {
+  const registrationPath = join(dir, REGISTRATION_FILE);
+  if (!existsSync(registrationPath)) return null;
+  const facts = registrationFacts(
+    readFileSync(registrationPath, "utf-8"),
+    registrationPath,
+    modules,
+  );
+  const settingsPath = join(dir, SETTINGS_FILE);
   const declared = declaredPrivate(
     existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
   );
-  const recorded =
-    answersText === null ? undefined : parseYamlMapping(answersText, where(ANSWERS_PATH)).private;
-  if (declared === null && typeof recorded !== "boolean") {
+  if (declared === null) {
     throw new Error(
-      `${where(".github/settings.yml")}: declares no boolean repository.private` +
-        (answersText === null
-          ? " and the checkout records no answers file"
-          : ` and ${where(ANSWERS_PATH)} records no boolean private answer`) +
-        " - the baseline's visibility-gated blocks cannot be computed",
+      `${settingsPath}: declares no boolean repository.private - the baseline's ` +
+        "visibility-gated blocks cannot be computed",
     );
   }
-  const isPrivate = declared ?? recorded === true;
   return {
-    modules,
-    private: isPrivate,
-    trackingLabels: trackingLabelsOf(registrationText, answersText, isPrivate, manifests, {
-      registration: where(".repo-platform.yml"),
-      answers: where(ANSWERS_PATH),
-    }),
+    ...facts,
+    private: declared,
     prTitleWorkflowPresent: existsSync(join(dir, PR_TITLE_WORKFLOW)),
   };
 }
@@ -615,8 +545,8 @@ const MANAGED_YAML_HEADER =
   "# .github/scripts/fleet/render_managed_settings.ts - scratch output, never committed.\n";
 
 /** The managed document as YAML bytes, headed by MANAGED_YAML_HEADER. */
-export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]): string {
-  return MANAGED_YAML_HEADER + stringifyYaml(managedSettings(facts, manifests));
+export function renderManagedYaml(facts: RepoFacts, modules?: Module[]): string {
+  return MANAGED_YAML_HEADER + stringifyYaml(managedSettings(facts, modules));
 }
 
 /** The skip a target earns by leaving management between the plan job's
@@ -624,8 +554,7 @@ export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]
  *  means no selection to compute a baseline from, and applying one built
  *  from an older revision would reconcile - and delete - labels on a
  *  repository that is no longer managed. Adoption IS the opt-in: every
- *  repository with a registration file is a settings target, and the
- *  operator repository stands in its own answers file for one. */
+ *  repository with a registration file is a settings target. */
 export function leftManagementReason(repo: string): string {
   return (
     `${repo}: no .repo-platform.yml at the revision these facts were read from - the ` +
@@ -635,14 +564,7 @@ export function leftManagementReason(repo: string): string {
 }
 
 function main(args: string[]): void {
-  const flags = parseFlags(
-    args,
-    ["--repo", "--out"] as const,
-    ["--target-dir", "--operator-answers"] as const,
-  );
-  if (flags["--target-dir"] !== undefined && flags["--operator-answers"] !== undefined) {
-    fail("--target-dir and --operator-answers are mutually exclusive - pass one fact source");
-  }
+  const flags = parseFlags(args, ["--repo", "--out"] as const, ["--target-dir"] as const);
   const repo = flags["--repo"];
   // Null after the reads when the target left management (no registration
   // at the pinned revision): nothing is written and the apply is gated off.
@@ -652,23 +574,20 @@ function main(args: string[]): void {
   // target moved since. Every fact source pins, local ones included.
   let pinnedRef = "";
   try {
-    const manifests = loadManifests();
+    const modules = loadModules();
     if (flags["--target-dir"] !== undefined) {
-      facts = factsFromTargetDir(flags["--target-dir"], manifests);
+      facts = factsFromTargetDir(flags["--target-dir"], modules);
       pinnedRef = localHeadSha(flags["--target-dir"]);
-    } else if (flags["--operator-answers"] !== undefined) {
-      facts = factsFromOperatorAnswers(flags["--operator-answers"], manifests);
-      pinnedRef = localHeadSha(dirname(resolve(flags["--operator-answers"])));
     } else {
       // Resolved BEFORE any read, and published below, so the merge step
       // reads the repo layer at this same commit.
       pinnedRef = resolveTargetRef(repo);
-      facts = factsFromFetch(repo, manifests, pinnedRef);
+      facts = factsFromFetch(repo, modules, pinnedRef);
     }
     if (facts === null) {
       warning(leftManagementReason(repo));
     } else {
-      writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
+      writeFileSync(flags["--out"], renderManagedYaml(facts, modules));
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

@@ -2,18 +2,11 @@
 # here (above BEGIN), or below the END marker where last-match-wins
 # can override managed patterns.
 
-# Local compose/build output (published trees live on the staging/latest branches).
-/template/
-
-# Smoke-test output from local copier runs
-/.smoke/
-
 # Paths this repository's own workflows create inside the checkout (the
-# sync's target and validator checkouts, ci.yml's actionlint binary),
-# root-anchored so a nested folder of the same name is not swallowed.
+# sync's target and build checkouts), root-anchored so a nested folder of
+# the same name is not swallowed.
 /target/
-/validator/
-/actionlint
+/build/
 
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore - do not edit between the BEGIN/END
@@ -656,3 +649,9 @@ rustc-ice-*.txt
 #.idea/
 
 # END REPO-PLATFORM MANAGED
+
+# The managed Python section ignores lib/ wholesale, which would drop a new
+# shared helper or its test from a commit without a word; these two are
+# source directories of this repository.
+!/scripts/lib/
+!/tests/scripts/lib/

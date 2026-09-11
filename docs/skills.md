@@ -30,7 +30,7 @@ A skill folder is UNPUBLISHED until `plugin.json` lists it: installers and the [
 
 | Key | Meaning | Default |
 |---|---|---|
-| `skills.dir` | Directory holding the repository's agent skills, in `.repo-platform.yml`. Relative path segments of letters, digits, dots, underscores, and dashes: the value lands in the gate job's action input, where the fleet plan reads it. The managed discovery workflow `validate-skills.yml` is written with the default directory (its `paths` filter and `skills-dir` input), so a non-default value leaves discovery watching `skills/` until that file takes the directory from the registration. | `skills` |
+| `skills.dir` | Directory holding the repository's agent skills, in `.repo-platform.yml`. Relative path segments of letters, digits, dots, underscores, and dashes: the value lands in the gate job's action input, where the fleet plan reads it, and the sync writes it into the managed discovery workflow `validate-skills.yml` (its `paths` filter and `skills-dir` input). | `skills` |
 
 The directory is a registration key, rather than an edit in the written files, because the gate job's action input and the discovery workflow's trigger paths must agree on it.
 
@@ -64,7 +64,7 @@ repo-platform hosts three skills under [`skills/`](https://github.com/Vivswan/re
 
 ## Dogfooding
 
-repo-platform selects `skills` in `.repo-platform-answers.yml` (its fleet-operations skills live under `skills/`, and its `.claude-plugin/` manifests are its own, repo-owned like any starter), carries the managed discovery workflow as a generated dogfood copy, and runs both modes from its hand-written ci.yml. There the discovery job gates through all-green too, per this repository's all-jobs-gate convention: a listing regression in the action it ships should block its own merges. A PR touching `skills/` therefore runs discovery twice - advisory via the dogfooded workflow, gating via ci.yml - an intended overlap.
+repo-platform selects `skills` in its own `.repo-platform.yml` (its fleet-operations skills live under `skills/`, and its `.claude-plugin/` manifests are its own, repo-owned like any starter) and runs both validation modes from its hand-written ci.yml. There the discovery job gates through all-green too, per this repository's all-jobs-gate convention: a listing regression in the action it ships should block its own merges.
 
 ## Adopting in an existing skills repository
 
@@ -74,7 +74,7 @@ repo-platform selects `skills` in `.repo-platform-answers.yml` (its fleet-operat
 
 ## Per-skill license copies
 
-A standalone skill install copies only the skill folder, so a repo whose skills must ship a license carries a byte-identical `LICENSE.md` in every published folder. Do not maintain those copies by hand - declare them as [mirrors](new-repo.md#mirror-copies-of-rendered-files) in `.repo-platform.yml`, and every sync refreshes each copy from the root license it just wrote (a new skill folder is picked up by the glob with no declaration edit):
+A standalone skill install copies only the skill folder, so a repo whose skills must ship a license carries a byte-identical `LICENSE.md` in every published folder. Do not maintain those copies by hand - declare them as [mirrors](new-repo.md#mirror-copies-of-platform-files) in `.repo-platform.yml`, and every sync refreshes each copy from the root license it just wrote (a new skill folder is picked up by the glob with no declaration edit):
 
 ```yaml
 mirrors:

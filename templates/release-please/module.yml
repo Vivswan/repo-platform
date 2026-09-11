@@ -1,8 +1,0 @@
-# yaml-language-server: $schema=../module.schema.json
-# Module manifest (schema and loader: scripts/lib/module_manifests.ts).
-description: release-please releases through the fleet's release pipeline, plus autorelease labels
-ownership:
-  - { path: .release-please-manifest.json, class: starter }
-  - { path: release-please-config.json, class: starter }
-settings_layers:
-  - settings.yml

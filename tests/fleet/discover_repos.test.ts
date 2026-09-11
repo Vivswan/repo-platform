@@ -9,10 +9,10 @@ const temp = tempDirs();
 // End-to-end harness for the sync plan's discovery step, stub-gh style
 // (see discovery.test.ts). This script replaced sync-repos.yml's inline
 // jq pipeline, so the tests pin its two output contracts: the
-// {repo, private} rows in discovered.json (the selector parses them and
-// hands them to redact.ts's enrich; `private` drives redaction) and
-// the public log line, byte-identical to the jq era, which prints only
-// a count and the owner login.
+// {repo, private} rows in discovered.json (the selectors parse them;
+// `private` decides what their public logs may name) and the public log
+// line, byte-identical to the jq era, which prints only a count and the
+// owner login.
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
   const root = temp.dir("discover-repos-");

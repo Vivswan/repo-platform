@@ -1,7 +1,7 @@
 // The actions/shared/ zone contract: it ships on the build branch and its
-// code runs where nothing was installed (copier's post-render hooks inside
-// freshly rendered repositories, the composite actions before their own
-// installs), so every module there must resolve with ZERO installation.
+// code runs where nothing was installed (the composite actions before
+// their own installs), so every module there must resolve with ZERO
+// installation.
 // This scan is what keeps the zone shippable: node builtins (node:-prefixed
 // so the intent is explicit) and zone-internal relative imports only - a
 // bare specifier ("zod", even bare "fs"), a parent-relative escape into an

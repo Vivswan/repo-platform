@@ -1,26 +1,13 @@
 // The label rules' pure helpers (scripts/check/ssot/labels.ts).
 
 import { describe, expect, test } from "bun:test";
-import {
-  LABEL_RE_COPIES,
-  labelRegexCopyMismatches,
-  zToDollar,
-} from "../../../scripts/check/ssot/labels.ts";
-
-describe("zToDollar", () => {
-  test("normalizes a python \\Z end anchor to $", () => {
-    expect(zToDollar("^a{0,49}\\Z")).toBe("^a{0,49}$");
-    expect(zToDollar("^a$")).toBe("^a$");
-  });
-});
+import { LABEL_RE_COPIES, labelRegexCopyMismatches } from "../../../scripts/check/ssot/labels.ts";
 
 describe("labelRegexCopyMismatches", () => {
   const LABEL_RE = "^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$";
-  // One fixture source per copy shape, the pattern spelled by the caller.
+  // One fixture source per copy, the pattern spelled by the caller.
   const source = (copy: (typeof LABEL_RE_COPIES)[number], pattern: string) =>
-    copy.shape === "const"
-      ? `export const ${copy.name} = /${pattern}/;\n`
-      : `const s = z.strictObject({ ${copy.name}: z.string().regex(/${pattern}/, "m") });\n`;
+    `export const ${copy.name} = /${pattern}/;\n`;
   const reader = (drifted?: string) => (rel: string) => {
     const copy = LABEL_RE_COPIES.find((entry) => entry.file === rel);
     if (copy === undefined) throw new Error(`unexpected read ${rel}`);

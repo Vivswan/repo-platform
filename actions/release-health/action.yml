@@ -26,7 +26,7 @@ inputs:
     description: >-
       Deprecated single-label spelling of tracking-labels, folded into it
       (kept so workflows rendered before the rename keep their fuzz gate
-      until template sync re-renders them)
+      until the next sync rewrites them)
     required: false
     default: ""
   blocker-label:

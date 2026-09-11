@@ -2,10 +2,10 @@ name: Plan
 description: >-
   Resolves one managed repository's fleet configuration at run time, so
   every managed ci.yml can be byte-identical: reads the repository's
-  registration (.repo-platform.yml) with its recorded copier answers as the
-  fallback, checks it against the module data shipped beside this action
-  on the build branch (files.yml, whose modules block is the vocabulary in
-  canonical order), and publishes the result as step outputs. Mode default resolves
+  registration (.repo-platform.yml), checks it against the module data
+  shipped beside this action on the build branch (files.yml, whose modules
+  block is the vocabulary in canonical order), and publishes the result as
+  step outputs. Mode default resolves
   what fleet-ci.yml's jobs key on (the module selection in canonical order,
   the visibility, the skills directory, the CodeQL languages, the tracking
   labels); mode pages resolves the deploy configuration reusable-pages.yml

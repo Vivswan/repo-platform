@@ -33,7 +33,6 @@ jobs:
         with:
           sparse-checkout: |
             .repo-platform.yml
-            .github/.copier-answers.yml
           sparse-checkout-cone-mode: false
       - uses: Vivswan/repo-platform/actions/plan@build
         id: plan

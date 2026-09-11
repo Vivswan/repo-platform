@@ -1,7 +1,6 @@
-# Weekly: bump the toolchain version pins (templates/<module>/module.yml
-# toolchain.pin and files.yml modules.<module>.pin) to the latest upstream
-# releases, regenerate the pinned dotfiles (templates/ and files/) and
-# dogfood copies, and open a PR when anything moved.
+# Weekly: bump the toolchain version pins (files.yml modules.<module>.pin)
+# to the latest upstream releases, regenerate the pinned dotfiles, and
+# open a PR when anything moved.
 # Merging the PR reaches the build branch automatically via the post-green publish.
 
 name: Refresh toolchains
@@ -59,6 +58,6 @@ jobs:
           BUMPS: ${{ steps.refresh.outputs.bumps }}
           MAJOR: ${{ steps.refresh.outputs.major }}
           BRANCH: automation/toolchain-refresh
-          PR_TITLE: "fix(templates): bump ${{ steps.refresh.outputs.bumps }}"
+          PR_TITLE: "fix(files): bump ${{ steps.refresh.outputs.bumps }}"
           REFRESH_TITLE: "true"
         run: bun .github/scripts/refresh-toolchains/open_refresh_pr.ts

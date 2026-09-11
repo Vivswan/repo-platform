@@ -1,6 +1,6 @@
 // Unit tests for the toolchain-pin refresher's pure pieces: the upstream
 // payload parsers (fixture payloads, no network), the line-targeted
-// manifest rewrite, the bump prose, and the PIN_SOURCES <-> manifests
+// files.yml rewrite, the bump prose, and the PIN_SOURCES <-> files.yml
 // cross-check against the live repo.
 
 import { describe, expect, test } from "bun:test";
@@ -8,7 +8,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   bumpFilesPin,
-  bumpPinVersion,
   decideBump,
   fetchJson,
   latestBunVersion,
@@ -18,7 +17,7 @@ import {
   PIN_SOURCES,
   proseBumps,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
-import { loadManifests } from "../../scripts/lib/module_manifests";
+import { toolchainPins } from "../../scripts/generate/toolchain_pins";
 
 describe("fetchJson", () => {
   test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
@@ -143,59 +142,6 @@ describe("latestDenoVersion", () => {
   });
 });
 
-describe("bumpPinVersion", () => {
-  const manifest = [
-    "# yaml-language-server: $schema=../module.schema.json",
-    "description: demo toolchain",
-    "toolchain:",
-    "  codeql_language: python",
-    "  pin:",
-    "    file: .demo-version",
-    "    version: 1.2.3",
-    "dependabot:",
-    "  ecosystem: pip",
-    "",
-  ].join("\n");
-
-  test.each([
-    ["1.3.0", "a bump rewrites only the pin's version line"],
-    ["1.2.3", "the current version is idempotent (byte-identical output)"],
-  ])("to %s: %s, preserving every other byte", (version) => {
-    expect(bumpPinVersion(manifest, version, "demo")).toBe(
-      manifest.replace("    version: 1.2.3", `    version: ${version}`),
-    );
-  });
-
-  // Every reject path: absent pin block, pin block without a version line,
-  // a version line that sits outside the block, and the two decorated
-  // forms the line-targeted rewrite refuses rather than half-rewriting.
-  test.each([
-    ["there is no pin block at all", "description: x\n", "no pin block"],
-    [
-      "the pin block has no version line",
-      manifest.replace("    version: 1.2.3\n", ""),
-      "no version line",
-    ],
-    [
-      "the only version line sits at column 0, outside the pin block",
-      ["toolchain:", "  pin:", "    file: .demo-version", "version: 9.9.9", ""].join("\n"),
-      "no version line",
-    ],
-    [
-      "the version is quoted (must be exactly version: X.Y.Z)",
-      manifest.replace("    version: 1.2.3", '    version: "1.2.3"'),
-      "version: X.Y.Z",
-    ],
-    [
-      "the version line carries a trailing comment (must be exactly version: X.Y.Z)",
-      manifest.replace("    version: 1.2.3", "    version: 1.2.3 # keep in step with CI"),
-      "version: X.Y.Z",
-    ],
-  ])("throws when %s", (_reason, text, thrown) => {
-    expect(() => bumpPinVersion(text, "1.0.0", "demo")).toThrow(thrown);
-  });
-});
-
 describe("bumpFilesPin", () => {
   const files = [
     "placeholders: []",
@@ -294,10 +240,9 @@ describe("majorJumps", () => {
 });
 
 describe("PIN_SOURCES coverage", () => {
-  test("exactly the pin-carrying manifests have upstream sources", () => {
-    const pinned = loadManifests()
-      .filter((m) => m.toolchain?.pin !== undefined)
-      .map((m) => m.module)
+  test("exactly the pin-carrying files.yml modules have upstream sources", () => {
+    const pinned = toolchainPins(readFileSync(join(import.meta.dir, "../../files.yml"), "utf-8"))
+      .map((pin) => pin.module)
       .sort();
     expect(Object.keys(PIN_SOURCES).sort()).toEqual(pinned);
   });

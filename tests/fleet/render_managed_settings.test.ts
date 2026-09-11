@@ -1,41 +1,38 @@
 // Unit tests for the managed settings layers (layers 1 to 4): which layer
 // files a repo's facts select, what the merged labels and rulesets come
 // out as, and the fact resolvers' fail-closed reads. Uses the REAL layer
-// files and module manifests - they are on-disk constants, and what they
-// merge to is exactly what the fleet's applies ship, so the expectations
-// below are the rosters spelled out, never re-read from the files (a loop
-// over an emptied layer file would pass vacuously). The repo layer and
-// the fleet override (layers 5 and 6) are merge_settings_layers' tests.
+// files and files.yml - they are on-disk constants, and what they merge to
+// is exactly what the fleet's applies ship, so the expectations below are
+// the rosters spelled out, never re-read from the files (a loop over an
+// emptied layer file would pass vacuously). The repo layer and the fleet
+// override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  assertLayerFiles,
   declaredPrivate,
-  enableCodeql,
   factsFromFetch,
-  factsFromOperatorAnswers,
   factsFromTargetDir,
   layerPaths,
   leftManagementReason,
+  loadModules,
   managedLabelNames,
   managedLabels,
   managedRulesets,
   managedSettings,
-  modulesFrom,
   type RepoFacts,
+  registrationFacts,
   renderManagedYaml,
-  trackingLabelsFrom,
-  trackingLabelsOf,
 } from "../../.github/scripts/fleet/render_managed_settings";
 import { capture } from "../../.github/scripts/shared/proc";
-import { loadManifests } from "../../scripts/lib/module_manifests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
-const manifests = loadManifests();
+const modules = loadModules();
 
 // The baseline's unconditional roster: dependabot's base pair, the triage
 // trio, then the fleet-wide nightly security stream. Every selection starts from it.
@@ -59,7 +56,7 @@ function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
 }
 
 function labelNames(f: RepoFacts): string[] {
-  return managedLabels(f, manifests).map((label) => label.name);
+  return managedLabels(f, modules).map((label) => label.name);
 }
 
 describe("managedLabels", () => {
@@ -99,31 +96,32 @@ describe("managedLabels", () => {
     expect(labelNames(f)).toEqual(labels);
   });
 
-  test("tracking labels render the repo's answer with the manifest tuple", () => {
+  test("tracking labels render the repo's label with the data file's tuple", () => {
     const withFuzzer = managedLabels(
       facts({ modules: ["fuzzer"], trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }] }),
-      manifests,
+      modules,
     );
-    const tuple = manifests.find((m) => m.module === "fuzzer")?.tracking_label;
-    if (tuple === undefined) throw new Error("the fuzzer manifest declares no tracking_label");
+    const tuple = modules.find((m) => m.name === "fuzzer")?.tracking_label;
+    if (tuple === undefined)
+      throw new Error("files.yml's fuzzer module declares no tracking_label");
     expect(withFuzzer.find((l) => l.name === "my-fuzz")).toEqual({
       name: "my-fuzz",
-      color: tuple.color,
-      description: tuple.description,
+      color: tuple.color as string,
+      description: tuple.description as string,
     });
   });
 
-  test("a tracking label for a module without a tracking_label manifest throws", () => {
+  test("a tracking label for a module without a tracking_label throws", () => {
     expect(() =>
-      managedLabels(facts({ trackingLabels: [{ module: "uv", label: "x" }] }), manifests),
+      managedLabels(facts({ trackingLabels: [{ module: "uv", label: "x" }] }), modules),
     ).toThrow("declares no tracking_label");
   });
 });
 
 describe("managedRulesets", () => {
-  const rulesetNames = (f: RepoFacts) => managedRulesets(f, manifests).map((r) => r.name);
+  const rulesetNames = (f: RepoFacts) => managedRulesets(f, modules).map((r) => r.name);
   const mainRules = (f: RepoFacts) => {
-    const main = managedRulesets(f, manifests).find((r) => r.name === "main");
+    const main = managedRulesets(f, modules).find((r) => r.name === "main");
     return (main?.rules ?? []) as { type: string; parameters?: Record<string, unknown> }[];
   };
   const mainRuleTypes = (f: RepoFacts) => mainRules(f).map((r) => r.type);
@@ -144,7 +142,7 @@ describe("managedRulesets", () => {
 
   test("the pr-title module flips the baseline's disabled required-check ruleset active", () => {
     const enforcement = (f: RepoFacts) =>
-      managedRulesets(f, manifests).find((r) => r.name === "pr-title")?.enforcement;
+      managedRulesets(f, modules).find((r) => r.name === "pr-title")?.enforcement;
     expect(enforcement(facts())).toBe("disabled");
     expect(enforcement(facts({ modules: ["pr-title"] }))).toBe("active");
     // Visibility-independent: pr-title checks run on private repos too.
@@ -157,7 +155,7 @@ describe("managedRulesets", () => {
     );
     // The flip must not lose the baseline's shape: the merged entry still
     // carries the pinned required check.
-    const merged = managedRulesets(facts({ modules: ["pr-title"] }), manifests).find(
+    const merged = managedRulesets(facts({ modules: ["pr-title"] }), modules).find(
       (r) => r.name === "pr-title",
     ) as { rules?: { type: string; parameters?: Record<string, unknown> }[] };
     const checks = merged.rules?.find((r) => r.type === "required_status_checks")?.parameters
@@ -191,7 +189,7 @@ describe("managedRulesets", () => {
       "release-tags",
     ]);
     expect(
-      managedRulesets(facts({ modules: ["release-please"] }), manifests).find(
+      managedRulesets(facts({ modules: ["release-please"] }), modules).find(
         (r) => r.name === "release-tags",
       ),
     ).toEqual({
@@ -204,15 +202,15 @@ describe("managedRulesets", () => {
     });
   });
 
-  test("code_scanning renders exactly for a public repo with a toolchain", () => {
+  test("code_scanning renders exactly for a public repo with a CodeQL toolchain", () => {
     // The toolchain modules' settings-public.yml layers contribute it to
     // the main ruleset; the override's own main rules are appended to at
     // apply time (merge_settings_layers' tests pin that). EVERY CodeQL
     // toolchain module, with the exact threshold tuple: a stale module
     // layer or a misspelled enum value would otherwise pass on types
     // alone and weaken (or 422) that module's repos at apply time.
-    const codeqlModules = manifests.filter((m) => m.toolchain !== undefined).map((m) => m.module);
-    expect(codeqlModules.length).toBeGreaterThan(0);
+    const codeqlModules = modules.filter((m) => m.codeql_language !== undefined).map((m) => m.name);
+    expect(codeqlModules).toEqual(["bun", "node", "deno", "uv"]);
     for (const module of codeqlModules) {
       const rule = mainRules(facts({ modules: [module] })).find((r) => r.type === "code_scanning");
       expect(rule?.parameters).toEqual({
@@ -244,7 +242,7 @@ describe("managedRulesets", () => {
 
 describe("layerPaths", () => {
   const names = (f: RepoFacts) =>
-    layerPaths(f, manifests).map((p) => p.split("/").slice(-2).join("/"));
+    layerPaths(f, modules).map((p) => p.split("/").slice(-2).join("/"));
 
   test.each<{ reason: string; facts: RepoFacts; paths: string[] }>([
     {
@@ -282,33 +280,54 @@ describe("layerPaths", () => {
 });
 
 describe("the layer topology fails CLOSED", () => {
-  // layerPaths once selected layer files by existence, which failed OPEN:
-  // a deleted templates/uv/settings.yml vanished from the stack, the roster
-  // came out short but valid-looking, and the apply's delete-undeclared
-  // pass removed the module's labels from live repos. The declaration now
-  // lives in each module.yml (settings_layers) and the manifest LOADER
-  // holds it against the tree both ways (assertSettingsLayerFiles), so a
-  // genuine drift fails at loadManifests, never as a shorter render; the
-  // render still owns the declaration-driven selection proven here.
+  // Selecting layer files by existence fails OPEN: a deleted
+  // files/uv/settings.yml would vanish from the stack, the roster come out
+  // short but valid-looking, and the apply's delete-undeclared pass remove
+  // the module's labels from live repos. The declaration lives in
+  // files.yml (settings_layers) and the render holds it against the tree.
 
-  test("selection follows the manifest declaration, never the tree", () => {
-    // templates/uv/settings.yml exists on disk, but a manifest that does
-    // not declare it must not select it - the tree is not the source. The
-    // fleet layers still render: the undeclared module contributes
-    // nothing, nothing else goes missing.
-    const undeclared = manifests.map((m) =>
-      m.module === "uv" ? { ...m, settings_layers: undefined } : m,
+  test("selection follows the declaration, never the tree", () => {
+    // A module that declares no layer selects none, whatever the tree
+    // holds (the listing is injected empty: the topology check below owns
+    // the undeclared-file case). The fleet layers still render: the
+    // undeclared module contributes nothing, nothing else goes missing.
+    const undeclared = modules.map((m) =>
+      m.name === "uv" ? { ...m, settings_layers: undefined } : m,
     );
-    const paths = layerPaths(facts({ modules: ["uv"] }), undeclared).map((p) =>
-      p.split("/").slice(-2).join("/"),
-    );
+    const paths = layerPaths(
+      facts({ modules: ["uv"] }),
+      undeclared,
+      existsSync,
+      undefined,
+      () => [],
+    ).map((p) => p.split("/").slice(-2).join("/"));
     expect(paths).toEqual([".github/settings-baseline.yml", ".github/settings-public.yml"]);
   });
 
   test("a deleted FLEET layer is a hard error", () => {
     const exists = (path: string) =>
       !path.endsWith(join(".github", "settings-baseline.yml")) && existsSync(path);
-    expect(() => layerPaths(facts(), manifests, exists)).toThrow("fleet settings layer is missing");
+    expect(() => layerPaths(facts(), modules, exists)).toThrow("fleet settings layer is missing");
+  });
+
+  test("a declared MODULE layer missing from files/ is a hard error, selected or not", () => {
+    const exists = (path: string) =>
+      !path.endsWith(join("files", "uv", "settings.yml")) && existsSync(path);
+    expect(() => layerPaths(facts({ modules: ["bun"] }), modules, exists)).toThrow(
+      "declared in files.yml modules.uv.settings_layers but missing",
+    );
+  });
+
+  test("a present MODULE layer file no declaration names is a hard error, selected or not", () => {
+    // The reverse direction: dropping modules.uv.settings_layers while
+    // files/uv/settings.yml stays on disk would silently shorten the stack
+    // (python:uv leaves the roster and the apply deletes it).
+    const undeclared = modules.map((m) => (m.name === "uv" ? { ...m, settings_layers: [] } : m));
+    expect(() => assertLayerFiles(undeclared)).toThrow(
+      "files/uv/settings.yml: a settings layer file files.yml modules.uv.settings_layers does not declare",
+    );
+    // The control: the committed declarations match the tree in both directions.
+    expect(() => assertLayerFiles(modules)).not.toThrow();
   });
 });
 
@@ -347,15 +366,7 @@ describe("managedSettings", () => {
       repository: baselineRepository,
     },
   ])("$reason", ({ facts: f, repository }) => {
-    expect(managedSettings(f, manifests).repository).toEqual(repository);
-  });
-});
-
-describe("enableCodeql", () => {
-  test("matches copier.yml's computed default: public plus a toolchain", () => {
-    expect(enableCodeql(facts({ modules: ["bun"] }), manifests)).toBe(true);
-    expect(enableCodeql(facts({ modules: ["bun"], private: true }), manifests)).toBe(false);
-    expect(enableCodeql(facts({ modules: ["rust"] }), manifests)).toBe(false);
+    expect(managedSettings(f, modules).repository).toEqual(repository);
   });
 });
 
@@ -366,10 +377,7 @@ describe("the render CLI acts on the adoption recheck", () => {
   // written at all.
   const script = resolve(import.meta.dir, "../../.github/scripts/fleet/render_managed_settings.ts");
 
-  function runCli(
-    registration: string | null,
-    opts: { answers?: boolean } = {},
-  ): {
+  function runCli(registration: string | null): {
     exitCode: number | null;
     stdout: string;
     outputs: string;
@@ -393,9 +401,6 @@ describe("the render CLI acts on the adoption recheck", () => {
     if (registration !== null) writeFileSync(join(root, ".repo-platform.yml"), registration);
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".github/settings.yml"), "repository:\n  private: false\n");
-    if (opts.answers ?? true) {
-      writeFileSync(join(root, ".github/.copier-answers.yml"), "github_username: o\n");
-    }
     git(["git", "-C", root, "add", "-A"]);
     git(["git", "-C", root, "commit", "-qm", "facts"]);
     const head = git(["git", "-C", root, "rev-parse", "HEAD"]);
@@ -428,9 +433,9 @@ describe("the render CLI acts on the adoption recheck", () => {
     // The written file IS the render for the checkout's facts - the
     // document the workflow applies - and it carries the generator's
     // self-identifying header.
-    const factsRead = factsFromTargetDir(result.root, manifests);
+    const factsRead = factsFromTargetDir(result.root, modules);
     expect(factsRead).not.toBeNull();
-    expect(result.document).toBe(renderManagedYaml(factsRead as RepoFacts, manifests));
+    expect(result.document).toBe(renderManagedYaml(factsRead as RepoFacts, modules));
     expect(result.document).toContain("render_managed_settings.ts");
     expect(result.outputs).toContain("skipped=false");
     // The pin the freshness step compares against: without it that step
@@ -438,15 +443,22 @@ describe("the render CLI acts on the adoption recheck", () => {
     expect(result.outputs).toContain(`ref=${result.head}`);
   });
 
-  test("a cut-over checkout renders its tracking labels from the registration, no answers file", () => {
-    const result = runCli(
-      "modules: [uv, fuzzer, nightly]\nproject: {name: Demo, slug: demo, description: ''}\nlabels: {fuzzer: my-fuzz}\n",
-      { answers: false },
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.document).toContain("name: my-fuzz");
-    expect(result.document).toContain("name: nightly-failure");
-    expect(result.outputs).toContain("skipped=false");
+  test("a selected stream module renders its registration label, else the module default", () => {
+    const defaulted = runCli("modules: [uv, fuzzer]\n");
+    expect(defaulted.exitCode).toBe(0);
+    expect(defaulted.document).toContain("name: fuzz-nightly");
+    const declared = runCli("modules: [uv, fuzzer]\nlabels: {fuzzer: my-fuzz}\n");
+    expect(declared.exitCode).toBe(0);
+    expect(declared.document).toContain("name: my-fuzz");
+    expect(declared.document).not.toContain("fuzz-nightly");
+  });
+
+  test("an unreadable registration fails the render, naming the file", () => {
+    const result = runCli("modules: [uv, pgaes]\n");
+    expect(result.exitCode).toBe(1);
+    expect(result.document).toBeNull();
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain('unknown module(s) "pgaes"');
   });
 });
 
@@ -461,43 +473,22 @@ describe("adoption is rechecked at the pinned commit", () => {
       seen.push(path);
       return null;
     };
-    expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toBeNull();
+    expect(factsFromFetch("owner/name", modules, "0".repeat(40), fetcher)).toBeNull();
     expect(seen).toEqual([".repo-platform.yml"]);
   });
 
   test("the local fact source is null without the file, facts with it", () => {
     const dir = temp.dir("adoption-");
     mkdirSync(join(dir, ".github"));
-    writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
-    expect(factsFromTargetDir(dir, manifests)).toBeNull();
+    writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: false\n");
+    expect(factsFromTargetDir(dir, modules)).toBeNull();
     writeFileSync(join(dir, ".repo-platform.yml"), "modules: [uv]\n");
-    expect(factsFromTargetDir(dir, manifests)).toEqual({
+    expect(factsFromTargetDir(dir, modules)).toEqual({
       modules: ["uv"],
       private: false,
       trackingLabels: [],
       prTitleWorkflowPresent: false,
     });
-  });
-
-  test("a cut-over checkout needs no answers file: the declared visibility and the registration's labels", () => {
-    const dir = temp.dir("cut-over-");
-    mkdirSync(join(dir, ".github"));
-    writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
-    writeFileSync(
-      join(dir, ".repo-platform.yml"),
-      "modules: [uv, fuzzer]\nproject: {name: Demo, slug: demo, description: ''}\nlabels: {fuzzer: my-fuzz}\n",
-    );
-    expect(factsFromTargetDir(dir, manifests)).toEqual({
-      modules: ["uv", "fuzzer"],
-      private: true,
-      trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
-      prTitleWorkflowPresent: false,
-    });
-    // Without a declared visibility there is nothing left to read it from.
-    writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
-    expect(() => factsFromTargetDir(dir, manifests)).toThrow(
-      "declares no boolean repository.private and the checkout records no answers file",
-    );
   });
 
   test("the skip reason names the repository and the deletion it avoids", () => {
@@ -518,12 +509,12 @@ describe("factsFromFetch pins every read to one ref", () => {
     const seen: { path: string; ref: string }[] = [];
     const fetcher = (_repo: string, path: string, ref: string): string | null => {
       seen.push({ path, ref });
-      if (path === ".repo-platform.yml") return "modules: [uv, fuzzer]\n";
+      if (path === ".repo-platform.yml")
+        return "modules: [uv, fuzzer]\nlabels: {fuzzer: my-fuzz}\n";
       if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-      if (path === ".github/.copier-answers.yml") return "fuzzer_label: my-fuzz\n";
       return null;
     };
-    expect(factsFromFetch("owner/name", manifests, PIN, fetcher)).toEqual({
+    expect(factsFromFetch("owner/name", modules, PIN, fetcher)).toEqual({
       modules: ["uv", "fuzzer"],
       private: false,
       trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
@@ -532,222 +523,163 @@ describe("factsFromFetch pins every read to one ref", () => {
     // Exactly the files that matter, in read order, every one at the pin;
     // pr-title.yml is not probed because the module is unselected.
     expect(seen).toEqual(
-      [".repo-platform.yml", ".github/settings.yml", ".github/.copier-answers.yml"].map((path) => ({
-        path,
-        ref: PIN,
-      })),
+      [".repo-platform.yml", ".github/settings.yml"].map((path) => ({ path, ref: PIN })),
     );
+  });
+
+  test("the pr-title workflow is probed at the pin only where the module is selected", () => {
+    const PIN = "000000000000000000000000000000000000000b";
+    const seen: string[] = [];
+    const fetcher = (_repo: string, path: string, ref: string): string | null => {
+      seen.push(`${path}@${ref}`);
+      if (path === ".repo-platform.yml") return "modules: [pr-title]\n";
+      if (path === ".github/settings.yml") return "repository:\n  private: true\n";
+      if (path === ".github/workflows/pr-title.yml") return "name: pr-title\n";
+      return null;
+    };
+    expect(factsFromFetch("owner/name", modules, PIN, fetcher)).toEqual({
+      modules: ["pr-title"],
+      private: true,
+      trackingLabels: [],
+      prTitleWorkflowPresent: true,
+    });
+    expect(seen).toEqual([
+      `.repo-platform.yml@${PIN}`,
+      `.github/settings.yml@${PIN}`,
+      `.github/workflows/pr-title.yml@${PIN}`,
+    ]);
+  });
+});
+
+describe("registrationFacts", () => {
+  const WHERE = "owner/name/.repo-platform.yml";
+
+  test("reads the selection and refuses anything the grammar refuses", () => {
+    expect(registrationFacts("modules: [uv, pages]\n", WHERE, modules).modules).toEqual([
+      "uv",
+      "pages",
+    ]);
+    expect(() => registrationFacts("notmodules: true\n", WHERE, modules)).toThrow(
+      "no module selection found",
+    );
+    // The plan's registration grammar: a duplicate entry is unreadable.
+    expect(() => registrationFacts("modules: [uv, uv]\n", WHERE, modules)).toThrow(
+      "duplicate modules entry",
+    );
+    // An unknown key is refused too: the grammar is strict for every reader.
+    expect(() => registrationFacts("modules: [uv]\nextra: 1\n", WHERE, modules)).toThrow(
+      "Unrecognized key",
+    );
+    expect(() => registrationFacts("a: [unclosed\n", WHERE, modules)).toThrow("YAML parse error");
+  });
+
+  test("a typo in a module name is LOUD", () => {
+    // layerPaths finds no layer files for it, so the document would look
+    // valid while missing that module's labels, and the apply deletes
+    // undeclared labels off the live repository.
+    expect(() => registrationFacts("modules: [uv, pgaes]\n", WHERE, modules)).toThrow(
+      "unknown module",
+    );
+  });
+
+  test.each<{
+    reason: string;
+    registration: string;
+    labels: { module: string; label: string }[];
+  }>([
+    {
+      reason: "a declared label is the label",
+      registration: "modules: [fuzzer]\nlabels: {fuzzer: my-fuzz}\n",
+      labels: [{ module: "fuzzer", label: "my-fuzz" }],
+    },
+    {
+      reason: "no selected stream module resolves nothing",
+      registration: "modules: [uv]\n",
+      labels: [],
+    },
+    {
+      reason: "an undeclared label for a selected stream is the module default",
+      registration: "modules: [uv, fuzzer]\n",
+      labels: [{ module: "fuzzer", label: "fuzz-nightly" }],
+    },
+    {
+      reason: "the fallback is per stream, in canonical module order",
+      registration: "modules: [nightly, fuzzer]\nlabels: {nightly: my-nightly}\n",
+      labels: [
+        { module: "fuzzer", label: "fuzz-nightly" },
+        { module: "nightly", label: "my-nightly" },
+      ],
+    },
+  ])("$reason", ({ registration, labels }) => {
+    expect(registrationFacts(registration, WHERE, modules).trackingLabels).toEqual(labels);
+  });
+
+  test("a tracking label the layers already manage is refused, case-insensitively, like the plan does", () => {
+    for (const label of ["javascript", "Javascript", "release-blocker", "dependencies"]) {
+      expect(() =>
+        registrationFacts(`modules: [fuzzer]\nlabels: {fuzzer: ${label}}\n`, WHERE, modules),
+      ).toThrow(`tracking label "${label}" (fuzzer) is a label the platform already manages`);
+    }
+    // The roster is injectable, so the refusal is proven against a name the
+    // committed layers do not carry, and a default is judged like a key.
+    expect(() =>
+      registrationFacts("modules: [fuzzer]\n", WHERE, modules, new Set(["fuzz-nightly"])),
+    ).toThrow('tracking label "fuzz-nightly" (fuzzer) is a label the platform already manages');
+    expect(
+      registrationFacts("modules: [fuzzer]\nlabels: {fuzzer: my-fuzz}\n", WHERE, modules)
+        .trackingLabels,
+    ).toEqual([{ module: "fuzzer", label: "my-fuzz" }]);
+  });
+
+  test("a labels key naming no selected stream throws", () => {
+    expect(() =>
+      registrationFacts("modules: [uv]\nlabels: {fuzzer: my-fuzz}\n", WHERE, modules),
+    ).toThrow("labels.fuzzer names no selected tracking stream");
+  });
+
+  test("a label shaped outside the grammar throws, naming the key", () => {
+    expect(() =>
+      registrationFacts('modules: [fuzzer]\nlabels: {fuzzer: "-bad"}\n', WHERE, modules),
+    ).toThrow("labels.fuzzer");
+  });
+
+  test.each([
+    {
+      reason: "two declared labels",
+      registration: "modules: [fuzzer, nightly]\nlabels: {fuzzer: same, nightly: same}\n",
+      error: 'tracking label "same" is shared by two streams (fuzzer, nightly)',
+    },
+    {
+      reason: "two declared labels differing only in case",
+      registration: "modules: [fuzzer, nightly]\nlabels: {fuzzer: Same, nightly: same}\n",
+      error: 'tracking label "same" is shared by two streams (fuzzer, nightly)',
+    },
+    {
+      reason: "a declared label that is another stream's default",
+      registration: "modules: [docs-site, fuzzer]\nlabels: {docs_site: fuzz-nightly}\n",
+      error: 'tracking label "fuzz-nightly" is shared by two streams (docs_site, fuzzer)',
+    },
+  ])(
+    "a label shared by two streams is refused at the facts boundary: $reason",
+    ({ registration, error }) => {
+      expect(() => registrationFacts(registration, WHERE, modules)).toThrow(error);
+    },
+  );
+
+  test("two settings layers claiming one label name fail the render", () => {
+    // Bypassing registrationFacts, which refuses the shared label first:
+    // the render's own collision check guards the merged layers.
+    const trackingLabels = [
+      { module: "docs-site", label: "fuzz-nightly" },
+      { module: "fuzzer", label: "fuzz-nightly" },
+    ];
+    expect(() =>
+      managedSettings(facts({ modules: ["docs-site", "fuzzer"], trackingLabels }), modules),
+    ).toThrow("which collide");
   });
 });
 
 describe("fact resolvers", () => {
-  test("modulesFrom reads the top-level list and refuses anything else", () => {
-    expect(modulesFrom("modules: [uv, pages]\n", "f")).toEqual(["uv", "pages"]);
-    expect(() => modulesFrom("notmodules: true\n", "f")).toThrow("modules list");
-    // The sync's registration grammar: a duplicate entry is unreadable.
-    expect(() => modulesFrom("modules: [uv, uv]\n", "f")).toThrow("modules list");
-    // A typo must be LOUD: layerPaths finds no layer files for it, so the
-    // document would look valid while missing that module's labels, and
-    // the apply deletes undeclared labels off the live repository.
-    expect(() => modulesFrom("modules: [uv, pgaes]\n", "f")).toThrow("unknown module");
-    // A folded name is unknown too: the repository's pending sync PR drops
-    // it (its rung), and the message says so instead of tolerating it.
-    expect(() => modulesFrom("modules: [uv, settings-sync]\n", "f")).toThrow("merge that PR first");
-    expect(() => modulesFrom("a: [unclosed\n", "f")).toThrow("YAML parse error");
-  });
-
-  describe("trackingLabelsOf", () => {
-    // The fleet plan's resolution, reused: the registration's labels block,
-    // else the recorded answer while the answers file exists, else the
-    // module default files.yml declares - so the settings roster and
-    // fleet-ci name the same label for every repository.
-    const WHERE = {
-      registration: "owner/name/.repo-platform.yml",
-      answers: "owner/name/.github/.copier-answers.yml",
-    };
-    const V2 = "project: {name: Demo, slug: demo, description: ''}\n";
-    test.each<{
-      reason: string;
-      registration: string;
-      answers: string | null;
-      labels: { module: string; label: string }[];
-    }>([
-      {
-        reason: "a cut-over registration's labels block, no answers file",
-        registration: `modules: [uv, fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
-        answers: null,
-        labels: [{ module: "fuzzer", label: "my-fuzz" }],
-      },
-      {
-        reason: "a cut-over registration without a labels block resolves the module default",
-        registration: `modules: [uv, fuzzer, nightly]\n${V2}`,
-        answers: null,
-        labels: [
-          { module: "fuzzer", label: "fuzz-nightly" },
-          { module: "nightly", label: "nightly-failure" },
-        ],
-      },
-      {
-        reason: "the fallback is per stream: a declared one stays declared",
-        registration: `modules: [fuzzer, nightly]\n${V2}labels: {nightly: my-nightly}\n`,
-        answers: null,
-        labels: [
-          { module: "fuzzer", label: "fuzz-nightly" },
-          { module: "nightly", label: "my-nightly" },
-        ],
-      },
-      {
-        reason: "the old shape: the recorded answer while the answers file exists",
-        registration: "modules: [uv, fuzzer]\n",
-        answers: "fuzzer_label: my-fuzz\n",
-        labels: [{ module: "fuzzer", label: "my-fuzz" }],
-      },
-      {
-        reason: "the old shape with no recorded answer resolves the module default",
-        registration: "modules: [uv, fuzzer]\n",
-        answers: "github_username: o\n",
-        labels: [{ module: "fuzzer", label: "fuzz-nightly" }],
-      },
-      {
-        reason: "a declared label agreeing with the recorded answer",
-        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
-        answers: "fuzzer_label: my-fuzz\n",
-        labels: [{ module: "fuzzer", label: "my-fuzz" }],
-      },
-      {
-        reason: "no selected stream module resolves nothing",
-        registration: `modules: [uv]\n${V2}`,
-        answers: null,
-        labels: [],
-      },
-    ])("$reason", ({ registration, answers, labels }) => {
-      expect(trackingLabelsOf(registration, answers, false, manifests, WHERE)).toEqual(labels);
-    });
-
-    test.each<{ reason: string; registration: string; answers: string | null; error: string }>([
-      {
-        reason: "a labels key naming no selected stream",
-        registration: `modules: [uv]\n${V2}labels: {fuzzer: my-fuzz}\n`,
-        answers: null,
-        error: "labels.fuzzer names no selected tracking stream",
-      },
-      {
-        reason: "a declared label disagreeing with the recorded answer",
-        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`,
-        answers: "fuzzer_label: other\n",
-        error: "the two must agree while both exist",
-      },
-      {
-        reason: "a label the settings layers already manage",
-        registration: `modules: [fuzzer]\n${V2}labels: {fuzzer: dependencies}\n`,
-        answers: null,
-        error: "is a label the template already manages",
-      },
-      {
-        reason: "two streams sharing one label",
-        registration: `modules: [fuzzer, nightly]\n${V2}labels: {fuzzer: same, nightly: same}\n`,
-        answers: null,
-        error: "is shared by two streams",
-      },
-      {
-        reason: "a registration the fleet grammar refuses",
-        registration: "modules: [fuzzer]\nlabels: {fuzzer: 'bad\"quote'}\n",
-        answers: null,
-        error: "owner/name/.repo-platform.yml: labels.fuzzer: must be a plain label",
-      },
-      {
-        reason: "a recorded answer that is not a string",
-        registration: "modules: [fuzzer]\n",
-        answers: "fuzzer_label: [a]\n",
-        error: "fuzzer_label must be a string",
-      },
-    ])("fails closed on $reason", ({ registration, answers, error }) => {
-      expect(() => trackingLabelsOf(registration, answers, false, manifests, WHERE)).toThrow(error);
-    });
-
-    test("the fetched facts resolve a cut-over repository from its registration alone", () => {
-      const seen: string[] = [];
-      const fetcher = (_repo: string, path: string): string | null => {
-        seen.push(path);
-        if (path === ".repo-platform.yml")
-          return `modules: [uv, fuzzer]\n${V2}labels: {fuzzer: my-fuzz}\n`;
-        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-        return null;
-      };
-      expect(factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toEqual({
-        modules: ["uv", "fuzzer"],
-        private: false,
-        trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
-        prTitleWorkflowPresent: false,
-      });
-      // The answers file is still asked for (a 404 is its normal state now).
-      expect(seen).toEqual([
-        ".repo-platform.yml",
-        ".github/settings.yml",
-        ".github/.copier-answers.yml",
-      ]);
-    });
-
-    test("the fetched facts refuse a labels key naming no selected stream, like the plan", () => {
-      // Skipping the resolver on a stream-less selection would render a
-      // roster without the declared label, and the apply deletes it.
-      const fetcher = (_repo: string, path: string): string | null => {
-        if (path === ".repo-platform.yml") return `modules: [uv]\n${V2}labels: {fuzzer: my-fuzz}\n`;
-        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-        return null;
-      };
-      expect(() => factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)).toThrow(
-        "labels.fuzzer names no selected tracking stream",
-      );
-    });
-
-    test("a stream-less fetched selection still reads the answers file at the pin", () => {
-      const seen: string[] = [];
-      const fetcher = (_repo: string, path: string): string | null => {
-        seen.push(path);
-        if (path === ".repo-platform.yml") return "modules: [uv]\n";
-        if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-        return null;
-      };
-      expect(
-        factsFromFetch("owner/name", manifests, "0".repeat(40), fetcher)?.trackingLabels,
-      ).toEqual([]);
-      expect(seen).toEqual([
-        ".repo-platform.yml",
-        ".github/settings.yml",
-        ".github/.copier-answers.yml",
-      ]);
-    });
-  });
-
-  describe("trackingLabelsFrom", () => {
-    // The operator's own answers file has no registration and no sync PR
-    // writes it, so an absent or unreadable answer is a defect.
-    const WHERE = "operator/.repo-platform-answers.yml";
-    test("a recorded answer is the label", () => {
-      expect(trackingLabelsFrom("fuzzer_label: my-fuzz\n", ["fuzzer"], manifests, WHERE)).toEqual([
-        { module: "fuzzer", label: "my-fuzz" },
-      ]);
-      expect(trackingLabelsFrom("{}\n", ["uv"], manifests, WHERE)).toEqual([]);
-    });
-    test("an absent answer throws instead of assuming the default", () => {
-      expect(() =>
-        trackingLabelsFrom("github_username: o\n", ["fuzzer"], manifests, WHERE),
-      ).toThrow(
-        `${WHERE}: the fuzzer module is selected but the file records no fuzzer_label answer - ` +
-          "no sync PR records this file, so the tracking label cannot be resolved; record the answer",
-      );
-    });
-    test.each(['fuzzer_label: ""\n', "fuzzer_label:\n", "fuzzer_label: [a]\n"])(
-      "a present but unreadable answer fails: %s",
-      (answers) => {
-        expect(() => trackingLabelsFrom(answers, ["fuzzer"], manifests, WHERE)).toThrow(
-          "the fuzzer module is selected but its fuzzer_label answer is not readable",
-        );
-      },
-    );
-  });
-
   test("declaredPrivate reads only a boolean repository.private", () => {
     expect(declaredPrivate("repository:\n  private: true\n")).toBe(true);
     expect(declaredPrivate("repository:\n  private: false\n")).toBe(false);
@@ -757,58 +689,35 @@ describe("fact resolvers", () => {
     expect(declaredPrivate(null)).toBeNull();
   });
 
-  test("factsFromTargetDir prefers the checkout's declared visibility over the recorded answer", () => {
+  test("factsFromTargetDir reads the checkout's declared visibility and refuses an undeclared one", () => {
     const dir = temp.dir("facts-");
     mkdirSync(join(dir, ".github"));
     writeFileSync(join(dir, ".repo-platform.yml"), "modules: [uv]\n");
-    writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
     writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
-    expect(factsFromTargetDir(dir, manifests)?.private).toBe(true);
-    // Undeclared falls back to the recorded answer.
+    expect(factsFromTargetDir(dir, modules)?.private).toBe(true);
     writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
-    expect(factsFromTargetDir(dir, manifests)?.private).toBe(false);
-  });
-
-  test("the operator's own selection is validated too", () => {
-    // repo-platform is always a settings target, so a typo in its answers
-    // file is the same destructive path as one in a client repo.
-    const dir = temp.dir("operator-");
-    const file = join(dir, "answers.yml");
-    const real = readFileSync(".repo-platform-answers.yml", "utf-8");
-    writeFileSync(file, real.replace("- bun", "- bnu"));
-    expect(() => factsFromOperatorAnswers(file, manifests)).toThrow("unknown module");
-  });
-
-  test("the operator's absent stream answer is a defect, not a pending render", () => {
-    // No sync PR writes .repo-platform-answers.yml, so the client-side
-    // default fallback must not engage: the file is hand-maintained.
-    const dir = temp.dir("operator-label-");
-    const file = join(dir, "answers.yml");
-    const real = readFileSync(".repo-platform-answers.yml", "utf-8");
-    const stripped = real.replace(/^docs_site_label: .*\n/m, "");
-    if (stripped === real) throw new Error("the real operator answers record no docs_site_label");
-    writeFileSync(file, stripped);
-    expect(() => factsFromOperatorAnswers(file, manifests)).toThrow(
-      "records no docs_site_label answer - no sync PR records this file",
+    expect(() => factsFromTargetDir(dir, modules)).toThrow(
+      "declares no boolean repository.private",
     );
   });
 
-  test("the operator answers reproduce this repository's own facts", () => {
-    // Runs against the real .repo-platform-answers.yml (cwd is the repo
-    // root under bun test), so a drifted answers schema fails here first.
-    const operatorFacts = factsFromOperatorAnswers(".repo-platform-answers.yml");
+  test("this repository's own registration reproduces its facts", () => {
+    // Runs against the real checkout (cwd is the repo root under bun
+    // test), the way settings-repos.yml's operator row reads it.
+    const operatorFacts = factsFromTargetDir(".", modules);
+    if (operatorFacts === null) throw new Error("this repository carries no .repo-platform.yml");
     expect(operatorFacts.private).toBe(false);
     // repo-platform runs no release pipeline of its own, so release-please
-    // is deliberately absent from its dogfooded modules.
+    // is deliberately absent from its own modules.
     expect(operatorFacts.modules).not.toContain("release-please");
     expect(operatorFacts.modules).toContain("bun");
-    // The dogfooded docs-site module is a tracking-stream module, so the
-    // operator facts must resolve its label from the recorded answer.
+    // The docs-site module is a tracking-stream module, so the operator
+    // facts resolve its label from the registration.
     expect(operatorFacts.trackingLabels).toEqual([{ module: "docs-site", label: "docs-link-rot" }]);
     // The operator baseline must carry the labels its own machinery
     // recreates (dependabot, the docs-site link-rot stream) - the
     // delete/recreate loop tripwire.
-    const names = managedLabels(operatorFacts, manifests).map((label) => label.name);
+    const names = managedLabels(operatorFacts, modules).map((label) => label.name);
     for (const required of ["dependencies", "github_actions", "javascript", "docs-link-rot"]) {
       expect(names).toContain(required);
     }
@@ -822,7 +731,7 @@ describe("managedLabelNames", () => {
     // and the release-please module's own. A pure function of on-disk
     // constants, so the exact list is the claim - a loop re-reading the
     // layer files would pass on an emptied one.
-    expect(managedLabelNames(manifests)).toEqual([
+    expect(managedLabelNames(modules)).toEqual([
       ...BASELINE_LABELS,
       "settings-as-code-report",
       "javascript",

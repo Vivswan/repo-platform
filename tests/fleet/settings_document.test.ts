@@ -119,8 +119,8 @@ describe("the name-keyed sections must be lists of mappings", () => {
   });
 
   test("parseLayerFile refuses the same shapes: one boundary, both entrances", () => {
-    expect(() => parseLayerFile("labels:\n  bug: x\n", "templates/x/settings.yml")).toThrow(
-      "templates/x/settings.yml: labels: labels must be a list of mappings",
+    expect(() => parseLayerFile("labels:\n  bug: x\n", "files/x/settings.yml")).toThrow(
+      "files/x/settings.yml: labels: labels must be a list of mappings",
     );
   });
 });
@@ -130,8 +130,8 @@ describe("parseLayerFile", () => {
     // The render selects layer files by existence, so "declares nothing"
     // is already expressible by not shipping the file; an empty one is an
     // authoring accident and says so.
-    expect(() => parseLayerFile("", "templates/x/settings.yml")).toThrow("not a YAML mapping");
-    expect(() => parseLayerFile("# comments only\n", "templates/x/settings.yml")).toThrow(
+    expect(() => parseLayerFile("", "files/x/settings.yml")).toThrow("not a YAML mapping");
+    expect(() => parseLayerFile("# comments only\n", "files/x/settings.yml")).toThrow(
       "not a YAML mapping",
     );
     // A repository's own settings.yml is the opposite case: present but

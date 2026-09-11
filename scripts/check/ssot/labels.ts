@@ -1,37 +1,17 @@
 // Rules over the label rosters: the managed labels' sites, the release
-// guard's literals, dependabot's tuples, and the tracking-label validators.
+// guard's literals, dependabot's tuples, and the hand-copied label regex.
 
 import { loadLayer } from "../../../.github/scripts/fleet/render_managed_settings.ts";
-import { constRegexSource, constStringValue, propertyRegexSource } from "../../lib/ts_extract.ts";
+import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
-import {
-  asRecord,
-  copierConfig,
-  loadManifests,
-  managedLabelRoster,
-  read,
-  trackingManifests,
-} from "./inputs.ts";
+import { managedLabelRoster, modules, read, trackingStreams } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** Normalize python-style \Z end anchors to $, for regex-pair comparison. */
-export function zToDollar(pattern: string): string {
-  return pattern.replace(/\\Z$/, "$");
-}
-
 /** The hand-copied homes of the fuzz-issue action's LABEL_RE, each read off
- *  its AST: the exported const twins, and the zod `.regex()` literals pinned
- *  under a schema property. copier.yml's validators are compared in the
- *  rule itself; the generated module.schema.json rides on module_manifests. */
-export const LABEL_RE_COPIES: readonly {
-  file: string;
-  shape: "const" | "property";
-  name: string;
-}[] = [
-  { file: "actions/plan/registration.ts", shape: "const", name: "LABEL_RE" },
-  { file: "actions/release-health/release-health.ts", shape: "const", name: "LABEL_RE" },
-  { file: "scripts/generate/render_dogfood.ts", shape: "property", name: "docs_site_label" },
-  { file: "scripts/lib/module_manifests.ts", shape: "property", name: "default" },
+ *  its AST: the exported const twins. */
+export const LABEL_RE_COPIES: readonly { file: string; name: string }[] = [
+  { file: "actions/plan/registration.ts", name: "LABEL_RE" },
+  { file: "actions/release-health/release-health.ts", name: "LABEL_RE" },
 ];
 
 /** Each copy in LABEL_RE_COPIES whose pattern body differs from `labelRe`
@@ -42,12 +22,11 @@ export function labelRegexCopyMismatches(
 ): Mismatch[] {
   const mismatches: Mismatch[] = [];
   for (const copy of LABEL_RE_COPIES) {
-    const anchor = { where: copy.file, what: `the ${copy.name} label regex` };
-    const source = readSource(copy.file);
-    const got =
-      copy.shape === "const"
-        ? constRegexSource(source, copy.name, { ...anchor, exported: true })
-        : propertyRegexSource(source, copy.name, anchor);
+    const got = constRegexSource(readSource(copy.file), copy.name, {
+      where: copy.file,
+      what: `the ${copy.name} label regex`,
+      exported: true,
+    });
     if (got !== labelRe) {
       mismatches.push({
         file: `${copy.file} ${copy.name}`,
@@ -59,17 +38,21 @@ export function labelRegexCopyMismatches(
   return mismatches;
 }
 
+/** The two starter workflows carrying a tracking stream's create tuple. */
+export const FUZZ_STARTER = "files/fuzzer/.github/workflows/nightly-fuzz.yml";
+export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
+
 /** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const labelRules: Rule[] = [
   {
     name: "labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // The baseline generator is the label roster's single home; this
+      // The settings layers are the label roster's single home; this
       // regression tripwire keeps the hand-maintained tuples from quietly
       // losing a member the fleet's tools recreate (dependabot, the
       // release machinery) - losing one restarts the nightly
-      // delete/recreate loop the generator exists to kill.
+      // delete/recreate loop the layers exist to kill.
       const rosterNames = new Set(managedLabelRoster().map((label) => label.name));
       const required = [
         "dependencies",
@@ -94,28 +77,14 @@ export const labelRules: Rule[] = [
         }
       }
 
-      // Tracking-label streams: each manifest's tracking_label block is the
-      // single source; the hand-written copier question is anchored back to
-      // it here (the baseline generator renders the stream labels from the
-      // same manifest tuples, so it cannot drift), and the create-tuple
-      // carriers (the action's defaults for the fuzz stream, the starter's
-      // overrides for the nightly stream) below.
-      for (const { module, tracking } of trackingManifests()) {
-        const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
-        if (String(question.default) !== tracking.default) {
-          mismatches.push({
-            file: `copier.yml ${tracking.answer} default`,
-            expected: `${tracking.default} (templates/${module}/module.yml tracking_label)`,
-            got: String(question.default),
-          });
-        }
-      }
-
-      // The fuzz stream's create tuple lives in the action's DEFAULTS, so
-      // the fuzz starter must pass no override - asserted, so adding one
-      // later fails this rule instead of silently orphaning its premise.
-      const fuzzTracking = trackingManifests().find((m) => m.module === "fuzzer")?.tracking;
-      if (!fuzzTracking) throw new Error("templates/fuzzer/module.yml lost tracking_label");
+      // Tracking-label streams: files.yml's tracking_label block is the
+      // single source of each stream's create tuple; the carriers (the
+      // action's defaults for the fuzz stream, the starters' overrides for
+      // the nightly stream, the shared deploy for the docs-site stream) are
+      // anchored back to it here.
+      const streams = trackingStreams();
+      const fuzzTracking = streams.find((m) => m.module === "fuzzer");
+      if (!fuzzTracking) throw new Error("files.yml modules.fuzzer lost tracking_label");
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
       const color = constStringValue(action, "DEFAULT_LABEL_COLOR", {
         where: "fuzz-issue.ts",
@@ -128,21 +97,21 @@ export const labelRules: Rule[] = [
       if (color !== fuzzTracking.color || description !== fuzzTracking.description) {
         mismatches.push({
           file: "actions/fuzz-issue/fuzz-issue.ts label defaults",
-          expected: `${fuzzTracking.color} / ${fuzzTracking.description} (templates/fuzzer/module.yml tracking_label)`,
+          expected: `${fuzzTracking.color} / ${fuzzTracking.description} (files.yml modules.fuzzer.tracking_label)`,
           got: `${color} / ${description}`,
         });
       }
-      const fuzzStarter = read("templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja");
+      const fuzzStarter = read(FUZZ_STARTER);
       if (/label-(?:color|description):/.test(fuzzStarter)) {
         mismatches.push({
-          file: "templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja",
+          file: FUZZ_STARTER,
           expected:
             "no label-color/label-description override (the fuzz tuple is anchored to the action's defaults)",
           got: "an override - anchor this rule to it instead",
         });
       }
       // The fuzz starter's explicit title must stay the action's title
-      // default: already-rendered fleet starters omit the input and depend
+      // default: already-written fleet starters omit the input and depend
       // on the default (the action's own test pins DEFAULT_TITLE to it).
       const titleDefault = mustMatch(
         read("actions/fuzz-issue/action.yml"),
@@ -153,31 +122,31 @@ export const labelRules: Rule[] = [
       const starterTitle = mustMatch(
         fuzzStarter,
         /^ {10}title: (.+)$/m,
-        "nightly-fuzz.yml.jinja",
+        FUZZ_STARTER,
         "title input",
       )[1];
       if (starterTitle !== titleDefault) {
         mismatches.push({
-          file: "templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja title",
+          file: `${FUZZ_STARTER} title`,
           expected: `${titleDefault} (actions/fuzz-issue/action.yml title default)`,
           got: starterTitle,
         });
       }
 
       // The nightly stream's create tuple is passed by its starter.
-      const nightlyTracking = trackingManifests().find((m) => m.module === "nightly")?.tracking;
-      if (!nightlyTracking) throw new Error("templates/nightly/module.yml lost tracking_label");
-      const starter = read("templates/nightly/.github/workflows/nightly.yml.jinja");
+      const nightlyTracking = streams.find((m) => m.module === "nightly");
+      if (!nightlyTracking) throw new Error("files.yml modules.nightly lost tracking_label");
+      const starter = read(NIGHTLY_STARTER);
       const starterColor = mustMatch(
         starter,
         /label-color: "([^"]+)"/,
-        "nightly.yml.jinja",
+        NIGHTLY_STARTER,
         "label-color input",
       )[1];
       const starterDescription = mustMatch(
         starter,
         /label-description: (.+)/,
-        "nightly.yml.jinja",
+        NIGHTLY_STARTER,
         "label-description input",
       )[1];
       if (
@@ -185,16 +154,16 @@ export const labelRules: Rule[] = [
         starterDescription !== nightlyTracking.description
       ) {
         mismatches.push({
-          file: "templates/nightly/.github/workflows/nightly.yml.jinja label overrides",
-          expected: `${nightlyTracking.color} / ${nightlyTracking.description} (templates/nightly/module.yml tracking_label)`,
+          file: `${NIGHTLY_STARTER} label overrides`,
+          expected: `${nightlyTracking.color} / ${nightlyTracking.description} (files.yml modules.nightly.tracking_label)`,
           got: `${starterColor} / ${starterDescription}`,
         });
       }
 
       // The docs-site stream's create tuple is passed by the shared deploy
       // (reusable-pages.yml files the link-rot issue for every caller).
-      const docsTracking = trackingManifests().find((m) => m.module === "docs-site")?.tracking;
-      if (!docsTracking) throw new Error("templates/docs-site/module.yml lost tracking_label");
+      const docsTracking = streams.find((m) => m.module === "docs-site");
+      if (!docsTracking) throw new Error("files.yml modules.docs-site lost tracking_label");
       const reusablePages = read(".github/workflows/reusable-pages.yml");
       const rotColor = mustMatch(
         reusablePages,
@@ -211,7 +180,7 @@ export const labelRules: Rule[] = [
       if (rotColor !== docsTracking.color || rotDescription !== docsTracking.description) {
         mismatches.push({
           file: ".github/workflows/reusable-pages.yml label overrides",
-          expected: `${docsTracking.color} / ${docsTracking.description} (templates/docs-site/module.yml tracking_label)`,
+          expected: `${docsTracking.color} / ${docsTracking.description} (files.yml modules.docs-site.tracking_label)`,
           got: `${rotColor} / ${rotDescription}`,
         });
       }
@@ -278,16 +247,15 @@ export const labelRules: Rule[] = [
     // names the autorelease labels as string literals. gh pr list exits 0
     // and empty for a label that does not exist, so a literal that drifts
     // from the managed roster degrades the guard to a permanent silent
-    // no-op - anchor the literals to the release-please manifest's
-    // settings layer here instead.
+    // no-op - anchor the literals to the release-please module's settings
+    // layer here instead.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const releaseLabels = (loadLayer("templates/release-please/settings.yml").labels ?? []) as {
-        name: string;
-      }[];
+      const layer = "files/release-please/settings.yml";
+      const releaseLabels = (loadLayer(layer).labels ?? []) as { name: string }[];
       if (releaseLabels.length === 0) {
-        throw new Error("templates/release-please/settings.yml declares no labels - anchor lost");
+        throw new Error(`${layer} declares no labels - anchor lost`);
       }
       const roster = new Set(releaseLabels.map((label) => label.name));
       const rel = ".github/workflows/fleet-release.yml";
@@ -309,8 +277,8 @@ export const labelRules: Rule[] = [
         if (!roster.has(name)) {
           mismatches.push({
             file: rel,
-            expected: `label '${name}' declared in templates/release-please/settings.yml`,
-            got: "not in the manifest roster",
+            expected: `label '${name}' declared in ${layer}`,
+            got: "not in the module's roster",
           });
         }
       }
@@ -336,35 +304,35 @@ export const labelRules: Rule[] = [
   {
     name: "dependabot-label-tuples",
     run: () => {
-      // A toolchain module's dependabot label now has two homes: the
-      // manifest's `dependabot` tuple (which drives the generated
-      // dependabot.yml and the docs) and the module's own settings layer
-      // (which drives the label roster the apply syncs). If they drift,
-      // dependabot recreates a label the settings apply then deletes -
-      // the nightly delete/recreate loop this whole roster exists to kill.
+      // A toolchain module's dependabot label has two homes: files.yml's
+      // `dependabot_label` tuple (which the docs quote) and the module's
+      // own settings layer (which drives the label roster the apply syncs).
+      // If they drift, dependabot recreates a label the settings apply then
+      // deletes - the nightly delete/recreate loop this whole roster exists
+      // to kill.
       const mismatches: Mismatch[] = [];
-      for (const manifest of loadManifests()) {
-        const tuple = manifest.dependabot;
+      for (const module of modules()) {
+        const tuple = module.dependabot_label;
         if (tuple === undefined) continue;
-        const rel = `templates/${manifest.module}/settings.yml`;
+        const rel = `files/${module.name}/settings.yml`;
         const declared = (loadLayer(rel).labels ?? []) as {
           name: string;
           color: string;
           description: string;
         }[];
-        const entry = declared.find((label) => label.name === tuple.label);
+        const entry = declared.find((label) => label.name === tuple.name);
         if (entry === undefined) {
           mismatches.push({
             file: rel,
-            expected: `a label '${tuple.label}' (the manifest's dependabot.label)`,
+            expected: `a label '${tuple.name}' (files.yml modules.${module.name}.dependabot_label)`,
             got: declared.map((label) => label.name).join(", ") || "no labels",
           });
           continue;
         }
         if (entry.color !== tuple.color) {
           mismatches.push({
-            file: `${rel} label '${tuple.label}' color`,
-            expected: `${tuple.color} (templates/${manifest.module}/module.yml dependabot.color)`,
+            file: `${rel} label '${tuple.name}' color`,
+            expected: `${tuple.color} (files.yml modules.${module.name}.dependabot_label.color)`,
             got: entry.color,
           });
         }
@@ -373,71 +341,19 @@ export const labelRules: Rule[] = [
     },
   },
   {
-    // Every tracking-label copier question (one per manifest tracking_label
-    // stream) and every hand-copied regex (LABEL_RE_COPIES) must state
-    // exactly the shape the fuzz-issue action enforces, and every later
-    // stream's validator must carry the case-insensitive cross-answer
-    // collision clause against each earlier answer - the validator is the
-    // collision boundary at generation time (the fleet preflight covers
-    // the applies), so deleting the clause must fail here.
+    // Every hand-copied label regex (LABEL_RE_COPIES) must state exactly
+    // the shape the fuzz-issue action enforces: the plan refuses a
+    // registration label the action would refuse, and release-health reads
+    // labels the same way.
     name: "tracking-label-regex",
     run: () => {
-      const mismatches: Mismatch[] = [];
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
       const labelRe = constRegexSource(action, "LABEL_RE", {
         where: "fuzz-issue.ts",
         what: "LABEL_RE",
         exported: true,
       });
-      mismatches.push(...labelRegexCopyMismatches(labelRe, read));
-      const streams = trackingManifests();
-      for (const [index, { tracking }] of streams.entries()) {
-        const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
-        const validator = String(question.validator ?? "");
-        const copierRe = zToDollar(
-          mustMatch(
-            validator,
-            /regex_search\('([^']+)'\)/,
-            `copier.yml ${tracking.answer} validator`,
-            "pattern",
-          )[1],
-        );
-        if (copierRe !== labelRe) {
-          mismatches.push({
-            file: `copier.yml ${tracking.answer} validator`,
-            expected: `${labelRe} (actions/fuzz-issue/fuzz-issue.ts LABEL_RE)`,
-            got: copierRe,
-          });
-        }
-        for (const earlier of streams.slice(0, index)) {
-          const clause = `${tracking.answer} | lower == ${earlier.tracking.answer} | lower`;
-          if (!validator.includes(clause)) {
-            mismatches.push({
-              file: `copier.yml ${tracking.answer} validator`,
-              expected: `the collision clause '${clause}' (streams sharing a label close each other's issues)`,
-              got: "missing",
-            });
-          }
-        }
-      }
-      // Copier asks questions in FILE order, and each stream's generated
-      // validator references every earlier stream's answer, so the
-      // questions must physically follow the streams' MODULE_ORDER - out
-      // of order, the earlier validator reads a not-yet-answered question
-      // and every render fails at the prompt.
-      const questionKeys = Object.keys(copierConfig());
-      for (let index = 1; index < streams.length; index++) {
-        const prev = streams[index - 1].tracking.answer;
-        const next = streams[index].tracking.answer;
-        if (questionKeys.indexOf(next) < questionKeys.indexOf(prev)) {
-          mismatches.push({
-            file: "copier.yml",
-            expected: `the '${next}' question declared after '${prev}' (stream order; validators reference earlier answers)`,
-            got: "declared before it",
-          });
-        }
-      }
-      return mismatches;
+      return labelRegexCopyMismatches(labelRe, read);
     },
   },
 ];

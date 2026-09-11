@@ -142,7 +142,12 @@ function run(mode: string | undefined, opts: Options = {}) {
 }
 
 const oneFailure = [
-  { label: "copier update", slug: "copier-update", rc: 3, output: "Traceback: secret target path" },
+  {
+    label: "settings render",
+    slug: "settings-render",
+    rc: 3,
+    output: "Traceback: secret target path",
+  },
 ];
 
 /** The gh conversation as ordered "<method> <api path>" records (gh api
@@ -203,10 +208,10 @@ describe("failure_issue.ts", () => {
     expect(r.calls).toContain("--jq .number");
     expect(r.calls).toContain("assignees | length");
     expect(r.calls).toContain("assignees[]=Vivswan");
-    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).toContain("## settings render: exit 3");
     expect(r.body).toContain("Traceback: secret target path");
     expect(r.body).toContain("actions/runs/123");
-    expect(r.body).toContain("docs/private-repos.md");
+    expect(r.body).toContain("docs/settings.md");
     // The torn-row control: a well-formed manifest carries no skipped-row note.
     expect(r.body).not.toContain("malformed failure-manifest row");
     // The number gh returned stays out of the public log, like the slug.
@@ -272,7 +277,7 @@ describe("failure_issue.ts", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
-    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).toContain("## settings render: exit 3");
     expect(r.body).toContain("Traceback: secret target path");
     expect(r.body).toContain("2 malformed failure-manifest row(s) were skipped");
     expect(r.body).not.toContain("undefined");
@@ -304,7 +309,7 @@ describe("failure_issue.ts", () => {
       unterminated: true,
     });
     expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).toContain("## settings render: exit 3");
     expect(r.body).not.toContain("## branch push");
     expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
   });
@@ -312,7 +317,7 @@ describe("failure_issue.ts", () => {
   test("deliver bounds an oversized capture", () => {
     const r = run("deliver", {
       failures: [
-        { label: "copier update", slug: "copier-update", rc: 1, output: "x".repeat(30000) },
+        { label: "settings render", slug: "settings-render", rc: 1, output: "x".repeat(30000) },
       ],
     });
     expect(r.body).toContain("(truncated at 20000 bytes");
@@ -322,7 +327,12 @@ describe("failure_issue.ts", () => {
   test("a capture full of backticks cannot terminate its own fence", () => {
     const r = run("deliver", {
       failures: [
-        { label: "copier update", slug: "copier-update", rc: 1, output: "before\n`````raw\nafter" },
+        {
+          label: "settings render",
+          slug: "settings-render",
+          rc: 1,
+          output: "before\n`````raw\nafter",
+        },
       ],
     });
     expect(r.body).toContain("``````text\nbefore\n`````raw\nafter\n``````");
@@ -332,8 +342,8 @@ describe("failure_issue.ts", () => {
     const r = run("deliver", {
       failures: [
         {
-          label: "copier update",
-          slug: "copier-update",
+          label: "settings render",
+          slug: "settings-render",
           rc: 1,
           output: "bin\u0000ary\n`````raw\nafter",
         },
@@ -346,7 +356,7 @@ describe("failure_issue.ts", () => {
   test("a giant backtick run collapses and the body stays bounded", () => {
     const r = run("deliver", {
       failures: [
-        { label: "copier update", slug: "copier-update", rc: 1, output: "`".repeat(30000) },
+        { label: "settings render", slug: "settings-render", rc: 1, output: "`".repeat(30000) },
       ],
     });
     expect(r.body).toContain(`${"`".repeat(101)}text`);
@@ -359,8 +369,8 @@ describe("failure_issue.ts", () => {
     const r = run("deliver", {
       failures: [
         {
-          label: "copier update",
-          slug: "copier-update",
+          label: "settings render",
+          slug: "settings-render",
           rc: 1,
           output: "x".repeat(19995) + "`".repeat(10),
         },

@@ -21,11 +21,7 @@ import { join } from "node:path";
 import { Node } from "ts-morph";
 import { parseTs } from "../../scripts/lib/ts_extract.ts";
 
-const SITES = [
-  ".github/scripts/sync/clean_renders.ts",
-  ".github/scripts/sync/disarm_pr.ts",
-  ".github/scripts/fleet/select_settings_repos.ts",
-];
+const SITES = [".github/scripts/fleet/select_settings_repos.ts"];
 
 /** The whole argument list must be ONE literal naming the program only: a
  * plain double-quoted string, or a template literal whose sole

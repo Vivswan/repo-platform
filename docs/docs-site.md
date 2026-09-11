@@ -23,7 +23,7 @@ Standalone, the deploy runs three ways: on every green push to the default branc
 - Tables need no width tricks: a top-level table wider than the doc column scrolls horizontally inside the column instead of clipping at the viewport (one nested in a quote, list, or container gets no scroll wrapper).
 - A ```` ```mermaid ```` fence renders as a diagram in the site's colors, in both appearance modes, on its own or as a tab of a `::: code-group`. The diagram library loads only on pages that carry one; the fence's source stays on the page as the fallback without JavaScript and beside the error when the diagram does not parse. On paper the diagram prints as drawn from the light appearance, and as its source from the dark one (the drawn colors are the screen's).
 - `docs/README.md` is the site's landing page; each directory's `README.md` is its index. The sidebar and nav derive from the file tree and each page's own frontmatter - there is no config file. A page is titled by its `title` frontmatter, else its `# ` h1, else its filename; a directory group takes its folder name with each word capitalized (`api-reference/` reads as Api Reference).
-- Sidebar order within a directory: the landing page, then pages with an `order` frontmatter key (a number, ascending, ties by title), then pages the landing's link table names in the order it first names them, then the rest in file order. Pages sharing a `group` frontmatter key (a string) sit under one heading placed where the group's first member falls, so `order: 20` and `group: Modules` on a page's frontmatter both place it and head it. A tree with neither frontmatter nor a landing table keeps its file order; the search launcher lists pages and directories in the sidebar's order too. A landing page titled exactly like the site (the `project_name` answer, which can differ from the repository name) reads Overview in the sidebar, since the nav bar right above already carries that name.
+- Sidebar order within a directory: the landing page, then pages with an `order` frontmatter key (a number, ascending, ties by title), then pages the landing's link table names in the order it first names them, then the rest in file order. Pages sharing a `group` frontmatter key (a string) sit under one heading placed where the group's first member falls, so `order: 20` and `group: Modules` on a page's frontmatter both place it and head it. A tree with neither frontmatter nor a landing table keeps its file order; the search launcher lists pages and directories in the sidebar's order too. A landing page titled exactly like the site (the registration's `project.name`, which can differ from the repository name) reads Overview in the sidebar, since the nav bar right above already carries that name.
 - A table in `docs/README.md` whose one column is bare links to pages becomes the search launcher's curated rows (label from the first other cell, note from the remaining cells); without one the launcher lists every page and heading.
 - VitePress `<!-- @include: file.md -->` directives work, but a page that uses one lists no heading rows in the launcher's page index (full-text search still reaches those headings), and a landing page that uses one places no pages by its link table (they keep file order). Only a directive VitePress expands counts: one naming a missing file, which is what a mention in prose or a code span normally is, changes nothing.
 - Links are written as they read on GitHub and resolve in repository space: a link inside `docs/` (or into another root the site renders, see below) becomes the page's route, a link to any other file in the repository (`../.github/workflows/ci.yml`, `../README.md`) becomes a link to that file on GitHub at the version being read, and absolute URLs pass through. A link to a page's source file name (`guide/README.md`) renders as the directory URL, and heading anchors are GitHub's (`#3-add-checks-to-checksyml` reaches `## 3. Add checks to checks.yml` on both). Dead internal links fail the build - that failure is the point, see the PR check below - and once the site is assembled every same-site link is checked again across the whole artifact ([pages.md](pages.md#internal-links-are-checked-across-mounts)).
@@ -40,7 +40,7 @@ The docs mount can render other directories of the repository beside `docs/`, so
 | Key | What it names | With the example |
 |---|---|---|
 | `path` | The repository directory to stage | `skills/` |
-| `mount` | The URL directory under the docs mount | `.../<repo>/skills/`, or `.../<repo>/<docs_site_path>/skills/` beside the pages module |
+| `mount` | The URL directory under the docs mount | `.../<repo>/skills/`, or `.../<repo>/<docs_site.path>/skills/` beside the pages module |
 | `page` | The file that serves as each child directory's page | `skills/repo-platform-sync-pr/SKILL.md` renders at `/skills/repo-platform-sync-pr/` |
 
 How a staged root renders:
@@ -82,18 +82,19 @@ Historical version tags are gentler: a tag whose tree has no `docs/` (or carries
 
 ## Link rot
 
-Nightly deploys crawl the assembled site's EXTERNAL links after publishing (internal ones were already fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the `docs_site_label` answer's label (default `docs-link-rot`) listing every broken URL with up to five of the pages linking it, closed automatically on the first clean night. Like every tracking stream, an open issue holds releases on repos with the release-please module - `release-override` is the documented escape hatch.
+Nightly deploys crawl the assembled site's EXTERNAL links after publishing (internal ones were already fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the `labels.docs_site` registration key's label (default `docs-link-rot`) listing every broken URL with up to five of the pages linking it, closed automatically on the first clean night. Like every tracking stream, an open issue holds releases on repos with the release-please module - `release-override` is the documented escape hatch.
 
-## Module parameters (copier questions)
+## Module parameters (registration keys)
 
-| Question | Meaning | Default |
+| Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `docs_site_path` | URL path the docs mount under when the pages module also renders a website | `docs` |
-| `docs_site_label` | The link-rot tracking issue's label | `docs-link-rot` |
+| `docs_site.path` | URL path the docs mount under when the pages module also publishes a website | `docs` |
+| `docs_site.include` | Extra source roots staged into the site (`{path, mount, page?}` each; [other roots on the site](#other-roots-on-the-site)) | none |
+| `labels.docs_site` | The link-rot tracking issue's label | `docs-link-rot` |
 
 ## With the pages module
 
-Both modules selected deploy ONE Pages site: the repo's own site at `/` (unversioned, built from the default branch) and the docs at `/<docs_site_path>/` with the full version rules; the pipeline derives the layout from the registration, so pages.yml and docs-site.yml keep their one shape. [pages.md](pages.md#with-the-docs-site-module) has the composed layout.
+Both modules selected deploy ONE Pages site: the repo's own site at `/` (unversioned, built from the default branch) and the docs at `/<docs_site.path>/` with the full version rules; the pipeline derives the layout from the registration, so pages.yml and docs-site.yml keep their one shape. [pages.md](pages.md#with-the-docs-site-module) has the composed layout.
 
 ## What each page gets for free
 

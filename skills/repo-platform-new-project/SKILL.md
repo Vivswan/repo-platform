@@ -43,7 +43,7 @@ For an existing repository, skip this step and work on a branch of the repo as i
 
 ### 2. Write `.repo-platform.yml`
 
-Only `modules` is required. Every other key has a default; write a key only when the default is wrong. `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
+Only `modules` is required, but write `project` too: the settings starter needs `project.description` (an empty description holds that starter with a Registration note until the key is set). `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
 
 Minimal:
 
@@ -94,7 +94,7 @@ gh run list -R Vivswan/repo-platform --workflow sync-repos.yml --limit 1
 gh run watch -R Vivswan/repo-platform <id> --exit-status
 ```
 
-`manual=true` keeps the PR waiting for a human even when the report holds nothing. The run's job log (`gh run view <id> --log`) carries the operator's only lines: `plan:` once, then one `row <i>:` line per repository, numbered from 0. No line names a repository: the details are in the repo's own sync PR or failure issue.
+`manual=true` keeps the PR waiting for a human even when the report holds nothing. The run's job log (`gh run view <id> --log`) carries the operator's only lines: the selector's `syncing:` line (public slugs by name, private repositories as a count), `plan:` once, then one `row <i>:` line per repository, numbered from 0. No row line names a repository: the details are in the repo's own sync PR or failure issue.
 
 | Line | Meaning |
 | --- | --- |
@@ -135,7 +135,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.claude-plugin/plugin.json` | skills: list each published skill in `skills` |
 | `.github/settings.yml` | the repo's own settings on top of the fleet baseline |
 
-The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`, `.github/dependabot.yml`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
+The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
 Two modules need content of yours before their first run on main:
 
@@ -166,7 +166,7 @@ Repository settings (labels, rulesets, fields) are applied from repo-platform fo
 gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-The apply still reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the retired `.github/.copier-answers.yml` and fails for a repo that selects one of them without that file. Such a repo declares those labels in its own `.github/settings.yml` and reports the failed apply on Vivswan/repo-platform.
+The apply reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys, the module's default when a key is unset, and declares them on the repository.
 
 ## Owner actions (need repository-settings access)
 
@@ -177,7 +177,7 @@ The apply still reads the tracking labels of `fuzzer`, `nightly`, and `docs-site
 ## Private repositories
 
 - No CodeQL or dependency-review jobs; the public-only variant of `auto-assign.yml` is not written.
-- Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection log names a private one only by a hint); the details land in the repo's own sync PR and failure issue.
+- Fleet run logs are public, so the `plan:` and `row <i>:` lines never name a repository (the plan job's selection line names public repositories and counts private ones); the details land in the repo's own sync PR and failure issue.
 
 ## Verify
 

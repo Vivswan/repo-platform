@@ -29,7 +29,7 @@ The run's job log ends `row 0: PR opened`. In the report:
 
 - Written: `.github/workflows/nightly.yml` as `starter`, `created`. Every other row `unchanged`.
 - Review: `Hold for review: no`; `manual=true` keeps it waiting for you.
-- No `.github/settings.yml` diff from the sync. Declare the label there yourself: the settings apply never reads `labels.*`, and it fails for a repo that selects `nightly` without the retired `.github/.copier-answers.yml`.
+- No `.github/settings.yml` diff from the sync: the settings apply declares the label from the registration (`labels.nightly`, else the default `nightly-failure`).
 
 ### The starter, and moving real checks in
 

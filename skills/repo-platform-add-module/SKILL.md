@@ -27,10 +27,10 @@ For enrolling a repo that is not managed yet, use the `repo-platform-new-project
 
 ## The module roster
 
-One line each, generated from the module manifests.
+One line each, the `description` of each module in repo-platform's `files.yml`.
 
 | Module | What it gives the repo |
-|---|---|<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
+|---|---|
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
 | `node` | JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS) |
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
@@ -44,7 +44,7 @@ One line each, generated from the module manifests.
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
-| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not rendered |<!-- END GENERATED: module-roster -->
+| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not written |
 
 ## What each module writes
 
@@ -56,7 +56,7 @@ From repo-platform's `files.yml` (`bun scripts/files_table.ts` prints the live t
 | `node` | `.node-version` | managed |
 | `deno` | `.dvmrc`, `.github/workflows/deno-audit.yml` | managed |
 | `uv`, `rust` | no file of their own | - |
-| every toolchain | blocks in `.gitignore`, `.github/dependabot.yml`, and `AGENTS.md` | split |
+| every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
 | every toolchain but `rust` | `.github/workflows/auto-format.yml`; the CodeQL variant of `auto-assign.yml` on public repos | starter; managed |
 | `pages` | `.github/workflows/pages.yml` | managed |
 | `docs-site` | `.github/workflows/docs-site.yml` | managed |
@@ -116,7 +116,7 @@ Anything the module diff does not explain is reviewed with the `repo-platform-sy
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Labels: the settings apply declares each module's default label, but it still reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the retired `.github/.copier-answers.yml` and fails for a repo that selects one of them without that file. Declare the module's label (default or custom) in the repo's own `.github/settings.yml`; a custom `labels.*` value is never read by the apply.
+- Labels: the settings apply reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys (the module's default when the key is unset) and declares them; a `labels.*` key for a module the repo does not select fails the apply and the plan.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
 - `skills`: a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
 - `bun`: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
@@ -128,7 +128,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 
 | Module | Keys | Default |
 |---|---|---|
-| `pages` | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the selected toolchains, or `none` when no toolchain is selected; the commands of the first `pages.setup` toolchain in roster order, empty with `none` (so `pages.build` is mandatory then, unless a surviving answers file records `pages_build_command`); `dist` |
+| `pages` | `pages.setup`, `pages.install`, `pages.build`, `pages.dist` | the selected toolchains, or `none` when no toolchain is selected; the commands of the first `pages.setup` toolchain in roster order, empty with `none` (so `pages.build` is mandatory then); `dist` |
 | `docs-site` | `docs_site.path`, `docs_site.include`, `labels.docs_site` | `docs`, none, `docs-link-rot` |
 | `skills` | `skills.dir` | `skills` |
 | `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
@@ -136,7 +136,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
 
 - A key change alone needs no sync: the pages and docs-site legs read the registration at run time. `mirrors` and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), while an existing starter (`.github/settings.yml`, the plugin manifests) keeps its content, so edit it yourself.
-- Tracking labels (`fuzzer`, `nightly`, `docs_site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan. So does any setting that a surviving `.github/.copier-answers.yml` also records with a different value, checked where the plan resolves it: `labels.*` and `skills.dir` on every PR, `pages.*`, `docs_site.path`, and `project.name` (with `docs-site`) when the pages or docs-site leg plans the site. The two must agree while both hold a value.
+- Tracking labels (`fuzzer`, `nightly`, `docs_site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 
 ## Removing a module

@@ -2,7 +2,6 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { type PlanDefaults, REQUIRED_DEFAULTS } from "../../../actions/plan/plan.ts";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import { actionManifestFiles } from "../../../scripts/check/ssot/delivery_pins.ts";
 import {
@@ -13,12 +12,6 @@ import {
   bunDirsMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
-  COPIER_BACKED_DEFAULTS,
-  COPIER_QUESTIONS,
-  copierDefault,
-  FETCHED_TREE_PIN_ANCHOR,
-  filesDefaultMismatches,
-  filesModuleDataMismatches,
   lockedTypesBunVersion,
   majorMinor,
   SCRATCH_SCOPED_SCRIPTS,
@@ -27,16 +20,7 @@ import {
   stepCarriesWithKey,
   TYPECHECK_TSCONFIG_LOOP,
 } from "../../../scripts/check/ssot/toolchain.ts";
-import { actionSetsUpBun } from "../../../scripts/generate/toolchain_pins.ts";
-
-/** The PlanDefaults key whose copier question is `question`. */
-function keyOf(question: string): keyof PlanDefaults {
-  const found = (Object.keys(COPIER_QUESTIONS) as (keyof PlanDefaults)[]).find(
-    (name) => COPIER_QUESTIONS[name] === question,
-  );
-  if (found === undefined) throw new Error(`no plan default answers ${question}`);
-  return found;
-}
+import { actionSetsUpBun } from "../../../scripts/lib/action_steps.ts";
 
 describe("stepCarriesWithKey", () => {
   const key = "bun-version-file:";
@@ -193,8 +177,8 @@ ${RUN_STEP}`;
   });
   const perStepMismatch = {
     file: FILE,
-    expected: `every setup-bun step carrying 'bun-version-file: ${ACTION_BUN_PIN}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
-    got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
+    expected: `every setup-bun step carrying 'bun-version-file: ${ACTION_BUN_PIN}' in its with: block`,
+    got: "a setup-bun step pinned to something other than the action-local dotfile - anything else can resolve the CALLER repository's bun version files",
   };
   const bareBunMismatch = (line: string, step = "Run") => ({
     file: FILE,
@@ -381,217 +365,12 @@ ${RUN_STEP}`;
     expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
   });
 
-  // A runner-scratch pin needs an earlier bash step that removes the pin's
-  // root by a fixed rm on the literal path, shell knobs emptied, and that the
-  // setup's condition requires; anything less lets a caller plant the pin.
-  const PIN =
-    "${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/.bun-version";
-  const REQUIRED = "      if: steps.clear.outcome == 'success'\n";
-  const fetchedSetup = (condition = REQUIRED) => `    - name: Set up the fetched tree's bun
-${condition}      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: ${PIN}
-`;
-  const NEUTRAL = 'BASH_ENV: ""\n        SHELLOPTS: ""';
-  const clearingStep = (
-    run: string,
-    extra = "",
-    shell = "bash",
-    env = NEUTRAL,
-  ) => `    - name: Clear
-      id: clear
-${extra}      shell: ${shell}
-      env:
-        ${env}
-      run: ${run}
-`;
-  const REMOVAL = '/bin/rm -rf "${{ runner.temp }}/aligned-validator"';
-  const noClearing = {
-    file: FILE,
-    expected:
-      `a step before the setup-bun pinned at '${PIN}' that clears that pin's runner-scratch root ` +
-      "(a bash step with BASH_ENV and SHELLOPTS emptied whose whole run block is one /bin/rm -rf " +
-      "of clean paths under that root, and whose success this setup's condition requires)",
-    got: "no such step - a caller could plant that pin before the action runs",
-  };
-  const cases: [string, string, ReturnType<typeof actionsBunGuardMismatches>, string?, string?][] =
-    [
-      ["a required clearing step removing the root", clearingStep(REMOVAL), []],
-      [
-        "a required clearing step removing the root and other scratch paths in one rm",
-        clearingStep(
-          `/bin/rm -rf "\${{ runner.temp }}/other" "\${{ runner.temp }}/aligned-validator" "\${{ runner.temp }}/x.md"`,
-        ),
-        [],
-      ],
-      // One rm attempts every path and fails when any did; a line per path
-      // stops at the first failure under -e or masks it behind the last.
-      [
-        "a clearing split over one rm line per path",
-        clearingStep(`|\n        /bin/rm -rf "\${{ runner.temp }}/other"\n        ${REMOVAL}`),
-        [noClearing],
-      ],
-      [
-        "a clearing preceded by a set -e line",
-        clearingStep(`|\n        set -euo pipefail\n        ${REMOVAL}`),
-        [noClearing],
-      ],
-      [
-        "a clearing whose operands touch (bash joins them into one word)",
-        clearingStep(`${REMOVAL}"\${{ runner.temp }}/other"`),
-        [noClearing],
-      ],
-      [
-        "a clearing whose paths are not each quoted",
-        clearingStep('/bin/rm -rf "${{ runner.temp }}/aligned-validator" ${{ runner.temp }}/other'),
-        [noClearing],
-      ],
-      // Every operand is judged, not only the one covering the pin: a
-      // second operand the shell expands or a caller supplies is refused.
-      ...[
-        '"$HOME/x"',
-        '"$(echo /)"',
-        '"`echo /`"',
-        '"${{ inputs.cleanup-path }}"',
-        '"${{ runner.temp }}/../work"',
-        '"/tmp/other"',
-      ].map((operand): (typeof cases)[number] => [
-        `a clearing of the root beside the operand ${operand}`,
-        clearingStep(`${REMOVAL} ${operand}`),
-        [noClearing],
-      ]),
-      [
-        "a required clearing step allowed to fail (its success is still required)",
-        clearingStep(REMOVAL, "      continue-on-error: true\n"),
-        [],
-      ],
-      [
-        "a required clearing step carrying a condition of its own",
-        clearingStep(REMOVAL, "      if: steps.bun.outputs.pinned == 'true'\n"),
-        [],
-      ],
-      [
-        "the setup requiring it among other terms",
-        clearingStep(REMOVAL),
-        [],
-        "      if: steps.fetch.outcome == 'success' && steps.clear.outcome == 'success'\n",
-      ],
-      ["no earlier step at all", "", [noClearing]],
-      ["a clearing step the setup does not require", clearingStep(REMOVAL), [noClearing], ""],
-      [
-        "a clearing step the setup names only inside a disjunction",
-        clearingStep(REMOVAL),
-        [noClearing],
-        "      if: always() || steps.clear.outcome == 'success'\n",
-      ],
-      [
-        "a clearing step required only in one branch of a mixed condition",
-        clearingStep(REMOVAL),
-        [noClearing],
-        "      if: steps.clear.outcome == 'success' && false || always()\n",
-      ],
-      [
-        "a clearing step named only inside a parenthesised sub-expression",
-        clearingStep(REMOVAL),
-        [noClearing],
-        "      if: false == (false && steps.clear.outcome == 'success') && steps.fetch.outcome == 'success'\n",
-      ],
-      [
-        "a clearing of a scratch path that does not cover the pin",
-        clearingStep('/bin/rm -rf "${{ runner.temp }}/other"'),
-        [noClearing],
-      ],
-      [
-        "a clearing under a shell that is not bash",
-        clearingStep(REMOVAL, "", "true {0}"),
-        [noClearing],
-      ],
-      [
-        "a clearing step that leaves BASH_ENV inherited",
-        clearingStep(REMOVAL, "", "bash", 'SHELLOPTS: ""'),
-        [noClearing],
-      ],
-      [
-        "a clearing step that leaves SHELLOPTS inherited",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""'),
-        [noClearing],
-      ],
-      [
-        "a clearing step that sets BASH_ENV to a file",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: /tmp/x\n        SHELLOPTS: ""'),
-        [noClearing],
-      ],
-      [
-        "a clearing step that sets SHELLOPTS to noexec",
-        clearingStep(REMOVAL, "", "bash", 'BASH_ENV: ""\n        SHELLOPTS: noexec'),
-        [noClearing],
-      ],
-      [
-        "a clearing by rm from PATH rather than /bin/rm",
-        clearingStep('rm -rf "${{ runner.temp }}/aligned-validator"'),
-        [noClearing],
-      ],
-      [
-        "a clearing through a variable",
-        clearingStep(
-          '/bin/rm -rf "$ALIGNED_DIR"',
-          "",
-          "bash",
-          `${NEUTRAL}\n        ALIGNED_DIR: \${{ runner.temp }}/aligned-validator`,
-        ),
-        [noClearing],
-      ],
-      [
-        "a clearing commented out",
-        clearingStep(`|\n        # ${REMOVAL}\n        echo skipped`),
-        [noClearing],
-      ],
-      [
-        "a clearing wrapped in shell control flow",
-        clearingStep(`|\n        if false; then\n          ${REMOVAL}\n        fi`),
-        [noClearing],
-      ],
-      [
-        "a clearing followed by another command",
-        clearingStep(`|\n        ${REMOVAL}\n        echo done`),
-        [noClearing],
-      ],
-      ["a clearing with trailing shell syntax", clearingStep(`${REMOVAL} || true`), [noClearing]],
-      [
-        "the clearing step AFTER the setup, not before",
-        "",
-        [noClearing],
-        REQUIRED,
-        clearingStep(REMOVAL),
-      ],
-    ];
-  test.each(cases)(
-    "a runner-scratch pin with %s",
-    (_name, before, expected, condition = REQUIRED, after = "") => {
-      const text = `${canonical}${before}${fetchedSetup(condition)}${after}`;
-      expect(actionsBunGuardMismatches(FILE, text)).toEqual(expected);
-    },
-  );
-
-  // The scratch-root anchor admits only a clean dotfile path: a traversal
-  // or a nested expression could reach the caller's checkout again.
-  test.each([
-    "${{ runner.temp }}/../work/repo/.bun-version",
-    "${{ runner.temp }}/safe\\..\\..\\work\\repo/.bun-version",
-    "${{ runner.temp }}/.. /work/repo/.bun-version",
-    "${{ runner.temp }}/..../.bun-version",
-    "${{ runner.temp }}/aligned validator/.bun-version",
-    "${{ runner.temp }}/aligned/./.bun-version",
-    "${{ runner.temp }}/${{ github.workspace }}/.bun-version",
-    "${{ runner.temp }}//.bun-version",
-    "${{ runner.temp }}/aligned/package.json",
-    "${{ runner.temp }}/.bun-version-extra",
-  ])("an EXTRA setup-bun pinned at %s is refused per step", (pin) => {
+  test("an EXTRA setup-bun pinned under the runner scratch root is refused per step like any other pin", () => {
     const extra = `${canonical}
-    - name: Set up the fetched tree's bun
+    - name: Set up a fetched tree's bun
       uses: oven-sh/setup-bun@v2
       with:
-        bun-version-file: ${pin}
+        bun-version-file: \${{ runner.temp }}/tree/.bun-version
 `;
     expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
   });
@@ -640,181 +419,6 @@ ${extra}      shell: ${shell}
   });
 });
 
-describe("filesModuleDataMismatches", () => {
-  const pins = [
-    { module: "bun", value: { file: ".bun-version", version: "1.4.0" } },
-    { module: "node", value: { file: ".node-version", version: "24.19.0" } },
-  ];
-  const agreeing = {
-    bun: { pin: { file: ".bun-version", version: "1.4.0" } },
-    node: { pin: { file: ".node-version", version: "24.19.0" } },
-    uv: { description: "no pin" },
-  };
-
-  test("files.yml values equal to the manifests' pass", () => {
-    expect(filesModuleDataMismatches("pin", "toolchain.pin", pins, agreeing)).toEqual([]);
-  });
-
-  test("a version the refresh bumped on one side only, a missing pin, and a pin with no manifest twin are named", () => {
-    const drifted = {
-      bun: { pin: { file: ".bun-version", version: "1.4.1" } },
-      uv: { pin: { file: ".python-version", version: "3.13.0" } },
-    };
-    expect(filesModuleDataMismatches("pin", "toolchain.pin", pins, drifted)).toEqual([
-      {
-        file: "files.yml modules.bun.pin",
-        expected:
-          '{"file":".bun-version","version":"1.4.0"} (templates/bun/module.yml\'s toolchain.pin)',
-        got: '{"file":".bun-version","version":"1.4.1"}',
-      },
-      {
-        file: "files.yml modules.node.pin",
-        expected:
-          '{"file":".node-version","version":"24.19.0"} (templates/node/module.yml\'s toolchain.pin)',
-        got: "no pin",
-      },
-      {
-        file: "files.yml modules.uv.pin",
-        expected: "no pin (templates/uv/module.yml declares no toolchain.pin)",
-        got: '{"file":".python-version","version":"3.13.0"}',
-      },
-    ]);
-  });
-
-  test("the pages axis: a build command changed on one side, a missing block, and a block with no manifest twin are named under the pages key", () => {
-    const pages = [
-      {
-        module: "bun",
-        value: { install: "bun install --frozen-lockfile", build: "bun run build" },
-      },
-      {
-        module: "rust",
-        value: { install: "cargo +stable install mdbook --locked", build: "mdbook build -d dist" },
-      },
-    ];
-    const drifted = {
-      bun: { pages: { install: "bun install --frozen-lockfile", build: "bun run docs:build" } },
-      uv: { pages: { install: "uv sync", build: "uv run mkdocs build" } },
-      pages: { dist: "dist" },
-    };
-    expect(filesModuleDataMismatches("pages", "pages", pages, drifted)).toEqual([
-      {
-        file: "files.yml modules.bun.pages",
-        expected:
-          '{"build":"bun run build","install":"bun install --frozen-lockfile"} (templates/bun/module.yml\'s pages)',
-        got: '{"build":"bun run docs:build","install":"bun install --frozen-lockfile"}',
-      },
-      {
-        file: "files.yml modules.rust.pages",
-        expected:
-          '{"build":"mdbook build -d dist","install":"cargo +stable install mdbook --locked"} (templates/rust/module.yml\'s pages)',
-        got: "no pages",
-      },
-      {
-        file: "files.yml modules.uv.pages",
-        expected: "no pages (templates/uv/module.yml declares no pages)",
-        got: '{"build":"uv run mkdocs build","install":"uv sync"}',
-      },
-    ]);
-  });
-});
-
-describe("filesDefaultMismatches", () => {
-  const modules = {
-    pages: { dist: "dist" },
-    "docs-site": { path: "docs" },
-    skills: { skills_dir: { default: "skills" } },
-  };
-  const backed = (module: string) => {
-    const found = COPIER_BACKED_DEFAULTS.find((entry) => entry.module === module);
-    if (found === undefined) throw new Error(`no copier-backed default for ${module}`);
-    return found;
-  };
-
-  test("the rule pins exactly the defaults the plan requires, each under a copier question", () => {
-    const site = ({ module, key }: { module: string; key: string }) => `${module}.${key}`;
-    expect(COPIER_BACKED_DEFAULTS.map(site).sort()).toEqual(
-      Object.values(REQUIRED_DEFAULTS).map(site).sort(),
-    );
-    expect(Object.keys(COPIER_QUESTIONS).sort()).toEqual(Object.keys(REQUIRED_DEFAULTS).sort());
-    for (const backed of COPIER_BACKED_DEFAULTS) {
-      expect(backed.question).not.toBe("");
-      expect(backed.pick).toBe(REQUIRED_DEFAULTS[keyOf(backed.question)].pick);
-    }
-  });
-
-  test("the three defaults the plan reads, each equal to its copier question's default, pass", () => {
-    const defaults = { pages: "dist", "docs-site": "docs", skills: "skills" };
-    for (const [module, value] of Object.entries(defaults)) {
-      expect(filesDefaultMismatches(backed(module), value, modules)).toEqual([]);
-    }
-  });
-
-  test.each([
-    [
-      "a dist that differs",
-      "pages",
-      { pages: { dist: "site" } },
-      {
-        file: "files.yml modules.pages.dist",
-        expected: '"dist" (copier.yml\'s pages_dist_dir default)',
-        got: '"site"',
-      },
-    ],
-    [
-      "a module without the key",
-      "pages",
-      { pages: { description: "no dist" } },
-      {
-        file: "files.yml modules.pages.dist",
-        expected: '"dist" (copier.yml\'s pages_dist_dir default)',
-        got: "no dist",
-      },
-    ],
-    [
-      "a nested default that is absent",
-      "skills",
-      { skills: {} },
-      {
-        file: "files.yml modules.skills.skills_dir.default",
-        expected: '"skills" (copier.yml\'s skills_dir default)',
-        got: "no skills_dir.default",
-      },
-    ],
-    [
-      "a module files.yml lacks",
-      "docs-site",
-      {},
-      {
-        file: "files.yml modules.docs-site.path",
-        expected: '"docs" (copier.yml\'s docs_site_path default)',
-        got: "no path",
-      },
-    ],
-  ])("%s is named", (_case, module, files, mismatch) => {
-    const expected = { pages: "dist", "docs-site": "docs", skills: "skills" }[module] ?? "";
-    expect(filesDefaultMismatches(backed(module), expected, files)).toEqual([mismatch]);
-  });
-});
-
-describe("copierDefault", () => {
-  test("reads the named question's string default", () => {
-    expect(
-      copierDefault("pages_dist_dir", { pages_dist_dir: { type: "str", default: "dist" } }),
-    ).toBe("dist");
-    expect(copierDefault("skills_dir", { skills_dir: { default: "skills" } })).toBe("skills");
-  });
-
-  test.each([
-    ["no question", {}],
-    ["no default", { pages_dist_dir: { type: "str" } }],
-    ["an empty default", { pages_dist_dir: { default: "" } }],
-    ["a non-string default", { pages_dist_dir: { default: 1 } }],
-  ])("%s is refused", (_case, copier) => {
-    expect(() => copierDefault("pages_dist_dir", copier)).toThrow(/pages_dist_dir/);
-  });
-});
-
 describe("majorMinor", () => {
   test("reads plain versions and single caret/tilde ranges", () => {
     expect(majorMinor("1.4.0", "w")).toEqual([1, 4]);
@@ -847,7 +451,7 @@ describe("bunTypesAheadMismatches", () => {
       { file: "actions/x/package.json", version: "^2.0.0" },
     ]);
     expect(mismatches).toHaveLength(2);
-    expect(mismatches[0].expected).toContain("templates/bun/module.yml");
+    expect(mismatches[0].expected).toContain("files.yml");
     expect(mismatches[1].got).toContain("^2.0.0");
   });
 });
@@ -941,7 +545,7 @@ describe("bunRuntimeMismatches", () => {
 describe("bunDirsMismatches", () => {
   // An action package: each control drops it from exactly one of the four
   // homes and the rule names that home and the directory.
-  const ACTION = "actions/validate-template-report";
+  const ACTION = "actions/validate-managed-files";
   const green: BunDirsInputs = {
     lockDirs: [".", "actions/check-typography", ACTION],
     dependabotBunDirs: [".", "actions/check-typography", ACTION],
@@ -1028,13 +632,13 @@ describe("scratchScopedScriptMismatches", () => {
   test("a drift back to a shared-scratch command fails, quoting the pin and the drift", () => {
     // The two retired shapes, each of which passed every other gate while
     // sibling runs trampled one another's scratch: a bare `bun test`
-    // (fixtures under the shared os.tmpdir) and the fixed --dest path
-    // compose:check once wiped from under a concurrent run.
+    // (fixtures under the shared os.tmpdir) and a fixed --dest path a
+    // concurrent build check once wiped from under a running one.
     const cases: [string, string][] = [
       ["test", "bun test"],
       [
-        "compose:check",
-        "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check && rm -rf /tmp/repo-platform-compose-check",
+        "build:check",
+        "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-build-check && rm -rf /tmp/repo-platform-build-check",
       ],
     ];
     for (const [name, drifted] of cases) {

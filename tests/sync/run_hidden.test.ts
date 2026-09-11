@@ -43,7 +43,7 @@ describe("run_hidden.ts", () => {
     const parsed = parseHiddenFailures(
       [
         "branch push\t1\t/tmp/rt/hidden-branch-push.log",
-        "copier update\t3",
+        "settings render\t3",
         "lonely-label",
         "a\t1\t/tmp/rt/a.log\textra",
         "empty-rc\t\t/tmp/rt/b.log",

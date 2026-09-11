@@ -61,7 +61,6 @@ const EXTENSIONS = new Set([
   ".yml",
   ".yaml",
   ".json",
-  ".jinja",
   ".md",
   ".html",
   ".css",

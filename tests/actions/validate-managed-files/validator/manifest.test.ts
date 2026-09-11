@@ -1,0 +1,376 @@
+// Ownership-manifest shape and byte parity: the document itself (absence,
+// malformed text, the self entry, unknown fields, duplicate keys), then
+// every entry against the file on disk (managed and mirror hashes, split
+// regions, links), plus the symlink and marker-slicing fixtures.
+
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
+import { checkManifestParity } from "../../../../actions/validate-managed-files/validator/checks/manifest_parity.ts";
+import { loadContext } from "../../../../actions/validate-managed-files/validator/context.ts";
+import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
+import { tempDirs } from "../../../shared/temp_dir.ts";
+import {
+  B,
+  BASELINE,
+  COMMIT,
+  E,
+  gitFreeEnv,
+  HB,
+  HE,
+  MANIFEST,
+  managedEntry,
+  manifestOf,
+  regionOf,
+  SELF_ENTRY,
+  shaLatin1 as sha,
+  splitEntry,
+  stampedBaseline,
+  VALIDATOR,
+  validatorRunner,
+} from "./fixtures";
+
+const temp = tempDirs();
+const runValidator = validatorRunner(temp);
+
+const RESYNC =
+  "re-run the sync (dispatch sync-repos.yml in Vivswan/repo-platform with repo=<owner>/<name>), which replaces platform files whole";
+
+describe("the manifest's shape", () => {
+  test("a missing manifest is deletion damage", () => {
+    const { exitCode, stderr } = runValidator({}, [], { noManifest: true });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST} is missing - every sync writes it`);
+  });
+
+  test("an unparsable manifest is its own error", () => {
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: "not json\n" });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST}: does not parse as a manifest`);
+  });
+
+  test("a conflict-marked manifest is the conflict-marker check's report, with no parity double", () => {
+    const conflicted = [
+      `${"<".repeat(7)} ours`,
+      manifestOf(stampedBaseline()),
+      "=".repeat(7),
+      `${">".repeat(7)} theirs`,
+      "",
+    ].join("\n");
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: conflicted });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST}: contains unresolved merge-conflict markers`);
+    expect(stderr).not.toContain("does not parse as a manifest");
+  });
+
+  test("a manifest that does not list itself is an error", () => {
+    const entries = {
+      ".github/workflows/ci.yml": managedEntry(BASELINE[".github/workflows/ci.yml"]),
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("does not list itself");
+  });
+
+  test.each([
+    { reason: "a null commit (before the first sync stamps it)", commit: "null", ok: true },
+    { reason: "the build's full sha", commit: `"${COMMIT}"`, ok: true },
+    { reason: "a short sha", commit: '"abc1234"', ok: false },
+    { reason: "a number", commit: "42", ok: false },
+    { reason: "uppercase hex", commit: `"${COMMIT.toUpperCase()}"`, ok: false },
+  ])("the self entry's commit is null or a full sha: $reason", ({ commit, ok }) => {
+    const entries = {
+      ...stampedBaseline(),
+      [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${commit}}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    if (ok) {
+      expect(stderr).toBe("");
+      expect(exitCode).toBe(0);
+    } else {
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        "its self entry's commit must be null or the build's full 40-hex sha",
+      );
+    }
+  });
+
+  test("an entry field outside the vocabulary is an error naming the entry and the keys", () => {
+    const stale = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        ".github/workflows/checks.yml": '{"class": "starter", "withheld": true}',
+      }),
+    });
+    expect(stale.exitCode).toBe(1);
+    expect(stale.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
+      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; the next sync restamps the entry without them, or revert the edit`,
+    ]);
+    const control = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
+    expect({ exitCode: control.exitCode, stderr: control.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+  });
+
+  // JSON.parse keeps the LAST binding silently, so a duplicate keeping a
+  // second, starter-classed ci.yml line (or a second class field inside
+  // the entry) would switch that file's parity off invisibly.
+  test.each([
+    {
+      reason: "two entry lines for one path (the second starter-classed)",
+      entryLines: [
+        `    ".github/workflows/ci.yml": ${stampedBaseline()[".github/workflows/ci.yml"]}`,
+        `    ".github/workflows/ci.yml": {"class": "starter"}`,
+      ],
+    },
+    {
+      reason: "a duplicated class field inside one entry object",
+      entryLines: [
+        `    ".github/workflows/ci.yml": {"class": "managed", "class": "starter", "hash": null}`,
+      ],
+    },
+  ])("a duplicated manifest key is a hard error: $reason", ({ entryLines }) => {
+    const text = `{\n  "files": {\n${[
+      `    ${JSON.stringify(MANIFEST)}: ${SELF_ENTRY[MANIFEST]}`,
+      ...entryLines,
+    ].join(",\n")}\n  }\n}\n`;
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("binds a key more than once");
+  });
+
+  test("self mode inverts: a present manifest is the error", () => {
+    const present = runValidator({ [MANIFEST]: manifestOf(SELF_ENTRY) }, ["--self"]);
+    expect(present.exitCode).toBe(1);
+    expect(present.stderr).toContain(`${MANIFEST}: exists in the operator repository`);
+    const absent = runValidator({}, ["--self"]);
+    expect(absent.stderr).toBe("");
+    expect(absent.exitCode).toBe(0);
+  });
+});
+
+describe("byte parity, entry by entry", () => {
+  test("a drifted managed entry names the file once", () => {
+    const { exitCode, stdout, stderr } = runValidator({
+      "docs/pinned.md": "drifted\n",
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.includes("docs/pinned.md"))).toEqual([
+      `error: docs/pinned.md: content does not match the sha256 recorded in ${MANIFEST} - the ` +
+        "file drifted from the last sync; local edits to a managed file are replaced by the " +
+        "next sync (move them to a repo-owned location), and platform-side updates restamp on that sync",
+    ]);
+    expect(stdout).not.toContain("docs/pinned.md");
+  });
+
+  test("a starter entry passes whatever the file holds, and never carries a hash", () => {
+    const good = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        ".github/settings.yml": '{"class": "starter"}',
+      }),
+      ".github/settings.yml": "repository:\n  has_issues: true\n",
+    });
+    expect(good.stderr).toBe("");
+    expect(good.exitCode).toBe(0);
+    const hashed = runValidator({
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        ".github/workflows/checks.yml": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
+      }),
+    });
+    expect(hashed.exitCode).toBe(1);
+    expect(hashed.stderr).toContain("a starter carrying a hash");
+  });
+
+  test("a mirror entry is verified like a managed file: byte parity, presence", () => {
+    const copy = "mirrored license text\n";
+    const entries = {
+      ...stampedBaseline(),
+      "skills/a/LICENSE.md": `{"class": "mirror", "hash": "${sha(copy)}"}`,
+    };
+    const good = runValidator({ [MANIFEST]: manifestOf(entries), "skills/a/LICENSE.md": copy });
+    expect(good.stderr).toBe("");
+    expect(good.exitCode).toBe(0);
+    const drifted = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "skills/a/LICENSE.md": "edited copy\n",
+    });
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.stderr).toContain("skills/a/LICENSE.md: content does not match the sha256");
+    const missing = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain("skills/a/LICENSE.md: listed as mirror in");
+    expect(missing.stderr).toContain(RESYNC);
+  });
+
+  test("a split entry's region is sliced from marker line to marker line, trailing spaces tolerated", () => {
+    // Marker LINES match by trimmed equality at every splitter (the writer
+    // and this validator's parity slice must agree, or the sync would
+    // deliver trees whose stamped region differs from the one parity
+    // verifies).
+    const content = `above\n${HB} \nroot = true\n${HE}\nrepo tail\n`;
+    const region = regionOf(content, HB, HE);
+    if (region === null) throw new Error("fixture lost its marker lines");
+    const entries = {
+      ...stampedBaseline(),
+      ".editorconfig":
+        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(HB)}, ` +
+        `"end": ${JSON.stringify(HE)}, "hash": "${sha(region)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      ".editorconfig": content,
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a split entry whose markers are missing, duplicated, or out of order fails closed", () => {
+    const entries = {
+      ...SELF_ENTRY,
+      ".github/workflows/ci.yml":
+        `{"class": "split", "grammar": "managed-region", "begin": "# no-such-begin", ` +
+        `"end": "# no-such-end", "hash": "${"c".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      ".github/workflows/ci.yml: the managed-region marker lines ('# no-such-begin'",
+    );
+    const reordered = runValidator({ ".gitignore": [HE, HB, ""].join("\n") });
+    expect(reordered.exitCode).toBe(1);
+    expect(reordered.stderr).toContain(".gitignore: the managed-region marker lines");
+  });
+
+  test("a symlink's hash covers the link target, under the link class or an older managed record", () => {
+    const build = (claudeEntry: string): string => {
+      const root = temp.dir("validate-managed-link-");
+      for (const [rel, content] of Object.entries(BASELINE)) {
+        mkdirSync(join(root, dirname(rel)), { recursive: true });
+        writeFileSync(join(root, rel), content);
+      }
+      symlinkSync("AGENTS.md", join(root, "CLAUDE.md"));
+      writeFileSync(join(root, "files.yml"), "");
+      writeFileSync(
+        join(root, MANIFEST),
+        manifestOf({ ...stampedBaseline(), "CLAUDE.md": claudeEntry }),
+      );
+      return root;
+    };
+    const dataFile = join(temp.dir("validate-managed-link-data-"), "files.yml");
+    writeFileSync(dataFile, "placeholders: []\nmodules: {uv: {}}\nfiles: []\n");
+    for (const cls of ["managed", "link"]) {
+      const root = build(`{"class": "${cls}", "hash": "${sha("AGENTS.md")}"}`);
+      const result = boundedSpawnSync([process.execPath, VALIDATOR, "--files", dataFile, root], {
+        env: gitFreeEnv(),
+      });
+      expect(result.stderr).toBe("");
+      expect(result.exitCode).toBe(0);
+    }
+    const repointed = build(`{"class": "link", "hash": "${sha("docs/AGENTS.md")}"}`);
+    const drifted = boundedSpawnSync(
+      [process.execPath, VALIDATOR, "--files", dataFile, repointed],
+      {
+        env: gitFreeEnv(),
+      },
+    );
+    expect(drifted.exitCode).toBe(1);
+    expect(drifted.stderr).toContain("CLAUDE.md: content does not match the sha256");
+  });
+
+  test("a link record on a regular file fails parity by class", () => {
+    const { exitCode, stderr } = runValidator({
+      "CLAUDE.md": "AGENTS.md\n",
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        "CLAUDE.md": `{"class": "link", "hash": "${sha("AGENTS.md\n")}"}`,
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `CLAUDE.md: recorded as a link in ${MANIFEST} but is not a symbolic link`,
+    );
+  });
+
+  test("the split entry builder and the validator agree on the baseline", () => {
+    expect(stampedBaseline()["AGENTS.md"]).toBe(splitEntry(BASELINE["AGENTS.md"], B, E));
+  });
+});
+
+describe("checkManifestParity over one tree walking every dispatch branch", () => {
+  test("reports exactly these verdicts, in manifest order", () => {
+    const root = temp.dir("manifest-parity-");
+    const region = `${B}\n# Notes\n${E}\n`;
+    const files: Record<string, string> = {
+      "docs/intact.md": "managed content\n",
+      "docs/drifted.md": "edited content\n",
+      "docs/notes.md": `preamble\n${region}tail\n`,
+      "docs/broken-region.md": `${B}\n${B}\nno end\n`,
+      "docs/unknown-grammar.md": region,
+      "docs/unstamped.md": "content\n",
+      "docs/starter.md": "repo-owned\n",
+      "docs/odd.md": "content\n",
+      "docs/file-as-link.md": "intact.md",
+    };
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(join(root, dirname(rel)), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    }
+    symlinkSync("intact.md", join(root, "docs/link.md"));
+    symlinkSync("intact.md", join(root, "docs/linked.md"));
+    symlinkSync("drifted.md", join(root, "docs/repointed.md"));
+    mkdirSync(join(root, "docs/dir.md"));
+    mkdirSync(join(root, ".github"));
+    const split = (hash: string, grammar = "managed-region") =>
+      `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": "${hash}"}`;
+    const entries: Record<string, string> = {
+      [MANIFEST_NAME]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+      "docs/intact.md": `{"class": "managed", "hash": "${sha("managed content\n")}"}`,
+      "docs/drifted.md": `{"class": "managed", "hash": "${sha("original content\n")}"}`,
+      "docs/notes.md": split(sha(region)),
+      "docs/broken-region.md": split(sha(region)),
+      "docs/unknown-grammar.md": split(sha(region), "prefix"),
+      "docs/no-grammar.md": `{"class": "split", "begin": "# b", "end": "# e", "hash": "${"d".repeat(64)}"}`,
+      "docs/unstamped.md": '{"class": "managed", "hash": null}',
+      "docs/starter.md": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
+      "docs/odd.md": '{"class": "bespoke"}',
+      "docs/short-hash.md": '{"class": "managed", "hash": "abc"}',
+      "docs/link.md": `{"class": "managed", "hash": "${sha("intact.md")}"}`,
+      "docs/dir.md": `{"class": "managed", "hash": "${"e".repeat(64)}"}`,
+      "docs/deleted.md": `{"class": "managed", "hash": "${"f".repeat(64)}"}`,
+      "docs/linked.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+      "docs/repointed.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+      "docs/file-as-link.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+      "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+    };
+    writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
+    const findings = checkManifestParity(loadContext(root, false, join(root, "no-files.yml")));
+    const messages = findings.map((finding) => {
+      expect(finding.severity).toBe("error");
+      return finding.message.split(" - ")[0].split(";")[0];
+    });
+    expect(messages).toEqual([
+      `docs/drifted.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,
+      `docs/broken-region.md: the managed-region marker lines ('${B}' ... '${E}') recorded in ${MANIFEST_NAME} are missing, duplicated, or out of order in the file, so managed-region parity cannot be verified`,
+      `${MANIFEST_NAME}: entry 'docs/unknown-grammar.md' declares split grammar "prefix", which this validator does not read (one grammar exists: managed-region)`,
+      `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
+      `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (unstamped)`,
+      `${MANIFEST_NAME}: entry 'docs/starter.md' is a starter carrying a hash`,
+      `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
+      `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be null or a lowercase sha256 hex digest`,
+      `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,
+      `docs/deleted.md: listed as managed in ${MANIFEST_NAME} but missing from the repo`,
+      `docs/repointed.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,
+      `docs/file-as-link.md: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link`,
+      `docs/link-gone.md: listed as link in ${MANIFEST_NAME} but missing from the repo`,
+    ]);
+    for (const finding of findings) expect(finding.message).not.toContain("template");
+  });
+});

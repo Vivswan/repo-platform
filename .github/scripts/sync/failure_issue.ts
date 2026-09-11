@@ -6,9 +6,8 @@
 //
 // deliver (failed run): replace the issue body with every recorded hidden
 // failure (hidden-failures.tsv) and (re)open it, assigning the target's
-// owner best-effort. Skipped when PR_URL is set: the only hidden-wrapped
-// failures that let a run reach PR creation are validation ones, which
-// open_pr.ts already routed into the PR body. resolve (successful run):
+// owner best-effort. Skipped when PR_URL is set: a run that opened a PR
+// carried its hidden failures in that body. resolve (successful run):
 // close the issue if one is open.
 //
 // Found by exact title among issues created by the token's user, never by
@@ -90,7 +89,7 @@ function warnAndExit(lead: string, tail: string): never {
 const deliverLead =
   "sync failure diagnostics could not be delivered to the target repository's failure-report issue";
 const deliverTail =
-  "This run's captured output dies with the runner; reproduce the failure locally per docs/private-repos.md.";
+  "This run's captured output dies with the runner; run the render and merge locally (docs/settings.md names the scripts).";
 const resolveLead =
   "the target repository's failure-report issue could not be resolved after this healthy run";
 const resolveTail = "If one is open, close it manually.";
@@ -213,8 +212,7 @@ if (mode === "deliver") {
   for (const { label, rc, capture } of manifest) {
     sections.push("", `## ${label}: exit ${rc}`, "", `${fence}text`);
     if (existsSync(capture)) {
-      // GitHub caps issue bodies at 64 KiB; keep each capture bounded
-      // like open_pr.ts's PR-body excerpt.
+      // GitHub caps issue bodies at 64 KiB, so each capture is bounded.
       sections.push(collapseRuns(excerptOf(capture)));
       if (statSync(capture).size > EXCERPT_BYTES) {
         sections.push("(truncated at 20000 bytes; reproduce locally for the rest)");
@@ -235,8 +233,8 @@ if (mode === "deliver") {
     "",
     `This issue is reused by every ${REPORT_KIND} run: each delivery replaces the body ` +
       `(earlier reports stay in the edit history), open means the ${REPORT_KIND} needs ` +
-      `attention, and the next fully healthy run closes it. Local reproduction: ` +
-      `https://github.com/${repository}/blob/main/docs/private-repos.md`,
+      `attention, and the next fully healthy run closes it. The apply's layers and scripts: ` +
+      `https://github.com/${repository}/blob/main/docs/settings.md`,
   );
   writeFileSync(bodyFile, `${sections.join("\n")}\n`);
 

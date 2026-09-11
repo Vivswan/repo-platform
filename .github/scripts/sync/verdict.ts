@@ -3,8 +3,8 @@
 // its own behalf. Everything else a run learns goes to $RUNNER_TEMP files
 // or to the target repository (docs/sync.md, "The operator").
 //
-// plan: env ROWS (the selector's rows JSON) -> "plan: <N> rows", outputs
-//   count and indexes ([0..N-1], the matrix).
+// plan: the selector's rows file in RUNNER_TEMP -> "plan: <N> rows",
+//   outputs count and indexes ([0..N-1], the matrix).
 // row: env ROW, TARGET (empty when no step resolved the target), RUNNER_TEMP
 //   -> one "row <i>: ..." line from the verdict deliver.ts wrote; a resolved
 //   target with no verdict exits 1 silently (the delivery channel broke).
@@ -18,6 +18,10 @@ export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "failed"] 
 export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
 
 export const VERDICT_FILE = "verdict.txt";
+
+/** The selector's rows ({repo, private}, real slugs) in RUNNER_TEMP: the
+ *  plan counts them, the row resolver reads its own. */
+export const ROWS_FILE = "rows.json";
 
 export const UNRESOLVED = "failed before the target was resolved; re-run the workflow";
 
@@ -52,7 +56,9 @@ function rowCount(rows: string): number {
 }
 
 function plan(): number {
-  const count = rowCount(requireEnv("ROWS"));
+  const file = join(requireEnv("RUNNER_TEMP"), ROWS_FILE);
+  if (!existsSync(file)) return 1;
+  const count = rowCount(readFileSync(file, "utf-8"));
   if (count < 0) return 1;
   setOutput("count", String(count));
   setOutput("indexes", JSON.stringify([...Array(count).keys()]));

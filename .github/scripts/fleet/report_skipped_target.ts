@@ -25,7 +25,7 @@ export function skippedTargetNotice(
   if (mergeSkipped) {
     return (
       `settings apply skipped for ${hint}: it has no .github/settings.yml yet, so there is nothing to layer ` +
-      "over the fleet defaults. The settings starter seeds the file on its next template sync."
+      "over the fleet defaults. The settings starter seeds the file on its next sync."
     );
   }
   return (

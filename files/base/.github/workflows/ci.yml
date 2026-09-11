@@ -41,7 +41,7 @@ jobs:
     uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@build
     permissions:
       contents: read
-      # validate-template posts its sticky findings comment.
+      # validate-managed-files posts its sticky findings comment.
       pull-requests: write
       # The ceiling for the CodeQL analysis calls.
       security-events: write

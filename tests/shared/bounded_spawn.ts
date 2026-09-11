@@ -24,7 +24,7 @@ export interface BoundedSpawnOptions {
   stdin?: Uint8Array | "ignore";
   /** Hard hang bound in milliseconds; absent = SPAWN_TIMEOUT_MS. A bound
    * on hanging, not an operational deadline - callers with slow children
-   * (copier renders) pass a generous one. */
+   * (whole-tree writer runs) pass a generous one. */
   timeoutMs?: number;
 }
 

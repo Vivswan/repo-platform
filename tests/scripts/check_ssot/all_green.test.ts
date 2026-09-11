@@ -21,6 +21,7 @@ import {
   rosterMismatches,
   SKELETON_SOURCE,
   skeletonCi,
+  skeletonGateMismatches,
 } from "../../../scripts/check/ssot/all_green.ts";
 import { templateCarries } from "../../../scripts/lib/ts_extract.ts";
 
@@ -510,4 +511,119 @@ describe("callerCeilingMismatches", () => {
       expect(callerCeilingMismatches({ rel, text: raised }, site).length).toBeGreaterThan(0);
     },
   );
+});
+
+describe("skeletonGateMismatches", () => {
+  const doc = skeletonCi;
+  const jobs = (d: Record<string, unknown>) => d.jobs as Record<string, Record<string, unknown>>;
+
+  test("the committed skeleton passes (the control)", () => {
+    expect(skeletonGateMismatches(doc())).toEqual([]);
+  });
+
+  test.each<{
+    reason: string;
+    mutate: (j: Record<string, Record<string, unknown>>) => void;
+    job: string;
+  }>([
+    {
+      reason: "the gate drops the ci caller",
+      mutate: (j) => {
+        j["all-green"].needs = ["checks"];
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the gate loses always()",
+      mutate: (j) => {
+        delete j["all-green"].if;
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the judgment step is replaced",
+      mutate: (j) => {
+        j["all-green"].steps = [{ run: "echo green" }];
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the ci caller is conditioned",
+      mutate: (j) => {
+        j.ci.if = "github.event_name != 'schedule'";
+      },
+      job: "ci",
+    },
+    {
+      reason: "the judgment step is conditioned",
+      mutate: (j) => {
+        (j["all-green"].steps as Record<string, unknown>[])[0].if = "false";
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the judgment step is softened",
+      mutate: (j) => {
+        (j["all-green"].steps as Record<string, unknown>[])[0]["continue-on-error"] = true;
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the ci caller calls another workflow",
+      mutate: (j) => {
+        j.ci.uses = "owner/repo-platform/.github/workflows/fleet-nightly.yml@build";
+      },
+      job: "ci",
+    },
+    {
+      reason: "a leg's condition grows an || arm",
+      mutate: (j) => {
+        j["post-green"].if =
+          "needs.all-green.result == 'success' && github.event_name == 'push' || always()";
+      },
+      job: "post-green",
+    },
+    {
+      reason: "checks stops skipping the schedule",
+      mutate: (j) => {
+        delete j.checks.if;
+      },
+      job: "checks",
+    },
+    {
+      reason: "nightly joins the gate",
+      mutate: (j) => {
+        j.nightly.needs = ["all-green"];
+      },
+      job: "nightly",
+    },
+    {
+      reason: "a leg loses its gate clause",
+      mutate: (j) => {
+        j["post-green"].if = "github.event_name == 'push'";
+      },
+      job: "post-green",
+    },
+    {
+      reason: "a leg no longer rides behind the gate",
+      mutate: (j) => {
+        j.pages.needs = ["ci"];
+      },
+      job: "pages",
+    },
+  ])("$reason goes red naming the job", ({ mutate, job }) => {
+    const mutated = doc();
+    mutate(jobs(mutated));
+    const found = skeletonGateMismatches(mutated);
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.every((m) => m.file === `${SKELETON_SOURCE} job '${job}'`)).toBe(true);
+  });
+
+  test("a skeleton missing a caller job is one loud mismatch per absent job", () => {
+    const mutated = doc();
+    delete jobs(mutated).nightly;
+    expect(skeletonGateMismatches(mutated)).toEqual([
+      { file: `${SKELETON_SOURCE} job 'nightly'`, expected: "the job present", got: "no such job" },
+    ]);
+  });
 });

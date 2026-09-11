@@ -174,7 +174,7 @@ describe("prTitleWorkflowMismatches", () => {
     );
     expect(shadowing.some((m) => m.expected.includes("nothing else"))).toBe(true);
     const empty = prTitleWorkflowMismatches(workflow, baseline, "labels: []\n");
-    expect(empty.some((m) => m.file.includes("templates/pr-title/settings.yml"))).toBe(true);
+    expect(empty.some((m) => m.file.includes("files/pr-title/settings.yml"))).toBe(true);
   });
 
   // The live-file forcing test: the exact judgment the pr-title-workflow
@@ -182,9 +182,9 @@ describe("prTitleWorkflowMismatches", () => {
   // goes red here.
   const livePrTitle = () =>
     prTitleWorkflowMismatches(
-      readFileSync("templates/pr-title/.github/workflows/pr-title.yml.jinja", "utf-8"),
+      readFileSync("files/pr-title/.github/workflows/pr-title.yml", "utf-8"),
       readFileSync(".github/settings-baseline.yml", "utf-8"),
-      readFileSync("templates/pr-title/settings.yml", "utf-8"),
+      readFileSync("files/pr-title/settings.yml", "utf-8"),
     );
 
   test("the pr-title workflow is ARMED: every link the rule pins holds on the live sources", () => {

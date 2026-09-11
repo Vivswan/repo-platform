@@ -1,6 +1,6 @@
 # This repository's own actionlint configuration; the fleet starter twin
-# lives in templates/base/.github/actionlint.yaml.jinja (generated once,
-# then repo-owned).
+# lives in files/base/.github/actionlint.yaml (written once, then
+# repo-owned).
 
 paths:
   .github/workflows/**/*.{yml,yaml}:

@@ -11,16 +11,12 @@ import {
   type YAMLMap,
   type Node as YamlNode,
 } from "yaml";
-import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../compose/data_anchors.ts";
-import { ANCHOR_RE } from "../../compose/splice.ts";
-import { type JinjaVars, normalizeJinja, placeholderJinja } from "../../lib/jinja_subset.ts";
-import { landedPathAndGates } from "../../ownership/landed_paths.ts";
 import { escapeRegExp, type Mismatch } from "./comparison.ts";
-import { jinjaVars, read, walkFiles } from "./inputs.ts";
+import { readSource, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 /** The one action anything repo-platform ships posts PR comments through
- *  (template workflows, its own workflows, its composite actions): one
+ *  (the writer's workflow sources, its own workflows, its composite actions): one
  *  comment per header key per PR, upserted. Headers are
  *  `repo-platform/<host>`, the host being the workflow stem or the action
  *  name, so two posters can never edit each other's comment. */
@@ -41,73 +37,28 @@ export interface StickyScope {
   postMayFail: boolean;
 }
 
-/** The rendered stem (`auto-format` for the gated
- *  `{% if has_toolchain %}auto-format.yml{% endif %}.jinja`) of a template
- *  workflow source; null for any other path. */
-export function templateWorkflowStem(rel: string): string | null {
-  if (!rel.startsWith("templates/")) return null;
-  const { path } = landedPathAndGates(rel.replace(/\.jinja$/, ""));
-  return /\/\.github\/workflows\/([^/]+)\.ya?ml$/.exec(path)?.[1] ?? null;
+/** The workflow stem a writer source lands as, or null for any other
+ *  path: `files/<module>/.github/workflows/<stem>[.<variant>].yml`, block
+ *  files (`<stem>.block.<value>.yml`) included, since a block is spliced
+ *  into the workflow whose name it carries. The stem is the filename up to
+ *  its first dot (`auto-assign.codeql.yml` lands as auto-assign.yml). */
+export function sourceWorkflowStem(rel: string): string | null {
+  const match = /^files\/[^/]+\/\.github\/workflows\/([^/.]+)[^/]*\.ya?ml$/.exec(rel);
+  return match?.[1] ?? null;
 }
 
-/** The workflow stems each fragment anchor splices into (the composer's
- *  ANCHOR_RE, one anchor per line, read from the RAW jinja source); the
- *  toolchain-setup fragment is prepended into its targets' contributions
- *  and inherits their hosts. */
-export function fragmentHosts(workflows: [rel: string, text: string][]): Map<string, string[]> {
-  const hosts = new Map<string, string[]>();
-  for (const [rel, text] of workflows) {
-    const stem = templateWorkflowStem(rel);
-    if (stem === null) throw new Error(`fragmentHosts: ${rel} is not a template workflow source`);
-    for (const line of text.split("\n")) {
-      const anchor = ANCHOR_RE.exec(line)?.[1];
-      if (anchor !== undefined) hosts.set(anchor, [...(hosts.get(anchor) ?? []), stem]);
-    }
-  }
-  const setup = TOOLCHAIN_SETUP_TARGETS.flatMap((target) => hosts.get(target) ?? []);
-  return hosts.set(TOOLCHAIN_SETUP_FRAGMENT, setup);
-}
-
-/** A source's scope by where it lives: a template workflow hosts itself, a
- *  fragment its anchors' workflows, a repo-platform workflow itself, and
- *  every file of a composite action the action; anything else hosts
- *  nothing, so a sticky step there has no header it could carry. */
-export function stickyScopeOf(rel: string, anchorHosts: Map<string, string[]>): StickyScope {
-  const stem = templateWorkflowStem(rel);
+/** A source's scope by where it lives: a writer workflow source hosts the
+ *  workflow it lands as, a repo-platform workflow itself, and every file of
+ *  a composite action the action; anything else hosts nothing, so a sticky
+ *  step there has no header it could carry. */
+export function stickyScopeOf(rel: string): StickyScope {
+  const stem = sourceWorkflowStem(rel);
   if (stem !== null) return { hosts: [stem], postMayFail: false };
-  const fragment = /^templates\/[^/]+\/fragments\/([a-z0-9-]+)\.jinja$/.exec(rel)?.[1];
-  if (fragment !== undefined) {
-    return { hosts: anchorHosts.get(fragment) ?? [], postMayFail: false };
-  }
   const workflow = /^\.github\/workflows\/([^/]+)\.ya?ml$/.exec(rel)?.[1];
   if (workflow !== undefined) return { hosts: [workflow], postMayFail: false };
   const action = /^actions\/([^/]+)\//.exec(rel)?.[1];
   if (action !== undefined) return { hosts: [action], postMayFail: true };
   return { hosts: [], postMayFail: false };
-}
-
-/** A jinja source as YAML the scanner can parse, every source line keeping
- *  its number: comments blanked with their newlines kept, whitespace-control
- *  dashes dropped (a `{%-` tag eats the newline beside it; the scanner needs
- *  the line, not the whitespace), else/elif turned into adjacent if-blocks so
- *  BOTH branches are scanned (a value-level else would repeat a key and the
- *  parser keeps the last), tags stripped and expressions placeholdered by the
- *  shared jinja subset. A source the subset cannot normalize, or that lost a
- *  line, comes back comment-blanked only: read as text, sticky steps refused. */
-export function stickyYamlOf(rel: string, text: string, vars: JinjaVars): string {
-  if (!rel.endsWith(".jinja")) return text;
-  const blanked = text.replace(/\{#[\s\S]*?#\}/g, (comment) => comment.replace(/[^\n]/g, ""));
-  const branched = blanked
-    .replace(/\{%-/g, "{%")
-    .replace(/-%\}/g, "%}")
-    .replace(/\{%\s*else\s*%\}/g, "{% endif %}{% if _else %}")
-    .replace(/\{%\s*elif\b([^%]*?)%\}/g, "{% endif %}{% if $1 %}");
-  try {
-    const yaml = placeholderJinja(normalizeJinja(branched, vars));
-    return yaml.split("\n").length === text.split("\n").length ? yaml : blanked;
-  } catch {
-    return blanked;
-  }
 }
 
 /** A comment line in YAML or TypeScript. */
@@ -226,13 +177,11 @@ interface ParsedSteps {
 
 /** The steps of a YAML text - every mapping carrying `uses` or `run`
  *  inside a sequence, wherever the sequence sits: a workflow's
- *  `jobs.*.steps`, a composite action's `runs.steps`, a fragment's bare
- *  step list, a job-mapping fragment's `steps`. Null when the text is not
- *  YAML or holds no steps: the scanner then reads it as text. Duplicate
- *  keys are tolerated (a jinja else branch produces them). */
+ *  `jobs.*.steps` or a composite action's `runs.steps`. Null when the
+ *  text is not YAML or holds no steps: the scanner then reads it as text. */
 export function parsedSteps(text: string): ParsedSteps | null {
   const lineCounter = new LineCounter();
-  const doc = parseDocument(text, { lineCounter, uniqueKeys: false });
+  const doc = parseDocument(text, { lineCounter });
   if (doc.errors.length > 0) return null;
   const steps: YAMLMap[] = [];
   const visit = (node: unknown): void => {
@@ -263,7 +212,7 @@ function stringScalars(node: unknown, out: Scalar<string>[] = []): Scalar<string
 }
 
 /** One source judged against its scope. YAML step lists (a workflow, a composite
- *  action, a step fragment) are read as the runner reads them: keys in any order,
+ *  action, a block file) are read as the runner reads them: keys in any order,
  *  `run` as YAML folds it (`>-` is one shell line, `|` one per line), each command
  *  line's words as the shell splits them; anything else is read as command lines
  *  of text. Everywhere: no hand-rolled PR comment; every sticky step pinned
@@ -302,7 +251,7 @@ export function stickyCommentMismatches(
     if (stray !== -1) {
       flag(
         stray + 1,
-        "the sticky action used by a step in a parseable YAML step list (workflow, composite action, or step fragment)",
+        "the sticky action used by a step in a parseable YAML step list (workflow, composite action, or block file)",
         "the sticky action named in a source with no parseable steps",
       );
     }
@@ -366,21 +315,15 @@ export function stickyCommentMismatches(
   return { mismatches, stickySteps };
 }
 
-/** The rule over every source under templates/, .github/workflows/, and
- *  actions/: fragment hosts come from the RAW workflow sources (the
- *  anchors are jinja comments), each source is then scanned as
- *  `yamlOf(rel, text)` renders it. Throws when no template workflow
- *  source or no sticky step is present at all: a scan with nothing to
- *  judge has lost its anchor. */
-export function stickyTreeMismatches(
-  sources: [rel: string, text: string][],
-  yamlOf: (rel: string, text: string) => string = (_rel, text) => text,
-): Mismatch[] {
-  const workflows = sources.filter(([rel]) => templateWorkflowStem(rel) !== null);
-  if (workflows.length === 0) throw new Error("no template workflow sources found - anchor lost");
-  const anchorHosts = fragmentHosts(workflows);
+/** The rule over every source under files/, .github/workflows/, and
+ *  actions/. Throws when no writer workflow source or no sticky step is
+ *  present at all: a scan with nothing to judge has lost its anchor. */
+export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mismatch[] {
+  if (!sources.some(([rel]) => sourceWorkflowStem(rel) !== null)) {
+    throw new Error("no writer workflow sources found - anchor lost");
+  }
   const judged = sources.map(([rel, text]) =>
-    stickyCommentMismatches(rel, yamlOf(rel, text), stickyScopeOf(rel, anchorHosts)),
+    stickyCommentMismatches(rel, text, stickyScopeOf(rel)),
   );
   if (judged.every((j) => j.stickySteps === 0)) {
     throw new Error(`no ${STICKY_COMMENT_ACTION} step in any source - anchor lost`);
@@ -393,18 +336,15 @@ export const stickyCommentRules: Rule[] = [
   {
     // Everything repo-platform ships posts PR comments through the sticky
     // action only (stickyCommentMismatches states the shape): every file
-    // under the template sources, its own workflows, and its composite
-    // actions is the scan, jinja sources read as the YAML they render.
+    // under the writer's sources, its own workflows, and its composite
+    // actions is the scan.
     name: "sticky-pr-comments",
-    run: () => {
-      const vars = jinjaVars();
-      return stickyTreeMismatches(
-        ["templates", ".github/workflows", "actions"]
+    run: () =>
+      stickyTreeMismatches(
+        ["files", ".github/workflows", "actions"]
           .flatMap((root) => walkFiles(root))
           .filter((f) => !f.symlink)
-          .map((f) => [f.path, read(f.path)]),
-        (rel, text) => stickyYamlOf(rel, text, vars),
-      );
-    },
+          .map((f) => [f.path, readSource(f.path)]),
+      ),
   },
 ];

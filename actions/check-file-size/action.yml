@@ -18,13 +18,6 @@ inputs:
     description: Directory to scan (a git checkout)
     required: false
     default: "."
-  rendered-dir:
-    description: >-
-      A rendered template tree under path, judged with the managed-file skip
-      off so an oversize render fails at its source (repo-platform's own
-      job); empty skips it.
-    required: false
-    default: ""
 
 runs:
   using: composite
@@ -57,11 +50,10 @@ runs:
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         SCAN_PATH: ${{ inputs.path }}
-        RENDERED_DIR: ${{ inputs.rendered-dir }}
         REPORT_PATH: ${{ runner.temp }}/check-file-size-report.md
       run: |
         status=0
-        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" ${RENDERED_DIR:+--rendered "$RENDERED_DIR"} || status=$?
+        "$ACTION_BUN" "${{ github.action_path }}/check-file-size.ts" "$SCAN_PATH" || status=$?
         grep -q '^report=' "$GITHUB_OUTPUT" || echo "report=error" >> "$GITHUB_OUTPUT"
         exit "$status"
 
