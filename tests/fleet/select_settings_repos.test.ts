@@ -599,7 +599,7 @@ describe("select_settings_repos.ts", () => {
       expect({ ...r, masked: r.masked.length }).toEqual({
         exitCode: 1,
         stdout: lines(
-          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
+          `::error::1 of 2 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text (the range judged at ${SHA.slice(0, 12)})`,
         ),
         masked: PRIVATE_SLUGS.flatMap(maskForms).length,
         stderr: "",
