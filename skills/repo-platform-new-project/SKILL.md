@@ -43,7 +43,7 @@ For an existing repository, skip this step and work on a branch of the repo as i
 
 ### 2. Write `.repo-platform.yml`
 
-Only `modules` is required, but write `project` too: the settings starter needs `project.description` (an empty description holds that starter with a Registration note until the key is set). `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
+Only `modules` is required, but write `project` too: the settings starter and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the settings starter while it is still absent, with a Registration note until the key is set. `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
 
 Minimal:
 
@@ -114,7 +114,7 @@ The PR body is the report, one section per outcome ([the sync-pr skill](https://
 | Written | `created` for every path that was absent; an adopted repo also sees `unchanged` for a starter it already had, `region added` for a split file that had no markers (the region goes above its content and the PR holds), and `replaced local edits` for a managed file or split region it had written itself |
 | Replaced local edits | a diff per replaced file; move anything you want to keep (step 6) |
 | Retired | a row per file the platform no longer writes; `held` means it needs your decision |
-| Registration notes | a module name `files.yml` does not know, dropped; a placeholder with no value, naming the registration key to set (an empty `project.description` holds the settings starter) |
+| Registration notes | a module name `files.yml` does not know, dropped; a placeholder with no value, naming the registration key to set (an empty `project.description` counts as no value: it holds the managed region of `AGENTS.md` on every sync, and the settings starter while it is still absent) |
 | Mirrors | one row per declared target: `written`, `current`, `replaced local edits`, or `replaced` (the last two hold the PR); a declaration the writer cannot honour fails the sync instead |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
