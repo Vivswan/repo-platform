@@ -5,17 +5,17 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 ## Base (every managed repo, no module needed)
 
 - Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.github/instructions/review.instructions.md`, `.yamllint`, `.typography-allow`, `.github/repo-platform-manifest.json` (the record of what the platform wrote).
-- Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `.github/dependabot.yml` (the github-actions ecosystem always), `AGENTS.md`, `LICENSE.md`.
+- Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, `LICENSE.md`. Managed with per-module blocks: `.github/dependabot.yml` (the github-actions ecosystem always).
 - Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.yml` (the repo's own settings over the fleet baseline).
 - Settings are applied from repo-platform for every registered repo; the labels a module needs come with its selection.
 
 ## Toolchains: bun / node / deno / uv / rust
 
 - Managed: the version dotfile for bun/node/deno (`.bun-version`, `.node-version`, `.dvmrc`, fleet-pinned), `dependabot-bun-lockfile.yml` (bun), `deno-audit.yml` (deno). Public repos with bun/node/deno/uv get the CodeQL variant of `auto-assign.yml`; fleet CI runs CodeQL for their language.
-- Split blocks: a gitignore section, a Dependabot ecosystem entry, and a Toolchain section in `AGENTS.md`.
+- Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
 - Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
 - Companion, bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT. Without it the lockfile fix lands but cannot re-trigger checks.
-- Removal: the dotfile and module workflow are retired; the blocks leave the split regions. `auto-format.yml` stays. The Dependabot label leaves the baseline once no selected toolchain carries it.
+- Removal: the dotfile and module workflow are retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the baseline once no selected toolchain carries it.
 
 ## pages
 
@@ -59,7 +59,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.
 - Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`). The two must differ when both are selected: both streams dedup and auto-close by label.
-- A custom label goes in three places: the registration key (read by fleet CI's plan), the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it), and the repo's own `.github/settings.yml` (the settings apply does not read `labels.*`). A repo that still carries the retired `.github/.copier-answers.yml` must not contradict it: when that file records `nightly_label` / `fuzzer_label` and the registration's `labels.*` differs, the plan fails (the same rule covers `skills.dir` on every PR, and `pages.*`, `docs_site.path`, and `project.name` (with `docs-site`) when the pages or docs-site leg plans the site); a value present in only one file is read from there.
+- A custom label goes in two places: the registration key (read by fleet CI's plan and by the settings apply, which declares it) and the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it).
 - Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the baseline and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.yml` first.
 - Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md`.
 

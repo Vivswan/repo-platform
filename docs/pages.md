@@ -5,7 +5,7 @@ group: Modules
 
 # Pages
 
-Selecting the `pages` module arms the managed ci.yml's `pages` leg and lands a managed `pages.yml` workflow; both deploy ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout. Callers pass only the commit to build and `vars.CUSTOM_DOMAIN`: the shared workflow's `config` job ([actions/plan](../actions/plan/action.yml), mode `pages`) reads the mounts, the toolchain setup, the build commands, the output directory, the site title, and the link-rot label from the repository's registration and recorded answers.
+Selecting the `pages` module arms the managed ci.yml's `pages` leg and lands a managed `pages.yml` workflow; both deploy ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout. Callers pass only the commit to build and `vars.CUSTOM_DOMAIN`: the shared workflow's `config` job ([actions/plan](../actions/plan/action.yml), mode `pages`) reads the mounts, the toolchain setup, the build commands, the output directory, the site title, and the link-rot label from the repository's registration.
 
 | URL | Built from | Content changes when |
 |---|---|---|
@@ -33,16 +33,16 @@ The ordering is an order, not a gate: the `pages` job carries `!cancelled()` bes
 
 Nothing to do: the pages module's settings layer enables Pages with Actions-workflow builds on the next fleet settings apply ([settings.md](settings.md)). Only a deploy that must run before that apply needs the manual toggle: Settings -> Pages -> Source: GitHub Actions. The `github-pages` environment needs no protection rule: deploys never run on tag refs, and a required-reviewers rule there parks every deploy "waiting for review" until the next run cancels it. The fleet settings apply does not manage environments, so remove such a rule by hand (Settings -> Environments -> github-pages).
 
-## Module parameters (copier questions)
+## Module parameters (registration keys)
 
-| Question | Meaning | Default |
+| Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `pages_setup` | <!-- BEGIN GENERATED: pages-setup-meaning (scripts/generate.ts - edit module.yml manifests, not this block) -->Toolchain(s) installed on the build runner (comma-separated `bun`/`node`/`deno`/`uv`/`rust`, or `none`)<!-- END GENERATED: pages-setup-meaning --> | <!-- BEGIN GENERATED: pages-setup-default (scripts/generate.ts - edit module.yml manifests, not this block) -->every selected toolchain module joined with commas (e.g. `bun,node,deno,uv,rust`), else `none`<!-- END GENERATED: pages-setup-default --> |
-| `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `npm ci` / `deno ci` / `uv sync` / `cargo +stable install mdbook --locked` / empty<!-- END GENERATED: pages-install-default --> |
-| `pages_build_command` | The build; must not be empty | <!-- BEGIN GENERATED: pages-build-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun run build` / `npm run build` / `deno task build` / `uv run mkdocs build --site-dir dist` / `mdbook build -d dist`<!-- END GENERATED: pages-build-default --> |
-| `pages_dist_dir` | Build output directory | `dist` |
+| `pages.setup` | Toolchain(s) installed on the build runner (comma-separated `bun`/`node`/`deno`/`uv`/`rust`, or `none`) | every selected toolchain module joined with commas (e.g. `bun,node,deno,uv,rust`), else `none` |
+| `pages.install` | Install step before each build (empty skips) | the install command of the first `pages.setup` toolchain in `files.yml` order (not the order typed) (`bun install --frozen-lockfile` / `npm ci` / `deno ci` / `uv sync` / `cargo +stable install mdbook --locked`), else empty |
+| `pages.build` | The build; must not be empty | the build command of the first `pages.setup` toolchain in `files.yml` order (`bun run build` / `npm run build` / `deno task build` / `uv run mkdocs build --site-dir dist` / `mdbook build -d dist`) |
+| `pages.dist` | Build output directory | `dist` (`modules.pages.dist` in `files.yml`) |
 
-The retired `pages_production` and `pages_staging` answers have no replacement: the tag rules above are the one behavior, and whether a repository has version tags decides what the root serves.
+The plan action ([actions/plan](../actions/plan/action.yml)) resolves them on every run from the registration and the build branch's `files.yml`; a registration that sets none of them builds with the defaults.
 
 ## The build contract
 
@@ -59,17 +59,17 @@ Examples:
 - Vite: `bun x vite build --base "$PAGES_BASE_PATH"`
 - MkDocs (uv): `uv run mkdocs build --site-dir dist` (set `site_url` from `PAGES_ORIGIN`/`PAGES_BASE_PATH` in `mkdocs.yml` via an env plugin, or ignore them for path-relative sites)
 - mdBook (rust): `MDBOOK_OUTPUT__HTML__SITE_URL="$PAGES_BASE_PATH" mdbook build -d dist` (mdBook reads any `book.toml` key from the environment this way), or leave the site path-relative
-- Anything else: `pages_setup=none` and an install command that fetches the tool (a Hugo or Zola release tarball, `gem install`); the pipeline sees only the command and its output directory
+- Anything else: `pages.setup: none` and an install command that fetches the tool (a Hugo or Zola release tarball, `gem install`); the pipeline sees only the command and its output directory
 
 ## With the docs-site module
 
-Selecting `docs-site` alongside `pages` renders ONE Pages workflow: the website stays at `/` but becomes UNVERSIONED (one build of the default branch head - version navigation belongs to the docs), and the docs mount at `/<docs_site_path>/` (default `docs`) with the full tag rules one level down. The docs side's conventions live in [docs-site.md](docs-site.md).
+Selecting `docs-site` alongside `pages` gives ONE Pages workflow: the website stays at `/` but becomes UNVERSIONED (one build of the default branch head - version navigation belongs to the docs), and the docs mount at `/<docs_site.path>/` (default `docs`) with the full tag rules one level down. The docs side's conventions live in [docs-site.md](docs-site.md).
 
 ## Internal links are checked across mounts
 
 Once every mount is in place, the assembled artifact is crawled as one site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page (`.html` or `.htm`) built from the default branch head must resolve, wherever the target lives:
 
-- a website page linking into `/<docs_site_path>/`
+- a website page linking into `/<docs_site.path>/`
 - a docs page linking to a skill rendered from another root
 - a `#fragment` naming a heading that exists on the target page (`#top` in any letter case always does)
 - an asset the build emitted

@@ -5,19 +5,19 @@ group: Modules
 
 # Fuzzer
 
-Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the template](https://github.com/Vivswan/repo-platform/blob/main/templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it. On a red night it uploads the failure artifacts and files a [tracking issue](tracking-issues.md) built from your failure reports; on a green night it closes the stream's open issues.
+Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the source](https://github.com/Vivswan/repo-platform/blob/main/files/fuzzer/.github/workflows/nightly-fuzz.yml)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it. On a red night it uploads the failure artifacts and files a [tracking issue](tracking-issues.md) built from your failure reports; on a green night it closes the stream's open issues.
 
-The starter is generated once and then repo-owned (`_skip_if_exists`): fuzzers and their toolchains differ too much across repos for the template to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Issue lifecycle, release gating, label renaming, and the action pin's history are shared with the nightly module: [Tracking issues](tracking-issues.md).
+The starter is written once and then repo-owned: fuzzers and their toolchains differ too much across repos for the platform to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Issue lifecycle, release gating, label renaming, and the action pin's history are shared with the nightly module: [Tracking issues](tracking-issues.md).
 
-Repo-owned also means a fix to the starter never reaches repos that already rendered it. The upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent); repos that rendered the starter before that line existed add it themselves (cloud-speech already did).
+Repo-owned also means a fix to the starter never reaches repos that already received it. The upload step sets `include-hidden-files: true` because `actions/upload-artifact` skips hidden paths such as `.fuzz-failures/` by default since v4.4, so without it the step finds no files and uploads nothing (`if-no-files-found: ignore` keeps that silent); repos that received the starter before that line existed add it themselves (cloud-speech already did).
 
-## Module parameter (copier question)
+## Module parameter (registration key)
 
-| Question | Meaning | Default |
+| Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `fuzzer_label` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | `fuzz-nightly` |
+| `labels.fuzzer` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | `fuzz-nightly` |
 
-The label is a copier question rather than a starter edit because the settings layer must declare it too; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning and the validator's reserved-name rules.
+The label is a registration key rather than a starter edit alone because the settings layer must declare it too; [Tracking issues: the label is the stream](tracking-issues.md#the-label-is-the-stream) has the reasoning and the reserved-name rules.
 
 ## Customizing the starter
 

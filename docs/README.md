@@ -1,15 +1,15 @@
 # repo-platform
 
-repo-platform manages standards files, CI workflows, and repository settings across Vivswan's repositories from one place: a Copier template renders each repo's files, push-based sync PRs keep them current, and reusable workflows run the fleet's CI. Code is the source of truth, so each page links to the file that owns a behavior instead of restating it.
+repo-platform manages standards files, CI workflows, and repository settings across Vivswan's repositories from one place: a writer copies each repo's files from one file list, push-based sync PRs keep them current, and reusable workflows run the fleet's CI. Code is the source of truth, so each page links to the file that owns a behavior instead of restating it.
 
 ## I want to...
 
 | Goal | Read |
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
-| Read a `validate-template` result: what blocks, what only warns | [New repo: the template check](new-repo.md#the-template-check) |
+| Read a `validate-managed-files` result: what blocks, what only warns | [New repo: the managed files check](new-repo.md#the-managed-files-check) |
 | Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
-| Add or remove a module, and get its render as the sync PR that follows | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
+| Add or remove a module, and get its files as the sync PR that follows | [New repo: changing the module selection](new-repo.md#changing-the-module-selection) |
 | Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |
 | Know which conventions every managed repo follows, and what enforces each | [Fleet guidelines](fleet-guidelines.md) |
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
@@ -29,13 +29,10 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Understand the issue a red night filed | [Tracking issues: lifecycle](tracking-issues.md#issue-lifecycle) |
 | Ship a release while a tracking issue is open | [Tracking issues: release gating](tracking-issues.md#release-gating) |
 | Rename a tracking label without breaking the stream | [Tracking issues: renaming the label](tracking-issues.md#renaming-the-label) |
-| Move or rewrite a rendered file across the fleet (a one-shot transition) | [Migrations: adding a rung](migrations.md#adding-a-rung) |
-| Find out why a sync PR moved a file before the copier diff | [Migrations: the walk](migrations.md#the-walk-over-build-history) |
-| Add a module file, fragment, or anchor to the template | [Composition](compose.md) |
-| Review a template change's rendered diff | [Golden renders](golden-renders.md) |
+| Add, rename, or retire a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
+| Read a sync PR's report, or find why a row held | [Sync: the report](sync.md#the-report) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
-| Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
-| Find where a private repo's failure details land | [Private repos: details in the target repository](private-repos.md) |
+| Keep a private repo's name out of fleet logs, and find where its details land | [Sync: private repositories](sync.md#private-repositories) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
@@ -43,7 +40,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 ### Start here
 
-1. [New repo](new-repo.md) - scaffold a repository, render the template, and register it with the fleet.
+1. [New repo](new-repo.md) - scaffold a repository, register it with the fleet, and receive its first sync PR.
 2. [Fleet guidelines](fleet-guidelines.md) - the conventions every managed repository follows, each with what enforces it.
 3. [All-green](all-green.md) - the required check: ci.yml's own gate job judging every needed result.
 4. [Settings](settings.md) - the six-layer settings merge and how applies run.
@@ -58,12 +55,9 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 ### Fleet operations
 
-10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
-11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, docs-site, and security streams share: lifecycle, release gating, renaming.
-12. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking fixable-CRITICAL gate, the expiring bypass file, and the nightly scan that files one tracking issue per repository.
-13. [Migrations](migrations.md) - the ladder of one-shot fleet transitions: one self-contained file per rung on the build branch, and the sync's walk over build history that runs the rungs a repository has not crossed.
-14. [Composition](compose.md) - how templates/ composes into the tree copier renders: gates, anchors, fragments, data anchors, collisions, and the ownership contract.
-15. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
-16. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-17. [Private repos](private-repos.md) - what fleet logs hide for private repositories, and how to see the full detail.
-18. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+10. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+11. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+12. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, docs-site, and security streams share: lifecycle, release gating, renaming.
+13. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking fixable-CRITICAL gate, the expiring bypass file, and the nightly scan that files one tracking issue per repository.
+14. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+15. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

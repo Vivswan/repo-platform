@@ -24,10 +24,10 @@ Settings stop being applied too: the nightly heal only manages enrolled repos wi
 1. Delete the management metadata:
 
    ```bash
-   git rm .github/.copier-answers.yml .repo-platform.yml
+   git rm .repo-platform.yml .github/repo-platform-manifest.json
    ```
 
-2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-template` job goes red once `.github/.copier-answers.yml` and `.repo-platform.yml` are gone, and no input turns it off. Replace the `ci` job:
+2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-managed-files` job goes red once `.repo-platform.yml` is gone, and no input turns it off. Replace the `ci` job:
    - copy the jobs you want out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public; replace each job's `inputs.*` conditions and values with your repo's literals - a plain workflow has no workflow_call inputs), or write your own
    - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
    - the `pages` job (pages module) deploys downstream of `all-green`; if you drop the gate, give `pages.yml` a `push` trigger on main instead and delete the job
