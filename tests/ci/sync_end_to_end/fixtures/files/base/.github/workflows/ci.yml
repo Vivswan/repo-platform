@@ -2,6 +2,7 @@ name: "{{project_name}} CI"
 on:
   push:
     branches: [main]
+permissions: {}
 jobs:
   ci:
     runs-on: ubuntu-latest

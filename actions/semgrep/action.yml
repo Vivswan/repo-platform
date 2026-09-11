@@ -5,14 +5,16 @@ description: >-
   the step failing on an ERROR-severity finding. Public repositories only:
   the registry needs no token, but code scanning needs a public repository
   or Advanced Security. The only bypass is semgrep's own `// nosemgrep:
-  rule-id` comment on the finding, with a reason. Two registry rules are
-  excluded from the scan: mutable-action-tag duplicates zizmor's
-  unpinned-uses (one tool owns each finding class), permanently;
-  secrets-inherit only until the fleet cutover, because managed
-  repositories still run the old rendered ci.yml and release.yml, whose
-  `secrets: inherit` lines carry no nosemgrep marker (the writer's ci.yml
-  marks each one with its reason), and the rule would fail every fleet
-  repository until the writer replaces them.
+  rule-id` comment on the finding, with a reason; semgrep keeps a marked
+  finding in its SARIF as a suppressed result and code scanning shows a
+  suppressed result as an open alert, so the upload drops suppressed results
+  first. Two registry rules are excluded from the scan: mutable-action-tag
+  duplicates zizmor's unpinned-uses (one tool owns each finding class),
+  permanently; secrets-inherit only until the fleet cutover, because
+  managed repositories still run the old rendered ci.yml and release.yml,
+  whose `secrets: inherit` lines carry no nosemgrep marker (the writer's
+  ci.yml marks each one with its reason), and the rule would fail every
+  fleet repository until the writer replaces them.
 
 runs:
   using: composite
@@ -37,6 +39,18 @@ runs:
           --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" . \
           && status=0 || status=$?
         echo "status=$status" >>"$GITHUB_OUTPUT"
+
+    # A nosemgrep-marked finding stays in the SARIF as a suppressed result,
+    # and code scanning ignores SARIF suppressions (the JSON copy the judge
+    # reads never carries it). A scan that wrote no SARIF leaves nothing to
+    # filter; the upload then fails on the missing file.
+    - name: Drop the marked findings from the SARIF
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        [ -f "$RUNNER_TEMP/semgrep.sarif" ] || exit 0
+        jq 'del(.runs[].results[] | select((.suppressions // []) | length > 0))' "$RUNNER_TEMP/semgrep.sarif" >"$RUNNER_TEMP/semgrep.upload.sarif"
+        mv "$RUNNER_TEMP/semgrep.upload.sarif" "$RUNNER_TEMP/semgrep.sarif"
 
     - name: Upload the findings to code scanning
       if: ${{ !cancelled() }}

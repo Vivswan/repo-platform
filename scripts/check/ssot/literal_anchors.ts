@@ -55,6 +55,8 @@ function handProse(rel: string): string {
  *  raw bytes included - for rules that pin inline script copies
  *  byte-identical. */
 export function inlineFunctionCopies(text: string, name: string): string[] {
+  // The name is a function identifier the calling rule spells out, never input.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   const block = new RegExp(`^( *)async function ${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\1\\}`, "gm");
   return [...text.matchAll(block)].map((match) => match[0]);
 }
