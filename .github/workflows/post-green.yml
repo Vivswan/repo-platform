@@ -3,8 +3,8 @@
 # sha, and a workflow_dispatch runs the two delivery legs alone (publish-build
 # and move-stable) on a green main sha.
 #
-# Invariants every leg must hold: STATE-shaped (a coalesced pending run is
-# covered by its evictor or healed by the next trigger); the commit comes from
+# Invariants every leg must hold: STATE-shaped (a leg replaced while pending
+# at its lane is covered by its evictor or healed by the next trigger); the commit comes from
 # the sha input, never re-derived from context; a leg that mutates shared state
 # keeps its own green verification. Inside a called run github.event_name is
 # the caller's event, so `!= 'workflow_dispatch'` gates the call-only legs.
@@ -27,7 +27,8 @@ on:
           push): the read-directives leg's FALLBACK base, used only when
           the mover reports no base (the tag did not move, or did not exist
           before this run) and no build branch exists yet or its every stamp
-          is sha itself (the first publish, landed by this run).
+          is sha or a newer commit (the first publish, landed by this run or
+          a neighbouring one).
           Explicit like sha, and verified an ancestor of it.
         required: true
         type: string
@@ -149,7 +150,7 @@ jobs:
   # pull request of every commit since the last published build (the squash
   # commit carries the title alone; a direct push is read from its message:
   # fleet_sync_marker.ts) and handed to sync-fleet. State-shaped: mutates
-  # nothing; the range covers the merges whose runs this run evicted. A bad directive fails the leg on the judged
+  # nothing; the range covers the merges whose publish this run evicted. A bad directive fails the leg on the judged
   # commit only; an older one already failed its own run and warns here.
   # Needs-ordered behind the mover for its fallback base (the tag's previous
   # commit, else the push's `before`) and run on every mover result: only

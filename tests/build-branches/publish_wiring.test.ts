@@ -467,18 +467,24 @@ describe("post-green publish wiring", () => {
     expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
   });
 
-  test("ci.yml's main lane serializes without cancelling; only pull-request lanes cancel", () => {
-    // The directive-loss fix reads a RANGE because GitHub keeps one pending
-    // run per group and replaces it (a burst of three loses the middle
-    // run); cancel-in-progress must never add a second loss by killing the
-    // running main run, while PR pushes keep cancelling their stale runs.
-    const doc = parseYaml(ciYml) as {
-      concurrency: { group: string; "cancel-in-progress": string | boolean };
-    };
-    expect(doc.concurrency).toEqual({
-      group: "${{ github.workflow }}-${{ github.ref }}",
-      "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
-    });
+  test("ci.yml keys a push run by its commit and never cancels it; only pull-request lanes cancel", () => {
+    // A ref-keyed group keeps one pending run and cancels the older one: a burst of merges leaves the tip unjudged.
+    // Keyed by the commit, every push run completes; PR pushes keep cancelling their stale runs.
+    // The skeleton every fleet repository runs carries the same block (its only placeholder is the owner).
+    const skeleton = read("files/base/.github/workflows/ci.yml").replaceAll(
+      "{{github_username}}",
+      "owner",
+    );
+    for (const text of [ciYml, skeleton]) {
+      const doc = parseYaml(text) as {
+        concurrency: { group: string; "cancel-in-progress": string | boolean };
+      };
+      expect(doc.concurrency).toEqual({
+        group:
+          "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+        "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+      });
+    }
   });
 
   test("ONE lane per delivery ref: a literal group on each delivery job, and no lane on the caller", () => {
@@ -508,15 +514,10 @@ describe("post-green publish wiring", () => {
     // Delivery legs never cancel a running one: an interrupted publish
     // between commit and push is exactly the wedge the CAS exists for.
     expect(postGreen).not.toContain("cancel-in-progress: true");
-    // No self-deadlock: ci.yml's post-green job must hold no job-level
-    // concurrency at all (a caller must never hold the resource its
-    // called workflow requires; ci.yml's run-level lane already
-    // serializes main runs) - and above all never the publisher lane the
-    // called job waits for. Asserted structurally on the parsed job
-    // (comments may NAME the lane while explaining this very rule).
-    const doc = parseYaml(ciYml) as {
-      jobs: Record<string, Record<string, unknown>>;
-    };
+    // No self-deadlock: ci.yml's post-green job holds no job-level lane at all.
+    // A caller must never hold the resource its called workflow requires, above all the publisher lane the called job waits for.
+    // Asserted structurally on the parsed job: comments may NAME the lane while explaining this very rule.
+    const doc = parseYaml(ciYml) as { jobs: Record<string, Record<string, unknown>> };
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
   });

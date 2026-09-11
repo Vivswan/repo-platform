@@ -13,8 +13,11 @@ on:
 permissions:
   contents: read
 
+# Keyed by the commit on a push: every merge to main gets its own complete run and verdict.
+# A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges leaves the tip unjudged.
+# Pull-request runs stay keyed by the ref: a newer push cancels the stale run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -465,14 +468,10 @@ jobs:
         with:
           needs: ${{ toJSON(needs) }}
 
-  # Everything that runs after green on a main push. Same-run and
-  # needs-ordered behind the gate, so github.sha IS the judged commit; the
-  # called workflow's publish job holds the build-branches-publish lane (a
-  # lane this caller must never hold, or the call deadlocks against
-  # itself), and ci.yml's run-level concurrency already serializes main
-  # runs, so no caller lane is needed. contents: write is the ceiling the
-  # called move-stable job needs for its tag push; every other called job
-  # declares read.
+  # Everything that runs after green on a main push.
+  # Same-run and needs-ordered behind the gate, so github.sha IS the judged commit.
+  # No lane here: a caller holding a lane its called job takes deadlocks the call, and the called publish job holds build-branches-publish.
+  # contents: write is the ceiling the called move-stable job needs for its tag push; every other called job declares read.
   post-green:
     needs: [all-green]
     if: >-

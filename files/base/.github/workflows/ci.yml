@@ -24,8 +24,11 @@ on:
 permissions:
   contents: read
 
+# Keyed by the commit on a push: every merge to main gets its own complete run and verdict.
+# A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges leaves the tip unjudged.
+# Pull-request runs stay keyed by the ref: a newer push cancels the stale run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
