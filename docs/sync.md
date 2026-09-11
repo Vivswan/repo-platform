@@ -127,7 +127,7 @@ The three links carry no `when`: every repository gets them.
 | `pin` | `{file, version}` of the toolchain's version dotfile: `bun run pins` writes `files/<module>/<file>` from it (and the `.bun-version` copies beside the actions and at this repository's root), and the toolchain refresh bumps it | the pin writer and the toolchain refresh |
 | `pages` | `{install, build}`: the pages install and build commands a repository selecting this toolchain gets unless its registration names others | the fleet plan and the registration cutover |
 | `dependabot_ecosystems` | the Dependabot ecosystems the module adds (also its `blocks` list) | the writer |
-| `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the settings baseline |
+| `dependabot_label` | `{name, color}` of the label its Dependabot PRs carry | the `dependabot-label-tuples` rule in `scripts/check/ssot/labels.ts`, which pins it equal to the label in `files/<module>/settings.yml` (the layer the applied roster comes from) |
 | `gitignore_sources` | the github/gitignore templates the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
@@ -335,5 +335,5 @@ A repository still registered the old way (`.repo-platform.yml` holding only `mo
 - The module list is the old file's selection in `files.yml` order (the order the writer selects in); an unknown name is dropped and noted.
 - The derived document must pass the registration schema, or the writer fails (the row files its issue).
 - The answers file leaves through the `retired` entry for `.github/.copier-answers.yml` that the files.yml conversion carries (files.yml retires it); the cutover notes hold the PR for review.
-- After the cutover the manifest's own entry is the one record of the build commit: validate-template's fetch ([aligned/fetch.ts](../actions/validate-template-report/src/aligned/fetch.ts)) and the validator read it there, the answers file's `_commit` only while that file still exists, and the tracking labels come from the registration's `labels` block ([settings.md](settings.md)).
+- After the cutover the manifest's self entry is the one record of the build commit: the writer stamps it (`null` before the first sync, else the build's full sha) and `validate-managed-files` judges that shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)); nothing fetches the build branch to learn it. The tracking labels come from the registration's `labels` block ([settings.md](settings.md)).
 - A repository whose registration already carries `project`, or that has no answers file, is left alone.

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "validate-template-report",
+      "name": "validate-managed-files",
       "dependencies": {
         "yaml": "^2.9.0",
       },

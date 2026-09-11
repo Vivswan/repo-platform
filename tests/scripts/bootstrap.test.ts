@@ -4,7 +4,7 @@
 // node_modules, and a nested lock directory.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bunLockDirs, missingNodeModules } from "../../scripts/bootstrap";
 import { tempDirs } from "../shared/temp_dir";
@@ -49,4 +49,27 @@ describe("bunLockDirs", () => {
     writeFileSync(join(base, "bun.lock"), "");
     expect(bunLockDirs(base)).toEqual([".", "actions/parent/nested", "actions/with-lock"]);
   });
+});
+
+/** The name a bun.lock records for the package that owns it (its root
+ *  workspace). bun.lock is JSON with trailing commas, so they go first. */
+function lockedName(dir: string): string {
+  const lock = JSON.parse(
+    readFileSync(join(root, dir, "bun.lock"), "utf-8").replace(/,(\s*[}\]])/g, "$1"),
+  ) as { workspaces: Record<string, { name: string }> };
+  return lock.workspaces[""].name;
+}
+
+// A frozen install accepts a stale workspace name (bun 1.4.0), so the
+// lockfile of a renamed action is judged here instead.
+test("every bun.lock names the package.json beside it", () => {
+  const dirs = bunLockDirs(root);
+  const named = (name: (dir: string) => string) => dirs.map((dir) => ({ dir, name: name(dir) }));
+  expect(named(lockedName)).toEqual(
+    named(
+      (dir) =>
+        (JSON.parse(readFileSync(join(root, dir, "package.json"), "utf-8")) as { name: string })
+          .name,
+    ),
+  );
 });

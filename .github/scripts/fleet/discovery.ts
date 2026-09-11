@@ -172,11 +172,12 @@ export function scopeSource(shaEnv: string): ScopeSource {
 }
 
 // Case-insensitive replaceAll: GitHub identity is case-insensitive, so a
-// scrub keyed to one casing must catch every other. The needle is
-// regex-escaped and the replacement is a thunk, so neither is ever
-// interpreted as pattern or substitution syntax.
+// scrub keyed to one casing must catch every other. The replacement is a
+// thunk, so a `$` in it is never substitution syntax.
 function replaceAllFoldingCase(text: string, needle: string, replacement: string): string {
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // The needle is regex-escaped on the line above, so it is never pattern syntax.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return text.replace(new RegExp(escaped, "gi"), () => replacement);
 }
 

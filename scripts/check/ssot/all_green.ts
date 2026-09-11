@@ -442,9 +442,12 @@ export function skeletonGateMismatches(
   }
   const calls = (name: string, workflow: string) => {
     const uses = String(asRecord(jobs[name] ?? {}, name).uses ?? "");
-    if (
-      !new RegExp(`/repo-platform/\\.github/workflows/${escapeRegExp(workflow)}@build$`).test(uses)
-    ) {
+    // The workflow file name is one of this rule's own literals below, escaped; the rest is literal.
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+    const pinned = new RegExp(
+      `/repo-platform/\\.github/workflows/${escapeRegExp(workflow)}@build$`,
+    );
+    if (!pinned.test(uses)) {
       mismatches.push({
         file: at(name),
         expected: `uses: <owner>/repo-platform/.github/workflows/${workflow}@build`,
