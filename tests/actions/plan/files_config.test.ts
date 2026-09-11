@@ -281,6 +281,8 @@ describe("pathProblem", () => {
     ["a/b\tc", "carries a control character"],
     [`a/${"b".repeat(255)}`, null],
     [`a/${"b".repeat(256)}`, "has a segment over 255 bytes"],
+    [Array(4).fill("c".repeat(255)).join("/"), null],
+    [Array(17).fill("c".repeat(255)).join("/"), "is longer than 1024 bytes"],
   ])("%s -> %p", (path, problem) => {
     expect(pathProblem(path)).toBe(problem);
   });

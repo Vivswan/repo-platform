@@ -161,6 +161,11 @@ export class FilesConfigError extends Error {
   }
 }
 
+/** The checkout root's own length plus the relative path must fit the
+ *  runner's PATH_MAX (4096 on Linux) or a stat of the path throws instead
+ *  of answering; no fleet path comes near this. */
+const MAX_PATH_BYTES = 1024;
+
 /** Why `path` cannot be a repository-relative file path, or null. */
 export function pathProblem(path: string): string | null {
   if (path.startsWith("/")) return "is absolute";
@@ -174,6 +179,7 @@ export function pathProblem(path: string): string | null {
   if (segments.some((segment) => Buffer.byteLength(segment) > 255)) {
     return "has a segment over 255 bytes";
   }
+  if (Buffer.byteLength(path) > MAX_PATH_BYTES) return `is longer than ${MAX_PATH_BYTES} bytes`;
   return null;
 }
 

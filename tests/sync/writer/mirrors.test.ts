@@ -2,10 +2,12 @@
 // platform-written, or nested targets, foreign content), and the byte copies.
 
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -386,6 +388,78 @@ describe("applyMirrors", () => {
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/sub/LICENSE.md"))).toBe(false);
   });
+
+  test("a target longer than the runner can stat is refused by its length, and the pass goes on", () => {
+    // Every segment is a legal 255 bytes; only the whole path is too long
+    // to look up, so an lstat of it would throw ENAMETOOLONG.
+    const long = Array(17).fill("a".repeat(255)).join("/");
+    const root = tree({ "skills/a/README.md": "" });
+    const rows = applyMirrors(
+      root,
+      [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
+      new Map([["LICENSE.md", Buffer.from("L\n")]]),
+      new Set(),
+      {},
+    );
+    expect(rows).toEqual([
+      {
+        source: "LICENSE.md",
+        target: long,
+        outcome: "refused",
+        detail: "the target is longer than 1024 bytes",
+      },
+      { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+    ]);
+    expect(existsSync(join(root, long.slice(0, 255)))).toBe(false);
+  });
+
+  // macOS caps a whole path at 1024 bytes, so a checkout there cannot hold a
+  // relative path near the bound; the runners are Linux (PATH_MAX 4096).
+  test.skipIf(process.platform === "darwin")(
+    "a glob that grows past the bound through long directory names is refused by name, never probed",
+    () => {
+      const seg = "d".repeat(255);
+      const levels = 17;
+      const root = tree({ "skills/a/README.md": "" });
+      // Made from a shell whose cwd is the chain so far: the deepest
+      // directory's absolute path is longer than one syscall may name.
+      const chunk = (cwd: string, depth: number) =>
+        spawnSync("mkdir", ["-p", Array(depth).fill(seg).join("/")], { cwd });
+      chunk(root, 8);
+      chunk(join(root, ...Array(8).fill(seg)), levels - 8);
+      try {
+        const rows = applyMirrors(
+          root,
+          [
+            {
+              source: "LICENSE.md",
+              targets: [`${Array(levels).fill("*").join("/")}/LICENSE.md`, "skills/*/LICENSE.md"],
+            },
+          ],
+          new Map([["LICENSE.md", Buffer.from("L\n")]]),
+          new Set(),
+          {},
+        );
+        // Four levels fit the bound and are listed; the fifth does not, so
+        // the rest of the pattern rides along from there.
+        const rider = [...Array(5).fill(seg), ...Array(levels - 5).fill("*"), "LICENSE.md"].join(
+          "/",
+        );
+        expect(rows).toEqual([
+          {
+            source: "LICENSE.md",
+            target: rider,
+            outcome: "refused",
+            detail: "the target is longer than 1024 bytes",
+          },
+          { source: "LICENSE.md", target: "skills/a/LICENSE.md", outcome: "written", detail: "" },
+        ]);
+        expect(readdirSync(join(root, ...Array(4).fill(seg)))).toEqual([seg]);
+      } finally {
+        spawnSync("rm", ["-rf", seg], { cwd: root });
+      }
+    },
+  );
 
   test("a final star matching a symlink refuses it instead of skipping it", () => {
     const root = tree({ "docs/a.md": "L\n" });

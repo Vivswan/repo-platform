@@ -104,15 +104,18 @@ export function blockedPrefix(root: string, pattern: string): BlockedAncestor | 
  *
  *  Symbolic links are matched, never skipped, and never listed through: a
  *  link in a final segment, or one in a directory segment that does not
- *  provably resolve to a file, makes the prefix LINKED, and from there the
- *  rest of the pattern rides along literally (`skills/link/sub/*.md`) so
- *  applyMirrors refuses the path by its linked ancestor. A link to a file
- *  in a directory segment is no directory and is skipped like a file. */
+ *  provably resolve to a file, ends the probing there, and so does a prefix
+ *  pathProblem refuses (one grown past the length bound through long
+ *  directory names, which a stat could not name). From there the rest of
+ *  the pattern rides along literally (`skills/link/sub/*.md`) so
+ *  applyMirrors refuses the path by its linked ancestor or by name. A link
+ *  to a file in a directory segment is no directory and is skipped like a
+ *  file. */
 export function expandPattern(root: string, pattern: string): string[] {
   if (!pattern.includes("*")) return [pattern];
   const segments = pattern.split("/");
   const out: string[] = [];
-  const walk = (prefix: string, index: number, linked: boolean): void => {
+  const walk = (prefix: string, index: number, unprobed: boolean): void => {
     if (index === segments.length) {
       out.push(prefix);
       return;
@@ -121,10 +124,16 @@ export function expandPattern(root: string, pattern: string): string[] {
     const rel = (name: string) => (prefix === "" ? name : `${prefix}/${name}`);
     if (!segment.includes("*")) {
       const next = rel(segment);
-      walk(next, index + 1, linked || lstatOrNull(join(root, next))?.isSymbolicLink() === true);
+      walk(
+        next,
+        index + 1,
+        unprobed ||
+          pathProblem(next) !== null ||
+          lstatOrNull(join(root, next))?.isSymbolicLink() === true,
+      );
       return;
     }
-    if (linked) {
+    if (unprobed) {
       out.push(rel(segments.slice(index).join("/")));
       return;
     }
@@ -136,12 +145,16 @@ export function expandPattern(root: string, pattern: string): string[] {
     const re = new RegExp(`^${segment.split("*").map(escapeRe).join("[^/]*")}$`);
     for (const name of readdirSync(dir).sort()) {
       if (!re.test(name)) continue;
+      if (pathProblem(rel(name)) !== null) {
+        walk(rel(name), index + 1, true);
+        continue;
+      }
       const stat = lstatOrNull(join(dir, name));
       if (stat === null) continue;
       if (stat.isSymbolicLink()) {
         if (final || !linksToFile(join(dir, name))) walk(rel(name), index + 1, true);
       } else if (final ? stat.isFile() : stat.isDirectory()) {
-        walk(rel(name), index + 1, linked);
+        walk(rel(name), index + 1, false);
       }
     }
   };
