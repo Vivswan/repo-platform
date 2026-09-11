@@ -96,14 +96,31 @@ export function literalPrefix(pattern: string): string {
   return star === -1 ? pattern : segments.slice(0, star).join("/");
 }
 
-/** Every declared target files.yml alone proves unwritable: a source it
- *  does not write here as managed or split; a `**`; a target (or pattern
- *  text) the grammar refuses, under `.github/workflows/`, or nested with a
- *  path files.yml writes or retires; a literal target declared twice or
- *  nested with another (both sides, whatever their sources); a pattern
- *  whose literal prefix a literal target would make a file of. A target
- *  the grammar refuses is judged by that alone: the nesting walks need a
- *  clean relative path. */
+/** The names one pattern segment matches: each `*` any run of characters
+ *  but `/`, everything else itself. The writer lists directories through
+ *  this and the plan matches known paths with it, so the two agree. */
+export function segmentPattern(segment: string): RegExp {
+  const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A mirror glob segment from the repository's .repo-platform.yml, escaped.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+  return new RegExp(`^${segment.split("*").map(literal).join("[^/]*")}$`);
+}
+
+/** Whether a pattern names `path` segment for segment: what the writer
+ *  would expand it to if `path` were a file in the checkout. */
+export function patternMatches(pattern: string, path: string): boolean {
+  const segments = pattern.split("/");
+  const parts = path.split("/");
+  return (
+    segments.length === parts.length &&
+    segments.every((segment, index) => segmentPattern(segment).test(parts[index]))
+  );
+}
+
+/** Every declared target files.yml alone proves unwritable, each with its
+ *  reason (docs/sync.md lists the rules). A target the grammar refuses is
+ *  judged by that alone: the nesting and matching walks need a clean
+ *  relative path. */
 export function mirrorDeclarationProblems(mirrors: Mirrors, owned: OwnedPaths): MirrorProblem[] {
   const problems: MirrorProblem[] = [];
   const declared = mirrors.flatMap(({ source, targets }) =>
@@ -125,11 +142,13 @@ export function mirrorDeclarationProblems(mirrors: Mirrors, owned: OwnedPaths): 
     else clean.push({ source, target });
   }
   const literals = clean.filter(({ target }) => !isGlob(target));
-  const claims = new Map<string, number>();
-  for (const { target } of literals) claims.set(target, (claims.get(target) ?? 0) + 1);
+  const claims = new Map<string, string[]>();
+  for (const { source, target } of literals) {
+    claims.set(target, [...(claims.get(target) ?? []), source]);
+  }
   const literalPaths = new Set(claims.keys());
   for (const { source, target } of literals) {
-    if ((claims.get(target) ?? 0) > 1) {
+    if ((claims.get(target) ?? []).length > 1) {
       problems.push({ source, target, problem: "the target is declared more than once" });
     }
     const nested = nestedWith(target, literalPaths);
@@ -144,17 +163,39 @@ export function mirrorDeclarationProblems(mirrors: Mirrors, owned: OwnedPaths): 
       });
     }
   }
+  const known: [ReadonlySet<string>, string][] = [
+    [new Set([REGISTRATION_PATH]), "the registration"],
+    [owned.writes, "a path files.yml writes"],
+    [owned.retires, "a path files.yml retires"],
+  ];
   for (const { source, target } of clean) {
     if (!isGlob(target)) continue;
     const prefix = literalPrefix(target);
-    if (prefix === "") continue;
-    const nested = literalPaths.has(prefix) ? { under: prefix } : nestedWith(prefix, literalPaths);
-    if (nested !== null && "under" in nested) {
-      problems.push({
-        source,
-        target,
-        problem: `the pattern's ancestor '${nested.under}' is another target`,
-      });
+    if (prefix !== "") {
+      const nested = literalPaths.has(prefix)
+        ? { under: prefix }
+        : nestedWith(prefix, literalPaths);
+      if (nested !== null && "under" in nested) {
+        problems.push({
+          source,
+          target,
+          problem: `the pattern's ancestor '${nested.under}' is another target`,
+        });
+      }
+    }
+    for (const [paths, what] of known) {
+      for (const path of [...paths].filter((path) => patternMatches(target, path)).sort()) {
+        problems.push({ source, target, problem: `the pattern matches '${path}', ${what}` });
+      }
+    }
+    for (const [path, sources] of claims) {
+      if (sources.some((other) => other !== source) && patternMatches(target, path)) {
+        problems.push({
+          source,
+          target,
+          problem: `the pattern matches '${path}', a target of another source`,
+        });
+      }
     }
   }
   return problems;

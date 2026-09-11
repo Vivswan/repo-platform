@@ -25,7 +25,12 @@ import {
   MirrorFailure,
   type MirrorRow,
 } from "../../../.github/scripts/sync/writer/mirrors.ts";
-import type { MirrorProblem, OwnedPaths } from "../../../actions/plan/mirrors.ts";
+import {
+  type MirrorProblem,
+  mirrorPathProblem,
+  type OwnedPaths,
+  patternMatches,
+} from "../../../actions/plan/mirrors.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -298,7 +303,6 @@ describe("applyMirrors", () => {
 
   test("a glob pass fails whole on the links it meets, a pattern reading through a link or a file or matching nothing, and a held source", () => {
     const root = tree({
-      ".repo-platform.yml": "modules: []\n",
       "skills/a/README.md": "",
       "skills/b/README.md": "",
       "docs/a.md": "L\n",
@@ -331,8 +335,6 @@ describe("applyMirrors", () => {
               targets: ["nowhere/*/x", "skills/link/*.md", "real/a/x/*", "docs/*.md"],
             },
             { source: "HELD.md", targets: ["skills/*/HELD.md"] },
-            // A root glob reaching the registration the sync reads.
-            { source: "B.md", targets: ["*.yml"] },
           ],
           bytes({ "A.md": "A\n", "B.md": "B\n" }),
           owned(["A.md", "B.md", "HELD.md"]),
@@ -379,22 +381,20 @@ describe("applyMirrors", () => {
       ),
       ...links.map((link) => linkAbove(`${link}/nope/LICENSE.md`, link)),
       failure("B.md", "docs/b.md", "the target is a symbolic link"),
-      failure("B.md", ".repo-platform.yml", "the target is the registration itself"),
     ]);
-    expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe("modules: []\n");
     expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
     expect(readFileSync(join(root, "docs/a.md"), "utf-8")).toBe("L\n");
   });
 
-  test("a glob landing on another source's literal, or on a path nested with a target, fails after the literals are written", () => {
-    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "B\n" });
+  test("a glob landing on a path nested with a target fails after the literals are written", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/a/COPY.md": "old\n" });
     const failures = failuresOf(() =>
       applyMirrors(
         root,
         [
           // A literal makes a directory that a glob then names as a file.
-          { source: "A.md", targets: ["skills/LICENSE.md/x", "skills/a/COPY.md", "*/LICENSE.md"] },
+          { source: "A.md", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
           { source: "B.md", targets: ["skills/*/COPY.md"] },
         ],
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
@@ -403,7 +403,6 @@ describe("applyMirrors", () => {
       ),
     );
     expect(failures).toEqual([
-      failure("B.md", "skills/a/COPY.md", "the target is claimed by more than one source"),
       failure(
         "A.md",
         "skills/LICENSE.md",
@@ -416,8 +415,70 @@ describe("applyMirrors", () => {
       ),
     ]);
     expect(readFileSync(join(root, "skills/LICENSE.md/x"), "utf-8")).toBe("A\n");
-    expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("A\n");
+    expect(readFileSync(join(root, "skills/a/COPY.md"), "utf-8")).toBe("old\n");
     expect(existsSync(join(root, "skills/LICENSE.md/COPY.md"))).toBe(false);
+  });
+
+  test("a glob the plan proves to land on a written path, the registration, or another source's literal fails before anything is written", () => {
+    const root = tree({
+      ".repo-platform.yml": "modules: [bun]\n",
+      "LICENSE.md": "L\n",
+      "AGENTS.md": "A\n",
+      "skills/a/README.md": "",
+    });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          { source: "LICENSE.md", targets: ["*.md", "skills/a/LICENSE.md"] },
+          { source: "AGENTS.md", targets: ["*.yml", "skills/*/LICENSE.md"] },
+        ],
+        bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
+        owned(["LICENSE.md", "AGENTS.md"]),
+        {},
+      ),
+    );
+    expect(failures).toEqual([
+      failure("LICENSE.md", "*.md", "the pattern matches 'AGENTS.md', a path files.yml writes"),
+      failure("LICENSE.md", "*.md", "the pattern matches 'LICENSE.md', a path files.yml writes"),
+      failure("AGENTS.md", "*.yml", "the pattern matches '.repo-platform.yml', the registration"),
+      failure(
+        "AGENTS.md",
+        "skills/*/LICENSE.md",
+        "the pattern matches 'skills/a/LICENSE.md', a target of another source",
+      ),
+    ]);
+    expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe("modules: [bun]\n");
+    expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
+  });
+
+  // The checkout holds every owned path as a file, so the writer's expansion
+  // and the plan's matcher see the same names; the paths the checkout leg
+  // refuses are exactly the ones the plan reports.
+  test.each([
+    ["*.md", ["AGENTS.md", "LICENSE.md", "SECURITY.md"]],
+    ["*.yml", [".repo-platform.yml"]],
+    ["*/README.md", ["docs/README.md"]],
+    ["docs/*", ["docs/README.md"]],
+    ["skills/*/*.md", []],
+    ["skills/*/README.md", []],
+  ])("the writer expands %s to the paths the plan matches: %p", (pattern, refused) => {
+    const claims = owned(["LICENSE.md", "AGENTS.md"], ["docs/README.md"], ["SECURITY.md"]);
+    const root = tree(
+      Object.fromEntries(
+        [...claims.writes, ...claims.retires, ".repo-platform.yml", "skills/a/README.md"].map(
+          (path) => [path, ""],
+        ),
+      ),
+    );
+    const expanded = expandPattern(root, pattern);
+    expect(expanded.filter((path) => mirrorPathProblem(path, claims) !== null)).toEqual(refused);
+    expect(expanded.filter((path) => patternMatches(pattern, path))).toEqual(expanded);
+    expect(
+      [...claims.writes, ...claims.retires, ".repo-platform.yml"]
+        .filter((path) => patternMatches(pattern, path))
+        .sort(),
+    ).toEqual(refused);
   });
 
   test("two globs of different sources landing on one path fail both sides", () => {

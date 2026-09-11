@@ -19,6 +19,7 @@ import {
   mirrorPathProblem,
   nestedWith,
   type OwnedPaths,
+  segmentPattern,
 } from "../../../../actions/plan/mirrors.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { type Records, recordedHash, sha256 } from "./manifest.ts";
@@ -117,11 +118,9 @@ export function expandPattern(root: string, pattern: string): string[] {
     const dir = join(root, prefix);
     if (lstatOrNull(dir)?.isDirectory() !== true) return;
     const final = index === segments.length - 1;
-    // A mirror glob segment from the repository's .repo-platform.yml, escaped.
-    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-    const re = new RegExp(`^${segment.split("*").map(escapeRe).join("[^/]*")}$`);
+    const names = segmentPattern(segment);
     for (const name of readdirSync(dir).sort()) {
-      if (!re.test(name)) continue;
+      if (!names.test(name)) continue;
       if (pathProblem(rel(name)) !== null) {
         walk(rel(name), index + 1, true);
         continue;
@@ -149,10 +148,6 @@ function linksToFile(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** One concrete path a source claims, with the bytes it would copy. */

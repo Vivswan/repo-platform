@@ -13,6 +13,7 @@ import {
   nestedWith,
   type OwnedPaths,
   ownedPaths,
+  patternMatches,
 } from "../../../actions/plan/mirrors.ts";
 
 const OWNED: OwnedPaths = {
@@ -82,6 +83,23 @@ describe("mirrorPathProblem", () => {
   });
 });
 
+describe("patternMatches", () => {
+  test.each([
+    ["*.md", "LICENSE.md", true],
+    ["*.md", "docs/README.md", false],
+    ["*/README.md", "docs/README.md", true],
+    ["docs/*", "docs/README.md", true],
+    ["skills/*/LICENSE.md", "skills/a/LICENSE.md", true],
+    ["skills/*/LICENSE.md", "skills/LICENSE.md", false],
+    ["*", ".repo-platform.yml", true],
+    ["a*b*", "ab", true],
+    ["*.md", "xmd", false],
+    ["a.b", "aXb", false],
+  ])("%s against %s -> %p", (pattern, path, matches) => {
+    expect(patternMatches(pattern, path)).toBe(matches);
+  });
+});
+
 describe("nestedWith and literalPrefix", () => {
   test("a path nests with the one above or below it, never with itself", () => {
     const others = new Set(["a/b", "x/y/z", "a/b/c/d"]);
@@ -121,6 +139,36 @@ describe("mirrorDeclarationProblems", () => {
         OWNED,
       ),
     ).toEqual([]);
+  });
+
+  test("a pattern that matches the registration, a written or retired path, or another source's literal target", () => {
+    const problems = mirrorDeclarationProblems(
+      [
+        { source: "LICENSE.md", targets: ["*.md", "skills/a/LICENSE.md", "skills/*/AGENTS.md"] },
+        { source: "AGENTS.md", targets: ["*.yml", "*/README.md", "skills/*/LICENSE.md", "*/x"] },
+        { source: "AGENTS.md", targets: ["skills/*/AGENTS.md", ".github/*"] },
+      ],
+      OWNED,
+    );
+    const L = (target: string, problem: string) => ({ source: "LICENSE.md", target, problem });
+    const A = (target: string, problem: string) => ({ source: "AGENTS.md", target, problem });
+    expect(problems).toEqual([
+      L("*.md", "the pattern matches 'AGENTS.md', a path files.yml writes"),
+      L("*.md", "the pattern matches 'CLAUDE.md', a path files.yml writes"),
+      L("*.md", "the pattern matches 'LICENSE.md', a path files.yml writes"),
+      L("*.md", "the pattern matches 'SECURITY.md', a path files.yml retires"),
+      A("*.yml", "the pattern matches '.repo-platform.yml', the registration"),
+      A("*.yml", "the pattern matches 'nightly.yml', a path files.yml writes"),
+      A("*/README.md", "the pattern matches 'docs/README.md', a path files.yml writes"),
+      A(
+        "skills/*/LICENSE.md",
+        "the pattern matches 'skills/a/LICENSE.md', a target of another source",
+      ),
+      A(
+        ".github/*",
+        "the pattern matches '.github/repo-platform-manifest.json', a path files.yml writes",
+      ),
+    ]);
   });
 
   test("every problem files.yml alone proves, both sides of a conflict, in declaration order", () => {
