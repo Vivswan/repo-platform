@@ -16,6 +16,7 @@ import { checkConflictMarkers } from "./checks/conflict_markers.ts";
 import { checkHeaders } from "./checks/headers.ts";
 import { checkManifestParity } from "./checks/manifest_parity.ts";
 import { checkManifestShape } from "./checks/manifest_shape.ts";
+import { checkMirrors } from "./checks/mirrors.ts";
 import { checkRegistration } from "./checks/registration.ts";
 import { checkReleasePlease } from "./checks/release_please.ts";
 import { checkSplitMarkers } from "./checks/split_markers.ts";
@@ -33,6 +34,7 @@ const CHECKS: ((ctx: Context) => Finding[])[] = [
   checkHeaders,
   checkManifestShape,
   checkManifestParity,
+  checkMirrors,
 ];
 
 function usageError(message: string): never {

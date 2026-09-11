@@ -161,7 +161,7 @@ describe("ownership-manifest byte parity", () => {
     {
       reason: ".repo-platform.yml classed managed with a stale hash",
       path: ".repo-platform.yml",
-      content: `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: AGENTS.md\n    targets: [copies/AGENTS.md]\n`,
+      content: `${BASELINE[".repo-platform.yml"]}mirrors: []\n`,
     },
     { reason: "any other unlisted path", path: "docs/pinned.md", content: "drifted\n" },
   ])("a drifted managed entry fails parity: $reason", ({ path, content }) => {

@@ -35,8 +35,10 @@ import { LOCAL_NOTES, type MainProject, mainEnv, mainUpdate } from "./main_updat
 
 const harness = upgradePathHarness();
 
+// A glob target: the validator holds a literal target to its copy, and
+// this leg materializes none (the declaration's survival is the point).
 const MIRRORS_DECLARATION =
-  "mirrors:\n  - source: AGENTS.md\n    targets:\n      - copies/AGENTS.md\n";
+  "mirrors:\n  - source: AGENTS.md\n    targets:\n      - copies/*/AGENTS.md\n";
 
 /** Repo-owned content the local-content carry must bring back over the
  * re-render: tails below END markers, a .gitignore entry ABOVE the BEGIN
