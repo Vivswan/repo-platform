@@ -1,7 +1,8 @@
 // The knip action's contract: the repository's own configuration is
 // discovered by knip itself and the fleet default only fills the gap, the
-// run is the pinned knip over that flag alone, and the fleet default adds
-// nothing to knip's own discovery, whose limits the end-to-end controls pin.
+// run is the pinned knip over that flag alone, and the fleet default names
+// the fleet's layout (tests, hooks, scripts directories) as entry files on
+// top of knip's own discovery, whose limits the end-to-end controls pin.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,8 +13,8 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 const action = loadAction("actions/knip/action.yml");
-const FLEET_CONFIG = join(REPO_ROOT, "actions/knip/knip.json");
-const FLEET_FLAG = "--config /opt/action/knip.json";
+const FLEET_CONFIG = join(REPO_ROOT, "actions/knip/knip.jsonc");
+const FLEET_FLAG = "--config /opt/action/knip.jsonc --no-config-hints";
 
 describe("actions/knip", () => {
   test("a composite of the config resolution and the pinned knip run, no inputs to loosen it", () => {
@@ -78,29 +79,57 @@ describe("actions/knip", () => {
     expect(resolveConfig(without).outputs).toEqual({ flag: FLEET_FLAG });
   });
 
-  test("the fleet default is a valid knip configuration that only relaxes same-file exports", () => {
-    const config = JSON.parse(readFileSync(FLEET_CONFIG, "utf8"));
-    expect(Object.keys(config).sort()).toEqual(["$schema", "ignoreExportsUsedInFile"]);
-    expect(config.ignoreExportsUsedInFile).toBe(true);
+  test("the fleet default: same-file exports relaxed, the fleet layout as entry files with knip's defaults restated, the fleet-installed tools as known binaries", () => {
+    // A jsonc file so each list carries its reason; knip parses it itself.
+    const config = JSON.parse(
+      readFileSync(FLEET_CONFIG, "utf8")
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("//"))
+        .join("\n"),
+    );
+    expect(config).toEqual({
+      $schema: "https://unpkg.com/knip@6/schema.json",
+      ignoreExportsUsedInFile: true,
+      entry: [
+        "{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+        "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+        "**/*.test.{ts,mts,js,mjs}",
+        "tests/**/*.{ts,mts,js,mjs}",
+        ".githooks/**/*.{ts,mts,js,mjs}",
+        "**/scripts/**/*.{ts,mts,js,mjs}",
+      ],
+      ignoreBinaries: ["uv", "uvx", "actionlint", "gitleaks"],
+    });
   });
 
-  // End to end with the pinned knip on a repository of the fleet shape: the
-  // default finds a root cli.ts, the workflow-run script and the .github
-  // action script (github-actions plugin), and the test files (bun plugin,
-  // on the `bun test` script). The controls pin the shapes it misses, which
-  // the fleet guidelines send to a repository knip.json.
+  // End to end with the pinned knip, run as the action runs it, on a
+  // repository of the fleet shape: the default finds a root cli.ts, the
+  // package.json bin, the workflow-run script and the .github action script
+  // (github-actions plugin), and the fleet layout the entry globs name: test
+  // files run through a launcher script (not `bun test`, so the bun plugin
+  // misses them), their helpers, a git hook, and a skill's scripts directory.
+  // The controls pin the shapes it misses, which the fleet guidelines send
+  // to a repository knip.json.
   const knip = (repo: string) =>
-    boundedSpawnSync([join(REPO_ROOT, "node_modules/.bin/knip"), "--config", FLEET_CONFIG], {
-      cwd: repo,
-      timeoutMs: 60_000,
-      // knip loads its config through jiti, whose disk cache would land in
-      // the run's TMPDIR and read as a leaked fixture.
-      env: { ...process.env, JITI_FS_CACHE: "false", JITI_CACHE: "false" },
-    });
-  function fleetShapedRepo(options: { testScript: boolean } = { testScript: true }): string {
+    boundedSpawnSync(
+      [join(REPO_ROOT, "node_modules/.bin/knip"), "--config", FLEET_CONFIG, "--no-config-hints"],
+      {
+        cwd: repo,
+        timeoutMs: 60_000,
+        // knip loads its config through jiti, whose disk cache would land in
+        // the run's TMPDIR and read as a leaked fixture.
+        env: { ...process.env, JITI_FS_CACHE: "false", JITI_CACHE: "false" },
+      },
+    );
+  function fleetShapedRepo(): string {
     const repo = temp.dir("knip-e2e-");
-    const scripts = options.testScript ? ', "scripts": {"test": "bun test"}' : "";
-    writeFileSync(join(repo, "package.json"), `{"name": "x", "type": "module"${scripts}}`);
+    // The scripts run the fleet-installed tools beside the launcher.
+    writeFileSync(
+      join(repo, "package.json"),
+      '{"name": "x", "type": "module", "bin": {"x": "bin/x.js"}, "scripts": {"test": "bun scripts/run_tests.ts", "lint:yaml": "uvx yamllint .", "lint:actions": "actionlint && gitleaks detect && uv run ruff"}}',
+    );
+    mkdirSync(join(repo, "bin"));
+    writeFileSync(join(repo, "bin/x.js"), "console.log(5);\n");
     // A bun repository's tsconfig: knip resolves the .ts-suffixed imports
     // only under allowImportingTsExtensions.
     writeFileSync(
@@ -121,12 +150,21 @@ describe("actions/knip", () => {
     );
     mkdirSync(join(repo, "scripts"));
     writeFileSync(join(repo, "scripts/x.ts"), "console.log(2);\n");
+    writeFileSync(join(repo, "scripts/run_tests.ts"), "console.log(6);\n");
+    mkdirSync(join(repo, ".githooks"));
+    writeFileSync(join(repo, ".githooks/pre-commit.mts"), "console.log(7);\n");
+    mkdirSync(join(repo, "skills/tool/scripts"), { recursive: true });
+    writeFileSync(join(repo, "skills/tool/scripts/probe.mts"), "console.log(8);\n");
     mkdirSync(join(repo, "src"));
     writeFileSync(join(repo, "src/lib.ts"), "export function helper(): number {\n  return 1;\n}\n");
-    mkdirSync(join(repo, "tests"));
+    mkdirSync(join(repo, "tests/helpers"), { recursive: true });
+    writeFileSync(
+      join(repo, "tests/helpers/check_failure.ts"),
+      "export function fail(): void {}\n",
+    );
     writeFileSync(
       join(repo, "tests/lib.test.ts"),
-      'import { helper } from "../src/lib.ts";\nhelper();\n',
+      'import { helper } from "../src/lib.ts";\nimport { fail } from "./helpers/check_failure.ts";\nhelper();\nfail();\n',
     );
     return repo;
   }
@@ -143,11 +181,21 @@ describe("actions/knip", () => {
     expect([run.exitCode, run.stdout, run.stderr]).toEqual([0, "", ""]);
   });
 
-  test("end to end, control: without a bun test script the test files, and what only they import, are unused", () => {
-    const run = knip(fleetShapedRepo({ testScript: false }));
+  test("end to end, control: a test file outside every entry glob, and what only it imports, are unused", () => {
+    const repo = fleetShapedRepo();
+    mkdirSync(join(repo, "spec"));
+    writeFileSync(
+      join(repo, "spec/lib.spec.ts"),
+      'import { other } from "../src/other.ts";\nother();\n',
+    );
+    writeFileSync(
+      join(repo, "src/other.ts"),
+      "export function other(): number {\n  return 2;\n}\n",
+    );
+    const run = knip(repo);
     expect([run.exitCode, unusedFiles(run.stdout)]).toEqual([
       1,
-      ["src/lib.ts", "tests/lib.test.ts"],
+      ["spec/lib.spec.ts", "src/other.ts"],
     ]);
   });
 
@@ -161,6 +209,18 @@ describe("actions/knip", () => {
     writeFileSync(join(repo, "actions/tool/tool.ts"), "console.log(4);\n");
     const run = knip(repo);
     expect([run.exitCode, unusedFiles(run.stdout)]).toEqual([1, ["actions/tool/tool.ts"]]);
+  });
+
+  test("end to end, control: a binary the fleet does not install is unlisted", () => {
+    const repo = fleetShapedRepo();
+    const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
+    pkg.scripts.shell = "shellcheck scripts/*.sh";
+    writeFileSync(join(repo, "package.json"), JSON.stringify(pkg));
+    const run = knip(repo);
+    expect([run.exitCode, run.stdout.trim().split("\n")]).toEqual([
+      1,
+      ["Unlisted binaries (1)", "shellcheck  package.json"],
+    ]);
   });
 
   test("end to end, control: a dead file still fails under the fleet default", () => {

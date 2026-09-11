@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": true,
+  // A custom entry list replaces knip's defaults, so the two default patterns lead it; the rest is
+  // the fleet's layout: tests run by name through a launcher, git hooks, and any scripts/ directory.
+  "entry": [
+    "{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+    "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
+    "**/*.test.{ts,mts,js,mjs}",
+    "tests/**/*.{ts,mts,js,mjs}",
+    ".githooks/**/*.{ts,mts,js,mjs}",
+    "**/scripts/**/*.{ts,mts,js,mjs}"
+  ],
+  // Tools the fleet's CI installs itself, never package.json dependencies.
+  "ignoreBinaries": ["uv", "uvx", "actionlint", "gitleaks"]
+}

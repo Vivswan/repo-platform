@@ -14,21 +14,22 @@ runs:
   steps:
     # knip discovers the repository's file itself (any of its config names,
     # or a knip key in package.json); --config only fills the gap when
-    # there is none.
+    # there is none. The fleet default names the whole fleet's layout, so
+    # its patterns a repository has nothing for are not hints worth printing.
     - name: Resolve the configuration
       id: config
       shell: bash
       env:
-        FLEET_CONFIG: ${{ github.action_path }}/knip.json
+        FLEET_CONFIG: ${{ github.action_path }}/knip.jsonc
       run: |
         for own in knip.json knip.jsonc .knip.json .knip.jsonc knip.ts knip.js knip.config.ts knip.config.js; do
           [ -f "$own" ] && { echo "flag=" >>"$GITHUB_OUTPUT"; exit 0; }
         done
-        if [ -f package.json ] && jq -e '.knip' package.json >/dev/null; then echo "flag="; else echo "flag=--config $FLEET_CONFIG"; fi >>"$GITHUB_OUTPUT"
+        if [ -f package.json ] && jq -e '.knip' package.json >/dev/null; then echo "flag="; else echo "flag=--config $FLEET_CONFIG --no-config-hints"; fi >>"$GITHUB_OUTPUT"
 
     - name: Find unused files, exports, and dependencies
       shell: bash
       env:
         CONFIG_FLAG: ${{ steps.config.outputs.flag }}
-      # Unquoted on purpose: the flag is two words or empty.
+      # Unquoted on purpose: the flag is three words or empty.
       run: npx --yes knip@6.35.1 $CONFIG_FLAG
