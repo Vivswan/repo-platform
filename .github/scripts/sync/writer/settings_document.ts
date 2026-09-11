@@ -10,7 +10,8 @@
 // `labels` or `rulesets` section that is not a list of mappings (the merge
 // unions those by name; any other shape would fall into wholesale replace
 // and silently discard the managed roster - the apply then deletes every
-// undeclared label, green either way).
+// undeclared label, green either way), and an alias that names its own
+// ancestor (the merge walks the document and would never end).
 //
 // MergedSettings is OUTPUT: the finished document the apply hands to GitHub.
 // `null` is ABSENT from MergedValue, so a merged document still carrying the
@@ -172,8 +173,37 @@ function parseYamlText(text: string, where: string): unknown {
   }
 }
 
+/** The path of the first value that is one of its own ancestors, or null.
+ *  The yaml parser resolves `&r {self: *r}` into a structure that contains
+ *  itself; a subtree merely shared between two keys leaves the ancestor
+ *  set on the way back up and is legal. */
+function cyclePath(
+  value: unknown,
+  ancestors: Set<object>,
+  path: PropertyKey[],
+): PropertyKey[] | null {
+  if (typeof value !== "object" || value === null) return null;
+  if (ancestors.has(value)) return path;
+  ancestors.add(value);
+  for (const [step, child] of Object.entries(value)) {
+    const found = cyclePath(child, ancestors, [
+      ...path,
+      Array.isArray(value) ? Number(step) : step,
+    ]);
+    if (found !== null) return found;
+  }
+  ancestors.delete(value);
+  return null;
+}
+
 function asSettingsLayer(data: unknown, where: string): SettingsLayer {
   if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
+  const cycle = cyclePath(data, new Set(), []);
+  if (cycle !== null) {
+    throw new Error(
+      `${where}: a cyclic alias at ${issuePath(cycle)} - the document contains itself and cannot be merged`,
+    );
+  }
   const result = settingsLayerSchema.safeParse(data);
   if (result.success) return result.data;
   const issue = result.error.issues[0];

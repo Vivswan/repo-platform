@@ -345,6 +345,14 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
         problems.push(`${where}: displaces applies to managed entries only`);
       }
     }
+    if (entry.render !== undefined) {
+      if (entry.source !== undefined || entry.blocks !== undefined) {
+        problems.push(`${where}: a rendered entry has no source or blocks`);
+      }
+      if (entry.displaces === undefined) {
+        problems.push(`${where}: a rendered entry needs displaces, the overlay it renders from`);
+      }
+    }
     if (entry.class === "link") {
       if (entry.source !== undefined || entry.blocks !== undefined) {
         problems.push(`${where}: a link entry has a target, not a source or blocks`);
@@ -360,22 +368,16 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.target !== undefined) {
       problems.push(`${where}: target applies to link entries only`);
     }
-    const displacing = entry.displaces === undefined ? {} : { displaces: entry.displaces };
-    if (entry.class === "managed" && entry.render !== undefined) {
-      if (entry.source !== undefined || entry.blocks !== undefined) {
-        problems.push(`${where}: a rendered entry has no source or blocks`);
-      }
-      if (entry.displaces === undefined) {
-        problems.push(`${where}: a rendered entry needs displaces, the overlay it renders from`);
-      }
+    if (entry.class === "managed" && entry.render !== undefined && entry.displaces !== undefined) {
       return {
         path: entry.path,
         when,
         class: "managed",
         render: entry.render,
-        displaces: entry.displaces ?? "",
+        displaces: entry.displaces,
       };
     }
+    const displacing = entry.displaces === undefined ? {} : { displaces: entry.displaces };
     const source = entry.source ?? `${SOURCE_PREFIX}${when?.modules?.[0] ?? "base"}/${entry.path}`;
     if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
       problems.push(`${where}: source '${source}' must be a clean path under ${SOURCE_PREFIX}`);
@@ -408,7 +410,6 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.class !== "managed" || entry.displaces === undefined) continue;
     const where = `files: ${entry.path}`;
     const target = entry.displaces;
-    if (target === "") continue;
     const problem = pathProblem(target);
     if (problem !== null) problems.push(`${where}: displaces ${target}, which ${problem}`);
     if (target === entry.path) problems.push(`${where}: displaces its own path`);
@@ -436,7 +437,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       );
     }
   }
-  const rendered = files.some((entry) => entry.class === "managed" && "render" in entry);
+  const rendered = data.files.some((entry) => entry.render !== undefined);
   if (rendered && data.settings === undefined) {
     problems.push(
       "settings: missing - a render: settings entry reads the four fleet layers from it",
