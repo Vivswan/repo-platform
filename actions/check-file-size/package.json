@@ -1,7 +1,13 @@
 {
   "name": "check-file-size",
   "private": true,
-  "description": "Dependency manifest for the check-file-size action (dev-only: the script carries no runtime dependencies).",
+  "description": "Dependency manifest for the check-file-size action: web-tree-sitter parses every judged file with the prebuilt grammars of tree-sitter-wasms (0.25.10 is the newest loader that accepts their build); its bash and yaml builds import libc symbols that loader does not provide, so those two grammars come from their own packages.",
+  "dependencies": {
+    "@tree-sitter-grammars/tree-sitter-yaml": "0.7.1",
+    "tree-sitter-bash": "0.25.1",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.25.10"
+  },
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"

@@ -3,7 +3,8 @@ description: >-
   Caps file length and line width in two tiers (sensible sizes warn, hard
   caps fail) and comment block length in one (warns only; a comment line
   `comment-cap: ignore <reason>` exempts its block); caps and kinds:
-  check-file-size.ts. Findings are written ONCE
+  check-file-size.ts, which reads comments and literals off each file's
+  tree-sitter grammar. Findings are written ONCE
   as one table and reported through two sinks - the step summary and the
   log annotations on every event, plus a sticky PR comment on pull_request
   events (deleted when there is nothing to say); the fleet rule for any
@@ -37,9 +38,18 @@ runs:
       with:
         pin: ${{ github.action_path }}/.bun-version
 
-    # No install step (no runtime dependencies). continue-on-error so the
-    # comment steps run first; the last step re-raises. The script records
-    # report=findings|clean|error itself; dying before that reads as error.
+    # The grammars are runtime dependencies (web-tree-sitter and its wasm
+    # packages), installed frozen so the fleet runs the pinned build.
+    - name: Install the action's dependencies
+      shell: bash
+      env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: '"$ACTION_BUN" install --frozen-lockfile --production --cwd "$ACTION_PATH"'
+
+    # continue-on-error so the comment steps run first; the last step
+    # re-raises. The script records report=findings|clean|error itself;
+    # dying before that reads as error.
     - name: Check file sizes
       id: check
       continue-on-error: true
