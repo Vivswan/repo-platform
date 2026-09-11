@@ -11,6 +11,7 @@ import {
   describe as describeFinding,
   type Finding,
   GRAMMAR_WASMS,
+  type Grammar,
   type Grammars,
   HARD,
   isGenerated,
@@ -245,13 +246,27 @@ describe("judgeFile line counts", () => {
     const path = `file.${kind}`;
     expect(judgeFile(path, kind, `${region}${lines(warn)}`, grammars)).toEqual([]);
     expect(judgeFile(path, kind, `${lines(warn + 1)}${region}`, grammars)).toEqual([
-      { path, kind, tier: "warn", measure: "lines", value: warn + 1, cap: warn },
+      {
+        path,
+        kind,
+        tier: "warn",
+        measure: "lines",
+        value: warn + 1,
+        cap: warn,
+      },
     ]);
     expect(judgeFile(path, kind, `${region}${lines(hard)}`, grammars)).toEqual([
       { path, kind, tier: "warn", measure: "lines", value: hard, cap: warn },
     ]);
     expect(judgeFile(path, kind, `${lines(hard + 1)}${region}`, grammars)).toEqual([
-      { path, kind, tier: "hard", measure: "lines", value: hard + 1, cap: hard },
+      {
+        path,
+        kind,
+        tier: "hard",
+        measure: "lines",
+        value: hard + 1,
+        cap: hard,
+      },
     ]);
   });
 
@@ -925,6 +940,30 @@ describe("judgeFile comment blocks", () => {
       [],
     ],
     [
+      "a // reason may start with */ too: the closer belongs to the /* */ form of the same node type",
+      "f.ts",
+      `x\n// ${COMMENT_MARKER} */ is the upstream glob\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "a /* */ reason may start with -->: html_comment's text is no closer here",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} --> is part of the upstream syntax */\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
+      "a /* */ marker's reason ends at its own */, not a later one on the line",
+      "f.ts",
+      `x\n/* ${COMMENT_MARKER} */ /* upstream text */\n${slashes(BLOCK)}x\n`,
+      [[2], [2, BLOCK + 1, "block"]],
+    ],
+    [
+      "an html_comment runs to the line end: --> inside it is part of the reason",
+      "f.js",
+      `x;\n<!-- ${COMMENT_MARKER} --> is part of the upstream syntax\n${slashes(50)}x\n`,
+      [],
+    ],
+    [
       "a marker inside a generated region is not read",
       "f.ts",
       `x\n// BEGIN GENERATED: x\n// ${COMMENT_MARKER} upstream text\n// END GENERATED: x\n${slashes(BLOCK + 1)}x\n`,
@@ -988,23 +1027,35 @@ describe("grammars", () => {
   // A grammar wasm importing a libc symbol the runtime does not export loads fine.
   // It then crashes the parse on the first input reaching the symbol (tree-sitter-wasms' bash build imports isalpha).
   // The two assertion sinks are reached only by a grammar bug, a crash either way.
-  test("every grammar wasm imports only symbols the runtime provides", async () => {
+  test("every grammar wasm imports only symbols the runtime provides; the tree-sitter-wasms bash build is the control", async () => {
     const runtime = await WebAssembly.compile(
       readFileSync(join(ACTION_DIR, "node_modules", "web-tree-sitter", "tree-sitter.wasm")),
     );
     const provided = new Set(WebAssembly.Module.exports(runtime).map((entry) => entry.name));
     const glue = new Set(["abort", "__assert_fail"]);
-    const missing: string[] = [];
-    for (const wasm of GRAMMAR_WASMS) {
-      const grammar = await WebAssembly.compile(readFileSync(wasm));
-      for (const entry of WebAssembly.Module.imports(grammar)) {
-        if (entry.kind === "function" && !provided.has(entry.name) && !glue.has(entry.name)) {
-          missing.push(`${wasm.slice(wasm.lastIndexOf("/") + 1)}: ${entry.name}`);
+    const missingImports = async (wasms: readonly string[]): Promise<string[]> => {
+      const missing: string[] = [];
+      for (const wasm of wasms) {
+        const grammar = await WebAssembly.compile(readFileSync(wasm));
+        for (const entry of WebAssembly.Module.imports(grammar)) {
+          if (entry.kind === "function" && !provided.has(entry.name) && !glue.has(entry.name)) {
+            missing.push(`${wasm.slice(wasm.lastIndexOf("/") + 1)}: ${entry.name}`);
+          }
         }
       }
-    }
+      return missing;
+    };
     expect(GRAMMAR_WASMS.length).toBe(12);
-    expect(missing).toEqual([]);
+    expect(await missingImports(GRAMMAR_WASMS)).toEqual([]);
+    const crashing = join(
+      ACTION_DIR,
+      "node_modules",
+      "tree-sitter-wasms",
+      "out",
+      "tree-sitter-bash.wasm",
+    );
+    expect(GRAMMAR_WASMS).not.toContain(crashing);
+    expect(await missingImports([crashing])).toContain("tree-sitter-bash.wasm: isalpha");
   });
 
   test.each(SAMPLES)(
@@ -1029,6 +1080,123 @@ describe("grammars", () => {
     },
   );
 
+  /** Every comment form of every grammar: how it opens, and how it closes when the reason does not run to the line end. */
+  const STYLES: [path: string, open: string, close: string][] = [
+    ["f.ts", "//", ""],
+    ["f.ts", "/*", "*/"],
+    ["f.ts", "<!--", ""],
+    ["f.tsx", "//", ""],
+    ["f.tsx", "/*", "*/"],
+    ["f.tsx", "<!--", ""],
+    ["f.js", "//", ""],
+    ["f.js", "/*", "*/"],
+    ["f.js", "<!--", ""],
+    ["f.js", "-->", ""],
+    ["f.py", "#", ""],
+    ["f.rs", "//", ""],
+    ["f.rs", "/*", "*/"],
+    ["f.go", "//", ""],
+    ["f.go", "/*", "*/"],
+    ["f.c", "//", ""],
+    ["f.c", "/*", "*/"],
+    ["f.cpp", "//", ""],
+    ["f.cpp", "/*", "*/"],
+    ["f.java", "//", ""],
+    ["f.java", "/*", "*/"],
+    ["f.kt", "//", ""],
+    ["f.kt", "/*", "*/"],
+    ["f.sh", "#", ""],
+    [".github/workflows/f.yml", "#", ""],
+  ];
+  const extension = (path: string): string => path.slice(path.lastIndexOf(".") + 1);
+  const loaded = (path: string): Grammar => {
+    const grammar = grammars.get(extension(path));
+    if (grammar === undefined || "reason" in grammar) throw new Error(`${path} has no grammar`);
+    return grammar;
+  };
+  /** The node type the grammar gives a comment written in this style. */
+  const commentType = (grammar: Grammar, text: string): string => {
+    const tree = grammar.parser.parse(text);
+    if (tree === null) throw new Error("tree-sitter returned no tree");
+    const pending = [tree.rootNode];
+    for (let node = pending.shift(); node !== undefined; node = pending.shift()) {
+      if (grammar.comments.has(node.type)) return node.type;
+      pending.push(...node.children.filter((child) => child !== null));
+    }
+    throw new Error(`no comment in ${JSON.stringify(text)}`);
+  };
+
+  test.each(STYLES)(
+    "%s %s: a reason holding the other forms' closers survives to its own closer",
+    (path, open, close) => {
+      const kind = classify(path);
+      if (kind === null) throw new Error(`${path} has no kind`);
+      const foreign = ["*/", "-->"].filter((closer) => closer !== close).join(" ");
+      const marker = `${open} ${COMMENT_MARKER} ${foreign} is upstream syntax ${close}`.trimEnd();
+      const run = `${open} c ${close}`.trimEnd();
+      const header = `${marker}\n${`${run}\n`.repeat(COMMENT_CAPS.header)}`;
+      expect(judgeFile(path, kind, header, grammars)).toEqual([]);
+      // The control: the same block with a bare marker warns twice.
+      expect(
+        judgeFile(
+          path,
+          kind,
+          header.replace(marker, `${open} ${COMMENT_MARKER} ${close}`.trimEnd()),
+          grammars,
+        ),
+      ).toEqual([
+        { path, kind, tier: "warn", measure: "marker", line: 1 },
+        {
+          path,
+          kind,
+          tier: "warn",
+          measure: "comment",
+          line: 1,
+          value: COMMENT_CAPS.header + 1,
+          cap: COMMENT_CAPS.header,
+          scope: "header",
+        },
+      ]);
+    },
+  );
+
+  test("every comment node type of every grammar has a style above, so its delimiters are proven", () => {
+    // A grammar is named by the first extension reaching it: a style's, else its own.
+    const byGrammar = new Map<Grammar, { name: string; types: Set<string> }>();
+    for (const [path, open, close] of STYLES) {
+      const grammar = loaded(path);
+      const entry = byGrammar.get(grammar) ?? { name: extension(path), types: new Set<string>() };
+      byGrammar.set(grammar, entry);
+      entry.types.add(commentType(grammar, `${open} c ${close}\n`));
+    }
+    for (const [ext, grammar] of grammars) {
+      if (!("reason" in grammar) && !byGrammar.has(grammar)) {
+        byGrammar.set(grammar, { name: ext, types: new Set() });
+      }
+    }
+    const styled = Object.fromEntries(
+      [...byGrammar.values()].map(({ name, types }) => [name, [...types].sort()]),
+    );
+    const declared = Object.fromEntries(
+      [...byGrammar].map(([grammar, { name }]) => [name, [...grammar.comments.keys()].sort()]),
+    );
+    expect(styled).toEqual(declared);
+    expect(Object.keys(styled)).toEqual([
+      "ts",
+      "tsx",
+      "js",
+      "py",
+      "rs",
+      "go",
+      "c",
+      "cpp",
+      "java",
+      "kt",
+      "sh",
+      "yml",
+    ]);
+  });
+
   test("an extension without a grammar gets no comment judgement and no literal exemption, and is reported once", () => {
     const none: Grammars = new Map([["ts", { reason: "no grammar maps this extension" }]]);
     const wide = `const x = "${"a ".repeat(115)}";\n`;
@@ -1040,7 +1208,11 @@ describe("grammars", () => {
     expect(judgeFile("f.ts", "source", chatty, none).map(describeFinding)).toEqual([
       `f.ts:${2 * BLOCK + 5}: 243 chars (cap ${WARN.width})`,
     ]);
-    const root = checkout({ "a.ts": chatty, "b.ts": lines(3), "c.sh": "echo x\n" });
+    const root = checkout({
+      "a.ts": chatty,
+      "b.ts": lines(3),
+      "c.sh": "echo x\n",
+    });
     const verdict = check(root, none);
     expect(verdict.unjudged).toEqual([
       { extension: "ts", files: 2, reason: "no grammar maps this extension" },
@@ -1192,7 +1364,10 @@ describe("check", () => {
   });
 
   test("an allowlisted warn-tier file is silenced too, and is not stale", () => {
-    const root = checkout({ "src/warm.ts": WARM, [ALLOWLIST_FILE]: "src/warm.ts # known\n" });
+    const root = checkout({
+      "src/warm.ts": WARM,
+      [ALLOWLIST_FILE]: "src/warm.ts # known\n",
+    });
     expect(summary(root)).toEqual({
       failures: [],
       warnings: [],
@@ -1202,7 +1377,10 @@ describe("check", () => {
   });
 
   test("an entry without a reason fails and exempts nothing", () => {
-    const root = checkout({ "src/big.ts": BIG, [ALLOWLIST_FILE]: "src/big.ts\n" });
+    const root = checkout({
+      "src/big.ts": BIG,
+      [ALLOWLIST_FILE]: "src/big.ts\n",
+    });
     expect(summary(root)).toEqual({
       failures: [bigLine],
       warnings: [],
@@ -1228,7 +1406,9 @@ describe("check", () => {
   });
 
   test("this repository passes with its allowlist, rendered goldens included", () => {
-    const verdict = check(REPO_ROOT, grammars, { rendered: ["tests/golden-renders/all-modules"] });
+    const verdict = check(REPO_ROOT, grammars, {
+      rendered: ["tests/golden-renders/all-modules"],
+    });
     expect([...verdict.failures.map(describeFinding), ...verdict.allowlistErrors]).toEqual([]);
   });
 });
@@ -1301,7 +1481,10 @@ describe("the CLI", () => {
   test("findings: exit 1, ::error:: lines, the table as comment body, summary, and report=findings", () => {
     const hardLines = HARD.lines.source + 1;
     const wide = `${"a ".repeat(120).trim()}\n`;
-    const root = checkout({ "src/big.ts": lines(hardLines), "src/warm.sh": wide });
+    const root = checkout({
+      "src/big.ts": lines(hardLines),
+      "src/warm.sh": wide,
+    });
     expect(run(root)).toEqual({
       exitCode: 1,
       stdout: [`::warning::src/warm.sh:1: 239 chars (cap ${WARN.width})`],
@@ -1335,7 +1518,10 @@ describe("the CLI", () => {
   });
 
   test("clean: exit 0, a summary, no comment body (the action deletes the comment), report=clean", () => {
-    const root = checkout({ "src/fine.ts": lines(3), "src/managed.ts": `${MANAGED}${lines(3)}` });
+    const root = checkout({
+      "src/fine.ts": lines(3),
+      "src/managed.ts": `${MANAGED}${lines(3)}`,
+    });
     expect(run(root)).toEqual({
       exitCode: 0,
       stdout: ["File size check passed (0 warning(s), 1 managed file(s) skipped)."],
@@ -1372,7 +1558,14 @@ describe("the CLI", () => {
 describe("report", () => {
   const verdict: Verdict = {
     failures: [
-      { path: "a.ts", kind: "source", tier: "hard", measure: "lines", value: 2100, cap: 2000 },
+      {
+        path: "a.ts",
+        kind: "source",
+        tier: "hard",
+        measure: "lines",
+        value: 2100,
+        cap: 2000,
+      },
     ],
     warnings: [
       {
@@ -1444,7 +1637,13 @@ describe("report", () => {
       "clean says so and keeps the managed count",
       {
         state: "clean",
-        verdict: { ...verdict, failures: [], warnings: [], allowlistErrors: [], unjudged: [] },
+        verdict: {
+          ...verdict,
+          failures: [],
+          warnings: [],
+          allowlistErrors: [],
+          unjudged: [],
+        },
       },
       [
         "## File size check",

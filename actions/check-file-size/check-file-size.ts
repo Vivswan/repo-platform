@@ -204,72 +204,69 @@ function generatedRegionMask(lines: string[]): boolean[] {
 
 // The per-language surface is this table and nothing else.
 // A literal is a token the warn width tier leaves alone.
-// A closer ends an exemption marker's reason inside a comment.
+// A comment type maps to the delimiters that end an exemption marker's reason, or null when it runs to the line end.
+// JS's html_comment is null: `<!-- a -->` and a line-start `-->` both run to the line end, so `-->` is text.
+interface Delimiters {
+  open: string;
+  close: string;
+}
 interface GrammarSpec {
   wasm: string;
-  comments: readonly string[];
+  comments: Readonly<Record<string, Delimiters | null>>;
   literals: readonly string[];
-  closers: readonly string[];
 }
 
 const PACKAGES = join(import.meta.dir, "node_modules");
 // tree-sitter-wasms 0.1.13 loads only under web-tree-sitter 0.25.x: 0.26 rejects its dylink format.
 const prebuilt = (name: string): string =>
   join(PACKAGES, "tree-sitter-wasms", "out", `tree-sitter-${name}.wasm`);
+const STARRED: Delimiters = { open: "/*", close: "*/" };
 const JS: Omit<GrammarSpec, "wasm"> = {
-  comments: ["comment", "html_comment"],
+  comments: { comment: STARRED, html_comment: null },
   literals: ["string", "template_string", "template_literal_type", "regex"],
-  closers: ["*/", "-->"],
 };
 const C_LIKE: Omit<GrammarSpec, "wasm"> = {
-  comments: ["comment"],
+  comments: { comment: STARRED },
   literals: ["string_literal", "raw_string_literal", "char_literal"],
-  closers: ["*/"],
 };
 const GRAMMARS = {
   typescript: { wasm: prebuilt("typescript"), ...JS },
   tsx: { wasm: prebuilt("tsx"), ...JS },
   javascript: { wasm: prebuilt("javascript"), ...JS },
-  python: { wasm: prebuilt("python"), comments: ["comment"], literals: ["string"], closers: [] },
+  python: { wasm: prebuilt("python"), comments: { comment: null }, literals: ["string"] },
   rust: {
     wasm: prebuilt("rust"),
-    comments: ["line_comment", "block_comment"],
+    comments: { line_comment: null, block_comment: STARRED },
     literals: C_LIKE.literals,
-    closers: ["*/"],
   },
   go: {
     wasm: prebuilt("go"),
-    comments: ["comment"],
+    comments: C_LIKE.comments,
     literals: ["interpreted_string_literal", "raw_string_literal", "rune_literal"],
-    closers: ["*/"],
   },
   c: { wasm: prebuilt("c"), ...C_LIKE },
   cpp: { wasm: prebuilt("cpp"), ...C_LIKE },
   java: {
     wasm: prebuilt("java"),
-    comments: ["line_comment", "block_comment"],
+    comments: { line_comment: null, block_comment: STARRED },
     literals: ["string_literal", "character_literal"],
-    closers: ["*/"],
   },
   kotlin: {
     wasm: prebuilt("kotlin"),
-    comments: ["line_comment", "multiline_comment"],
+    comments: { line_comment: null, multiline_comment: STARRED },
     literals: ["string_literal", "character_literal"],
-    closers: ["*/"],
   },
   // The tree-sitter-wasms bash build imports libc isalpha, which the loader lacks: `case` and `[[` crash the parse.
   bash: {
     wasm: join(PACKAGES, "tree-sitter-bash", "tree-sitter-bash.wasm"),
-    comments: ["comment"],
+    comments: { comment: null },
     literals: ["string", "raw_string", "ansi_c_string", "regex"],
-    closers: [],
   },
   // The tree-sitter-wasms yaml build crashes at parse time under every loader that accepts the others.
   yaml: {
     wasm: join(PACKAGES, "@tree-sitter-grammars", "tree-sitter-yaml", "tree-sitter-yaml.wasm"),
-    comments: ["comment"],
+    comments: { comment: null },
     literals: ["double_quote_scalar", "single_quote_scalar"],
-    closers: [],
   },
 } satisfies Record<string, GrammarSpec>;
 type GrammarName = keyof typeof GRAMMARS;
@@ -317,9 +314,9 @@ const EXTENSION_GRAMMAR: Readonly<Record<string, GrammarName | Unjudged>> = {
 export interface Grammar {
   /** One parser per grammar per run. */
   parser: Parser;
-  comments: ReadonlySet<string>;
+  /** Comment node type to the delimiters that end a marker's reason, or null. */
+  comments: ReadonlyMap<string, Delimiters | null>;
   literals: ReadonlySet<string>;
-  closers: readonly string[];
 }
 
 /** By judged extension: its grammar, or why it has none. */
@@ -334,9 +331,8 @@ async function loadGrammar(spec: GrammarSpec): Promise<Grammar | Unjudged> {
     parser.setLanguage(await Language.load(spec.wasm));
     return {
       parser,
-      comments: new Set(spec.comments),
+      comments: new Map(Object.entries(spec.comments)),
       literals: new Set(spec.literals),
-      closers: spec.closers,
     };
   } catch (error) {
     return { reason: `${spec.wasm}: ${error instanceof Error ? error.message : String(error)}` };
@@ -370,6 +366,8 @@ interface Token {
   // A literal in a grammar `key` field is a key.
   // Every other leaf is code: named (an identifier) or anonymous (punctuation, a keyword).
   kind: "comment" | "literal" | "key" | "named" | "anonymous" | "shebang";
+  /** The grammar's node type. */
+  type: string;
   startRow: number;
   /** The last row it puts a character on. */
   endRow: number;
@@ -416,7 +414,7 @@ function tokenize(tree: Tree, grammar: Grammar): Token[] {
               : "named";
         if (kind === "literal" && isKey(field, ancestors, startIndex, endIndex)) kind = "key";
         const endRow = end.column === 0 && end.row > start.row ? end.row - 1 : end.row;
-        const token: Token = { kind, startRow: start.row, endRow };
+        const token: Token = { kind, type, startRow: start.row, endRow };
         if (kind === "comment" || start.row === 0) token.text = cursor.nodeText;
         if (start.row === 0 && kind !== "literal" && SHEBANG.test(token.text ?? "")) {
           token.kind = "shebang";
@@ -518,7 +516,8 @@ const MARKER = new RegExp(`\\b${COMMENT_MARKER}\\b`, "g");
 // A blank row, a code row, or a `skip`ped row ends a run; only code demotes the header.
 // The shebang is neither.
 // A marker belongs to the block holding its row, so one on a code or skipped row is not read.
-// A reason ends at the marker's line end, the next marker, or a closer from the grammar table.
+// A reason ends at the marker's line end, the next marker, or the closer of the comment holding it.
+// The closer applies only when the token opens with its pair: JS's `comment` type covers `//` and `/* */` alike.
 function commentBlocks(analysis: Analysis, grammar: Grammar, skip: boolean[]): CommentBlock[] {
   const { rows, comments } = analysis;
   const blocks: CommentBlock[] = [];
@@ -549,14 +548,17 @@ function commentBlocks(analysis: Analysis, grammar: Grammar, skip: boolean[]): C
     }
   });
   end(rows.length);
-  for (const { startRow, text = "" } of comments) {
+  for (const { type, startRow, text = "" } of comments) {
+    const delimiters = grammar.comments.get(type) ?? null;
+    const closers =
+      delimiters !== null && text.startsWith(delimiters.open) ? [delimiters.close] : [];
     const matches = [...text.matchAll(MARKER)];
     matches.forEach((match, i) => {
       const row = startRow + (text.slice(0, match.index).match(/\n/g)?.length ?? 0);
       const block = blockAt[row];
       if (block === undefined) return;
       const from = match.index + match[0].length;
-      const stops = ["\n", ...grammar.closers].map((stop) => text.indexOf(stop, from));
+      const stops = ["\n", ...closers].map((stop) => text.indexOf(stop, from));
       stops.push(matches[i + 1]?.index ?? -1);
       const until = Math.min(...stops.filter((stop) => stop !== -1), text.length);
       block.markers.push({ line: row + 1, reason: text.slice(from, until).trim() });
