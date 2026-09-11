@@ -226,8 +226,8 @@ const KNOWN: Record<string, Known> = {
   "AGENTS.md": {
     selections: SELECTIONS,
     reason:
-      "the module-conditional phrases are worded as 'with the <module> module' or unconditionally; the Toolchain section moves to the end of the region (blocks append);" +
-      " the Repository-specific guidance heading and its comment go (the opening paragraph already says where guidance goes)",
+      "the module-conditional phrases are worded as 'with the <module> module' or unconditionally; the Toolchain section moves to the end of the region," +
+      " right before the Repository-specific guidance heading (the blocks splice in there)",
     expected: (golden) => {
       const toolchain = /\n## Toolchain\n\n(?:- .*\n)+/.exec(golden);
       let out = toolchain === null ? golden : golden.replace(toolchain[0], "");
@@ -245,10 +245,12 @@ const KNOWN: Record<string, Known> = {
         "- Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region," +
           " `.typography-allow.local`, the release hooks, and the module starters (the release-please JSON files, the `.claude-plugin/` manifests, the nightly workflows).",
       );
-      out = out.replace(
-        "\n## Repository-specific guidance\n\n<!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->\n",
-        toolchain === null ? "" : toolchain[0],
-      );
+      if (toolchain !== null) {
+        out = out.replace(
+          "\n## Repository-specific guidance\n",
+          `${toolchain[0]}\n## Repository-specific guidance\n`,
+        );
+      }
       return out;
     },
   },
@@ -486,6 +488,37 @@ describe("blocks land once per distinct content, in module order", () => {
       expect({ path, found: at.every((index) => index > 0) }).toEqual({ path, found: true });
     }
   });
+
+  // The owned tail below END nests under the last heading of the region, so
+  // that heading is the repository-specific one whether or not blocks land.
+  test.each([
+    [
+      "minimal",
+      answersOf("minimal"),
+      ["- Fleet-wide conventions: repo-platform's docs/fleet-guidelines.md."],
+    ],
+    [
+      "bun",
+      { ...answersOf("minimal"), modules: ["bun"] },
+      ["## Toolchain", "", ...block("bun", "AGENTS.md", "toolchain").trimEnd().split("\n")],
+    ],
+  ])(
+    "the AGENTS.md region ends with the repository-specific heading (%s)",
+    (label, answers, above) => {
+      const run = runWriter(`agents-tail-${label}`, answers);
+      const lines = readFileSync(join(run.target, "AGENTS.md"), "utf-8").split("\n");
+      const end = lines.indexOf("<!-- END REPO-PLATFORM MANAGED -->");
+      expect(lines.slice(end - above.length - 4, end + 2)).toEqual([
+        ...above,
+        "",
+        "## Repository-specific guidance",
+        "",
+        "<!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->",
+        "<!-- END REPO-PLATFORM MANAGED -->",
+        "",
+      ]);
+    },
+  );
 
   test("bun alone: its two gitignore sources, its ecosystem, and its steps, nothing of the others", () => {
     const run = runWriter("bun-only", { ...answersOf("minimal"), modules: ["bun"] });

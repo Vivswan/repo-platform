@@ -22,3 +22,7 @@ Everything between the BEGIN and END markers is managed by {{github_username}}/r
 - Repo-owned, never overwritten by sync: `checks.yml`, `post-green.yml`, `.gitleaks.toml`, `.gitignore` outside its managed region, `.typography-allow.local`, the release hooks, and the module starters (the release-please JSON files, the `.claude-plugin/` manifests, the nightly workflows).
 - Module selection is the `modules` list in `.repo-platform.yml`; the next sync PR applies a change. The per-module contracts are in repo-platform's docs/new-repo.md.
 - Fleet-wide conventions: repo-platform's docs/fleet-guidelines.md.
+
+## Repository-specific guidance
+
+<!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->

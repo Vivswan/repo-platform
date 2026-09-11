@@ -25,3 +25,8 @@ Everything between the BEGIN and END markers is managed by {{github_username}}/r
 
 ## Toolchain
 
+{{blocks}}
+
+## Repository-specific guidance
+
+<!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
