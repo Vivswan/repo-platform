@@ -320,13 +320,17 @@ describe("post-green publish wiring", () => {
       },
     });
     // A called job cannot exceed its caller's grant, so ci.yml's post-green
-    // job carries the write ceiling the tag push needs.
+    // job carries the ceiling of every post-green.yml job.
+    // contents write: move-stable's tag push with the run token (the build publish pushes with its own PAT and reads only).
+    // checks read: the green gate's check-run lookup.
+    // pull-requests read: read-directives' merged pull request lookup.
     const ci = parseYaml(ciYml) as {
       jobs: Record<string, { permissions?: unknown }>;
     };
     expect(ci.jobs["post-green"].permissions).toEqual({
       contents: "write",
       checks: "read",
+      "pull-requests": "read",
     });
     // read-directives mutates nothing; it reads every commit since the last
     // published build (never a re-derived ref) into the two outputs
