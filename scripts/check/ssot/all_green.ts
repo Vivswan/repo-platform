@@ -5,6 +5,7 @@
 import { parse as parseYaml } from "yaml";
 import { loadOverrideLayer } from "../../../.github/scripts/fleet/merge_settings_layers.ts";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
+import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, packageScripts, read, repoCi } from "./inputs.ts";
@@ -410,10 +411,16 @@ export const FLEET_CI_ROSTER = [
  *  scan with no per-repo diff. */
 export const FLEET_NIGHTLY_ROSTER = ["plan", "trivy-nightly"];
 
-/** The rendered skeleton every fleet repository runs, byte-identical across
- *  selections (the smoke matrix proves it against this golden), so its
- *  caller jobs' grants are the ceilings the called workflows live under. */
-export const SKELETON_RENDER = "tests/golden-renders/minimal/.github/workflows/ci.yml";
+/** The skeleton ci.yml the writer ships to every fleet repository, one
+ *  file whatever the selection, so its caller jobs' grants are the
+ *  ceilings the called workflows live under. */
+export const SKELETON_SOURCE = "files/base/.github/workflows/ci.yml";
+
+/** The skeleton parsed; its only placeholder is the owner, which no grant depends on. */
+export function skeletonCi(): Record<string, unknown> {
+  const text = substitute(read(SKELETON_SOURCE), { github_username: "owner" });
+  return asRecord(parseYaml(text), SKELETON_SOURCE);
+}
 
 /** Each fleet-facing called workflow and the skeleton job that calls it:
  *  the caller job's permissions are the ceiling every job of the called
@@ -688,15 +695,14 @@ export const allGreenRules: Rule[] = [
     // own chain) at expansion, so the check runs here, before the edit ships.
     name: "fleet-caller-ceilings",
     run: () => {
-      const skeleton = asRecord(parseYaml(read(SKELETON_RENDER)), SKELETON_RENDER);
-      const callers = ciJobs(skeleton, SKELETON_RENDER);
+      const callers = ciJobs(skeletonCi(), SKELETON_SOURCE);
       const fleet = Object.entries(FLEET_CALLERS).flatMap(([rel, job]) =>
         callerCeilingMismatches(
           { rel, text: read(rel) },
           {
-            rel: SKELETON_RENDER,
+            rel: SKELETON_SOURCE,
             job,
-            permissions: asRecord(callers[job], `${SKELETON_RENDER} job '${job}'`).permissions,
+            permissions: asRecord(callers[job], `${SKELETON_SOURCE} job '${job}'`).permissions,
           },
         ),
       );
@@ -750,15 +756,20 @@ export const allGreenRules: Rule[] = [
         );
       }
 
-      // The job whose check run carries the name, at both sources. The
-      // repo side is structural (the parsed doc); the template side is a
-      // line anchor (the file is jinja).
-      if (!(gateName in ciJobs(repoCi(), "ci.yml"))) {
-        mismatches.push({
-          file: ".github/workflows/ci.yml",
-          expected: `a job id '${gateName}' (the job's own check run is the required context)`,
-          got: "no such job",
-        });
+      // The job whose check run carries the name, at every source. The
+      // repo side and the writer's skeleton are structural (parsed docs);
+      // the template side is a line anchor (the file is jinja).
+      for (const [ci, where] of [
+        [repoCi(), ".github/workflows/ci.yml"],
+        [skeletonCi(), SKELETON_SOURCE],
+      ] as const) {
+        if (!(gateName in ciJobs(ci, where))) {
+          mismatches.push({
+            file: where,
+            expected: `a job id '${gateName}' (the job's own check run is the required context)`,
+            got: "no such job",
+          });
+        }
       }
       mustMatch(
         read("templates/base/.github/workflows/ci.yml.jinja"),

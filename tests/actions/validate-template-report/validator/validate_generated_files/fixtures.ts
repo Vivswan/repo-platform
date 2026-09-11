@@ -76,7 +76,7 @@ export const MANIFEST = ".github/repo-platform-manifest.json";
 // beside the module list. A key outside the template's `modules`/`mirrors`
 // pair is what tells the validator the answers file has been retired.
 export const V2_REGISTRATION =
-  "# Generated once by repo-platform and repo-owned from then on.\nmodules: [uv]\nproject:\n  name: Demo\n  slug: demo\n  description: A demo\n";
+  "# Written once by repo-platform and repo-owned from then on.\nmodules: [uv]\nproject:\n  name: Demo\n  slug: demo\n  description: A demo\n";
 // What the cutover takes out of BASELINE: the answers file itself. The
 // template renders no public-only file, so nothing else stands down once no
 // answers record the visibility (registration_and_gate.test.ts pins that).

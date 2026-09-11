@@ -17,7 +17,8 @@ import {
   judgeSubstitutionMismatches,
   OPERATOR_CALLERS,
   rosterMismatches,
-  SKELETON_RENDER,
+  SKELETON_SOURCE,
+  skeletonCi,
 } from "../../../scripts/check/ssot/all_green.ts";
 import { templateCarries } from "../../../scripts/lib/ts_extract.ts";
 
@@ -454,19 +455,23 @@ describe("callerCeilingMismatches", () => {
   // Both rosters, the fleet's skeleton callers and the operator's own chain (ci.yml's
   // post-green job calling post-green.yml, whose legs call the writers), as one site list.
   const liveSites = [
-    ...Object.entries(FLEET_CALLERS).map(([rel, job]) => ({ rel, caller: SKELETON_RENDER, job })),
+    ...Object.entries(FLEET_CALLERS).map(([rel, job]) => ({
+      rel,
+      caller: SKELETON_SOURCE,
+      job,
+      doc: skeletonCi,
+    })),
     ...Object.entries(OPERATOR_CALLERS).map(([rel, caller]) => ({
       rel,
       caller: caller.rel,
       job: caller.job,
+      doc: () => parseYaml(readFileSync(caller.rel, "utf-8")) as Record<string, unknown>,
     })),
   ];
   test.each(liveSites)(
     "$rel fits its caller $caller job $job; raising one scope goes red",
-    ({ rel, caller, job }) => {
-      const callerDoc = parseYaml(readFileSync(caller, "utf-8")) as {
-        jobs: Record<string, { permissions?: unknown }>;
-      };
+    ({ rel, caller, job, doc }) => {
+      const callerDoc = doc() as { jobs: Record<string, { permissions?: unknown }> };
       const text = readFileSync(rel, "utf-8");
       const site = { rel: caller, job, permissions: callerDoc.jobs[job].permissions };
       expect(callerCeilingMismatches({ rel, text }, site)).toEqual([]);
