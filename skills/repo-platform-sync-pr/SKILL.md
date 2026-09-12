@@ -1,6 +1,6 @@
 ---
 name: repo-platform-sync-pr
-description: 'Handle an automated sync PR from Vivswan/repo-platform - read its report, clear every row, keep local content in its owned place, and follow the failure path. Use when a PR from repo-platform arrives on branch automation/repo-platform, for "the repo-platform bot PR", "the sync PR", "the automation branch PR", when a sync PR says "Hold for review: yes", reports "replaced local edits", a held retirement, or a replaced mirror, when "the sync PR deleted my local section", or when a "[repo-platform] sync failed" issue appears in the repository.'
+description: 'Handle an automated sync PR from Vivswan/repo-platform - read its report, clear every row, keep local content in its owned place, and follow the failure path. Use when a PR arrives on branch automation/repo-platform, for "the repo-platform bot PR", "the sync PR", "the automation branch PR", when a sync PR says "Hold for review: yes", reports "replaced local edits", a held retirement, or a replaced mirror, when "the sync PR deleted my local section", or when a "[repo-platform] sync failed" issue appears in the repository.'
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -8,7 +8,7 @@ metadata:
 
 # repo-platform: Handling a Sync PR
 
-repo-platform writes its files into managed repos from the outside: a sync run opens (or refreshes) one PR per repo on the `automation/repo-platform` branch, and the PR body is the writer's report. This skill is how to read that report, decide every row, and escalate when the sync itself failed.
+The platform writes its files into managed repos from the outside: a sync run opens (or refreshes) one PR on the `automation/repo-platform` branch for each repo whose tree differs from the build (a repo already matching gets none, and its stale sync PR is closed), and the PR body is the writer's report. This skill is how to read that report, decide every row, and escalate when the sync itself failed.
 
 Work in this order, always:
 
@@ -20,13 +20,13 @@ Work in this order, always:
 
 ## When to Apply
 
-- A PR from repo-platform appeared, head branch `automation/repo-platform`
+- A sync PR appeared, head branch `automation/repo-platform`
 - Its Review section says `Hold for review: yes`
 - A `[repo-platform] sync failed` issue appeared in the repository
 
 ## What the PR is
 
-- A copy, not a merge. The writer copies each selected file from repo-platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. The one rendered file is `.github/settings.yml`, folded from the fleet settings layers and the repo's own `.github/settings.local.yml`. Nothing is three-way merged and no conflict marker ever lands in the branch.
+- A copy, not a merge. The writer copies each selected file from the platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. The one rendered file is `.github/settings.yml`, folded from the fleet settings layers and the repo's own `.github/settings.local.yml`. Nothing is three-way merged and no conflict marker ever lands in the branch.
 - The writer tells its own previous write from a local edit through `.github/repo-platform-manifest.json`, which records a hash per managed file and per split region. A managed file, or a split region, whose content is neither the recorded hash nor the new content is replaced and reported with a diff.
 - The head branch is rewritten on every sync run (a dispatch, a merge directive, or the weekly cron). Commits parked on it between runs are replaced; fix-then-merge promptly.
 - A PR whose report holds nothing arms auto-merge and lands once the required check passes (`all-green`, plus `pr-title` where selected). A run dispatched with `manual=true`, or any hold reason, waits for a human.
@@ -142,7 +142,7 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 |---|---|
 | `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
 | the managed region of a split file | above BEGIN or below END of the same file |
-| a module workflow or a pin dotfile | repo-platform's `files/` (a PR there reaches the whole fleet), or a repo-owned workflow beside it |
+| a module workflow or a pin dotfile | the platform's `files/` (a PR there reaches the whole fleet), or a repo-owned workflow beside it |
 | a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `site.*`, `skills.dir`) |
 | the rendered `.github/settings.yml` (a label, a ruleset, an identity key) | `.github/settings.local.yml`, the overlay the render reads; the next sync re-renders the managed file from it |
 | a site build command | the repo-owned `.github/actions/site-build/action.yml` hook (its `dist` output names the built directory) |
@@ -187,6 +187,6 @@ A row reading `failed before the target was resolved; re-run the workflow` means
 
 ## Closing instead of fixing
 
-Closing the PR is not an opt-out: the next run rewrites the branch and opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see repo-platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
+Closing the PR is not an opt-out: the next run rewrites the branch and opens a fresh PR with the same report. To pause syncs, revoke the fleet token's access to the repo or delete `.repo-platform.yml`. To detach permanently, see the platform's [docs/eject.md](https://github.com/Vivswan/repo-platform/blob/main/docs/eject.md).
 
 Worked examples of report rows and their resolutions are in [references/worked-examples.md](references/worked-examples.md); the class of every path is in [references/file-ownership.md](references/file-ownership.md).

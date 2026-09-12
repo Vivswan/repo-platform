@@ -1,13 +1,13 @@
 # Per-module reference: files, keys, companion steps, removal
 
-The roster and every file are in repo-platform's `files.yml`; the module docs (`docs/<module>.md` where one exists) are the depth. Managed files are rewritten on every sync, starters are written once and then repo-owned, split files carry the module's block inside their managed region.
+The roster and every file are in the platform's `files.yml`; the module docs (`docs/<module>.md` where one exists) are the depth. Managed files are rewritten on every sync, starters are written once and then repo-owned, split files carry the module's block inside their managed region.
 
 ## Base (every managed repo, no module needed)
 
 - Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.github/instructions/review.instructions.md`, `.yamllint`, `.typography-allow`, `.github/settings.yml` (rendered from the fleet settings layers, the selected modules' layers, and the repo's overlay), `.github/repo-platform-manifest.json` (the record of what the platform wrote).
 - Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, `LICENSE.md`. Managed with per-module blocks: `.github/dependabot.yml` (the github-actions ecosystem always).
 - Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`), `.github/actions/site-build/action.yml` (the site-build hook the `site` leg runs; a no-op until filled in).
-- Settings are rendered into `.github/settings.yml` by the sync and applied from repo-platform for every registered repo; the labels a module needs land in the render with its selection.
+- Settings are rendered into `.github/settings.yml` by the sync and applied by the platform for every registered repo; the labels a module needs land in the render with its selection.
 
 ## Toolchains: bun / node / deno / uv / rust
 
@@ -20,7 +20,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 ## site
 
 - No file of its own. The deploy is the `site` leg of `ci.yml`: every main run whose gate passed (a push, the nightly schedule, a dispatch) builds ONE Pages site from the repo-owned `.github/actions/site-build/action.yml` hook's output (the repository's website, at the root) and `docs/` (rendered under the fleet theme, at `/<site.path>/` beside a website, else at the root). Fleet CI's `docs-check` job builds `docs/` strictly on every PR of a repo that has one.
-- The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. repo-platform's `docs/site.md` has the contract and examples.
+- The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. The platform's `docs/site.md` has the contract and examples.
 - Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
 - Companion: Pages is enabled by the module's settings layer on the next settings apply; before it, enable Pages with Source: GitHub Actions by hand.
@@ -30,7 +30,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 
 - Starters: `release-please-config.json`, `.release-please-manifest.json`. The hooks `update-release.yml` and `update-release-pr.yml` are base starters and run only when this module is selected.
 - Managed: the release variant of `.typography-allow`. The `release`, `update-release`, `publish-release`, and `update-release-pr` legs of `ci.yml` run on a push to main once selected.
-- Pipeline: `release` cuts a draft through release-please (repo-platform's fleet-release workflow) -> the repo-owned `update-release.yml` hook, a placeholder until you add assets or notes -> `publish-release` (fleet-release-publish) attaches one `attestation.json` per release for a public repo with assets, publishes others unattested, and flips the draft live. `update-release-pr` calls the repo-owned hook for files that ride in the release commit.
+- Pipeline: `release` cuts a draft through release-please (the fleet-release workflow) -> the repo-owned `update-release.yml` hook, a placeholder until you add assets or notes -> `publish-release` (fleet-release-publish) attaches one `attestation.json` per release for a public repo with assets, publishes others unattested, and flips the draft live. `update-release-pr` calls the repo-owned hook for files that ride in the release commit.
 - Gates: fleet CI's `release-freshness` and `release-health` jobs run on release-please PRs (branches `release-please--*`). Freshness requires the PR to contain the tip of its base branch. Health fails on an open tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream, an open `release-blocker` issue, or an open Dependabot alert at or above the threshold (default `high`; alerts the token cannot read skip that gate); the cut re-runs the same gate, and `release-override` on the release PR bypasses it.
 - Labels (`autorelease: pending`, `autorelease: tagged`, `release-blocker`, `release-override`) and the tag-immutability ruleset come from the module's settings layer: the sync renders them into `.github/settings.yml`, the settings apply declares them.
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
@@ -54,7 +54,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 - Keys: `labels.fuzzer` (default `fuzz-nightly`) / `labels.nightly` (default `nightly-failure`). The two must differ when both are selected: both streams dedup and auto-close by label.
 - A custom label goes in two places: the registration key (read by fleet CI's plan and by the sync, which renders it into `.github/settings.yml` for the settings apply to declare) and the starter's two `label:` inputs (the starter is repo-owned; the sync never edits it).
 - Removal: remove `labels.<key>` together with the module (a leftover key fails the plan). The label leaves the rendered settings on that sync and the next apply deletes it. The starter keeps running; delete it yourself or declare its label in `.github/settings.local.yml` first.
-- Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md`.
+- Depth: the platform's `docs/fuzzer.md` and `docs/nightly.md`.
 
 ## pr-title
 

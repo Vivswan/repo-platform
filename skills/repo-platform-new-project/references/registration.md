@@ -23,7 +23,7 @@ Shapes the schema pins: `project.slug` is kebab-case; `site.path` and every `mou
 
 ## Module roster
 
-One line each, the `description` of each module in repo-platform's `files.yml`:
+One line each, the `description` of each module in the platform's `files.yml`:
 
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
 - `node`: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
@@ -39,7 +39,7 @@ One line each, the `description` of each module in repo-platform's `files.yml`:
 - `nightly`: nightly CI starter with failure issue filing and auto-close
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not written
 
-The files each module brings are listed in the `repo-platform-add-module` skill and in repo-platform's `files.yml`.
+The files each module brings are listed in the `repo-platform-add-module` skill and in the platform's `files.yml`.
 
 ## Labels and streams
 

@@ -5,7 +5,7 @@ group: Start here
 
 # Creating a new repository
 
-repo-platform is standards-only: the native toolchain owns the project skeleton, repo-platform layers CI conventions, settings, gitignore, and agent instructions on top. There is nothing to configure in the new repo itself - no sync workflow, no secrets. Once the repo exists on GitHub with `.repo-platform.yml` on its default branch, repo-platform's push sync picks it up.
+The platform is standards-only: the native toolchain owns the project skeleton, and the platform layers CI conventions, settings, gitignore, and agent instructions on top. There is nothing to configure in the new repo itself - no sync workflow, no secrets. Once the repo exists on GitHub with `.repo-platform.yml` on its default branch, the push sync picks it up.
 
 ## 1. Scaffold with the native tool
 
