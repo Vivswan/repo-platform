@@ -14,6 +14,7 @@ import {
   tempDirTreeMismatches,
   topLevelProperties,
 } from "../../../scripts/check/ssot/process_discipline.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 
 describe("spawnSyncSites", () => {
   test("finds calls with and without options, splitting at the top-level comma", () => {
@@ -248,9 +249,26 @@ describe("spawnSyncHazard", () => {
     expect(spawnSyncHazard("{ timeout: options.timeoutMs }")).toBeNull();
   });
 
-  test("a stream shaped to undefined/null falls back to the piped default (reviewer's probe)", () => {
+  test("a stream shaped to undefined falls back to the piped default (reviewer's probe)", () => {
     expect(spawnSyncHazard('{ stdout: undefined, stderr: "inherit" }')).toContain("stdout");
     expect(spawnSyncHazard("{ stdio: undefined }")).toContain("stdout and stderr");
+  });
+
+  test('null is "ignore" in bun-types (measured on 1.4.0: no buffer comes back), so it shapes the stream', () => {
+    expect(spawnSyncHazard('{ stdout: null, stderr: "inherit" }')).toBeNull();
+    expect(spawnSyncHazard('{ stdio: ["ignore", null, "inherit"] }')).toBeNull();
+    expect(spawnSyncHazard('{ stdio: ["ignore", null, undefined] }')).toBe(
+      "stderr left to the piped default with no timeout",
+    );
+  });
+
+  test("a non-array stdio value is refused by name: bun-types declares stdio as a tuple, so only a literal shows the slots", () => {
+    for (const stdio of ["makeStreams()", "7", "STDIO", '"inherit"', "null"]) {
+      expect(spawnSyncHazard(`{ stdio: ${stdio} }`)).toBe(
+        "a stdio value the scanner cannot audit (not an array literal, so its stream slots cannot be read) with no timeout",
+      );
+    }
+    expect(spawnSyncHazard("{ stdio: makeStreams(), timeout: 5_000 }")).toBeNull();
   });
 
   test("an explicit timeout bounds any piped shape, object-form included", () => {
@@ -271,14 +289,81 @@ describe("spawnSyncHazard", () => {
     );
     expect(spawnSyncHazard('{ stdio: ["inherit"] }')).toContain("stdout and stderr");
     expect(spawnSyncHazard('{ stdio: ["ignore", , "inherit"] }')).toContain("stdout");
-    expect(spawnSyncHazard('{ stdio: ["ignore", null, "inherit"] }')).toContain("stdout");
-    // An own stream key can shape what the array slot leaves open.
-    expect(spawnSyncHazard('{ stdio: ["inherit"], stdout: log, stderr: log }')).toBeNull();
+  });
+
+  test("the stdio tuple overrides the stdout/stderr keys, as bun-types says and bun 1.4.0 does", () => {
+    expect(spawnSyncHazard('{ stdio: ["inherit"], stdout: log, stderr: log }')).toBe(
+      "stdout and stderr left to the piped default with no timeout",
+    );
+    expect(
+      spawnSyncHazard(
+        '{ stdio: ["ignore", undefined, undefined], stdout: "ignore", stderr: "ignore" }',
+      ),
+    ).toBe("stdout and stderr left to the piped default with no timeout");
+    expect(
+      spawnSyncHazard('{ stdio: ["ignore", "inherit", "inherit"], stdout: "pipe" }'),
+    ).toBeNull();
+  });
+
+  test("a stream value is judged as what it evaluates to, never by its text", () => {
+    for (const wrapped of ["(undefined)", "void 0", "(void 0) as never"]) {
+      expect(spawnSyncHazard(`{ stdout: ${wrapped}, stderr: "ignore" }`)).toBe(
+        "stdout left to the piped default with no timeout",
+      );
+    }
+    expect(spawnSyncHazard('{ stdout: "p\\x69pe", stderr: "ignore" }')).toBe(
+      "explicitly piped stdio with no timeout",
+    );
+    expect(spawnSyncHazard("{ stdout: `pipe`, stderr: 2 }")).toBe(
+      "explicitly piped stdio with no timeout",
+    );
+    expect(spawnSyncHazard("{ stdout: 1, stderr: 2 }")).toBeNull();
+    expect(spawnSyncHazard('{ stdout: options.log, stderr: "inherit" }')).toBeNull();
+  });
+
+  test("a call, an operator expression, or a string bun-types does not list is refused, not trusted", () => {
+    for (const value of ["makeStream()", "a || b", '"socket-fd"', "Bun.file(path)"]) {
+      expect(spawnSyncHazard(`{ stdout: ${value}, stderr: "inherit" }`)).toBe(
+        "stdout shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
+      );
+    }
+    expect(spawnSyncHazard("{ stdout: makeStream(), stderr: makeStream() }")).toBe(
+      "stdout and stderr shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
+    );
+    expect(spawnSyncHazard("{ stdout: makeStream(), timeout: 5_000 }")).toBeNull();
+  });
+
+  test("an optional chain is refused, not trusted: `options?.log` with options undefined is the piped default", () => {
+    // A `?.` anywhere in the chain, or an element step (an absent element is undefined too): both refused.
+    for (const value of ["options?.log", "a.b?.c", "a?.b.c", "(a?.b)", "a?.[k]", "a[k]"]) {
+      expect(spawnSyncHazard(`{ stdout: ${value}, stderr: "inherit" }`)).toBe(
+        "stdout shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
+      );
+    }
+    // The recorded trust: a plain member path is judged by its key, and a timeout clears the hazard whatever the value.
+    expect(spawnSyncHazard('{ stdout: options.log, stderr: "inherit" }')).toBeNull();
+    expect(spawnSyncHazard("{ stdout: options?.log, timeout: 5_000 }")).toBeNull();
+  });
+
+  test("a slot past stderr is judged too: spawnSync never drains it, so a pipe there wedges on a full buffer", () => {
+    expect(spawnSyncHazard('{ stdio: ["ignore", "ignore", "ignore", "pipe"] }')).toBe(
+      "explicitly piped stdio with no timeout",
+    );
+    expect(spawnSyncHazard('{ stdio: ["ignore", "ignore", "ignore", makeFd()] }')).toBe(
+      "stdio[3] shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
+    );
+    // An undefined or null extra slot is a closed fd (measured: a writer to it fails with EBADF at once).
+    for (const closed of ["undefined", "null", "3"]) {
+      expect(spawnSyncHazard(`{ stdio: ["ignore", "ignore", "ignore", ${closed}] }`)).toBeNull();
+    }
+    expect(spawnSyncHazard('{ stdio: ["ignore", , "ignore", undefined] }')).toBe(
+      "stdout left to the piped default with no timeout",
+    );
   });
 
   test("a spread inside a stdio array is unauditable - it can shift or inject stream slots", () => {
-    expect(spawnSyncHazard('{ stdio: ["ignore", ...streams, "inherit"] }')).toContain(
-      "cannot audit",
+    expect(spawnSyncHazard('{ stdio: ["ignore", ...streams, "inherit"] }')).toBe(
+      "a stdio value the scanner cannot audit (a spread can shift or inject stream slots) with no timeout",
     );
     expect(spawnSyncHazard('{ stdio: (["ignore", ...streams]) }')).toContain("cannot audit");
     expect(spawnSyncHazard('{ stdio: (["inherit"]) }')).toContain("stdout and stderr");
@@ -289,6 +374,72 @@ describe("spawnSyncHazard", () => {
     expect(spawnSyncHazard("{ timeoutMs: 5 }")).toBe(
       "stdout and stderr left to the piped default with no timeout",
     );
+  });
+});
+
+describe("spawnSyncHazard agrees with bun about which literal shapes pipe", () => {
+  // Every claim the rule makes about stream defaults, null, fd numbers, and tuple precedence is checked against the
+  // pinned bun itself: each shape is spawned in a child bun (a direct Bun.spawnSync here would be a site this rule judges),
+  // which reports the output streams that came back as buffers. `piped` is the measured value the rule must agree with.
+  const cases: { shape: string; piped: ("stdout" | "stderr")[] }[] = [
+    { shape: "{}", piped: ["stdout", "stderr"] },
+    { shape: "{ stdio: undefined }", piped: ["stdout", "stderr"] },
+    { shape: '{ stdout: "inherit" }', piped: ["stderr"] },
+    { shape: '{ stdout: null, stderr: "inherit" }', piped: [] },
+    { shape: '{ stdio: ["ignore", null, "inherit"] }', piped: [] },
+    { shape: '{ stdio: ["ignore", null, undefined] }', piped: ["stderr"] },
+    { shape: '{ stdio: ["ignore", , "inherit"] }', piped: ["stdout"] },
+    { shape: '{ stdio: ["inherit"] }', piped: ["stdout", "stderr"] },
+    { shape: '{ stdio: ["inherit", "inherit", "inherit"] }', piped: [] },
+    {
+      shape: '{ stdio: ["inherit"], stdout: "ignore", stderr: "ignore" }',
+      piped: ["stdout", "stderr"],
+    },
+    { shape: '{ stdio: ["ignore", "inherit", "inherit"], stdout: "pipe" }', piped: [] },
+    { shape: '{ stdout: (undefined), stderr: "ignore" }', piped: ["stdout"] },
+    { shape: '{ stdout: void 0, stderr: "ignore" }', piped: ["stdout"] },
+    { shape: '{ stdout: "p\\x69pe", stderr: "ignore" }', piped: ["stdout"] },
+    { shape: '{ stdout: "pipe", stderr: "pipe" }', piped: ["stdout", "stderr"] },
+    { shape: "{ stdout: 1, stderr: 2 }", piped: [] },
+  ];
+  test.each(cases)("$shape pipes $piped", ({ shape, piped }) => {
+    const probe =
+      'const r = Bun.spawnSync(["sh", "-c", "printf out; printf err >&2"], ' +
+      `${shape}); console.log("\\nRESULT " + JSON.stringify(["stdout", "stderr"].filter((s) => r[s] instanceof Uint8Array)));`;
+    const child = boundedSpawnSync([process.execPath, "-e", probe]);
+    expect(child.exitCode).toBe(0);
+    const result = child.stdout.split("\n").findLast((line) => line.startsWith("RESULT "));
+    expect(result).toBeDefined();
+    expect(JSON.parse(result?.slice("RESULT ".length) ?? "")).toEqual(piped);
+    const hazard = spawnSyncHazard(shape);
+    if (piped.length === 0) {
+      expect(hazard).toBeNull();
+    } else if (/"pipe"|`pipe`|p\\x69pe/.test(shape)) {
+      expect(hazard).toBe("explicitly piped stdio with no timeout");
+    } else {
+      expect(hazard).toBe(`${piped.join(" and ")} left to the piped default with no timeout`);
+    }
+  });
+});
+
+describe("spawnSyncHazard agrees with bun about a slot past stderr", () => {
+  // No buffer comes back for fd 3, so the oracle is the hang itself: a 1 MiB writer into the slot, under a deadline the
+  // child adds only to bound the measurement. The rule judges the shape without that deadline.
+  const cases: { slot: string; hangs: boolean }[] = [
+    { slot: '"pipe"', hangs: true },
+    { slot: '"ignore"', hangs: false },
+    { slot: "undefined", hangs: false },
+  ];
+  test.each(cases)("stdio[3] = $slot hangs: $hangs", ({ slot, hangs }) => {
+    const shape = `{ stdio: ["ignore", "ignore", "ignore", ${slot}] }`;
+    const probe =
+      'const r = Bun.spawnSync(["sh", "-c", "exec head -c 1048576 /dev/zero >&3 2>/dev/null"], ' +
+      `{ ...${shape}, timeout: 500, killSignal: "SIGKILL" }); console.log("RESULT " + JSON.stringify(r.exitedDueToTimeout === true));`;
+    const child = boundedSpawnSync([process.execPath, "-e", probe]);
+    expect(child.exitCode).toBe(0);
+    const result = child.stdout.split("\n").findLast((line) => line.startsWith("RESULT "));
+    expect(JSON.parse(result?.slice("RESULT ".length) ?? "")).toBe(hangs);
+    expect(spawnSyncHazard(shape)).toBe(hangs ? "explicitly piped stdio with no timeout" : null);
   });
 });
 
@@ -303,11 +454,20 @@ describe("asyncSpawnMismatches", () => {
     ]);
   });
 
-  test("an unenumerated async Bun.spawn fires per site, naming the file", () => {
+  test("an unenumerated async Bun.spawn fires per site, naming the file and the true reason for the pin", () => {
     const found = asyncSpawnMismatches("scripts/x.ts", 'const p = Bun.spawn(["gh"]);\n', false);
-    expect(found).toHaveLength(1);
-    expect(found[0].file).toBe("scripts/x.ts:1");
-    expect(found[0].expected).toContain("ASYNC_SPAWN_FILES");
+    expect(found).toEqual([
+      {
+        file: "scripts/x.ts:1",
+        // Bun.spawn honors `timeout` (bun-types declares it on the shared options; measured: SIGTERM at ~52 ms with timeout: 50),
+        // so the message must not claim the option is missing.
+        expected:
+          "no async Bun.spawn outside ASYNC_SPAWN_FILES (an async site draining its pipes has no pipe-EOF " +
+          "deadlock for a timeout to bound, so its bound is a recorded rationale rather than a checked option; " +
+          "a sync site rewritten async exits the sync gate and must land here, by name)",
+        got: "an unenumerated async Bun.spawn",
+      },
+    ]);
   });
 
   test("LAUNDERING: a test file's spawnSync rewritten as async Bun.spawn fails by introducing a fourth name", () => {
