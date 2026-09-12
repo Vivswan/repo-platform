@@ -133,8 +133,10 @@ describe("resolve_settings_target.ts", () => {
   });
 
   test.each<{ reason: string; env: Record<string, string | undefined>; outcome: Run }>([
+    // A public repository stays listed with push after its PAT grant is revoked, so this case proves
+    // only the missing-listing refusal.
     {
-      reason: "a row whose repository is missing from the owner's listing since the plan (a public repository can stay listed after its grant is revoked; this proves the missing-listing refusal only)",
+      reason: "a row whose repository left the owner's listing since the plan",
       env: { ROW_KEY: keyOf(GONE) },
       outcome: refused(1, MOVED),
     },
