@@ -120,6 +120,16 @@ The branch is both the writer's source and the fleet's executable channel (`uses
 - The writer runs from this repository's checkout, never from the branch: the branch carries data the writer reads (`files.yml`, `files/`) and code the fleet's workflows execute (`actions/`, the reusable workflows), and the provenance proof covers both.
 - Every self pin resolves: the `delivery-pin-stems` ssot rule ([delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts)) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, whatever the ref, so a renamed or deleted action fails CI here instead of the next fleet run.
 
+## A new action input lands as a stack
+
+A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repository's root twin of it) calls platform actions at the delivery ref, and the root twin is this repository's own check of that workflow. A workflow PR that feeds an action an input not yet at the delivery ref reds itself, whether the PR adds the input or is stacked on the PR that does: its check runs the action's copy at the delivery ref.
+
+1. Land the action change alone: its own PR against main, so the post-green run carries the new input to the delivery ref.
+2. Stack the workflow PR on the action branch while both are open. Once the action PR merges, rebase the workflow branch onto main with `--onto main <old action tip>` and retarget the PR: the squash made a new commit, so a plain retarget keeps the action commits in the workflow PR's diff.
+3. Wait for the action merge's post-green run to move the delivery ref, then re-run the workflow PR's check and merge: a push before the move runs the old copy again, and the move itself starts no PR run.
+
+Example: the pr-title workflow PR feeding validate-commit-names a new `title` input, stacked on the action PR before that PR merged; its own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
+
 ## Residuals
 
 | Residual | Why it stands | What bounds it |

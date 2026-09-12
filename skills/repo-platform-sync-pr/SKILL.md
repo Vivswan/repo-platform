@@ -137,7 +137,7 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 |---|---|
 | `ci.yml` (a job, a step) | `checks.yml` for gate jobs; `post-green.yml` for green-gated work on main; `update-release.yml` / `update-release-pr.yml` for release-time logic |
 | the managed region of a split file | above BEGIN or below END of the same file |
-| a module workflow or a pin dotfile | the platform's `files/` (a PR there reaches the whole fleet), or a repo-owned workflow beside it |
+| a module workflow or a pin dotfile | the platform's `files/` (a PR there reaches the whole fleet; one that feeds a platform action a new input lands as a stack, action first: [build provenance](https://github.com/Vivswan/repo-platform/blob/main/docs/build-provenance.md#a-new-action-input-lands-as-a-stack)), or a repo-owned workflow beside it |
 | a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `site.*`) |
 | the rendered `.github/settings.yml` (a label, a ruleset, an identity key) | `.github/settings.local.yml`, the overlay the render reads; the next sync re-renders the managed file from it |
 | a site build command | the repo-owned `.github/actions/site-build/action.yml` hook (its `dist` output names the built directory) |
