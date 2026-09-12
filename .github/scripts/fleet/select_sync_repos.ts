@@ -1,23 +1,8 @@
 #!/usr/bin/env bun
-// Selects the push-sync fan-out: every discovered repo the token can
-// ACTUALLY push to (probed per repo - the PAT's grant is the only
-// membership fact) that has adopted the platform (a readable
-// .repo-platform.yml). Invoked by sync-repos.yml's plan job after
-// discovery wrote $RUNNER_TEMP/discovered.json, and again by every row job
-// (its output to a file) so row indexes mean the plan's repositories.
-//
-// The rows go to $RUNNER_TEMP/rows.json with their real slugs; the job
-// output carries the count alone. This log is publicly readable, so a
-// private repository is never named here: its skips are counted, a public
-// one's are noticed by slug. The operator repository is never a row (its
-// files are the sources).
-//
-// Scope (sync_scope.ts owns the grammar): owner/name slugs, public/private,
-// modules:<a>+<b> filters (judged over each adopted repo's declared list
-// below), or the literal "all", an explicit whole-fleet scope (never
-// ambiguous, since real slugs are always owner/name).
-// Env: PAT, GH_TOKEN, OWNER, GITHUB_REPOSITORY, RUNNER_TEMP, GITHUB_OUTPUT,
-// GITHUB_EVENT_PATH; ONLY_REPO and TARGET_SHA (the workflow_call scope).
+// sync-repos.yml's plan job runs this after discovery wrote $RUNNER_TEMP/discovered.json, and every
+// row job runs it again so a row index means the plan's repository. This log is public: the rows
+// file carries the real slugs, the job output only the count, and a private repository is never
+// named here.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,12 +43,7 @@ if (scope.kind === "error") {
   process.exit(1);
 }
 
-// The whole discovered fleet becomes rows, then the scope applies to them:
-// the visibility tokens need every row, and a slug must name a discovered
-// repo or the run fails (below). Visibility is discovery's, fail-closed
-// (parseDiscovered rejects an entry without an explicit private flag).
-// parseJson, not a raw JSON.parse: discovered.json carries real slugs, and
-// a SyntaxError echoing them would leak into this public log.
+// parseJson, not JSON.parse: a SyntaxError would echo the real slugs into this public log.
 const discovered = parseDiscovered(
   parseJson(
     readFileSync(join(runnerTemp, "discovered.json"), "utf-8"),
@@ -119,9 +99,7 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
     error(`adoption check failed for ${display}: ${scrubSlug(adoption.stderr, slug, display)}`);
     process.exit(1);
   }
-  // A filter judges the declared list; a list it cannot read is reported
-  // and left out (the writer's own selection would fail on it), a repo it
-  // leaves out is counted, never named (it may be private).
+  // A repo the filter leaves out is counted, never named: it may be private.
   const filters = modulesFilterFor(scope, slug);
   if (filters !== null) {
     const declared = declaredModules(adoption.stdout);

@@ -1,24 +1,7 @@
 #!/usr/bin/env bun
-// Selects the targets settings-repos.yml hands to github-settings-as-code
-// in repos mode: every discovered repo the fleet token can push to (probed
-// per repo - the PAT's grant is the only membership fact) that has adopted
-// the platform (a readable .repo-platform.yml) and whose .github/settings.yml
-// is the sync's rendered document (the generator header on its first line;
-// a hand-written file applied alone would delete every fleet label). The
-// operator repository is selected like any other.
-//
-// One repo's flaky probe never blocks the rest: every probe is retried,
-// and a repo whose probes still return no answer is skipped with a warning
-// (the nightly cron retries it); exit 1 is reserved for failures that
-// invalidate the whole selection. The log and the step summary are public:
-// every discovered private slug is masked before anything else prints, and
-// a private repository is named only as such.
-//
-// Env: PAT, GH_TOKEN, OWNER, GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional)
-// receives every warning; GITHUB_EVENT_PATH supplies the dispatch scope
-// input (a non-empty ONLY_REPO env overrides it: post-green.yml's called
-// run, the harness, local runs), SOURCE_SHA the judged commit a refused
-// called scope names. The scope grammar is the sync's (sync_scope.ts).
+// The log and step summary are public, so every discovered private slug is masked before anything
+// else prints. One repo's flaky probe never blocks the rest: exit 1 is reserved for failures that
+// invalidate the whole selection, and the nightly cron retries a skipped repo.
 
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
@@ -52,19 +35,13 @@ import {
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
 
-// A bare name gets the fleet owner prefixed (readDispatchRepo). A list is
-// validated against the discovered fleet once the rows are known (below).
 const scope = parseScope(readDispatchRepo(owner), new Set(moduleRoster()));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
 }
 
-// A drop that leaves a repo without settings management is announced: a
-// workflow warning, plus a step-summary bullet under a heading written
-// once. Routine skips stay at notice level and out of the summary. The
-// summary is not covered by the runner's masker, so callers pass
-// already-scrubbed text.
+// The step summary is not covered by the runner's masker, so callers pass already-scrubbed text.
 let summaryHeaded = false;
 function warn(message: string): void {
   console.log(`::warning::${message}`);
@@ -78,9 +55,7 @@ function warn(message: string): void {
   }
 }
 
-// Each probe answers one question about one repo: a pass carries what it
-// learned, a drop is a definitive negative (already explained), and a
-// retry carries the no-answer detail for the retry loop.
+// A drop has already printed its own notice.
 type ProbeResult<T> =
   | { kind: "pass"; value: T }
   | { kind: "drop" }
@@ -98,8 +73,7 @@ function probePush(slug: string, display: string): ProbeResult<true> {
   return { kind: "retry", detail: `HTTP ${String(code).padStart(3, "0")}` };
 }
 
-/** A repository file read raw off its default branch; the content is read
- *  for a fact and never printed (it is target-owned text). */
+/** The content is target-owned text: read for a fact, never printed. */
 function readRepoFile(slug: string, path: string) {
   return captureNetwork([
     "gh",
@@ -110,9 +84,8 @@ function readRepoFile(slug: string, path: string) {
   ]);
 }
 
-// The adoption probe: a readable .repo-platform.yml is the opt-in; only a
-// 404 means "not adopted". The declared list rides along for the scope's
-// modules: filters (null when unreadable; the filter judge reports that).
+// Only a 404 means "not adopted"; any other failure is a no-answer, so an outage never reads as an
+// opt-out.
 function probeAdoption(slug: string, display: string): ProbeResult<{ modules: string[] | null }> {
   const probe = readRepoFile(slug, ".repo-platform.yml");
   if (probe.exitCode === 0) {
@@ -125,9 +98,8 @@ function probeAdoption(slug: string, display: string): ProbeResult<{ modules: st
   return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// The rendered probe: the apply reads each target's own .github/settings.yml,
-// so it must be the sync's document. An absent file and a hand-written one
-// are the same skip: the sync PR carrying the render has not merged.
+// The apply reads each target's own .github/settings.yml, so a hand-written one is as unready as a
+// missing one.
 function probeRendered(slug: string, display: string): ProbeResult<true> {
   const probe = readRepoFile(slug, ".github/settings.yml");
   if (probe.exitCode === 0) {
@@ -142,10 +114,8 @@ function probeRendered(slug: string, display: string): ProbeResult<true> {
   return { kind: "retry", detail: probe.stderr.replace(/\n+$/, "") };
 }
 
-// The pass value keeps the repo in the pipeline, null drops it - a definitive
-// negative (already reported) or no answer after the retries, which warns
-// loudly: a silently dropped repo would heal nothing tonight. The no-answer
-// detail is scrubbed of the slug before printing.
+// No answer after the retries warns rather than notices: a silently dropped repo would heal nothing
+// tonight.
 const ATTEMPTS = 3;
 // Test knob: the harness sets it to 0 so retry coverage does not sleep.
 const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
@@ -174,8 +144,6 @@ async function probe<T>(
   return null;
 }
 
-// Discovery pre-filters to owned, user-writable repos; the token's actual
-// grant is probed per repo below. Visibility rides along fail-closed.
 const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
 // Before anything else prints: the masker covers what a scrub might miss,
 // and the apply step echoes the repos output into the log.
@@ -183,9 +151,7 @@ for (const row of discovered) {
   if (row.private) for (const form of maskForms(row.repo)) addMask(form);
 }
 
-// The scope's refusals (sync_scope.ts, counts only): every slug must name
-// a discovered repo, and a called scope may not name a private one. A known
-// repo the probes then DROP is a routine notice, so a scope may select nothing.
+// A slug the probes later DROP is a routine notice, so a valid scope may select nothing.
 const known = new Map(discovered.map((row) => [row.repo.toLowerCase(), row.private]));
 const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"), owner);
 if (refusal !== null) {
@@ -202,8 +168,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   if ((await probe("push-permission probe", probePush, repo, display)) === null) continue;
   const adopted = await probe("adoption check", probeAdoption, repo, display);
   if (adopted === null) continue;
-  // A filter judges the declared list; a list it cannot read is reported
-  // and left out, a repo it leaves out is counted, never named.
+  // A repo the filter leaves out is counted, never named: it may be private.
   const filters = modulesFilterFor(scope, repo);
   if (filters !== null) {
     if (adopted.modules === null) {

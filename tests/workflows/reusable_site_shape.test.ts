@@ -1,9 +1,5 @@
-// The fleet's site deploy in one job: the repo-owned hook runs from the
-// checkout before the fleet's assembly, so its output crosses no job
-// boundary and the Pages artifact is the only artifact; the deploy steps
-// gate on the assembly's positive publish output, the link-rot steps on
-// the schedule. Each property here is one a refactor could lose while the
-// deploy still works on a happy path.
+// The fleet's site deploy in one job: the repo-owned hook runs from the checkout before the fleet's assembly,
+// so its output crosses no job boundary and the Pages artifact is the only artifact.
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";

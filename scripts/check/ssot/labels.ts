@@ -44,7 +44,6 @@ export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
 /** The shared deploy carrying the site stream's create tuple. */
 export const REUSABLE_SITE = ".github/workflows/reusable-site.yml";
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const labelRules: Rule[] = [
   {
     name: "labels",

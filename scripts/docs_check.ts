@@ -1,11 +1,8 @@
 #!/usr/bin/env bun
 
-// `bun run docs:check`: ci.yml's docs-check job (the pages-site action's
-// strict CHECK build) over this repo's docs/, with the env that job's
-// action step sets, so an exported shell variable cannot change the build.
-// RUNNER_TEMP is per run and removed in the finally: the action's scratch
-// is otherwise one fixed path under the system tmpdir that it never cleans
-// and that concurrent worktrees would wipe from under each other.
+// The local twin of ci.yml's docs-check job; the build inputs are set here the way the pages-site action's step sets them, so an
+// exported copy of one cannot change the build. RUNNER_TEMP is per run and removed in the finally: the action's scratch is otherwise
+// one fixed path under the system tmpdir that it never cleans and that concurrent worktrees would wipe from under each other.
 //
 // Usage: bun scripts/docs_check.ts
 

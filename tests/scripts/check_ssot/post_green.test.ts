@@ -1,5 +1,3 @@
-// The post-green and fleet-writer models (scripts/check/ssot/post_green.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import {

@@ -1,8 +1,3 @@
-// The settings render over a scratch tree: the layer order and what each
-// layer contributes, the override on top, the overlay's visibility fact,
-// the tracking labels with their tuples, every hold the repository's own
-// files earn, the header, and byte-for-byte determinism.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

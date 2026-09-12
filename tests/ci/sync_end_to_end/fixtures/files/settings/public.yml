@@ -1,4 +1,3 @@
-# The fixture's public overlay: a main rule.
 rulesets:
   - name: main
     rules:

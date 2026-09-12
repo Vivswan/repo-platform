@@ -1,5 +1,3 @@
-// The all-green roster rules' pure helpers (scripts/check/ssot/all_green.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";

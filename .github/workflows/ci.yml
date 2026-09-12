@@ -13,19 +13,16 @@ on:
 permissions:
   contents: read
 
-# Keyed by the commit on a push: every merge to main gets its own complete run and verdict.
-# A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges leaves the tip unjudged.
-# Pull-request runs stay keyed by the ref: a newer push cancels the stale run.
+# Keyed by the commit on a push: a ref-keyed group holds one pending run, so in a burst of merges the displaced commit never gets a verdict.
+# Pull-request runs stay keyed by the ref so a newer push cancels the stale run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # This repository's own workflows, then the workflows the fleet receives:
-  # the sources under files/ carry placeholders actionlint cannot read, so
-  # the writer lands them in two scratch repositories (every module, none)
-  # and the binary the first step put on PATH lints each from its own root,
-  # where the starter actionlint.yaml's path-scoped ignores apply.
+  # The sources under files/ carry placeholders actionlint cannot read, so the writer lands them in
+  # two scratch repositories (every module, none). Each is linted from its own root, where the
+  # starter actionlint.yaml's path-scoped ignores apply.
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -45,12 +42,9 @@ jobs:
             (cd "$RUNNER_TEMP/fleet-lint/$target" && actionlint -color)
           done
 
-  # The action scans the event's commit range (fetch-depth: 0 so any
-  # range resolves). Same job the base template ships to every managed
-  # repo; `bun run lint:secrets` covers history and staged changes
-  # locally. pull-requests read: the action lists the PR's commits to
-  # build the scan range. Comments off keeps that scope at read; leaks
-  # still land in the job summary and SARIF artifact.
+  # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
+  # the PR's commits to build that range. Comments off keeps that scope at read; findings still land
+  # in the job summary and SARIF artifact.
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -70,11 +64,8 @@ jobs:
           # the floor so CI honors the same config local runs do.
           GITLEAKS_VERSION: "8.30.1"
 
-  # Fails when a PR introduces a dependency with a high or critical advisory.
-  # Only PR events have a dependency diff to review, so the skip lives on the steps:
-  # all-green treats a skipped job as standing down, so a job-level skip would fail open.
-  # Gating jobs stay unconditional (the all-green-roster ssot rule pins this);
-  # event conditions go on their steps.
+  # The PR-only condition sits on the steps, not the job: all-green treats a skipped job as standing
+  # down, so a job-level skip would fail open (the all-green-roster ssot rule pins this).
   dependency-review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -85,10 +76,6 @@ jobs:
       - uses: ./actions/dependency-review
         if: github.event_name == 'pull_request'
 
-  # The all-green gate's judging logic, exercised as the REAL run block
-  # extracted from actions/all-green/action.yml against scenario needs
-  # payloads: the fail-closed shapes (a failure, all skipped, an empty
-  # needs list, malformed input) must exit red, the healthy shapes green.
   allgreen-judgment:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -107,9 +94,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The same action the fleet runs; local path, so this repository
-      # always lints with the tree under review rather than what is
-      # published. `bun run lint:yaml` is the local twin.
       - uses: ./actions/yamllint
 
   biome:
@@ -160,10 +144,8 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      # Keyed on each action's tsconfig.json: dirs without one (no TS to
-      # check) skip naturally, and a new action joins without editing this
-      # list. The bun-dirs ssot rule pins the glob and requires every dir
-      # committing a bun.lock to carry a tsconfig.json.
+      # The glob is the roster: the bun-dirs ssot rule pins it and requires every dir committing a
+      # bun.lock to carry a tsconfig.json.
       - name: Typecheck repo and action scripts
         run: |
           for tsconfig in tsconfig.json actions/*/tsconfig.json; do
@@ -173,10 +155,8 @@ jobs:
             echo "::endgroup::"
           done
 
-  # Network gate, deliberately outside `bun run check`: proves every
-  # third-party action pin resolves to a real upstream ref (a dangling
-  # pin like a retired moving-major tag passes every offline gate and
-  # then fails at job start, fleet-wide once synced).
+  # Networked, so outside `bun run check`: a dangling pin (a retired moving-major tag) passes every
+  # offline gate and fails at job start, fleet-wide once synced.
   action-refs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -223,9 +203,7 @@ jobs:
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
-  # The build tree the fleet consumes, assembled twice and compared: the
-  # post-green publish ships exactly this, so a failing or
-  # non-deterministic assembly fails here first.
+  # The post-green publish ships exactly this tree, so a non-deterministic assembly fails here first.
   build-tree:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -272,10 +250,6 @@ jobs:
           TYPOS_REQUIRED: "1"
         run: bun run test
 
-  # Structural validation of this repository's own hosted agent skills
-  # (skills/ plus the repo-owned .claude-plugin manifests), dogfooding the
-  # composite action the skills module pins fleet-wide. Offline and cheap;
-  # `bun run validate:skills` is the local twin.
   validate-skills:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -285,12 +259,8 @@ jobs:
         with:
           skills-dir: skills
 
-  # CLI discovery for the same catalog. Fleet repos get this as the
-  # advisory validate-skills.yml (npx needs the npm registry, and managed
-  # repos must not block on a registry hiccup); here it GATES, per this
-  # repo's all-jobs-gate convention - CI is not network-shy (action-refs
-  # already resolves upstream refs) and a listing regression in the action
-  # this repo ships should block its own merges.
+  # Advisory in the fleet (validate-skills.yml: npx needs the npm registry), gating here: a listing
+  # regression in the action this repo ships should block its own merges.
   skills-discovery:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -301,10 +271,7 @@ jobs:
           skills-dir: skills
           mode: discovery
 
-  # This repository's docs built strictly through the site action from the
-  # working tree (dead internal links fail here, not the deploy), with the
-  # same configuration the site job passes; `bun run docs:check` is the
-  # local twin. Unconditional, like every gating job.
+  # The config is the site job's, byte for byte: a dead internal link fails here instead of the deploy.
   docs-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -315,11 +282,9 @@ jobs:
           check: "true"
           config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
 
-  # The pages-site action's vitepress build, end to end in the runner's
-  # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
-  # nothing else in the gate ever RUNS vitepress, and the build's module
-  # resolution only breaks under that separation - the class a laptop
-  # layout cannot reproduce (tests/ci/pages_site_build/).
+  # vitepress in the runner's directory topology (workspace, action tree, and RUNNER_TEMP apart): the
+  # build's module resolution breaks only under that separation, which a laptop layout cannot
+  # reproduce (tests/ci/pages_site_build/).
   pages-site-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -333,11 +298,7 @@ jobs:
       - name: Build the fixture site and assert the artifact
         run: bun run test tests/ci/pages_site_build
 
-  # CodeQL runs inside the gate: this thin job calls the analysis workflow,
-  # and a caller job's permissions are the ceiling for every job in the
-  # called workflow, so the scan permissions are granted here. This repo is
-  # TypeScript-only (the actions, scripts, and writer tooling), so one
-  # language leg suffices; the name matches fleet-ci's per-language jobs.
+  # A caller job's permissions are the ceiling for the called workflow, so the scan grants sit here.
   codeql-javascript:
     permissions:
       contents: read
@@ -347,9 +308,7 @@ jobs:
     with:
       language: javascript-typescript
 
-  # The four fleet lint actions dogfooded from the working tree, each the
-  # same call fleet-ci.yml makes at @build. This repository is public, so
-  # the SARIF uploads (zizmor, semgrep) run unconditionally.
+  # This repository is public, so the SARIF uploads (zizmor, semgrep) run unconditionally.
   zizmor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -390,9 +349,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./actions/semgrep
 
-  # The shared bun-setup action dogfooded from the working tree: the runner
-  # gets the pinned bun, then one call per planted pin (that version:
-  # reused, not installed; an earlier release: installed), judged by ci/.
   bun-setup-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -431,8 +387,6 @@ jobs:
         # shared install path); the judge reads recorded outputs only.
         run: bun .github/scripts/ci/bun_setup_smoke.ts judge
 
-  # The same blocking scan the fleet runs, by local path.
-  # A fixable HIGH or CRITICAL vulnerability in any committed lockfile, or any HIGH or CRITICAL misconfiguration, fails here first.
   trivy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -440,14 +394,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./actions/trivy
 
-  # THE gate: this job's own check run (named all-green, created by the
-  # GitHub Actions app) is the ruleset's required check. `needs` must list
-  # every gating job above - ALL_GREEN_ROSTER (scripts/check/ssot/all_green.ts) is that list's
-  # authored twin, compared both ways, so adding or retiring a gate is loud.
-  # `if: always()` because the judgment must run over failures; the shared
-  # action fails unless every result is success or skipped with at least
-  # one success (a skipped gate stands down; an all-skipped run vouches
-  # for nothing).
+  # THE gate: this job's own check run is the ruleset's required check (files/settings/override.yml),
+  # and actions/all-green fails closed on an all-skipped run.
+  #   needs        -> every gating job; ALL_GREEN_ROSTER (scripts/check/ssot/all_green.ts) is its authored twin, compared both ways
+  #   if: always() -> the judgment must run over failures
   all-green:
     needs:
       - actionlint
@@ -484,10 +434,8 @@ jobs:
         with:
           needs: ${{ toJSON(needs) }}
 
-  # Everything that runs after green on a main push.
-  # Same-run and needs-ordered behind the gate, so github.sha IS the judged commit.
-  # No lane here: a caller holding a lane its called job takes deadlocks the call, and the called publish job holds build-branches-publish.
-  # contents: write is the ceiling the called move-stable job needs for its tag push; every other called job declares read.
+  # Needs-ordered behind the gate in the same run, so github.sha IS the judged commit.
+  # No concurrency group: the called publish job holds build-branches-publish, and a caller holding a lane its called job takes deadlocks the call.
   post-green:
     needs: [all-green]
     if: >-
@@ -507,14 +455,9 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # This repository's own site: the skeleton's `site` leg carried by hand,
-  # calling the pipeline by local path so this tree's workflow is the one
-  # under test. Ordered behind post-green so the deploy runs after this run
-  # republished the build branch its actions ride (@build); !cancelled()
-  # keeps a red fleet leg from holding the site back. No push clause: the
-  # weekly schedule is the rebuild and the link-rot check, a dispatch the
-  # manual deploy. The configuration is spelled out: this caller reads no
-  # registration through the plan.
+  # Ordered behind post-green so the deploy runs after this run republished the build branch its
+  # actions ride; !cancelled() keeps a red fleet leg from holding the site back. No push clause in
+  # the if: the weekly schedule is the rebuild and link-rot check, a dispatch the manual deploy.
   site:
     needs: [all-green, post-green]
     if: >-

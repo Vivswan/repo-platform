@@ -1,7 +1,3 @@
-// files.yml's grammar: the shape, the cross-checks within the document
-// (paths, unknown modules, same-path exclusivity, retired vs written), and
-// the typed module data every reader resolves defaults from.
-
 import { describe, expect, test } from "bun:test";
 import {
   blockSourcePath,

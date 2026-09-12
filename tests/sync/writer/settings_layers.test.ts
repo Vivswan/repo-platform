@@ -1,11 +1,5 @@
-// The settings layers read from the real files.yml and files/ tree: which
-// layer files a selection folds, what the merged labels and rulesets come
-// out as, and the topology check that fails closed. The layer files are
-// on-disk constants, and what they merge to is exactly what the fleet's
-// rendered documents carry, so the expectations below are the rosters
-// spelled out, never re-read from the files (a loop over an emptied layer
-// file would pass vacuously). The overlay and the override (layers 5 and
-// 6) are merge_settings_layers' tests.
+// The expectations are the fleet's rosters spelled out, never re-read from the layer files: a loop over an emptied layer file would pass vacuously.
+// The overlay and the override (layers 5 and 6) are merge_settings_layers.test.ts's.
 
 import { describe, expect, test } from "bun:test";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -99,12 +93,10 @@ describe("the managed rulesets", () => {
   const mainRuleTypes = (s: LayerSelection) => mainRules(s).map((r) => r.type);
 
   test("the fleet protection rulesets are NOT in these layers", () => {
-    // main and non-bypassable PROTECTION rules live in the override, which
-    // merges above the overlay. The public overlay's main ENTRY carries
-    // only the code_quality rule and the public-only copilot_code_review
-    // auto-request; the private side contributes no ruleset. The
-    // baseline's pr-title ruleset IS here and renders on every visibility,
-    // so the disabled deselection heal reaches every repo.
+    // The main and non-bypassable PROTECTION rules live in the override, which merges above these layers;
+    // the private side contributes no ruleset of its own.
+    //   pr-title  -> the baseline's, on every visibility, so the disabled deselection heal reaches every repo
+    //   main      -> the public overlay's entry alone: the code_quality rule and the public-only copilot_code_review auto-request
     expect(rulesetNames(selection())).toEqual(["pr-title", "main"]);
     expect(mainRuleTypes(selection())).toEqual(["code_quality", "copilot_code_review"]);
     expect(rulesetNames(selection({ private: true }))).toEqual(["pr-title"]);

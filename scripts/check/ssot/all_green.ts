@@ -1,7 +1,3 @@
-// Rules holding the all-green verdict together: the authored gating-job
-// rosters for ci.yml and fleet-ci.yml, the gate check's name, and the local
-// check chain that mirrors CI.
-
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
@@ -20,13 +16,6 @@ import type { Rule } from "./rule_roster.ts";
 export const CHECK_RUN_LOOKUP =
   "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}";
 
-/** The predicate's declared check name, read from the AST: the single
- *  top-level `export const CHECK_NAME` declaration whose value is a
- *  plain string literal. A look-alike inside a comment, a string, or a
- *  multiline template is not a declaration node and can never be the one
- *  found; a declaration rewritten to any non-literal shape (a
- *  concatenation, a join) throws anchor-lost rather than passing on a
- *  value the pin cannot see whole. */
 export function declaredCheckName(source: string): string {
   return constStringValue(source, "CHECK_NAME", {
     where: "all_green.ts",
@@ -38,9 +27,6 @@ export function declaredCheckName(source: string): string {
 export const ALL_GREEN_ACTION = "actions/all-green/action.yml";
 const JUDGE_STEP = "Judge every needed result";
 
-/** The judge step's run block, off the parsed action: the one bash the
- *  gate executes and the substitution ban audits. A renamed or reshaped
- *  step throws anchor-lost rather than auditing nothing. */
 export function judgeRunBlock(actionText: string): string {
   const action = asRecord(parseYaml(actionText), ALL_GREEN_ACTION);
   const steps = asRecord(action.runs ?? {}, `${ALL_GREEN_ACTION} runs`).steps;
@@ -53,12 +39,8 @@ export function judgeRunBlock(actionText: string): string {
   return judge.run;
 }
 
-/** The lines of a bash script whose command substitution sits anywhere
- *  but opening a plain assignment (`var="$(...)"`, or `if ! var="$(...)";
- *  then`, where the status IS the tested thing), as `line:text`. Inside
- *  [ ], [[ ]], test, or case words a substitution is errexit-exempt, so
- *  a crashing probe reads as empty and the guard falls OPEN; `$((...))`
- *  runs no command. Comment lines are skipped. */
+/** Inside [ ], [[ ]], test, or case words a substitution is errexit-exempt, so a crashing probe reads as empty and the guard falls OPEN.
+ *  `if ! var="$(...)"; then` is allowed because the status IS the tested thing; `$((...))` runs no command. */
 export function bannedSubstitutions(script: string): string[] {
   const offenders: string[] = [];
   script.split("\n").forEach((line, index) => {
@@ -78,9 +60,7 @@ export function bannedSubstitutions(script: string): string[] {
   return offenders;
 }
 
-/** The judge block's errexit discipline: `set -euo pipefail` first (the
- *  ban below assumes errexit), then no substitution outside a plain
- *  assignment. Pure, for the forcing tests. */
+/** The substitution ban assumes errexit, so `set -euo pipefail` must come first. */
 export function judgeSubstitutionMismatches(actionText: string): Mismatch[] {
   const file = `${ALL_GREEN_ACTION} step '${JUDGE_STEP}'`;
   const run = judgeRunBlock(actionText);
@@ -108,8 +88,6 @@ export function judgeSubstitutionMismatches(actionText: string): Mismatch[] {
   return mismatches;
 }
 
-/** Transitively expand a package.json script through its `bun run X` calls;
- *  returns the concatenated bodies and every script name reached. */
 export function expandCheckChain(
   scripts: Record<string, string>,
   entry: string,
@@ -127,14 +105,9 @@ export function expandCheckChain(
   return { text: bodies.join("\n"), names };
 }
 
-/** Every gating job in this repository's ci.yml, by job id: the authored
- *  twin of the all-green job's needs list (the all-green-roster rule holds
- *  the sides together). The run-time gate judges whatever its needs name,
- *  so a job deleted from ci.yml AND the needs list would stop gating with
- *  nothing to notice; this roster is where that deletion becomes loud.
- *  Adding or removing a gating job means editing both, deliberately, in one
- *  change. Jobs downstream of the gate (post-green) are the one exemption;
- *  every other job gates. */
+/** The run-time gate judges whatever its needs name, so a job deleted from ci.yml AND the needs list would stop gating with nothing to notice;
+ *  this roster is where that deletion becomes loud (the all-green-roster rule). Adding or removing a gating job means editing both in one change;
+ *  jobs downstream of the gate are the one exemption. */
 export const ALL_GREEN_ROSTER = [
   "actionlint",
   "gitleaks",
@@ -163,13 +136,7 @@ export const ALL_GREEN_ROSTER = [
   "trivy",
 ];
 
-/** Set comparison between an authored roster and a gating-job list.
- *  Both directions are load-bearing: a gating job missing from the
- *  roster is a gate the roster never vouched for, and a roster entry with
- *  no job is a REMOVED gate - the sneaky case, where deleting the job
- *  would otherwise change nothing the gate can see. Callers hand in the
- *  GATING job list (the gate's own and downstream jobs already
- *  excluded). */
+/** Callers hand in the GATING job list, the gate's own and downstream jobs already excluded. */
 export function rosterMismatches(
   roster: string[],
   gating: string[],
@@ -207,14 +174,6 @@ export function rosterMismatches(
   return mismatches;
 }
 
-/** The meta-check gate's shape over this repository's parsed ci.yml against
- *  the authored roster. The all-green JOB's own check run is the ruleset's
- *  required check, so it must exist, carry exactly `if: always()` (a failed
- *  dependency must FAIL the gate, not skip it), need EXACTLY the roster (a
- *  dropped needs entry un-gates a job that keeps running), and judge through
- *  the shared action. Gating jobs stay unconditional and un-renamed (a
- *  skipped RESULT stands down; conditions go on steps); downstream jobs are
- *  exempt from the roster but must spell out the gate's result. Pure, for the forcing tests. */
 export function allGreenGateMismatches(
   ci: Record<string, unknown>,
   roster: string[],
@@ -279,8 +238,6 @@ export function allGreenGateMismatches(
       got: `name: ${String(gateRecord.name)}`,
     });
   }
-  // A matrix would suffix the job's check-run names (all-green (x)),
-  // and the ruleset requires the exact context.
   if (gateRecord.strategy !== undefined) {
     mismatches.push({
       file: `${site.jobsFile} job 'all-green'`,
@@ -289,10 +246,6 @@ export function allGreenGateMismatches(
       got: "a strategy key",
     });
   }
-  // The judgment step: the shared action, with the needs context wired
-  // in - without the input the action judges nothing. No step in the
-  // gate job may carry a condition or failure softening: a skipped or
-  // continue-on-error'd judgment is a green check over an unjudged run.
   const steps = (gateRecord.steps as Record<string, unknown>[] | undefined) ?? [];
   for (const step of steps) {
     if (step.if !== undefined || step["continue-on-error"] !== undefined) {
@@ -323,9 +276,6 @@ export function allGreenGateMismatches(
   }
   for (const name of gating) {
     const job = asRecord(jobs[name] ?? {}, name);
-    // The meta-check treats a skipped result as standing down, so a
-    // job-level `if:` on a gating job fails OPEN; event conditions go on
-    // steps.
     if (job.if !== undefined) {
       mismatches.push({
         file: `${site.jobsFile} job '${name}'`,
@@ -344,13 +294,9 @@ export function allGreenGateMismatches(
   }
   for (const name of downstream) {
     const condition = String(asRecord(jobs[name] ?? {}, name).if ?? "");
-    // The gate clause must be present AND undefeatable, so the condition
-    // is an &&-chain drawn from a closed alphabet: any clause outside it
-    // (an || arm, always()/failure(), a chained or parenthesized
-    // comparison such as `(true && <gate>) == false`) is refused whole.
-    // `!cancelled()` is the one status function in the alphabet: it only
-    // narrows, and a leg ordered behind a sibling it does not gate on
-    // needs it to run past that sibling's red or skip.
+    // `(true && <gate>) == false` is why the chain is matched clause by clause against a closed alphabet.
+    // `!cancelled()` is the one status function in it: it only narrows, and a leg ordered behind a sibling
+    // it does not gate on needs it to run past that sibling's red or skip.
     const clauses = condition.split("&&").map((clause) => clause.trim());
     if (
       !clauses.includes(DOWNSTREAM_GATE_CLAUSE) ||
@@ -369,15 +315,6 @@ export function allGreenGateMismatches(
   return mismatches;
 }
 
-/** The managed skeleton's gate, judged on the parsed document: `all-green`
- *  needs exactly the two callers and judges through the published action
- *  under `if: always()`; the `ci` caller is unconditional and `checks`
- *  skips only on the schedule (the schedule run is the fleet callers');
- *  `nightly` runs on the schedule alone and gates nothing; every other job
- *  needs `all-green` (directly or through a job that does) and every job
- *  needing it directly spells the gate clause in its condition. Pure, for
- *  the forcing tests: a skeleton with `needs: [checks]` would let a green
- *  checks job vouch for a red fleet run. */
 export function skeletonGateMismatches(
   skeleton: Record<string, unknown>,
   jobsFile: string = SKELETON_SOURCE,
@@ -495,9 +432,6 @@ export function skeletonGateMismatches(
       });
     }
     if (needsOf(name).includes("all-green")) {
-      // The same closed alphabet as the operator's gate: an &&-chain
-      // whose every clause is a known narrowing, so an || arm or a status
-      // function cannot release the leg off a red gate.
       const clauses = condition(name)
         .split("&&")
         .map((clause) => clause.trim());
@@ -516,9 +450,6 @@ export function skeletonGateMismatches(
   return mismatches;
 }
 
-/** The clauses a skeleton leg's `if:` may be composed of, joined by `&&`
- *  only: the gate clause, the main-push scoping, `!cancelled()`, the hook's
- *  result, and the module tests on the plan's compact JSON output. */
 const SKELETON_CLAUSES: readonly RegExp[] = [
   /^needs\.all-green\.result == 'success'$/,
   /^needs\.post-green\.result == 'success'$/,
@@ -528,12 +459,8 @@ const SKELETON_CLAUSES: readonly RegExp[] = [
   /^!?contains\(needs\.ci\.outputs\.modules, '"[a-z-]+"'\)$/,
 ];
 
-/** The clause every downstream job's condition must carry. */
 export const DOWNSTREAM_GATE_CLAUSE = "needs.all-green.result == 'success'";
 
-/** Every clause a downstream job's `if:` may be composed of, joined by
- *  `&&` only: the gate clause, the main-push scoping, and `!cancelled()`
- *  for a leg with order edges. A new clause joins here deliberately. */
 export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
   DOWNSTREAM_GATE_CLAUSE,
   "!cancelled()",
@@ -541,10 +468,7 @@ export const DOWNSTREAM_CLAUSES: ReadonlySet<string> = new Set([
   "github.ref == 'refs/heads/main'",
 ]);
 
-/** Every gating job in fleet-ci.yml, by job id (ALL_GREEN_ROSTER's fleet
- *  counterpart): a job deleted there stops gating the whole fleet with no
- *  per-repo diff. The seven base checks are STEPS of base-checks (shape test);
- *  plan is the first job, whose outputs every other job keys on. */
+/** A job deleted from fleet-ci.yml stops gating the whole fleet with no per-repo diff. The base checks are STEPS of base-checks, not jobs. */
 export const FLEET_CI_ROSTER = [
   "plan",
   "validate-managed-files",
@@ -563,15 +487,12 @@ export const FLEET_CI_ROSTER = [
 
 export const FLEET_CI_SOURCE = ".github/workflows/fleet-ci.yml";
 
-/** fleet-ci.yml's jobs by id, off the file text: the one parse every fleet-ci rule shares. */
 export function fleetCiJobs(text: string): Record<string, unknown> {
   return ciJobs(asRecord(parseYaml(text), FLEET_CI_SOURCE), FLEET_CI_SOURCE);
 }
 
-/** The plan job carries no job-level `if:`.
- *  On a schedule run the skeleton's `checks` job skips (files/base/.github/workflows/ci.yml) and every other fleet-ci job stands down, codeql excepted on its weekly day.
- *  plan's success is then the one result the all-green gate can count on, and the gate fails closed on an all-skipped run.
- *  A missing plan job is the roster rule's finding, not this one's. Pure, for the forcing tests. */
+/** On a schedule run the skeleton's `checks` job skips and every other fleet-ci job stands down (codeql excepted on its weekly day),
+ *  so plan's success is the one result keeping the all-green gate from failing closed. A missing plan job is the roster rule's finding. */
 export function planUnconditionalMismatches(text: string): Mismatch[] {
   const plan = fleetCiJobs(text).plan;
   if (plan === undefined) return [];
@@ -587,11 +508,7 @@ export function planUnconditionalMismatches(text: string): Mismatch[] {
   ];
 }
 
-/** Every job in fleet-nightly.yml, by job id: the schedule-only leg the
- *  skeleton's `nightly` caller runs beside fleet-ci's schedule run (where
- *  only plan and, on the weekly day, codeql run). Not a gate - nothing
- *  here feeds all-green - but a job deleted here stops the fleet's nightly
- *  scan with no per-repo diff. */
+/** Not a gate (nothing here feeds all-green), but a job deleted from fleet-nightly.yml stops the fleet's nightly scan with no per-repo diff. */
 export const FLEET_NIGHTLY_ROSTER = ["plan", "trivy-nightly"];
 
 /** The skeleton ci.yml the writer ships to every fleet repository, one
@@ -614,10 +531,8 @@ export const FLEET_CALLERS: Record<string, string> = {
   ".github/workflows/reusable-site.yml": "site",
 };
 
-/** The operator's own call chain, each called workflow with the job that calls it: ci.yml's
- *  post-green job calls post-green.yml, whose legs call the fleet writers (the writer roster's
- *  callerJob, so a newly registered writer is checked without a second listing). The same
- *  expansion-time check applies, so one scope over a ceiling here fails every main run. */
+/** Derived from FLEET_WRITERS so a newly registered writer is checked without a second listing;
+ *  one scope over a ceiling here fails every main run. */
 export const OPERATOR_CALLERS: Record<string, { rel: string; job: string }> = {
   [POST_GREEN_REL]: { rel: ".github/workflows/ci.yml", job: "post-green" },
   ...Object.fromEntries(
@@ -630,15 +545,10 @@ export const OPERATOR_CALLERS: Record<string, { rel: string; job: string }> = {
 
 const PERMISSION_RANK: Record<string, number> = { none: 0, read: 1, write: 2 };
 
-/** A called workflow's job grants against its caller job's grant, judged on
- *  the parsed documents (exported for the forcing tests). GitHub checks
- *  every nested job's permissions against the caller's when the call is
- *  EXPANDED, before any nested `if` runs, so one scope over the ceiling
- *  fails every caller's run at once - a skipped job included. A job
- *  without its own block inherits the called workflow's top-level block
- *  (none: the caller's, which fits by definition); a scope the caller
- *  omits is `none` there. Shorthand grants (read-all, write-all) on either
- *  side are refused: the ceiling must be spelled out per scope. */
+/** GitHub checks nested job grants when the call is EXPANDED, before any nested `if` runs, so a skipped job over the ceiling fails the run too.
+ *    job without its own block   -> inherits the called workflow's top-level block; none there means the caller's, which fits by definition
+ *    scope the caller omits      -> none
+ *    read-all / write-all        -> refused on either side: the ceiling must be spelled out per scope */
 export function callerCeilingMismatches(
   called: { rel: string; text: string },
   caller: { rel: string; job: string; permissions: unknown },
@@ -685,7 +595,6 @@ export function callerCeilingMismatches(
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const allGreenRules: Rule[] = [
   {
     name: "local-gates",
@@ -694,8 +603,7 @@ export const allGreenRules: Rule[] = [
       const scripts = packageScripts();
       const chain = expandCheckChain(scripts, "check");
       const jobs = ciJobs(repoCi(), "ci.yml");
-      // The verdict roster IS the gating-job list now (the all-green-roster
-      // rule pins it against ci.yml's actual jobs).
+      // ALL_GREEN_ROSTER stands in for the needs list: the all-green-roster rule pins them equal.
       const needs = ALL_GREEN_ROSTER;
       for (const jobName of needs) {
         const job = asRecord(jobs[jobName], jobName);
@@ -743,14 +651,8 @@ export const allGreenRules: Rule[] = [
           const job = asRecord(jobs[jobName], jobName);
           return (
             ((job.steps as Record<string, unknown>[] | undefined) ?? [])
-              // A `continue-on-error` step fails OPEN: its command runs but a
-              // non-zero exit is swallowed, so the gate it was meant to be is
-              // no gate. Drop those lines from the gating set - a required
-              // command sitting on a suppressed step is the same missing gate
-              // as a deleted step. (A plain `if:` is NOT rejected here: ci.yml
-              // steps legitimately carry event conditions like
-              // `if: github.event_name == 'pull_request'`, the repo
-              // convention for keeping the JOB unconditional.)
+              // A continue-on-error step fails OPEN (its non-zero exit is swallowed), so its lines are no gate.
+              // A plain `if:` stays: ci.yml steps carry event conditions, the convention for keeping the JOB unconditional.
               .filter((step) => step["continue-on-error"] === undefined)
               .flatMap((step) => [
                 // `uses` counts too: a gate that moved into a composite action
@@ -790,30 +692,19 @@ export const allGreenRules: Rule[] = [
     },
   },
   {
-    // The gate's shape at authoring time: the all-green job's needs list,
-    // ci.yml's gating jobs, and the authored ALL_GREEN_ROSTER held
-    // together in every direction (allGreenGateMismatches has the model).
-    // This is where a deleted or un-needed gate goes loud.
     name: "all-green-roster",
     run: () => allGreenGateMismatches(repoCi(), ALL_GREEN_ROSTER),
   },
   {
-    // The managed skeleton every fleet repository runs: its gate must need
-    // both callers, judge through the published action under always(),
-    // and every leg after it must ride behind the gate clause.
     name: "skeleton-gate",
     run: () => skeletonGateMismatches(skeletonCi()),
   },
   {
-    // Every judge probe is a jq call under errexit; a substitution outside
-    // a plain assignment is where a crashed jq would read as empty.
     name: "all-green-judge-substitutions",
     run: () => judgeSubstitutionMismatches(read(ALL_GREEN_ACTION)),
   },
   {
-    // fleet-ci.yml's jobs against FLEET_CI_ROSTER, both directions. Job-level
-    // `if:` is the design here (a skipped job leaves the caller green); info-*
-    // ids, an all-green job, name:, and job-level continue-on-error are banned.
+    // Job-level `if:` is allowed here, unlike the operator's gating jobs: a skipped fleet-ci job leaves the caller green.
     name: "fleet-ci-roster",
     run: () => {
       const rel = FLEET_CI_SOURCE;
@@ -861,15 +752,10 @@ export const allGreenRules: Rule[] = [
     },
   },
   {
-    // plan is the one fleet-ci job that runs on every schedule run; gating
-    // it off would turn every managed repository's nightly all-green red.
     name: "fleet-ci-plan-unconditional",
     run: () => planUnconditionalMismatches(read(FLEET_CI_SOURCE)),
   },
   {
-    // fleet-nightly.yml's jobs against FLEET_NIGHTLY_ROSTER, both directions:
-    // the split-off nightly leg has no caller result anyone judges, so a
-    // deleted job there would go quiet fleet-wide.
     name: "fleet-nightly-roster",
     run: () => {
       const rel = ".github/workflows/fleet-nightly.yml";
@@ -881,9 +767,6 @@ export const allGreenRules: Rule[] = [
     },
   },
   {
-    // Every called workflow's job grants under its caller's: one scope over
-    // the ceiling fails every fleet run (or every main run, for the operator's
-    // own chain) at expansion, so the check runs here, before the edit ships.
     name: "fleet-caller-ceilings",
     run: () => {
       const callers = ciJobs(skeletonCi(), SKELETON_SOURCE);
@@ -912,14 +795,7 @@ export const allGreenRules: Rule[] = [
     },
   },
   {
-    // The gate check's NAME, pinned once as data: the string the ruleset
-    // REQUIRES and the job id whose check run CARRIES it must be provably the
-    // same at authoring time, or a renamed job leaves branch protection
-    // waiting forever while every job stays green. Its independently-authored
-    // homes: the shared predicate's CHECK_NAME (which must also feed its own
-    // check-run lookup), the all-green JOB id in this ci.yml and in the
-    // managed one (a job's check run is named by its id; the roster rules
-    // pin that neither carries name:), the override layer, and docs/all-green.md.
+    // A renamed gate job leaves branch protection waiting forever while every job stays green, so the name is pinned across its homes here.
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -947,8 +823,6 @@ export const allGreenRules: Rule[] = [
         );
       }
 
-      // The job whose check run carries the name, at both sources, on the
-      // parsed documents.
       for (const [ci, where] of [
         [repoCi(), ".github/workflows/ci.yml"],
         [skeletonCi(), SKELETON_SOURCE],

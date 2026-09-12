@@ -1,6 +1,3 @@
-// The placeholder grammar: listed names substitute, Actions expressions
-// ride through, unknown names are reported and refused.
-
 import { describe, expect, test } from "bun:test";
 import {
   blocksAnchorProblem,

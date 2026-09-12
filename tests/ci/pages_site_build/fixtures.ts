@@ -67,8 +67,6 @@ export interface BuildResult {
   stderr: string;
 }
 
-/** One build.ts run over `workspace` into `runner.alias`; `env` carries
- *  the mode (CHECK, SITE_DIR, CONFIG, CUSTOM_DOMAIN). */
 export function buildSite(
   workspace: string,
   repository: string,

@@ -1,6 +1,3 @@
-// Entry selection: the four when clauses and the module resolution that
-// drops unknown names instead of failing.
-
 import { describe, expect, test } from "bun:test";
 import { resolveModules } from "../../../.github/scripts/sync/writer/select.ts";
 import { applies, parseFilesConfig, selectEntries } from "../../../actions/plan/files_config.ts";

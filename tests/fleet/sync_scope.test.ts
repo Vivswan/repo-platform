@@ -1,6 +1,3 @@
-// The scope grammar shared by the directive parser and both selectors, as
-// whole parse results, whole selection verdicts, and the refusal texts.
-
 import { describe, expect, test } from "bun:test";
 import {
   classifyEntry,

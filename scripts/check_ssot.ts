@@ -1,22 +1,14 @@
 #!/usr/bin/env bun
 
-// Single-source-of-truth drift checker: facts this repo intentionally states
-// in more than one INDEPENDENTLY-authored place (the fleet workflows' job
-// rosters, the settings and label rosters, doc-quoted constants, the
-// delivery pins the writer's sources carry) are compared here so drift
-// fails CI instead of rotting silently. Nothing here compares a copy to
-// the source it was copied from: the writer copies files whole, and the
-// end-to-end sync test proves that copy.
+// Facts this repo states in more than one INDEPENDENTLY-authored place are compared here so drift fails CI instead of rotting silently.
+// Nothing here compares a copy to the source it was copied from: the writer copies files whole, and the end-to-end sync test proves that copy.
 //
-// The rules are a flat named list assembled from scripts/check/ssot/. Every
-// grep-shaped extraction goes through mustMatch(), so a rule whose anchor
-// text disappears fails loudly instead of vacuously; structure read from
-// TypeScript SOURCES comes off the AST via scripts/lib/ts_extract.ts under
-// the same contract, so a comment, string, or template decoy can neither
-// satisfy an anchor nor hide the real declaration.
+// Every rule's extraction fails loudly when its anchor disappears, never vacuously:
+//   grep-shaped text    -> mustMatch() (scripts/check/ssot/comparison.ts)
+//   TypeScript sources  -> the AST via scripts/lib/ts_extract.ts, so a comment, string, or template decoy
+//                          can neither satisfy an anchor nor hide the declaration
 //
-// Usage: bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y"
-//                                    # lines and exits 1 on any mismatch
+// Usage: bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y" lines and exits 1 on any mismatch
 
 import { allGreenRules } from "./check/ssot/all_green.ts";
 import type { Mismatch } from "./check/ssot/comparison.ts";
@@ -35,8 +27,6 @@ import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
 import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
 import { toolchainRules } from "./check/ssot/toolchain.ts";
 
-/** Every rule, one group module at a time; ruleRosterMismatches audits
- *  the assembled list against RULE_ROSTER before the loop runs. */
 const rules: Rule[] = [
   ...toolchainRules,
   ...deliveryPinRules,

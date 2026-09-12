@@ -1,13 +1,8 @@
-// Pins this repository's OWN build-branch and stable-tag protection in
-// its settings overlay, the same way merge_settings_layers.test.ts pins the override
-// layer's protection policy. The `build` ref is executable fleet-wide -
-// rendered workflows pin `uses: ...@build` and run its actions/ subtree
-// directly - so a settings edit that drops it from the append-only
-// ruleset must fail here, loudly. Also pins, fleet-wide: no settings
-// layer may declare an Integration bypass actor, because GitHub rejects
-// one on a user-owned repository's ruleset (POST /rulesets, 422 "Actor
-// GitHub Actions integration must be part of the ruleset source or owner
-// organization") and the settings apply dies at ruleset creation.
+// The `build` ref is executable fleet-wide (rendered workflows pin `uses: ...@build` and run its actions/ subtree directly),
+// so a settings edit that drops it from the append-only ruleset must fail here, loudly.
+// No settings layer may declare an Integration bypass actor: GitHub rejects one on a user-owned repository's ruleset
+// (POST /rulesets, 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization")
+// and the settings apply dies at ruleset creation.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";

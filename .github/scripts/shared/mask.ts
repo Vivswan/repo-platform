@@ -5,7 +5,6 @@
  *  inside too many innocent words for a substring masker. */
 export const MIN_MASKED_NAME = 4;
 
-/** Every spelling of `slug` a log line could carry, deduplicated. */
 export function maskForms(slug: string): string[] {
   const name = slug.split("/").pop() ?? slug;
   const forms = [

@@ -1,24 +1,11 @@
-// The pr-title module's natively-required check at its three sources: the
-// workflow's trigger shape and job id, the baseline's disabled ruleset, and
-// the module settings layer's enforcement flip.
-
 import { parse as parseYaml } from "yaml";
 import { canonical, type Mismatch } from "./comparison.ts";
 import { asRecord, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The pr-title module's managed workflow and settings layer, as the writer copies them. */
 export const PR_TITLE_WORKFLOW = "files/pr-title/.github/workflows/pr-title.yml";
 export const PR_TITLE_LAYER = "files/pr-title/settings.yml";
 
-/** The pr-title module's natively-required check, pinned at its three sources.
- *  The workflow runs on every judged event PLUS synchronize (a required check
- *  must exist at the PR's NEWEST head, or the merge box waits forever), its job
- *  id is the ruleset's check-run name, and the semantic-title action is the one
- *  unconditional step (a replaced step is a green no-op). The BASELINE holds the
- *  ruleset DISABLED, context pinned to the GitHub Actions app (integration_id
- *  15368), so deselection heals via the ordinary apply; the MODULE layer holds
- *  only the enforcement flip, in its own ruleset (a same-type rule REPLACES). */
 export function prTitleWorkflowMismatches(
   workflowText: string,
   baselineText: string,
@@ -48,10 +35,6 @@ export function prTitleWorkflowMismatches(
       });
     }
   }
-  // A display name would rename the check run away from the required
-  // context, and a job- or step-level condition (or a swapped-out step)
-  // would leave a required check that judges nothing; the job census
-  // above pins the id, these pin the body.
   if (lines.some((line) => /^ {4}name:/.test(line))) {
     mismatches.push({
       file: wfRel,
@@ -84,7 +67,6 @@ export function prTitleWorkflowMismatches(
       got: `${actionCount} occurrences`,
     });
   }
-  // The baseline's disabled full shape.
   const baseline = asRecord(parseYaml(baselineText), baselineRel);
   const baselineRulesets = (baseline.rulesets ?? []) as Record<string, unknown>[];
   const ruleset = baselineRulesets.find((entry) => entry.name === "pr-title");
@@ -105,8 +87,6 @@ export function prTitleWorkflowMismatches(
       got: String(ruleset.enforcement ?? "missing"),
     });
   }
-  // Applicability: an active ruleset requiring the right context still
-  // gates nothing if it targets tags or the wrong ref.
   if (ruleset.target !== "branch") {
     mismatches.push({
       file: baselineRel,
@@ -149,9 +129,6 @@ export function prTitleWorkflowMismatches(
       got: contexts.join(", ") || "no required_status_checks rule",
     });
   }
-  // The module layer: exactly the enforcement flip. Any other key on the
-  // entry could shadow the baseline's shape (a rules list of the same
-  // type REPLACES the baseline's rule in the merge).
   const moduleLayer = asRecord(parseYaml(moduleLayerText), moduleRel);
   const moduleEntries = (moduleLayer.rulesets ?? []) as Record<string, unknown>[];
   const flip = moduleEntries.find((entry) => entry.name === "pr-title");
@@ -170,13 +147,8 @@ export function prTitleWorkflowMismatches(
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const prTitleRules: Rule[] = [
   {
-    // The pr-title module's natively-required check at its sources
-    // (prTitleWorkflowMismatches has the model): the workflow's trigger
-    // shape, the job id the ruleset requires, and the module settings
-    // layer's pinned context.
     name: "pr-title-workflow",
     run: () =>
       prTitleWorkflowMismatches(

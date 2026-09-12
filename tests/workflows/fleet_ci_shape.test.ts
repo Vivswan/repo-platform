@@ -1,13 +1,7 @@
-// The single-call fleet CI's shape contract: fleet-ci.yml is the fleet's
-// gate-job home, so the properties every managed repository used to prove
-// per render are pinned here once (this suite absorbed the retired
-// per-repository validate/yamllint job-shape suite - the reporting lives in
-// the validate-managed-files action, pinned by its own suite). The
-// validate-managed-files job and the base-checks steps are THIN callers of their @build actions
-// (the predicates live in the actions and are their suites' job to
-// police); module- and visibility-conditioned jobs carry job-level guards
-// (a skipped job stands down in the all-green verdict); and no job may
-// sleep - the gate waits by failing fast, never on a billed runner.
+// fleet-ci.yml is the fleet's gate-job home, so the shape every managed repository relies on is pinned here once;
+// only the wiring is judged, since the predicates live in the @build actions and their own suites police them.
+//   validate-managed-files job, base-checks steps  -> thin callers of their actions
+//   module- and visibility-conditioned jobs        -> job-level guards; a skipped job stands down in the all-green verdict
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -189,8 +183,6 @@ describe("fleet-ci.yml", () => {
     for (let failing = 0; failing < steps.length - 1; failing++) {
       expect(runsAfterFailure(failing)).toEqual(steps.map(() => true));
     }
-    // Each base tool is pinned exactly once in the whole workflow: the
-    // per-visibility fan-out jobs are gone, and none may come back.
     const everyUses = Object.values(fleetCi.jobs).flatMap((job) =>
       (job.steps ?? []).map((step) => step.uses ?? ""),
     );
@@ -329,11 +321,11 @@ describe("fleet-ci.yml", () => {
     const hasNpmLock = "hashFiles('package-lock.json', 'npm-shrinkwrap.json') != ''";
     expect(job?.if).toBe(`(${bun} || ${node}) && ${SKIP_ON_SCHEDULE}`);
     const steps = job?.steps ?? [];
-    // A repository selecting both modules has bun.lock, not package-lock.json:
-    // the package-manager choice is resolved once, on the bun module. bun's
-    // frozen install accepts a missing lockfile, npm ci refuses; setup-node's
-    // cache is off as in every other setup-node step (it fails on a
-    // package.json naming a package manager with no lockfile).
+    // A repository selecting both modules is a bun repository (bun.lock, no package-lock.json),
+    // so the package manager is resolved once, on the bun module.
+    //   bun install --frozen-lockfile  -> accepts a missing lockfile, so beyond the module clause only package.json gates it
+    //   npm ci                         -> refuses one, so the npm lockfile gates it too
+    //   setup-node cache               -> off, as in every setup-node step: it fails on a package.json naming a package manager with no lockfile
     expect(steps.map((step) => [step.uses ?? step.run, step.if, step.id])).toEqual([
       [expect.stringContaining("actions/checkout@"), undefined, undefined],
       [expect.stringContaining("oven-sh/setup-bun@"), bun, undefined],
@@ -487,13 +479,10 @@ describe("fleet-ci.yml", () => {
     expect(trivy?.steps?.[1]?.with).toBeUndefined();
   });
 
-  // The grant the skeleton's `ci` caller carried before the nightly scan
-  // split out; GitHub rejects the whole call when any nested job asks for
-  // a scope above the caller's, before the job's condition runs, so no
-  // job here may (the nightly scan's issues: write is why
-  // fleet-nightly.yml exists). The check-ssot rule judges the live
-  // skeleton; this pins the old grant so a widened caller cannot let a
-  // job's grant grow unnoticed.
+  // GitHub rejects the whole reusable call when any nested job asks for a scope above the caller's,
+  // before the job's condition runs, so no job here may exceed the skeleton's `ci` grant
+  // (the nightly scan's issues: write is why fleet-nightly.yml is a separate call).
+  // The check-ssot rule judges the live skeleton; this copy pins the grant so a widened caller cannot let a job's grant grow unnoticed.
   const CI_CALLER = {
     rel: "ci.yml",
     job: "ci",

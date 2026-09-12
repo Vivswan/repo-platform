@@ -1,5 +1,3 @@
-// The site-config parity model (scripts/check/ssot/site_config.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";

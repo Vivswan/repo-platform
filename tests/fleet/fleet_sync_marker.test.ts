@@ -1,8 +1,3 @@
-// The directives grammar as one table of whole messages and FULL parse
-// results; the main() rows run the script on scratch clones, with `gh`
-// stubbed to answer each commit's pull request lookup from a file, and
-// assert the whole outcome (exit code, GITHUB_OUTPUT, every log line).
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

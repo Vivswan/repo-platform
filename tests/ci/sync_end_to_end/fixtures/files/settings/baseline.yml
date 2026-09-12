@@ -1,4 +1,3 @@
-# The fixture's fleet baseline: two labels and the disabled pr-title ruleset.
 repository:
   has_wiki: false
   allow_merge_commit: true

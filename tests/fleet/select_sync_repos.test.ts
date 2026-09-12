@@ -10,21 +10,12 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
-// End-to-end harness for the sync fan-out selector, stub-gh/curl style
-// (see select_settings_repos.test.ts). Personas cover adoption and its
-// skip notice, revoked push access (a public repo stays discovered and
-// prints one notice per plan whose scope selects it; a private one
-// vanishes from GET /user/repos, so the stubs admit hidden-gone only in
-// the control run), the operator repository (discovered, never a row),
-// and PRIVATE repos, which the public log never names: their skips are
-// counted, and the rows file alone carries their slugs.
-//
-// Two personas join only the modules-filter runs (they would select in
-// every other run and shift each exact row list): badlist (public, its
-// modules list unreadable: a filter cannot judge it, so it is reported by
-// slug and left out) and hidden-nomods (PRIVATE, the same defect, counted).
-// Declared selections: steady [uv, site], hidden-server [site,
-// release-please], every other adopted persona [uv].
+// End-to-end harness for the sync fan-out selector, stub-gh/curl style (see select_settings_repos.test.ts).
+// The personas carry the facts the stubs cannot show:
+//   PRIVATE ones            -> never reach the public log: skips counted, the rows file alone carries their slugs
+//   revoked push, public    -> stays discoverable and prints a notice
+//   revoked push, private   -> vanishes from GET /user/repos, so the stubs admit hidden-gone only in the control run
+//   badlist, hidden-nomods  -> unreadable modules list, so filter runs only: anywhere else they would select and shift each exact row list
 describe("select_sync_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
   const root = temp.dir("select-sync-");
@@ -388,11 +379,8 @@ describe("select_sync_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // The modules: filters, dispatched (the typed input arrives via the event
-  // payload). Whole outcome per case: every log line in row order, the
-  // rows, and the exit code; a filter judges each adopted candidate's
-  // declared list, reports (never skips) one it cannot read, counts the
-  // ones it leaves out, and admits a slug as typed.
+  // The modules: filters, dispatched (the typed input arrives via the event payload);
+  // a candidate whose declared list the filter cannot read is left out with a warning (naming it when public), never silently.
   const BADLIST_ROW = { repo: "Vivswan/badlist", private: false };
   const UNREADABLE = (display: string) =>
     `::warning::${display}: its .repo-platform.yml has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`;

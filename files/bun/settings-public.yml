@@ -1,16 +1,6 @@
 ---
-# The bun module's PUBLIC-only settings layer (layer 4 of the settings
-# merge, docs/settings.md): merged for a public repository that selects
-# the module.
-#
-# CodeQL analyzes this toolchain, so the main ruleset gains the
-# code_scanning rule. Rules of a same-name ruleset APPEND across layers
-# keyed by `type`, so this adds to the main ruleset that
-# files/settings/override.yml declares rather than replacing it, and a
-# repository selecting two analyzable toolchains contributes the rule
-# twice with identical content (the append dedupes by type). GitHub
-# rejects the rule on a private repository, which is why it is here and
-# not in the module's unconditional layer.
+# GitHub rejects the code_scanning rule on a private repository, so it lives in this PUBLIC-only layer (layer 4, docs/settings.md), not the module's unconditional one.
+# Rules of a same-name ruleset append across layers keyed by `type`: this adds to the main ruleset files/settings/override.yml declares, and two analyzable toolchains contribute the rule once.
 
 rulesets:
   - name: main

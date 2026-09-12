@@ -1,4 +1,3 @@
-# The fixture's private overlay: the private reporting label.
 labels:
   - name: settings-as-code-report
     color: "0e2a47"

@@ -1,5 +1,5 @@
-# repo-platform's own registration: the operator is a fleet member whose
-# settings its own settings-repos.yml manages, read from this checkout.
+# The operator's own registration: this repository is a settings target like any other, and
+# `bun run settings` renders its settings.yml from the modules here.
 # The sync never targets this repository (its files are the sources).
 modules:
   - bun

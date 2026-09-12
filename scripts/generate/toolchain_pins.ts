@@ -1,12 +1,5 @@
 #!/usr/bin/env bun
-// The toolchain version dotfiles, written from files.yml's module pins:
-// each pinned module's dotfile under files/<module>/ (the file the writer
-// copies into a repository selecting the module), the composite actions'
-// .bun-version beside every action.yml that calls the shared bun-setup
-// step (so an action never rides the CALLER's bun resolution), and this
-// repository's own .bun-version. Every pin must have the files entry that
-// delivers it, and no stray version dotfile may linger under files/ or
-// beside an action. --check reports drift without writing.
+// Each composite action calling the shared bun-setup step gets its own .bun-version so an action never rides the CALLER's bun resolution.
 //
 // Usage: bun scripts/generate/toolchain_pins.ts [--check]
 
@@ -24,7 +17,6 @@ export interface ToolchainPin {
   version: string;
 }
 
-/** files.yml's toolchain pins, in canonical module order. */
 export function toolchainPins(filesText: string, label = FILES_CONFIG): ToolchainPin[] {
   return pinsOf(parseFilesConfig(filesText, label));
 }
@@ -35,11 +27,7 @@ function pinsOf(config: FilesConfig): ToolchainPin[] {
   );
 }
 
-/** A dotfile the generator writes is only delivered when files.yml also
- *  lists it: each pin needs a `files` entry at its file, sourced from the
- *  module's copy. A pin renamed in one place and not the other would leave
- *  the writer copying the old dotfile forever. Returns one problem per
- *  undelivered pin. */
+/** A pin renamed in files.yml but not in its files entry would leave the writer copying the old dotfile forever. */
 export function undeliveredPins(config: FilesConfig): string[] {
   return pinsOf(config).flatMap((pin) => {
     const source = `${pin.module}/${pin.file}`;
@@ -59,11 +47,8 @@ export function undeliveredPins(config: FilesConfig): string[] {
   });
 }
 
-/** Version dotfiles under files/<module>/ that no pin names: a renamed or
- *  dropped pin leaves the old dotfile behind, and a files entry still
- *  listing it keeps delivering the stale version. A pin dotfile is known
- *  by its content (one version line, what pinFileContent writes), so a
- *  dotfile of any name is caught. The caller throws. */
+/** A renamed or dropped pin leaves the old dotfile behind, and a files entry still listing it keeps delivering the stale version;
+ *  matching by content rather than name catches a renamed dotfile too. */
 export function strayPinFiles(pins: ToolchainPin[], filesDir: string): string[] {
   const expected = new Set(pins.map((pin) => `${pin.module}/${pin.file}`));
   const strays: string[] = [];
@@ -86,8 +71,6 @@ export function pinFileContent(pin: ToolchainPin): string {
   return `${pin.version}\n`;
 }
 
-/** The bun module's pin, the single source the action-local and the
- *  repository's own .bun-version are written from. */
 export function bunToolchainPin(pins: ToolchainPin[]): ToolchainPin {
   const bun = pins.find((pin) => pin.module === "bun");
   if (bun === undefined) {
@@ -98,7 +81,6 @@ export function bunToolchainPin(pins: ToolchainPin[]): ToolchainPin {
   return bun;
 }
 
-/** Every dotfile the pins write, repo-relative, with its content. */
 export function pinOutputs(pins: ToolchainPin[], actionsDir: string): [string, string][] {
   const bun = bunToolchainPin(pins);
   return [
@@ -114,8 +96,6 @@ export function pinOutputs(pins: ToolchainPin[], actionsDir: string): [string, s
   ];
 }
 
-/** The dotfiles under `root` whose content is not what the pins write
- *  (a missing file counts), repo-relative with the expected content. */
 export function stalePinOutputs(pins: ToolchainPin[], root: string): [string, string][] {
   return pinOutputs(pins, join(root, "actions")).filter(([rel, content]) => {
     const path = join(root, rel);

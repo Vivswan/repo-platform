@@ -1,11 +1,5 @@
-# The end-to-end fixture's data file: one entry per class, blocks on a
-# split, a managed, and a starter entry (two modules declaring one block
-# value), a universal hook starter under .github/actions, a same-path pair
-# split by module conditions, a visibility-gated entry, two links, three
-# class flips (one from a hash-less record, which is held), the rendered
-# settings document over its overlay starters, and the retirements: clean,
-# edited, moved, a starter, a move to an unselected home, and a split file
-# with repository-owned content around its region.
+# The end-to-end fixture's files.yml, paired with the seeded checkout in tests/ci/sync_end_to_end.test.ts:
+# each entry and retirement exists for one state that test asserts.
 placeholders:
   - project_name
   - project_slug
