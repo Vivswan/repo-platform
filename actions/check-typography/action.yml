@@ -2,14 +2,9 @@ name: Check Typography
 description: >-
   Fails on typographic look-alike and invisible unicode characters (curly
   quotes, dash lookalikes, Trojan-Source bidi controls, VS Code's ambiguous
-  confusables). Per-repo exemptions via .typography-allow and
-  .typography-allow.local files listing relative path prefixes to skip.
-
-inputs:
-  path:
-    description: Directory to scan
-    required: false
-    default: "."
+  confusables) in the caller's checkout. Per-repo exemptions via
+  .typography-allow and .typography-allow.local files listing relative path
+  prefixes to skip.
 
 runs:
   using: composite
@@ -37,6 +32,5 @@ runs:
     - name: Check typography
       shell: bash
       env:
-        SCAN_PATH: ${{ inputs.path }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
-      run: '"$ACTION_BUN" "${{ github.action_path }}/check-typography.ts" "$SCAN_PATH"'
+      run: '"$ACTION_BUN" "${{ github.action_path }}/check-typography.ts"'

@@ -102,15 +102,12 @@ describe("fleet-ci.yml", () => {
       expect.stringContaining("repo-platform/actions/validate-managed-files@stable"),
       "run",
     ]);
-    // The token serves the sticky comment; the visibility is the plan's
-    // resolved output, so the validator and the plan select by one reading
-    // (the plan resolves it from the payload, or the API when the event
-    // carries no repository object).
+    // The action defaults the comment token to github.token; the visibility
+    // is the plan's resolved output, so the validator and the plan select by
+    // one reading (the plan resolves it from the payload, or the API when the
+    // event carries no repository object).
     expect(steps[1]?.id).toBe("validate");
-    expect(steps[1]?.with).toEqual({
-      "github-token": "${{ secrets.GITHUB_TOKEN }}",
-      "private": "${{ needs.plan.outputs.private }}",
-    });
+    expect(steps[1]?.with).toEqual({ private: "${{ needs.plan.outputs.private }}" });
     // The report action DEFERS the integrity verdict; the LAST step
     // re-raises it fail-closed, hence '!=': an output that resolved EMPTY
     // (a broken or renamed mapping inside the action) still re-raises -

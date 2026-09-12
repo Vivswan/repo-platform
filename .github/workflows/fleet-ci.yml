@@ -62,7 +62,6 @@ jobs:
       - uses: Vivswan/repo-platform/actions/validate-managed-files@stable
         id: validate
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           private: ${{ needs.plan.outputs.private }}
       # Fail-closed: != 'success' re-raises on 'failure' AND on an output
       # that resolved empty (a broken mapping must never read as green).
@@ -273,8 +272,7 @@ jobs:
     if: contains(fromJSON(needs.plan.outputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # vulnerability-alerts read is the Dependabot alerts API key; where
-    # the token cannot see alerts the action degrades to a skipped check.
+    # vulnerability-alerts read is the Dependabot alerts API key; without it the security gate fails.
     permissions:
       contents: read
       issues: read
