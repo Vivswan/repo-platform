@@ -43,12 +43,10 @@ bun .github/scripts/sync/writer/sync.ts \
 ## files.yml
 
 ```yaml
-placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, skills_dir, fuzzer_label]
+placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, fuzzer_label]
 modules:
   bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun], settings_layers: [settings.yml, settings-public.yml]}
-  node: {gitignore_sources: [Node], dependabot_ecosystems: [npm]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
-  skills: {skills_dir: {default: skills}}
   release-please: {}
 settings:
   baseline: files/settings/baseline.yml
@@ -76,13 +74,13 @@ retired:
 | Key | Meaning |
 | --- | --- |
 | `placeholders` | The placeholder names sources may use, each spelled as the name inside double braces. Each must be one the writer derives (`PLACEHOLDER_NAMES`). |
-| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. Any key is allowed; `blocks` entries name one of these keys. Two keys carry placeholder defaults: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder and `skills_dir: {default}` backs `skills_dir` (below). |
+| `modules.<name>` | A module and its data; the keys ARE the module roster, in the order the writer selects and the fleet plan lists. Any key is allowed; `blocks` entries name one of these keys. One key carries a placeholder default: `tracking_label: {key, default, ...}` backs the `<key>_label` placeholder (below). |
 | `files[].path` | The repository-relative path written. Clean paths only: no `..`, no empty segment, no `.git`. |
 | `files[].class` | `managed`, `split`, `starter`, or `link` (below). |
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
@@ -99,7 +97,7 @@ The loader refuses, all problems at once:
 - a `split` without `region`; `region` on a non-split entry; `target` on a non-link entry; a link with a `source` or `blocks`, without a `target`, or with a target that is absolute, leaves the repository, or is the link itself
 - a `source` outside `files/`, or one missing from the tree (block files included)
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
-- a listed `skills_dir` or `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
+- a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
 - an `overlay` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`
@@ -107,7 +105,7 @@ The loader refuses, all problems at once:
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
-- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires (a retired entry may leave; the probe above is its gate)
+- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires, starters excepted (a written starter is repo-owned, so a dropped one needs no retirement; a retired entry may leave, the probe above being its gate)
 
 ## files.yml reference
 
@@ -118,7 +116,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, over the `.github/settings.local.yml` overlay starter) |
 | `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
-| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, skills, fuzzer, and nightly starters |
+| `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, fuzzer, and nightly starters |
 | `link` | `CLAUDE.md` (to `AGENTS.md`), `.github/agents.md` and `.github/copilot-instructions.md` (to `../AGENTS.md`) |
 
 | `when` form | Used by |
@@ -132,7 +130,7 @@ The three links carry no `when`: every repository gets them.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source three toolchains declare is byte-identical in each, so it lands once |
+| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source two toolchains declare is byte-identical in each, so it lands once |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |
@@ -147,14 +145,13 @@ The three links carry no `when`: every repository gets them.
 | `gitignore_sources` | the github/gitignore templates and platform-authored sections the module adds (its `blocks` list) | the writer |
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
-| `skills_dir` | `{default}`: the skills directory the `skills_dir` placeholder and the plan's `skills-dir` output fall back to when the registration sets no `skills.dir` | the writer and the fleet plan |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
 | `settings_layers` | the settings layer files the module contributes (`settings.yml`, `settings-public.yml`, `settings-private.yml`), read from `files/<module>/` | the writer's settings render |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 
-Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
+Placeholders in use beyond the project block: `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
-A module with no files still appears under `modules` (`issue-templates`, `custom-license`) so a registration selecting it is known and a `when` can name it.
+A module with no files still appears under `modules` (`custom-license`) so a registration selecting it is known and a `when` can name it.
 
 ## Placeholders
 
@@ -167,7 +164,6 @@ A module with no files still appears under `modules` (`issue-templates`, `custom
 | `github_username_lower` | the owner, lower-cased |
 | `copyright_holder` | `project.copyright_holder`, else the owner |
 | `year` | the current UTC year |
-| `skills_dir` | `skills.dir` from the registration, else `modules.<m>.skills_dir.default` |
 | `fuzzer_label`, `nightly_label`, `site_label` | `labels.<key>` from the registration, else the `default` of the `modules.<m>.tracking_label` whose `key` is `fuzzer`, `nightly`, or `site` |
 
 - A token is the name inside double braces with no spaces; spaces inside the braces make it plain text.

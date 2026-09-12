@@ -8,7 +8,6 @@ placeholders:
   - github_username_lower
   - copyright_holder
   - year
-  - skills_dir
   - fuzzer_label
 modules:
   bun:
@@ -16,16 +15,14 @@ modules:
     dependabot_ecosystems: [bun]
     checks_examples: [bun]
     settings_layers: [settings.yml]
-  node:
+  deno:
     gitignore_sources: [Node]
-    dependabot_ecosystems: [npm]
+    dependabot_ecosystems: [deno]
   pages: {}
   docs-site: {}
   fuzzer:
     gitignore_sources: [fuzzer]
     tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}
-  skills:
-    skills_dir: {default: skills}
 settings:
   baseline: files/settings/baseline.yml
   public: files/settings/public.yml
@@ -97,9 +94,6 @@ files:
   - path: .github/workflows/nightly-fuzz.yml
     class: starter
     when: {modules: [fuzzer]}
-  - path: .github/workflows/validate-skills.yml
-    class: managed
-    when: {modules: [skills]}
   - path: .github/workflows/private-only.yml
     class: managed
     when: {private: true}

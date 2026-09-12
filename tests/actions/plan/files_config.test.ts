@@ -88,7 +88,6 @@ describe("parseFilesConfig", () => {
         "modules:",
         "  bun: { codeql_language: javascript-typescript, pin: { file: .bun-version, version: 1.4.0 } }",
         "  site: { path: docs, tracking_label: { key: site, default: docs-link-rot, color: D4A72C, description: Link rot } }",
-        "  skills: { skills_dir: { default: skills } }",
       ].join("\n"),
     );
     expect(config.modules).toEqual({
@@ -105,7 +104,6 @@ describe("parseFilesConfig", () => {
           description: "Link rot",
         },
       },
-      skills: { skills_dir: { default: "skills" } },
     });
   });
 
@@ -180,11 +178,6 @@ describe("parseFilesConfig", () => {
       "a tracking label key that is not a label key",
       "files: []\nplaceholders: []\nmodules:\n  a: { tracking_label: { key: Fuzzer, default: x } }",
       "modules.a.tracking_label.key: not a label key",
-    ],
-    [
-      "a skills_dir without a default",
-      "files: []\nplaceholders: []\nmodules:\n  a: { skills_dir: {} }",
-      "modules.a.skills_dir.default: ",
     ],
     [
       "an empty path",

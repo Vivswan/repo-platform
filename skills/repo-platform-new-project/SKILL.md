@@ -48,13 +48,13 @@ Only `modules` is required, but write `project` too: the settings overlay starte
 Minimal:
 
 ```yaml
-modules: [uv, release-please, issue-templates, pr-title]
+modules: [uv, release-please, pr-title]
 ```
 
 Full:
 
 ```yaml
-modules: [bun, site, release-please, issue-templates, pr-title, skills, fuzzer, nightly]
+modules: [bun, site, release-please, pr-title, fuzzer, nightly]
 project:
   name: My Project
   slug: my-project
@@ -64,8 +64,6 @@ site:
   path: docs
   include:
     - { path: skills, mount: skills, page: SKILL.md }
-skills:
-  dir: skills
 labels:
   fuzzer: fuzz-nightly
   nightly: nightly-failure
@@ -128,7 +126,6 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.github/actions/site-build/action.yml` | site: build the repo's own website into a directory named in `dist`; a no-op until filled in |
 | `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
 | `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
-| `.claude-plugin/plugin.json` | skills: list each published skill in `skills` |
 | `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets; the sync renders the managed `.github/settings.yml` from it and the fleet layers, so never edit the rendered file |
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.

@@ -89,25 +89,25 @@ describe("stepCarriesWithKey", () => {
   test("a key-shaped line inside a block scalar body never matches", () => {
     const scalar = lines(
       [
-        "      - uses: actions/setup-node@v6",
+        "      - uses: denoland/setup-deno@v2",
         "        with:",
         "          cache-dependency-path: |",
-        "            node-version-file: .node-version",
+        "            deno-version-file: .dvmrc",
       ].join("\n"),
     );
-    expect(stepCarriesWithKey(scalar, 0, "node-version-file:")).toBe(false);
+    expect(stepCarriesWithKey(scalar, 0, "deno-version-file:")).toBe(false);
   });
 
   test("a key nested deeper than the direct-child level never matches", () => {
     const nested = lines(
       [
-        "      - uses: actions/setup-node@v6",
+        "      - uses: denoland/setup-deno@v2",
         "        with:",
         "          something:",
-        "            node-version-file: .node-version",
+        "            deno-version-file: .dvmrc",
       ].join("\n"),
     );
-    expect(stepCarriesWithKey(nested, 0, "node-version-file:")).toBe(false);
+    expect(stepCarriesWithKey(nested, 0, "deno-version-file:")).toBe(false);
   });
 
   test("a with: block ended by a later step key stops matching", () => {

@@ -3,7 +3,6 @@
 # The sync never targets this repository (its files are the sources).
 modules:
   - bun
-  - skills
   - pr-title
   - site
 project:

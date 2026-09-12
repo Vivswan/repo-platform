@@ -30,7 +30,6 @@ jobs:
     outputs:
       modules: ${{ steps.plan.outputs.modules }}
       private: ${{ steps.plan.outputs.private }}
-      skills-dir: ${{ steps.plan.outputs.skills-dir }}
       codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
       weekly: ${{ steps.plan.outputs.weekly }}
@@ -171,37 +170,26 @@ jobs:
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
-  # knip resolves imports through node_modules, so the repository's own toolchain installs first;
-  # the fleet configuration applies unless the repository carries its own knip configuration.
-  #   bun selected                 -> bun's install serves a repository selecting both modules
-  #   install inputs missing       -> stand down: a repository committed right after selecting the module has none yet
-  #   package-manager-cache: false -> setup-node hard-fails on a package.json naming a package manager with no lockfile
+  # knip resolves imports through node_modules, so the repository's own bun installs first; the fleet
+  # configuration applies unless the repository carries its own knip configuration. A repository
+  # committed right after selecting the module has no package.json yet, so the job stands down then.
   knip:
     needs: [plan]
-    if: (contains(fromJSON(needs.plan.outputs.modules), 'bun') || contains(fromJSON(needs.plan.outputs.modules), 'node')) && github.event_name != 'schedule'
+    if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: contains(fromJSON(needs.plan.outputs.modules), 'bun')
         with:
           bun-version-file: .bun-version
       - id: bun-install
-        if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && hashFiles('package.json') != ''
+        if: hashFiles('package.json') != ''
         run: bun install --frozen-lockfile
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') }}
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - id: npm-install
-        if: ${{ !contains(fromJSON(needs.plan.outputs.modules), 'bun') && hashFiles('package.json') != '' && hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' }}
-        run: npm ci
       - uses: Vivswan/repo-platform/actions/knip@build
-        if: steps.bun-install.outcome == 'success' || steps.npm-install.outcome == 'success'
-      - if: steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'
-        run: echo "::notice::knip stood down, the install inputs are missing (package.json, plus package-lock.json or npm-shrinkwrap.json for npm ci)"
+        if: steps.bun-install.outcome == 'success'
+      - if: steps.bun-install.outcome == 'skipped'
+        run: echo "::notice::knip stood down, this repository has no package.json to install from"
 
   # Public only: code scanning is where the findings go (!= 'true' as above).
   semgrep:
@@ -232,19 +220,6 @@ jobs:
     uses: ./.github/workflows/reusable-codeql.yml
     with:
       language: ${{ matrix.language }}
-
-  # Offline and inside the gate; the network-dependent discovery check
-  # stays advisory in the standalone validate-skills.yml.
-  validate-skills:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/validate-skills@build
-        with:
-          skills-dir: ${{ needs.plan.outputs.skills-dir }}
 
   # A dead internal link fails the PR here instead of the site leg after the merge. The hashFiles
   # guard sits on the step: GitHub does not allow hashFiles in a job-level if.

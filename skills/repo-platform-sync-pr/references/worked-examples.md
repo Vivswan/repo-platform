@@ -27,9 +27,9 @@ Resolution: single-segment globs only: `docs/*/LICENSE.md`. Fix the declaration 
 
 ## 4. Registration note: an unknown module
 
-`modules:` lists `issue-forms`. The Registration notes section names it as dropped; the PR holds; the module's files were not written.
+`modules:` lists `pr-titles`. The Registration notes section names it as dropped; the PR holds; the module's files were not written.
 
-Resolution: the name is `issue-templates`. Fix `.repo-platform.yml`, merge, dispatch the sync again.
+Resolution: the name is `pr-title`. Fix `.repo-platform.yml`, merge, dispatch the sync again.
 
 ## 5. A first-sync `unchanged` starter at a path the repo already had
 

@@ -37,7 +37,6 @@ const MINIMAL_FILES = [
   "placeholders: []",
   "files: []",
   "modules:",
-  "  skills: { skills_dir: { default: skills } }",
   "  site: { path: docs }",
   "",
 ].join("\n");
@@ -77,14 +76,11 @@ describe("loadModuleData", () => {
   test("the real files.yml in its key order, with the data and defaults the plan reads", () => {
     expect(MODULES.map((m) => m.name)).toEqual([
       "bun",
-      "node",
       "deno",
       "uv",
       "rust",
       "site",
       "release-please",
-      "issue-templates",
-      "skills",
       "pr-title",
       "fuzzer",
       "nightly",
@@ -99,14 +95,18 @@ describe("loadModuleData", () => {
       default: "fuzz-nightly",
     });
     expect(byName.get("site")?.tracking_label?.key).toBe("site");
-    expect(FILES_DATA.defaults).toEqual({ skillsDir: "skills", docsPath: "docs" });
+    expect(FILES_DATA.defaults).toEqual({ docsPath: "docs" });
   });
 
   test("the minimal modules block loads; a default the plan reads going missing fails, naming the file and key", () => {
     expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(FILES_DATA.defaults);
     const cases: [drop: string, replacement: string, error: string][] = [
-      ["  site: { path: docs }\n", "", "modules.site.path: missing"],
-      ["{ skills_dir: { default: skills } }", "{}", "modules.skills.skills_dir.default: missing"],
+      ["{ path: docs }", "{}", "modules.site.path: missing"],
+      [
+        "{ path: docs }",
+        "{ tracking_label: { key: site, default: rot } }",
+        "modules.site.path: missing",
+      ],
     ];
     for (const [drop, replacement, error] of cases) {
       expect(MINIMAL_FILES).toContain(drop);
@@ -168,7 +168,6 @@ describe("planCi", () => {
     expect(plan).toEqual({
       modules: ["bun", "uv", "site", "release-please", "fuzzer", "nightly"],
       private: false,
-      skillsDir: "skills",
       codeqlLanguages: ["javascript-typescript", "python"],
       trackingLabels: ["docs-link-rot", "fuzz-nightly", "nightly-failure", "security-nightly"],
       weekly: true,
@@ -176,7 +175,6 @@ describe("planCi", () => {
     expect(outputsOf(plan)).toEqual({
       "modules": '["bun","uv","site","release-please","fuzzer","nightly"]',
       "private": "false",
-      "skills-dir": "skills",
       "codeql-languages": '["javascript-typescript","python"]',
       "tracking-labels": "docs-link-rot,fuzz-nightly,nightly-failure,security-nightly",
       "weekly": "true",
@@ -191,17 +189,15 @@ describe("planCi", () => {
     expect(planCi(input("modules: []"), THURSDAY).weekly).toBe(false);
   });
 
-  test("registration values win over the module defaults, per key", () => {
-    const text =
-      "modules: [skills, fuzzer, nightly]\nskills:\n  dir: agents\nlabels:\n  nightly: nightly-red\n";
-    expect(planCi(input(text))).toMatchObject({
-      skillsDir: "agents",
+  test("registration labels win over the module defaults, per key", () => {
+    expect(
+      planCi(input("modules: [fuzzer, nightly]\nlabels:\n  nightly: nightly-red\n")),
+    ).toMatchObject({
       trackingLabels: ["fuzz-nightly", "nightly-red", "security-nightly"],
     });
     expect(
-      planCi(input("modules: [skills, fuzzer, nightly]\nlabels: { fuzzer: 'fuzz: nightly' }\n")),
+      planCi(input("modules: [fuzzer, nightly]\nlabels: { fuzzer: 'fuzz: nightly' }\n")),
     ).toMatchObject({
-      skillsDir: "skills",
       trackingLabels: ["fuzz: nightly", "nightly-failure", "security-nightly"],
     });
   });
@@ -209,8 +205,8 @@ describe("planCi", () => {
   test("CodeQL is off for a private repository and where no module analyzes", () => {
     expect(planCi(input("modules: [bun, uv]", true)).codeqlLanguages).toEqual([]);
     expect(planCi(input("modules: [rust, site]")).codeqlLanguages).toEqual([]);
-    // Shared language, one entry: bun and node both analyze as JS/TS.
-    expect(codeqlLanguages(selectModules(input("modules: [node, bun]")), false)).toEqual([
+    // Shared language, one entry: bun and deno both analyze as JS/TS.
+    expect(codeqlLanguages(selectModules(input("modules: [deno, bun]")), false)).toEqual([
       "javascript-typescript",
     ]);
   });
@@ -219,7 +215,6 @@ describe("planCi", () => {
     expect(outputsOf(planCi(input("modules: []"), THURSDAY))).toEqual({
       "modules": "[]",
       "private": "false",
-      "skills-dir": "skills",
       "codeql-languages": "[]",
       "tracking-labels": "security-nightly",
       "weekly": "false",
@@ -280,10 +275,10 @@ describe("planCi", () => {
   });
 
   test("a sound mirror declaration plans exactly like the registration without it", () => {
-    const bare = "modules: [bun, skills]\n";
+    const bare = "modules: [bun]\n";
     const text = `${bare}mirrors:\n  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, template/LICENSE.md]}\n  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}\n`;
     expect(planCi(input(text), THURSDAY)).toEqual(planCi(input(bare), THURSDAY));
-    expect(planCi(input(text), THURSDAY).modules).toEqual(["bun", "skills"]);
+    expect(planCi(input(text), THURSDAY).modules).toEqual(["bun"]);
   });
 
   test("a tracking label default files.yml spells outside the label grammar fails, naming the data file", () => {
@@ -420,7 +415,7 @@ describe("plan.ts as a child", () => {
     };
   }
 
-  test("default mode writes the six fleet-ci rows and echoes them", () => {
+  test("default mode writes the five fleet-ci rows and echoes them", () => {
     const result = run(
       { ".repo-platform.yml": "modules: [bun, fuzzer, release-please]\n" },
       { PRIVATE: "false" },
@@ -430,7 +425,6 @@ describe("plan.ts as a child", () => {
       [
         'modules=["bun","release-please","fuzzer"]',
         "private=false",
-        "skills-dir=skills",
         'codeql-languages=["javascript-typescript"]',
         "tracking-labels=fuzz-nightly,security-nightly",
         `weekly=${new Date().getUTCDay() === 1}`,
@@ -531,10 +525,7 @@ describe("plan.ts as a child", () => {
 
   test("every default comes from files.yml: other defaults there change the outputs, a missing one fails", () => {
     const real = readFileSync(FILES_CONFIG, "utf-8");
-    const edits: [string, string][] = [
-      ["skills_dir: {default: skills}", "skills_dir: {default: agents}"],
-      ["    path: docs\n", "    path: manual\n"],
-    ];
+    const edits: [string, string][] = [["    path: docs\n", "    path: manual\n"]];
     let other = real;
     for (const [from, to] of edits) {
       expect(other).toContain(from);
@@ -544,15 +535,14 @@ describe("plan.ts as a child", () => {
     const otherPath = join(dir, "files.yml");
     writeFileSync(otherPath, other);
     const ci = run(
-      { ".repo-platform.yml": "modules: [skills, site]\n" },
+      { ".repo-platform.yml": "modules: [site]\n" },
       { PRIVATE: "false", FILES_CONFIG: otherPath },
     );
     expect(ci.exitCode).toBe(0);
     expect(ci.output).toBe(
       [
-        'modules=["site","skills"]',
+        'modules=["site"]',
         "private=false",
-        "skills-dir=agents",
         "codeql-languages=[]",
         "tracking-labels=docs-link-rot,security-nightly",
         `weekly=${new Date().getUTCDay() === 1}`,
@@ -570,7 +560,7 @@ describe("plan.ts as a child", () => {
     const missingPath = join(dir, "missing-path.yml");
     writeFileSync(missingPath, real.replace("    path: docs\n", ""));
     const missing = run(
-      { ".repo-platform.yml": "modules: [skills]\n" },
+      { ".repo-platform.yml": "modules: [bun]\n" },
       { PRIVATE: "false", FILES_CONFIG: missingPath },
     );
     expect(missing.exitCode).toBe(1);
@@ -578,12 +568,9 @@ describe("plan.ts as a child", () => {
     expect(missing.output).toBe("");
   });
 
-  test("a private registration plans without CodeQL and with its own skills directory", () => {
-    const result = run(
-      { ".repo-platform.yml": "modules: [uv, skills]\nskills: { dir: agents }\n" },
-      { PRIVATE: "true" },
-    );
+  test("a private registration plans without CodeQL", () => {
+    const result = run({ ".repo-platform.yml": "modules: [uv]\n" }, { PRIVATE: "true" });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("skills-dir=agents\ncodeql-languages=[]\n");
+    expect(result.output).toContain("private=true\ncodeql-languages=[]\n");
   });
 });

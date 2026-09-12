@@ -7,7 +7,6 @@ import {
   fetchJson,
   latestBunVersion,
   latestDenoVersion,
-  latestNodeLts,
   majorJumps,
   PIN_SOURCES,
   proseBumps,
@@ -73,7 +72,7 @@ describe("decideBump", () => {
     ["2.0.0", "1.99.99", "downgrade", "major below the pin"],
     ["1.3.14", "1.3.14", "current", "equal is a no-op"],
     ["1.3.14", "1.3.15", "bump", "patch ahead"],
-    ["24.19.0", "26.0.0", "bump", "LTS line jump"],
+    ["2.9.5", "3.0.0", "bump", "major line jump"],
     ["1.9.0", "1.10.0", "bump", "minor 10 > 9 numerically (lexicographic says 1.10 < 1.9)"],
     ["1.10.0", "1.9.9", "downgrade", "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
     ["9.99.99", "10.0.0", "bump", "major 10 > 9 numerically (lexicographic says 10 < 9)"],
@@ -92,35 +91,6 @@ describe("latestBunVersion", () => {
     expect(() => latestBunVersion({ tag_name: "v1.3.14" })).toThrow("does not match");
     expect(() => latestBunVersion({})).toThrow("expected a string");
     expect(() => latestBunVersion(null)).toThrow("expected a string");
-  });
-});
-
-describe("latestNodeLts", () => {
-  test("picks the first entry whose lts is a non-empty codename (newest LTS line)", () => {
-    expect(
-      latestNodeLts([
-        { version: "v25.1.0", lts: false },
-        { version: "v24.19.0", lts: "Krypton" },
-        { version: "v24.18.0", lts: "Krypton" },
-      ]),
-    ).toBe("24.19.0");
-  });
-
-  test("odd lts shapes (true, null, missing, empty) never count as LTS", () => {
-    expect(() =>
-      latestNodeLts([
-        { version: "v25.1.0", lts: true },
-        { version: "v25.0.0", lts: null },
-        { version: "v24.19.0" },
-        { version: "v24.18.0", lts: "" },
-      ]),
-    ).toThrow("no LTS");
-  });
-
-  test("rejects a payload without any LTS entry or with a bad version", () => {
-    expect(() => latestNodeLts([{ version: "v25.1.0", lts: false }])).toThrow("no LTS");
-    expect(() => latestNodeLts([{ version: "24.19.0", lts: "Krypton" }])).toThrow("does not match");
-    expect(() => latestNodeLts({ version: "v24.19.0" })).toThrow("array");
   });
 });
 
@@ -143,8 +113,8 @@ describe("bumpFilesPin", () => {
     "  bun:",
     "    description: bun",
     "    pin: {file: .bun-version, version: 1.4.0}",
-    "  node:",
-    "    pin: {file: .node-version, version: 24.19.0}",
+    "  deno:",
+    "    pin: {file: .dvmrc, version: 2.9.5}",
     "  uv:",
     "    description: no pin",
     "",
@@ -154,7 +124,7 @@ describe("bumpFilesPin", () => {
 
   test.each([
     ["bun", "1.4.1", "    pin: {file: .bun-version, version: 1.4.0}"],
-    ["node", "26.0.0", "    pin: {file: .node-version, version: 24.19.0}"],
+    ["deno", "3.0.0", "    pin: {file: .dvmrc, version: 2.9.5}"],
   ])("bumps only modules.%s's pin line to %s", (module, version, line) => {
     expect(bumpFilesPin(files, module, version, "files.yml")).toBe(
       files.replace(line, line.replace(/\d+\.\d+\.\d+/, version)),
@@ -167,7 +137,7 @@ describe("bumpFilesPin", () => {
 
   test.each([
     ["the module carries no pin line", files, "uv", "no pin line"],
-    ["the module is not under modules", files, "deno", "no modules.deno entry"],
+    ["the module is not under modules", files, "rust", "no modules.rust entry"],
     ["there is no modules section", "files: []\n", "bun", "no modules section"],
     [
       "the pin is not the one-line flow mapping",
@@ -211,10 +181,10 @@ describe("proseBumps", () => {
     expect(
       proseBumps([
         { module: "bun", from: "1.3.14", version: "1.3.15" },
-        { module: "node", from: "24.19.0", version: "24.20.0" },
+        { module: "uv", from: "0.9.0", version: "0.9.1" },
         { module: "deno", from: "2.9.5", version: "2.9.6" },
       ]),
-    ).toBe("bun to 1.3.15, node to 24.20.0, and deno to 2.9.6");
+    ).toBe("bun to 1.3.15, uv to 0.9.1, and deno to 2.9.6");
   });
 });
 
@@ -223,10 +193,10 @@ describe("majorJumps", () => {
     expect(
       majorJumps([
         { module: "bun", from: "1.3.14", version: "1.3.15" },
-        { module: "node", from: "24.19.0", version: "26.0.0" },
+        { module: "uv", from: "0.9.0", version: "1.0.0" },
         { module: "deno", from: "2.9.5", version: "3.0.0" },
       ]),
-    ).toBe("node 24 -> 26, deno 2 -> 3");
+    ).toBe("uv 0 -> 1, deno 2 -> 3");
     expect(majorJumps([{ module: "bun", from: "1.3.14", version: "1.4.0" }])).toBe("");
     expect(majorJumps([])).toBe("");
   });

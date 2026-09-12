@@ -46,7 +46,6 @@ describe("placeholderValues", () => {
 
 describe("placeholderValues: the registration-backed names", () => {
   const defaults = {
-    skills_dir: "skills",
     fuzzer_label: "fuzz-nightly",
     nightly_label: "nightly-failure",
     site_label: "docs-link-rot",
@@ -54,19 +53,13 @@ describe("placeholderValues: the registration-backed names", () => {
 
   test("absent from both sides, the name has no value; a module default fills it", () => {
     const bare = placeholderValues({ modules: [] }, SLUG, {}, NOW);
-    expect(Object.keys(bare)).not.toContain("skills_dir");
     expect(Object.keys(bare)).not.toContain("fuzzer_label");
     expect(placeholderValues({ modules: [] }, SLUG, defaults, NOW)).toMatchObject(defaults);
   });
 
-  test("the registration's own skills.dir and labels win over the defaults", () => {
-    const registration = {
-      modules: [],
-      skills: { dir: "lib/skills" },
-      labels: { fuzzer: "fuzz", site: "rot" },
-    };
+  test("the registration's own labels win over the defaults", () => {
+    const registration = { modules: [], labels: { fuzzer: "fuzz", site: "rot" } };
     expect(placeholderValues(registration, SLUG, defaults, NOW)).toMatchObject({
-      skills_dir: "lib/skills",
       fuzzer_label: "fuzz",
       nightly_label: "nightly-failure",
       site_label: "rot",

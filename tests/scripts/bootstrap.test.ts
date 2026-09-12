@@ -26,7 +26,6 @@ describe("bunLockDirs", () => {
       "actions/trivy",
       "actions/validate-commit-names",
       "actions/validate-managed-files",
-      "actions/validate-skills",
     ]);
   });
 

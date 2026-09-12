@@ -32,7 +32,7 @@ The measure of the design is the cost of a simple change, not the number of chec
 
 ## Modules
 
-Modules (pick any combination): `bun`, `node`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
+Modules (pick any combination): `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
 
 ## Onboarding a repo
 
@@ -77,7 +77,7 @@ Managed repos need no secret. One optional feature carries its own token: a `bun
 
 ## Going deeper
 
-- Guides: [new repo](docs/new-repo.md), [sync](docs/sync.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [site module](docs/site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md).
+- Guides: [new repo](docs/new-repo.md), [sync](docs/sync.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [site module](docs/site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md).
 - The file list and its grammar: [files.yml](files.yml) and [docs/sync.md](docs/sync.md#filesyml); the writer's code under [.github/scripts/sync/writer](.github/scripts/sync/writer).
 - Working in this repo - generators, editing rules, local gates: [AGENTS.md](AGENTS.md).
 - [`skills/`](skills/): portable agent skills for driving the platform from other repos - new project, sync-PR handling, module add/remove - installed with `npx skills`; never synced to managed repos.

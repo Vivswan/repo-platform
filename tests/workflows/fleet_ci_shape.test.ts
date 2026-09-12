@@ -45,14 +45,7 @@ const fleetCi = parseYaml(source) as {
 };
 
 describe("fleet-ci.yml", () => {
-  const PLAN_OUTPUTS = [
-    "modules",
-    "private",
-    "skills-dir",
-    "codeql-languages",
-    "tracking-labels",
-    "weekly",
-  ];
+  const PLAN_OUTPUTS = ["modules", "private", "codeql-languages", "tracking-labels", "weekly"];
   // The nightly schedule carries only the jobs that ask for it: the
   // other gate jobs stand down there with this exact clause.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
@@ -313,43 +306,30 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toEqual({ "contents": "read", "security-events": "write" });
   });
 
-  test("knip is armed by the bun or node module; bun's install serves both, npm's only a bun-less repository", () => {
+  test("knip is armed by the bun module and stands down without a package.json to install from", () => {
     const job = fleetCi.jobs.knip;
     const bun = "contains(fromJSON(needs.plan.outputs.modules), 'bun')";
-    const node = "contains(fromJSON(needs.plan.outputs.modules), 'node')";
-    const hasPackage = "hashFiles('package.json') != ''";
-    const hasNpmLock = "hashFiles('package-lock.json', 'npm-shrinkwrap.json') != ''";
-    expect(job?.if).toBe(`(${bun} || ${node}) && ${SKIP_ON_SCHEDULE}`);
+    expect(job?.if).toBe(`${bun} && ${SKIP_ON_SCHEDULE}`);
     const steps = job?.steps ?? [];
-    // A repository selecting both modules is a bun repository (bun.lock, no package-lock.json),
-    // so the package manager is resolved once, on the bun module.
-    //   bun install --frozen-lockfile  -> accepts a missing lockfile, so beyond the module clause only package.json gates it
-    //   npm ci                         -> refuses one, so the npm lockfile gates it too
-    //   setup-node cache               -> off, as in every setup-node step: it fails on a package.json naming a package manager with no lockfile
+    // bun install --frozen-lockfile accepts a missing lockfile, so package.json alone gates the install.
     expect(steps.map((step) => [step.uses ?? step.run, step.if, step.id])).toEqual([
       [expect.stringContaining("actions/checkout@"), undefined, undefined],
-      [expect.stringContaining("oven-sh/setup-bun@"), bun, undefined],
-      ["bun install --frozen-lockfile", `${bun} && ${hasPackage}`, "bun-install"],
-      [expect.stringContaining("actions/setup-node@"), `\${{ !${bun} }}`, undefined],
-      ["npm ci", `\${{ !${bun} && ${hasPackage} && ${hasNpmLock} }}`, "npm-install"],
+      [expect.stringContaining("oven-sh/setup-bun@"), undefined, undefined],
+      ["bun install --frozen-lockfile", "hashFiles('package.json') != ''", "bun-install"],
       [
         expect.stringContaining("repo-platform/actions/knip@build"),
-        "steps.bun-install.outcome == 'success' || steps.npm-install.outcome == 'success'",
+        "steps.bun-install.outcome == 'success'",
         undefined,
       ],
       [
         expect.stringContaining("::notice::knip stood down"),
-        "steps.bun-install.outcome == 'skipped' && steps.npm-install.outcome == 'skipped'",
+        "steps.bun-install.outcome == 'skipped'",
         undefined,
       ],
     ]);
-    // The pinned version files, so the toolchain-version-files rule's
+    // The pinned version file, so the toolchain-version-files rule's
     // contract holds here as in every other setup step.
     expect(steps[1]?.with).toEqual({ "bun-version-file": ".bun-version" });
-    expect(steps[3]?.with).toEqual({
-      "node-version-file": ".node-version",
-      "package-manager-cache": false,
-    });
     // No SARIF, so no security-events grant.
     expect(job?.permissions).toBeUndefined();
   });
@@ -374,8 +354,6 @@ describe("fleet-ci.yml", () => {
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {
     const GUARDS = {
-      "validate-skills":
-        "contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'",
       "docs-check":
         "contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'",
       "release-freshness":
@@ -386,14 +364,6 @@ describe("fleet-ci.yml", () => {
     for (const [job, guard] of Object.entries(GUARDS)) {
       expect(fleetCi.jobs[job]?.if).toBe(guard);
     }
-  });
-
-  test("validate-skills calls its action at @build with the skills-dir input forwarded", () => {
-    const steps = fleetCi.jobs["validate-skills"]?.steps ?? [];
-    const action = steps.find((step) =>
-      (step.uses ?? "").includes("repo-platform/actions/validate-skills@build"),
-    );
-    expect(action?.with?.["skills-dir"]).toBe("${{ needs.plan.outputs.skills-dir }}");
   });
 
   test("docs-check builds docs/ strictly through pages-site at @build, standing down without a docs/ tree", () => {

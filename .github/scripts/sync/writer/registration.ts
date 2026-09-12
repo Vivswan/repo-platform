@@ -30,7 +30,6 @@ export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
   github_username_lower: "the repository slug",
   copyright_holder: "project.copyright_holder",
   year: "the clock",
-  skills_dir: "skills.dir (or the skills module's skills_dir default)",
   fuzzer_label: "labels.fuzzer (or the fuzzer module's tracking_label default)",
   nightly_label: "labels.nightly (or the nightly module's tracking_label default)",
   site_label: "labels.site (or the site module's tracking_label default)",
@@ -47,11 +46,8 @@ export function parseRepositorySlug(slug: string): RepositorySlug {
   return { owner: match[1], name: match[2] };
 }
 
-/** The values for every placeholder: the project block when the
- *  registration carries one, the repository name otherwise; the year is
- *  the current UTC year; the skills directory and each tracking label are
- *  the registration's own value, else the module default files.yml
- *  declares, else absent (no listed source may use them then). */
+/** A tracking label absent from both the registration and files.yml's module default stays absent:
+ *  sync.ts then refuses any listed source that uses it (placeholders.ts, missingPlaceholders). */
 export function placeholderValues(
   registration: Registration,
   repository: RepositorySlug,
@@ -70,7 +66,6 @@ export function placeholderValues(
     year: String(now.getUTCFullYear()),
   };
   const optional: Partial<Record<PlaceholderName, string | undefined>> = {
-    skills_dir: registration.skills?.dir ?? defaults.skills_dir,
     fuzzer_label: labels.fuzzer ?? defaults.fuzzer_label,
     nightly_label: labels.nightly ?? defaults.nightly_label,
     site_label: labels.site ?? defaults.site_label,

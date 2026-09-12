@@ -1,8 +1,8 @@
 # Worked examples
 
-Two end-to-end module additions, with the checks that matter at each step.
+One end-to-end module addition, with the checks that matter at each step.
 
-## 1. Adding `nightly` to a repo that already has `fuzzer`
+## Adding `nightly` to a repo that already has `fuzzer`
 
 Goal: the repo's slow suites move off the PR path into a nightly stream with automatic issue filing, next to the existing fuzz stream.
 
@@ -42,39 +42,3 @@ Two jobs: `checks` (yours; the placeholder is a green no-op that never files iss
 
 - The first scheduled run is green, or files one issue carrying the label.
 - The label exists on the repo: `gh label list -R Vivswan/<repo>`. It arrives with the first settings apply after the sync PR merges; before that, create it with `gh label create`.
-
-## 2. Adding `skills`
-
-Goal: the repo hosts agent skills other repositories install with `npx skills add`.
-
-### The edit
-
-```bash
-git checkout -b add-skills
-# .repo-platform.yml: add "skills" to modules. Keep the default skills/ directory:
-# the managed validate-skills.yml is written for it.
-# .claude-plugin/plugin.json: a minimal manifest, because the validate-skills
-# gate job runs on this PR and reads it:
-#   { "name": "<slug>-skills", "description": "Agent skills for <name>", "skills": [] }
-git add -A && git commit -m "chore: add the skills module"
-gh pr create
-# merge, then:
-gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
-```
-
-### The sync PR
-
-- Written: `.claude-plugin/plugin.json` as `starter`, `unchanged` (you committed it; an existing starter is never rewritten), `.claude-plugin/marketplace.json` as `starter`, `created`, `.github/workflows/validate-skills.yml` as `managed`, `created`.
-- The plugin name is `<project.slug>-skills`: use the same slug in the manifest you committed and in the registration's `project` block (`name`, `slug`, `description` together) when the repository name is not the slug you want.
-
-### Publishing a skill
-
-1. Create `skills/<name>/SKILL.md` with frontmatter `name: <name>` (equal to the folder, kebab-case) and a nonempty `description`.
-2. Add `./skills/<name>` to `plugin.json`'s `skills` array. Unlisted folders validate and never ship.
-3. Keep an index `README.md` at the root of the skills directory.
-4. Per-skill license copies: declare `mirrors: [{source: LICENSE.md, targets: ["skills/*/LICENSE.md"]}]` in the registration; every sync refreshes them and a new folder is picked up by the glob.
-
-### Verify
-
-- The `validate-skills` job inside `ci` is green on the next PR (structure), and the advisory `validate-skills.yml` run lists every published skill (discovery).
-- `npx skills add Vivswan/<repo> --list` names the skill.

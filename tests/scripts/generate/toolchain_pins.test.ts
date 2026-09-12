@@ -23,14 +23,14 @@ const FILES_YML = [
   "  bun:",
   "    description: bun",
   "    pin: {file: .bun-version, version: 1.4.0}",
-  "  node:",
-  "    description: node",
-  "    pin: {file: .node-version, version: 24.19.0}",
+  "  deno:",
+  "    description: deno",
+  "    pin: {file: .dvmrc, version: 2.9.5}",
   "  uv:",
   "    description: uv",
   "files:",
   "  - {path: .bun-version, class: managed, when: {modules: [bun]}}",
-  "  - {path: .node-version, class: managed, when: {modules: [node]}}",
+  "  - {path: .dvmrc, class: managed, when: {modules: [deno]}}",
   "",
 ].join("\n");
 
@@ -38,7 +38,7 @@ describe("toolchainPins", () => {
   test("reads the pinned modules in files.yml order, unpinned ones skipped", () => {
     expect(toolchainPins(FILES_YML)).toEqual([
       { module: "bun", file: ".bun-version", version: "1.4.0" },
-      { module: "node", file: ".node-version", version: "24.19.0" },
+      { module: "deno", file: ".dvmrc", version: "2.9.5" },
     ]);
   });
 
@@ -54,7 +54,7 @@ describe("pinOutputs", () => {
     const outputs = pinOutputs(pins, join(REPO_ROOT, "actions"));
     expect(outputs.slice(0, 2)).toEqual([
       ["files/bun/.bun-version", "1.4.0\n"],
-      ["files/node/.node-version", "24.19.0\n"],
+      ["files/deno/.dvmrc", "2.9.5\n"],
     ]);
     expect(outputs.at(-1)).toEqual([".bun-version", "1.4.0\n"]);
     const actionPins = outputs.slice(2, -1);
@@ -74,16 +74,16 @@ describe("undeliveredPins", () => {
   test("every pin with a files entry at its file from the module's copy passes; a renamed pin is named", () => {
     expect(undeliveredPins(parseFilesConfig(FILES_YML, "t"))).toEqual([]);
     const renamed = FILES_YML.replace(
-      "pin: {file: .node-version, version: 24.19.0}",
-      "pin: {file: .node-version-new, version: 24.19.0}",
+      "pin: {file: .dvmrc, version: 2.9.5}",
+      "pin: {file: .dvmrc-new, version: 2.9.5}",
     );
     expect(undeliveredPins(parseFilesConfig(renamed, "t"))).toEqual([
-      "files.yml modules.node.pin names .node-version-new but no files entry delivers files/node/.node-version-new - add the entry (or drop the pin)",
+      "files.yml modules.deno.pin names .dvmrc-new but no files entry delivers files/deno/.dvmrc-new - add the entry (or drop the pin)",
     ]);
     // An entry at the path sourced from ANOTHER module's copy does not deliver this pin.
     const other = FILES_YML.replace(
-      "  - {path: .node-version, class: managed, when: {modules: [node]}}",
-      "  - {path: .node-version, class: managed, when: {modules: [node]}, source: files/bun/.node-version}",
+      "  - {path: .dvmrc, class: managed, when: {modules: [deno]}}",
+      "  - {path: .dvmrc, class: managed, when: {modules: [deno]}, source: files/bun/.dvmrc}",
     );
     expect(undeliveredPins(parseFilesConfig(other, "t"))).toHaveLength(1);
   });
@@ -94,11 +94,11 @@ describe("strayPinFiles", () => {
     const filesDir = temp.dir("toolchain-pins-files-");
     for (const rel of [
       "bun/.bun-version",
-      "node/.node-version",
-      "uv/.python-version",
       "deno/.dvmrc",
-      "deno/.bun-version",
-      "base/.node-version",
+      "uv/.python-version",
+      "rust/.rust-version",
+      "rust/.bun-version",
+      "base/.dvmrc",
     ]) {
       mkdirSync(join(filesDir, rel.split("/")[0]), { recursive: true });
       writeFileSync(join(filesDir, rel), "1.0.0\n");
@@ -106,8 +106,8 @@ describe("strayPinFiles", () => {
     writeFileSync(join(filesDir, "uv/.block.Python.gitignore"), "x\n");
     writeFileSync(join(filesDir, "uv/settings.yml"), "labels: []\n");
     expect(strayPinFiles(toolchainPins(FILES_YML), filesDir)).toEqual([
-      "files/deno/.bun-version",
-      "files/deno/.dvmrc",
+      "files/rust/.bun-version",
+      "files/rust/.rust-version",
       "files/uv/.python-version",
     ]);
   });
@@ -118,14 +118,14 @@ describe("stalePinOutputs", () => {
     const root = temp.dir("toolchain-pins-root-");
     mkdirSync(join(root, "actions"), { recursive: true });
     mkdirSync(join(root, "files/bun"), { recursive: true });
-    mkdirSync(join(root, "files/node"), { recursive: true });
+    mkdirSync(join(root, "files/deno"), { recursive: true });
     writeFileSync(join(root, "files/bun/.bun-version"), "1.4.0\n");
-    writeFileSync(join(root, "files/node/.node-version"), "24.18.0\n");
+    writeFileSync(join(root, "files/deno/.dvmrc"), "2.9.4\n");
     writeFileSync(join(root, ".bun-version"), "1.4.0\n");
     expect(stalePinOutputs(toolchainPins(FILES_YML), root)).toEqual([
-      ["files/node/.node-version", "24.19.0\n"],
+      ["files/deno/.dvmrc", "2.9.5\n"],
     ]);
-    writeFileSync(join(root, "files/node/.node-version"), "24.19.0\n");
+    writeFileSync(join(root, "files/deno/.dvmrc"), "2.9.5\n");
     expect(stalePinOutputs(toolchainPins(FILES_YML), root)).toEqual([]);
   });
 });

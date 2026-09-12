@@ -5,15 +5,15 @@
 // repository is computed here and handed to the jobs as step outputs.
 //
 // `default` mode resolves what fleet-ci.yml's jobs key on: the selection in
-// canonical order, the visibility, the skills directory, the CodeQL
-// languages, the tracking labels, and whether a scheduled run is the week's
-// CodeQL rescan; it also rejects a mirror declaration files.yml proves
-// unwritable (mirrors.ts). `site` mode resolves the site configuration the
-// pages-site action consumes (one JSON document: the site title, the docs
-// mount path or null for no docs half, the include roots, the link-rot
-// label) from the registration. Fail closed: an
-// unknown module or key, a malformed value, or a missing registration fails
-// the step; nothing here defaults an invalid registration into a green run.
+// canonical order, the visibility, the CodeQL languages, the tracking
+// labels, and whether a scheduled run is the week's CodeQL rescan; it also
+// rejects a mirror declaration files.yml proves unwritable (mirrors.ts).
+// `site` mode resolves the site configuration the pages-site action
+// consumes (one JSON document: the site title, the docs mount path or null
+// for no docs half, the include roots, the link-rot label) from the
+// registration. Fail closed: an unknown module or key, a malformed value,
+// or a missing registration fails the step; nothing here defaults an
+// invalid registration into a green run.
 //
 // Env: MODE (default|site), PRIVATE ("true"/"false"; empty asks the API
 // for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
@@ -62,8 +62,6 @@ export type Module = ModuleData & { name: string };
 /** The values a registration may leave unset, each declared once in
  *  files.yml by the module that owns the setting. */
 export interface PlanDefaults {
-  /** modules.skills.skills_dir.default */
-  skillsDir: string;
   /** modules.site.path: the URL segment the docs mount under beside a website. */
   docsPath: string;
 }
@@ -89,7 +87,6 @@ export interface DefaultSource {
  *  and key must be there, or the build tree is broken and no repository
  *  plans. */
 export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
-  skillsDir: { module: "skills", key: "skills_dir.default", pick: (d) => d.skills_dir?.default },
   docsPath: { module: "site", key: "path", pick: (d) => d.path },
 };
 
@@ -117,7 +114,6 @@ export function loadModuleData(text: string, label = "files.yml"): FilesData {
     return value ?? "";
   };
   const defaults: PlanDefaults = {
-    skillsDir: required(REQUIRED_DEFAULTS.skillsDir),
     docsPath: required(REQUIRED_DEFAULTS.docsPath),
   };
   if (missing.length > 0) throw new PlanError(missing);
@@ -219,7 +215,6 @@ export function trackingLabels(
 export interface CiPlan {
   modules: string[];
   private: boolean;
-  skillsDir: string;
   codeqlLanguages: string[];
   trackingLabels: string[];
   weekly: boolean;
@@ -259,7 +254,6 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   return {
     modules: selected.map((module) => module.name),
     private: input.private,
-    skillsDir: input.registration.skills?.dir ?? input.defaults.skillsDir,
     codeqlLanguages: codeqlLanguages(selected, input.private),
     trackingLabels: [...trackingLabels(input, selected), SECURITY_LABEL],
     weekly: weekly(now),
@@ -313,7 +307,6 @@ export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
   return {
     "modules": JSON.stringify(plan.modules),
     "private": String(plan.private),
-    "skills-dir": plan.skillsDir,
     "codeql-languages": JSON.stringify(plan.codeqlLanguages),
     "tracking-labels": plan.trackingLabels.join(","),
     "weekly": String(plan.weekly),

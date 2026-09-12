@@ -19,8 +19,6 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Fill in the site-build hook that builds my website | [Site: the hook](site.md#the-hook-githubactionssite-buildactionyml) |
 | Serve the site from my own domain | [Site: custom domain](site.md#custom-domain) |
 | Translate docs (zh-cn/, ja/, ...) | [Site: docs conventions](site.md#docs-conventions) |
-| Host agent skills other repos can install | [Skills](skills.md) |
-| Fix a skill that validates green but never ships | [Skills: publishing](skills.md#publishing-a-skill) |
 | Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
 | Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |
 | See which toolchain versions the fleet pins | [Toolchains: the pins](toolchains.md#the-pins) |
@@ -49,15 +47,14 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 ### Modules
 
 5. [Site](site.md) - one GitHub Pages site per repository: the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme.
-6. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
-7. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
-8. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
+6. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
+7. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
 
 ### Fleet operations
 
-9. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
-10. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
-11. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
-12. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
-13. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+8. [Sync](sync.md) - the writer, its file list, the report, the operator that runs it against the fleet, and what the public log hides for private repositories.
+9. [Toolchain pins](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
+11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
+12. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
