@@ -193,7 +193,6 @@ export interface WorkflowFile {
 
 const WORKFLOWS_DIR = ".github/workflows/";
 
-/** Every regular file under .github/workflows, read. */
 export function workflowFiles(): WorkflowFile[] {
   return walkFiles(".github/workflows")
     .filter((f) => !f.symlink)

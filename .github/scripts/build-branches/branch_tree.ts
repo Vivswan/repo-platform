@@ -54,9 +54,9 @@ export const FLEET_WORKFLOWS = [
   "reusable-site.yml",
 ];
 
-/** The labels the platform manages (every settings layer's roster), which
- *  no tracking stream may reuse: the plan action reads this file to refuse
- *  a registration label naming one. */
+/** Written into the build tree until the branch's deletion; nothing reads it
+ *  since the plan action derives the same roster at run time
+ *  (actions/plan/reserved_labels.ts). */
 export const RESERVED_LABELS_FILE = "reserved-labels.yml";
 
 /** The sync writer's data file and source tree, shipped verbatim: the
