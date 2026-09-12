@@ -84,13 +84,13 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a slug written before a token is emitted after it: the scope is a set, tokens first",
-      body: message("[fleet-sync: Vivswan/a, private]", PROSE),
-      expected: { kind: "fleet-sync", scope: ["private", "vivswan/a"] },
+      body: message("[fleet-sync: Acme/a, private]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["private", "acme/a"] },
     },
     {
       reason: "a token mixes with slugs, folded",
-      body: message("[fleet-sync: public, Vivswan/Dotfiles]", PROSE),
-      expected: { kind: "fleet-sync", scope: ["public", "vivswan/dotfiles"] },
+      body: message("[fleet-sync: public, Acme/Widgets]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["public", "acme/widgets"] },
     },
     {
       reason: "a justification on a scope other than all is red",
@@ -104,13 +104,13 @@ describe("parseDirectives", () => {
     },
     {
       reason: "a backticked scoped block",
-      body: message("`[fleet-sync: Vivswan/a, Vivswan/b]`", PROSE),
-      expected: { kind: "fleet-sync", scope: ["vivswan/a", "vivswan/b"] },
+      body: message("`[fleet-sync: Acme/a, Acme/b]`", PROSE),
+      expected: { kind: "fleet-sync", scope: ["acme/a", "acme/b"] },
     },
     {
       reason: "a list is trimmed, folded, and deduped",
-      body: message("[Fleet-Sync: Vivswan/A , vivswan/b,Vivswan/a]", PROSE),
-      expected: { kind: "fleet-sync", scope: ["vivswan/a", "vivswan/b"] },
+      body: message("[Fleet-Sync: Acme/A , acme/b,Acme/a]", PROSE),
+      expected: { kind: "fleet-sync", scope: ["acme/a", "acme/b"] },
     },
     {
       reason: "no space after the colon",
@@ -848,21 +848,21 @@ describe("main", () => {
     return git(source, ["rev-parse", "HEAD"]);
   }
   const seed = commit("seed");
-  const listA = commit(message("`[fleet-sync: Vivswan/a]`", PROSE));
+  const listA = commit(message("`[fleet-sync: Acme/a]`", PROSE));
   const prose1 = commit(message(PROSE));
   const prose2 = commit(message(PROSE));
-  const listBothOwners = commit(message("[fleet-sync: Vivswan/b, vivswan/a]", PROSE));
+  const listBothOwners = commit(message("[fleet-sync: Acme/b, acme/a]", PROSE));
   const whole = commit(message("[fleet-sync: all] every repo's ci.yml changed", PROSE));
   const bottom = commit(message(PROSE, "[fleet-sync]"));
   const prose3 = commit(message(PROSE));
   const pub = commit(message("[fleet-sync: public]", PROSE));
-  const mixed = commit(message("`[fleet-sync: private, Vivswan/b]`", PROSE));
+  const mixed = commit(message("`[fleet-sync: private, Acme/b]`", PROSE));
   const bare = commit(message("[fleet-sync]", PROSE));
   const unjustified = commit(message("`[fleet-sync: all]`", PROSE));
   const reasoned = commit(message("[fleet-sync: public] the ci changed", PROSE));
   const context = commit(message("[Context] This is ordinary PR prose.", PROSE));
   const leaky = commit(message("[fleet-sync: SecretOrg/PrivateRepo,]", PROSE));
-  const ordered = commit(message("[fleet-sync: Vivswan/a, private]", PROSE));
+  const ordered = commit(message("[fleet-sync: Acme/a, private]", PROSE));
   const mention = commit(message(PROSE, "The sync leg is untouched, so no `[fleet-sync]`."));
 
   // The squash commits of the current fleet policy carry the title alone: the block lives in the
@@ -902,7 +902,7 @@ describe("main", () => {
     {
       number: 41,
       title: "feat: reopened after a closed attempt (#41)",
-      body: `\`[fleet-sync: Vivswan/c]\`\n\n${PROSE}`,
+      body: `\`[fleet-sync: Acme/c]\`\n\n${PROSE}`,
       merge_commit_sha: sha,
     },
   ]);
@@ -992,8 +992,8 @@ describe("main", () => {
     const stamped = run(publishedSeed, prose2, prose1);
     expect(stamped).toEqual({
       exitCode: 0,
-      output: "armed=true\nrepos=vivswan/a\n",
-      stdout: lines(directive(listA, "vivswan/a"), syncing(seed, prose2, "vivswan/a")),
+      output: "armed=true\nrepos=acme/a\n",
+      stdout: lines(directive(listA, "acme/a"), syncing(seed, prose2, "acme/a")),
       stderr: "",
     });
     // The control, the old single-commit read: the same run against an
@@ -1014,11 +1014,11 @@ describe("main", () => {
         "two directives with overlapping repo lists: the union, in commit order, each repo once",
       cwd: publishedSeed,
       sha: listBothOwners,
-      output: "armed=true\nrepos=vivswan/a,vivswan/b\n",
+      output: "armed=true\nrepos=acme/a,acme/b\n",
       stdout: lines(
-        directive(listA, "vivswan/a"),
-        directive(listBothOwners, "vivswan/b,vivswan/a"),
-        syncing(seed, listBothOwners, "vivswan/a,vivswan/b"),
+        directive(listA, "acme/a"),
+        directive(listBothOwners, "acme/b,acme/a"),
+        syncing(seed, listBothOwners, "acme/a,acme/b"),
       ),
     },
     {
@@ -1027,7 +1027,7 @@ describe("main", () => {
       sha: whole,
       output: "armed=true\nrepos=all\n",
       stdout: lines(
-        directive(listBothOwners, "vivswan/b,vivswan/a"),
+        directive(listBothOwners, "acme/b,acme/a"),
         directive(whole, "all"),
         syncing(prose2, whole, "all"),
       ),
@@ -1036,11 +1036,11 @@ describe("main", () => {
       reason: "visibility tokens union with a slug list and pass through as written",
       cwd: publishedProse3,
       sha: mixed,
-      output: "armed=true\nrepos=public,private,vivswan/b\n",
+      output: "armed=true\nrepos=public,private,acme/b\n",
       stdout: lines(
         directive(pub, "public"),
-        directive(mixed, "private,vivswan/b"),
-        syncing(prose3, mixed, "public,private,vivswan/b"),
+        directive(mixed, "private,acme/b"),
+        syncing(prose3, mixed, "public,private,acme/b"),
       ),
     },
   ])("$reason", ({ cwd, sha, output, stdout }) => {
@@ -1078,7 +1078,7 @@ describe("main", () => {
       stdout: lines(
         poisoned,
         directive(pub, "public"),
-        directive(mixed, "private,vivswan/b"),
+        directive(mixed, "private,acme/b"),
         `::error::${short(bare)}: "[fleet-sync]": ${NEEDS_REASON}`,
       ),
     },
@@ -1123,12 +1123,12 @@ describe("main", () => {
       reason: "a list: repos is the folded comma list",
       sha: listBothOwners,
       exitCode: 0,
-      output: "armed=true\nrepos=vivswan/b,vivswan/a\n",
+      output: "armed=true\nrepos=acme/b,acme/a\n",
       stdout: (base: string, sha: string) =>
         lines(
           fallback(sha, base),
-          directive(sha, "vivswan/b,vivswan/a"),
-          syncing(base, sha, "vivswan/b,vivswan/a"),
+          directive(sha, "acme/b,acme/a"),
+          syncing(base, sha, "acme/b,acme/a"),
         ),
     },
     {
@@ -1171,12 +1171,12 @@ describe("main", () => {
       reason: "a slug before a token: repos= carries tokens first, then slugs",
       sha: ordered,
       exitCode: 0,
-      output: "armed=true\nrepos=private,vivswan/a\n",
+      output: "armed=true\nrepos=private,acme/a\n",
       stdout: (base: string, sha: string) =>
         lines(
           fallback(sha, base),
-          directive(sha, "private,vivswan/a"),
-          syncing(base, sha, "private,vivswan/a"),
+          directive(sha, "private,acme/a"),
+          syncing(base, sha, "private,acme/a"),
         ),
     },
     {
@@ -1224,9 +1224,9 @@ describe("main", () => {
       reason: "two pull requests list the commit: the one it is the merge of wins",
       sha: twoPulls,
       exitCode: 0,
-      output: "armed=true\nrepos=vivswan/c\n",
+      output: "armed=true\nrepos=acme/c\n",
       stdout: (base: string, sha: string) =>
-        lines(fallback(sha, base), directive(sha, "vivswan/c"), syncing(base, sha, "vivswan/c")),
+        lines(fallback(sha, base), directive(sha, "acme/c"), syncing(base, sha, "acme/c")),
     },
     {
       reason: "a pull request with a null body carries no block",

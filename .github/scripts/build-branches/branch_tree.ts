@@ -84,9 +84,8 @@ vouched for. Every shipped workflow is workflow_call-only (enforced at
 assembly), so nothing can ever run ON this branch.
 `;
 
-/** Directories never published under actions/: build output and installed
- *  dependencies, both reproducible from what is published. */
-export const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".turbo"]);
+/** Installed dependencies never publish under actions/: the action reinstalls them from its shipped lockfile. */
+export const EXCLUDED_DIRS = new Set(["node_modules"]);
 
 /** Test files never publish either: nothing on the branch runs them, and
  *  they import fixtures from tests/, which the branch does not carry. */

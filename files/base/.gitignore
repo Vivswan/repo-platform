@@ -11,7 +11,6 @@
 
 ## CI workspace paths (repo-platform)
 /results.sarif
-/.fuzz-failures/
 
 ## Windows (github/gitignore Global/Windows.gitignore)
 # Windows thumbnail cache files

@@ -22,6 +22,7 @@ modules:
   pages: {}
   docs-site: {}
   fuzzer:
+    gitignore_sources: [fuzzer]
     tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}
   skills:
     skills_dir: {default: skills}

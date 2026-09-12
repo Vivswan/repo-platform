@@ -46,21 +46,18 @@ The hook is a universal starter: the sync seeds it once in every repository, mod
 | refused | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path |
 | declares no `dist` output | only the docs directory publishes, when there is one, with a notice that the hook named no directory |
 
-A bun website:
+A website built by the repository's own toolchain (its setup steps go before the build step):
 
 ```yaml
 runs:
   using: composite
   steps:
-    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      with: {bun-version-file: .bun-version}
-    - {run: bun install --frozen-lockfile, shell: bash}
     - id: build
       shell: bash
       env: {PAGES_BASE_PATH: "${{ inputs.base-path }}", PAGES_ORIGIN: "${{ inputs.origin }}"}
       run: |
-        bun run build:web
-        echo "dist=apps/web/dist" >> "$GITHUB_OUTPUT"
+        <your build command>
+        echo "dist=<the built site directory>" >> "$GITHUB_OUTPUT"
 ```
 
 An MkDocs website (uv):

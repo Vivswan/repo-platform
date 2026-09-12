@@ -53,8 +53,6 @@ describe("action steps", () => {
     writeFileSync(join(dir, "spelled-long", "action.yaml"), SHARED);
     mkdirSync(join(dir, "pages-site", "node_modules", "dep"), { recursive: true });
     writeFileSync(join(dir, "pages-site", "node_modules", "dep", "action.yml"), SHARED);
-    mkdirSync(join(dir, "pages-site", "dist"));
-    writeFileSync(join(dir, "pages-site", "dist", "action.yml"), SHARED);
     mkdirSync(join(dir, "shared"));
     symlinkSync(join(dir, "pages-site", "action.yml"), join(dir, "shared", "action.yml"));
     mkdirSync(join(dir, "x"));

@@ -10,15 +10,8 @@ repository:
       status: enabled
 
 rulesets:
-  # code_quality lives here for every public repo, not beside code_scanning in the toolchain layers: the rule gates on GitHub Code Quality's OWN analysis, and its documented blocking conditions omit "a required tool is not configured".
-  # The evidence is the docs' silence plus ONE live specimen, copilot-env, which has carried this rule since 2026-08-21 (ruleset history v47188788).
-  #
-  #   personal account                                   -> Code Quality (a Team/GHEC-only product) cannot be enabled there
-  #   PRs kept auto-merging under the rule               -> auto-merge does not bypass rules, so the rule was not blocking
-  #   GitHub starts blocking on an unconfigured analysis -> merges block fleet-wide, loudly, not silently
-  #   private repositories                               -> the feature family needs Advanced Security, so the private layer stays silent
-  #   rules of a same-name ruleset                       -> append across layers keyed by `type`, adding to the main ruleset in files/settings/override.yml
-  #   severity: warnings                                 -> matches the specimen's live rule
+  # Code quality results are required on every public repository whatever its toolchain, so the rule lives in this layer, not beside code_scanning in the toolchain layers.
+  # Rules of a same-name ruleset append across layers keyed by `type`, so this joins the main ruleset in files/settings/override.yml.
   - name: main
     rules:
       - type: code_quality

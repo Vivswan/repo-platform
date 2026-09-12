@@ -38,7 +38,7 @@ describe("parseScope", () => {
     { raw: " ALL ", expected: ALL },
     { raw: "public", expected: list(["public"], []) },
     { raw: "Private", expected: list(["private"], []) },
-    { raw: "public, Vivswan/Dotfiles", expected: list(["public"], ["vivswan/dotfiles"]) },
+    { raw: "public, Acme/Widgets", expected: list(["public"], ["acme/widgets"]) },
     { raw: "o/a,o/b, O/A", expected: list([], ["o/a", "o/b"]) },
     { raw: "public,private", expected: list(["public", "private"], []) },
     { raw: "modules:site", expected: list([], [], [["site"]]) },
@@ -123,7 +123,7 @@ describe("parseScope", () => {
       },
     },
     {
-      raw: "modules:site+Vivswan/secret, modules:o/hidden",
+      raw: "modules:site+Acme/secret, modules:o/hidden",
       expected: {
         kind: "error",
         message: `2 of 3 module names in the modules: filters are not modules files.yml knows (values withheld - this log is public); the modules are: ${moduleRoster().join(", ")}`,
@@ -147,7 +147,7 @@ describe("classifyEntry", () => {
     ["all", "all"],
     ["Public", "public"],
     ["PRIVATE", "private"],
-    ["Vivswan/a", "slug"],
+    ["Acme/a", "slug"],
     ["modules:site", "modules"],
     ["MODULES:", "modules"],
     ["module:site", "invalid"],

@@ -62,7 +62,7 @@ export function writeTargets(dest: string): Record<string, string[]> {
         "--build",
         PLACEHOLDER_BUILD,
         "--repository",
-        "Vivswan/fleet-lint",
+        "example/fleet-lint",
         "--private",
         "false",
         "--summary",

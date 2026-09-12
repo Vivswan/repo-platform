@@ -34,6 +34,12 @@ const droppedMirrorNote = (path: string) =>
 const HASH_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const HASH_END = "# END REPO-PLATFORM MANAGED";
 const OLD_REGION = `${HASH_BEGIN}\n# old managed region\nnode_modules/\n${HASH_END}\n`;
+/** The .gitignore region the fixture writes for bun up to the END marker: the base, then the module blocks in files.yml order. */
+const BUN_REGION_PREFIX =
+  `${HASH_BEGIN}\n# Generated from github/gitignore - do not edit between the markers.\n` +
+  "node_modules/\n## Node\n*.log\n## Bun\nbun.lockb\n";
+const REGION_WITHOUT_FUZZER = `${BUN_REGION_PREFIX}${HASH_END}\n`;
+const REGION_WITH_FUZZER = `${BUN_REGION_PREFIX}## Fuzzer\n/.fuzz-failures/\n${HASH_END}\n`;
 const OLD_LICENSE = "MIT License\n\nCopyright (c) 2020 Someone\n";
 const OLD_CI = "name: platform ci v1\n";
 const LOCAL_CI = "name: my own ci\non: push\n";
@@ -441,22 +447,9 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/docs-site.yml")).toContain("docs site (standalone)");
   });
 
-  test("rewrites the split region between the repo-owned halves with the module blocks, one Node block for two modules", () => {
+  test("rewrites the split region between the repo-owned halves with the module blocks, one Node block for two modules, the fuzzer block last", () => {
     expect(read(".gitignore")).toBe(
-      [
-        "# my ignores above",
-        HASH_BEGIN,
-        "# Generated from github/gitignore - do not edit between the markers.",
-        "node_modules/",
-        "## Node",
-        "*.log",
-        "## Bun",
-        "bun.lockb",
-        HASH_END,
-        "# my ignores below",
-        ".idea/",
-        "",
-      ].join("\n"),
+      `# my ignores above\n${REGION_WITH_FUZZER}# my ignores below\n.idea/\n`,
     );
   });
 
@@ -923,6 +916,47 @@ describe("sync.ts over a modules-only registration", () => {
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
+  });
+});
+
+describe("sync.ts over a repository that deselected the fuzzer module", () => {
+  test("the recorded region carrying the fuzzer block is rewritten without it, the repo-owned sides untouched", () => {
+    const target = temp.dir("sync-e2e-no-fuzzer-target-");
+    const files: Record<string, string> = {
+      ".repo-platform.yml":
+        "modules: [bun]\nproject: {name: Demo Project, slug: demo, description: A demo repository}\n",
+      ".gitignore": `# my ignores above\n${REGION_WITH_FUZZER}# my ignores below\n`,
+      [MANIFEST]: `{"files": {".gitignore": {"class": "split", "grammar": "managed-region", "begin": "${HASH_BEGIN}", "end": "${HASH_END}", "hash": "${sha256(REGION_WITH_FUZZER)}"}}}\n`,
+    };
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(target, rel)), { recursive: true });
+      writeFileSync(join(target, rel), content);
+    }
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const { summary } = runSync(
+      target,
+      join(temp.dir("sync-e2e-no-fuzzer-summary-"), "summary.json"),
+    );
+    expect(summary.modules).toEqual(["bun"]);
+    expect(summary.written.find((row) => row.path === ".gitignore")).toEqual({
+      path: ".gitignore",
+      class: "split",
+      change: "updated",
+      detail: "",
+    });
+    expect(readFileSync(join(target, ".gitignore"), "utf-8")).toBe(
+      `# my ignores above\n${REGION_WITHOUT_FUZZER}# my ignores below\n`,
+    );
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    expect(manifest.files[".gitignore"]).toEqual({
+      class: "split",
+      grammar: "managed-region",
+      begin: HASH_BEGIN,
+      end: HASH_END,
+      hash: sha256(REGION_WITHOUT_FUZZER),
+    });
   });
 });
 

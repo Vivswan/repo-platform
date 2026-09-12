@@ -10,5 +10,3 @@ project:
   name: repo-platform
   slug: repo-platform
   description: Standards files, CI, and settings for Vivswan's repositories, pushed from one place
-labels:
-  site: docs-link-rot

@@ -30,7 +30,7 @@ const temp = tempDirs();
 const runValidator = validatorRunner(temp);
 
 const RESYNC =
-  "re-run the sync (dispatch sync-repos.yml in Vivswan/repo-platform with repo=<owner>/<name>), which replaces platform files whole";
+  "re-run the sync (dispatch sync-repos.yml in repo-platform with repo=<owner>/<name>), which replaces platform files whole";
 
 describe("the manifest's shape", () => {
   test("a missing manifest is deletion damage", () => {
