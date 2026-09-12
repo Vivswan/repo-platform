@@ -1,5 +1,5 @@
-// The assignee is the repository owner by expression: every managed CODEOWNERS the platform writes is `* @owner`,
-// so a parse of it can only ever yield the same name, and GitHub's own CODEOWNERS review request covers the review.
+// The assignee is the repository owner by expression; CODEOWNERS is not read, so a repo-owned wildcard override below
+// the managed region no longer changes it. GitHub's own CODEOWNERS review request covers the review.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
