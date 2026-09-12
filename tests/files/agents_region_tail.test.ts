@@ -58,7 +58,7 @@ const bunBlock = readFileSync(
 );
 
 test.each([
-  ["no toolchain", [], ["- Fleet-wide conventions: repo-platform's docs/fleet-guidelines.md."]],
+  ["no toolchain", [], []],
   ["bun", ["bun"], ["## Toolchain", "", ...bunBlock.trimEnd().split("\n")]],
 ])(
   "the AGENTS.md region ends with the repository-specific heading (%s)",
