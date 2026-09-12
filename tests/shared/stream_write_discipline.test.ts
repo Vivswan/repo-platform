@@ -53,7 +53,7 @@ describe("forwarded child streams are written synchronously", () => {
       );
       expect(findings).toEqual([]);
     },
-    // A whole-tree read that took 0.4 s idle and passed bun's 5 s default under load.
+    // A whole-tree read: 0.4 s idle, but it ran past bun's 5 s default under load.
     harnessBound(30_000),
   );
 });
