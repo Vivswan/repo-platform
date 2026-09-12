@@ -1,8 +1,9 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FLEET_WORKFLOWS } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { actionManifestPaths } from "../../lib/action_steps.ts";
 import { constStringValue } from "../../lib/ts_extract.ts";
-import { type Mismatch, sortedSet } from "./comparison.ts";
+import { escapeRegExp, type Mismatch, sortedSet } from "./comparison.ts";
 import { OWNER, REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -136,14 +137,27 @@ export interface SelfPin {
   ref: string;
 }
 
-/** Self-delivery pins in the writer's sources: the owner slot is the
- *  `github_username` placeholder in either case (the writer substitutes
- *  this owner, GitHub resolves owners case-insensitively), so the slot is
- *  matched by placeholder name, never by enumerating spellings. */
+/** A self pin is a `uses:` naming this repository; the owner slot is the `github_username` placeholder in either case
+ *  in the writer's sources and OWNER itself in this repository's own workflows, manifests, and doc examples.
+ *  Only the `uses:` keyword marks a pin: prose spells the shape with an ellipsis (`Vivswan/repo-platform/...@<ref>`). */
 export function sourceSelfPins(text: string, file: string): SelfPin[] {
-  const token =
-    /(?<![A-Za-z0-9-])\{\{\s*github_username(?:_lower)?\s*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
+  const ownerSlot = String.raw`(?:\{\{\s*github_username(?:_lower)?\s*\}\}|${escapeRegExp(OWNER)})`;
+  const token = new RegExp(
+    String.raw`uses:\s*['"]?${ownerSlot}/(repo-platform/[A-Za-z0-9_./-]+)@([^\s"'\x60]*)`,
+    "gi",
+  );
   return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
+}
+
+/** An empty scan means the extraction grammar rotted, not a clean fleet: the sources always carry self-references. */
+function anchoredSelfPins(pins: SelfPin[]): SelfPin[] {
+  if (pins.length === 0) {
+    throw new Error(
+      "no repo-platform self-reference found in the scanned content - anchor lost " +
+        "(the writer's sources always pin their own actions and reusables)",
+    );
+  }
+  return pins;
 }
 
 export function deliveryRefTwinMismatches(published: string, deliveryRef: string): Mismatch[] {
@@ -157,16 +171,9 @@ export function deliveryRefTwinMismatches(published: string, deliveryRef: string
   ];
 }
 
-/** `@main` is the ungated live tip and any other ref forks the delivery story.
- *  An empty scan means the extraction grammar rotted, not a clean fleet: the sources always carry self-references. */
+/** `@main` is the ungated live tip and any other ref forks the delivery story. */
 export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mismatch[] {
-  if (pins.length === 0) {
-    throw new Error(
-      "no repo-platform self-reference found in the scanned content - anchor lost " +
-        "(the writer's sources always pin their own actions and reusables)",
-    );
-  }
-  return pins
+  return anchoredSelfPins(pins)
     .filter((pin) => pin.ref !== deliveryRef)
     .map((pin) => ({
       file: pin.file,
@@ -177,7 +184,7 @@ export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mis
 
 /** A reusable-workflow `uses:` fetches the FILE at the ref, so a pin on a workflow the build branch does not ship 404s every caller run
  *  even with the right ref; branch_tree.ts ships exactly FLEET_WORKFLOWS.
- *  Actions have no twin check: copyActions ships the whole actions/ tree, so only a pin naming a directory that does not exist could 404. */
+ *  Actions have no roster: copyActions ships the whole actions/ tree, so the delivery-pin-stems rule's existence check is their whole guard. */
 export function fleetWorkflowPinMismatches(
   pins: SelfPin[],
   shipped: readonly string[],
@@ -194,20 +201,53 @@ export function fleetWorkflowPinMismatches(
     }));
 }
 
+/** A `uses:` fetches the stem's path at the ref, so a pin on a moved or deleted action directory or workflow file 404s
+ *  every caller run with the ref itself right; the checkout is the tree every delivery ref is assembled from.
+ *  GitHub's resolution: a `.github/workflows/` stem is the file itself, any other stem is a directory read by either manifest spelling. */
+export function stemMismatches(pins: SelfPin[], exists: (rel: string) => boolean): Mismatch[] {
+  return anchoredSelfPins(pins).flatMap((pin) => {
+    const path = pin.stem.slice("repo-platform/".length);
+    const wanted = path.startsWith(".github/workflows/")
+      ? [path]
+      : [`${path}/action.yml`, `${path}/action.yaml`];
+    if (wanted.some(exists)) return [];
+    return [
+      {
+        file: pin.file,
+        expected: `${wanted.join(" or ")} in the checkout (a uses: fetches it at the ref, so a missing stem 404s every caller)`,
+        got: `${pin.stem}@${pin.ref} (no such path)`,
+      },
+    ];
+  });
+}
+
+function pinSites(): string[] {
+  return [
+    ...walkFiles(".github/workflows").map((f) => f.path),
+    ...walkFiles("files")
+      .filter((f) => !f.symlink)
+      .map((f) => f.path),
+    ...actionManifestFiles(),
+  ];
+}
+
+/** The pin sites plus the docs and skills, whose examples spell the shape a reader copies. */
+function selfPinSites(): string[] {
+  return [
+    ...pinSites(),
+    ...["docs", "skills"].flatMap((dir) =>
+      walkFiles(dir)
+        .filter((f) => !f.symlink)
+        .map((f) => f.path),
+    ),
+  ];
+}
+
 export const deliveryPinRules: Rule[] = [
   {
     name: "action-pins",
     run: () => {
-      const files = [
-        ...walkFiles(".github/workflows").map((f) => f.path),
-        // The sync writer's sources, workflow block files included: what
-        // the fleet runs after a sync.
-        ...walkFiles("files")
-          .filter((f) => !f.symlink)
-          .map((f) => f.path),
-        ...actionManifestFiles(),
-      ];
-      const pins = files.flatMap((rel) => extractUsesPins(read(rel), rel));
+      const pins = pinSites().flatMap((rel) => extractUsesPins(read(rel), rel));
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
       return [...pinMismatches(pins), ...pinShapeMismatches(pins, OWNER, BRANCH_PINNED)];
@@ -232,5 +272,13 @@ export const deliveryPinRules: Rule[] = [
         ...fleetWorkflowPinMismatches(pins, FLEET_WORKFLOWS),
       ];
     },
+  },
+  {
+    name: "delivery-pin-stems",
+    run: () =>
+      stemMismatches(
+        selfPinSites().flatMap((rel) => sourceSelfPins(read(rel), rel)),
+        (rel) => existsSync(join(REPO_ROOT, rel)),
+      ),
   },
 ];

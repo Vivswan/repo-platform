@@ -9,6 +9,7 @@ import {
   pinMismatches,
   pinShapeMismatches,
   sourceSelfPins,
+  stemMismatches,
 } from "../../../scripts/check/ssot/delivery_pins.ts";
 
 const SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1";
@@ -194,16 +195,32 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
     ]);
   });
 
-  test("third-party, local, other-repo, literal-owner, and other-placeholder refs are not self-pins", () => {
+  test("third-party, local, other-repo, other-placeholder, and prose refs are not self-pins", () => {
     const text = [
       "      - uses: actions/checkout@v7",
       "      - uses: ./actions/local",
       "      - uses: {{github_username}}/other-repo/actions/x@main",
-      "      - uses: Vivswan/repo-platform/actions/x@main",
       "      - uses: {{other_owner}}/repo-platform/actions/x@main",
       "      - uses: x{{github_username}}/repo-platform/actions/x@main",
+      "      - uses: xVivswan/repo-platform/actions/x@main",
+      "- Exception: `Vivswan/repo-platform/...@build` references stay on the delivery ref.",
     ].join("\n");
     expect(sourceSelfPins(text, "f")).toEqual([]);
+  });
+
+  test("the literal owner in any case is a self-pin too, in a workflow, a manifest, or a doc's code span", () => {
+    const text = [
+      "      - uses: Vivswan/repo-platform/actions/plan@build",
+      "      uses: vivswan/repo-platform/actions/bun-setup@build",
+      "    uses: Vivswan/repo-platform/.github/workflows/reusable-site.yml@main",
+      "Each action calls bun-setup (`uses: Vivswan/repo-platform/actions/bun-setup@build` with `pin` set).",
+    ].join("\n");
+    expect(sourceSelfPins(text, "f")).toEqual([
+      { file: "f", stem: "repo-platform/actions/plan", ref: "build" },
+      { file: "f", stem: "repo-platform/actions/bun-setup", ref: "build" },
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-site.yml", ref: "main" },
+      { file: "f", stem: "repo-platform/actions/bun-setup", ref: "build" },
+    ]);
   });
 
   test("a planted @main source ref reds, naming the file and the offending ref", () => {
@@ -267,5 +284,83 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
 
   test("an empty scan throws - anchor lost, never a silently green rule", () => {
     expect(() => deliveryRefMismatches([], "build")).toThrow("anchor lost");
+  });
+});
+
+describe("stemMismatches (delivery-pin-stems)", () => {
+  const tree = new Set([
+    "actions/plan/action.yml",
+    "actions/pages-site/check-links/action.yaml",
+    ".github/workflows/reusable-site.yml",
+  ]);
+  const exists = (rel: string) => tree.has(rel);
+  const missing = (wanted: string) =>
+    `${wanted} in the checkout (a uses: fetches it at the ref, so a missing stem 404s every caller)`;
+
+  test("a pin on a missing action directory reds, naming the file, the stem, and the ref as written", () => {
+    const planted = [
+      "      - uses: Vivswan/repo-platform/actions/plan@build",
+      "      - uses: Vivswan/repo-platform/actions/does-not-exist@build",
+    ].join("\n");
+    const file = ".github/workflows/fleet-ci.yml";
+    expect(stemMismatches(sourceSelfPins(planted, file), exists)).toEqual([
+      {
+        file,
+        expected: missing(
+          "actions/does-not-exist/action.yml or actions/does-not-exist/action.yaml",
+        ),
+        got: "repo-platform/actions/does-not-exist@build (no such path)",
+      },
+    ]);
+  });
+
+  test("the ref is data: under any tag or branch a missing stem reds and a present one passes", () => {
+    for (const ref of ["build", "stable", "v2"]) {
+      const text = [
+        `      - uses: {{github_username}}/repo-platform/actions/does-not-exist@${ref}`,
+        `    uses: {{github_username}}/repo-platform/.github/workflows/reusable-site.yml@${ref}`,
+      ].join("\n");
+      expect(stemMismatches(sourceSelfPins(text, "f"), exists)).toEqual([
+        {
+          file: "f",
+          expected: missing(
+            "actions/does-not-exist/action.yml or actions/does-not-exist/action.yaml",
+          ),
+          got: `repo-platform/actions/does-not-exist@${ref} (no such path)`,
+        },
+      ]);
+    }
+  });
+
+  test("present stems pass in every shape: an action, a nested action with the yaml spelling, a reusable workflow", () => {
+    const pins = [
+      { file: "a", stem: "repo-platform/actions/plan", ref: "build" },
+      { file: "a", stem: "repo-platform/actions/pages-site/check-links", ref: "build" },
+      { file: "b", stem: "repo-platform/.github/workflows/reusable-site.yml", ref: "build" },
+    ];
+    expect(stemMismatches(pins, exists)).toEqual([]);
+  });
+
+  test("a missing reusable workflow is one file; a stem outside actions/ is asked for a manifest like any directory", () => {
+    const pins = [
+      { file: "a", stem: "repo-platform/.github/workflows/reusable-ghost.yml", ref: "build" },
+      { file: "b", stem: "repo-platform/scripts/run_tests.ts", ref: "build" },
+    ];
+    expect(stemMismatches(pins, exists)).toEqual([
+      {
+        file: "a",
+        expected: missing(".github/workflows/reusable-ghost.yml"),
+        got: "repo-platform/.github/workflows/reusable-ghost.yml@build (no such path)",
+      },
+      {
+        file: "b",
+        expected: missing("scripts/run_tests.ts/action.yml or scripts/run_tests.ts/action.yaml"),
+        got: "repo-platform/scripts/run_tests.ts@build (no such path)",
+      },
+    ]);
+  });
+
+  test("an empty scan throws - anchor lost, never a silently green rule", () => {
+    expect(() => stemMismatches([], exists)).toThrow("anchor lost");
   });
 });
