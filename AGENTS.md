@@ -9,6 +9,7 @@ repo-platform is a file writer plus reusable GitHub Actions workflows and compos
 ## Architecture essentials
 
 - This repo is the push-only operator: `sync-repos.yml` pushes sync PRs into managed repos and `settings-repos.yml` applies settings. Managed repos carry no sync workflow and no sync secret; the REPO_PLATFORM_TOKEN PAT lives only here.
+- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` line in a merged PR body (post-green runs it after the build publishes); a manual `sync-repos.yml` dispatch only when neither fits. Unsure which is right: ask the owner.
 - `files.yml` is the source of truth for what the fleet receives (the grammar: actions/plan/files_config.ts, the contract: docs/sync.md); the sources under `files/` are copied whole by the writer in .github/scripts/sync/writer.
 - The orphan `build` branch is the delivery channel the fleet consumes (branch_tree.ts assembles it). Fleet refs pin `@build`, never `@main`.
 - Publishing the build branch is green-gated and provenance-verified: the post-green legs, including the `[fleet-sync: <scope>]` PR-body directive, are in docs/all-green.md; the trust model is in docs/build-provenance.md.
