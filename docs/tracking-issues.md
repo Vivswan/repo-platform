@@ -9,7 +9,7 @@ The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open Git
 
 ## The action
 
-Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action. It assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: the stream's one open issue is refreshed in place, never commented on. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
+Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action. It assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: a red night refreshes the stream's open issue in place instead of commenting on it. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
 
 Because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
 
