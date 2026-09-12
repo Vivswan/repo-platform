@@ -13,7 +13,7 @@ const NOW = new Date("2031-03-04T23:59:00Z");
 const SLUG = { owner: "OwnerOrg", name: "my-repo" };
 
 describe("placeholderValues", () => {
-  test("a v1 registration falls back to the repository slug", () => {
+  test("a registration without a project block falls back to the repository slug", () => {
     expect(placeholderValues({ modules: ["bun"] }, SLUG, {}, NOW)).toEqual({
       project_name: "my-repo",
       project_slug: "my-repo",
@@ -25,7 +25,7 @@ describe("placeholderValues", () => {
     });
   });
 
-  test("a v2 project block wins over the slug", () => {
+  test("the project block wins over the slug", () => {
     const registration = {
       modules: [],
       project: {

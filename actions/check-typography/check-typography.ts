@@ -80,7 +80,7 @@ function isCheckable(name: string): boolean {
   return EXTENSIONS.has(name.slice(dot));
 }
 
-// .typography-allow is template-managed in synced repos; .typography-allow.local is repo-owned and never synced.
+// .typography-allow is written by the sync in managed repos; .typography-allow.local is repo-owned and never synced.
 const ALLOW_FILES = [join(ROOT, ".typography-allow"), join(ROOT, ".typography-allow.local")];
 const ALLOWED_PREFIXES = ALLOW_FILES.flatMap((file) =>
   existsSync(file)
@@ -193,7 +193,7 @@ function* walk(dir: string): Generator<string> {
     const path = join(dir, entry);
     const stat = lstatSync(path);
     // Symlinks (e.g. CLAUDE.md -> AGENTS.md) are skipped: their targets are
-    // checked directly, and template symlinks may be dangling by design.
+    // checked directly, and a managed symlink may be dangling by design.
     if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
       if (!SKIP_DIRS.has(entry)) yield* walk(path);

@@ -14,18 +14,12 @@ export const CHECK_NAME = "all-green";
  * count. */
 const CHECK_APP = "github-actions";
 
-/** Older verdict checks record the judged run's event in external_id; a pull_request run judged a
- * synthetic merge tree, never the sha's own. A blocklist, not an allowlist: job-created checks
- * carry opaque external_ids and must keep vouching. */
-const MERGE_TREE_EVENTS = new Set(["pull_request", "pull_request_target"]);
-
 const checkRunsSchema = z.object({
   check_runs: z.array(
     z.object({
       name: z.string(),
       status: z.string(),
       conclusion: z.string().nullable(),
-      external_id: z.string().nullable(),
       app: z.object({ slug: z.string() }).nullable(),
     }),
   ),
@@ -99,12 +93,7 @@ export function allGreenFailure(
       checkRunsSchema,
       probe.stdout,
       "all_green: check runs response",
-    ).check_runs.filter(
-      (check) =>
-        check.name === CHECK_NAME &&
-        check.app?.slug === CHECK_APP &&
-        !MERGE_TREE_EVENTS.has(check.external_id ?? ""),
-    );
+    ).check_runs.filter((check) => check.name === CHECK_NAME && check.app?.slug === CHECK_APP);
     if (checks.some((check) => check.status === "completed" && check.conclusion === "success")) {
       return null;
     }

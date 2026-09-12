@@ -17,7 +17,6 @@ function verdict(conclusion: string): string {
         name: "all-green",
         status: "completed",
         conclusion,
-        external_id: "workflow_run",
         app: { slug: "github-actions" },
       },
     ],

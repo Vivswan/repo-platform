@@ -33,7 +33,7 @@ files:
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
 retired:
-  - { path: .github/.copier-answers.yml }
+  - { path: .github/old-tool.yml }
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
@@ -75,7 +75,7 @@ describe("parseFilesConfig", () => {
     expect(config.placeholders).toEqual(["project_name", "year"]);
     expect(Object.keys(config.modules)).toEqual(["bun", "site", "nightly", "fuzzer"]);
     expect(config.retired).toEqual([
-      { path: ".github/.copier-answers.yml" },
+      { path: ".github/old-tool.yml" },
       { path: "SECURITY.md", moved_to: ".github/SECURITY.md" },
     ]);
   });

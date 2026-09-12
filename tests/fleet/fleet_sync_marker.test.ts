@@ -136,7 +136,7 @@ describe("parseDirectives", () => {
       expected: { kind: "fleet-sync", scope: ["o/r"] },
     },
     {
-      reason: "a block at the bottom of the body (the retired position) fails, naming the position",
+      reason: "a block at the bottom of the body fails, naming the position",
       body: message(PROSE, "[fleet-sync]"),
       expected: misplaced("[fleet-sync]"),
     },
@@ -352,7 +352,7 @@ describe("parseDirectives", () => {
     {
       reason:
         "a wrapped line whose continuation starts with a code span is still the justification",
-      body: message("[fleet-sync: all] every repo renders\n`ci.yml` from this template", PROSE),
+      body: message("[fleet-sync: all] every repo renders\n`ci.yml` from this source", PROSE),
       expected: FLEET,
     },
     {
@@ -537,7 +537,7 @@ describe("parseDirectives", () => {
       },
     },
     {
-      reason: "a modules: filter naming no module of the template fails on the grammar first",
+      reason: "a modules: filter naming no module of files.yml fails on the grammar first",
       body: message("[fleet-sync: modules:pagez]", PROSE),
       expected: {
         kind: "error",

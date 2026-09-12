@@ -511,13 +511,10 @@ describe("post-green publish wiring", () => {
     expect(commitSegment).toContain('...(staged ? [] : ["--allow-empty"])');
   });
 
-  test("no tree without actions/ ever publishes (the bootstrap shape guard)", () => {
-    // A dispatch naming a PRE-unification main commit composes the
-    // retired template-only tree with that commit's own branch_tree.ts;
-    // minting `build` from it would 404 every fleet @build ref. The guard
-    // must run BEFORE the first commit or push inside publish() - moving
-    // it later would leave the window open while this test stayed green
-    // on presence alone.
+  test("no tree without actions/ ever publishes", () => {
+    // A dispatch composes the tree with the named commit's own branch_tree.ts, so the guard judges
+    // the composed tree, and BEFORE the first commit or push inside publish(): moved later, the
+    // window would stay open while this test stayed green on presence alone.
     const publish = read(".github/scripts/build-branches/publish.ts");
     expect(publish).toContain("carries no actions/ subtree");
     const body = publish.slice(publish.indexOf("function publish("));

@@ -69,7 +69,7 @@ files:
   - {path: .github/actions/site-build/action.yml, class: starter}
   - {path: .github/workflows/nightly-fuzz.yml, class: starter, when: {modules: [fuzzer]}}
 retired:
-  - {path: .github/.copier-answers.yml}
+  - {path: CONTRIBUTING.md}
   - {path: SECURITY.md, moved_to: .github/SECURITY.md}
 ```
 
@@ -195,7 +195,7 @@ A module with no files still appears under `modules` (`issue-templates`, `custom
 | `managed` | whole file, every sync; a `render: settings` entry writes the rendered settings document instead of a copy | replaced and reported (`replaced local edits`, with a diff), holds the PR | `hash` = sha256 of the file |
 | `split` | the marker-bounded region, every sync | everything above BEGIN and below END is kept; a file that never mentions the markers gets the region above its content and the verdict `region added`, which holds the PR; marker text duplicated or buried mid-line fails the run | `hash` = sha256 of the region, marker lines included |
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
-| `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string, the hash the previous pipeline already recorded for its symlinks |
+| `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string |
 
 Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there. An entry of any class finding a directory (or anything else that is neither a file nor a link) at its path is held with `<what> sits at the path, and the writer will not replace it`. A rendered entry whose overlay path holds anything but a regular file is held too, with the detail naming what sits there. A rendered entry is also held when its overlay is missing, does not parse, names one label twice, or when the registration's tracking labels are refused ([settings.md](settings.md)).
 
@@ -205,7 +205,7 @@ A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`,
 
 | State | Outcome |
 | --- | --- |
-| the path already holds exactly what the entry writes | `unchanged`; the record takes the new class (how a symlink the previous pipeline recorded as managed becomes a `link` record) |
+| the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
 | anything else, a `starter` record or a record without a hash included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
@@ -218,13 +218,13 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 
 | State of the retired file | Outcome |
 | --- | --- |
-| `managed`, content equals the recorded hash | `deleted` |
+| `managed` or `mirror`, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
 | `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay. The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it. Next run the path is unrecorded and produces no row. |
 | `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
 | `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
-| a symlink whose target hashes to the recorded hash, whatever class the record names | `deleted` (the link goes; what it points at is never touched) |
-| a symlink with another target; a regular file where a `link` was recorded | `held` |
+| `link`, a symlink whose target hashes to the recorded hash | `deleted` (the link goes; what it points at is never touched) |
+| a symlink with another target; a regular file where a `link` was recorded; a symlink where a `managed`, `split`, or `mirror` was recorded | `held` |
 | content differs, or a record without a hash | `held` |
 | recorded as `starter` | `kept` (repo-owned) |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |

@@ -15,7 +15,6 @@ function ghReturning(
     status?: string;
     conclusion?: string | null;
     app?: string | null;
-    external_id?: string | null;
   }[],
 ): (command: string[]) => RunResult {
   return () => ({
@@ -26,7 +25,6 @@ function ghReturning(
         name: check.name ?? "all-green",
         status: check.status ?? "completed",
         conclusion: check.conclusion === undefined ? "success" : check.conclusion,
-        external_id: check.external_id === undefined ? "push" : check.external_id,
         app: check.app === null ? null : { slug: check.app ?? "github-actions" },
       })),
     }),
@@ -93,16 +91,6 @@ describe("allGreenFailure", () => {
       NO_CHECK,
     ],
     [
-      "a pull_request verdict never vouches - a PR run tests the merge tree, not the sha",
-      ghReturning([{ external_id: "pull_request" }]),
-      NO_CHECK,
-    ],
-    [
-      "a pull_request_target verdict never vouches either",
-      ghReturning([{ external_id: "pull_request_target" }]),
-      NO_CHECK,
-    ],
-    [
       "an incomplete verdict is not green yet",
       ghReturning([{ status: "in_progress", conclusion: null }]),
       "its all-green verdict is still 'in_progress' after 0s",
@@ -120,15 +108,6 @@ describe("allGreenFailure", () => {
   ];
   test.each(refusals)("%s", (_reason, gh, expected) => {
     expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBe(expected);
-  });
-
-  test("job-created checks (opaque or empty external_id) vouch - the current shape", () => {
-    // The all-green job's own check run carries an opaque external_id, so the
-    // event filter is a blocklist.
-    for (const externalId of [null, "", "7452900668-check-run"]) {
-      const gh = ghReturning([{ external_id: externalId }]);
-      expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBeNull();
-    }
   });
 
   test("a missing check is polled for under the deadline - a fresh run's check races the caller", () => {

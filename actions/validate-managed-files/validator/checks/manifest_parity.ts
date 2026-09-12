@@ -155,17 +155,26 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     let actual: string;
-    if (stat.isSymbolicLink()) {
+    if (entry.class === "link") {
+      if (!stat.isSymbolicLink()) {
+        findings.push(
+          error(
+            `${rel}: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link - ` +
+              "the sync writes a relative symlink there and never reads through one, so " +
+              "a regular file at the path is a local replacement; restore the link from " +
+              "git history or re-run the sync",
+          ),
+        );
+        continue;
+      }
       // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct targets onto the replacement character.
-      // Any class hashes a link this way.
       actual = sha256(readlinkSync(join(ctx.root, rel), { encoding: "buffer" }));
-    } else if (entry.class === "link") {
+    } else if (stat.isSymbolicLink()) {
       findings.push(
         error(
-          `${rel}: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link - ` +
-            "the sync writes a relative symlink there and never reads through one, so " +
-            "a regular file at the path is a local replacement; restore the link from " +
-            "git history or re-run the sync",
+          `${rel}: recorded as ${entry.class} in ${MANIFEST_NAME} but is a symbolic link - ` +
+            "the sync writes a regular file there, so a link at the path is a local " +
+            `replacement; restore the file from git history or ${RESYNC}`,
         ),
       );
       continue;

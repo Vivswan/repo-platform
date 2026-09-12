@@ -75,7 +75,7 @@ describe("keepReason", () => {
 });
 
 describe("keepReason on symbolic links", () => {
-  test("a link is judged by its target string, whatever the record's class", () => {
+  test("a link is judged by its target string under a link record, and by class under any other", () => {
     const target = checkout({ "AGENTS.md": "agents\n", "as-file.md": "not a link\n" });
     symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
     symlinkSync("../AGENTS.md", join(target, "other.md"));
@@ -84,7 +84,9 @@ describe("keepReason on symbolic links", () => {
       "other.md": { class: "link", hash: sha256("AGENTS.md") },
       "as-file.md": { class: "link", hash: sha256("AGENTS.md") },
     };
-    expect(keepReason(target, "CLAUDE.md", records)).toBeNull();
+    expect(keepReason(target, "CLAUDE.md", records)).toBe(
+      "a symbolic link sits where the platform wrote a file",
+    );
     expect(keepReason(target, "other.md", records)).toBe(
       "the path is a symbolic link whose target is not the recorded one",
     );
@@ -195,7 +197,7 @@ describe("retire", () => {
     symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
     const records: Records = {
       "docs.yml": { class: "managed", hash: sha256("d\n") },
-      "CLAUDE.md": { class: "managed", hash: sha256("AGENTS.md") },
+      "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
     };
     expect(retire(target, [], ["docs.yml", "gone.yml", "CLAUDE.md"], new Set(), records)).toEqual([
       { path: "docs.yml", outcome: "deleted", detail: "no longer selected" },

@@ -24,7 +24,7 @@ function run(env: Record<string, string | undefined>) {
       PATH: `${stub.bin}:${process.env.PATH}`,
       BUMPS: "bun 1.3.0 -> 1.4.0",
       MAJOR: "",
-      PR_TITLE: "fix(templates): bump bun 1.3.0 -> 1.4.0",
+      PR_TITLE: "fix(files): bump bun 1.3.0 -> 1.4.0",
       PR_BODY: undefined,
       COMMIT_MESSAGE: undefined,
       STUB_EXIT: undefined,
@@ -61,7 +61,7 @@ describe("open_refresh_pr.ts", () => {
       stderr: "",
       calls: [["bun", join(SCRIPTS, "shared/open_automation_pr.ts")]],
       body,
-      message: "fix(templates): bump bun 1.3.0 -> 1.4.0",
+      message: "fix(files): bump bun 1.3.0 -> 1.4.0",
     });
   });
 
@@ -72,7 +72,7 @@ describe("open_refresh_pr.ts", () => {
       stderr: "",
       calls: [["bun", join(SCRIPTS, "shared/open_automation_pr.ts")]],
       body: SUMMARY,
-      message: "fix(templates): bump bun 1.3.0 -> 1.4.0",
+      message: "fix(files): bump bun 1.3.0 -> 1.4.0",
     });
   });
 

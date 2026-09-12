@@ -72,7 +72,7 @@ export interface PlanDefaults {
   docsPath: string;
 }
 
-export interface TemplateData {
+export interface FilesData {
   /** Every module in files.yml order, which is the canonical module order. */
   modules: Module[];
   defaults: PlanDefaults;
@@ -100,7 +100,7 @@ export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSourc
 /** files.yml's module data as the plan reads it: an unreadable or invalid
  *  file, or one missing a default the plan resolves from, is an error
  *  naming the file and every missing default. */
-export function loadModuleData(text: string, label = "files.yml"): TemplateData {
+export function loadModuleData(text: string, label = "files.yml"): FilesData {
   let config: FilesConfig;
   try {
     config = parseFilesConfig(text, label);
@@ -372,11 +372,11 @@ function main(): number {
     throw new PlanError([`MODE must be one of ${MODES.join(", ")}; got '${mode}'`]);
   }
   const filesConfig = requireEnv("FILES_CONFIG");
-  const template = loadModuleData(readFilesConfig(filesConfig), filesConfig);
+  const moduleData = loadModuleData(readFilesConfig(filesConfig), filesConfig);
   const root = process.cwd();
   const input: PlanInput = {
     registration: readRegistration(root),
-    ...template,
+    ...moduleData,
     reservedLabels: readReservedLabels(requireEnv("RESERVED_LABELS_FILE")),
     private:
       mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),

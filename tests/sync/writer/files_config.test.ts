@@ -36,7 +36,7 @@ files:
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
 retired:
-  - { path: .github/.copier-answers.yml }
+  - { path: .github/old-tool.yml }
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 

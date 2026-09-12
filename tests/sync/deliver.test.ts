@@ -487,7 +487,7 @@ describe("boundedReport", () => {
         diff: `--- src/file-${i}.ts\n+++ src/file-${i}.ts\n@@\n-${"y".repeat(30_000)}\n+${"z".repeat(30_000)}`,
       })),
       retired: [{ path: "old.yml", outcome: "held", detail: "edited locally" }],
-      notes: ["unknown module dropped: legacy"],
+      notes: ["unknown module dropped: unknown-one"],
       mirrors: [],
     };
     const report = renderReport(buildReport(outcome));
@@ -499,7 +499,7 @@ describe("boundedReport", () => {
       expect(bounded).toContain(`| \`${row.path}\` | managed | updated |`);
     }
     expect(bounded).toContain("| `old.yml` | held | edited locally |");
-    expect(bounded).toContain("- unknown module dropped: legacy");
+    expect(bounded).toContain("- unknown module dropped: unknown-one");
     expect(bounded).toContain("#### `src/file-0.ts`");
     expect(bounded).not.toContain("z".repeat(30_000));
     expect(omitted(bounded)).toHaveLength(1);

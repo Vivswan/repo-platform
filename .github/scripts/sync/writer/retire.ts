@@ -28,7 +28,7 @@ export interface RetireRow {
 
 /** What sits at a path against the writer's last write.
  *  `blank`: a split whose region is the last write with only blank lines around it, so nothing is worth handing over.
- *  A symbolic link is judged by its target string, never read through, whatever class the record names. */
+ *  A symbolic link is judged by its target string, never read through. */
 export type Judgement =
   | { verdict: "own" }
   | { verdict: "blank" }
@@ -64,12 +64,14 @@ export function judge(target: string, path: string, records: Records): Judgement
   if (hash === null) return foreign("the record carries no hash");
   const found = probe(target, path);
   if (found.kind === "absent") return { verdict: "own" };
-  if (found.kind === "link") {
+  if (entry.class === "link") {
+    if (found.kind !== "link")
+      return foreign("a regular file sits where the platform wrote a link");
     return sha256(found.target) === hash
       ? { verdict: "own" }
       : foreign("the path is a symbolic link whose target is not the recorded one");
   }
-  if (entry.class === "link") return foreign("a regular file sits where the platform wrote a link");
+  if (found.kind === "link") return foreign("a symbolic link sits where the platform wrote a file");
   if (entry.class === "split") {
     if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
       return foreign("the split record names no markers");

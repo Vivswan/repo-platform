@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const FILES_TREE = new URL("../../files", import.meta.url).pathname;
+const ROOT = new URL("../../", import.meta.url).pathname;
+
+// The operator's own .github/ carries hand-kept copies of the managed files, so it speaks the
+// same vocabulary; .github/scripts is code, not a copy.
+const TREES: { dir: string; skip: string[] }[] = [
+  { dir: "files", skip: [] },
+  { dir: ".github", skip: [".github/scripts"] },
+];
 
 const RETIRED_WORDING =
   /\btemplate (sync|updates)|during template|repo-platform's template|copier/gi;
@@ -12,19 +19,20 @@ function retiredWording(text: string): string[] {
   return unwrapped.match(RETIRED_WORDING) ?? [];
 }
 
-function walk(root: string, prefix = ""): string[] {
+function walk(rel: string, skip: string[]): string[] {
   const out: string[] = [];
-  for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
-    const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isDirectory() && !entry.isSymbolicLink()) out.push(...walk(root, rel));
-    else out.push(rel);
+  for (const entry of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+    const path = `${rel}/${entry.name}`;
+    if (skip.includes(path) || entry.isSymbolicLink()) continue;
+    if (entry.isDirectory()) out.push(...walk(path, skip));
+    else out.push(path);
   }
   return out.sort();
 }
 
-describe("the files/ tree speaks the sync's vocabulary", () => {
-  // The spellings the platform retired, wrapped ones included, against the
-  // uses that stay legitimate: the tripwire below is only as good as this.
+describe("the managed files speak the sync's vocabulary", () => {
+  // The retired spellings, wrapped ones included, against the uses that stay legitimate: the
+  // tripwire below is only as good as this.
   test.each([
     ["# Local edits may be replaced during template updates.", ["during template"]],
     ["never overwritten by template\n# sync, so add", ["template sync"]],
@@ -38,14 +46,10 @@ describe("the files/ tree speaks the sync's vocabulary", () => {
     expect(retiredWording(text)).toEqual(hits);
   });
 
-  test("no source file says template sync, template updates, or copier", () => {
-    const hits = walk(FILES_TREE)
-      .filter((path) => !lstatSync(join(FILES_TREE, path)).isSymbolicLink())
-      .flatMap((path) =>
-        retiredWording(readFileSync(join(FILES_TREE, path), "utf-8")).map(
-          (hit) => `${path}: ${hit}`,
-        ),
-      );
+  test("no source file or operator copy says template sync, template updates, or copier", () => {
+    const hits = TREES.flatMap(({ dir, skip }) => walk(dir, skip)).flatMap((path) =>
+      retiredWording(readFileSync(join(ROOT, path), "utf-8")).map((hit) => `${path}: ${hit}`),
+    );
     expect(hits).toEqual([]);
   });
 });

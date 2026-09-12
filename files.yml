@@ -148,10 +148,5 @@ files:
 # only reports it kept, so the ISSUE_TEMPLATE forms (starters, now served by
 # the account's .github repository) stay where each repository left them.
 retired:
-  - {path: .github/.copier-answers.yml}
-  - {path: .github/workflows/release.yml}
   - {path: CONTRIBUTING.md}
-  - {path: .github/CODE_OF_CONDUCT.md}
   - {path: .github/SECURITY.md}
-  - {path: .github/workflows/pages.yml}
-  - {path: .github/workflows/docs-site.yml}

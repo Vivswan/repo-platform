@@ -24,7 +24,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`; `null` turns the docs half off, for a website that renders `docs/` itself), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
 - Companion: Pages is enabled by the module's settings layer on the next settings apply; before it, enable Pages with Source: GitHub Actions by hand.
-- Removal: the leg skips; the hook stays (a starter); the live site stays until you turn Pages off. A registration still carrying a `pages:` or `docs_site:` block fails the plan.
+- Removal: the leg skips; the hook stays (a starter); the live site stays until you turn Pages off.
 
 ## release-please
 

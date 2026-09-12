@@ -715,14 +715,6 @@ export const allGreenRules: Rule[] = [
       });
       for (const [name, raw] of Object.entries(jobs)) {
         const job = asRecord(raw ?? {}, name);
-        if (name.startsWith("info-")) {
-          mismatches.push({
-            file: `${rel} job '${name}'`,
-            expected:
-              "no info-* job in the fleet's shared gate home (a fleet job either gates through the ci caller's result or does not exist; repo-local advisory jobs belong to checks.yml with continue-on-error)",
-            got: "an info-* job id",
-          });
-        }
         if (name === "all-green") {
           mismatches.push({
             file: `${rel} job '${name}'`,
