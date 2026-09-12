@@ -1,20 +1,6 @@
-# Reusable code scanning alert assignment, split out of
-# reusable-auto-assign.yml so security-events stays out of that file: a
-# reusable-workflow call is statically validated against the permissions of
-# every job in the called file regardless of each job's `if:`, so keeping
-# the alert job here means only the caller job for THIS file grants
-# security-events: write. Callers render the call only on CodeQL-enabled
-# repos and trigger it on workflow_run (watching CI) + schedule, plus
-# workflow_dispatch as a manual catch-up.
-#
-# Who gets assigned: the users on the last `*` entry of the repo's own
-# CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
-# Each repo controls its policy by editing CODEOWNERS.
-#
-# The job declares the minimum permissions it needs. A called job can only
-# downgrade the caller's token, so every scope below must also appear on
-# the calling job in the caller template - adding a scope here breaks
-# callers that have not synced the matching caller update yet.
+# Split from reusable-auto-assign.yml: a reusable-workflow call is validated against the permissions of EVERY job in
+# the called file, `if:` or not, so only the caller job for this file has to grant security-events: write.
+# A called job can only downgrade the caller's token: adding a scope here breaks every caller not yet synced with it.
 
 name: Reusable Auto Assign Alerts
 
@@ -22,14 +8,8 @@ on:
   workflow_call: {}
 
 jobs:
-  # Assign open, currently-unassigned code scanning alerts per the CODEOWNERS
-  # policy. No Actions trigger exists for alert creation, so this polls after
-  # CI completes (workflow_run - CodeQL analyzes inside CI's gate) and nightly
-  # (schedule). CI completes on every push, PR, and dispatch run, but only
-  # default-branch pushes and scheduled re-scans produce new alerts, so other
-  # workflow_run deliveries are filtered out. Idempotent: alerts that already
-  # have an assignee are skipped. Code scanning only exists on a public repo
-  # (or GHAS), matching the codeql workflow's private guard.
+  # Only default-branch pushes and scheduled re-scans produce new alerts, so other workflow_run deliveries are
+  # filtered out; code scanning exists on public repositories alone (or GHAS), hence the visibility clause.
   assign-code-scanning:
     if: >-
       github.event.repository.private == false &&
@@ -50,8 +30,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            // Users on the last `*` entry of CODEOWNERS; the repo owner when
-            // there is no usable entry or no file.
+            // Teams cannot be assignees, so only @user entries on the last `*` line count; the repo owner otherwise.
             async function resolveAssignees() {
               for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
                 let data;

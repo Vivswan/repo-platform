@@ -1,11 +1,9 @@
-# Repo-owned: written once by {{github_username}}/repo-platform, never
-# overwritten by sync. Called after the all-green gate on every green push
-# to main, before the release: REPLACE the no-op job with this repository's
-# work (it uses a runner allocation per push until you do; the contract is in
-# repo-platform's docs/all-green.md, "After the gate"). Jobs here run for the
-# LATEST green main, not every commit (ci.yml's concurrency group cancels a
-# superseded pending run): act on the repository's current state, never on
-# "what this commit changed", and stay idempotent.
+# Repo-owned: written once by {{github_username}}/repo-platform, never overwritten by a later sync; the contract is
+# repo-platform's docs/all-green.md, "After the gate". Every green push to main gets its own run of this hook, and the
+# runs of neighbouring commits overlap, so a job here may finish after a newer commit's did.
+#   the no-op job                  -> REPLACE it with this repository's work; it costs a runner allocation on every green push until you do
+#   what a job acts on             -> the repository's current state, idempotently; never "what this commit changed", never "the newest commit"
+#   a concurrency group on a job   -> keyed per commit (inputs.sha): a shared lane replaces the pending run, and the release leg needs this hook
 
 name: Post Green
 

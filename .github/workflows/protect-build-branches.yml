@@ -1,9 +1,4 @@
-# Auto-close pull requests targeting the generated build branch. `build`
-# is published by post-green.yml's publish-build job; nothing merges into it via PRs -
-# changes go to files/ (and actions/) on main. (The retired `template`
-# and `actions` refs were deleted 2026-08-29 and are no longer matched.)
-# pull_request_target (not pull_request) so fork PRs are handled too; safe
-# because the PR's code is never checked out or executed here.
+# pull_request_target, not pull_request, so fork PRs are closed too.
 
 name: Protect Build Branches
 
@@ -21,9 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # One comment per PR, edited in place when the PR is reopened or
-      # retargeted again; a failed post fails the step, so the PR is not
-      # closed without its explanation.
+      # Explain before closing, and a failed post fails the step: the PR is never closed without its explanation.
       - name: Explain why the PR is closed
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:

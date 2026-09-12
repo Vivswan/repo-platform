@@ -43,8 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
-    # issues: write lets the fuzz-issue action file and close the tracking
-    # issue. The action assigns the owner at creation, so nothing else runs.
+    # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.
     permissions:
       issues: write
     steps:
@@ -55,9 +54,7 @@ jobs:
           mode: report
           label: "{{nightly_label}}"
           title: Nightly CI failures
-          # No artifacts directory: this stream files the generic report,
-          # not the fuzzer's failure-report contract. The label tuple is
-          # used only at creation and matches the settings layer's.
+          # The create tuple is anchored to files.yml's nightly tracking_label by check_ssot's labels rule.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
 

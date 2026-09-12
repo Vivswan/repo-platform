@@ -1,14 +1,8 @@
-# The fleet's nightly leg, split from fleet-ci.yml because GitHub checks
-# every nested job's permissions against the CALLER job's grant when the
-# call is expanded, before any nested `if` runs: a job here asks for
-# `issues: write`, which the skeleton ci.yml's `ci` caller never grants,
-# so it rides its own `nightly` caller with exactly this ceiling. The
-# `plan` job is fleet-ci's twin (actions/plan@build resolves the
-# repository's configuration from its registration), so a call carries no
-# inputs. Nothing here gates: the caller is not in the all-green needs
-# list and the scan job stays green whatever it finds. Action refs must
-# stay fully qualified @build: a `./` ACTION path resolves against the
-# CALLER's checkout.
+# Split from fleet-ci.yml: GitHub validates a called job's permissions against the CALLER job's grant before any `if` runs,
+# and trivy-nightly needs `issues: write`, which the skeleton's `ci` caller never grants, so it rides its own `nightly` caller.
+#
+#   not in the all-green needs list   -> nothing here gates; the scan stays green whatever it finds
+#   a `./` action path                -> resolves against the CALLER's checkout, so repo-platform's action refs stay `@build`
 
 name: Fleet nightly
 
@@ -19,10 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  # The one read of the registration, as in fleet-ci.yml: a sparse checkout
-  # of the two files the plan resolves from. The visibility rides the
-  # event's repository object; the action asks the API when an event
-  # carries none.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -41,10 +31,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The nightly half of the security scan (docs/security-scans.md): HIGH and CRITICAL, never red.
-  # The findings become the one security-nightly tracking issue.
-  # release-health blocks while that issue is open; a clean night closes it.
-  # The SARIF reaches code scanning where the repository is public (personal-account code scanning is public-only).
+  # The nightly half of the security scan (docs/security-scans.md): never red; its findings become the
+  # security-nightly issue that release-health blocks on, and a clean night closes it.
   trivy-nightly:
     needs: [plan]
     runs-on: ubuntu-latest
@@ -87,6 +75,7 @@ jobs:
           mode: resolve
           label: security-nightly
           stream: generic
+      # Personal-account code scanning is public-only.
       - name: Upload the SARIF to code scanning
         if: needs.plan.outputs.private == 'false'
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0

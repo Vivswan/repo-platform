@@ -1,9 +1,7 @@
-# Repo-owned: written once by {{github_username}}/repo-platform, never
-# overwritten by a later sync - edit freely. Jobs here get no secrets and
-# cap at contents: read; a job skipped by its own `if:` stands down from
-# the all-green gate, and `continue-on-error: true` keeps even a job's
-# failures out (an advisory check). A check needing more belongs in its
-# own workflow wired via .github/settings.yml.
+# Repo-owned: written once by {{github_username}}/repo-platform, never overwritten by a later sync - edit freely.
+# The caller grants no secrets and caps at contents: read; a check needing more gets its own workflow, wired via .github/settings.yml.
+#   a job skipped by its own `if:`   -> stands down from the all-green gate
+#   `continue-on-error: true`        -> an advisory check: even its failures stay out of the gate
 
 name: Checks
 

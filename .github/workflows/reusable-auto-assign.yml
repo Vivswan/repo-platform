@@ -1,23 +1,5 @@
-# Reusable auto-assign. Callers trigger on issues/pull_request; the caller's
-# event context flows through. A workflow_dispatch with an `issue` input
-# assigns that one issue (or PR - PRs are issues), for items whose creation
-# event fired no workflow. A schedule run, or a dispatch with the input left
-# empty, is a sweep: every open unassigned issue and PR gets the same
-# CODEOWNERS assignment. The sweep runs on the repo's own token, so it also
-# picks up bot-authored PRs whose event runs got a read-only GITHUB_TOKEN
-# (Dependabot's). Code scanning alert assignment lives in
-# reusable-auto-assign-alerts.yml: a reusable-workflow call is statically
-# validated against the permissions of every job in the called file
-# regardless of each job's `if:`, so keeping the alert job out of this file
-# lets callers grant security-events only to that call.
-#
-# Who gets assigned: the users on the last `*` entry of the repo's own
-# CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
-# The job declares the minimum permissions it needs. A called job can only
-# downgrade the caller's token, so every scope below must also appear on the
-# calling job in the caller template; adding a scope here breaks callers
-# that have not synced the matching caller update yet. This runs in CALLER
-# repos, where repo-platform's scripts do not exist: every step stays inline.
+# A called job can only downgrade the caller's token: adding a scope here breaks every caller not yet synced with it.
+# This runs from the CALLER's checkout, where repo-platform's scripts do not exist, so every step stays inline.
 
 name: Reusable Auto Assign
 
@@ -52,8 +34,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            // Users on the last `*` entry of CODEOWNERS; the repo owner when
-            // there is no usable entry or no file.
+            // Teams cannot be assignees, so only @user entries on the last `*` line count; the repo owner otherwise.
             async function resolveAssignees() {
               for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
                 let data;
@@ -115,10 +96,8 @@ jobs:
               assignees: JSON.parse(process.env.ASSIGNEES)
             });
 
-      # CODEOWNERS auto-requests reviews on protected-branch PRs, but not on
-      # every PR (and never when this workflow itself didn't fire). Request
-      # the resolved code owners as reviewers too; GitHub rejects a
-      # self-review request with 422, so the PR author is dropped.
+      # GitHub's automatic CODEOWNERS review request does not reach every PR, so the resolved owners are requested here too.
+      # GitHub rejects a self-review request with 422, so the PR author is dropped.
       - name: Request review from code owners
         if: >-
           github.event_name == 'pull_request' && github.event.action == 'opened' &&
@@ -139,14 +118,10 @@ jobs:
               reviewers
             });
 
-      # A dispatch with a number assigns that one issue or PR: GitHub fires no
-      # workflow for events created with a workflow's own GITHUB_TOKEN, so an
-      # issue or PR another workflow created never triggers the paths above;
-      # the creating workflow dispatches this one instead. Only the named item
-      # is touched, so unassigning yourself later sticks. A schedule run, or a
-      # dispatch with the input empty, sweeps every open unassigned issue and
-      # PR (filtered server-side; the issues list API covers PRs), page-bounded
-      # so a pathological backlog cannot run away; the nightly drains the rest.
+      # GitHub fires no workflow for an issue or PR created with a workflow's own GITHUB_TOKEN, so the creating
+      # workflow dispatches this one with the number.
+      #   a number  -> that item alone
+      #   empty     -> a sweep of every open unassigned issue and PR, page-bounded so a backlog cannot run away; the nightly drains the rest
       - name: Assign the dispatched item, or sweep open unassigned items
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
