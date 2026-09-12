@@ -120,6 +120,16 @@ The branch is both the writer's source and the fleet's executable channel (`uses
 - The writer runs from this repository's checkout, never from the branch: the branch carries data the writer reads (`files.yml`, `files/`) and code the fleet's workflows execute (`actions/`, the reusable workflows), and the provenance proof covers both.
 - Every self pin resolves: the `delivery-pin-stems` ssot rule ([delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts)) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, whatever the ref, so a renamed or deleted action fails CI here instead of the next fleet run.
 
+## A new action input lands as a stack
+
+A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repository's root twin of it) calls platform actions at the delivery ref, and the root twin is this repository's own check of that workflow. A workflow PR that feeds an action an input the same PR adds reds itself: its check runs the action's copy at the delivery ref, which does not have the input yet.
+
+1. Land the action change alone: its own PR against main, so the post-green run carries the new input to the delivery ref.
+2. Stack the workflow PR on the action branch while both are open; retarget it to main once the action PR merges.
+3. Re-run the workflow PR's check (or push a rebase) after the delivery ref has moved, then merge.
+
+Example: a `title` input added to validate-commit-names with the pr-title workflow feeding it in the same PR; the PR's own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
+
 ## Residuals
 
 | Residual | Why it stands | What bounds it |

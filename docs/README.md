@@ -31,6 +31,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Add, rename, or retire a file the platform writes | [Sync: files.yml](sync.md#filesyml) |
 | Read a sync PR's report, or find why a row held | [Sync: the report](sync.md#the-report) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
+| Change a managed workflow so it uses a new input of a platform action | [Build provenance: a new action input lands as a stack](build-provenance.md#a-new-action-input-lands-as-a-stack) |
 | Keep a private repo's name out of fleet logs, and find where its details land | [Sync: private repositories](sync.md#private-repositories) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
