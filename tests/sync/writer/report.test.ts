@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildReport,
   holdReasons,
+  REPLACED_HEADING,
   renderReport,
   type SyncOutcome,
   unifiedDiff,
@@ -121,6 +122,42 @@ describe("renderReport", () => {
     expect(text).not.toContain("### Replaced local edits");
     expect(text).not.toContain("### Registration notes");
     expect(text).toContain("Hold for review: no");
+  });
+
+  // The motivating input: a path the platform wrote as a starter and files.yml later re-declared managed. The
+  // platform wrote that content itself, so the warning claims only what the rows show: no record vouched for it.
+  test("the replaced-edits warning names what the rows show, on a re-declared starter", () => {
+    const path = ".github/settings.yml";
+    const diff = `--- ${path}\n+++ ${path}\n@@\n-description: stale\n+description: rendered`;
+    const text = renderReport(
+      buildReport({
+        ...QUIET,
+        written: [
+          {
+            path,
+            class: "managed",
+            change: "replaced local edits",
+            detail:
+              "class changed from starter to managed; the record was stale, so the file was judged unrecorded",
+          },
+        ],
+        replaced: [{ path, diff }],
+      }),
+    );
+    expect(text).toContain(
+      [
+        REPLACED_HEADING,
+        "",
+        "> [!WARNING]",
+        "> These files held content no manifest record vouched for. The platform version replaced it; the text it replaced is below.",
+        "",
+        `#### \`${path}\``,
+        "",
+        "```diff",
+        diff,
+        "```",
+      ].join("\n"),
+    );
   });
 
   test("a pipe inside a cell is escaped so the table keeps its columns", () => {

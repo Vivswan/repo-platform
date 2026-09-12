@@ -11,7 +11,6 @@ import {
   strayFields,
 } from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
-import { pathProblem } from "../../../shared/repo_path.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 import { RESYNC } from "./manifest_shape.ts";
@@ -23,10 +22,7 @@ function sha256(data: Buffer): string {
 export function checkManifestParity(ctx: Context): Finding[] {
   if (ctx.mode === "self" || ctx.manifest.state !== "parsed") return [];
   const findings: Finding[] = [];
-  for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
-    // manifest_shape reports a key outside the path grammar; parity never
-    // reads one (`../../../../etc/passwd` would be read from outside the root).
-    if (pathProblem(rel) !== null) continue;
+  for (const [rel, entry] of Object.entries(ctx.manifest.records)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
     // The self entry's invariant comes before any class dispatch: a
     // corrupted class (say, starter) must not slip past it. Its commit slot
@@ -178,49 +174,57 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
+    // The occupant's kind is judged before its hash: a hash-null record over a link where a file is recorded would
+    // otherwise be offered a resync the class writer holds. The mirror writer replaces whatever stands at a declared
+    // target; every other writer holds a path whose occupant is the wrong kind, so the occupant must go first.
+    const linkRecorded =
+      entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
+    const resync =
+      entry.class === "mirror" ? `or ${RESYNC}` : `or remove what stands at the path and ${RESYNC}`;
+    if (linkRecorded && !stat.isSymbolicLink()) {
+      findings.push(
+        error(
+          `${rel}: recorded as ${entry.class === "link" ? "a link" : "a symlink mirror"} in ` +
+            `${MANIFEST_NAME} but is not a symbolic link - the record (a link target's hash) can ` +
+            `verify a link alone; restore the link from git history, ${resync}`,
+        ),
+      );
+      continue;
+    }
+    if (!linkRecorded && stat.isSymbolicLink()) {
+      findings.push(
+        error(
+          `${rel}: recorded as ${entry.class} in ${MANIFEST_NAME} but is a symbolic link - the ` +
+            "record (a file's content hash) cannot verify a link, which the sync never reads through; " +
+            `restore the file from git history, ${resync}`,
+        ),
+      );
+      continue;
+    }
+    if (!linkRecorded && !stat.isFile()) {
+      findings.push(
+        error(
+          `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; ` +
+            `restore the file from git history, ${resync}`,
+        ),
+      );
+      continue;
+    }
     if (hash === null) {
       findings.push(
         error(
-          `${rel}: ${MANIFEST_NAME} records no hash for it (unstamped) - the ` +
-            "sync writes every hash it records, so this is a hand edit; re-run the sync to stamp it",
+          `${rel}: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
+            "verify the file against - the sync carries such a record as it found it; for a path the sync " +
+            `writes now (a selected entry or a declared mirror target), ${RESYNC} and the record is ` +
+            "restamped; for any other, delete the file and its entry",
         ),
       );
       continue;
     }
     let actual: string;
-    const linkRecorded =
-      entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
     if (linkRecorded) {
-      if (!stat.isSymbolicLink()) {
-        findings.push(
-          error(
-            `${rel}: recorded as ${entry.class === "link" ? "a link" : "a symlink mirror"} in ` +
-              `${MANIFEST_NAME} but is not a symbolic link - the sync writes a relative symlink ` +
-              "there and never reads through one, so a regular file at the path is a local " +
-              `replacement; restore the link from git history or ${RESYNC}`,
-          ),
-        );
-        continue;
-      }
       // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct targets onto the replacement character.
       actual = sha256(readlinkSync(join(ctx.root, rel), { encoding: "buffer" }));
-    } else if (stat.isSymbolicLink()) {
-      findings.push(
-        error(
-          `${rel}: recorded as ${entry.class} in ${MANIFEST_NAME} but is a symbolic link - ` +
-            "the sync writes a regular file there, so a link at the path is a local " +
-            `replacement; restore the file from git history or ${RESYNC}`,
-        ),
-      );
-      continue;
-    } else if (!stat.isFile()) {
-      findings.push(
-        error(
-          `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file ` +
-            "nor a symlink; re-run the sync to restore the managed file",
-        ),
-      );
-      continue;
     } else {
       const content = readFileSync(join(ctx.root, rel)).toString("latin1");
       if (split !== null) {
