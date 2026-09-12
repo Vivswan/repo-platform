@@ -1,7 +1,7 @@
 // A knob with one value across every caller is a constant, so each action declares only the inputs its callers vary.
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadAction, REPO_ROOT } from "../shared/action_step";
 
@@ -28,11 +28,6 @@ const ACTIONS: Record<string, Record<string, Input>> = {
   trivy: { mode: { required: false, default: "blocking" } },
   typos: {},
   "validate-commit-names": {},
-  "validate-skills": {
-    "skills-dir": { required: false, default: "skills" },
-    "plugin-manifest": { required: false, default: ".claude-plugin/plugin.json" },
-    mode: { required: false, default: "structure" },
-  },
   yamllint: {},
   "validate-managed-files": {
     "github-token": { required: false, default: "${{ github.token }}" },
@@ -58,9 +53,9 @@ const ACTIONS: Record<string, Record<string, Input>> = {
 
 describe("action inputs", () => {
   test("the table names every action", () => {
-    const discovered = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "shared")
-      .map((entry) => entry.name)
+    // A directory alone is not an action: a deleted action's ignored node_modules can outlive it in a checkout.
+    const discovered = readdirSync(join(REPO_ROOT, "actions"))
+      .filter((name) => existsSync(join(REPO_ROOT, "actions", name, "action.yml")))
       .sort();
     expect(Object.keys(ACTIONS).sort()).toEqual(discovered);
   });
