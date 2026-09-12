@@ -26,7 +26,6 @@ Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowerca
 One line each, the `description` of each module in the platform's `files.yml`:
 
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
-- `node`: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
 - `deno`: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
 - `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)

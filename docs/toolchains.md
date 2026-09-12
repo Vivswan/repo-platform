@@ -9,14 +9,14 @@ One version per toolchain, fleet-wide. Each pin lives in `files.yml` (`modules.<
 
 ## The pins
 
-The pinned versions are the `pin` entries of the `bun`, `node`, and `deno` modules in [files.yml](../files.yml) (`{file, version}`: `.bun-version`, `.node-version`, `.dvmrc`); nothing else records them, so the file is the roster and the refresh below is the only writer.
+The pinned versions are the `pin` entries of the `bun` and `deno` modules in [files.yml](../files.yml) (`{file, version}`: `.bun-version`, `.dvmrc`); nothing else records them, so the file is the roster and the refresh below is the only writer.
 
 Modules without a pin: uv floats on its setup action's default, and rust ships no toolchain setup in CI (its module data deliberately carries no `pin`), so rust version selection stays repository-owned.
 
 ## How the pin reaches repositories
 
 - The dotfiles are MANAGED files (deliberately not starters): in a repo selecting the module, every sync updates them, and no registration key overrides them - the fleet shares one version per toolchain.
-- Managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`, `node-version-file: .node-version`, `deno-version-file: .dvmrc`).
+- Managed workflows and the repo-owned starters as first written pass the matching version-file input (`bun-version-file: .bun-version`, `deno-version-file: .dvmrc`).
 - The [site module's](site.md) build hook is the repository's own composite action, so it installs whatever toolchain its steps name (the seeded example reads `.bun-version`); the fleet's docs build runs under the fleet's own bun, never the repository's pin.
 - validate-managed-files' parity check fails a repo whose dotfile differs from the one its last sync wrote.
 - repo-platform's own composite actions (under `actions/`) pin their bun too, from an action-local `.bun-version` beside each action.yml that `bun run pins` writes from the same pin:
@@ -32,7 +32,7 @@ To run one repo on a different version, override in a repo-owned workflow and le
 
 | Toolchain | Override |
 |---|---|
-| bun / node | pass the explicit version input (`bun-version:` on setup-bun, `node-version:` on setup-node) - both actions prefer it over their version-file input |
+| bun | pass the explicit version input (`bun-version:` on setup-bun), which the action prefers over its version-file input |
 | deno | setup-deno resolves the other way around (a non-empty `deno-version-file` wins over `deno-version`), so replace or remove the `deno-version-file:` line instead |
 
 Rules that follow:
@@ -45,7 +45,7 @@ Rules that follow:
 
 The refresh-toolchains workflow (weekly cron plus manual dispatch, mirroring refresh-gitignore) bumps the pins when upstream moved:
 
-1. Fetch the latest upstream versions: bun's latest GitHub release, Node's newest LTS line from nodejs.org, Deno's latest stable release.
+1. Fetch the latest upstream versions: bun's latest GitHub release, Deno's latest stable release.
 2. Rewrite the `modules.<module>.pin` entries in `files.yml` in place, then rerun `bun run pins`, which writes the version dotfiles under `files/`, beside the actions, and at this repository's root (`bun run pins:check` is the offline gate against drift).
 3. Open or refresh a PR on the `automation/toolchain-refresh` branch when anything moved.
 

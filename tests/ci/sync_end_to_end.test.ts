@@ -139,7 +139,7 @@ function seedTarget(): string {
   const target = temp.dir("sync-e2e-target-");
   const files: Record<string, string> = {
     ".repo-platform.yml": [
-      "modules: [bun, node, docs-site, fuzzer, skills, uv]",
+      "modules: [bun, deno, docs-site, fuzzer, skills, uv]",
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "labels: {fuzzer: fuzz-me}",
       "mirrors:",
@@ -267,7 +267,7 @@ describe("sync.ts end to end", () => {
   });
 
   test("selects the known modules; unknown modules and unsafe records become notes", () => {
-    expect(summary.modules).toEqual(["bun", "node", "docs-site", "fuzzer", "skills"]);
+    expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer", "skills"]);
     expect(summary.notes).toEqual([
       "dropped unknown module `uv` (files.yml does not know it)",
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
@@ -420,7 +420,7 @@ describe("sync.ts end to end", () => {
         "updates:",
         '  - package-ecosystem: "bun"',
         '    directory: "/"',
-        '  - package-ecosystem: "npm"',
+        '  - package-ecosystem: "deno"',
         '    directory: "/"',
         "# end of updates",
         "",
@@ -671,7 +671,7 @@ describe("sync.ts end to end", () => {
       expect(stdout).toContain(heading);
     }
     expect(stdout).toContain(
-      `| \`${BUILD}\` | \`bun\`, \`node\`, \`docs-site\`, \`fuzzer\`, \`skills\` | public |`,
+      `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\`, \`skills\` | public |`,
     );
     expect(stdout).toContain(
       "| `.gitattributes` | split | held | class changed from managed to split, and the content differs from the last write |",

@@ -35,7 +35,7 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-`modules` is any combination of `bun`, `node`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
+`modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the published `build` branch, whose tip is provenance-verified against a rebuild from its stamped main commit before any row consumes it ([build provenance](build-provenance.md#the-provenance-proof)).
 
@@ -74,21 +74,20 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.github/workflows/copilot-setup-steps.yml` | starter | always |
 | `.gitleaks.toml` | starter | always |
 | `.yamllint` | managed | always |
-| `.github/workflows/auto-assign.yml` | managed | any of `bun`, `node`, `deno`, `uv`; public |
+| `.github/workflows/auto-assign.yml` | managed | any of `bun`, `deno`, `uv`; public |
 | `.github/workflows/auto-assign.yml` | managed | private |
-| `.github/workflows/auto-assign.yml` | managed | without `bun`, `node`, `deno`, `uv`; public |
-| `.github/workflows/auto-format.yml` | starter | any of `bun`, `node`, `deno`, `uv` |
+| `.github/workflows/auto-assign.yml` | managed | without `bun`, `deno`, `uv`; public |
+| `.github/workflows/auto-format.yml` | starter | any of `bun`, `deno`, `uv` |
 | `.typography-allow` | managed | without `release-please` |
 | `.typography-allow` | managed | modules: `release-please` |
-| `AGENTS.md` | split | without `bun`, `node`, `deno`, `uv`, `rust` |
-| `AGENTS.md` | split | any of `bun`, `node`, `deno`, `uv`, `rust` |
+| `AGENTS.md` | split | without `bun`, `deno`, `uv`, `rust` |
+| `AGENTS.md` | split | any of `bun`, `deno`, `uv`, `rust` |
 | `LICENSE.md` | split | without `custom-license` |
 | `CLAUDE.md` | link | always |
 | `.github/agents.md` | link | always |
 | `.github/copilot-instructions.md` | link | always |
 | `.bun-version` | managed | modules: `bun` |
 | `.github/workflows/dependabot-bun-lockfile.yml` | managed | modules: `bun` |
-| `.node-version` | managed | modules: `node` |
 | `.dvmrc` | managed | modules: `deno` |
 | `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
 | `.release-please-manifest.json` | starter | modules: `release-please` |
@@ -157,7 +156,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR.
 
 - The managed-files check is green on the first PR by design: it judges the stamped manifest against the classes the new selection makes live, so nothing is bypassed; the one exception is an edit that flips a recorded path's class (see the table below).
-- The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.node-version` for `node`). It stays red until the sync PR lands unless the first PR adds that file.
+- The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the sync PR lands unless the first PR adds that file.
 - The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text
@@ -240,6 +239,6 @@ A new managed repo touches nothing in repo-platform: there is no fleet list to e
 Repository settings are applied from repo-platform for every managed repository - the full model (six layers, merge dialect, apply semantics) is in [settings.md](settings.md). What the new repo sees:
 
 - The first sync writes `.github/settings.local.yml` ONCE as a repo-owned overlay (`description` from the registration's `project.description`, `homepage` and `topics` declared empty, `private` matching the repository's visibility) plus commented examples, and right after it the managed `.github/settings.yml`: the fleet layers, the selected modules' layers, and that overlay folded into one document. The rendered file is rewritten on every sync; the overlay never is.
-- Declare only the repo's OWN labels, rulesets, and overrides in `.github/settings.local.yml`; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless. Everything fleet-shaped stays out of the overlay, so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers: `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.
+- Declare only the repo's OWN labels, rulesets, and overrides in `.github/settings.local.yml`; [the merge dialect](settings.md#the-merge-dialect) says how they combine with the fleet layers, and the override layer's invariants win regardless. Everything fleet-shaped stays out of the overlay, so the labels dependabot auto-creates can never fall out of sync with the roster: `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers: `javascript` (`168700`) for bun, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.
 - An overlay edit is two PRs: yours, then the sync PR that re-renders `.github/settings.yml` ([the manual run](#the-manual-run) brings it at once). Never edit the rendered file: the next sync replaces it and holds its PR, and the [managed files check](#the-managed-files-check) reds the PR that edits it.
 - Nothing in the repository applies its settings: repo-platform's central run applies the rendered file after every green main merge there and nightly, once the sync PR carrying it has merged ([settings.md](settings.md#how-the-apply-works)).

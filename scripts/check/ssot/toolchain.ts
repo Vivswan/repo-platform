@@ -169,7 +169,6 @@ export function bunRuntimeMismatches(runtimeVersion: string, pinnedVersion: stri
 
 export const SETUP_VERSION_FILES: [action: RegExp, input: string][] = [
   [/^-? ?uses: oven-sh\/setup-bun@/, "bun-version-file:"],
-  [/^-? ?uses: actions\/setup-node@/, "node-version-file:"],
   [/^-? ?uses: denoland\/setup-deno@/, "deno-version-file:"],
 ];
 

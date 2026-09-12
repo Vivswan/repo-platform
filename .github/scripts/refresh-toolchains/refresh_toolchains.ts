@@ -24,27 +24,6 @@ export function latestBunVersion(payload: unknown): string {
   return versionFrom(tag, /^bun-v(\d+\.\d+\.\d+)$/, "oven-sh/bun latest release tag");
 }
 
-/** The dist index is newest-first, and `lts` is false or the line's codename, so the first entry whose `lts` is a non-empty string
- *  is the newest LTS release. */
-export function latestNodeLts(payload: unknown): string {
-  if (!Array.isArray(payload)) {
-    throw new Error("nodejs.org dist index: expected an array of releases");
-  }
-  const entry = payload.find(
-    (release) =>
-      typeof release === "object" &&
-      release !== null &&
-      typeof (release as { lts?: unknown }).lts === "string" &&
-      (release as { lts: string }).lts !== "",
-  );
-  if (entry === undefined) throw new Error("nodejs.org dist index: no LTS release found");
-  return versionFrom(
-    (entry as { version?: unknown }).version,
-    /^v(\d+\.\d+\.\d+)$/,
-    "nodejs.org LTS version",
-  );
-}
-
 /** releases/latest never returns a prerelease, so this is the latest stable. */
 export function latestDenoVersion(payload: unknown): string {
   const tag = (payload as { tag_name?: unknown } | null)?.tag_name;
@@ -56,7 +35,6 @@ export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown
     url: "https://api.github.com/repos/oven-sh/bun/releases/latest",
     parse: latestBunVersion,
   },
-  node: { url: "https://nodejs.org/dist/index.json", parse: latestNodeLts },
   deno: {
     url: "https://api.github.com/repos/denoland/deno/releases/latest",
     parse: latestDenoVersion,
@@ -116,8 +94,8 @@ export function proseBumps(bumps: Bump[]): string {
   return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
 }
 
-/** The bumps crossing a major version (an LTS transition, a bun 2.0), as
- *  "node 24 -> 26" fragments for the PR body's prominent callout. */
+/** The bumps crossing a major version (a bun 2.0, a deno 3.0), as
+ *  "deno 2 -> 3" fragments for the PR body's prominent callout. */
 export function majorJumps(bumps: Bump[]): string {
   return bumps
     .filter((b) => b.from.split(".")[0] !== b.version.split(".")[0])

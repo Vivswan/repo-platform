@@ -77,7 +77,6 @@ describe("loadModuleData", () => {
   test("the real files.yml in its key order, with the data and defaults the plan reads", () => {
     expect(MODULES.map((m) => m.name)).toEqual([
       "bun",
-      "node",
       "deno",
       "uv",
       "rust",
@@ -209,8 +208,8 @@ describe("planCi", () => {
   test("CodeQL is off for a private repository and where no module analyzes", () => {
     expect(planCi(input("modules: [bun, uv]", true)).codeqlLanguages).toEqual([]);
     expect(planCi(input("modules: [rust, site]")).codeqlLanguages).toEqual([]);
-    // Shared language, one entry: bun and node both analyze as JS/TS.
-    expect(codeqlLanguages(selectModules(input("modules: [node, bun]")), false)).toEqual([
+    // Shared language, one entry: bun and deno both analyze as JS/TS.
+    expect(codeqlLanguages(selectModules(input("modules: [deno, bun]")), false)).toEqual([
       "javascript-typescript",
     ]);
   });

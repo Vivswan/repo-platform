@@ -46,7 +46,6 @@ bun .github/scripts/sync/writer/sync.ts \
 placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, skills_dir, fuzzer_label]
 modules:
   bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun], settings_layers: [settings.yml, settings-public.yml]}
-  node: {gitignore_sources: [Node], dependabot_ecosystems: [npm]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   skills: {skills_dir: {default: skills}}
   release-please: {}
@@ -82,7 +81,7 @@ retired:
 | `files[].source` | The source file, under `files/`. Default: `files/<first when.modules entry, or base>/<path>`. Not for links. |
 | `files[].when` | The selection condition (below). Absent or empty means always. |
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
-| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
+| `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
 | `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
@@ -107,7 +106,7 @@ The loader refuses, all problems at once:
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
-- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires (a retired entry may leave; the probe above is its gate)
+- with `--previous-files`: a path the previous `files.yml` wrote that the current one neither writes nor retires, starters excepted (a written starter is repo-owned, so a dropped one needs no retirement; a retired entry may leave, the probe above being its gate)
 
 ## files.yml reference
 
@@ -132,7 +131,7 @@ The three links carry no `when`: every repository gets them.
 
 | `blocks` key | Entry | Block files |
 | --- | --- | --- |
-| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source three toolchains declare is byte-identical in each, so it lands once |
+| `gitignore_sources` | `.gitignore` (split) | `files/<module>/.block.<Source>.gitignore`, one github/gitignore template or platform-authored section (`PLATFORM_SECTIONS` in `scripts/generate/build_gitignore.ts`, the fuzzer's failure directory) each, written by that script together with `files/base/.gitignore`; the Node source two toolchains declare is byte-identical in each, so it lands once |
 | `dependabot_ecosystems` | `.github/dependabot.yml` (managed) | `files/<module>/.github/dependabot.block.<ecosystem>.yml`, appended at the anchor line that ends the source |
 | `agents_toolchain` | `AGENTS.md` (Toolchain variant, split) | `files/<module>/AGENTS.block.toolchain.md`, the module's Toolchain bullets, appended after the region body |
 | `toolchain_steps` | `checks.yml`, `copilot-setup-steps.yml`, `auto-format.yml` (starters) | `files/<module>/.github/workflows/<stem>.block.toolchain.yml`: the example checks, the setup and install steps, the setup and format steps; each block opens with the blank line that separates it from the step above, and the anchor sits after the checkout step (`copilot-setup-steps.yml` ends there; `checks.yml` and `auto-format.yml` keep one blank line below it before their closing steps) |

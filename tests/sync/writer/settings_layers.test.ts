@@ -64,9 +64,9 @@ describe("the managed labels", () => {
       labels: [...BASELINE_LABELS, "python:uv"],
     },
     {
-      reason: "two toolchains sharing a dependabot label contribute it once",
-      selection: selection({ modules: ["bun", "node"] }),
-      labels: [...BASELINE_LABELS, "javascript"],
+      reason: "two toolchains contribute their dependabot labels in module order",
+      selection: selection({ modules: ["deno", "bun"] }),
+      labels: [...BASELINE_LABELS, "javascript", "deno"],
     },
     {
       reason: "a selected module contributes its own settings layer's labels",
@@ -161,7 +161,7 @@ describe("the managed rulesets", () => {
     const codeqlModules = loadModules()
       .filter((m) => m.codeql_language !== undefined)
       .map((m) => m.name);
-    expect(codeqlModules).toEqual(["bun", "node", "deno", "uv"]);
+    expect(codeqlModules).toEqual(["bun", "deno", "uv"]);
     for (const module of codeqlModules) {
       const rule = mainRules(selection({ modules: [module] })).find(
         (r) => r.type === "code_scanning",

@@ -16,9 +16,9 @@ modules:
     dependabot_ecosystems: [bun]
     checks_examples: [bun]
     settings_layers: [settings.yml]
-  node:
+  deno:
     gitignore_sources: [Node]
-    dependabot_ecosystems: [npm]
+    dependabot_ecosystems: [deno]
   pages: {}
   docs-site: {}
   fuzzer:

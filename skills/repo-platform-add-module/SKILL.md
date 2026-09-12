@@ -32,7 +32,6 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | Module | What it gives the repo |
 |---|---|
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
-| `node` | JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS) |
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
 | `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
@@ -52,7 +51,6 @@ From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live ta
 | Module | Files | Class |
 |---|---|---|
 | `bun` | `.bun-version`, `.github/workflows/dependabot-bun-lockfile.yml` | managed |
-| `node` | `.node-version` | managed |
 | `deno` | `.dvmrc`, `.github/workflows/deno-audit.yml` | managed |
 | `uv`, `rust` | no file of their own | - |
 | every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |
@@ -144,7 +142,7 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site
 
 - Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `region removed` when a split file's region was untouched but the repo had written around it (the region and its markers go, your content stays as a plain file); `held` with the reason when someone edited the content (decide, then delete or keep it yourself).
 - Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.local.yml`.
-- Labels: the module's labels leave the rendered `.github/settings.yml` on that sync (`managed`, `updated`) and the next apply removes them from the repo, unless another selected module still declares them (bun and node share `javascript`) or your `.github/settings.local.yml` does: a label still declared stays rendered and applied.
+- Labels: the module's labels leave the rendered `.github/settings.yml` on that sync (`managed`, `updated`) and the next apply removes them from the repo, unless another selected module still declares them or your `.github/settings.local.yml` does: a label still declared stays rendered and applied.
 - Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched, `region removed` when you had written outside its region (your text stays as a plain file), and `held` when the region itself was edited. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content, reported `region added`, which holds the PR); delete the old text in the sync PR.
 
 ## Verify
