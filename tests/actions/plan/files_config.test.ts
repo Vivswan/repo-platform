@@ -452,6 +452,23 @@ describe("render, overlay, and the settings block", () => {
       ),
       "settings: layers[2] 'files/settings/public.yml' is declared twice",
     ],
+    [
+      // Folded again after the module layers, the baseline would undo their values.
+      "a layer sourcing the baseline",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("files/bun/settings.yml", "files/settings/baseline.yml")],
+      ),
+      "settings: layers[2] 'files/settings/baseline.yml' is declared twice",
+    ],
+    [
+      "a layer sourcing the override",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("files/bun/settings.yml", "files/settings/override.yml")],
+      ),
+      "settings: layers[2] 'files/settings/override.yml' is declared twice",
+    ],
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
   });
