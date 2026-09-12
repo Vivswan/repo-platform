@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-// The grammar lives in actions/validate-commit-names/subject.ts, not here:
-// the build branch ships actions/ but not scripts/, so the shared module must sit inside the action.
+// The grammar and the refusal words live in actions/validate-commit-names/subject.ts, not here: the build branch
+// ships actions/ but not scripts/, so the shared module sits inside the action, and a committer reads locally the
+// reason CI's commit-names job would print after the push.
 // Motivating failure: `docs(all-green,build-provenance): ...`, a comma in the scope,
 // passed every local gate (pre-commit runs before the message exists) and reddened main.
 //
@@ -9,12 +10,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import {
-  allowedTypes,
-  conventionalSubject,
-  isMergeSubject,
-  scopeCharacterClass,
-} from "../../actions/validate-commit-names/subject.ts";
+import { isMergeSubject, refusal } from "../../actions/validate-commit-names/subject.ts";
 
 // A commit -v message carries the whole diff; the bound caps the text handed to the stripspace child,
 // and the subject is in the first content line anyway.
@@ -50,23 +46,18 @@ export function main(argv: string[]): number {
     console.error("usage: bun scripts/check/check_commit_subject.ts <commit-msg-file>");
     return 2;
   }
-  const candidates = candidateSubjects(readFileSync(messagePath, "utf-8"));
-  const acceptable = (subjectLine: string) =>
-    isMergeSubject(subjectLine) || conventionalSubject.test(subjectLine);
-  if (!candidates.some(acceptable)) {
-    console.error(
-      [
-        `commit-subject: REFUSED: ${candidates.map((c) => JSON.stringify(c)).join(" / ")}`,
-        "The subject must be a Conventional Commit - `<type>(<scope>)?!?: <description>` with",
-        `type one of ${allowedTypes.join("|")} and scope drawn from ${scopeCharacterClass}`,
-        "(no commas: ONE scope per subject; CI's commit-names job enforces this same grammar,",
-        "so a subject refused here would otherwise redden main after the push).",
-        "Examples: `feat: add setup flow`, `fix(sync): repair installer`, `feat!: simplify bootstrap`.",
-      ].join("\n"),
-    );
-    return 1;
-  }
-  return 0;
+  const judged = candidateSubjects(readFileSync(messagePath, "utf-8")).map((candidate) => ({
+    candidate,
+    reason: isMergeSubject(candidate) ? undefined : refusal(candidate),
+  }));
+  if (judged.some(({ reason }) => reason === undefined)) return 0;
+  console.error(
+    [
+      "commit-subject: REFUSED",
+      ...judged.map(({ candidate, reason }) => `- ${JSON.stringify(candidate)}\n  ${reason}`),
+    ].join("\n"),
+  );
+  return 1;
 }
 
 if (import.meta.main) {
