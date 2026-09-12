@@ -156,6 +156,8 @@ describe("the managed rulesets", () => {
     // EVERY CodeQL toolchain module, with the exact threshold tuple: a
     // stale module layer or a misspelled enum value would otherwise pass
     // on types alone and weaken (or 422) that module's repos at apply time.
+    // The tuple is the fleet's high-or-critical bar: a non-security warning
+    // or a medium security alert never blocks a merge.
     const codeqlModules = loadModules()
       .filter((m) => m.codeql_language !== undefined)
       .map((m) => m.name);
@@ -169,7 +171,7 @@ describe("the managed rulesets", () => {
           {
             tool: "CodeQL",
             security_alerts_threshold: "high_or_higher",
-            alerts_threshold: "errors_and_warnings",
+            alerts_threshold: "errors",
           },
         ],
       });

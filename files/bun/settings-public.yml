@@ -9,8 +9,6 @@ rulesets:
         parameters:
           code_scanning_tools:
             - tool: CodeQL
+              # The fleet's severity bar, shared with semgrep (ERROR) and trivy (HIGH, CRITICAL): a warning-level alert or a medium security alert never blocks a merge.
               security_alerts_threshold: high_or_higher
-              # errors_and_warnings: CodeQL warnings gate merges too. Pinned
-              # at the fleet layer so no repo re-declares the tightening in
-              # its own settings.yml, where a copy would only shadow it.
-              alerts_threshold: errors_and_warnings
+              alerts_threshold: errors

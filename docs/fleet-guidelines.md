@@ -157,7 +157,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | dependency-review | dependency-review | a vulnerable dependency at or above high | none: upgrade or drop the dependency |
 | deno audit | deno-audit.yml (deno repos; pull requests and main pushes touching deno.lock, plus a weekly run) | a high or critical advisory (`--level high`), or a lockfile out of date with its manifest (`--frozen`) | none: upgrade or drop the dependency |
 | Trivy | trivy (every event but the schedule; `trivy-nightly` on the schedule reports without blocking) | a HIGH or CRITICAL vulnerability with a fix available, or any HIGH or CRITICAL misconfiguration; both scans run at HIGH and CRITICAL, so a MEDIUM or LOW finding appears nowhere | an entry in the repo-owned `.trivyignore.yaml` carrying a `statement` and an `expired_at` date ([security-scans.md](security-scans.md#bypassing-a-finding-trivyignoreyaml)); the plain `.trivyignore` is refused |
-| CodeQL | codeql | nothing (alerts only) | a code scanning dismissal with a reason |
+| CodeQL | codeql | nothing in the job; the `main` ruleset's `code_scanning` rule blocks the merge on an error-severity alert or a high-or-critical security alert ([settings.md](settings.md)) | a code scanning dismissal with a reason |
 
 - What the fleet configs settle before a repository's bypass applies:
   - typos accepts `unparseable` and the hyphenated `mis-` prefix (`mis-parses`, `mis-set`) everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
