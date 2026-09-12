@@ -57,7 +57,7 @@ The Registration notes, exactly:
 - ``dropped unknown module `<name>` (files.yml does not know it)``: dropped for this sync
 - `.github/repo-platform-manifest.json <problem>; every existing file is judged as unrecorded`: the manifest could not be read, so this sync rewrites it
 - ``placeholder `{{<name>}}` has no value: set <key> in .repo-platform.yml``: every file rendering that placeholder is `held`; an empty value counts as none
-- ``manifest record for `<path>` dropped: its class or shape is not one the writer records``: a class the writer does not record, or a `split` record with no `begin` and `end` markers
+- ``manifest record for `<path>` dropped: its class or shape is not one the writer records``: the record is not exactly a shape the writer writes (an unknown class, a field its class does not carry, a hash that is neither null nor a sha256 digest or is missing where the class carries one, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers). The path is unrecorded from then on: a selected entry or a declared mirror writes it as any unrecorded path, and anywhere else the file is the repository's own
 - ``manifest record for `<path>` ignored: the path <problem>``: an unclean path
 - ``manifest record for `<path>` dropped: no mirror in .repo-platform.yml reaches it now, so the file is the repository's own (a mirror declared again adopts it while it still holds the source's content)``
 
@@ -101,7 +101,7 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Replaced local edits | Someone edited a managed file (`ci.yml`, a module workflow, a pin dotfile) or the managed region of a split file | Read the diff; move the need (below). The platform version stays |
 | Held retirement | A retired path holds content the platform did not write, or a split file's region differs from the recorded one | Keep what matters, delete the rest yourself; the row returns every sync until the file is gone |
 | Removed region | A retired split file carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
-| Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the copy's way (`replaced`, the detail names it) | Read the diff; the platform copy stays. Content worth keeping moves to a path no declaration names |
+| Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the target's way (`replaced`, the detail names it) | Read the diff; the platform's copy or link, by the declared `kind`, stays. Content worth keeping moves to a path no declaration names |
 | Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
 | Settings | `.github/settings.yml` reads `replaced local edits` (someone edited the rendered file, or the repository carried a hand-written one the sync had not recorded) or `held` (`no overlay at .github/settings.local.yml (its starter is held or missing)`, an overlay naming one label twice, or a tracking label the plan refuses) | `replaced local edits`: move what the diff removed into `.github/settings.local.yml` (the rendered file is never edited by hand); the holds name the registration key or the overlay line to fix |
 
