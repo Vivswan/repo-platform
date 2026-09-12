@@ -1,8 +1,5 @@
-// The runtime slice the composite actions' bun scripts share: env reads,
-// workflow-command prints, and deadline-bearing subprocess runners. Lives
-// in the dependency-free zone because a composite action runs from its
-// own directory on the build branch, where nothing else of the repository
-// tree exists to import from.
+// Dependency-free on purpose: a composite action runs from its own directory on the build branch,
+// where nothing else of the repository tree exists to import from.
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
@@ -27,14 +24,12 @@ export function warning(message: string): void {
   console.log(`::warning::${escapeData(message)}`);
 }
 
-/** An error annotation; `file` pins it to a path in the checkout. */
 export function error(message: string, file?: string): void {
   const where = file === undefined ? "" : ` file=${escapeData(file)}`;
   console.log(`::error${where}::${escapeData(message)}`);
 }
 
-/** How a child ended. The deadline wins over the exit code: a child that
- *  exited 0 while an orphan held its pipe open still hit the deadline. */
+/** The deadline wins over the exit code: a child that exited 0 while an orphan held its pipe open still hit the deadline. */
 export type ChildExit =
   | { kind: "exited"; code: number }
   | { kind: "signaled"; signal: string }
@@ -81,8 +76,6 @@ export function capture(command: string[], options: RunOptions): RunResult {
   return { exit: childExit(proc), stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
 }
 
-/** One line saying why a captured child failed: the deadline, the signal,
- *  its first stderr line, or its exit code. */
 export function failureDetail(result: RunResult): string {
   if (result.exit.kind === "timed-out") return "timed out";
   if (result.exit.kind === "signaled") return `died on ${result.exit.signal}`;
@@ -93,8 +86,6 @@ export function failureDetail(result: RunResult): string {
   return line || `exit ${result.exit.code}`;
 }
 
-/** A child whose output belongs in the job log as it happens (stdio
- *  inherited); only how it ended comes back. */
 export function run(command: string[], options: RunOptions): ChildExit {
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,

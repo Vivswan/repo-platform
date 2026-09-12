@@ -1,24 +1,14 @@
-// The fleet's design tokens as data. Carbon's design system is its --vp-*
-// custom properties (the authoritative list is
-// packages/theme/src/theme/styles/vars.css in
-// github.com/brenoepics/vitepress-carbon); scripts/generate/theme_tokens.ts
-// renders this file into tokens.css, which sets carbon's values and adds the
-// fleet's own --fleet-* tokens. Dark is the default (carbon's baseConfig
-// sets the initial appearance); light is a full variant with the same
-// grounds lifted; print overrides the subset that must be ink on paper.
-//
-// The one accent is the repository's hue: config.mts sets
-// <html data-fleet-hue="0..5"> at build time, and HUES below is the only
-// place a hue value is written. Everything that carries color reads
-// --fleet-hue, --fleet-hue-band (tinted background) or --fleet-hue-soft
-// (selection, underline), except the warning and caution blocks, which
-// read their own alert colors.
+// scripts/generate/theme_tokens.ts renders this file into tokens.css, which sets carbon's --vp-* values (the authoritative
+// list is packages/theme/src/theme/styles/vars.css in github.com/brenoepics/vitepress-carbon) and adds the fleet's own
+// --fleet-* tokens. The one accent is the repository's hue (config.mts sets <html data-fleet-hue="0..5"> at build time),
+// and HUES below is the only place a hue value is written.
+//   dark   -> the default: carbon's baseConfig sets the initial appearance
+//   light  -> a full variant with the same grounds lifted
+//   print  -> overrides only the subset that must be ink on paper
 
-/** A custom property name. */
 export type TokenName = `--${string}`;
 
-/** A token's value per color mode. The print sheet overrides only the
- *  tokens that carry color onto paper; the rest keep the screen value. */
+/** `print` is set only for the tokens that carry color onto paper; the rest keep the screen value. */
 export interface ModeValues {
   light: string;
   dark: string;
@@ -26,13 +16,10 @@ export interface ModeValues {
 }
 
 export type Mode = keyof ModeValues;
-/** The two modes a screen shows; print is the third value set. */
 export type ScreenMode = Exclude<Mode, "print">;
 export const MODES: readonly Mode[] = ["light", "dark", "print"];
 
-/** A shared token's value: one string, or a base value that media queries
- *  override (applied in source order after the base, each inside its own
- *  media query). */
+/** Overrides are applied in source order after the base, each inside its own media query. */
 export type SharedValue = string | { base: string; overrides: readonly MediaOverride[] };
 
 export interface MediaOverride {
@@ -40,8 +27,7 @@ export interface MediaOverride {
   value: string;
 }
 
-/** Tokens with one value in every mode. Written on :root AND .dark: carbon's
- *  own .dark block sets several of them (brand-1, brand-2) directly, and the
+/** Written on :root AND .dark: carbon's own .dark block sets several of them (brand-1, brand-2) directly, and the
  *  .dark declaration is what outranks it. */
 export const SHARED_TOKENS = {
   fonts: {
@@ -174,7 +160,6 @@ export const SHARED_TOKENS = {
   },
 } as const satisfies Record<string, Record<TokenName, SharedValue>>;
 
-/** The three custom properties every hue slot writes. */
 export const HUE_TOKENS = {
   hue: "--fleet-hue",
   band: "--fleet-hue-band",
@@ -332,7 +317,6 @@ export const MODE_TOKENS = {
   },
 } as const satisfies Record<string, Record<TokenName, ModeValues>>;
 
-/** Every token the layer declares. */
 export function tokenNames(): TokenName[] {
   return [
     ...Object.values(SHARED_TOKENS).flatMap((group) => Object.keys(group) as TokenName[]),
@@ -341,9 +325,8 @@ export function tokenNames(): TokenName[] {
   ];
 }
 
-/** The values a mode writes, hue slot 0 included: for light and dark the
- *  whole palette; for print the overrides alone, the way the print sheet
- *  declares them. */
+/** Light and dark carry the whole palette with hue slot 0; print carries the overrides alone and PRINT_HUE, the way
+ *  the print sheet declares them. */
 export function modeValues(mode: Mode): Map<TokenName, string> {
   const values = new Map<TokenName, string>();
   for (const group of Object.values(MODE_TOKENS)) {

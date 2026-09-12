@@ -2,10 +2,9 @@
 // launcher's directory groups so both name a folder the same way. Browser-
 // safe: the launcher's client bundle imports it.
 
-/** `api-reference` -> `Api Reference`: dashes and underscores become spaces
- *  and every word starts with a capital, so a folder name sits beside the
- *  Title Case page titles around it. A nested path keeps its slashes, each
- *  segment titled (`guide/getting-started` -> `Guide/Getting Started`). */
+/** Every word capitalized, so a folder name sits beside the Title Case page titles around it.
+ *    `api-reference`         -> `Api Reference`
+ *    `guide/getting-started` -> `Guide/Getting Started` */
 export function dirTitle(dir: string): string {
   return dir
     .split("/")

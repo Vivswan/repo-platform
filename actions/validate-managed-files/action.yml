@@ -51,11 +51,8 @@ runs:
         "${{ runner.temp }}/validate-managed-files-verdict.json"
         "${{ runner.temp }}/validate-managed-files-report.md"
 
-    # The validator on the action's own bun and its own frozen dependencies
-    # (the tarball ships no node_modules), its module vocabulary the
-    # files.yml at the build branch root two levels above this action; its
-    # exit code follows the verdict for the step's colour, and the gate
-    # reads the report step's output.
+    # The tarball ships no node_modules, so the dependencies are installed here.
+    # FILES_CONFIG is the files.yml at the build branch root, two levels above this action.
     - name: Validate the checkout
       id: validate
       if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'

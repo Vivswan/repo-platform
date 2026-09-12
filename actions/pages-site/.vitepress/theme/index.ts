@@ -1,6 +1,4 @@
-// The fleet docs theme entry: vitepress-carbon as the base skin, with the
-// theme-owned components mounted in its layout slots. README.md next to
-// this file holds the replacement contract for each file.
+// README.md next to this file holds the replacement contract for each file.
 
 import "@fontsource-variable/wix-madefor-text";
 import "@fontsource-variable/wix-madefor-display";

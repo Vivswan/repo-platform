@@ -1,8 +1,5 @@
-// Regenerates every tracked bun.lock from scratch in the caller's checkout
-// and pushes the fix commit to a Dependabot PR's head. Dependabot bumps the
-// target package but leaves stale nested entries behind, and bun keeps a
-// stale lockfile as a valid resolution, so only a delete-then-resolve drops
-// them. Inputs come from the environment as action.yml sets them.
+// Dependabot bumps the target package but leaves stale nested entries behind, and bun keeps a stale lockfile
+// as a valid resolution, so only a delete-then-resolve drops them.
 
 import { appendFileSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
@@ -42,9 +39,7 @@ function exitReason(exit: ChildExit): string {
   return failureDetail({ exit, stdout: "", stderr: "" });
 }
 
-/** A child whose output belongs in the job log; a failure ends the run with
- *  the child's own code. Only the verb is named, never the argv: the push
- *  argv carries the token. */
+/** Only the verb is named, never the argv: the push argv carries the token. */
 function must(command: string[], timeoutMs: number): void {
   const exit = run(command, { timeoutMs });
   if (succeeded(exit)) return;

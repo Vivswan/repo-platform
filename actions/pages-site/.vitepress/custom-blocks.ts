@@ -19,11 +19,8 @@ export const CUSTOM_BLOCK_LABELS = {
 
 type LabelKey = keyof typeof CUSTOM_BLOCK_LABELS;
 
-/** Retitles GitHub-style alerts whose title is the plugin's uppercase
- *  default (the type's name). Any other author-written title after the
- *  marker stays; one spelling the default itself reaches the token
- *  indistinguishable from none, and the fleet reads labels in sentence
- *  case anyway, so it is retitled the same way. */
+/** An author-written title spelling the uppercase default reaches the token indistinguishable from none;
+ *  the fleet reads labels in sentence case anyway, so it is retitled the same way. */
 export function alertTitlesRule(md: MarkdownRenderer): void {
   md.core.ruler.after("github-alerts", "alert_titles", (state) => {
     for (const token of state.tokens) {

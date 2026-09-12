@@ -1,7 +1,6 @@
 import { writeFileSync } from "node:fs";
 
-/** One diagnostic. Errors fail the run; advisories are printed and never
- *  touch the exit code. */
+/** Errors fail the run; advisories are printed and never touch the exit code. */
 export type Finding = { severity: "error" | "advisory"; message: string };
 
 export function error(message: string): Finding {
@@ -20,12 +19,8 @@ export function advisoriesOf(findings: readonly Finding[]): string[] {
   return findings.filter((f) => f.severity === "advisory").map((f) => f.message);
 }
 
-/** Findings as markdown, in TWO separate files because the two streams
- *  have different consequences: errors are what this process exits nonzero
- *  on, advisories never touch the exit code (one combined file once made a
- *  caller treat "has content" as "blocks"). Both are opt-in through
- *  FINDINGS_FILE / ADVISORIES_FILE. An empty set writes an EMPTY file
- *  rather than none, which is how a caller tells "nothing to report" from
+/** TWO files because the streams have different consequences: a caller must not read "has content" as "blocks".
+ *  An empty set writes an EMPTY file rather than none, which is how a caller tells "nothing to report" from
  *  "the validator never ran". */
 export function writeReports(findings: readonly Finding[], env: NodeJS.ProcessEnv): void {
   const section = (title: string, items: string[]): string =>
@@ -40,7 +35,6 @@ export function writeReports(findings: readonly Finding[], env: NodeJS.ProcessEn
   write("ADVISORIES_FILE", section("Advisories", advisoriesOf(findings)));
 }
 
-/** Prints advisories to stdout and errors to stderr; returns the exit code. */
 export function print(findings: readonly Finding[]): number {
   for (const message of advisoriesOf(findings)) console.log(`advisory: ${message}`);
   const errors = errorsOf(findings);

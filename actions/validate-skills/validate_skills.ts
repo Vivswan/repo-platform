@@ -1,24 +1,8 @@
 #!/usr/bin/env bun
-// Validates a repository hosting agent skills (repo-platform's `skills`
-// module); docs/skills.md ("What is checked and where") is the user-facing
-// contract. Two modes, from the action's `mode` input:
-//
-//   structure (default, offline): plugin manifest, each skill folder's
-//     SKILL.md contract, the skills root's index README.md, and
-//     marketplace.json's consistency with the plugin manifest; a missing
-//     skills directory is the valid starter state.
-//   discovery (network): the real `npx -y skills add <repo> --list` must
-//     list every skill the plugin manifest publishes.
-//
-// Symlinks are rejected anywhere on a validated path, ancestors included:
-// a link can point outside the checkout, so what ships would not be what
-// was validated. The one exception is a marketplace plugin's `source`,
-// which may resolve through links while its physical path stays inside
-// the repository. An EMPTY `skills` array is valid: the starter seeds it
-// and a freshly adopted repo publishes nothing yet.
-//
-// Inputs (env): SKILLS_DIR, PLUGIN_MANIFEST, MODE. Dependency-free (Bun +
-// node builtins) so the action needs no install step.
+// Dependency-free (Bun + node builtins), so the action needs no install step; docs/skills.md ("What is checked and
+// where") is the user-facing contract. A link can point outside the checkout, so what ships would not be what was
+// validated: symlinks are rejected anywhere on a validated path, ancestors included.
+//   the one exception: a marketplace plugin's `source` may resolve through links while its physical path stays inside the repository
 
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -30,8 +14,7 @@ export const KEBAB_CASE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const MAX_NAME_LENGTH = 64;
 export const MAX_DESCRIPTION_LENGTH = 1024;
 
-/** A check failed. Thrown by fail(); collected per unit by the callers so
- *  one broken file cannot hide another's diagnosis. */
+/** Thrown by fail() and collected per unit by the callers, so one broken file cannot hide another's diagnosis. */
 export class CheckFailure extends Error {}
 
 export function fail(message: string): never {
@@ -46,8 +29,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Run a unit, collecting its CheckFailure (anything else is a bug and
- *  rethrows). */
 function collect(errors: string[], run: () => void): void {
   try {
     run();
@@ -169,11 +150,8 @@ export function loadPluginManifest(path: string, where: string): PluginManifest 
   return { name, skills: paths };
 }
 
-/** A manifest-referenced skill path: a real (non-symlink) direct child of
- *  the skills dir carrying a real SKILL.md. resolve() collapses ../
- *  segments before the containment check, so a traversing or out-of-tree
- *  path cannot bypass the per-folder validation. Shared by both manifests
- *  so plugin.json and marketplace.json confine paths identically. */
+/** resolve() collapses ../ segments before the containment check, so a traversing or out-of-tree path cannot bypass
+ *  the per-folder validation. Shared by both manifests, so plugin.json and marketplace.json confine paths identically. */
 export function checkSkillPath(
   where: string,
   skillPath: string,
@@ -197,10 +175,6 @@ export function checkSkillPath(
   }
 }
 
-/** One skill folder's SKILL.md contract: present (a real file), frontmatter
- *  name equal to the kebab-case folder name, nonempty description, both
- *  within the length limits, plus a parsable .mcp.json when the skill
- *  carries one. Returns every violation, not just the first. */
 export function validateSkillDir(skillDir: string, where: string): string[] {
   const errors: string[] = [];
   const folder = basename(skillDir);
@@ -246,12 +220,6 @@ export function validateSkillDir(skillDir: string, where: string): string[] {
   return errors;
 }
 
-/** marketplace.json, when a repo carries one: a kebab-case catalog name and
- *  a non-empty plugins list, each entry aggregated separately with a
- *  kebab-case name, a source directory inside the repository (an entry
- *  publishing the repository root must carry the plugin manifest's own
- *  name - one identity per catalog), and skill paths confined exactly like
- *  the plugin manifest's. */
 export function validateMarketplace(
   path: string,
   where: string,
@@ -327,10 +295,8 @@ export function validateMarketplace(
   return errors;
 }
 
-/** The direct child directories of the skills dir, sorted, plus errors for
- *  anything the symlink policy rejects (a symlinked skills dir or child).
- *  A missing skills dir is the starter state (nothing published yet), not
- *  an error - a manifest path pointing into it still fails its own check. */
+/** A missing skills dir is the starter state (nothing published yet), not an error: a manifest path pointing into it
+ *  still fails its own check. */
 export function skillDirs(skillsRoot: string, where: string): { dirs: string[]; errors: string[] } {
   const stat = lstatOf(skillsRoot);
   if (stat?.isSymbolicLink()) {
@@ -360,7 +326,6 @@ export function skillDirs(skillsRoot: string, where: string): { dirs: string[]; 
   return { dirs, errors };
 }
 
-/** The structure mode: every error found, empty when the tree is valid. */
 export function validateStructure(root: string, skillsDir: string, manifestRel: string): string[] {
   const errors: string[] = [];
   const skillsRoot = resolve(root, skillsDir);

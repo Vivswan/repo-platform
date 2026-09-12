@@ -1,12 +1,7 @@
-// Wraps every top-level markdown table in <div class="vp-table" tabindex="0">
-// so the theme can make the WRAPPER the horizontal scroller (tables.css):
-// a table wider than the doc column scrolls inside the wrapper instead of
-// clipping at the viewport, and the wrapper, not the table, is the tab stop
-// keyboard users scroll from. VitePress renders every table as
-// <table tabindex="0"> because its own theme scrolls the table itself; on a
-// wrapped table that would be a second stop that scrolls nothing, so the
-// wrapped table drops it. A table nested in a blockquote or list item gets
-// no wrapper, keeps carbon's scrolling block, and so keeps that tab stop.
+// The theme makes the WRAPPER the horizontal scroller (tables.css), so a wide table scrolls inside it instead of
+// clipping at the viewport, and the wrapper is the tab stop keyboard users scroll from.
+//   a top-level table  -> wrapped, and drops VitePress's own tabindex="0" (a second stop that would scroll nothing)
+//   a nested table     -> no wrapper; keeps carbon's scrolling block, and so keeps that tab stop
 
 // Typed through vitepress's renderer, the type markdown.config hands over,
 // so the rule cannot drift from the markdown-it typings vitepress binds to.

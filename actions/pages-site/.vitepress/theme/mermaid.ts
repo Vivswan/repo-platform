@@ -1,7 +1,4 @@
-// The diagram component: no markup of its own, it runs the render pass in
-// mermaid-render.ts after every content update (the first mount, every
-// navigation) and again when the appearance flips. Browser APIs stay inside
-// the callbacks, so the server render touches nothing.
+// Browser APIs stay inside the callbacks, so the server render touches nothing.
 
 import { onContentUpdated, useData } from "vitepress";
 import { defineComponent, watch } from "vue";

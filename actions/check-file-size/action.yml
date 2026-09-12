@@ -59,8 +59,7 @@ runs:
 
     # The comment is a convenience sink: the summary and annotations carry
     # the same table, so a token without pull-requests write (a fork or
-    # Dependabot PR) must not turn the verdict red. Only the check itself
-    # fails the action, in the last step.
+    # Dependabot PR) must not turn the verdict red.
     - name: Post the findings as a sticky PR comment
       if: github.event_name == 'pull_request' && steps.check.outputs.report == 'findings'
       continue-on-error: true

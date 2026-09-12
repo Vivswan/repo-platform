@@ -1,22 +1,6 @@
 #!/usr/bin/env bun
 
-// Guards against typographic look-alike and invisible characters that
-// sneak in via copy-paste or generated text. Vendored from cloud-speech
-// and generalized: scans the directory given as argv[2] (default: cwd),
-// with path-prefix exemptions read from .typography-allow
-// (template-managed in synced repos) and .typography-allow.local
-// (repo-owned, never synced).
-//
-// The forbidden set is the union of the explicit tables below (RANGES,
-// NAMES, FORBIDDEN) and VS Code's unicode-highlight data imported from
-// the monaco-editor package (InvisibleCharacters plus the
-// AmbiguousCharacters confusables). Context exemptions mirror VS Code's
-// "allowed locales": CJK sentence punctuation is allowed only in files
-// carrying CJK text, Devanagari only in files carrying Devanagari text;
-// the full-width comma U+FF0C is banned everywhere (use ", ").
-//
-// Runs under bun (which executes TypeScript natively) so it can import
-// the monaco-editor ESM modules directly.
+// The script exemptions mirror VS Code's "allowed locales": a script's punctuation is allowed only in files carrying that script's text.
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -96,9 +80,7 @@ function isCheckable(name: string): boolean {
   return EXTENSIONS.has(name.slice(dot));
 }
 
-// Optional per-repo exemption lists: relative path prefixes to skip.
-// .typography-allow is template-managed in synced repos;
-// .typography-allow.local is repo-owned and never synced.
+// .typography-allow is template-managed in synced repos; .typography-allow.local is repo-owned and never synced.
 const ALLOW_FILES = [join(ROOT, ".typography-allow"), join(ROOT, ".typography-allow.local")];
 const ALLOWED_PREFIXES = ALLOW_FILES.flatMap((file) =>
   existsSync(file)
@@ -173,8 +155,6 @@ function hex(code: number): string {
   return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
-/** Returns the failure message for a code point, or null when allowed.
- *  `context` carries the file-level script exemptions. */
 type ScriptContext = { cjk: boolean; devanagari: boolean };
 
 function violation(code: number, context: ScriptContext): string | null {

@@ -1,10 +1,5 @@
-// The nightly scan's findings as the fuzz-issue action's report directory
-// (docs/fuzzer.md, contract v1): one subdirectory per scanned target with
-// a report.md whose heading names the target and whose body carries the
-// replay command and the findings, worst severity first. A finding's
-// matched secret text never leaves the JSON: the report names the rule,
-// the file, and the line. Env: RESULTS (Trivy's JSON output), REPORT_DIR
-// (recreated empty), GITHUB_OUTPUT (findings, found, report-dir rows).
+// The fuzz-issue action's report directory (docs/fuzzer.md, contract v1): one subdirectory per scanned target with a report.md.
+// A finding's matched secret text never leaves the JSON: the report names the rule, the file, and the line.
 
 import { createHash } from "node:crypto";
 import {
@@ -68,7 +63,6 @@ function severity(value: string | undefined): Severity {
   return (SEVERITIES as readonly string[]).includes(value ?? "") ? (value as Severity) : "UNKNOWN";
 }
 
-/** Every finding grouped by target, in Trivy's order; clean targets drop out. */
 export function collectFindings(json: unknown): TargetReport[] {
   const results = (json as { Results?: TrivyResult[] } | null)?.Results ?? [];
   const reports: TargetReport[] = [];
@@ -103,7 +97,6 @@ export function collectFindings(json: unknown): TargetReport[] {
   return reports;
 }
 
-/** The counts by severity as one line, worst first, zeroes omitted. */
 export function severitySummary(findings: Finding[]): string {
   return SEVERITIES.map(
     (level) => [level, findings.filter((f) => f.severity === level).length] as const,
@@ -133,16 +126,12 @@ export function reportBody(report: TargetReport): string {
   return lines.join("\n");
 }
 
-/** A path as one shell word: bare when it needs no quoting, else single-quoted. */
 export function shellWord(path: string): string {
   return /^[A-Za-z0-9._/@:+=-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
-/** The longest directory name the report writes; a longer flattened path
- *  keeps its head plus a hash of the whole. */
 export const MAX_NAME = 100;
 
-/** A contract-conforming directory name for a target path, unique within the run. */
 export function directoryName(target: string, taken: Set<string>): string {
   let base = target.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._-]+/, "") || "target";
   if (base.length > MAX_NAME) {
@@ -155,8 +144,6 @@ export function directoryName(target: string, taken: Set<string>): string {
   return name;
 }
 
-/** The full results' name inside the report directory; a target of the
- *  same name gets the allocator's suffix. */
 export const RESULTS_NAME = "trivy.json";
 
 /** The report directory, recreated: empty on a clean scan (the artifact

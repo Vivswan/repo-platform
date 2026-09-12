@@ -1,9 +1,3 @@
-// The version dropdown: reads the version list the pages-site action
-// injects at build time (themeConfig.docsSiteVersions, derived from the
-// repository's version tags) and navigates to the selected version's root.
-// It renders nothing when fewer than two versions exist, so an unversioned
-// or not-yet-tagged site carries no dropdown at all.
-
 import { useData } from "vitepress";
 import { defineComponent, h } from "vue";
 

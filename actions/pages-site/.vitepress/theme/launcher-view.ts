@@ -1,14 +1,8 @@
-// The launcher UI's pure helpers: which rows a fold state shows, which
-// keys are the launcher's, how the keyboard highlight moves, how full-text
-// hits become a group, and the modifier keycap. No vue or vitepress import,
-// so the test suite loads this without a VitePress process and launcher.ts
-// and nav-launcher.ts stay renderers.
+// No vue or vitepress import, so the test suite loads this without a VitePress process and launcher.ts and
+// nav-launcher.ts stay renderers.
 
 import { type LauncherGroup, type LauncherItem, splitRows } from "./launcher-model.ts";
 
-/** A group as the list shows it: `open` is false only for a folded group
- *  the reader has not unfolded, whose foldable rows stay behind its fold
- *  row. */
 export interface ShownGroup {
   group: LauncherGroup;
   open: boolean;
@@ -18,8 +12,6 @@ export function shownGroups(groups: LauncherGroup[], unfolded: ReadonlySet<strin
   return groups.map((group) => ({ group, open: !group.folded || unfolded.has(group.key) }));
 }
 
-/** A group's rows around its fold row (the model's split), or everything
- *  kept for a group that never folded. */
 export function groupRows(group: LauncherGroup): {
   kept: LauncherItem[];
   foldable: LauncherItem[];
@@ -28,14 +20,10 @@ export function groupRows(group: LauncherGroup): {
   return splitRows(group.kind, group.items);
 }
 
-/** One option of the list: a link to a page or heading, or a folded
- *  group's fold row, which toggles that group's foldable rows. */
 export type LauncherRow =
   | { kind: "link"; item: LauncherItem }
   | { kind: "fold"; group: LauncherGroup; open: boolean };
 
-/** The options a group shows now, in display order: its kept rows, its
- *  fold row when it has one, then its foldable rows while it is open. */
 export function visibleRows({ group, open }: ShownGroup): LauncherRow[] {
   const { kept, foldable } = groupRows(group);
   const rows: LauncherRow[] = kept.map((item) => ({ kind: "link", item }));
@@ -44,7 +32,6 @@ export function visibleRows({ group, open }: ShownGroup): LauncherRow[] {
   return rows;
 }
 
-/** The options the arrow keys walk, in display order. */
 export function flatRows(shown: ShownGroup[]): LauncherRow[] {
   return shown.flatMap(visibleRows);
 }
@@ -62,18 +49,12 @@ export function foldLabel(group: LauncherGroup, open: boolean): string {
   return `${verb} ${headings} ${headings === 1 ? "heading" : "headings"} on ${group.title}`;
 }
 
-/** The highlight after an arrow key: roving over `count` rows and wrapping
- *  at both ends; -1 (nothing highlighted) steps onto the first or last row.
- *  With no rows there is nothing to highlight. */
 export function moveHighlight(current: number, delta: 1 | -1, count: number): number {
   if (count === 0) return -1;
   if (current < 0) return delta === 1 ? 0 : count - 1;
   return (current + delta + count) % count;
 }
 
-/** The highlight after the visible rows changed under it (a group folded,
- *  a query narrowed): the last row when it pointed past the end, else as it
- *  was. */
 export function clampHighlight(current: number, count: number): number {
   return current >= count ? count - 1 : current;
 }
@@ -90,10 +71,8 @@ export interface KeyState {
   shiftKey: boolean;
 }
 
-/** What a keydown in the field asks of the list, or null for a key the
- *  field keeps: text editing, Home and End caret moves, an arrow with any
- *  modifier held (Shift+Arrow selects, Cmd+Arrow jumps the caret), and
- *  every key during IME composition, where Enter accepts the candidate. */
+/** An arrow with any modifier held stays the field's (Shift+Arrow selects, Cmd+Arrow jumps the caret), as does every
+ *  key during IME composition, where Enter accepts the candidate. */
 export function keyIntent(event: KeyState): KeyIntent | null {
   if (event.isComposing) return null;
   const chord = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
@@ -113,14 +92,9 @@ export function keyIntent(event: KeyState): KeyIntent | null {
 
 export type HotkeyIntent = "open" | "swallow";
 
-/** What a keydown anywhere on the page asks of the shortcut owner: "open"
- *  for the launcher's shortcut (Cmd K, Ctrl K, and `/` outside a field;
- *  `editing` says the target is one), "swallow" for the same keys during
- *  IME composition, where Ctrl K converts the candidate: the launcher stays
- *  shut and the key keeps its default action, but carbon's own hotkey
- *  handler, which does not check composition, must still never see it.
- *  The `/` set includes every modifier on purpose: carbon's slash handler
- *  takes exactly that set. */
+/** "swallow" for the launcher's keys during IME composition, where Ctrl K converts the candidate: the launcher stays
+ *  shut and the key keeps its default action, but carbon's own hotkey handler, which does not check composition, must
+ *  still never see it. The `/` set includes every modifier on purpose: carbon's slash handler takes exactly that set. */
 export function hotkeyIntent(event: KeyState, editing: boolean): HotkeyIntent | null {
   const launcherKey =
     (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) ||
@@ -129,8 +103,7 @@ export function hotkeyIntent(event: KeyState, editing: boolean): HotkeyIntent | 
   return event.isComposing ? "swallow" : "open";
 }
 
-/** The highlight a query change lands on: the first row when a query has
- *  rows to open, none otherwise (an empty query is browsing, not aiming). */
+/** An empty query is browsing, not aiming, so nothing is highlighted until a query has rows to open. */
 export function initialHighlight(query: string, count: number): number {
   return query.trim() !== "" && count > 0 ? 0 : -1;
 }
@@ -168,9 +141,6 @@ export function decodeEntities(text: string): string {
 export const TEXT_MATCHES_KEY = "text";
 export const TEXT_MATCHES_CAP = 16;
 
-/** The full-text fallback as a launcher group: the section title on the
- *  left, its heading path on the right, at most TEXT_MATCHES_CAP rows.
- *  Null when there are no hits, so the caller shows the empty state. */
 export function textMatchGroup(hits: TextHit[]): LauncherGroup | null {
   if (hits.length === 0) return null;
   const items: LauncherItem[] = hits.slice(0, TEXT_MATCHES_CAP).map((hit) => ({
@@ -182,7 +152,6 @@ export function textMatchGroup(hits: TextHit[]): LauncherGroup | null {
   return { key: TEXT_MATCHES_KEY, title: "Text matches", kind: "page", items, folded: false };
 }
 
-/** The keycap for the launcher shortcut on the reader's platform. */
 export function modifierLabel(platform: string): "Cmd" | "Ctrl" {
   return /Mac|iPhone|iPad|iPod/i.test(platform) ? "Cmd" : "Ctrl";
 }

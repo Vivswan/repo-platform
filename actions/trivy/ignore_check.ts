@@ -1,11 +1,5 @@
-// The bypass file's contract: a repository silences a Trivy finding only
-// through .trivyignore.yaml, and every entry there carries an expiry and
-// a reason, so Trivy drops the entry when the date passes and the finding
-// blocks again on its own. The plain .trivyignore format has no expiry
-// field, so its presence fails the check; so does the zero date, which
-// Trivy keeps forever. Runs in the caller's checkout;
-// prints the ignore-file path for the scan step as a GITHUB_OUTPUT row
-// (empty when the repository has no bypass file).
+// Every bypass entry carries an expiry and a reason, so Trivy drops it when the date passes and the finding blocks again on its own.
+// The plain .trivyignore format has no expiry field, so its presence fails the check; so does the zero date, which Trivy keeps forever.
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { error, requireEnv, warning } from "../shared/action_runtime.ts";
@@ -18,7 +12,6 @@ export const ENTRY_KEYS = ["id", "paths", "purls", "statement", "expired_at"] as
 export const ZERO_DATE = "0001-01-01";
 
 export interface IgnoreCheck {
-  /** Why the file is not a valid bypass file, one line per finding. */
   problems: string[];
   /** Entries whose expiry has passed: Trivy no longer honors them. */
   expired: string[];
@@ -28,7 +21,6 @@ function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A calendar date as Trivy reads it (YYYY-MM-DD), or null. */
 export function parseDate(value: unknown): Date | null {
   const text = value instanceof Date ? value.toISOString().slice(0, 10) : value;
   if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;

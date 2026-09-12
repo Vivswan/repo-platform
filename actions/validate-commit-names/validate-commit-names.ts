@@ -1,9 +1,3 @@
-// Validates that every commit subject in a push/PR range is a Conventional
-// Commit. Vendored from Vivswan/copilot-env (.github/scripts/
-// validate-commit-names.cjs), converted to TypeScript; runs under bun.
-// The subject grammar itself lives in ./subject.ts (single source, shared
-// with this repo's commit-msg hook - the header there has the model).
-
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { conventionalSubject, isMergeSubject, subject } from "./subject.ts";
@@ -31,10 +25,8 @@ function git(args: string[]): string {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
 
-// True when `rev` resolves to a commit present in this checkout. A force-push
-// orphans the old tip (and a shallow clone may never fetch it), so `before`
-// can name a commit that no longer exists -- `git rev-list before..after`
-// would then fail fatally. We use this to fall back to the push payload.
+// A force-push orphans the old tip (and a shallow clone may never fetch it), so `before` can name a commit that
+// no longer exists, and `git rev-list before..after` would then fail fatally.
 function revExists(rev: string): boolean {
   try {
     // stdio "ignore" keeps git's "fatal: Not a valid object name" off the log
@@ -82,9 +74,7 @@ function listCommits(): Commit[] {
   if (eventName === "push") {
     const before = payload.before;
     const after = payload.after;
-    // Only diff a range when both endpoints are real and reachable here;
-    // otherwise (new branch, or a force-push that orphaned `before`) validate
-    // the commits GitHub listed in this push payload instead.
+    // A new branch's `before` is the zero sha and a force-push orphans it: the push payload is the fallback.
     if (before && after && !zeroSha.test(before) && revExists(before) && revExists(after)) {
       return shasInRange(`${before}..${after}`).map((sha) => ({
         sha,

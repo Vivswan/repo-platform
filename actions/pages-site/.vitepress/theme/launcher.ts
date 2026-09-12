@@ -1,10 +1,5 @@
-// The search launcher: the landing page's "I want to..." panel (mounted
-// from the <FleetLauncher rows="..."> tag the landing-table rule emits)
-// and, in "dialog" mode, the body of the nav's search dialog. The grouped
-// list renders server-side from the curated rows and the build-time page
-// index; browser APIs run only in onMounted and handlers. When a query
-// matches no page or heading, VitePress's local search index is loaded
-// once per locale and its hits show as a "Text matches" group.
+// The grouped list renders server-side from the curated rows and the build-time page index; browser APIs run only in
+// onMounted and handlers.
 
 import type MiniSearch from "minisearch";
 import { useData } from "vitepress";
@@ -66,7 +61,6 @@ export function searchIcon(size: number): VNode {
   );
 }
 
-/** The two keycaps of the launcher shortcut. */
 export function shortcutKeys(modifier: string): VNode {
   return h("span", { class: "fleet-launcher-keys", "aria-hidden": "true" }, [
     h("kbd", modifier),
@@ -112,7 +106,6 @@ function loadIndex(locale: string): Promise<MiniSearch<TextHit> | null> {
   return pending;
 }
 
-/** `text` with every token match wrapped in <mark> (bold by CSS). */
 function emphasized(text: string, tokens: string[]): (string | VNode)[] {
   const ranges = matchRanges(text, tokens);
   if (ranges.length === 0) return [text];

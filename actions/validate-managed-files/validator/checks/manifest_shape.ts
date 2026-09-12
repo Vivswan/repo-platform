@@ -2,17 +2,12 @@ import { MANIFEST_NAME, unknownEntryFields } from "../../../shared/manifest.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
-/** The one repair for a damaged managed file: the sync writes platform files whole. */
 export const RESYNC =
   "re-run the sync (dispatch sync-repos.yml in Vivswan/repo-platform with repo=<owner>/<name>), which replaces platform files whole";
 
-/** The ownership manifest's shape. The manifest is itself a managed file,
- *  so managed repositories carry it and repo-platform itself must NOT
- *  (self mode inverts); absence and unparsable text are errors, an entry
- *  field outside the vocabulary is a hand edit, the self entry names the
- *  build the writer stamped. The guarantee is VISIBILITY, not
- *  tamper-proofing: a hand-edited manifest is caught here or at parity,
- *  and the next sync restamps it. */
+/** The manifest is itself a managed file, so managed repositories carry it and repo-platform itself must NOT (self mode
+ *  inverts). The guarantee is VISIBILITY, not tamper-proofing: a hand-edited manifest is caught here or at parity, and
+ *  the next sync restamps it. */
 export function checkManifestShape(ctx: Context): Finding[] {
   if (ctx.mode === "self") {
     if (ctx.manifest.state === "absent") return [];

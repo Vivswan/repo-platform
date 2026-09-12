@@ -1,10 +1,6 @@
-// The render pass over a page's mermaid mounts (../mermaid.ts's fence
-// output): load the mermaid package, once, on the first mount ever seen (a
-// page without one costs no mermaid bytes), then draw each mount's source
-// into a diagram child. Mermaid bakes the theme's colors into the SVG, so
-// the pass runs again on every appearance flip. A failed render keeps the
-// source in view and adds the error under it. Kept apart from the component
-// in mermaid.ts so the pass is testable without VitePress.
+// mermaid loads on the first mount ever seen, so a page without one costs no mermaid bytes; the pass runs again on
+// every appearance flip because mermaid bakes the theme's colors into the SVG. Kept apart from the component in
+// mermaid.ts so the pass is testable without VitePress.
 
 import { MERMAID_CLASS, MERMAID_SOURCE_CLASS } from "../mermaid.ts";
 import { mermaidThemeVariables } from "./mermaid-theme.ts";
@@ -50,9 +46,8 @@ function fail(mount: HTMLElement, error: unknown): void {
   mount.dataset.state = "error";
 }
 
-/** Renders the page's mounts with the given mode's theme. A run that a
- *  later one overtakes (a toggle mid-render, a navigation) stops at its
- *  next await, so the newest theme always lands last. */
+/** A run that a later one overtakes (a toggle mid-render, a navigation) stops at its next await, so the newest theme
+ *  always lands last. */
 export async function renderAll(dark: boolean): Promise<void> {
   const run = ++generation;
   const mounts = [...document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS}`)];

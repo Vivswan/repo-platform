@@ -42,11 +42,8 @@ export type Manifest =
  *  and the module names then stand unjudged. */
 export type ModuleVocabulary = { modules: ReadonlySet<string> } | { problem: string };
 
-/** Everything the checks read, loaded once. Checks are pure functions of
- *  this record; every cross-check dependency (a missing modules list, a
- *  conflicted manifest, self mode) is a field here, never an ordering
- *  between checks. Self mode (repo-platform itself) walks gitignored paths
- *  no further and expects no manifest: its files are the sources. */
+/** Every cross-check dependency (a missing modules list, a conflicted manifest, self mode) is a field here, never an
+ *  ordering between checks. */
 export interface Context {
   mode: "self" | "render";
   root: string;
@@ -99,13 +96,9 @@ function loadManifest(root: string): Manifest {
   return { state: "parsed", files: parsed.files };
 }
 
-/** Untracked-and-ignored paths under `root`, from one `git ls-files
- *  --others --ignored --directory` pre-pass: `dirs` are ignored
- *  directories (reported collapsed, so the walk can prune them without
- *  ever descending - .claude/worktrees/ holds whole checkouts), `files`
- *  are individually ignored files. null when git cannot answer - no git
- *  on PATH, or root is not a git checkout - which is the honest reading
- *  of a plain tree: nothing is ignored. */
+/** --directory reports an ignored directory collapsed, so the walk prunes it without ever descending (.claude/worktrees/
+ *  holds whole checkouts). null when git cannot answer (no git on PATH, or root is not a checkout): the honest reading
+ *  of a plain tree is that nothing is ignored. */
 function gitIgnored(root: string): { dirs: Set<string>; files: Set<string> } | null {
   const proc = spawnSync(
     "git",
@@ -123,9 +116,6 @@ function gitIgnored(root: string): { dirs: Set<string>; files: Set<string> } | n
   return { dirs, files };
 }
 
-/** All regular files below root, sorted, skipping SKIP_DIRS and (when
- *  `ignored` is given) gitignored paths - directories are pruned before
- *  descent. */
 function walk(root: string, ignored: ReturnType<typeof gitIgnored>): string[] {
   const found: string[] = [];
   const visit = (rel: string) => {
@@ -149,11 +139,9 @@ function walk(root: string, ignored: ReturnType<typeof gitIgnored>): string[] {
  *  writer's own loader. */
 const WRITER_SOURCES = "files/";
 
-/** Loads the tree at `root`. Managed repositories walk every path: they
- *  are validated as plain trees and everything in them is content. Self
- *  mode skips gitignored paths: the operator checkout carries gitignored
- *  working state (agent worktrees with in-progress rebases) that is not
- *  the repository's content. */
+/** Managed repositories walk every path: they are validated as plain trees and everything in them is content. Self mode
+ *  skips gitignored paths: the operator checkout carries gitignored working state (agent worktrees with in-progress
+ *  rebases) that is not the repository's content. */
 export function loadContext(root: string, selfMode: boolean, filesConfig: string): Context {
   return {
     mode: selfMode ? "self" : "render",

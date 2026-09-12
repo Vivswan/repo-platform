@@ -11,13 +11,6 @@ function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/** Ownership-manifest byte parity, entry by entry: every managed, split,
- *  mirror, or link entry's recorded sha256 matches the file on disk (split
- *  files: the managed region alone, from the entry's BEGIN marker line
- *  through its END marker line; links: the target string, read through
- *  nothing). Drift means the file changed since the last sync; the next
- *  sync replaces it. A listed file missing from the repo is deletion
- *  damage and errors. This check reads each entry's fields as they stand. */
 export function checkManifestParity(ctx: Context): Finding[] {
   if (ctx.mode === "self" || ctx.manifest.state !== "parsed") return [];
   const findings: Finding[] = [];
@@ -94,8 +87,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
         );
         continue;
       }
-      // A grammar outside GRAMMAR_IDS cannot be read by guess without
-      // verifying the wrong region - loud refusal, mirroring the sync's own.
+      // A grammar outside GRAMMAR_IDS cannot be read by guess without verifying the wrong region.
       if (knownGrammar(entry.grammar) === null) {
         findings.push(
           error(
@@ -143,10 +135,8 @@ export function checkManifestParity(ctx: Context): Finding[] {
     }
     let actual: string;
     if (stat.isSymbolicLink()) {
-      // Raw link bytes: decoding a malformed-UTF-8 target would fold
-      // distinct targets onto the replacement character. Any class hashes
-      // a link this way: older records classed the agent-file aliases as
-      // managed with this same hash.
+      // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct targets onto the replacement character.
+      // Any class hashes a link this way.
       actual = sha256(readlinkSync(join(ctx.root, rel), { encoding: "buffer" }));
     } else if (entry.class === "link") {
       findings.push(

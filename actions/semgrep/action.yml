@@ -22,7 +22,6 @@ runs:
       shell: bash
       run: python3 -m pip install --quiet semgrep==1.176.1
 
-    # --severity ERROR filters the rules: the SARIF and the JSON copy carry ERROR findings only.
     # No --error: the exit status means "did the scan complete"; the judge below is the verdict.
     # The status is a step output, not the step's result, so a fatal scan still reaches the judge.
     - name: Scan
