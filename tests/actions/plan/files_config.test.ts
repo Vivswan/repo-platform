@@ -469,6 +469,20 @@ describe("render, overlay, and the settings block", () => {
       ),
       "settings: layers[2] 'files/settings/override.yml' is declared twice",
     ],
+    [
+      // The same document below and above the repository overlay would overwrite the overlay's keys.
+      "an override that is the baseline",
+      doc(
+        [STARTER, RENDERED],
+        [
+          SETTINGS.replace(
+            "override: files/settings/override.yml",
+            "override: files/settings/baseline.yml",
+          ),
+        ],
+      ),
+      "settings: override 'files/settings/baseline.yml' is declared twice",
+    ],
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);
   });

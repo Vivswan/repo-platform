@@ -502,8 +502,8 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       }
       return path.slice(SOURCE_PREFIX.length);
     };
-    // A layer folded twice overwrites whatever landed between the copies, so
-    // a layer's source may not repeat the baseline, the override, or another layer.
+    // A document folded twice overwrites whatever landed between the copies
+    // (the repository's overlay included), so every source is declared once.
     const sources = [declared.baseline, ...declared.layers.map((layer) => layer.source)];
     settings = {
       baseline: layerSource("baseline", declared.baseline),
@@ -518,6 +518,9 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       }),
       override: layerSource("override", declared.override),
     };
+    if (declared.override === declared.baseline) {
+      problems.push(`settings: override '${declared.override}' is declared twice`);
+    }
   }
   for (const entry of data.retired) {
     for (const path of [entry.path, ...(entry.moved_to === undefined ? [] : [entry.moved_to])]) {
