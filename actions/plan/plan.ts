@@ -8,16 +8,13 @@
 // canonical order, the visibility, the skills directory, the CodeQL
 // languages, the tracking labels, and whether a scheduled run is the week's
 // CodeQL rescan; it also rejects a mirror declaration files.yml proves
-// unwritable (mirrors.ts). `pages` mode resolves the deploy configuration
-// reusable-pages.yml consumes (mounts, setup toolchains, install and build
-// commands, output directory, site title, link-rot label) from the
-// registration; with CALLER_MOUNTS set the caller configured the deploy
-// itself: its CALLER_* values pass the setup grammar check and are
-// published unchanged, the registration unread. Fail closed: an unknown
-// module or key, a malformed value, or a missing registration fails the
-// step; nothing here defaults an invalid registration into a green run.
+// unwritable (mirrors.ts). `site` mode resolves the docs configuration the
+// pages-site action consumes (the docs mount path, the site title, the
+// include roots, the link-rot label) from the registration. Fail closed: an
+// unknown module or key, a malformed value, or a missing registration fails
+// the step; nothing here defaults an invalid registration into a green run.
 //
-// Env: MODE (default|pages), PRIVATE ("true"/"false"; empty asks the API
+// Env: MODE (default|site), PRIVATE ("true"/"false"; empty asks the API
 // for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's
 // files.yml: `modules` keys are the vocabulary in canonical order, values
 // the defaults the registration may leave unset), RESERVED_LABELS_FILE
@@ -52,14 +49,8 @@ import {
   type Registration,
 } from "./registration.ts";
 
-export const MODES = ["default", "pages"] as const;
+export const MODES = ["default", "site"] as const;
 export type Mode = (typeof MODES)[number];
-
-/** The docs tree a vitepress mount renders: the shared deploy's fixed
- *  default, which no caller overrides (docs_site_path names the URL mount,
- *  not the tree). */
-export const DOCS_DIR = "docs";
-export const SETUP_NONE = "none";
 
 export class PlanError extends Error {
   constructor(readonly problems: string[]) {
@@ -75,9 +66,7 @@ export type Module = ModuleData & { name: string };
 export interface PlanDefaults {
   /** modules.skills.skills_dir.default */
   skillsDir: string;
-  /** modules.pages.dist: the build output directory a pages deploy publishes. */
-  pagesDist: string;
-  /** modules.docs-site.path: the URL segment the docs mount under beside a website. */
+  /** modules.site.path: the URL segment the docs mount under beside a website. */
   docsPath: string;
 }
 
@@ -103,8 +92,7 @@ export interface DefaultSource {
  *  plans. */
 export const REQUIRED_DEFAULTS: Readonly<Record<keyof PlanDefaults, DefaultSource>> = {
   skillsDir: { module: "skills", key: "skills_dir.default", pick: (d) => d.skills_dir?.default },
-  pagesDist: { module: "pages", key: "dist", pick: (d) => d.dist },
-  docsPath: { module: "docs-site", key: "path", pick: (d) => d.path },
+  docsPath: { module: "site", key: "path", pick: (d) => d.path },
 };
 
 /** files.yml's module data as the plan reads it: an unreadable or invalid
@@ -132,7 +120,6 @@ export function loadModuleData(text: string, label = "files.yml"): TemplateData 
   };
   const defaults: PlanDefaults = {
     skillsDir: required(REQUIRED_DEFAULTS.skillsDir),
-    pagesDist: required(REQUIRED_DEFAULTS.pagesDist),
     docsPath: required(REQUIRED_DEFAULTS.docsPath),
   };
   if (missing.length > 0) throw new PlanError(missing);
@@ -281,163 +268,43 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   };
 }
 
-export interface Mount {
-  path: string;
-  source: "command" | "vitepress";
-  versioned: boolean;
-  /** Extra source roots a vitepress mount renders (the registration's
-   *  docs_site.include, verbatim); absent when none are declared. */
-  include?: { path: string; mount: string; page?: string }[];
-}
-
-export interface PagesPlan {
-  mounts: Mount[];
-  setup: string;
-  installCommand: string;
-  buildCommand: string;
-  distDir: string;
+/** The docs configuration the pages-site action consumes (docs/site.md):
+ *  the website itself is the repo-owned hook's, so nothing about it is
+ *  planned here. */
+export interface SitePlan {
+  /** The URL segment the docs mount under beside a website. */
+  docsPath: string;
+  /** Empty stays empty: pages-site then titles the site by repository name. */
   siteTitle: string;
-  docsDir: string;
+  /** The registration's site.include, verbatim; [] when none are declared. */
+  include: { path: string; mount: string; page: string }[];
   linkRotLabel: string;
 }
 
-/** Why `setup` is not a comma-separated list of distinct toolchain tokens
- *  (or exactly `none`), or null. */
-export function setupProblem(setup: string, tokens: readonly string[]): string | null {
-  if (!/^[a-z]+(,[a-z]+)*$/.test(setup)) {
-    return `invalid setup value '${setup}': it must be a comma-separated list of ${tokens.join("/")}, or ${SETUP_NONE} (no spaces or empty tokens)`;
-  }
-  const parts = setup.split(",");
-  for (const part of parts) {
-    if (part !== SETUP_NONE && !tokens.includes(part)) {
-      return `invalid setup token '${part}': each token must be ${tokens.join(", ")}, or ${SETUP_NONE}`;
-    }
-  }
-  const duplicate = parts.find((part, index) => parts.indexOf(part) !== index);
-  if (duplicate !== undefined) return `duplicate setup token '${duplicate}'`;
-  if (parts.includes(SETUP_NONE) && parts.length > 1) {
-    return `setup '${SETUP_NONE}' cannot be combined with toolchain tokens`;
-  }
-  return null;
-}
-
-/** The pages defaults files.yml carries: every selected toolchain module
- *  (one carrying pages data) joined by commas or `none`, and the commands
- *  of the first module in canonical order whose token `setup` names - among
- *  ALL modules, since setup may name a toolchain the selection does not. */
-export function defaultSetup(selected: Module[]): string {
-  return (
-    selected
-      .filter((m) => m.pages !== undefined)
-      .map((m) => m.name)
-      .join(",") || SETUP_NONE
-  );
-}
-
-export function defaultCommands(
-  modules: Module[],
-  setup: string,
-): { install: string; build: string } {
-  const tokens = new Set(setup.split(","));
-  const first = modules.find((module) => module.pages !== undefined && tokens.has(module.name));
-  return { install: first?.pages?.install ?? "", build: first?.pages?.build ?? "" };
-}
-
-export function planPages(input: PlanInput): PagesPlan {
+export function planSite(input: PlanInput): SitePlan {
   const selected = selectModules(input);
-  const names = new Set(selected.map((module) => module.name));
-  const pages = names.has("pages");
-  const docsSite = names.has("docs-site");
-  if (!pages && !docsSite) {
+  if (!selected.some((module) => module.name === "site")) {
     throw new PlanError([
-      `${REGISTRATION_PATH}: neither pages nor docs-site is selected - there is no site to deploy`,
+      `${REGISTRATION_PATH}: the site module is not selected - there is no site to deploy`,
     ]);
   }
-  const tokens = input.modules.filter((m) => m.pages !== undefined).map((m) => m.name);
-  const docsPath = input.registration.docs_site?.path ?? input.defaults.docsPath;
-  const include = input.registration.docs_site?.include;
-  const docsMount = (path: string): Mount => ({
-    path,
-    source: "vitepress",
-    versioned: true,
-    ...(include ? { include } : {}),
-  });
-  const mounts: Mount[] = pages
-    ? docsSite
-      ? [{ path: "/", source: "command", versioned: false }, docsMount(`/${docsPath}/`)]
-      : [{ path: "/", source: "command", versioned: true }]
-    : [docsMount("/")];
-  let setup = SETUP_NONE;
-  let installCommand = "";
-  let buildCommand = "";
-  let distDir = input.defaults.pagesDist;
-  if (pages) {
-    const declared = input.registration.pages ?? {};
-    setup = declared.setup ?? defaultSetup(selected);
-    const problem = setupProblem(setup, tokens);
-    if (problem !== null) throw new PlanError([`${REGISTRATION_PATH}: ${problem}`]);
-    const defaults = defaultCommands(input.modules, setup);
-    installCommand = declared.install ?? defaults.install;
-    buildCommand = declared.build ?? defaults.build;
-    if (buildCommand === "") {
-      throw new PlanError([
-        `${REGISTRATION_PATH}: the pages module needs a build command (pages.build, or a selected toolchain module with a default)`,
-      ]);
-    }
-    distDir = declared.dist ?? input.defaults.pagesDist;
-  }
-  let siteTitle = "";
-  let linkRotLabel = "";
-  if (docsSite) {
-    // Empty stays empty: pages-site then titles the site by repository name.
-    siteTitle = input.registration.project?.name ?? "";
-    const labels = trackingLabels(input, selected);
-    const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
-    linkRotLabel = labels[streams.indexOf("docs-site")];
-  }
+  const labels = trackingLabels(input, selected);
+  const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
   return {
-    mounts,
-    setup,
-    installCommand,
-    buildCommand,
-    distDir,
-    siteTitle,
-    docsDir: DOCS_DIR,
-    linkRotLabel,
+    docsPath: input.registration.site?.path ?? input.defaults.docsPath,
+    siteTitle: input.registration.project?.name ?? "",
+    include: input.registration.site?.include ?? [],
+    linkRotLabel: labels[streams.indexOf("site")],
   };
 }
 
-/** A deploy the caller configured through the workflow inputs: published
- *  unchanged, the setup grammar checked the way a planned one is. */
-export interface CallerPages {
-  mounts: string;
-  setup: string;
-  installCommand: string;
-  buildCommand: string;
-  distDir: string;
-  siteTitle: string;
-  docsDir: string;
-  linkRotLabel: string;
-}
-
-export function callerConfiguredPages(caller: CallerPages, modules: Module[]): CallerPages {
-  const tokens = modules.filter((m) => m.pages !== undefined).map((m) => m.name);
-  const problem = setupProblem(caller.setup, tokens);
-  if (problem !== null) throw new PlanError([`setup input: ${problem}`]);
-  return caller;
-}
-
-/** The step outputs of a plan, by output name (mounts as compact JSON). */
-export function outputsOf(plan: CiPlan | PagesPlan | CallerPages): Record<string, string> {
-  if ("mounts" in plan) {
+/** The step outputs of a plan, by output name (include as compact JSON). */
+export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
+  if ("docsPath" in plan) {
     return {
-      mounts: typeof plan.mounts === "string" ? plan.mounts : JSON.stringify(plan.mounts),
-      setup: plan.setup,
-      install_command: plan.installCommand,
-      build_command: plan.buildCommand,
-      dist_dir: plan.distDir,
+      docs_path: plan.docsPath,
       site_title: plan.siteTitle,
-      docs_dir: plan.docsDir,
+      include: JSON.stringify(plan.include),
       link_rot_label: plan.linkRotLabel,
     };
   }
@@ -500,38 +367,15 @@ function main(): number {
   }
   const filesConfig = requireEnv("FILES_CONFIG");
   const template = loadModuleData(readFilesConfig(filesConfig), filesConfig);
-  const callerMounts = env("CALLER_MOUNTS");
-  if (mode === "pages" && callerMounts !== "") {
-    const text = outputLines(
-      outputsOf(
-        callerConfiguredPages(
-          {
-            mounts: callerMounts,
-            setup: env("CALLER_SETUP"),
-            installCommand: env("CALLER_INSTALL_COMMAND"),
-            buildCommand: env("CALLER_BUILD_COMMAND"),
-            distDir: env("CALLER_DIST_DIR"),
-            siteTitle: env("CALLER_SITE_TITLE"),
-            docsDir: env("CALLER_DOCS_DIR"),
-            linkRotLabel: env("CALLER_LINK_ROT_LABEL"),
-          },
-          template.modules,
-        ),
-      ),
-    );
-    appendFileSync(requireEnv("GITHUB_OUTPUT"), text);
-    writeSync(1, text);
-    return 0;
-  }
   const root = process.cwd();
   const input: PlanInput = {
     registration: readRegistration(root),
     ...template,
     reservedLabels: readReservedLabels(requireEnv("RESERVED_LABELS_FILE")),
     private:
-      mode === "pages" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
+      mode === "site" ? false : resolvePrivate(env("PRIVATE"), requireEnv("GITHUB_REPOSITORY")),
   };
-  const plan = mode === "pages" ? planPages(input) : planCi(input);
+  const plan = mode === "site" ? planSite(input) : planCi(input);
   const text = outputLines(outputsOf(plan));
   appendFileSync(requireEnv("GITHUB_OUTPUT"), text);
   writeSync(1, text);
@@ -539,8 +383,8 @@ function main(): number {
 }
 
 /** GITHUB_OUTPUT rows: `name=value` for a one-line value, the delimited
- *  form for a value spanning lines (a multi-line build command is valid),
- *  under a random delimiter the value cannot contain. */
+ *  form for a value spanning lines, under a random delimiter the value
+ *  cannot contain. */
 export function outputLines(outputs: Record<string, string>): string {
   return Object.entries(outputs)
     .map(([name, value]) => {

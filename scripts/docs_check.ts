@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
-// `bun run docs:check`: the Docs Site workflow's PR check (the pages-site
-// action's strict CHECK build) over this repo's docs/, with the env that
-// job's action step sets, so an exported shell variable cannot change the
-// build. RUNNER_TEMP is per run and removed in the finally: the action's
-// scratch is otherwise one fixed path under the system tmpdir that it never
-// cleans and that concurrent worktrees would wipe from under each other.
+// `bun run docs:check`: ci.yml's docs-check job (the pages-site action's
+// strict CHECK build) over this repo's docs/, with the env that job's
+// action step sets, so an exported shell variable cannot change the build.
+// RUNNER_TEMP is per run and removed in the finally: the action's scratch
+// is otherwise one fixed path under the system tmpdir that it never cleans
+// and that concurrent worktrees would wipe from under each other.
 //
 // Usage: bun scripts/docs_check.ts
 
@@ -15,6 +15,10 @@ import { join, resolve } from "node:path";
 import { passthrough } from "../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
+
+/** The configuration ci.yml's docs-check and site jobs pass (the site-config-parity ssot rule pins the three). */
+const SITE_CONFIG =
+  '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}';
 
 function main(): number {
   // No-op handlers replace bun's default disposition, which would end the
@@ -29,14 +33,9 @@ function main(): number {
         GITHUB_WORKSPACE: REPO_ROOT,
         GITHUB_REPOSITORY: "Vivswan/repo-platform",
         RUNNER_TEMP: scratch,
-        MOUNTS: '[{"path": "/", "source": "vitepress", "versioned": true}]',
         CHECK: "true",
-        DOCS_DIR: "docs",
-        SITE_TITLE: "repo-platform",
-        INSTALL_COMMAND: "",
-        BUILD_COMMAND: "",
-        CALLER_PATH: process.env.PATH ?? "",
-        DIST_DIR: "dist",
+        SITE_DIR: "",
+        CONFIG: SITE_CONFIG,
         MAX_VERSIONS: "5",
         CUSTOM_DOMAIN: "",
         DEFAULT_BRANCH: "main",

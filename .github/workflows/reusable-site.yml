@@ -1,0 +1,155 @@
+# The fleet's one GitHub Pages deploy, called by the managed ci.yml's `site`
+# leg (docs/site.md). ONE job on purpose: the repo-owned site-build hook
+# (.github/actions/site-build, a composite action in the caller's checkout,
+# run when it exists) hands its output directory to the fleet's assembly in
+# the same workspace, so the Pages artifact is the only artifact. The
+# pages-site action lays the hook's website out at the root and the docs
+# versioned beside or under it, checks every internal link, and hands back
+# the directory to upload; a repository with neither ends green with a
+# notice and no deploy. A caller passing no `config` is configured from its
+# registration (the action runs the plan over .repo-platform.yml); this
+# repository's own ci.yml passes its configuration as JSON. On scheduled
+# runs with a link-rot label the deployed site's external links are checked
+# after the deploy and findings ride the fleet's tracking-issue stream
+# (fuzz-issue@build). Callers own `concurrency: pages`; this workflow
+# declares none.
+
+name: Reusable Site
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The commit to build ("" = the event's own ref)
+        required: false
+        type: string
+        default: ""
+      custom_domain:
+        description: Custom domain ("" = <owner>.github.io/<repo>); pass vars.CUSTOM_DOMAIN
+        required: false
+        type: string
+        default: ""
+      config:
+        description: 'Registration-less callers only: the site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"}; empty reads the registration'
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # The hook step runs under this token too: a composite action declares
+    # no permissions of its own. issues: write is the link-rot issue's.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      issues: write
+    steps:
+      # One full checkout serves the hook and every docs tier: version tags
+      # and per-ref trees come from history, which needs fetch-depth 0.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha }}
+
+      - name: Resolve the site URLs
+        id: urls
+        env:
+          CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
+        run: |
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            echo "base_path=/" >> "$GITHUB_OUTPUT"
+            echo "origin=https://$CUSTOM_DOMAIN" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_path=/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_OUTPUT"
+            echo "origin=https://$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]').github.io" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The repository's own website, built by its hook from the checkout;
+      # a repository that has not filled the hook in publishes docs/ alone.
+      - name: Build the repository's website
+        id: hook
+        if: hashFiles('.github/actions/site-build/action.yml') != ''
+        uses: ./.github/actions/site-build
+        with:
+          base-path: ${{ steps.urls.outputs.base_path }}
+          origin: ${{ steps.urls.outputs.origin }}
+
+      - name: Note a hook that named no directory
+        if: steps.hook.outcome == 'success'
+        env:
+          DIST: ${{ steps.hook.outputs.dist }}
+        run: '[ -n "$DIST" ] || echo "::notice::the site-build hook ran and named no dist directory; only the docs directory publishes, when there is one"'
+
+      - name: Assemble the site
+        id: site
+        uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          site-dir: ${{ steps.hook.outputs.dist }}
+          config: ${{ inputs.config }}
+          custom-domain: ${{ inputs.custom_domain }}
+          max-versions: ${{ vars.PAGES_MAX_VERSIONS || '5' }}
+
+      - if: steps.site.outputs.publish == 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - if: steps.site.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ steps.site.outputs.site-dir }}
+
+      - id: deployment
+        if: steps.site.outputs.publish == 'true'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      # Nightly link rot over what shipped: external links only (internal
+      # ones were fatal at assembly), on the schedule alone so a fixed link
+      # closes the issue on the next clean night, never on a push.
+      - name: Check external links
+        id: links
+        if: github.event_name == 'schedule' && steps.site.outputs.publish == 'true' && steps.site.outputs.link-rot-label != ''
+        uses: Vivswan/repo-platform/actions/pages-site/check-links@build
+        with:
+          site-dir: ${{ steps.site.outputs.site-dir }}
+
+      # A count the gates below can test positively (check_ssot's
+      # step-output-gates rule): an absent count fails here rather than
+      # reading as a clean night, and neither the report nor the close runs.
+      - name: Read the link-rot count
+        id: rot
+        if: steps.links.outcome == 'success'
+        env:
+          BROKEN: ${{ steps.links.outputs.broken }}
+        run: |
+          [[ "$BROKEN" =~ ^[0-9]+$ ]] || { echo "::error::check-links published no broken count: '$BROKEN'"; exit 1; }
+          echo "found=$([ "$BROKEN" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: File or update the link-rot issue
+        if: steps.rot.outputs.found == 'true'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: report
+          label: ${{ steps.site.outputs.link-rot-label }}
+          title: Docs site link rot
+          artifacts-dir: ${{ steps.links.outputs.report-dir }}
+          # The stream's create tuple, anchored to files.yml's site
+          # tracking_label by check_ssot's labels rule.
+          label-color: "D4A72C"
+          label-description: Automated docs-site link-rot report
+          stream: generic
+
+      - name: Close the link-rot issue on a clean night
+        if: steps.rot.outputs.found == 'false'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: resolve
+          label: ${{ steps.site.outputs.link-rot-label }}
+          stream: generic

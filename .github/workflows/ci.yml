@@ -301,6 +301,20 @@ jobs:
           skills-dir: skills
           mode: discovery
 
+  # This repository's docs built strictly through the site action from the
+  # working tree (dead internal links fail here, not the deploy), with the
+  # same configuration the site job passes; `bun run docs:check` is the
+  # local twin. Unconditional, like every gating job.
+  docs-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./actions/pages-site
+        with:
+          check: "true"
+          config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
+
   # The pages-site action's vitepress build, end to end in the runner's
   # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
   # nothing else in the gate ever RUNS vitepress, and the build's module
@@ -452,6 +466,7 @@ jobs:
       - script-tests
       - validate-skills
       - skills-discovery
+      - docs-check
       - pages-site-build
       - codeql-javascript
       - zizmor
@@ -492,19 +507,19 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # This repository's own docs site (the docs-site module, dogfooded): the
-  # skeleton's docs-site leg calling the pipeline by local path. Ordered
-  # behind post-green so the deploy runs after this run republished the
-  # build branch its pipeline consumes (@build), gated on the all-green
-  # result alone: !cancelled() keeps a red fleet leg from holding the site
-  # back. The mount is spelled out: this repository's registration drives
-  # its settings, not the called workflow.
-  docs-site:
+  # This repository's own site: the skeleton's `site` leg carried by hand,
+  # calling the pipeline by local path so this tree's workflow is the one
+  # under test. Ordered behind post-green so the deploy runs after this run
+  # republished the build branch its actions ride (@build); !cancelled()
+  # keeps a red fleet leg from holding the site back. No push clause: the
+  # weekly schedule is the rebuild and the link-rot check, a dispatch the
+  # manual deploy. The configuration is spelled out: this caller reads no
+  # registration through the plan.
+  site:
     needs: [all-green, post-green]
     if: >-
       !cancelled() &&
       needs.all-green.result == 'success' &&
-      github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
     concurrency:
       group: pages
@@ -514,10 +529,8 @@ jobs:
       pages: write
       id-token: write
       issues: write
-    uses: ./.github/workflows/reusable-pages.yml
+    uses: ./.github/workflows/reusable-site.yml
     with:
       sha: ${{ github.sha }}
-      mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
-      site_title: repo-platform
-      link_rot_label: docs-link-rot
+      config: '{"site_title": "repo-platform", "docs_path": "docs", "include": [], "link_rot_label": "docs-link-rot"}'
       custom_domain: ${{ vars.CUSTOM_DOMAIN }}

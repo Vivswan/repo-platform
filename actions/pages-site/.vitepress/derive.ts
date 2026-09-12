@@ -126,7 +126,7 @@ export function deriveRewrites(
 }
 
 /** What a page's markdown says about itself, read once at config time.
- *  `order` and `group` are the sidebar's frontmatter keys (docs/docs-site.md
+ *  `order` and `group` are the sidebar's frontmatter keys (docs/site.md
  *  documents the contract); null when the page carries none. */
 export interface PageMeta {
   /** The `title` frontmatter, else the first `# ` heading, else the `name`

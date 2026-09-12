@@ -297,8 +297,8 @@ describe("the layer topology fails CLOSED", () => {
     {
       reason: "a layer that is not a mapping",
       config: CONFIG,
-      damage: (tree) => writeFileSync(join(tree, "pages/settings.yml"), "# nothing\n"),
-      problem: "files/pages/settings.yml: not a YAML mapping",
+      damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "# nothing\n"),
+      problem: "files/site/settings.yml: not a YAML mapping",
     },
   ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
     // The control: the committed declarations match the committed tree in

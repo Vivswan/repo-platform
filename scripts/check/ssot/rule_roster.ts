@@ -21,7 +21,6 @@ export interface Rule {
  *  adding a rule means adding its name here, and deleting one means
  *  removing its entry in the same change, deliberately. */
 export const RULE_ROSTER = [
-  "pages-grammar",
   "bun-dirs",
   "bun-types-pin",
   "toolchain-version-files",
@@ -57,13 +56,13 @@ export const RULE_ROSTER = [
   "auto-assign-codeowners-parity",
   "settings-green-gate",
   "fleet-writers-ride-post-green",
-  "pages-callers-parity",
   "spawn-sync-hang-bound",
   "temp-dirs-through-helper",
   "no-tests-under-actions",
   "stream-write-sync",
   "ci-harness-imports",
   "operator-verdict-only",
+  "site-config-parity",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the live

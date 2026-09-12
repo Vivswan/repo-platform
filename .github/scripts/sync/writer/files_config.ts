@@ -62,7 +62,7 @@ const DEFAULTED: readonly PlaceholderName[] = [
   "skills_dir",
   "fuzzer_label",
   "nightly_label",
-  "docs_site_label",
+  "site_label",
 ];
 
 export interface PlaceholderDefaults {

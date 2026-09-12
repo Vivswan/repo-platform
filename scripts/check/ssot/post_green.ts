@@ -142,8 +142,8 @@ export interface WorkflowCaller {
 
 /** Every job in `workflows` (repo-relative path to text) whose `uses:`
  *  calls the repository's own workflow `rel`, in either spelling of a
- *  same-repository call (docs-site.yml uses the canonical one; owner and
- *  repository match in any case, the path exactly). A foreign
+ *  same-repository call (owner and repository match in any case, the
+ *  path exactly). A foreign
  *  repository's same path is not this file and does not count. */
 export function callersOf(
   workflows: Record<string, string>,

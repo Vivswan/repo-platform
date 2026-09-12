@@ -36,7 +36,7 @@ export const PLACEHOLDER_SOURCE: Record<PlaceholderName, string> = {
   skills_dir: "skills.dir (or the skills module's skills_dir default)",
   fuzzer_label: "labels.fuzzer (or the fuzzer module's tracking_label default)",
   nightly_label: "labels.nightly (or the nightly module's tracking_label default)",
-  docs_site_label: "labels.docs_site (or the docs-site module's tracking_label default)",
+  site_label: "labels.site (or the site module's tracking_label default)",
 };
 
 export interface RepositorySlug {
@@ -76,7 +76,7 @@ export function placeholderValues(
     skills_dir: registration.skills?.dir ?? defaults.skills_dir,
     fuzzer_label: labels.fuzzer ?? defaults.fuzzer_label,
     nightly_label: labels.nightly ?? defaults.nightly_label,
-    docs_site_label: labels.docs_site ?? defaults.docs_site_label,
+    site_label: labels.site ?? defaults.site_label,
   };
   for (const [name, value] of Object.entries(optional)) {
     if (value !== undefined) values[name as PlaceholderName] = value;

@@ -1,89 +1,67 @@
 name: Pages Site
 description: >-
-  Assembles the fleet's versioned GitHub Pages site artifact. Enumerates the
-  repository's version tags (plain vX.Y.Z) and builds every mount's tiers -
-  /latest/ from HEAD, one directory per served tag (a tag that structurally
-  cannot build - docs tree missing, build script undeclared - is skipped
-  with a notice), and the mount root serving the newest served version (or
-  a second build of HEAD while none serve). A
-  mount's content comes from the bundled VitePress build over the caller's
-  docs tree (source vitepress; the config and theme live in this action, the
-  caller carries only markdown; other roots of the repository, skills/ for
-  one, render inside it through the mount's include list) or from the
-  caller's own build command (source command). Once every mount is in place
-  the whole artifact's internal links are checked, fragments included, and
-  a broken one fails the step. With check true it instead builds the
-  caller's docs tree once, strictly (dead internal links fatal), with the
-  same include roots and link check, as the docs PR check. Requires
-  a full checkout (fetch-depth 0): version tags and per-ref trees come from
-  git history.
+  Assembles the fleet's GitHub Pages site (docs/site.md). Two parts, alone
+  or together: the repository's own website, prebuilt by its site-build
+  hook and handed over as a directory (site-dir), copied to the root; and
+  the docs, the repository's docs/ under the central VitePress theme
+  (config and theme live in this action, the repository carries only
+  markdown), versioned from its plain vX.Y.Z tags - latest/ from HEAD, one
+  directory per served tag (a tag whose tree has no docs/ is skipped with a
+  notice), the mount root serving the newest served version - at
+  /<docs_path>/ beside the website or at the root alone. Other roots of the
+  repository (skills/, for one) render inside the docs through the include
+  list. Once every part is in place the whole artifact's internal links
+  are checked, fragments included, and a broken one fails the step. With
+  neither part the step ends green with publish false and no directory.
+  With check true it instead builds docs/ once, strictly (dead internal
+  links fatal), with the same include roots and link check, as the docs PR
+  check. The configuration is the config input, or the repository's
+  registration read through the plan action when the input is empty. A
+  deploy needs a full checkout (fetch-depth 0): version tags and per-ref
+  trees come from git history.
 
 inputs:
-  mounts:
-    description: >-
-      JSON list of mounts: [{"path": "/", "source": "vitepress"|"command",
-      "versioned": true|false, "include": [{"path": "skills", "mount":
-      "skills", "page": "SKILL.md"}]}]. At most one mount per source; include
-      (other repository roots rendered inside the docs tree, each child
-      directory's page file serving at the directory URL) on the vitepress
-      mount only. With check true only the vitepress mount's include list is
-      read.
+  site-dir:
+    description: The repository's prebuilt website (the site-build hook's dist), a directory relative to the repository root; empty = no website
     required: false
-    default: '[{"path": "/", "source": "vitepress", "versioned": true}]'
+    default: ""
+  config:
+    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"}; empty reads the registration through the plan action'
+    required: false
+    default: ""
   check:
-    description: Build the docs tree once as a strict PR check (no artifact) instead of assembling the site
+    description: Build docs/ once as a strict PR check (no artifact) instead of assembling the site
     required: false
     default: "false"
-  docs-dir:
-    description: The docs tree a vitepress mount renders (repo-relative)
-    required: false
-    default: docs
-  site-title:
-    description: Site title for vitepress mounts (empty = the repository name)
-    required: false
-    default: ""
-  install-command:
-    description: Dependency install command run before each command-mount build ("" skips)
-    required: false
-    default: ""
-  build-command:
-    description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION/PAGES_TIER are exported (docs/pages.md)
-    required: false
-    default: ""
-  dist-dir:
-    description: Command-mount build output directory, relative to the repo root
-    required: false
-    default: dist
-  max-versions:
-    description: How many newest version tags each versioned mount serves
-    required: false
-    default: "5"
   custom-domain:
     description: Custom domain ("" = <owner>.github.io/<repo>)
     required: false
     default: ""
+  max-versions:
+    description: How many newest version tags the docs serve
+    required: false
+    default: "5"
 
 outputs:
+  publish:
+    description: '"true" when a site was assembled and site-dir is ready to upload, "false" when there was nothing to publish (empty in check mode)'
+    value: ${{ steps.assemble.outputs.publish }}
   site-dir:
-    description: The assembled _site directory to upload as the Pages artifact (empty in check mode)
+    description: The assembled _site directory to upload as the Pages artifact (empty when publish is false or in check mode)
     value: ${{ steps.assemble.outputs.site-dir }}
+  link-rot-label:
+    description: The nightly external-link check's tracking label from the configuration ("" disables the check)
+    value: ${{ steps.assemble.outputs.link-rot-label }}
+  site-title:
+    description: The docs title as built (the repository name when the configuration leaves it empty)
+    value: ${{ steps.assemble.outputs.site-title }}
 
 runs:
   using: composite
   steps:
-    # Recorded BEFORE the pinned setup below can prepend the action's own
-    # bun: caller-authored command-mount builds run on this PATH, so the
-    # toolchain the calling workflow set up (reusable-pages pins it from
-    # the checkout's dotfiles) keeps governing the caller's code while the
-    # action-local pin governs only action-owned code.
-    - name: Record the caller's toolchain PATH
-      id: caller
-      shell: bash
-      run: echo "path=$PATH" >> "$GITHUB_OUTPUT"
-
     # The action's pinned bun by absolute path: later steps run
-    # steps.action-bun.outputs.path, never `bun` through PATH, where a later
-    # setup-bun can put another bun first.
+    # steps.action-bun.outputs.path, never `bun` through PATH, where a
+    # caller's setup-bun can put another bun first.
     - name: Set up the action's bun
       id: action-bun
       uses: Vivswan/repo-platform/actions/bun-setup@build
@@ -96,18 +74,28 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" install --frozen-lockfile --cwd "${{ github.action_path }}"'
 
+    # The registration-configured call: the plan resolves the docs
+    # configuration from .repo-platform.yml in the caller's checkout.
+    - name: Plan the site from the registration
+      id: plan
+      if: inputs.config == ''
+      uses: Vivswan/repo-platform/actions/plan@build
+      with:
+        mode: site
+
+    # CONFIG is the caller's JSON, or the plan's four outputs folded into
+    # the same shape (toJSON quotes the strings; include is JSON already).
     - name: Build and assemble the site
       id: assemble
       shell: bash
       env:
-        MOUNTS: ${{ inputs.mounts }}
+        SITE_DIR: ${{ inputs.site-dir }}
         CHECK: ${{ inputs.check }}
-        DOCS_DIR: ${{ inputs.docs-dir }}
-        SITE_TITLE: ${{ inputs.site-title }}
-        INSTALL_COMMAND: ${{ inputs.install-command }}
-        BUILD_COMMAND: ${{ inputs.build-command }}
-        CALLER_PATH: ${{ steps.caller.outputs.path }}
-        DIST_DIR: ${{ inputs.dist-dir }}
+        CONFIG: >-
+          ${{ inputs.config != '' && inputs.config
+          || format('{{"site_title":{0},"docs_path":{1},"include":{2},"link_rot_label":{3}}}',
+          toJSON(steps.plan.outputs.site_title), toJSON(steps.plan.outputs.docs_path),
+          steps.plan.outputs.include, toJSON(steps.plan.outputs.link_rot_label)) }}
         MAX_VERSIONS: ${{ inputs.max-versions }}
         CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

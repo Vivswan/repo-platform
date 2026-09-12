@@ -8,10 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { reservedLabelNames } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import {
-  callerConfiguredPages,
   codeqlLanguages,
-  defaultCommands,
-  defaultSetup,
   loadModuleData,
   type Module,
   outputLines,
@@ -19,12 +16,11 @@ import {
   PlanError,
   type PlanInput,
   planCi,
-  planPages,
+  planSite,
   REQUIRED_DEFAULTS,
   readReservedLabels,
   resolvePrivate,
   selectModules,
-  setupProblem,
   trackingLabels,
   weekly,
 } from "../../../actions/plan/plan.ts";
@@ -45,8 +41,7 @@ const MINIMAL_FILES = [
   "files: []",
   "modules:",
   "  skills: { skills_dir: { default: skills } }",
-  "  pages: { dist: dist }",
-  "  docs-site: { path: docs }",
+  "  site: { path: docs }",
   "",
 ].join("\n");
 
@@ -89,8 +84,7 @@ describe("loadModuleData", () => {
       "deno",
       "uv",
       "rust",
-      "pages",
-      "docs-site",
+      "site",
       "release-please",
       "issue-templates",
       "skills",
@@ -103,23 +97,18 @@ describe("loadModuleData", () => {
     expect(byName.get("bun")?.codeql_language).toBe("javascript-typescript");
     expect(byName.get("uv")?.codeql_language).toBe("python");
     expect(byName.get("rust")?.codeql_language).toBeUndefined();
-    expect(byName.get("rust")?.pages).toEqual({
-      install: "cargo +stable install mdbook --locked",
-      build: "mdbook build -d dist",
-    });
     expect(byName.get("fuzzer")?.tracking_label).toMatchObject({
       key: "fuzzer",
       default: "fuzz-nightly",
     });
-    expect(byName.get("docs-site")?.tracking_label?.key).toBe("docs_site");
-    expect(TEMPLATE.defaults).toEqual({ skillsDir: "skills", pagesDist: "dist", docsPath: "docs" });
+    expect(byName.get("site")?.tracking_label?.key).toBe("site");
+    expect(TEMPLATE.defaults).toEqual({ skillsDir: "skills", docsPath: "docs" });
   });
 
   test("the minimal modules block loads; a default the plan reads going missing fails, naming the file and key", () => {
     expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(TEMPLATE.defaults);
     const cases: [drop: string, replacement: string, error: string][] = [
-      ["  pages: { dist: dist }\n", "", "modules.pages.dist: missing"],
-      ["  docs-site: { path: docs }\n", "", "modules.docs-site.path: missing"],
+      ["  site: { path: docs }\n", "", "modules.site.path: missing"],
       ["{ skills_dir: { default: skills } }", "{}", "modules.skills.skills_dir.default: missing"],
     ];
     for (const [drop, replacement, error] of cases) {
@@ -160,11 +149,6 @@ describe("loadModuleData", () => {
       "files.yml: modules.fuzzer.tracking_label.default: ",
     ],
     [
-      "a pages block without a build command",
-      MINIMAL_FILES.replace("modules:\n", "modules:\n  bun: { pages: { install: bun install } }\n"),
-      "files.yml: modules.bun.pages.build: ",
-    ],
-    [
       "a file entry naming a module the block lacks",
       MINIMAL_FILES.replace(
         "files: []",
@@ -183,12 +167,9 @@ describe("planCi", () => {
   const THURSDAY = new Date("2026-09-10T04:03:00Z");
 
   test("canonical order, CodeQL per toolchain, tracking labels per stream (defaults) plus the fleet security label", () => {
-    const plan = planCi(
-      input("modules: [nightly, uv, bun, fuzzer, docs-site, release-please]"),
-      MONDAY,
-    );
+    const plan = planCi(input("modules: [nightly, uv, bun, fuzzer, site, release-please]"), MONDAY);
     expect(plan).toEqual({
-      modules: ["bun", "uv", "docs-site", "release-please", "fuzzer", "nightly"],
+      modules: ["bun", "uv", "site", "release-please", "fuzzer", "nightly"],
       private: false,
       skillsDir: "skills",
       codeqlLanguages: ["javascript-typescript", "python"],
@@ -196,7 +177,7 @@ describe("planCi", () => {
       weekly: true,
     });
     expect(outputsOf(plan)).toEqual({
-      "modules": '["bun","uv","docs-site","release-please","fuzzer","nightly"]',
+      "modules": '["bun","uv","site","release-please","fuzzer","nightly"]',
       "private": "false",
       "skills-dir": "skills",
       "codeql-languages": '["javascript-typescript","python"]',
@@ -230,7 +211,7 @@ describe("planCi", () => {
 
   test("CodeQL is off for a private repository and where no module analyzes", () => {
     expect(planCi(input("modules: [bun, uv]", true)).codeqlLanguages).toEqual([]);
-    expect(planCi(input("modules: [rust, pages]")).codeqlLanguages).toEqual([]);
+    expect(planCi(input("modules: [rust, site]")).codeqlLanguages).toEqual([]);
     // Shared language, one entry: bun and node both analyze as JS/TS.
     expect(codeqlLanguages(selectModules(input("modules: [node, bun]")), false)).toEqual([
       "javascript-typescript",
@@ -327,7 +308,7 @@ describe("planCi", () => {
   });
 
   test("trackingLabels keeps canonical stream order whatever the selection order", () => {
-    const i = input("modules: [nightly, docs-site, fuzzer]");
+    const i = input("modules: [nightly, site, fuzzer]");
     expect(trackingLabels(i, selectModules(i))).toEqual([
       "docs-link-rot",
       "fuzz-nightly",
@@ -336,232 +317,49 @@ describe("planCi", () => {
   });
 });
 
-describe("planPages", () => {
-  test("pages with docs-site: the website unversioned at /, the docs mount versioned", () => {
-    const text = [
-      "modules: [bun, pages, docs-site]",
-      "project: { name: My Project, slug: my-project, description: d }",
-      "pages: { setup: bun, install: bun install --frozen-lockfile, build: bun run build, dist: dist }",
-      "docs_site: { path: docs }",
-      "labels: { docs_site: docs-link-rot }",
-    ].join("\n");
-    expect(outputsOf(planPages(input(text)))).toEqual({
-      mounts:
-        '[{"path":"/","source":"command","versioned":false},{"path":"/docs/","source":"vitepress","versioned":true}]',
-      setup: "bun",
-      install_command: "bun install --frozen-lockfile",
-      build_command: "bun run build",
-      dist_dir: "dist",
-      site_title: "My Project",
-      docs_dir: "docs",
-      link_rot_label: "docs-link-rot",
-    });
-  });
-
-  test("pages alone: one versioned command mount, no title, no link-rot label", () => {
-    const text =
-      "modules: [deno, pages]\npages: { setup: deno, install: deno ci, build: deno task build, dist: out }\n";
-    expect(outputsOf(planPages(input(text)))).toEqual({
-      mounts: '[{"path":"/","source":"command","versioned":true}]',
-      setup: "deno",
-      install_command: "deno ci",
-      build_command: "deno task build",
-      dist_dir: "out",
-      site_title: "",
-      docs_dir: "docs",
-      link_rot_label: "",
-    });
-  });
-
-  test("docs-site with no project name: an empty title, which pages-site fills with the repository name", () => {
-    expect(planPages(input("modules: [docs-site]")).siteTitle).toBe("");
-  });
-
-  test("docs_site.include rides on the vitepress mount verbatim, in both mount shapes", () => {
+describe("planSite", () => {
+  test("the registration carries everything: the docs mount path, the title, the include roots verbatim, the label", () => {
     const include = [
       { path: "skills", mount: "skills", page: "SKILL.md" },
-      { path: "guides", mount: "guides" },
+      { path: "guides", mount: "guides", page: "GUIDE.md" },
     ];
     const text = [
-      "modules: [docs-site]",
-      "project: { name: Site, slug: site, description: d }",
-      "docs_site:",
+      "modules: [bun, site, fuzzer]",
+      "project: { name: My Project, slug: my-project, description: d }",
+      "site:",
+      "  path: manual",
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
-      "    - { path: guides, mount: guides }",
+      "    - { path: guides, mount: guides, page: GUIDE.md }",
+      "labels: { site: rot }",
     ].join("\n");
-    expect(outputsOf(planPages(input(text))).mounts).toBe(
-      JSON.stringify([{ path: "/", source: "vitepress", versioned: true, include }]),
-    );
-    const withPages = `${text.replace("[docs-site]", "[pages, docs-site]")}\npages: { setup: none, build: ./build.sh }`;
-    expect(planPages(input(withPages)).mounts).toEqual([
-      { path: "/", source: "command", versioned: false },
-      { path: "/docs/", source: "vitepress", versioned: true, include },
-    ]);
-    // Without the key the mount carries no include at all (pages-site's
-    // default), rather than an empty list.
-    expect(planPages(input("modules: [docs-site]")).mounts).toEqual([
-      { path: "/", source: "vitepress", versioned: true },
-    ]);
-  });
-
-  test("docs-site alone: one versioned vitepress mount at the root, no toolchain", () => {
-    const text =
-      "modules: [docs-site]\nproject: { name: Docs Only, slug: docs-only, description: d }\nlabels: { docs_site: rot }\n";
-    expect(outputsOf(planPages(input(text)))).toEqual({
-      mounts: '[{"path":"/","source":"vitepress","versioned":true}]',
-      setup: "none",
-      install_command: "",
-      build_command: "",
-      dist_dir: "dist",
-      site_title: "Docs Only",
-      docs_dir: "docs",
+    expect(planSite(input(text))).toEqual({
+      docsPath: "manual",
+      siteTitle: "My Project",
+      include,
+      linkRotLabel: "rot",
+    });
+    expect(outputsOf(planSite(input(text)))).toEqual({
+      docs_path: "manual",
+      site_title: "My Project",
+      include: JSON.stringify(include),
       link_rot_label: "rot",
     });
   });
 
-  test("the registration carries everything; the defaults derive from the selected toolchains", () => {
-    const text = [
-      "modules: [uv, rust, pages, docs-site]",
-      "project: { name: Site, slug: site, description: d }",
-      "docs_site: { path: manual }",
-      "labels: { docs_site: rot }",
-    ].join("\n");
-    // Default setup: every selected toolchain module in canonical order; the
-    // commands come from the first token's module (uv before rust).
-    expect(planPages(input(text))).toMatchObject({
-      mounts: [
-        { path: "/", source: "command", versioned: false },
-        { path: "/manual/", source: "vitepress", versioned: true },
-      ],
-      setup: "uv,rust",
-      installCommand: "uv sync",
-      buildCommand: "uv run mkdocs build --site-dir dist",
-      distDir: "dist",
-      siteTitle: "Site",
-      linkRotLabel: "rot",
-    });
-    // Declared setup narrows the token whose module supplies the defaults.
-    const declared = `${text}\npages: { setup: rust, dist: book }`;
-    expect(planPages(input(declared))).toMatchObject({
-      setup: "rust",
-      installCommand: "cargo +stable install mdbook --locked",
-      buildCommand: "mdbook build -d dist",
-      distDir: "book",
-    });
-    // An explicit empty install skips the install.
-    expect(
-      planPages(input(`${text}\npages: { install: "", build: ./build.sh, setup: none }`)),
-    ).toMatchObject({
-      setup: "none",
-      installCommand: "",
-      buildCommand: "./build.sh",
+  test("a bare selection takes every default: files.yml's path, an empty title (pages-site fills in the repository name), no include roots, the stream's default label", () => {
+    expect(outputsOf(planSite(input("modules: [site]")))).toEqual({
+      docs_path: "docs",
+      site_title: "",
+      include: "[]",
+      link_rot_label: "docs-link-rot",
     });
   });
 
-  test.each<{ reason: string; text: string; error: string }>([
-    {
-      reason: "neither pages nor docs-site",
-      text: "modules: [bun]",
-      error: "neither pages nor docs-site is selected - there is no site to deploy",
-    },
-    {
-      reason: "pages with no build command anywhere",
-      text: "modules: [pages]",
-      error: "the pages module needs a build command",
-    },
-    {
-      reason: "a setup token that is not a toolchain",
-      text: "modules: [bun, pages]\npages: { setup: 'bun,ruby', build: x }",
-      error: "invalid setup token 'ruby'",
-    },
-    {
-      reason: "none combined with a toolchain",
-      text: "modules: [bun, pages]\npages: { setup: 'none,bun', build: x }",
-      error: "setup 'none' cannot be combined with toolchain tokens",
-    },
-    {
-      reason: "a setup with spaces",
-      text: "modules: [bun, pages]\npages: { setup: 'bun, node', build: x }",
-      error: "invalid setup value 'bun, node'",
-    },
-  ])("fails closed on $reason", ({ text, error }) => {
-    expect(() => planPages(input(text))).toThrow(error);
-  });
-});
-
-describe("setupProblem (the grammar the shared deploy used to check in shell)", () => {
-  const TOKENS = ["bun", "node", "deno", "uv", "rust"];
-  test.each([
-    ["none", null],
-    ["bun", null],
-    ["bun,rust", null],
-    ["", "invalid setup value ''"],
-    ["bun,", "invalid setup value 'bun,'"],
-    [",bun", "invalid setup value ',bun'"],
-    ["bun,,rust", "invalid setup value 'bun,,rust'"],
-    ["Bun", "invalid setup value 'Bun'"],
-    ["bun,bun", "duplicate setup token 'bun'"],
-    ["bun,none", "setup 'none' cannot be combined with toolchain tokens"],
-    ["bunx", "invalid setup token 'bunx'"],
-  ])("%p -> %p", (setup, problem) => {
-    const actual = setupProblem(setup, TOKENS);
-    if (problem === null) expect(actual).toBeNull();
-    else expect(actual).toStartWith(problem);
-  });
-
-  test("defaultSetup joins the selected toolchain modules, or none", () => {
-    expect(defaultSetup(selectModules(input("modules: [rust, bun, pages]")))).toBe("bun,rust");
-    expect(defaultSetup(selectModules(input("modules: [pages]")))).toBe("none");
-  });
-
-  test("the command defaults follow the setup tokens across ALL modules", () => {
-    // setup may name a toolchain the selection does not carry: the
-    // install default keys on the setup tokens alone.
-    expect(defaultCommands(MODULES, "bun,node")).toEqual({
-      install: "bun install --frozen-lockfile",
-      build: "bun run build",
-    });
-    expect(defaultCommands(MODULES, "none")).toEqual({ install: "", build: "" });
-    expect(planPages(input("modules: [node, pages]\npages: { setup: 'bun,node' }"))).toMatchObject({
-      installCommand: "bun install --frozen-lockfile",
-      buildCommand: "bun run build",
-    });
-    expect(planPages(input("modules: [pages]\npages: { setup: bun }"))).toMatchObject({
-      buildCommand: "bun run build",
-    });
-  });
-});
-
-describe("callerConfiguredPages", () => {
-  const caller = {
-    mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]',
-    setup: "none",
-    installCommand: "",
-    buildCommand: "",
-    distDir: "dist",
-    siteTitle: "T",
-    docsDir: "docs",
-    linkRotLabel: "",
-  };
-  test("publishes the caller's values unchanged, mounts included", () => {
-    expect(outputsOf(callerConfiguredPages(caller, MODULES))).toEqual({
-      mounts: caller.mounts,
-      setup: "none",
-      install_command: "",
-      build_command: "",
-      dist_dir: "dist",
-      site_title: "T",
-      docs_dir: "docs",
-      link_rot_label: "",
-    });
-  });
-  test("checks the setup grammar the way a planned deploy is checked", () => {
-    expect(() => callerConfiguredPages({ ...caller, setup: "bun,bun" }, MODULES)).toThrow(
-      "setup input: duplicate setup token 'bun'",
-    );
-    expect(() => callerConfiguredPages({ ...caller, setup: "bun,none" }, MODULES)).toThrow(
-      "cannot be combined",
+  test("fails closed when site is not selected: there is no site to deploy", () => {
+    expect(() => planSite(input("modules: [bun]"))).toThrow(PlanError);
+    expect(() => planSite(input("modules: [bun]"))).toThrow(
+      ".repo-platform.yml: the site module is not selected - there is no site to deploy",
     );
   });
 });
@@ -569,11 +367,8 @@ describe("callerConfiguredPages", () => {
 describe("outputLines", () => {
   test("one-line values as name=value; a multi-line value under a delimiter it cannot contain", () => {
     expect(outputLines({ a: "x", b: "" })).toBe("a=x\nb=\n");
-    const text = outputLines({ build_command: "bun run generate\nbun run build" });
-    const match =
-      /^build_command<<(ghadelimiter_[0-9a-f]{32})\nbun run generate\nbun run build\n\1\n$/.exec(
-        text,
-      );
+    const text = outputLines({ note: "line one\nline two" });
+    const match = /^note<<(ghadelimiter_[0-9a-f]{32})\nline one\nline two\n\1\n$/.exec(text);
     expect(match).not.toBeNull();
   });
 });
@@ -642,26 +437,21 @@ describe("plan.ts as a child", () => {
     expect(result.stdout.trimEnd()).toBe(result.output.trimEnd());
   });
 
-  test("pages mode writes the eight deploy rows", () => {
+  test("site mode writes the four docs rows without asking for the visibility", () => {
     const result = run(
       {
         ".repo-platform.yml":
-          "modules: [bun, pages]\npages: { setup: bun, build: bun run build }\n",
+          "modules: [bun, site]\nproject: { name: Site, slug: site, description: d }\nsite: { include: [{ path: skills, mount: skills, page: SKILL.md }] }\n",
       },
-      { MODE: "pages" },
+      { MODE: "site" },
     );
     expect(result.exitCode).toBe(0);
-    // No declared install command: the setup token's module supplies it.
     expect(result.output).toBe(
       [
-        'mounts=[{"path":"/","source":"command","versioned":true}]',
-        "setup=bun",
-        "install_command=bun install --frozen-lockfile",
-        "build_command=bun run build",
-        "dist_dir=dist",
-        "site_title=",
-        "docs_dir=docs",
-        "link_rot_label=",
+        "docs_path=docs",
+        "site_title=Site",
+        'include=[{"path":"skills","mount":"skills","page":"SKILL.md"}]',
+        "link_rot_label=docs-link-rot",
         "",
       ].join("\n"),
     );
@@ -722,60 +512,43 @@ describe("plan.ts as a child", () => {
     expect(invalid.stdout).toContain(
       '::error::.repo-platform.yml: (top level): Unrecognized key: "nope"',
     );
-    const mode = run({ ".repo-platform.yml": "modules: []\n" }, { MODE: "release" });
+    const mode = run({ ".repo-platform.yml": "modules: []\n" }, { MODE: "pages" });
     expect(mode.exitCode).toBe(1);
-    expect(mode.stdout).toContain("::error::MODE must be one of default, pages; got 'release'");
+    expect(mode.stdout).toContain("::error::MODE must be one of default, site; got 'pages'");
   });
 
-  test("a multi-line build command rides the delimited output form", () => {
-    const result = run(
-      {
-        ".repo-platform.yml":
-          "modules: [bun, pages]\npages:\n  setup: bun\n  build: |-\n    bun run generate\n    bun run build\n",
-      },
-      { MODE: "pages" },
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toMatch(
-      /\nbuild_command<<(ghadelimiter_[0-9a-f]{32})\nbun run generate\nbun run build\n\1\ndist_dir=dist\n/,
-    );
-  });
-
-  test("a caller-configured deploy publishes the caller's inputs and reads no registration", () => {
-    const caller = {
-      MODE: "pages",
-      CALLER_MOUNTS: '[{"path": "/", "source": "vitepress", "versioned": true}]',
-      CALLER_SETUP: "none",
-      CALLER_SITE_TITLE: "repo-platform",
-      CALLER_DOCS_DIR: "docs",
-      CALLER_DIST_DIR: "dist",
-      CALLER_LINK_ROT_LABEL: "docs-link-rot",
-    };
-    const result = run({}, caller);
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toBe(
-      [
-        `mounts=${caller.CALLER_MOUNTS}`,
-        "setup=none",
-        "install_command=",
-        "build_command=",
-        "dist_dir=dist",
-        "site_title=repo-platform",
-        "docs_dir=docs",
-        "link_rot_label=docs-link-rot",
-        "",
-      ].join("\n"),
-    );
-    const invalid = run({}, { ...caller, CALLER_SETUP: "bun," });
-    expect(invalid.exitCode).toBe(1);
-    expect(invalid.stdout).toContain("::error::setup input: invalid setup value 'bun,'");
-  });
+  // The two registration blocks the site module replaced fail the plan in
+  // EVERY mode, so a repository's next main run names the move before a
+  // deploy could read the stale keys as nothing.
+  test.each([
+    {
+      key: "pages",
+      text: "modules: [bun, site]\npages: { setup: bun, build: bun run build }\n",
+      error:
+        "::error::.repo-platform.yml: pages: is no longer a registration key - the website build lives in the repo-owned hook .github/actions/site-build/action.yml and the module is `site` (docs/site.md)",
+    },
+    {
+      key: "docs_site",
+      text: "modules: [site]\ndocs_site: { path: manual }\n",
+      error:
+        "::error::.repo-platform.yml: docs_site: is no longer a registration key - it is `site` now (`site.path`, `site.include`; the label key is `labels.site`), and a website build belongs in the repo-owned hook .github/actions/site-build/action.yml",
+    },
+  ])(
+    "a registration still carrying $key: fails in both modes naming the move",
+    ({ text, error }) => {
+      for (const env of [{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]) {
+        const result = run({ ".repo-platform.yml": text }, env);
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toContain(error);
+        expect(result.output).toBe("");
+      }
+    },
+  );
 
   test("every default comes from files.yml: other defaults there change the outputs, a missing one fails", () => {
     const real = readFileSync(FILES_CONFIG, "utf-8");
     const edits: [string, string][] = [
       ["skills_dir: {default: skills}", "skills_dir: {default: agents}"],
-      ["    dist: dist\n", "    dist: site\n"],
       ["    path: docs\n", "    path: manual\n"],
     ];
     let other = real;
@@ -787,13 +560,13 @@ describe("plan.ts as a child", () => {
     const otherPath = join(dir, "files.yml");
     writeFileSync(otherPath, other);
     const ci = run(
-      { ".repo-platform.yml": "modules: [skills, docs-site]\n" },
+      { ".repo-platform.yml": "modules: [skills, site]\n" },
       { PRIVATE: "false", FILES_CONFIG: otherPath },
     );
     expect(ci.exitCode).toBe(0);
     expect(ci.output).toBe(
       [
-        'modules=["docs-site","skills"]',
+        'modules=["site","skills"]',
         "private=false",
         "skills-dir=agents",
         "codeql-languages=[]",
@@ -802,32 +575,24 @@ describe("plan.ts as a child", () => {
         "",
       ].join("\n"),
     );
-    const pages = run(
-      { ".repo-platform.yml": "modules: [bun, pages, docs-site]\npages: { setup: bun }\n" },
-      { MODE: "pages", FILES_CONFIG: otherPath },
+    const site = run(
+      { ".repo-platform.yml": "modules: [bun, site]\n" },
+      { MODE: "site", FILES_CONFIG: otherPath },
     );
-    expect(pages.exitCode).toBe(0);
-    expect(pages.output).toBe(
-      [
-        'mounts=[{"path":"/","source":"command","versioned":false},{"path":"/manual/","source":"vitepress","versioned":true}]',
-        "setup=bun",
-        "install_command=bun install --frozen-lockfile",
-        "build_command=bun run build",
-        "dist_dir=site",
-        "site_title=",
-        "docs_dir=docs",
-        "link_rot_label=docs-link-rot",
-        "",
-      ].join("\n"),
+    expect(site.exitCode).toBe(0);
+    expect(site.output).toBe(
+      ["docs_path=manual", "site_title=", "include=[]", "link_rot_label=docs-link-rot", ""].join(
+        "\n",
+      ),
     );
-    const missingPath = join(dir, "missing-dist.yml");
-    writeFileSync(missingPath, real.replace("    dist: dist\n", ""));
+    const missingPath = join(dir, "missing-path.yml");
+    writeFileSync(missingPath, real.replace("    path: docs\n", ""));
     const missing = run(
       { ".repo-platform.yml": "modules: [skills]\n" },
       { PRIVATE: "false", FILES_CONFIG: missingPath },
     );
     expect(missing.exitCode).toBe(1);
-    expect(missing.stdout).toContain(`::error::${missingPath}: modules.pages.dist: missing`);
+    expect(missing.stdout).toContain(`::error::${missingPath}: modules.site.path: missing`);
     expect(missing.output).toBe("");
   });
 

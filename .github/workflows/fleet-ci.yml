@@ -271,6 +271,25 @@ jobs:
         with:
           skills-dir: ${{ needs.plan.outputs.skills-dir }}
 
+  # The docs PR check (docs/site.md): docs/ built once, strictly, with the
+  # include roots the deploy reads from the registration, so a dead
+  # internal link fails the PR instead of the site leg after the merge.
+  # The hashFiles guard sits on the step: a job-level if: runs before the
+  # checkout exists, where every hashFiles reads empty.
+  docs-check:
+    needs: [plan]
+    if: contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: hashFiles('docs/**') != ''
+        uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          check: "true"
+      - if: hashFiles('docs/**') == ''
+        run: echo "::notice::docs-check stood down, this repository has no docs/ directory"
+
   # Fails when the release-please PR head lacks main's tip at CHECK time:
   # a stale release PR cuts a release missing commits already on main.
   # Other PRs stay mergeable while behind.

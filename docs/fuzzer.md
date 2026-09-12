@@ -49,6 +49,7 @@ Size limits:
 |---|---|
 | per failure, lines included | the heading plus the first 60 lines after it (keep the replay block near the top; the rest survives only in the artifact) |
 | per failure, size | at most 8,000 characters |
+| without an `artifact-name` | no per-failure cap: the body is the only record, so every report rides whole, each cut at its share of the body budget with a count of the lines missing |
 | whole issue body | 60,000 characters; failures included oldest-first by directory mtime, then a note says how many were omitted |
 
 Re-extracting artifacts (the [shard aggregation](#sharding) below) stamps fresh mtimes, so the ordering only means something when the reports are read where they were written.

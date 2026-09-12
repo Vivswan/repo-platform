@@ -6,7 +6,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 
 - Managed: `.github/workflows/ci.yml` (the same file everywhere), `.github/workflows/auto-assign.yml`, `.github/instructions/review.instructions.md`, `.yamllint`, `.typography-allow`, `.github/settings.yml` (rendered from the fleet settings layers, the selected modules' layers, and the repo's overlay), `.github/repo-platform-manifest.json` (the record of what the platform wrote).
 - Split: `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS`, `AGENTS.md`, `LICENSE.md`. Managed with per-module blocks: `.github/dependabot.yml` (the github-actions ecosystem always).
-- Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`).
+- Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `post-green.yml` (your green-gated work on a push to main), `update-release.yml` and `update-release-pr.yml` (the release hooks, called only with release-please), `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml` (the repo's own settings overlay; edit it, never the rendered `.github/settings.yml`), `.github/actions/site-build/action.yml` (the site-build hook the `site` leg runs; a no-op until filled in).
 - Settings are rendered into `.github/settings.yml` by the sync and applied from repo-platform for every registered repo; the labels a module needs land in the render with its selection.
 
 ## Toolchains: bun / node / deno / uv / rust
@@ -17,28 +17,21 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 - Companion, bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT. Without it the lockfile fix lands but cannot re-trigger checks.
 - Removal: the dotfile and module workflow are retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
-## pages
+## site
 
-- Managed: `pages.yml` (the nightly rebuild and the dispatch). The deploy itself is the `pages` leg of `ci.yml`, which runs on a push to main once the module is selected.
-- Keys: `pages.setup` (comma-separated toolchain tokens or `none`; default: the selected toolchains, `none` when there is no toolchain), `pages.install` and `pages.build` (default: the commands of the first `pages.setup` toolchain in roster order, not in the order typed; empty with `none`, and `pages.build` must be nonempty), `pages.dist` (default `dist`). repo-platform's `docs/pages.md` has the build contract.
-- Companion: enable Pages with Source: GitHub Actions before the first deploy.
-- With `docs-site` also selected, the site build serves the docs as a mount at `/<docs_site.path>/` and the `docs-site` leg stands down.
-- Removal: `pages.yml` is retired; the leg skips; the live site stays until you turn Pages off.
-
-## docs-site
-
-- Managed: `docs-site.yml` (the PR check on `docs/` changes and the nightly link-rot run). The deploy is the `docs-site` leg of `ci.yml`.
-- Keys: `docs_site.path` (URL mount under a `pages` site; default `docs`), `docs_site.include` (extra trees rendered into the site: `{path, mount, page?}`), `labels.docs_site` (link-rot tracking label; default `docs-link-rot`).
-- Conventions: `docs/README.md` is the landing page and must exist; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute. Details: repo-platform's `docs/docs-site.md`.
-- Companion: the same Pages enablement as `pages`.
-- Removal: the workflow is retired; the leg skips; the site stays until you turn Pages off.
+- No file of its own. The deploy is the `site` leg of `ci.yml`: every main run whose gate passed (a push, the nightly schedule, a dispatch) builds ONE Pages site from the repo-owned `.github/actions/site-build/action.yml` hook's output (the repository's website, at the root) and `docs/` (rendered under the fleet theme, at `/<site.path>/` beside a website, else at the root). Fleet CI's `docs-check` job builds `docs/` strictly on every PR of a repo that has one.
+- The hook is a base starter every repository carries, seeded as a no-op (output `dist` empty: only the docs directory publishes, when there is one). Fill it in with the website's build: inputs `base-path` and `origin`, output `dist` naming the built directory. repo-platform's `docs/site.md` has the contract and examples.
+- Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
+- Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
+- Companion: Pages is enabled by the module's settings layer on the next settings apply; before it, enable Pages with Source: GitHub Actions by hand.
+- Removal: the leg skips; the hook stays (a starter); the live site stays until you turn Pages off. A registration still carrying a `pages:` or `docs_site:` block fails the plan.
 
 ## release-please
 
 - Starters: `release-please-config.json`, `.release-please-manifest.json`. The hooks `update-release.yml` and `update-release-pr.yml` are base starters and run only when this module is selected.
 - Managed: the release variant of `.typography-allow`. The `release`, `update-release`, `publish-release`, and `update-release-pr` legs of `ci.yml` run on a push to main once selected.
 - Pipeline: `release` cuts a draft through release-please (repo-platform's fleet-release workflow) -> the repo-owned `update-release.yml` hook, a placeholder until you add assets or notes -> `publish-release` (fleet-release-publish) attaches one `attestation.json` per release for a public repo with assets, publishes others unattested, and flips the draft live. `update-release-pr` calls the repo-owned hook for files that ride in the release commit.
-- Gates: fleet CI's `release-freshness` and `release-health` jobs run on release-please PRs (branches `release-please--*`). Freshness requires the PR to contain the tip of its base branch. Health fails on an open tracking issue of a selected stream (`fuzzer`, `nightly`, `docs-site`) or the fleet `security-nightly` stream, an open `release-blocker` issue, or an open Dependabot alert at or above the threshold (default `high`; alerts the token cannot read skip that gate); the cut re-runs the same gate, and `release-override` on the release PR bypasses it.
+- Gates: fleet CI's `release-freshness` and `release-health` jobs run on release-please PRs (branches `release-please--*`). Freshness requires the PR to contain the tip of its base branch. Health fails on an open tracking issue of a selected stream (`fuzzer`, `nightly`, `site`) or the fleet `security-nightly` stream, an open `release-blocker` issue, or an open Dependabot alert at or above the threshold (default `high`; alerts the token cannot read skip that gate); the cut re-runs the same gate, and `release-override` on the release PR bypasses it.
 - Labels (`autorelease: pending`, `autorelease: tagged`, `release-blocker`, `release-override`) and the tag-immutability ruleset come from the module's settings layer: the sync renders them into `.github/settings.yml`, the settings apply declares them.
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
 - Removal: the legs skip; the starters stay.
@@ -52,7 +45,7 @@ The roster and every file are in repo-platform's `files.yml`; the module docs (`
 - Managed: `validate-skills.yml` (advisory CLI discovery). Fleet CI's `validate-skills` job gates the catalog structure through all-green.
 - Starters: `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, seeded from `project.name` and `project.slug` with an empty `skills` catalog. Existing manifests are kept.
 - Key: `skills.dir` (default `skills`). Fleet CI's `validate-skills` job reads it through the plan, and the managed `validate-skills.yml` is written with it (its `paths` filter and `skills-dir` input), so both checks watch the same directory.
-- Companion: list each published skill in `plugin.json`'s `skills` array as `./<skills.dir>/<name>`; an unlisted folder validates and never ships. A skills tree can also become part of the docs site through `docs_site.include`.
+- Companion: list each published skill in `plugin.json`'s `skills` array as `./<skills.dir>/<name>`; an unlisted folder validates and never ships. A skills tree can also become part of the docs site through `site.include`.
 - Removal: `validate-skills.yml` is retired; the manifests and the skills directory stay.
 
 ## fuzzer / nightly
