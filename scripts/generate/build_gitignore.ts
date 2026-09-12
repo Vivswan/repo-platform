@@ -18,7 +18,11 @@ import {
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
-import { MANAGED_REGION_LABEL, PLATFORM_NAME } from "../../actions/shared/platform.ts";
+import {
+  MANAGED_REGION_LABEL,
+  PLATFORM_NAME,
+  REGISTRATION_PATH,
+} from "../../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
@@ -84,12 +88,12 @@ export function gitignoreSources(config: FilesConfig, label = "files.yml"): [str
   });
 }
 
-/** The operator's own selection, read the way the sync reads a target's: .repo-platform.yml resolved against files.yml. */
+/** The operator's own selection, read the way the sync reads a target's: the registration resolved against files.yml. */
 export function ownModules(root: string, config: FilesConfig): string[] {
   const { selected, dropped } = resolveModules(config, readRegistration(root).modules);
   if (dropped.length > 0) {
     throw new Error(
-      `.repo-platform.yml selects module(s) files.yml does not know: ${dropped.join(", ")}`,
+      `${REGISTRATION_PATH} selects module(s) files.yml does not know: ${dropped.join(", ")}`,
     );
   }
   return selected;
@@ -305,7 +309,7 @@ export function topologyProblems(input: {
           missing.length > 0
             ? `.gitignore's managed region lacks the section(s) [${missing.join(", ")}]; ${rerun}`
             : unselected.length > 0
-              ? `.gitignore's managed region carries the section(s) [${unselected.join(", ")}] no module in .repo-platform.yml declares; ${rerun}`
+              ? `.gitignore's managed region carries the section(s) [${unselected.join(", ")}] no module in ${REGISTRATION_PATH} declares; ${rerun}`
               : `.gitignore's managed region differs from files/base/.gitignore plus the block files; ${rerun}`,
         );
       }
