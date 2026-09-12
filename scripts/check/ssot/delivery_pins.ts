@@ -46,23 +46,25 @@ export function actionManifestFiles(): string[] {
 /** Third-party actions pinned to a BRANCH commit rather than a release: the
  *  value is the branch the trailing comment must name. Record the reason
  *  with each entry (an action that publishes no version tags). */
-export const BRANCH_PINNED: Record<string, string> = {};
+export const BRANCH_PINNED: Record<string, string> = {
+  // Vivswan/skills publishes no release tags; ci.yml runs its validate-skills action on this repository's own catalog.
+  "Vivswan/skills": "main",
+};
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
 
 /** A moving tag or branch would let upstream change what the fleet runs without a PR here; `@<sha> # vX.Y.Z` is the shape Dependabot bumps.
- *  The owner's own actions are exempt: the platform's self-pins under files/ are judged by the fleet-refs-ride-build rule,
- *  and the settings apply's pin by the settings-apply-input rule. */
+ *  Only the platform's own refs are exempt: they ride the green-gated delivery branch (the fleet-refs-ride-build rule judges the
+ *  ones under files/). The owner's other repositories are upstream code like any third party's, the settings apply's pin included. */
 export function pinShapeMismatches(
   pins: Pin[],
   owner: string,
   branchPinned: Record<string, string>,
 ): Mismatch[] {
   const mismatches: Mismatch[] = [];
-  const thirdParty = pins.filter(
-    (pin) => pin.action.split("/")[0].toLowerCase() !== owner.toLowerCase(),
-  );
+  const self = `${owner}/repo-platform`.toLowerCase();
+  const thirdParty = pins.filter((pin) => pin.action.toLowerCase() !== self);
   const shape = (action: string) =>
     action in branchPinned
       ? `${action}@<full 40-hex commit sha> # ${branchPinned[action]}`

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
+  BRANCH_PINNED,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
   extractUsesPins,
@@ -48,16 +49,61 @@ describe("pinShapeMismatches", () => {
   });
   const branchPinned = { "dtolnay/rust-toolchain": "master" };
 
-  test("passes sha pins with release comments, the owner's own refs, and the allowlisted branch pin", () => {
+  test("passes sha pins with release comments, the platform's own delivery ref, and the allowlisted branch pin", () => {
     const pins = [
       pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
       pin("b.yml", "actions/checkout", SHA, "v7.0.1"),
       pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
       pin("a.yml", "Vivswan/repo-platform", "build", null),
-      pin("a.yml", "vivswan/github-settings-as-code", "latest", null),
+      pin("a.yml", "vivswan/github-settings-as-code", SHA, "v2.0.0"),
     ];
     expect(pinShapeMismatches(pins, "Vivswan", branchPinned)).toEqual([]);
   });
+
+  // Only repo-platform's own refs ride the green-gated delivery branch; the owner's other
+  // repositories are upstream code like any third party's, frozen by sha the same way.
+  test.each<{ got: string; ref: string; version: string | null; expected: Mismatch[] }>([
+    { got: "sha # main", ref: SHA, version: "main", expected: [] },
+    {
+      got: "@main",
+      ref: "main",
+      version: null,
+      expected: [
+        {
+          file: "ci.yml",
+          expected: "Vivswan/skills@<full 40-hex commit sha> # main",
+          got: "@main",
+        },
+      ],
+    },
+    {
+      got: "sha # v1.0.0",
+      ref: SHA,
+      version: "v1.0.0",
+      expected: [
+        {
+          file: "ci.yml",
+          expected: "Vivswan/skills@<full 40-hex commit sha> # main",
+          got: `@${SHA} # v1.0.0`,
+        },
+      ],
+    },
+  ])(
+    "the owner's other repositories are third parties: Vivswan/skills at $got against the live allowlist",
+    ({ ref, version, expected }) => {
+      expect(BRANCH_PINNED["Vivswan/skills"]).toBe("main");
+      expect(
+        pinShapeMismatches(
+          [
+            pin("ci.yml", "Vivswan/skills", ref, version),
+            pin("a.yml", "actions/checkout", SHA, "v7.0.1"),
+          ],
+          "Vivswan",
+          BRANCH_PINNED,
+        ),
+      ).toEqual(expected);
+    },
+  );
 
   test.each<{ reason: string; pins: Pin[]; expected: Mismatch[] }>([
     {
@@ -142,6 +188,21 @@ describe("pinShapeMismatches", () => {
           file: "dtolnay/rust-toolchain",
           expected: "an action still pinned somewhere (branch-pinned allowlist)",
           got: "no uses: pins found (stale allowlist entry - remove it)",
+        },
+      ],
+    },
+    {
+      reason: "the owner's other repository at a moving ref, in any owner spelling",
+      pins: [
+        pin("a.yml", "vivswan/github-settings-as-code", "latest", null),
+        pin("a.yml", "dtolnay/rust-toolchain", SHA, "master"),
+      ],
+      expected: [
+        {
+          file: "a.yml",
+          expected:
+            "vivswan/github-settings-as-code@<full 40-hex commit sha> # v<major>.<minor>.<patch>",
+          got: "@latest",
         },
       ],
     },
