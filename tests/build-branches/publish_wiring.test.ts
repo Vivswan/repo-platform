@@ -432,9 +432,9 @@ describe("post-green publish wiring", () => {
   });
 
   test("ci.yml keys a push run by its commit and never cancels it; only pull-request lanes cancel", () => {
-    // A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges leaves
-    // the tip unjudged; keyed by the commit, every push run completes. The skeleton every fleet
-    // repository runs carries the same block (its only placeholder is the owner).
+    // A ref-keyed group keeps one pending run and replaces it with the newest: a burst of merges drops the middle commits' runs.
+    // Keyed by the commit, every push run completes; PR pushes keep cancelling their stale runs.
+    // The skeleton every fleet repository runs carries the same block (its only placeholder is the owner).
     const skeleton = read("files/base/.github/workflows/ci.yml").replaceAll(
       "{{github_username}}",
       "owner",
