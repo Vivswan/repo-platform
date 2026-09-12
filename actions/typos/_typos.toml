@@ -14,10 +14,4 @@ extend-ignore-re = [
   "\\b[0-9a-f]{7,}\\b",
   # A line ending in `# typos: ignore` or `// typos: ignore` opts itself out.
   "(?Rm)^.*(#|//)\\s*typos:\\s*ignore.*$",
-  # The hyphenated mis- prefix (mis-parses, Mis-set): productive English that typos reads as a typo of `miss`.
-  "(?i)\\bmis-",
 ]
-
-[default.extend-words]
-# A legitimate variant of unparsable, spelled this way across the fleet.
-unparseable = "unparseable"
