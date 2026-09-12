@@ -19,7 +19,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `labels.site` | The site module's link-rot tracking label | `docs-link-rot` |
 | `mirrors` | `{source, targets}` entries copying a `managed` or `split` file the sync writes here to other paths; single-segment `*` globs. The `plan` job rejects a target that nests with another, with a path the sync writes or retires, or under `.github/workflows/` | none |
 
-Shapes the schema pins: `project.slug` is kebab-case; `site.path` and every `mount` are one lowercase URL segment; `skills.dir` and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
+Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowercase URL segment and every `mount` one or more joined by slashes (never a locale-shaped name like `de`, `node_modules`, or `public/`); every `page` is a plain markdown file name other than `index.md`; `skills.dir` and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
 
 ## Module roster
 

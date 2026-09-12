@@ -8,10 +8,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { isLocaleDir } from "../../../actions/pages-site/.vitepress/conventions.ts";
 import {
   deriveRewrites,
   detectLocales,
-  isLocaleDir,
   pageMeta,
   readPage,
   routeOf,
@@ -91,17 +91,17 @@ describe("parseSiteConfig", () => {
     [
       "a docs path with a slash",
       config({ docs_path: "a/b" }),
-      "config.docs_path 'a/b' must be one plain URL segment",
+      "config.docs_path 'a/b' must be one plain lowercase URL segment",
     ],
     [
       "an empty docs path",
       config({ docs_path: "" }),
-      "config.docs_path '' must be one plain URL segment",
+      "config.docs_path '' must be one plain lowercase URL segment",
     ],
     [
       "a dot docs path",
       config({ docs_path: ".." }),
-      "config.docs_path '..' must be one plain URL segment",
+      "config.docs_path '..' must be one plain lowercase URL segment",
     ],
     ["a non-list include", config({ include: {} }), "config.include must be a list"],
     [

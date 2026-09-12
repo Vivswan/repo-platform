@@ -14,20 +14,14 @@
 // version index the theme's dropdown is fed from at build time. The
 // website is one copy of the hook's dist at the site root, unversioned.
 
-import { isLocaleDir, isUnwalkedEntry } from "./.vitepress/derive.ts";
-
-/** Another root of the repository rendered inside the docs mount
- *  (docs/site.md, "Other roots on the site"): the tree at `path` is staged
- *  under `<mount>/` in the docs tree, and in each of its child directories
- *  the file named `page` serves as that directory's page. */
-export interface IncludeRoot {
-  /** Repo-relative source directory (`skills`). */
-  path: string;
-  /** URL path under the mount root (`skills` -> `<mount>skills/`). */
-  mount: string;
-  /** The child directory's page file (`SKILL.md`). */
-  page: string;
-}
+import {
+  type IncludeRoot,
+  includeListProblem,
+  includeMountProblem,
+  includePageProblem,
+  relPathProblem,
+  urlSegmentProblem,
+} from "./.vitepress/conventions.ts";
 
 /** The docs configuration the action consumes: the plan action's site
  *  mode resolves it from the registration, a registration-less caller
@@ -79,32 +73,14 @@ export interface Tier {
   rel: string;
 }
 
-const SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
-
-/** A plain relative path: non-empty slash-joined segments, no "." or ".."
- *  (any of those could resolve outside the tree or to its root, and a
- *  dist escaping the tree publishes the whole checkout). */
+/** Throws unless `value` is a plain relative path inside the repository. */
 export function validateRelPath(value: string, what: string): void {
-  const parts = value.split("/");
-  if (
-    value === "" ||
-    parts.some((part) => part === "" || part === "." || part === ".." || !SEGMENT_RE.test(part))
-  ) {
-    throw new Error(
-      `${what} '${value}' must be a plain relative path inside the repository: ` +
-        "slash-joined segments of letters, digits, dots, underscores, or dashes, " +
-        "with no empty, '.', or '..' segments",
-    );
-  }
+  const problem = relPathProblem(value);
+  if (problem !== null) throw new Error(`${what} '${value}' ${problem}`);
 }
 
-/** The config's `include` list. Each root is parsed to the three keys and
- *  refused where the staging would misplace it: a mount whose first
- *  segment reads as a locale directory would become a translation tree
- *  (derive.ts's convention), a mount with a segment the markdown walk
- *  skips would stage pages that never get routes, `public/` is copied
- *  rather than rendered, and `index.md` as the page is the directory
- *  index already. */
+/** The config's `include` list parsed to the three keys, each root judged
+ *  by the site's rules (conventions.ts). */
 function parseIncludes(value: unknown, where: string): IncludeRoot[] {
   if (!Array.isArray(value)) throw new Error(`${where} must be a list of {path, mount, page}`);
   const includes = value.map((entry, index): IncludeRoot => {
@@ -118,42 +94,22 @@ function parseIncludes(value: unknown, where: string): IncludeRoot[] {
     for (const [key, text] of Object.entries({ path, mount, page })) {
       if (typeof text !== "string") throw new Error(`${at}.${key} must be a string`);
     }
-    validateRelPath(path as string, `${at}.path`);
-    validateRelPath(mount as string, `${at}.mount`);
-    const segments = (mount as string).split("/");
-    if (isLocaleDir(segments[0])) {
-      throw new Error(
-        `${at}.mount '${mount}' reads as a locale directory (docs/<lang>/ is a translation ` +
-          "tree by convention) - mount the root under another name",
-      );
+    const root: IncludeRoot = {
+      path: path as string,
+      mount: mount as string,
+      page: page as string,
+    };
+    for (const [key, problem] of [
+      ["path", relPathProblem(root.path)],
+      ["mount", includeMountProblem(root.mount)],
+      ["page", includePageProblem(root.page)],
+    ] as const) {
+      if (problem !== null) throw new Error(`${at}.${key} '${root[key]}' ${problem}`);
     }
-    if (segments.some(isUnwalkedEntry)) {
-      throw new Error(
-        `${at}.mount '${mount}' has a segment the site never walks (dot-prefixed or ` +
-          "node_modules), so its pages would get no routes - mount the root under another name",
-      );
-    }
-    if (segments[0] === "public") {
-      throw new Error(
-        `${at}.mount '${mount}' starts with public/, which VitePress copies to the site root ` +
-          "as static files instead of rendering - mount the root under another name",
-      );
-    }
-    if (!SEGMENT_RE.test(page as string) || !(page as string).endsWith(".md")) {
-      throw new Error(`${at}.page '${page}' must be a plain markdown file name (SKILL.md)`);
-    }
-    if (page === "index.md") {
-      throw new Error(
-        `${at}.page is index.md, which is a directory's page already - name the file the include renames to it`,
-      );
-    }
-    return { path: path as string, mount: mount as string, page: page as string };
+    return root;
   });
-  for (const key of ["path", "mount"] as const) {
-    if (new Set(includes.map((root) => root[key])).size !== includes.length) {
-      throw new Error(`${where} lists one ${key} twice - every root needs its own ${key}`);
-    }
-  }
+  const problem = includeListProblem(includes);
+  if (problem !== null) throw new Error(`${where} ${problem}`);
   return includes;
 }
 
@@ -187,11 +143,8 @@ export function parseSiteConfig(json: string): SiteConfig {
       throw new Error(`config.${key} must be one line - it contains a line break`);
     }
   }
-  if (!SEGMENT_RE.test(docs_path as string) || docs_path === "." || docs_path === "..") {
-    throw new Error(
-      `config.docs_path '${docs_path}' must be one plain URL segment (letters, digits, dots, underscores, or dashes)`,
-    );
-  }
+  const pathProblem = urlSegmentProblem(docs_path as string);
+  if (pathProblem !== null) throw new Error(`config.docs_path '${docs_path}' ${pathProblem}`);
   return {
     siteTitle: site_title as string,
     docsPath: docs_path as string,

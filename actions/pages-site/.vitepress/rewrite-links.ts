@@ -4,7 +4,7 @@
 
 import { posix } from "node:path";
 import type { MarkdownEnv, MarkdownRenderer } from "vitepress";
-import type { IncludeRoot } from "../lib.ts";
+import type { IncludeRoot } from "./conventions.ts";
 import { sourcePathOf } from "./source-path.ts";
 import { decodePathSegments, encodePathSegments } from "./url-path.ts";
 

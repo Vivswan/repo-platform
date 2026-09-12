@@ -35,10 +35,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import type { IncludeRoot } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
-  type IncludeRoot,
   mountRel,
   parseSiteConfig,
   planMount,

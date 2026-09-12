@@ -8,6 +8,13 @@
 
 import { parse } from "yaml";
 import { z } from "zod";
+import {
+  includeListProblem,
+  includeMountProblem,
+  includePageProblem,
+  relPathProblem,
+  urlSegmentProblem,
+} from "../pages-site/.vitepress/conventions.ts";
 
 export const REGISTRATION_PATH = ".repo-platform.yml";
 
@@ -90,26 +97,15 @@ const slug = z
     /^[a-z0-9]+(-[a-z0-9]+)*$/,
     "must be kebab-case (lowercase letters and digits, dash-separated)",
   );
-const urlSegment = z
-  .string()
-  .regex(
-    /^[a-z0-9][a-z0-9_-]*$/,
-    "must be one plain lowercase URL segment (letters, digits, dashes, underscores)",
-  );
-const relativePath = (what: string) =>
-  z.string().refine(
-    (value) => {
-      const parts = value.split("/");
-      return (
-        /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(value) &&
-        !parts.includes(".") &&
-        !parts.includes("..")
-      );
-    },
-    {
-      message: `${what} must be relative path segments of letters, digits, dots, underscores, or dashes joined by single slashes (no leading ./ or /, no '..')`,
-    },
-  );
+/** A string the site's rules judge (conventions.ts): the problem they
+ *  name is the issue's message. */
+const judged = (problem: (value: string) => string | null) =>
+  z.string().superRefine((value, ctx) => {
+    const message = problem(value);
+    if (message !== null) ctx.addIssue({ code: "custom", message });
+  });
+const urlSegment = judged(urlSegmentProblem);
+const relativePath = judged(relPathProblem);
 // The sync substitutes these into quoted YAML scalars verbatim, so a quote,
 // a backslash, or a control character would change the document it lands in.
 const plainText = (what: string) =>
@@ -141,22 +137,22 @@ export const registrationSchema = z.strictObject({
   site: z
     .strictObject({
       path: urlSegment.optional(),
-      // Extra source roots rendered into the docs mount: each tree at
-      // `path`, served under `mount`, each child directory's `page` file
-      // serving at the directory URL.
       include: z
         .array(
           z.strictObject({
-            path: relativePath("site.include[].path"),
-            mount: urlSegment,
-            page: z.string().min(1),
+            path: relativePath,
+            mount: judged(includeMountProblem),
+            page: judged(includePageProblem),
           }),
         )
-        .min(1)
+        .superRefine((roots, ctx) => {
+          const message = includeListProblem(roots);
+          if (message !== null) ctx.addIssue({ code: "custom", message });
+        })
         .optional(),
     })
     .optional(),
-  skills: z.strictObject({ dir: relativePath("skills.dir").optional() }).optional(),
+  skills: z.strictObject({ dir: relativePath.optional() }).optional(),
   labels: z.record(z.string(), label).optional(),
   mirrors: z
     .array(

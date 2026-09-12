@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
+import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
 import {
   declaredModules,
   parseRegistration,
@@ -133,7 +134,27 @@ describe("parseRegistration", () => {
     {
       reason: "an include root escaping the repo",
       text: "modules: []\nsite:\n  include: [{ path: ../x, mount: x, page: X.md }]\n",
-      error: `${FILE}: site.include.0.path: site.include[].path must be relative path segments`,
+      error: `${FILE}: site.include.0.path: must be a plain relative path inside the repository`,
+    },
+    {
+      reason: "an include root on a locale-shaped mount",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: de, page: X.md }]\n",
+      error: `${FILE}: site.include.0.mount: reads as a locale directory`,
+    },
+    {
+      reason: "an include root whose page is a path",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, page: x/SKILL.md }]\n",
+      error: `${FILE}: site.include.0.page: must be a plain markdown file name`,
+    },
+    {
+      reason: "two include roots on one mount",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: m, page: X.md }, { path: y, mount: m, page: Y.md }]\n",
+      error: `${FILE}: site.include: lists one mount twice`,
+    },
+    {
+      reason: "one include root staged twice",
+      text: "modules: []\nsite:\n  include: [{ path: x, mount: m, page: X.md }, { path: x, mount: n, page: X.md }]\n",
+      error: `${FILE}: site.include: lists one path twice`,
     },
     {
       reason: "an include entry with an unknown key",
@@ -189,6 +210,45 @@ describe("parseRegistration", () => {
     expect(registrationSchema.safeParse({ modules: [] }).success).toBe(true);
     expect(registrationSchema.safeParse({ modules: [], site: {} }).success).toBe(true);
     expect(registrationSchema.safeParse({ modules: [], site: { x: 1 } }).success).toBe(false);
+  });
+});
+
+// The registration and the pages-site config are two readers of one include
+// grammar: a rule that lands on one side alone lets a green plan fail later,
+// in docs-check or the deploy.
+describe("include roots: the registration and the pages-site config agree", () => {
+  const skills = { path: "skills", mount: "skills", page: "SKILL.md" };
+  test.each<[reason: string, include: object[], accepted: boolean]>([
+    [
+      "a sound list, one mount nested in another",
+      [skills, { path: "guides", mount: "skills/guides", page: "GUIDE.md" }],
+      true,
+    ],
+    ["an empty list, the plan's spelling of no roots", [], true],
+    ["a locale-shaped mount", [{ ...skills, mount: "de" }], false],
+    ["an uppercase mount", [{ ...skills, mount: "Skills" }], false],
+    ["a node_modules mount segment", [{ ...skills, mount: "x/node_modules" }], false],
+    ["a public mount", [{ ...skills, mount: "public/x" }], false],
+    ["a page with a directory in it", [{ ...skills, page: "x/SKILL.md" }], false],
+    ["index.md as the page", [{ ...skills, page: "index.md" }], false],
+    [
+      "two roots on one mount",
+      [skills, { path: "agents", mount: "skills", page: "AGENT.md" }],
+      false,
+    ],
+    ["one root staged twice", [skills, { ...skills, mount: "tools" }], false],
+  ])("%s", (_reason, include, accepted) => {
+    const text = `modules: [site]\nsite:\n  include: ${JSON.stringify(include)}\n`;
+    expect("registration" in parseRegistration(text)).toBe(accepted);
+    const config = JSON.stringify({
+      site_title: "",
+      docs_path: "docs",
+      include,
+      link_rot_label: "",
+    });
+    const parse = () => parseSiteConfig(config);
+    if (accepted) expect(parse).not.toThrow();
+    else expect(parse).toThrow();
   });
 });
 

@@ -8,31 +8,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
-
-/** ISO 639-1 primary language subtags: the locale-directory convention
- *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary
- *  from this set, so an ordinary docs directory (api/, cli/) can never be
- *  mistaken for a translation tree. */
-const ISO_639_1 = new Set(
-  (
-    "aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu " +
-    "cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi " +
-    "ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks " +
-    "ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl " +
-    "nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl " +
-    "sm sn so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve " +
-    "vi vo wa wo xh yi yo za zh zu"
-  ).split(" "),
-);
-
-const LOCALE_DIR_RE = /^([a-z]{2})(-[a-z0-9]{2,8})?$/;
-
-/** Whether a top-level directory name is a translation tree by the fleet
- *  convention: docs/<lang>[-<region>]/ mirroring the root structure. */
-export function isLocaleDir(name: string): boolean {
-  const match = LOCALE_DIR_RE.exec(name);
-  return match !== null && ISO_639_1.has(match[1]);
-}
+import { isLocaleDir, isUnwalkedEntry } from "./conventions.ts";
 
 /** The locale directories present in a walked file list: top-level
  *  convention-named directories that actually carry markdown, sorted. */
@@ -45,12 +21,6 @@ export function detectLocales(files: string[]): string[] {
         .filter(isLocaleDir),
     ),
   ].sort();
-}
-
-/** A directory entry the site never walks: dot-prefixed or node_modules
- *  (nothing under either should ever render). */
-export function isUnwalkedEntry(name: string): boolean {
-  return name.startsWith(".") || name === "node_modules";
 }
 
 /** Markdown files under `srcDir` as sorted relative paths, skipping the
@@ -81,7 +51,7 @@ export function isRegularFile(path: string): boolean {
 }
 
 /** The include roots' page files among `files`: `<mount>/<child>/<page>`,
- *  one per child directory of a root (an IncludeRoot of lib.ts, the mounts
+ *  one per child directory of a root (an IncludeRoot of conventions.ts, the mounts
  *  input's contract). These are the exact paths deriveRewrites serves at
  *  the directory URL. */
 export function includeIndexPages(

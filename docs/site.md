@@ -132,7 +132,7 @@ site:
 
 - A `README.md` at the include's root is the section's landing page; the other markdown files in a child directory render at their own paths.
 - Every version tier stages the root from its own ref; a tag without the directory skips it with a notice, and the default branch must carry every configured root.
-- Refused mounts: a locale-shaped name (`de`), a segment the site never walks (dot-prefixed, `node_modules`), `public/`. A child directory carrying both the page and an `index.md` fails the build.
+- `mount` is one or more lowercase URL segments joined by slashes (`skills`, `skills/agents`), `page` a plain markdown file name other than `index.md`, and no two roots share a `path` or a `mount`. Refused mounts: a locale-shaped name (`de`), a segment the site never walks (`node_modules`), `public/`. The plan refuses the same registration on every PR (one rule, [conventions.ts](../actions/pages-site/.vitepress/conventions.ts), read by both), so a root the deploy would misplace never reaches it. A child directory carrying both the page and an `index.md` fails the build.
 - A `SKILL.md`-style page with neither a `title` nor an h1 is titled by its `name` frontmatter key, its `description` becomes the meta description, and its "Edit this page" link names the real source path.
 - Links resolve from the page's own repository path: `../repo-platform-sync-pr/SKILL.md` on a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
 

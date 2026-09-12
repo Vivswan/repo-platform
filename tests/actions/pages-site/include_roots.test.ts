@@ -26,7 +26,7 @@ describe("parseSiteConfig include roots", () => {
     ["an unknown key", [{ ...SKILLS, title: "x" }], "unknown keys: title"],
     ["a traversing path", [{ ...SKILLS, path: "../skills" }], "plain relative path"],
     ["a locale-shaped mount", [{ ...SKILLS, mount: "de" }], "reads as a locale directory"],
-    ["a dot-prefixed mount", [{ ...SKILLS, mount: ".skills" }], "never walks"],
+    ["a dot-prefixed mount", [{ ...SKILLS, mount: ".skills" }], "lowercase URL segments"],
     ["a public mount", [{ ...SKILLS, mount: "public/skills" }], "starts with public/"],
     [
       "a node_modules segment in the mount",
