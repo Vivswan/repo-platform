@@ -42,7 +42,16 @@ The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO
 
 ## Shipping a change
 
-Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. To sync right after the merge, open the PR body with a directives block as its first paragraph: `[fleet-sync: public]` for the public repos (the default), `[fleet-sync: private]` for the private ones, `[fleet-sync: public, Vivswan/a]` to add public repos by slug, or `[fleet-sync: all] <why every repo needs this now>` for the whole fleet (the justification is required); a bracket-only line may sit in exactly one pair of backticks, and the justified `all` line is written bare. Post-green reads the block from the merged PR's title and body (the squash commit carries the title alone) and the parser scans the whole of it, so a bare `[fleet-sync` anywhere else in the body, even inside a fenced example, turns the read-directives leg red and nothing syncs, while a mention wrapped in a code span is prose ([docs/all-green.md](docs/all-green.md#after-the-gate) has the grammar). By hand: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>` (a comma list works), or `gh workflow run sync-repos.yml` for the whole fleet.
+Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. To sync right after the merge, put a directive line first in the PR body:
+
+| Line | Syncs |
+| --- | --- |
+| `[fleet-sync: public]` | the public repos (the default) |
+| `[fleet-sync: private]` | the private repos |
+| `[fleet-sync: public, Vivswan/a]` | public repos plus the slugs listed |
+| `[fleet-sync: all] <why every repo needs this now>` | the whole fleet; the justification is required and the line is written bare |
+
+Post-green reads the directive from the merged PR's title and body ([docs/all-green.md](docs/all-green.md) has the exact grammar). A bare `[fleet-sync` anywhere else in the body, even inside a fenced example, turns the read-directives leg red and nothing syncs.
 
 The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_scope.ts) owns the grammar; settings-repos.yml's `repo=` reads the same):
 
