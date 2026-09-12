@@ -1,5 +1,3 @@
-// CodeQL runs on its defaults per language: the one input is the language, and init reads only it.
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

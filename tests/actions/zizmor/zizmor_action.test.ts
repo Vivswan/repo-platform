@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadAction, REPO_ROOT, runBashStep, stepNamed } from "../../shared/action_step";
 import { tempDirs } from "../../shared/temp_dir";
@@ -101,26 +101,29 @@ describe("actions/zizmor", () => {
       root: repo,
     });
 
-  test("render: the fleet policy lands in the workspace with the caller's owner filled in", () => {
-    const repo = temp.dir("zizmor-render-");
-    const run = runStep("Render the fleet policy", repo);
-    // A workspace-relative path: the container sees /workspace, never the
-    // runner's action path.
-    expect([run.exitCode, run.outputs]).toEqual([0, { path: COPY }]);
-    expect(readFileSync(join(repo, COPY), "utf8")).toBe(
-      readFileSync(join(ACTION_DIR, "zizmor.yml"), "utf8").replaceAll("{{github_username}}", OWNER),
-    );
-    expect(render.id).toBe("policy");
-  });
-
-  test("render, control: a repository's own .github/zizmor.yml does not replace the fleet policy", () => {
-    const repo = temp.dir("zizmor-own-");
-    mkdirSync(join(repo, ".github"));
-    writeFileSync(join(repo, ".github/zizmor.yml"), "rules: {}\n");
-    const run = runStep("Render the fleet policy", repo);
-    expect([run.exitCode, run.outputs]).toEqual([0, { path: COPY }]);
-    expect(existsSync(join(repo, COPY))).toBe(true);
-  });
+  test.each([
+    { own: "absent", files: {} },
+    { own: "present", files: { ".github/zizmor.yml": "rules: {}\n" } },
+  ])(
+    "render: the fleet policy lands in the workspace with the caller's owner filled in, repository's own config $own",
+    ({ files }) => {
+      const repo = temp.dir("zizmor-render-");
+      for (const [rel, content] of Object.entries(files)) {
+        mkdirSync(join(repo, dirname(rel)), { recursive: true });
+        writeFileSync(join(repo, rel), content);
+      }
+      const run = runStep("Render the fleet policy", repo);
+      // A workspace-relative path: the container sees /workspace, never the runner's action path.
+      expect([run.exitCode, run.outputs]).toEqual([0, { path: COPY }]);
+      expect(readFileSync(join(repo, COPY), "utf8")).toBe(
+        readFileSync(join(ACTION_DIR, "zizmor.yml"), "utf8").replaceAll(
+          "{{github_username}}",
+          OWNER,
+        ),
+      );
+      expect(render.id).toBe("policy");
+    },
+  );
 
   test("cleanup: always runs, removes the copy, and is a no-op when nothing was copied", () => {
     expect(cleanup.if).toBe("always()");

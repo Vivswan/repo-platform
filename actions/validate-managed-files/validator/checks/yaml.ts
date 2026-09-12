@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { type EmptyStream, parseAllDocuments } from "yaml";
+import { parseAllDocuments, parseDocument } from "yaml";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
@@ -24,9 +24,12 @@ function diagnose(rel: string, text: string): Finding[] {
     error(`${rel}: does not parse as YAML (${m}); fix the syntax at the position shown`);
   const firstLine = (e: unknown) => (e instanceof Error ? e.message.split("\n")[0] : String(e));
   const docs = parseAllDocuments(text, { uniqueKeys: true });
-  // A stream with no document (a directive alone, "%TAG") carries its errors on the stream, not on a document.
+  // A directive with no document behind it composes zero documents and no stream error; only the forced single
+  // document reports it. An empty or comment-only file forces a document with no errors.
+  //   "%YAML 1.2\n"  -> Missing directives-end indicator line
+  //   "%TAG\n"       -> %TAG directive should contain exactly two parts, and the missing indicator
   if (docs.length === 0) {
-    return (docs as EmptyStream).errors.map((streamError) => syntaxError(firstLine(streamError)));
+    return parseDocument(text, { uniqueKeys: true }).errors.map((e) => syntaxError(firstLine(e)));
   }
   if (docs.length > 1) {
     findings.push(

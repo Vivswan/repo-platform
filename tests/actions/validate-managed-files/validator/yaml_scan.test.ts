@@ -8,7 +8,6 @@ const runValidator = validatorRunner(temp);
 const DUP_KEY_YAML = "homepage: https://a.example\nhomepage: https://b.example\n";
 
 describe("duplicate mapping keys", () => {
-  // The same rule everywhere: the later value silently wins at consumption time, whatever consumes the file.
   test.each([
     { reason: "settings.yml", path: ".github/settings.yml", content: DUP_KEY_YAML },
     {
@@ -73,6 +72,17 @@ describe("YAML syntax errors", () => {
       reason: "an unsupported YAML version directive with no document behind it",
       path: "config.yml",
       content: "%YAML nope\n",
+    },
+    {
+      reason:
+        "a valid version directive with no document behind it (zero documents and no stream error)",
+      path: "config.yml",
+      content: "%YAML 1.2\n",
+    },
+    {
+      reason: "a valid tag directive with no document behind it",
+      path: "config.yml",
+      content: "%TAG !e! tag:example.com,2026:\n",
     },
   ])("broken YAML anywhere fails: $reason", ({ path, content }) => {
     const { exitCode, stderr } = runValidator({ [path]: content });
