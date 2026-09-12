@@ -62,6 +62,7 @@ const LOCAL_CONSTRUCTOR = "local notes\n";
 const LOCAL_DOCKERIGNORE = "dist/\n";
 const UNHASHED = "# unhashed notes\n";
 const HANDMADE = "# my own notes, recorded by hand\n";
+const LOCAL_DEPENDABOT = "version: 2\n# my own update schedule\n";
 const noWriterNote = (path: string) =>
   `manifest record for \`${path}\` had no writer: no files.yml entry declares the path, so no sync ` +
   "recorded it; it is retired as a stale record (the Retired row has the outcome)";
@@ -126,6 +127,10 @@ function oldManifest(): string {
     // like any local edit; the path is named like an inherited object
     // property to keep every record lookup honest.
     constructor: `{"class": "starter"}`,
+    // A split record without its markers, carrying the local file's hash:
+    // not a record the writer can read, so it vouches for nothing and the
+    // file is judged unrecorded.
+    ".github/dependabot.yml": `{"class": "split", "hash": "${sha256(LOCAL_DEPENDABOT)}"}`,
     // A hash-less managed record for a path nothing declares or retires:
     // held every run, its record carried, never a silent orphan, and noted
     // as no sync's every run.
@@ -195,6 +200,7 @@ function seedTarget(): string {
     "UNHASHED.md": UNHASHED,
     "BESPOKE.md": "b\n",
     "HANDMADE.md": HANDMADE,
+    ".github/dependabot.yml": LOCAL_DEPENDABOT,
     [MANIFEST]: oldManifest(),
   };
   for (const [rel, content] of Object.entries(files)) {
@@ -286,6 +292,7 @@ describe("sync.ts end to end", () => {
     expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer"]);
     expect(summary.notes).toEqual([
       "dropped unknown module `uv` (files.yml does not know it)",
+      "manifest record for `.github/dependabot.yml` dropped: its class or shape is not one the writer records",
       noWriterNote("UNHASHED.md"),
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
@@ -312,7 +319,7 @@ describe("sync.ts end to end", () => {
       row("AGENTS.md", "split", "created"),
       row("CLAUDE.md", "link", "unchanged"),
       row(".github/agents.md", "link", "created"),
-      row(".github/dependabot.yml", "managed", "created"),
+      row(".github/dependabot.yml", "managed", "replaced local edits"),
       row(".github/workflows/checks.yml", "starter", "created"),
       row(HOOK, "starter", "created"),
       row(OVERLAY, "starter", "unchanged"),
@@ -659,6 +666,11 @@ describe("sync.ts end to end", () => {
     });
     expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files["HANDMADE-GONE.md"]).toBeUndefined();
+    // The unreadable record vouched for nothing: the write's own record replaces it.
+    expect(manifest.files[".github/dependabot.yml"]).toEqual({
+      class: "managed",
+      hash: sha256(read(".github/dependabot.yml")),
+    });
     expect(manifest.files[".editorconfig"]).toMatchObject({
       class: "split",
       hash: sha256(read(".editorconfig")),
@@ -735,6 +747,7 @@ describe("sync.ts end to end", () => {
       ".yamllint: the managed region was added above repository-owned content",
       ".dockerignore: the managed region was added above repository-owned content",
       "local edits replaced in .github/workflows/ci.yml",
+      "local edits replaced in .github/dependabot.yml",
       "local edits replaced in constructor",
       "local edits replaced in template/LICENSE.md",
       "local edits replaced in skills/beta/LICENSE.md",
@@ -745,6 +758,7 @@ describe("sync.ts end to end", () => {
       "mirror plain replaced: a directory stood at the target",
       "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
+      "registration: manifest record for `.github/dependabot.yml` dropped: its class or shape is not one the writer records",
       `registration: ${noWriterNote("UNHASHED.md")}`,
       "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
