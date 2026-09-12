@@ -106,7 +106,7 @@ describe("the fuzz-issue composite", () => {
       ["Find the stream's open issue", REPORT],
       ["Create the stream's label", REPORT],
       ["File or refresh the issue", REPORT],
-      ["Close every open issue of the stream", RESOLVE],
+      ["Close the stream's open issues", RESOLVE],
     ]);
     const body = stepNamed(action, "Assemble the issue body or the close comment");
     expect(body.id).toBe("body");
@@ -167,7 +167,7 @@ describe("the fuzz-issue composite", () => {
     },
     { listed: "", closed: [], reason: "no open issue closes nothing" },
   ])("close: $reason", ({ listed, closed }) => {
-    const run = runWithGh(stepNamed(action, "Close every open issue of the stream"), listed);
+    const run = runWithGh(stepNamed(action, "Close the stream's open issues"), listed);
     expect(run.exitCode).toBe(0);
     expect(run.gh).toEqual([
       list(LABEL, "100", ".[].number"),
