@@ -263,11 +263,17 @@ export async function securityGate(
       `repos/${repo}/dependabot/alerts?state=open&severity=${severities}&per_page=100`,
     ]);
   } catch (error) {
-    // A missing `vulnerability-alerts: read` grant and disabled alerts both answer HTTP 403; either is a broken gate, not a pass.
+    // An unreadable endpoint is a broken gate, not a pass. The configuration remedy rides only on the statuses configuration
+    // causes; GitHub answers a primary rate limit with 403 too, told apart by its wording.
+    //   HTTP 403 (grant missing, alerts disabled), HTTP 404  -> cause and remedy
+    //   HTTP 403 "rate limit", HTTP 429, HTTP 5xx            -> cause alone
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `security gate could not read the Dependabot alerts (${message}); the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository`,
-    );
+    const status = /\bHTTP (\d{3})\b/.exec(message)?.[1];
+    const configuration = (status === "403" || status === "404") && !/rate limit/i.test(message);
+    const remedy = configuration
+      ? "; the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository"
+      : "";
+    throw new Error(`security gate could not read the Dependabot alerts (${message})${remedy}`);
   }
   const alerts = JSON.parse(json) as Array<{ number: number }>;
   if (alerts.length === 0) {

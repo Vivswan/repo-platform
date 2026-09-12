@@ -322,27 +322,48 @@ describe("securityGate", () => {
 
   // Every fleet repository has Dependabot alerts enabled and the callers grant vulnerability-alerts: read,
   // so an unreadable endpoint is a broken gate, never a repository to wave through.
+  const REMEDY =
+    "; the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository";
   test.each([
-    [
-      "a bare 403 (missing vulnerability-alerts grant)",
-      "gh api failed (1): HTTP 403: Resource not accessible by integration",
-    ],
-    [
-      "Dependabot alerts disabled on the repository",
-      "gh api failed (1): Dependabot alerts are disabled for this repository. (HTTP 403)",
-    ],
-    ["a host without the feature (404)", "gh api failed (1): Not Found (HTTP 404)"],
-    ["a server error", "gh api failed (1): HTTP 500: boom"],
-    [
-      "a rate-limited 403",
-      "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
-    ],
-  ])("fails closed on %s, naming the HTTP status", async (_reason, message) => {
-    const { run } = fakeGh({ alertsError: message });
-    expect(securityGate(run, "o/r", "high", "advice")).rejects.toThrow(
-      `security gate could not read the Dependabot alerts (${message}); the gate needs vulnerability-alerts: read and Dependabot alerts enabled on the repository`,
-    );
-  });
+    {
+      reason: "a bare 403 (missing vulnerability-alerts grant)",
+      message: "gh api failed (1): HTTP 403: Resource not accessible by integration",
+      remedy: REMEDY,
+    },
+    {
+      reason: "Dependabot alerts disabled on the repository",
+      message: "gh api failed (1): Dependabot alerts are disabled for this repository. (HTTP 403)",
+      remedy: REMEDY,
+    },
+    {
+      reason: "a host without the feature (404)",
+      message: "gh api failed (1): Not Found (HTTP 404)",
+      remedy: REMEDY,
+    },
+    { reason: "a server error", message: "gh api failed (1): HTTP 500: boom", remedy: "" },
+    {
+      reason: "a rate-limited 403",
+      message: "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
+      remedy: "",
+    },
+    {
+      reason: "a secondary rate limit (429)",
+      message: "gh api failed (1): You have exceeded a secondary rate limit. (HTTP 429)",
+      remedy: "",
+    },
+  ])(
+    "fails closed on $reason, naming the cause and the configuration remedy only where configuration is the cause",
+    async ({ message, remedy }) => {
+      const { run } = fakeGh({ alertsError: message });
+      let thrown = "";
+      await securityGate(run, "o/r", "high", "advice").catch((error: Error) => {
+        thrown = error.message;
+      });
+      expect(thrown).toBe(
+        `security gate could not read the Dependabot alerts (${message})${remedy}`,
+      );
+    },
+  );
 });
 
 describe("overrideFromPullRequest", () => {
