@@ -68,6 +68,19 @@ describe("the all-green judgment", () => {
       verdict: "::error::gating jobs did not succeed: ci (cancelled).",
     },
     {
+      name: "every gating job cancelled names the cause, not the jobs",
+      results: { checks: "cancelled", ci: "cancelled" },
+      exitCode: 1,
+      verdict:
+        "::error::every gating job was cancelled - this run has no verdict; the newer run at this head carries it, or re-run this one.",
+    },
+    {
+      name: "a cancelled job beside a timed-out one is judged by name",
+      results: { checks: "cancelled", ci: "timed_out" },
+      exitCode: 1,
+      verdict: "::error::gating jobs did not succeed: checks (cancelled), ci (timed_out).",
+    },
+    {
       name: "all skipped vouches for nothing",
       results: { checks: "skipped", ci: "skipped" },
       exitCode: 1,

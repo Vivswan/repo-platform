@@ -25,6 +25,7 @@ The judgment, whole: every needed result must be `success` or `skipped` (a modul
 | --- | --- | --- |
 | `all-green` failed naming a job | That job's result was not success/skipped | Open the run, fix or re-run the failed job - the re-run re-judges. |
 | `all-green` shows "Expected" and never arrives | The CI run was cancelled or superseded before the gate ran | Push again or re-run the newest CI run at the head. |
+| `all-green` failed with "every gating job was cancelled" | The concurrency group cancelled this run for a newer one at the same head, or someone cancelled it | The newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head. |
 | `all-green` failed with "no gating job actually succeeded" | Everything the gate needs skipped | A run that verified nothing must not merge; check why the callers skipped. |
 | `pr-title` waiting (repos with the pr-title module) | Its own required check, outside this gate | Fix the title to a Conventional Commit; the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
 
