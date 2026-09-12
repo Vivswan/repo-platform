@@ -3,7 +3,6 @@
 
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
-import { pathProblem } from "../../../../actions/plan/files_config.ts";
 import {
   describeMirrorProblem,
   literalPrefix,
@@ -16,6 +15,7 @@ import {
   type OwnedPaths,
   segmentPattern,
 } from "../../../../actions/plan/mirrors.ts";
+import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import {
   type MirrorRecord,

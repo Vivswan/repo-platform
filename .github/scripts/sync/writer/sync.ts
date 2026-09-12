@@ -15,14 +15,11 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  type FileEntry,
-  pathProblem,
-  selectEntries,
-} from "../../../../actions/plan/files_config.ts";
+import { type FileEntry, selectEntries } from "../../../../actions/plan/files_config.ts";
 import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
+import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
@@ -188,15 +185,17 @@ interface Written {
   record: ManifestRecord;
   /** What a mirror would copy, or a replaced edit is diffed against. */
   content: string;
+  /** The stale record a write set aside, for the row's detail. */
+  detail?: string;
 }
 
 /** One entry written by its class, or the placeholders it lacks a value
  *  for (nothing is written then). A path whose record the writer reads
  *  under another class than the entry declares is a class flip: the
  *  recorded content is the platform's own previous write, so it is
- *  replaced whole when it still matches its record and held otherwise, its
- *  record carried (a flip to starter hands the file over and is never
- *  held). */
+ *  replaced whole when it still matches its record; otherwise the record
+ *  is stale and the file is written as an unrecorded one (a flip to
+ *  starter hands the file over and is never judged). */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -219,13 +218,14 @@ function writeEntry(
     found.kind !== "absent" &&
     !alreadyWritten(found, entry, rendered.content)
   ) {
-    const reason = keepReason(options.target, entry.path, records);
-    if (reason !== null) {
-      const detail = `class changed from ${flipped} to ${entry.class}, and ${reason}`;
+    if (keepReason(options.target, entry.path, records) !== null) {
+      const outcome = rendered.write(null);
+      if ("missing" in outcome) return outcome;
       return {
-        outcome: { change: "held", reason: detail },
+        outcome,
         record: rendered.record,
         content: rendered.content,
+        detail: `class changed from ${flipped} to ${entry.class}; the record was stale, so the file was judged unrecorded`,
       };
     }
     // A file staying a file is overwritten in place, which keeps its mode;
@@ -268,6 +268,11 @@ export function runSync(options: SyncOptions): SyncReport {
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
   const owned = ownedPaths(config, { modules: selected, private: options.private });
+  // Every path files.yml declares today, for any selection. A stale record
+  // at none of these and at no retired path is one the current files.yml
+  // cannot account for (a hand edit, or an entry deleted with no `retired`
+  // row), so its retirement is noted, which holds the PR.
+  const declared = new Set(config.files.map((entry) => entry.path));
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
   const stale: string[] = [];
@@ -283,8 +288,17 @@ export function runSync(options: SyncOptions): SyncReport {
     if (entryPaths.has(path) || owned.retires.has(path)) continue;
     if (record.class !== "managed" && record.class !== "split" && record.class !== "link") continue;
     const problem = pathProblem(path);
-    if (problem === null) stale.push(path);
-    else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+    if (problem !== null) {
+      notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+      continue;
+    }
+    stale.push(path);
+    if (!declared.has(path) && occupant(options.target, path) !== null) {
+      notes.push(
+        `manifest record for \`${path}\` had no writer: no files.yml entry declares or retires the path now; ` +
+          "it is retired as a stale record (the Retired row has the outcome)",
+      );
+    }
   }
   const retired = retire(options.target, config.retired, stale, entryPaths, records);
 
@@ -357,7 +371,7 @@ export function runSync(options: SyncOptions): SyncReport {
       path: entry.path,
       class: entry.class,
       change: outcome.change,
-      detail: outcome.change === "held" ? outcome.reason : "",
+      detail: outcome.change === "held" ? outcome.reason : (result.detail ?? ""),
     });
     if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });

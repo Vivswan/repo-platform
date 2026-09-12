@@ -11,7 +11,8 @@ export interface WrittenRow {
   path: string;
   class: FileClass;
   change: Change;
-  /** Why a held row was not written; empty otherwise. */
+  /** Why a held row was not written, or the stale record a write set
+   *  aside; empty otherwise. */
   detail: string;
 }
 
