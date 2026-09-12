@@ -32,6 +32,12 @@
       max-width: 100%;
       height: auto;
     }
+    /* Mermaid measures an html label on <body> at its own inline line-height and clips the
+     * label's foreignObject to that height; drawn here, the label's <p> would take the
+     * article's paragraph line-height (prose.css) and lose the bottom of its last line. */
+    p {
+      line-height: inherit;
+    }
   }
   & > .fleet-mermaid-error {
     margin: 12px 0 0;

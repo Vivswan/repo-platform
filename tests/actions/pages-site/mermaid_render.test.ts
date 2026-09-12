@@ -1,7 +1,7 @@
 // bun has no DOM, so the document holds only what the render pass touches.
 
 import { beforeEach, expect, test } from "bun:test";
-import { HUES } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
+import { HUES, SHARED_TOKENS } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
 
 class FakeElement {
   children: FakeElement[] = [];
@@ -33,20 +33,60 @@ class FakeElement {
 
 const mounts: FakeElement[] = [];
 const html = new FakeElement("html");
-(globalThis as { document?: unknown }).document = {
-  documentElement: html,
-  querySelectorAll: () => mounts,
-  createElement: (tag: string) => new FakeElement(tag),
-};
-
 interface Held {
   resolve: () => void;
   reject: (error: Error) => void;
 }
 
 /** Each render's SVG carries its ordinal, so a stale result landing is visible. */
-const stub = { failLoad: false, hold: false, held: [] as Held[] };
-const calls = { loads: 0, initialize: [] as Record<string, unknown>[], renders: [] as string[] };
+const stub = {
+  failLoad: false,
+  hold: false,
+  held: [] as Held[],
+  holdFonts: false,
+  heldFonts: [] as Held[],
+  failFonts: false,
+};
+const calls = {
+  loads: 0,
+  initialize: [] as Record<string, unknown>[],
+  renders: [] as string[],
+  fontLoads: [] as [string, string][],
+};
+const fontsApi = {
+  load(font: string, text: string): Promise<unknown[]> {
+    calls.fontLoads.push([font, text]);
+    if (stub.failFonts) return Promise.reject(new Error("NetworkError"));
+    if (!stub.holdFonts) return Promise.resolve([]);
+    return new Promise((resolve, reject) =>
+      stub.heldFonts.push({ resolve: () => resolve([]), reject }),
+    );
+  },
+};
+const fakeDocument = {
+  documentElement: html,
+  querySelectorAll: () => mounts,
+  createElement: (tag: string) => new FakeElement(tag),
+  fonts: fontsApi as typeof fontsApi | undefined,
+};
+(globalThis as { document?: unknown }).document = fakeDocument;
+
+async function withFakeTimers(body: (armed: Map<number, () => void>) => Promise<void>) {
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const armed = new Map<number, () => void>();
+  let handle = 0;
+  globalThis.setTimeout = ((callback: () => void) => {
+    handle += 1;
+    armed.set(handle, callback);
+    return handle;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id: number) => armed.delete(id)) as typeof clearTimeout;
+  try {
+    await body(armed);
+  } finally {
+    Object.assign(globalThis, real);
+  }
+}
 Bun.plugin({
   name: "mermaid-stub",
   setup(build) {
@@ -105,16 +145,22 @@ beforeEach(() => {
   html.dataset = { fleetHue: "2" };
   calls.initialize.length = 0;
   calls.renders.length = 0;
+  calls.fontLoads.length = 0;
   stub.failLoad = false;
   stub.hold = false;
   stub.held.length = 0;
+  stub.holdFonts = false;
+  stub.heldFonts.length = 0;
+  stub.failFonts = false;
+  fakeDocument.fonts = fontsApi;
 });
 
 // First, before any run has loaded the package: a load that fails is not
 // cached, so the next run imports again (bun re-runs the stub's factory).
-test("no mount never loads mermaid; a failed load is every mount's error and the next run loads again", async () => {
+test("no mount never loads mermaid or a face; a failed load is every mount's error and the next run loads again", async () => {
   await renderAll(true);
   expect(calls.loads).toBe(0);
+  expect(calls.fontLoads).toEqual([]);
   const first = mount("graph LR");
   const second = mount("graph TD");
   stub.failLoad = true;
@@ -193,6 +239,92 @@ test("a re-render replaces the diagram or the error in place under new ids, so t
     "p.fleet-mermaid-error:The diagram did not render: Parse error on line 2:",
   ]);
   expect(good.dataset.state).toBe("error");
+});
+
+test("initializes and draws only once the theme's mono face has loaded for every mount's text, and draws in the fallback when the face fails", async () => {
+  const first = mount("graph LR\n  A --> B");
+  const second = mount("graph TD");
+  stub.holdFonts = true;
+  const run = renderAll(false);
+  for (let i = 0; i < 100 && stub.heldFonts.length < 1; i += 1) await Bun.sleep(1);
+  // The face is asked for before the pass awaits the import, so a timer lets the import's
+  // microtasks drain: the pass is then parked on the face, or, without the wait, already drawn.
+  await Bun.sleep(10);
+  expect(calls.fontLoads).toEqual([
+    [
+      `${SHARED_TOKENS.code["--vp-code-font-size"]} ${SHARED_TOKENS.fonts["--vp-font-family-mono"]}`,
+      "graph LR\n  A --> Bgraph TD",
+    ],
+  ]);
+  expect(calls.loads).toBeGreaterThan(0);
+  expect(calls.initialize).toEqual([]);
+  expect(calls.renders).toEqual([]);
+  stub.heldFonts[0].resolve();
+  await run;
+  expect(calls.initialize).toHaveLength(1);
+  expect(shapes(first)[1]).toBe(
+    'div.fleet-mermaid-diagram:<svg data-render="1">graph LR\n  A --> B</svg>',
+  );
+  expect(shapes(second)[1]).toBe('div.fleet-mermaid-diagram:<svg data-render="2">graph TD</svg>');
+  stub.holdFonts = false;
+  stub.failFonts = true;
+  await renderAll(true);
+  expect(calls.fontLoads).toHaveLength(2);
+  expect(shapes(first)).toEqual([
+    "pre.fleet-mermaid-source:graph LR\n  A --> B",
+    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR\n  A --> B</svg>',
+  ]);
+  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+});
+
+test("a face that settles disarms its deadline; one that never settles draws every mount in the fallback when the deadline fires", async () => {
+  const first = mount("graph LR");
+  const second = mount("graph TD");
+  stub.holdFonts = true;
+  await withFakeTimers(async (armed) => {
+    const settled = renderAll(true);
+    expect(armed.size).toBe(1);
+    stub.heldFonts[0].resolve();
+    await settled;
+    expect(armed.size).toBe(0);
+    expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+    const stalled = renderAll(false);
+    expect(armed.size).toBe(1);
+    for (const [handle, fire] of armed) {
+      armed.delete(handle);
+      fire();
+    }
+    await stalled;
+  });
+  expect(stub.heldFonts).toHaveLength(2);
+  expect(darkModes()).toEqual([true, false]);
+  expect(shapes(first)).toEqual([
+    "pre.fleet-mermaid-source:graph LR",
+    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+  ]);
+  expect(shapes(second)).toEqual([
+    "pre.fleet-mermaid-source:graph TD",
+    'div.fleet-mermaid-diagram:<svg data-render="4">graph TD</svg>',
+  ]);
+  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+});
+
+test("a document without the fonts API draws at once: no face request, one initialize, every mount rendered", async () => {
+  const first = mount("graph LR");
+  const second = mount("graph TD");
+  fakeDocument.fonts = undefined;
+  await renderAll(true);
+  expect(calls.fontLoads).toEqual([]);
+  expect(calls.initialize).toHaveLength(1);
+  expect(shapes(first)).toEqual([
+    "pre.fleet-mermaid-source:graph LR",
+    'div.fleet-mermaid-diagram:<svg data-render="1">graph LR</svg>',
+  ]);
+  expect(shapes(second)).toEqual([
+    "pre.fleet-mermaid-source:graph TD",
+    'div.fleet-mermaid-diagram:<svg data-render="2">graph TD</svg>',
+  ]);
+  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
 });
 
 test("a run overtaken before it draws never initializes or renders; the newest mode lands alone", async () => {
