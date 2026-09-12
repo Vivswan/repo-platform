@@ -83,12 +83,17 @@ export interface RetiredEntry {
 
 const names = z.array(z.string().min(1)).min(1);
 
-const whenSchema = z.strictObject({
-  modules: names.optional(),
-  any: names.optional(),
-  without: names.optional(),
-  private: z.boolean().optional(),
-});
+// `when: {}` is unconditional, and parses to the same null an absent
+// when does: every reader, starterCoverage included, compares one
+// spelling of "always".
+const whenSchema = z
+  .strictObject({
+    modules: names.optional(),
+    any: names.optional(),
+    without: names.optional(),
+    private: z.boolean().optional(),
+  })
+  .transform((when): When | null => (Object.keys(when).length === 0 ? null : when));
 
 const fileSchema = z.strictObject({
   path: z.string().min(1),

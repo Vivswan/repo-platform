@@ -280,6 +280,13 @@ describe("render, displaces, and the settings block", () => {
     expect(parseFilesConfig(doc([STARTER], [])).settings).toBeNull();
   });
 
+  test("an empty when is unconditional: it parses to null and displaces an unconditional starter", () => {
+    const empty = (entry: string) => entry.replace(" }", ", when: {} }");
+    const config = parseFilesConfig(doc([STARTER, empty(RENDERED)]));
+    expect(config.files.map((entry) => entry.when)).toEqual([null, null]);
+    expect(problemsOf(doc([empty(STARTER), RENDERED]))).toEqual([]);
+  });
+
   test("every problem of a rendered entry is collected in one pass, and no rendered entry is built from it", () => {
     const checked = checkFilesConfig(
       doc(
