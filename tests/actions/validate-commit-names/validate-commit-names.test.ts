@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { oneScopeRule, refusal } from "../../../actions/validate-commit-names/subject.ts";
-import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
+import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -16,8 +16,9 @@ let serial = 0;
 const COMMA_SCOPE_SUBJECT = "style(contract,tests): align the fixture layout";
 const GENERIC_REASON = "not of the shape <type>(<scope>)?!?: <description>";
 
-/** A zero `before` sha makes the validator read the payload's commit list, so no git repo is needed. */
-function runValidator(subjects: string[]): { exitCode: number; stderr: string } {
+// A zero `before` sha makes the validator read the payload's commit list, so no git repo is needed.
+// Each commit's id is its 1-based position repeated, so `2222222` in an expected stderr names the second subject.
+function runValidator(subjects: string[]): BoundedSpawnResult {
   const eventPath = join(scratch, `event-${serial++}.json`);
   writeFileSync(
     eventPath,
@@ -25,19 +26,18 @@ function runValidator(subjects: string[]): { exitCode: number; stderr: string } 
       before: "0".repeat(40),
       after: "f".repeat(40),
       commits: subjects.map((message, index) => ({
-        id: String(index + 1).padStart(40, "0"),
+        id: String(index + 1).repeat(40),
         message,
       })),
     }),
   );
-  const { exitCode, stderr } = boundedSpawnSync(
+  return boundedSpawnSync(
     [process.execPath, "actions/validate-commit-names/validate-commit-names.ts"],
     {
       cwd: root,
       env: { PATH: process.env.PATH, GITHUB_EVENT_NAME: "push", GITHUB_EVENT_PATH: eventPath },
     },
   );
-  return { exitCode, stderr };
 }
 
 const REFUSALS: { subject: string; reason: string | undefined }[] = [
@@ -67,40 +67,52 @@ describe("refusal", () => {
   }
 });
 
-describe("the CI validator's refusal message", () => {
-  test("a comma-scoped subject is refused naming the one-scope rule beside the subject", () => {
-    const { exitCode, stderr } = runValidator([COMMA_SCOPE_SUBJECT]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(COMMA_SCOPE_SUBJECT);
-    expect(stderr).toContain(oneScopeRule);
-  });
+const REFUSAL_HEADER =
+  "Commit subjects must be Conventional Commits.\n" +
+  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.\n" +
+  "\n";
 
-  test("a non-conventional subject is refused for the grammar shape, not the one-scope rule", () => {
-    const { exitCode, stderr } = runValidator(["wip: half-done things"]);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("wip: half-done things");
-    expect(stderr).toContain(GENERIC_REASON);
-    expect(stderr).not.toContain(oneScopeRule);
-  });
+const RUNS: { name: string; subjects: string[]; outcome: BoundedSpawnResult }[] = [
+  {
+    name: "a single-scope subject passes with nothing on stderr",
+    subjects: ["style(contract): align the fixture layout"],
+    outcome: { exitCode: 0, stdout: "Checked 1 non-merge commit subject(s).\n", stderr: "" },
+  },
+  {
+    name: "a comma-scoped subject is refused naming the one-scope rule beside the subject",
+    subjects: [COMMA_SCOPE_SUBJECT],
+    outcome: {
+      exitCode: 1,
+      stdout: "Checked 1 non-merge commit subject(s).\n",
+      stderr: `${REFUSAL_HEADER}- 1111111 ${COMMA_SCOPE_SUBJECT}\n  ${oneScopeRule}\n`,
+    },
+  },
+  {
+    name: "a non-conventional subject is refused for the grammar shape, not the one-scope rule",
+    subjects: ["wip: half-done things"],
+    outcome: {
+      exitCode: 1,
+      stdout: "Checked 1 non-merge commit subject(s).\n",
+      stderr: `${REFUSAL_HEADER}- 1111111 wip: half-done things\n  ${GENERIC_REASON}\n`,
+    },
+  },
+  {
+    name: "each refused subject carries its own reason in one run and the accepted one is not listed",
+    subjects: ["feat(sync): the accepted one", COMMA_SCOPE_SUBJECT, "wip: half-done things"],
+    outcome: {
+      exitCode: 1,
+      stdout: "Checked 3 non-merge commit subject(s).\n",
+      stderr:
+        `${REFUSAL_HEADER}- 2222222 ${COMMA_SCOPE_SUBJECT}\n  ${oneScopeRule}\n` +
+        `- 3333333 wip: half-done things\n  ${GENERIC_REASON}\n`,
+    },
+  },
+];
 
-  test("each refused subject carries its own reason in one run", () => {
-    const { exitCode, stderr } = runValidator([
-      "feat(sync): the accepted one",
-      COMMA_SCOPE_SUBJECT,
-      "wip: half-done things",
-    ]);
-    expect(exitCode).toBe(1);
-    expect(stderr).not.toContain("the accepted one");
-    const lines = stderr.trimEnd().split("\n");
-    const comma = lines.findIndex((line) => line.includes(COMMA_SCOPE_SUBJECT));
-    const wip = lines.findIndex((line) => line.includes("wip: half-done things"));
-    expect(lines[comma + 1]).toBe(`  ${oneScopeRule}`);
-    expect(lines[wip + 1]).toBe(`  ${GENERIC_REASON}`);
-  });
-
-  test("control: a single-scope subject passes unchanged", () => {
-    const { exitCode, stderr } = runValidator(["style(contract): align the fixture layout"]);
-    expect(exitCode).toBe(0);
-    expect(stderr).toBe("");
-  });
+describe("the CI validator's whole outcome", () => {
+  for (const { name, subjects, outcome } of RUNS) {
+    test(name, () => {
+      expect(runValidator(subjects)).toEqual(outcome);
+    });
+  }
 });

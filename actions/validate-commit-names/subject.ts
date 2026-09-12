@@ -35,7 +35,6 @@ const commaScopedSubject = subjectGrammar(`${oneScope}(?:\\s*,\\s*${oneScope})+`
 export const oneScopeRule =
   "one scope per subject: split the change or pick the scope that names it";
 
-/** Why `value` is refused; undefined when the grammar accepts it. */
 export function refusal(value: string): string | undefined {
   if (conventionalSubject.test(value)) return undefined;
   if (commaScopedSubject.test(value)) return oneScopeRule;
