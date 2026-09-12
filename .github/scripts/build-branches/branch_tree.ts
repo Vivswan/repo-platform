@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-// The `build` branch tree, published beside the `stable` tag and consumed by nothing since the fleet's pins moved to
-// the tag (docs/build-provenance.md, "The build branch, until its deletion"); the guards below still hold it to the
-// shape a `uses:` ref can run. Nothing in it may vary between assemblies of one commit, so no timestamps or source
-// shas go in-tree: the provenance tree proof and publish.ts's no-change skip both compare it.
+// The `build` branch tree, published beside the `stable` tag; since the fleet's pins moved to the tag its only readers
+// are the starters already written into repositories (docs/build-provenance.md, "The build branch, until its
+// deletion"), so the guards below still hold it to the shape a `uses:` ref can run. Nothing in it may vary between
+// assemblies of one commit, so no timestamps or source shas go in-tree: the provenance tree proof and publish.ts's
+// no-change skip both compare it.
 
 import {
   cpSync,
