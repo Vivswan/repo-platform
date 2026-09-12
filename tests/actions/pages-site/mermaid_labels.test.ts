@@ -21,12 +21,13 @@ import {
   siteConfig,
   TEST_TIMEOUT_MS,
 } from "../../ci/pages_site_build/fixtures.ts";
+import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const REPOSITORY = "fixture-owner/fixture-repo";
 const PAGE = "/fixture-repo/latest/";
 const FONT = `${SHARED_TOKENS.code["--vp-code-font-size"]} ${SHARED_TOKENS.fonts["--vp-font-family-mono"]}`;
-const SCENARIO_TIMEOUT_MS = 60_000;
+const SCENARIO_TIMEOUT_MS = harnessBound(60_000);
 
 /** The reported node (its second line wraps into a third at mermaid's
  *  wrapping width), then the flowchart it was reported in. */
@@ -270,7 +271,10 @@ class Chrome {
 
   async close(): Promise<void> {
     void this.send("Browser.close").catch(() => undefined);
-    const exited = await Promise.race([this.process.exited, Bun.sleep(5_000).then(() => null)]);
+    const exited = await Promise.race([
+      this.process.exited,
+      Bun.sleep(harnessBound(5_000)).then(() => null),
+    ]);
     if (exited === null) {
       this.process.kill("SIGKILL");
       await this.process.exited;
@@ -367,7 +371,7 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 afterAll(async () => {
   await chrome?.close();
   server?.stop(true);
-}, 15_000);
+}, harnessBound(15_000));
 const temp = tempDirs();
 
 /** The site as Pages would serve it: the repository's base stripped, a

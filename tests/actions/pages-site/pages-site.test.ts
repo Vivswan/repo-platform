@@ -45,6 +45,7 @@ import {
 } from "../../../actions/pages-site/lib.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
+import { harnessBound } from "../../shared/harness_bound.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
@@ -560,7 +561,7 @@ describe("strict check build", () => {
         expect(readFileSync(page, "utf-8")).toContain("<p>Plain text here.</p>");
       }
     },
-    200_000,
+    harnessBound(200_000),
   );
 });
 
@@ -659,7 +660,7 @@ describe("link-rot reporting", () => {
       path: ["index.html", "other.html"],
       serverRoot: dir,
       concurrency: 5,
-      timeout: 5_000,
+      timeout: harnessBound(5_000),
       retry: true,
       linksToSkip: async () => false,
     });

@@ -6,6 +6,8 @@ import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { argvStub } from "../shared/argv_stub";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
+import { growthRatio, LINEAR_GROWTH_MAX } from "../shared/cpu_growth";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -773,40 +775,45 @@ describe("parseDirectives inside a container", () => {
   });
 });
 
+// The scanners and the fold each replaced a quadratic pass (a backtracking regex on one long run, a rescan of the
+// growing joined line on every continuation), so each is held to linear growth in CPU time, never to a wall-clock
+// bound: under load the fold ran 600 ms against a 300 ms bound while still linear.
 test.each([
   {
-    shape: "100k backticks in prose (the run tokenizer)",
-    line: `x ${"`".repeat(100_000)} [fleet-sync]`,
+    shape: "backticks in prose (the run tokenizer)",
+    line: (n: number) => `x ${"`".repeat(n)} [fleet-sync]`,
   },
   {
-    shape: "100k backticks as a fence line (the fence regex)",
-    line: `${"`".repeat(100_000)} [fleet-sync]`,
+    shape: "backticks as a fence line (the fence regex)",
+    line: (n: number) => `${"`".repeat(n)} [fleet-sync]`,
   },
   {
-    // 400k markers: the repeated-replace scan this row retired took 1.8 s here and 130 ms at 100k.
-    shape: "400k blockquote markers (the container scan)",
-    line: `${">".repeat(400_000)} [fleet-sync]`,
+    shape: "blockquote markers (the container scan)",
+    line: (n: number) => `${">".repeat(n)} [fleet-sync]`,
   },
-])("a run of $shape is scanned in linear time: the mention stays bare", ({ line }) => {
-  // The control for the scanner: the regex it replaced backtracked
-  // quadratically on one long run (about a second at this length).
-  const started = performance.now();
-  const parsed = parseDirectives(message(PROSE, line));
-  const elapsed = performance.now() - started;
-  expect(parsed).toEqual(misplaced(line));
-  expect(elapsed).toBeLessThan(300);
-});
+])(
+  "a run of $shape is scanned in linear time: the mention stays bare",
+  ({ line }) => {
+    expect(parseDirectives(message(PROSE, line(100_000)))).toEqual(misplaced(line(100_000)));
+    const growth = growthRatio(
+      (n) => message(PROSE, line(n)),
+      (body) => parseDirectives(body),
+    );
+    expect(growth).toBeLessThan(LINEAR_GROWTH_MAX);
+  },
+  harnessBound(60_000),
+);
 
-test("a justification wrapped over 100k lines folds in linear time and arms", () => {
-  // The control for the fold: rescanning the growing joined line on every
-  // continuation took 3.8 s here.
-  const body = message(`[fleet-sync: all] why\n${"more\n".repeat(100_000)}`.trimEnd(), PROSE);
-  const started = performance.now();
-  const parsed = parseDirectives(body);
-  const elapsed = performance.now() - started;
-  expect(parsed).toEqual(FLEET);
-  expect(elapsed).toBeLessThan(300);
-});
+test(
+  "a justification wrapped over 100k lines folds in linear time and arms",
+  () => {
+    const wrapped = (n: number) =>
+      message(`[fleet-sync: all] why\n${"more\n".repeat(n)}`.trimEnd(), PROSE);
+    expect(parseDirectives(wrapped(100_000))).toEqual(FLEET);
+    expect(growthRatio(wrapped, (body) => parseDirectives(body))).toBeLessThan(LINEAR_GROWTH_MAX);
+  },
+  harnessBound(60_000),
+);
 
 describe("main", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");

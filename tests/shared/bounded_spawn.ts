@@ -4,6 +4,8 @@
 //   capture() spreads live process.env                  -> disarms the hermetic and poisoned envs tests pass
 //   capture() folds a deadline expiry into an exit code -> an exit-code assertion could misread it as the failure under test
 
+import { harnessBound } from "./harness_bound";
+
 export const SPAWN_TIMEOUT_MS = 15_000;
 
 export interface BoundedSpawnOptions {
@@ -12,8 +14,8 @@ export interface BoundedSpawnOptions {
    * bun's own default, a snapshot of the environment at process start. */
   env?: Record<string, string | undefined>;
   stdin?: Uint8Array | "ignore";
-  /** A bound on hanging, not an operational deadline: callers with slow
-   * children (whole-tree writer runs) pass a generous one. */
+  /** A bound on hanging, not an operational deadline, stretched by tests/shared/harness_bound.ts's
+   * scale: callers with slow children (whole-tree writer runs) pass a generous one. */
   timeoutMs?: number;
 }
 
@@ -31,16 +33,10 @@ export function boundedSpawnSync(
   argv: string[],
   options: BoundedSpawnOptions = {},
 ): BoundedSpawnResult {
-  const timeoutMs = options.timeoutMs ?? SPAWN_TIMEOUT_MS;
-  // Guarded at the one mutation point because bun's spawnSync treats 0
-  // and Infinity as NO bound, and the ssot scanner (scripts/check/ssot/process_discipline.ts)
-  // trusts the `timeout: timeoutMs` identifier - a bad value here would pass
-  // the gate while disarming it.
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error(
-      `boundedSpawnSync: timeoutMs must be a positive finite number, got ${timeoutMs}`,
-    );
-  }
+  const requestedMs = options.timeoutMs ?? SPAWN_TIMEOUT_MS;
+  // The ssot scanner (scripts/check/ssot/process_discipline.ts) trusts the `timeout: timeoutMs` identifier,
+  // so harnessBound is where a value bun would read as NO bound is refused.
+  const timeoutMs = harnessBound(requestedMs);
   const proc = Bun.spawnSync(argv, {
     cwd: options.cwd,
     env: options.env,
@@ -51,9 +47,10 @@ export function boundedSpawnSync(
     killSignal: "SIGKILL",
   });
   if (proc.exitedDueToTimeout === true || proc.exitCode === null) {
+    const stretched = timeoutMs === requestedMs ? "" : ` (stretched to ${timeoutMs}ms for load)`;
     const cause =
       proc.exitedDueToTimeout === true
-        ? `exceeded the ${timeoutMs}ms harness bound`
+        ? `exceeded the ${requestedMs}ms harness bound${stretched}`
         : `died on signal ${proc.signalCode}`;
     throw new Error(
       `${argv.join(" ")} ${cause} - failed to look, not a result\n` +

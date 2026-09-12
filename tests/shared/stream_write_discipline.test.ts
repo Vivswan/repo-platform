@@ -14,6 +14,7 @@ import {
   asyncStreamWriteMismatches,
   NATURAL_EXIT_WRITE_FILES,
 } from "../../scripts/check/ssot/process_discipline.ts";
+import { harnessBound } from "./harness_bound";
 
 const REPO_ROOT = join(import.meta.dir, "../..");
 
@@ -35,19 +36,24 @@ function scriptFiles(root: string): string[] {
 }
 
 describe("forwarded child streams are written synchronously", () => {
-  test("no stream-write violations across the executable trees", () => {
-    // Reach control first: an empty walk would make the assertion below
-    // pass vacuously.
-    for (const root of ROOTS) {
-      expect(scriptFiles(root).length).toBeGreaterThan(0);
-    }
-    const findings = ROOTS.flatMap(scriptFiles).flatMap((rel) =>
-      asyncStreamWriteMismatches(
-        rel,
-        readFileSync(join(REPO_ROOT, rel), "utf-8"),
-        NATURAL_EXIT_WRITE_FILES.has(rel),
-      ),
-    );
-    expect(findings).toEqual([]);
-  });
+  test(
+    "no stream-write violations across the executable trees",
+    () => {
+      // Reach control first: an empty walk would make the assertion below
+      // pass vacuously.
+      for (const root of ROOTS) {
+        expect(scriptFiles(root).length).toBeGreaterThan(0);
+      }
+      const findings = ROOTS.flatMap(scriptFiles).flatMap((rel) =>
+        asyncStreamWriteMismatches(
+          rel,
+          readFileSync(join(REPO_ROOT, rel), "utf-8"),
+          NATURAL_EXIT_WRITE_FILES.has(rel),
+        ),
+      );
+      expect(findings).toEqual([]);
+    },
+    // A whole-tree read that took 0.4 s idle and passed bun's 5 s default under load.
+    harnessBound(30_000),
+  );
 });

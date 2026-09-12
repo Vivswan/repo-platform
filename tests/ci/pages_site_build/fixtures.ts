@@ -17,14 +17,15 @@ import {
 import { join, resolve } from "node:path";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { fixtureGit } from "../../shared/fixture_git.ts";
+import { harnessBound } from "../../shared/harness_bound.ts";
 import type { TempDirs } from "../../shared/temp_dir.ts";
 
 export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/build.ts");
 
 /** A vitepress build of four tiers runs well under this on CI runners; it
- *  is a hang bound, not a deadline. */
+ *  is a hang bound, not a deadline (boundedSpawnSync stretches it for load). */
 export const BUILD_TIMEOUT_MS = 180_000;
-export const TEST_TIMEOUT_MS = 200_000;
+export const TEST_TIMEOUT_MS = harnessBound(200_000);
 
 /** The CONFIG env the action step sets, from the plan or the caller. */
 export function siteConfig(
