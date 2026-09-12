@@ -14,7 +14,7 @@ Work in this order, always:
 
 1. Edit `modules:` (and the module's keys) in `.repo-platform.yml` on a branch and merge the PR.
 2. Run the sync: `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true`. Review the sync PR's report and merge.
-3. Finish the module's companion steps (starter customization, secrets, one-time setup).
+3. Finish the module's companion steps (starter customization, one-time setup).
 
 ## When to Apply
 
@@ -48,7 +48,7 @@ From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live ta
 
 | Module | Files | Class |
 |---|---|---|
-| `bun` | `.bun-version`, `.github/workflows/dependabot-bun-lockfile.yml` | managed |
+| `bun` | `.bun-version` | managed |
 | `deno` | `.dvmrc`, `.github/workflows/deno-audit.yml` | managed |
 | `uv`, `rust` | no file of their own | - |
 | every toolchain | blocks in `.gitignore` and `AGENTS.md`; a block in `.github/dependabot.yml` | split; managed |

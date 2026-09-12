@@ -13,9 +13,3 @@ rules:
     # reusable assigners, which never check out or run the triggering code.
     ignore:
       - auto-assign.yml
-  bot-conditions:
-    # The managed dependabot-bun-lockfile.yml checks github.actor on purpose:
-    # the pushed fix commit must not re-fire the dedupe; the job runs on
-    # same-repository heads only.
-    ignore:
-      - dependabot-bun-lockfile.yml

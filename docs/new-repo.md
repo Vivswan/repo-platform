@@ -87,7 +87,6 @@ Every path below comes from `files.yml` at the commit the `stable` tag names ([s
 | `.github/agents.md` | link | always |
 | `.github/copilot-instructions.md` | link | always |
 | `.bun-version` | managed | modules: `bun` |
-| `.github/workflows/dependabot-bun-lockfile.yml` | managed | modules: `bun` |
 | `.dvmrc` | managed | modules: `deno` |
 | `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
 | `.release-please-manifest.json` | starter | modules: `release-please` |
@@ -195,7 +194,7 @@ Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.m
 | --- | --- |
 | pr-title | A managed `pr-title.yml` workflow checking the PR title is a Conventional Commit with at most one scope, the grammar the `commit-names` job holds squash subjects to (titles become squash-commit subjects), with its own `pr-title` required check installed by the module's settings layer ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
 | release-please | Arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration - [the release pipeline](#the-release-pipeline-release-please) below. |
-| bun | A managed `dependabot-bun-lockfile.yml` that calls repo-platform's `dedupe-bun-lockfile` action at `@stable` to regenerate `bun.lock` from scratch on Dependabot's PRs and push the fix to the PR branch (Dependabot's own lockfile edits can leave stale nested entries that fail `bun install --frozen-lockfile`; the regeneration also refreshes every in-range pin, so most Dependabot PRs get a fix commit). [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
+| bun | The fleet's `.bun-version` pin ([toolchains.md](toolchains.md)). Dependabot's bun PRs install with the lockfile Dependabot wrote; a PR whose frozen install fails is fixed by hand, or by re-running Dependabot on it. Known limitation, accepted: Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2, so a Dependabot bun PR that cannot be rebased is closed and the bump made by hand. |
 | deno | A managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`, failing when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run. |
 | any toolchain with a formatter (every one except rust) | A repo-owned `auto-format.yml` starter: label a PR `fix-lint` to get a formatting commit pushed to it, prefilled with each selected toolchain's formatter. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
 | fuzzer | A repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](fuzzer.md) has the contract. |
@@ -203,11 +202,9 @@ Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.m
 
 ### Fix commits and re-triggering CI
 
-Two of those workflows push fix commits to PR branches with the default token (`github.token` / `GITHUB_TOKEN`). GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)), so the required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning saying so. The `held-run-notice` ssot rule ([held_run_notice.ts](../scripts/check/ssot/held_run_notice.ts)) keeps the two notices saying the same thing after the seam, with the starter's run warning and sticky comment wired to its one string.
+The `auto-format.yml` starter pushes its formatting commit to the PR branch with the default token (`github.token` / `GITHUB_TOKEN`). GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)), so the required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch. The job posts one sticky PR comment (edited in place on later runs) and a run warning saying so.
 
-- auto-format: a PAT with Contents:RW would start the run outright, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
-- bun lockfile fixes: on a public repository, whose ruleset carries the code-scanning rule, a hand `workflow_dispatch` run does not unblock the merge: it wants the PR-event CodeQL analysis.
-- Known limitation, accepted: Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2. A Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
+A PAT with Contents:RW would start the run outright, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
 
 ### The release pipeline (release-please)
 

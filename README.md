@@ -73,7 +73,7 @@ One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `RE
 
 Contents, Pull requests, Workflows, Administration, and Issues write are all hard requirements: without them sync legs or settings runs fail loudly, because a section the token cannot reach must not hide drift behind a green run. In particular a push GitHub refuses for a `.github/workflows/` change (the token lacks Workflows write) fails the sync for that repo with GitHub's error; nothing is delivered partially. A missing secret is a misconfiguration of this repo, and the failure carries the setup link.
 
-Managed repos need no secret. One optional feature carries its own token: a `bun` repo that registers the token as a *Dependabot* secret so the lockfile fixer's push re-runs CI. Missing that token warns and degrades the feature rather than failing the run.
+Managed repos need no secret.
 
 ## Going deeper
 

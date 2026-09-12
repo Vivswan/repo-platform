@@ -121,7 +121,6 @@ files:
   - {path: .github/copilot-instructions.md, class: link, target: ../AGENTS.md}
   # --- modules
   - {path: .bun-version, class: managed, when: {modules: [bun]}}
-  - {path: .github/workflows/dependabot-bun-lockfile.yml, class: managed, when: {modules: [bun]}}
   - {path: .dvmrc, class: managed, when: {modules: [deno]}}
   - {path: .github/workflows/deno-audit.yml, class: managed, when: {modules: [deno]}}
   - {path: .release-please-manifest.json, class: starter, when: {modules: [release-please]}}
@@ -138,3 +137,4 @@ retired:
   - {path: .github/SECURITY.md}
   - {path: .node-version}
   - {path: .github/workflows/validate-skills.yml}
+  - {path: .github/workflows/dependabot-bun-lockfile.yml}
