@@ -53,6 +53,7 @@ runs:
 
     # The tarball ships no node_modules, so the dependencies are installed here.
     # FILES_CONFIG is the files.yml at the build branch root, two levels above this action.
+    # REPOSITORY_PRIVATE is the visibility side of files.yml's `when` clauses, as the fleet plan reads it.
     - name: Validate the checkout
       id: validate
       if: steps.action-bun.outputs.ready == 'true' && steps.clear.outcome == 'success'
@@ -62,6 +63,7 @@ runs:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         ACTION_PATH: ${{ github.action_path }}
         FILES_CONFIG: ${{ github.action_path }}/../../files.yml
+        REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         SCRATCH_DIR: ${{ runner.temp }}/validate-managed-files
         VERDICT_FILE: ${{ runner.temp }}/validate-managed-files-verdict.json
       run: |

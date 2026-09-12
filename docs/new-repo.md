@@ -146,7 +146,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 | YAML | a YAML file anywhere in the repository that does not parse |
 | Conflict markers | a merge's conflict markers left in a source, config, or markdown file (the validator's text suffixes) |
 | Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, or an entry carrying a field the vocabulary lacks |
-| Manifest parity | an entry recorded under a class other than the one `files.yml` declares for its path (a relabel to `starter` would switch parity off), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
+| Manifest parity | an entry recorded under a class other than the one `files.yml` writes its path under for this repository's modules and visibility (a relabel to `starter` would switch parity off; a path no selected entry writes, a mirror target say, is judged as recorded), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 
 - Errors block; advisories inform. The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
@@ -173,7 +173,7 @@ PR edits modules: in .repo-platform.yml
 | | |
 |---|---|
 | What the PR check judges | The `plan` job runs on every event and reads `.repo-platform.yml`, checking it against the module data the build branch ships beside the plan action: every module name must exist and the file must parse. It fails closed, so an unknown module or a malformed registration never merges through a PR (a registration the sync does meet with an unknown name has that name dropped and the sync PR held with a Registration note). |
-| What the PR check does not judge | `validate-managed-files` reads the edited registration for its module names, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync PR brings the files, and the manifest with them. |
+| What the PR check does not judge | `validate-managed-files` reads the edited registration for its module names and for the class each recorded path now falls under, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync PR brings the files, and the manifest with them. One edit does fail the PR: a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say), because the sync that restamps the record reads the default branch. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules. |
 | Enforced by | [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
 
 #### The manual run

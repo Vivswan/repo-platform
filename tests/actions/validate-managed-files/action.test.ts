@@ -79,6 +79,7 @@ function play(scenario: Scenario): Outcome {
         ACTION_BUN: process.execPath,
         ACTION_PATH: actionPath,
         FILES_CONFIG: join(root, "files.yml"),
+        REPOSITORY_PRIVATE: "false",
         SCRATCH_DIR: scratch,
         VERDICT_FILE: verdictFile,
         ...scenario.env,

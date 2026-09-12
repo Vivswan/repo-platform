@@ -7,6 +7,7 @@ import {
   parseManifestFiles,
 } from "../../shared/manifest.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
+import { applies, type Selection, type When, whenOf } from "./selection.ts";
 
 export const REGISTRATION_PATH = ".repo-platform.yml";
 
@@ -37,13 +38,18 @@ export type Manifest =
   | { state: "malformed"; problem: string }
   | { state: "parsed"; files: Record<string, ManifestEntryShape> };
 
-/** What files.yml declares: its module names (the `modules` keys) and the
- *  class each `files` path is written under; or the reason it could not be
- *  read, which the registration check reports once, leaving both unjudged.
- *  A path listed under several `when` conditions collects every class. */
+export interface Declaration {
+  path: string;
+  class: string;
+  when: When | null;
+}
+
+/** The problem is reported once, by checks/registration.ts; every other reader leaves the data unjudged. */
 export type Vocabulary =
-  | { modules: ReadonlySet<string>; classes: ReadonlyMap<string, ReadonlySet<string>> }
+  | { modules: ReadonlySet<string>; files: readonly Declaration[] }
   | { problem: string };
+
+export type Target = { mode: "self" } | { mode: "render"; private: boolean };
 
 /** Every cross-check dependency (a missing modules list, a conflicted manifest, self mode) is a field here, never an
  *  ordering between checks. */
@@ -57,6 +63,12 @@ export interface Context {
    *  the record is null when the file is absent. */
   registration: { modules: unknown } | null;
   vocabulary: Vocabulary;
+  /** The class files.yml writes each path under for THIS repository, by the
+   *  writer's selection rule: a path whose declarations are all deselected
+   *  is absent here as it is from the writer's reservations (ownedPaths in
+   *  actions/plan/mirrors.ts). null when the registration or the data file
+   *  leaves the selection unknown. */
+  classes: ReadonlyMap<string, string> | null;
   manifest: Manifest;
 }
 
@@ -90,18 +102,43 @@ function loadVocabulary(filesConfig: string): Vocabulary {
   if (!Array.isArray(files)) {
     return { problem: `${filesConfig}: the module data file carries no files list` };
   }
-  const classes = new Map<string, Set<string>>();
+  const declarations: Declaration[] = [];
   for (const entry of files) {
     if (!isRecord(entry) || typeof entry.path !== "string" || typeof entry.class !== "string") {
       return {
         problem: `${filesConfig}: the module data file carries a files entry without a string path and class`,
       };
     }
-    const declared = classes.get(entry.path) ?? new Set<string>();
-    declared.add(entry.class);
-    classes.set(entry.path, declared);
+    const when = whenOf(entry.when);
+    if (when === undefined) {
+      return {
+        problem: `${filesConfig}: the module data file carries a files entry whose when clause is not the grammar's`,
+      };
+    }
+    declarations.push({ path: entry.path, class: entry.class, when });
   }
-  return { modules: new Set(Object.keys(modules)), classes };
+  return { modules: new Set(Object.keys(modules)), files: declarations };
+}
+
+/** Selected modules are the registration's names files.yml knows (the writer's resolveModules); one declaration per
+ *  path is live because the loader refuses two that can both hold (docs/sync.md, Selection). */
+function liveClasses(
+  vocabulary: Vocabulary,
+  registration: { modules: unknown } | null,
+  privateRepo: boolean,
+): ReadonlyMap<string, string> | null {
+  if ("problem" in vocabulary || !Array.isArray(registration?.modules)) return null;
+  const selection: Selection = {
+    modules: registration.modules.filter(
+      (name): name is string => typeof name === "string" && vocabulary.modules.has(name),
+    ),
+    private: privateRepo,
+  };
+  const classes = new Map<string, string>();
+  for (const entry of vocabulary.files) {
+    if (applies(entry.when, selection)) classes.set(entry.path, entry.class);
+  }
+  return classes;
 }
 
 function loadManifest(root: string): Manifest {
@@ -160,15 +197,19 @@ const WRITER_SOURCES = "files/";
 /** Managed repositories walk every path: they are validated as plain trees and everything in them is content. Self mode
  *  skips gitignored paths: the operator checkout carries gitignored working state (agent worktrees with in-progress
  *  rebases) that is not the repository's content. */
-export function loadContext(root: string, selfMode: boolean, filesConfig: string): Context {
+export function loadContext(root: string, filesConfig: string, target: Target): Context {
+  const registration = loadRegistration(root);
+  const vocabulary = loadVocabulary(filesConfig);
   return {
-    mode: selfMode ? "self" : "render",
+    mode: target.mode,
     root,
-    files: selfMode
-      ? walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES))
-      : walk(root, null),
-    registration: loadRegistration(root),
-    vocabulary: loadVocabulary(filesConfig),
+    files:
+      target.mode === "self"
+        ? walk(root, gitIgnored(root)).filter((rel) => !rel.startsWith(WRITER_SOURCES))
+        : walk(root, null),
+    registration,
+    vocabulary,
+    classes: target.mode === "self" ? null : liveClasses(vocabulary, registration, target.private),
     manifest: loadManifest(root),
   };
 }

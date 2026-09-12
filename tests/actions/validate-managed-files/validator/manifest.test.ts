@@ -261,18 +261,17 @@ describe("byte parity, entry by entry", () => {
     writeFileSync(dataFile, "placeholders: []\nmodules: {uv: {}}\nfiles: []\n");
     for (const cls of ["managed", "link"]) {
       const root = build(`{"class": "${cls}", "hash": "${sha("AGENTS.md")}"}`);
-      const result = boundedSpawnSync([process.execPath, VALIDATOR, "--files", dataFile, root], {
-        env: gitFreeEnv(),
-      });
+      const result = boundedSpawnSync(
+        [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", root],
+        { env: gitFreeEnv() },
+      );
       expect(result.stderr).toBe("");
       expect(result.exitCode).toBe(0);
     }
     const repointed = build(`{"class": "link", "hash": "${sha("docs/AGENTS.md")}"}`);
     const drifted = boundedSpawnSync(
-      [process.execPath, VALIDATOR, "--files", dataFile, repointed],
-      {
-        env: gitFreeEnv(),
-      },
+      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", repointed],
+      { env: gitFreeEnv() },
     );
     expect(drifted.exitCode).toBe(1);
     expect(drifted.stderr).toContain("CLAUDE.md: content does not match the sha256");
@@ -304,9 +303,11 @@ describe("the recorded class against files.yml", () => {
     `error: ${MANIFEST}: entry '${path}' is recorded as ${recorded} but files.yml declares ` +
     `the path ${declared} - the class decides what parity verifies, and the sync records the ` +
     "declared one; revert a hand edit (git history has the stamped original: the sync holds a " +
-    "drifted file whose record it cannot verify, never restamps it), or merge the pending sync " +
-    "PR when the platform changed the path's class since the last sync (a row that PR holds " +
-    "keeps the old record until it is resolved)";
+    "drifted file whose record it cannot verify, never restamps it), merge the pending sync PR " +
+    "when the platform changed the path's class since the last sync (a row that PR holds keeps " +
+    "the old record until it is resolved), or, when this registration's module change flips it " +
+    "(a mirror target a newly selected entry writes, say), land the edit that retires the old " +
+    "record first (docs/new-repo.md, PR edits modules)";
   const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
 
   // The starter row is the one that passed before: its branch verifies
@@ -373,6 +374,118 @@ describe("the recorded class against files.yml", () => {
     ]);
   });
 
+  // The table holds only the declarations the selection makes live: the
+  // writer reserves a path by the same rule, so a mirror it wrote at a
+  // deselected path is a record every later sync reproduces.
+  const SELECTION_FILES = [
+    "placeholders: []",
+    "modules: {optional: {}}",
+    "files:",
+    "  - {path: docs/source.md, class: managed}",
+    "  - {path: docs/copy.md, class: managed, when: {modules: [optional]}}",
+    "  - {path: docs/either.md, class: managed, when: {modules: [optional]}}",
+    "  - {path: docs/either.md, class: starter, when: {without: [optional]}}",
+    "  - {path: docs/local.md, class: starter, when: {private: false}}",
+    "  - {path: docs/local.md, class: managed, when: {private: true}}",
+    "retired: [{path: docs/old.md, moved_to: docs/source.md}]",
+    "",
+  ].join("\n");
+  const MIRRORS = "mirrors: [{source: docs/source.md, targets: [docs/copy.md]}]\n";
+  const SHARED = "shared\n";
+  const MIRROR = `{"class": "mirror", "hash": "${sha(SHARED)}"}`;
+  const STARTER = '{"class": "starter"}';
+  test.each<{
+    name: string;
+    registration: string;
+    private?: boolean;
+    entries: Record<string, string>;
+    expected: string[];
+  }>([
+    {
+      name: "a mirror at a managed path the selection leaves out is dispatched as recorded",
+      registration: `modules: []\n${MIRRORS}`,
+      entries: { "docs/copy.md": MIRROR },
+      expected: [],
+    },
+    {
+      name: "the same mirror at a selected managed path is the class error",
+      registration: `modules: [optional]\n${MIRRORS}`,
+      entries: { "docs/copy.md": MIRROR },
+      expected: [classError("docs/copy.md", "mirror", "managed")],
+    },
+    {
+      name: "the without variant is live: its starter record passes",
+      registration: "modules: []\n",
+      entries: { "docs/either.md": STARTER },
+      expected: [],
+    },
+    {
+      name: "the without variant is live: a managed record with the true hash is the error",
+      registration: "modules: []\n",
+      entries: { "docs/either.md": managedEntry("either\n") },
+      expected: [classError("docs/either.md", "managed", "starter")],
+    },
+    {
+      name: "the modules variant is live: the starter record is the error",
+      registration: "modules: [optional]\n",
+      entries: { "docs/either.md": STARTER },
+      expected: [classError("docs/either.md", "starter", "managed")],
+    },
+    {
+      name: "visibility is one side of the selection: private makes the managed variant live",
+      registration: "modules: []\n",
+      private: true,
+      entries: { "docs/local.md": STARTER },
+      expected: [classError("docs/local.md", "starter", "managed")],
+    },
+    {
+      name: "visibility is one side of the selection: public makes the starter variant live",
+      registration: "modules: []\n",
+      private: false,
+      entries: { "docs/local.md": STARTER },
+      expected: [],
+    },
+    {
+      name: "a retired path is no declaration: its record is verified as recorded",
+      registration: "modules: []\n",
+      entries: { "docs/old.md": managedEntry("original\n") },
+      expected: [
+        `error: docs/old.md: content does not match the sha256 recorded in ${MANIFEST} - the ` +
+          "file drifted from the last sync; local edits to a managed file are replaced by the " +
+          "next sync (move them to a repo-owned location), and platform-side updates restamp on that sync",
+      ],
+    },
+    {
+      name: "a registration without a modules list names no selection, so the classes stand unjudged",
+      registration: "modules: {uv: true}\n",
+      entries: { "docs/source.md": STARTER },
+      expected: [
+        "error: .repo-platform.yml: top-level `modules` is missing or not a list (the file may " +
+          "have failed to parse); set it to a YAML list of module names, e.g. modules: [uv, release-please]",
+      ],
+    },
+  ])("$name", ({ registration, private: privateRepo, entries, expected }) => {
+    const { exitCode, stderr } = runValidator(
+      {
+        ".repo-platform.yml": registration,
+        "docs/source.md": SHARED,
+        "docs/copy.md": SHARED,
+        "docs/either.md": "either\n",
+        "docs/local.md": "local\n",
+        "docs/old.md": "moved\n",
+        [MANIFEST]: manifestOf({
+          ...stampedBaseline(),
+          "docs/source.md": managedEntry(SHARED),
+          ...entries,
+        }),
+      },
+      [],
+      { filesYml: SELECTION_FILES, private: privateRepo },
+    );
+    expect(errors(stderr)).toEqual(expected);
+    expect(exitCode).toBe(expected.length === 0 ? 0 : 1);
+  });
+
   test("a data file without a files list is one error and the classes stand unjudged", () => {
     const { exitCode, stderr } = runValidator(
       { [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "starter"}' }) },
@@ -412,6 +525,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     symlinkSync("drifted.md", join(root, "docs/repointed.md"));
     mkdirSync(join(root, "docs/dir.md"));
     mkdirSync(join(root, ".github"));
+    writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
     writeFileSync(
       join(root, "files.yml"),
       "modules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n",
@@ -440,7 +554,9 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
-    const findings = checkManifestParity(loadContext(root, false, join(root, "files.yml")));
+    const findings = checkManifestParity(
+      loadContext(root, join(root, "files.yml"), { mode: "render", private: false }),
+    );
     const messages = findings.map((finding) => {
       expect(finding.severity).toBe("error");
       return finding.message.split(" - ")[0].split(";")[0];

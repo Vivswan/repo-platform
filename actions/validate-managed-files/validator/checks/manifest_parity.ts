@@ -47,19 +47,22 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     // The class decides what parity verifies (a starter: nothing), so it is
-    // judged against files.yml before any dispatch. A path files.yml does
-    // not declare (a mirror, a retired path, a deselected starter) is
-    // dispatched as recorded.
-    const declared = "problem" in ctx.vocabulary ? undefined : ctx.vocabulary.classes.get(rel);
-    if (declared !== undefined && !declared.has(entry.class)) {
+    // judged before any dispatch, against the declaration the selection
+    // makes live. A path no live declaration writes (a mirror target, a
+    // retired path, a deselected module's file) is dispatched as recorded.
+    const declared = ctx.classes?.get(rel);
+    if (declared !== undefined && declared !== entry.class) {
       findings.push(
         error(
           `${where} is recorded as ${entry.class} but files.yml declares the path ` +
-            `${[...declared].join(" or ")} - the class decides what parity verifies, and the ` +
+            `${declared} - the class decides what parity verifies, and the ` +
             "sync records the declared one; revert a hand edit (git history has the stamped " +
             "original: the sync holds a drifted file whose record it cannot verify, never " +
-            "restamps it), or merge the pending sync PR when the platform changed the path's " +
-            "class since the last sync (a row that PR holds keeps the old record until it is resolved)",
+            "restamps it), merge the pending sync PR when the platform changed the path's class " +
+            "since the last sync (a row that PR holds keeps the old record until it is resolved), " +
+            "or, when this registration's module change flips it (a mirror target a newly " +
+            "selected entry writes, say), land the edit that retires the old record first " +
+            "(docs/new-repo.md, PR edits modules)",
         ),
       );
       continue;
