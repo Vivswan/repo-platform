@@ -55,6 +55,9 @@ permissions:
 
 # A CALLED run takes a per-run group: its caller (post-green.yml's settings-fleet job) already holds
 # settings-repos, and a called workflow waiting on its caller's lane deadlocks.
+# cancel-in-progress stays false on both: the lane orders by arrival, so cancelling would let an older
+# commit's late run cancel the newer apply in flight. The selector stands that run down instead
+# (fleet/newest_main.ts; the settings-lane-newest-wins ssot rule pins the pair).
 concurrency:
   group: ${{ inputs.sha != '' && format('settings-repos-called-{0}', github.run_id) || 'settings-repos' }}
   cancel-in-progress: false
@@ -154,7 +157,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       # The only step that sees the name in the clear: resolve_settings_target.ts masks the target
-      # before anything else prints and hands it on as TARGET through GITHUB_ENV.
+      # before anything else prints and hands it on as TARGET through GITHUB_ENV. It also asks newest
+      # wins again at the write: a re-run of failed rows reuses the plan's answer.
       - name: Resolve the row's target
         env:
           ROW_KEY: ${{ matrix.key }}

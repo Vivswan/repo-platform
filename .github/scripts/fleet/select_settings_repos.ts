@@ -8,7 +8,7 @@
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
-import { addMask, env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { addMask, env, error, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { moduleRoster } from "../sync/modules.ts";
 import { planMatrix, rowKeyOf } from "../sync/resolve_row.ts";
@@ -26,6 +26,7 @@ import {
   scrubSlug,
   selectedLine,
 } from "./discovery.ts";
+import { supersededBy, supersededNotice } from "./newest_main.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import {
   modulesAdmit,
@@ -39,11 +40,32 @@ import {
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
 const runId = requireEnv("GITHUB_RUN_ID");
+const sha = requireEnv("GITHUB_SHA");
 
 const scope = parseScope(readDispatchRepo(owner), new Set(moduleRoster()));
 if (scope.kind === "error") {
   error(scope.message);
   process.exit(1);
+}
+
+function emitPlan(targets: DiscoveredRepo[]): void {
+  setOutput("count", String(targets.length));
+  setOutput("matrix", JSON.stringify(planMatrix(targets, rowKeyOf(pat, runId))));
+}
+
+// Newest wins (docs/settings.md): a run main moved past hands the apply an empty plan and exits green; the tip's own run or
+// the nightly applies. Asked before the first fleet read, so a superseded run names nothing and spins up no row; the row's
+// resolver asks again at the write, because a re-run of failed rows reuses this plan.
+let newer: string | null;
+try {
+  newer = supersededBy(sha);
+} catch (lookFailure) {
+  fail(lookFailure instanceof Error ? lookFailure.message : String(lookFailure));
+}
+if (newer !== null) {
+  notice(supersededNotice(sha, newer));
+  emitPlan([]);
+  process.exit(0);
 }
 
 // The step summary is not covered by the runner's masker, so callers pass already-scrubbed text.
@@ -192,8 +214,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
 
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
-setOutput("count", String(targets.length));
-setOutput("matrix", JSON.stringify(planMatrix(targets, rowKeyOf(pat, runId))));
+emitPlan(targets);
 const line = selectedLine(
   targets,
   "settings targets",

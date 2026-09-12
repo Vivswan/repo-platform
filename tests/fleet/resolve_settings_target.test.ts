@@ -5,6 +5,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -14,6 +15,8 @@ const temp = tempDirs();
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/fleet/resolve_settings_target.ts");
 const PAT = "stub-token";
 const RUN_ID = "4242";
+const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
+const NEWER_SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4";
 const keyOf = rowKeyOf(PAT, RUN_ID);
 const HIDDEN = "Vivswan/Hidden-Server";
 const PUBLIC = "Vivswan/steady";
@@ -65,6 +68,22 @@ describe("resolve_settings_target.ts", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    // The row's own newest-wins read: main's tip is STUB_MAIN_TIP (the
+    // run's commit unless a case moves it), or a dead remote.
+    writeFileSync(
+      join(bin, "git"),
+      [
+        "#!/usr/bin/env bash",
+        '[ "$1" = "ls-remote" ] || { echo "stub git: unexpected $*" >&2; exit 64; }',
+        'if [ -n "$STUB_GIT_FAIL" ]; then',
+        "  echo \"fatal: unable to access 'origin': Could not resolve host\" >&2",
+        "  exit 128",
+        "fi",
+        'printf "%s\\trefs/heads/main\\n" "$STUB_MAIN_TIP"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
   });
 
   /** The workflow's env for the step; a case sets a variable to undefined to leave it unset. */
@@ -76,8 +95,10 @@ describe("resolve_settings_target.ts", () => {
       PATH: `${bin}:${process.env.PATH}`,
       HOME: process.env.HOME,
       STUB_PAGES: join(root, "pages.json"),
+      STUB_MAIN_TIP: SHA,
       GITHUB_ENV: envFile,
       GITHUB_RUN_ID: RUN_ID,
+      GITHUB_SHA: SHA,
       PAT,
       OWNER: "Vivswan",
       ...env,
@@ -176,6 +197,32 @@ describe("resolve_settings_target.ts", () => {
       reason: "no GITHUB_ENV to write the name to",
       env: { ROW_KEY: keyOf(HIDDEN), GITHUB_ENV: undefined },
       outcome: refused(2, "GITHUB_ENV must be set"),
+    },
+    {
+      reason: "no commit to judge newest against",
+      env: { ROW_KEY: keyOf(HIDDEN), GITHUB_SHA: undefined },
+      outcome: refused(2, "GITHUB_SHA must be set"),
+    },
+    // Newest wins at the write: a re-run of failed rows reuses the plan's
+    // answer, so the row reads main's tip itself before listing anything.
+    {
+      reason:
+        "a row whose commit main moved past stands down green with no TARGET, listing nothing",
+      env: { ROW_KEY: keyOf(HIDDEN), STUB_MAIN_TIP: NEWER_SHA },
+      outcome: {
+        exitCode: 0,
+        stdout: `::notice::${supersededNotice(SHA, NEWER_SHA)}\n`,
+        stderr: "",
+        env: "",
+      },
+    },
+    {
+      reason: "a tip that cannot be read fails the row, never guessing",
+      env: { ROW_KEY: keyOf(HIDDEN), STUB_GIT_FAIL: "1" },
+      outcome: refused(
+        1,
+        "git ls-remote for refs/heads/main could not answer (exit 128); refusing to guess: fatal: unable to access 'origin': Could not resolve host",
+      ),
     },
     {
       reason: "a listing that fails (gh's own stderr, no row resolved)",

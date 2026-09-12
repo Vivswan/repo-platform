@@ -65,6 +65,20 @@ Every run, on all three entries, applies only from a GREEN commit ([fleet/requir
 
 The gate is ordering, not content: the apply reads nothing but the target list from this checkout (every settings document sits rendered in its own repository), so what it guards is the operator's own scripts and the place of the apply behind the sync in a green run. A red nightly is the signal that drift is going unhealed, so the halt is a FAILED run on purpose.
 
+### Newest wins
+
+The `settings-repos` lane runs one apply at a time in ARRIVAL order (post-green.yml's `settings-fleet` job holds it on a call, the cron and dispatch runs hold it themselves, `cancel-in-progress: false` on both), and CI durations vary, so an older commit's run can reach the lane after a newer one's. A run therefore asks whether main's tip is still its own commit ([fleet/newest_main.ts](../.github/scripts/fleet/newest_main.ts), one `git ls-remote`): when main moved on, it stands down GREEN with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
+
+| Where it asks | Why there |
+| --- | --- |
+| The selector, before its first fleet read | The cheap exit: an empty plan, so a superseded run names nothing and spins up no row. |
+| Each row's resolver, before its listing | The guarantee, at the write: a re-run of failed rows reuses the plan's answer, and by then a newer run may have applied; no `TARGET` skips the apply step. |
+
+| Guarantee | No apply row writes after a row of a newer main commit's run did: an older run's rows wait their turn on the lane and stand down, or never spin up. |
+| --- | --- |
+| The one gap | GitHub keeps one pending job per lane and replaces it with the newest arrival, so a burst can evict the newest commit's pending run behind an older one's; that older run stands down, and the next green push or the nightly applies. |
+| A failed look | A `git ls-remote` that cannot answer fails the run or the row: guessed "newest" would let a superseded run write, guessed "superseded" would stand the newest run down. |
+
 ## How the apply works
 
 A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([sync.md](sync.md#the-operator)). The selector lists the targets and keys each row of the apply matrix; every apply job resolves its own target and runs the pinned action on it, in `repos` mode, from its rendered `.github/settings.yml` on its default branch.
@@ -72,7 +86,7 @@ A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's op
 | Step | Script | What it does |
 | --- | --- | --- |
 | plan: select | [fleet/select_settings_repos.ts](../.github/scripts/fleet/select_settings_repos.ts) | the three probes below over every discovered repository the scope admits, sorted; the log names the public targets and counts the private ones; the outputs are `count` and `matrix`: one row per target, in the selection's order, each an index and the row's key, the sync operator's own `rowKeyOf` ([sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts): an HMAC of the slug under the fleet token and the run id), so a private target is identified without being named |
-| apply: resolve | [fleet/resolve_settings_target.ts](../.github/scripts/fleet/resolve_settings_target.ts) | lists the owner's writable repositories once and finds the one the row's key names; registers every form of the name with the runner's masker before anything else prints, and hands the slug to the action through `GITHUB_ENV` (`TARGET`); a key no listed repository carries (the grant moved mid-run) refuses, naming nothing |
+| apply: resolve | [fleet/resolve_settings_target.ts](../.github/scripts/fleet/resolve_settings_target.ts) | asks [newest wins](#newest-wins) at the write, then lists the owner's writable repositories once and finds the one the row's key names; registers every form of the name with the runner's masker before anything else prints, and hands the slug to the action through `GITHUB_ENV` (`TARGET`); a key no listed repository carries (the grant moved mid-run) refuses, naming nothing |
 | apply: apply | the pinned action, `repos:` that one target | the action's own run over the target: the log, summary, and `repos-result` output are the job's |
 
 A target is selected when all three probes pass, in this order:

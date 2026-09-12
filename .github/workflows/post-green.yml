@@ -176,6 +176,8 @@ jobs:
 
   # Every target on every called run: the apply is idempotent and reads each target's own state, so no diff decides it.
   # Ordered behind sync-fleet whatever its result, so a synced repo is applied after its sync; holds the lane the called run keys around.
+  # Never cancelling: the lane orders by arrival, and an older commit's late run must wait and stand down in the selector
+  # (fleet/newest_main.ts), not cancel the newer apply in flight.
   settings-fleet:
     needs: [sync-fleet]
     if: github.event_name != 'workflow_dispatch' && !cancelled()
