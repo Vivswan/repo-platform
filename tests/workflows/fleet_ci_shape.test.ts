@@ -102,10 +102,15 @@ describe("fleet-ci.yml", () => {
       expect.stringContaining("repo-platform/actions/validate-managed-files@build"),
       "run",
     ]);
-    // The token serves the aligned tree fetch, the freshness read, and the
-    // sticky comment; the action takes no other input.
+    // The token serves the sticky comment; the visibility is the plan's
+    // resolved output, so the validator and the plan select by one reading
+    // (the plan resolves it from the payload, or the API when the event
+    // carries no repository object).
     expect(steps[1]?.id).toBe("validate");
-    expect(steps[1]?.with?.["github-token"]).toBe("${{ secrets.GITHUB_TOKEN }}");
+    expect(steps[1]?.with).toEqual({
+      "github-token": "${{ secrets.GITHUB_TOKEN }}",
+      "private": "${{ needs.plan.outputs.private }}",
+    });
     // The report action DEFERS the integrity verdict; the LAST step
     // re-raises it fail-closed, hence '!=': an output that resolved EMPTY
     // (a broken or renamed mapping inside the action) still re-raises -

@@ -63,6 +63,7 @@ jobs:
         id: validate
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          private: ${{ needs.plan.outputs.private }}
       # Fail-closed: != 'success' re-raises on 'failure' AND on an output
       # that resolved empty (a broken mapping must never read as green).
       - name: Fail on a finding

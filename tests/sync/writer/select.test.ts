@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolveModules } from "../../../.github/scripts/sync/writer/select.ts";
-import { applies, parseFilesConfig, selectEntries } from "../../../actions/plan/files_config.ts";
+import { parseFilesConfig, selectEntries } from "../../../actions/plan/files_config.ts";
 
 const CONFIG = parseFilesConfig(`
 placeholders: []
@@ -13,21 +13,6 @@ files:
   - { path: private.yml, class: managed, when: { private: true } }
   - { path: toolchain.yml, class: managed, when: { any: [bun, fuzzer] } }
 `);
-
-describe("applies", () => {
-  test.each([
-    [{ modules: ["a", "b"] }, ["a", "b"], true],
-    [{ modules: ["a", "b"] }, ["a"], false],
-    [{ any: ["a", "b"] }, ["b"], true],
-    [{ any: ["a", "b"] }, [], false],
-    [{ without: ["a"] }, ["b"], true],
-    [{ without: ["a"] }, ["a", "b"], false],
-    [{ private: true }, [], false],
-    [null, [], true],
-  ])("%j with %j -> %p", (when, modules, expected) => {
-    expect(applies(when, { modules, private: false })).toBe(expected);
-  });
-});
 
 describe("selectEntries", () => {
   test("picks one docs.yml variant per selection and honours visibility", () => {

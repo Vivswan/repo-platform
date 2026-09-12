@@ -3,8 +3,9 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
+import { applies, type Selection, type When } from "../../shared/selection.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
-import { applies, type Selection, type When, whenOf } from "./selection.ts";
+import { whenOf } from "./when_of.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -59,7 +60,7 @@ export interface Context {
   registration: { modules: unknown } | null;
   vocabulary: Vocabulary;
   /** The class files.yml writes each path under for THIS repository, by the
-   *  writer's selection rule: a path whose declarations are all deselected
+   *  one selection rule: a path whose declarations are all deselected
    *  is absent here as it is from the writer's reservations (ownedPaths in
    *  actions/plan/mirrors.ts). null when the registration or the data file
    *  leaves the selection unknown. */

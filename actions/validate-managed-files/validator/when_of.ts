@@ -1,29 +1,5 @@
+import type { When } from "../../shared/selection.ts";
 import { isRecord } from "./readers.ts";
-
-export interface When {
-  modules?: string[];
-  any?: string[];
-  without?: string[];
-  private?: boolean;
-}
-
-export interface Selection {
-  modules: readonly string[];
-  private: boolean;
-}
-
-/** The writer's selection rule, `applies` in actions/plan/files_config.ts, repeated here because this action carries no
- *  zod and so cannot import the loader; tests/actions/validate-managed-files/validator/selection.test.ts pins the two equal. */
-export function applies(when: When | null, selection: Selection): boolean {
-  if (when === null) return true;
-  const selected = (name: string) => selection.modules.includes(name);
-  return (
-    (when.modules ?? []).every(selected) &&
-    (when.any === undefined || when.any.some(selected)) &&
-    !(when.without ?? []).some(selected) &&
-    (when.private === undefined || when.private === selection.private)
-  );
-}
 
 const LIST_KEYS = ["modules", "any", "without"] as const;
 const WHEN_KEYS = new Set<string>([...LIST_KEYS, "private"]);
