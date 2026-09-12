@@ -4,8 +4,13 @@ import { isMergeSubject, refusal, subject } from "./subject.ts";
 
 const zeroSha = /^0{40}$/;
 
-interface Commit {
-  sha: string;
+// One judge for two callers: fleet-ci's commit-names step hands over the event's commit range, the pr-title
+// workflow hands over the PR title that becomes the squash subject (docs/fleet-guidelines.md promises one grammar).
+const EXAMPLES =
+  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.";
+
+interface Judged {
+  label: string;
   subject: string;
 }
 
@@ -55,7 +60,7 @@ function eventPayload(): EventPayload {
   return JSON.parse(readFileSync(eventPath, "utf8")) as EventPayload;
 }
 
-function listCommits(): Commit[] {
+function listCommits(): Judged[] {
   const eventName = process.env.GITHUB_EVENT_NAME;
   const payload = eventPayload();
 
@@ -66,7 +71,7 @@ function listCommits(): Commit[] {
       throw new Error("pull_request event is missing base/head SHAs.");
     }
     return shasInRange(`${base}..${head}`).map((sha) => ({
-      sha,
+      label: `${sha.slice(0, 7)} `,
       subject: commitSubject(sha),
     }));
   }
@@ -77,7 +82,7 @@ function listCommits(): Commit[] {
     // A new branch's `before` is the zero sha and a force-push orphans it: the push payload is the fallback.
     if (before && after && !zeroSha.test(before) && revExists(before) && revExists(after)) {
       return shasInRange(`${before}..${after}`).map((sha) => ({
-        sha,
+        label: `${sha.slice(0, 7)} `,
         subject: commitSubject(sha),
       }));
     }
@@ -90,7 +95,7 @@ function listCommits(): Commit[] {
       );
     }
     return listed.map((commit) => ({
-      sha: commit.id,
+      label: `${commit.id.slice(0, 7)} `,
       subject: subject(commit.message),
     }));
   }
@@ -98,30 +103,30 @@ function listCommits(): Commit[] {
   return [];
 }
 
-function validateCommitNames(): void {
-  const commits = listCommits();
-  const checked = commits.filter((commit) => !isMergeSubject(commit.subject));
-  const failures = checked.flatMap((commit) => {
-    const reason = refusal(commit.subject);
-    return reason === undefined ? [] : [{ ...commit, reason }];
+function judge(entries: Judged[], header: string): void {
+  const failures = entries.flatMap((entry) => {
+    const reason = refusal(entry.subject);
+    return reason === undefined ? [] : [{ ...entry, reason }];
   });
-
-  console.log(`Checked ${checked.length} non-merge commit subject(s).`);
-
-  if (failures.length > 0) {
-    const lines = failures.map(
-      (commit) => `- ${commit.sha.slice(0, 7)} ${commit.subject}\n  ${commit.reason}`,
-    );
-    console.error(
-      [
-        "Commit subjects must be Conventional Commits.",
-        "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.",
-        "",
-        ...lines,
-      ].join("\n"),
-    );
-    process.exitCode = 1;
-  }
+  if (failures.length === 0) return;
+  const lines = failures.map((entry) => `- ${entry.label}${entry.subject}\n  ${entry.reason}`);
+  console.error([header, EXAMPLES, "", ...lines].join("\n"));
+  process.exitCode = 1;
 }
 
-validateCommitNames();
+function main(): void {
+  const title = process.env.PR_TITLE ?? "";
+  if (title !== "") {
+    console.log("Checked the PR title.");
+    judge(
+      [{ label: "", subject: subject(title) }],
+      "The PR title becomes the squash-merge subject and must be a Conventional Commit.",
+    );
+    return;
+  }
+  const commits = listCommits().filter((commit) => !isMergeSubject(commit.subject));
+  console.log(`Checked ${commits.length} non-merge commit subject(s).`);
+  judge(commits, "Commit subjects must be Conventional Commits.");
+}
+
+main();

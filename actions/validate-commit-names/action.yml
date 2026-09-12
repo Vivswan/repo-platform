@@ -1,9 +1,18 @@
 name: Validate Commit Names
 description: >-
-  Fails when any commit subject in the push/PR range is not a Conventional
-  Commit (feat/fix/chore/docs/...). Merge commits are skipped. Requires the
-  repository to be checked out with fetch-depth: 0 so the base..head range
-  is resolvable on pull_request events.
+  Fails when a subject is not a Conventional Commit (feat/fix/chore/docs/...)
+  with at most one scope. Without `title`, judges every non-merge commit
+  subject in the push/PR range, which needs the repository checked out with
+  fetch-depth: 0 so base..head resolves on pull_request events. With `title`,
+  judges that one string instead and needs no checkout.
+
+inputs:
+  title:
+    description: >-
+      A PR title to judge in place of the commit range: it becomes the squash
+      subject, so the same grammar holds it. Empty (the default) judges the range.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -17,8 +26,9 @@ runs:
       with:
         pin: ${{ github.action_path }}/.bun-version
 
-    - name: Validate commit subjects
+    - name: Validate the subjects
       shell: bash
       env:
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        PR_TITLE: ${{ inputs.title }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/validate-commit-names.ts"'

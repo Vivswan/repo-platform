@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { oneScopeRule, refusal } from "../../../actions/validate-commit-names/subject.ts";
+import { oneScopeRule, refusal, subject } from "../../../actions/validate-commit-names/subject.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
@@ -67,10 +67,9 @@ describe("refusal", () => {
   }
 });
 
-const REFUSAL_HEADER =
-  "Commit subjects must be Conventional Commits.\n" +
-  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.\n" +
-  "\n";
+const EXAMPLES =
+  "Examples: `feat: add setup flow`, `fix: repair installer`, `feat!: simplify bootstrap`, `chore(main): release 3.0.0`.\n\n";
+const REFUSAL_HEADER = `Commit subjects must be Conventional Commits.\n${EXAMPLES}`;
 
 const RUNS: { name: string; subjects: string[]; outcome: BoundedSpawnResult }[] = [
   {
@@ -113,6 +112,55 @@ describe("the CI validator's whole outcome", () => {
   for (const { name, subjects, outcome } of RUNS) {
     test(name, () => {
       expect(runValidator(subjects)).toEqual(outcome);
+    });
+  }
+});
+
+// The fleet's pr-title workflow hands the action the PR title as its `title` input, with no checkout and no event
+// payload: the title becomes the squash subject, so the same refusal() judges it and no title passes that check to
+// land red at the commit-names gate. A title is never a merge commit, so the range's merge exemption does not apply.
+function runTitleJudge(title: string): BoundedSpawnResult {
+  return boundedSpawnSync(
+    [process.execPath, "actions/validate-commit-names/validate-commit-names.ts"],
+    { cwd: root, env: { PATH: process.env.PATH, PR_TITLE: title } },
+  );
+}
+
+const TITLE_HEADER = `The PR title becomes the squash-merge subject and must be a Conventional Commit.\n${EXAMPLES}`;
+
+const TITLES: [title: string, reason: string | undefined][] = [
+  ["fix(a): x", undefined],
+  ["feat!: x", undefined],
+  ["fix(a)!: x", undefined],
+  ["docs: x", undefined],
+  ["docs(all-green/build.v2_1): x", undefined],
+  ["fix: x ", undefined],
+  ["fix:  x", undefined],
+  ["fix(a,b): x", oneScopeRule],
+  ["fix(a, b): x", oneScopeRule],
+  ["fix(a,b)!: x", oneScopeRule],
+  ["fix(a b): x", GENERIC_REASON],
+  ["fix(): x", GENERIC_REASON],
+  ["fix()!: x", GENERIC_REASON],
+  ["fix(a b)!: x", GENERIC_REASON],
+  ["fix(a):x", GENERIC_REASON],
+  ["fix(a): ", GENERIC_REASON],
+  ["fix:  ", GENERIC_REASON],
+  ["fix: \t", GENERIC_REASON],
+  ["Fix(a): x", GENERIC_REASON],
+  ["bogus(a): x", GENERIC_REASON],
+  ["(a): x", GENERIC_REASON],
+  ["Merge branch 'main' into feature", GENERIC_REASON],
+];
+
+describe("the PR title judged as the squash subject it becomes", () => {
+  for (const [title, reason] of TITLES) {
+    test(`${reason ?? "accepted"}: ${JSON.stringify(title)}`, () => {
+      expect(runTitleJudge(title)).toEqual({
+        exitCode: reason === undefined ? 0 : 1,
+        stdout: "Checked the PR title.\n",
+        stderr: reason === undefined ? "" : `${TITLE_HEADER}- ${subject(title)}\n  ${reason}\n`,
+      });
     });
   }
 });
