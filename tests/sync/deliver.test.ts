@@ -30,6 +30,7 @@ const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
 
+// Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
   'case "$*" in',
@@ -42,6 +43,7 @@ const GIT_LINES = [
 ];
 const GH_LINES = [
   'printf "gh %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
   'case "$*" in',
   '  "${STUB_GH_FAIL:-<none>}"*) echo "gh: HTTP 502" >&2; exit 1 ;;',
   '  "api user "*) echo token-bot ;;',

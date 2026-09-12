@@ -215,6 +215,9 @@ class Delivery {
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
     if (login.exitCode !== 0) return null;
+    // gh refuses `--slurp` beside `--jq`, so the filter runs per page and
+    // prints one line per matching issue; created-ascending, the first
+    // line across the pages is the oldest.
     const list = this.run(
       [
         "gh",
@@ -223,7 +226,6 @@ class Delivery {
         "--method",
         "GET",
         "--paginate",
-        "--slurp",
         "-f",
         "state=all",
         "-f",
@@ -235,15 +237,15 @@ class Delivery {
         "-F",
         "per_page=100",
         "--jq",
-        `[.[][] | select(has("pull_request") | not) | select(.title == env.ISSUE_TITLE)] | first | if . == null then "" else "\\(.number) \\(.state)" end`,
+        `.[] | select(has("pull_request") | not) | select(.title == env.ISSUE_TITLE) | "\\(.number) \\(.state)"`,
       ],
       "gh api issues GET",
       { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
     );
     if (list.exitCode !== 0) return null;
-    const found = list.stdout.trim();
-    if (found === "") return "";
-    const [number, state] = found.split(" ");
+    const oldest = list.stdout.split("\n").find((line) => line !== "");
+    if (oldest === undefined) return "";
+    const [number, state] = oldest.split(" ");
     return { number, state };
   }
 
