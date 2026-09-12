@@ -150,20 +150,20 @@ The `validate-managed-files` job judges the repository against the platform's cu
 
 - Errors block; advisories inform. The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
-- The check judges what the last sync recorded, so a module edit alone changes nothing here; the sync PR that follows brings the files and the manifest together ([changing the module selection](#changing-the-module-selection)).
+- The check judges what the last sync recorded against the classes the edited selection makes live, so a module edit alone changes nothing here unless it flips a recorded path's class (the exception in the table below); the sync PR that follows brings the files and the manifest together ([changing the module selection](#changing-the-module-selection)).
 
 ### Changing the module selection
 
 A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR.
 
-- The managed-files check is green on the first PR by design: it judges the stamped manifest, never the module list, so nothing is bypassed.
+- The managed-files check is green on the first PR by design: it judges the stamped manifest against the classes the new selection makes live, so nothing is bypassed; the one exception is an edit that flips a recorded path's class (see the table below).
 - The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.node-version` for `node`). It stays red until the sync PR lands unless the first PR adds that file.
 - The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text
 PR edits modules: in .repo-platform.yml
   -> plan reads the registration and checks it against the build's module data (an unknown module or a malformed file fails the job)
-  -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet
+  -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> merge the registration edit (the files cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true
   -> the sync opens a PR carrying the files and the new manifest stamp (the writer replaces platform files whole), held for review
