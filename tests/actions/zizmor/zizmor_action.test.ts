@@ -25,8 +25,8 @@ describe("actions/zizmor", () => {
     expect(action.inputs?.["upload-sarif"]?.default).toBe("true");
     expect(action.runs.steps.map((step) => step.name)).toEqual([
       "Resolve the policy",
-      "Upload every finding to code scanning",
-      "Upload every finding to code scanning (retry)",
+      "Upload the high findings to code scanning",
+      "Upload the high findings to code scanning (retry)",
       "Fail on a high finding",
       "Fail on a high finding (retry)",
       "Remove the copied policy",
@@ -60,8 +60,8 @@ describe("actions/zizmor", () => {
       retry: uploadRetry,
       id: "sarif",
       firstIf: "inputs.upload-sarif == 'true'",
-      retryName: "Upload every finding to code scanning (retry)",
-      inputs: { "advanced-security": true, "min-severity": "medium" },
+      retryName: "Upload the high findings to code scanning (retry)",
+      inputs: { "advanced-security": true, "min-severity": "high" },
     },
     {
       pass: "gate",

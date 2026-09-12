@@ -136,7 +136,7 @@ describe("reportBody", () => {
       "Nightly Trivy scan, 1 HIGH, 1 LOW. Replay from the repository root:",
       "",
       "```",
-      "trivy fs --scanners vuln,misconfig,secret --ignorefile .trivyignore.yaml Dockerfile",
+      "trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml Dockerfile",
       "```",
       "",
       "- HIGH DS-0002: Image user should not be 'root'. Add 'USER <non root user name>' line to the Dockerfile https://avd.aquasec.com/misconfig/ds-0002",
@@ -227,7 +227,7 @@ describe("shellWord", () => {
     expect(
       reportBody({ target: "my app/bun.lock", findings: [{ severity: "LOW", line: "x" }] }),
     ).toContain(
-      "\ntrivy fs --scanners vuln,misconfig,secret --ignorefile .trivyignore.yaml 'my app/bun.lock'\n",
+      "\ntrivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml 'my app/bun.lock'\n",
     );
   });
 });

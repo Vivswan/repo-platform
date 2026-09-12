@@ -22,6 +22,8 @@ import { IGNORE_FILE } from "./ignore_check.ts";
 export const SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 export const SCANNERS = "vuln,misconfig,secret";
+/** The nightly scan's filter; the replay must see what the scan saw. */
+export const SCAN_SEVERITY = "HIGH,CRITICAL";
 /** The report's row cap: the issue shows the heading plus 60 lines. */
 export const MAX_ROWS = 50;
 
@@ -113,15 +115,14 @@ export function severitySummary(findings: Finding[]): string {
 
 export function reportBody(report: TargetReport): string {
   const count = report.findings.length;
-  // The replay names the bypass file unconditionally so it sees what the
-  // scan saw; Trivy skips a missing ignore file.
+  // The replay names the bypass file unconditionally: Trivy skips a missing ignore file.
   const lines = [
     `# ${report.target}: ${count} finding${count === 1 ? "" : "s"}`,
     "",
     `Nightly Trivy scan, ${severitySummary(report.findings)}. Replay from the repository root:`,
     "",
     "```",
-    `trivy fs --scanners ${SCANNERS} --ignorefile ${IGNORE_FILE} ${shellWord(report.target)}`,
+    `trivy fs --scanners ${SCANNERS} --severity ${SCAN_SEVERITY} --ignorefile ${IGNORE_FILE} ${shellWord(report.target)}`,
     "```",
     "",
     ...report.findings.slice(0, MAX_ROWS).map((f) => `- ${f.severity} ${f.line}`),

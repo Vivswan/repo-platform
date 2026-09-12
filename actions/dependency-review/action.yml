@@ -10,9 +10,8 @@ inputs:
   fail-on-severity:
     description: Lowest vulnerability severity that fails the gate
     required: false
-    # Deliberate strictest threshold (also the upstream action's default,
-    # pinned so a default change cannot loosen the gate silently).
-    default: low
+    # Pinned here so an upstream default change cannot move the gate silently.
+    default: high
 
 runs:
   using: composite

@@ -1,8 +1,5 @@
-// The semgrep action's contract: a pinned install, one scan writing both a
-// SARIF copy (uploaded without its suppressed results) and a JSON copy with
-// its exit status as a step output, and a verdict step that runs whatever
-// the scan did and fails on a fatal scan or an ERROR finding - executed here
-// against fixture results.
+// The semgrep action's contract, run here against fixture results.
+// Semgrep itself never runs: the scan step gets a stand-in on PATH, the drop and judge steps get hand-written files.
 
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,7 +11,7 @@ const temp = tempDirs();
 const action = loadAction("actions/semgrep/action.yml");
 
 describe("actions/semgrep", () => {
-  test("install, scan, upload, judge: pinned, registry default ruleset, both outputs, no --error", () => {
+  test("install, scan, upload, judge: pinned, registry default ruleset, ERROR severity only, both outputs, no --error", () => {
     expect(action.runs.using).toBe("composite");
     expect(action.inputs).toBeUndefined();
     const [install, scan, drop, upload, judge] = action.runs.steps;
@@ -24,10 +21,10 @@ describe("actions/semgrep", () => {
     expect(command.startsWith("semgrep scan --config p/default ")).toBe(true);
     expect(command).toContain('--sarif-output="$RUNNER_TEMP/semgrep.sarif"');
     expect(command).toContain('--json-output="$RUNNER_TEMP/semgrep.json"');
-    // --error would fail the scan on WARNING findings too; the judge below
-    // is the verdict, and --severity would hide them from code scanning.
+    // One severity, ERROR: a second --severity would let WARNING or INFO findings back in.
+    // --error would make the exit status mean "findings" instead of "did the scan complete".
+    expect(command.match(/--severity[= ](\S+)/g)).toEqual(["--severity ERROR"]);
     expect(command).not.toContain("--error");
-    expect(command).not.toContain("--severity");
     // Registry ids carry their path; the id semgrep matches is the one code
     // scanning shows. zizmor's unpinned-uses owns action pinning; the fleet's
     // old rendered ci.yml and release.yml carry no nosemgrep marker on their
@@ -164,7 +161,7 @@ describe("actions/semgrep", () => {
     expect([run.exitCode, run.stdout]).toEqual([0, ""]);
   });
 
-  test("judge: WARNING and INFO findings pass (they reach code scanning, not the gate)", () => {
+  test("judge: only ERROR findings count, so a WARNING or INFO one in the JSON copy passes", () => {
     expect(judge([{ severity: "WARNING" }, { severity: "INFO" }]).exitCode).toBe(0);
   });
 
