@@ -14,7 +14,7 @@ Work in this order, always:
 
 1. Edit `modules:` (and the module's keys) in `.repo-platform.yml` on a branch and merge the PR.
 2. Run the sync: `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo> -f manual=true`. Review the sync PR's report and merge.
-3. Finish the module's companion steps (starter customization, secrets, one-time setup).
+3. Finish the module's companion steps (starter customization, one-time setup).
 
 ## When to Apply
 
