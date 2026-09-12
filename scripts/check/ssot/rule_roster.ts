@@ -26,6 +26,7 @@ export const RULE_ROSTER = [
   "fleet-refs-ride-build",
   "delivery-pin-stems",
   "sticky-pr-comments",
+  "held-run-notice",
   "local-gates",
   "all-green-roster",
   "skeleton-gate",

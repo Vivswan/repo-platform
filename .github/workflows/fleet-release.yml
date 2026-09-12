@@ -4,7 +4,7 @@
 #   release-cut true   -> the cut: tag the release-PR merge and draft the release; no PR work
 #   release-cut false  -> propose or refresh the release PR, only while main's head is still the judged commit
 #
-# Without REPO_PLATFORM_TOKEN the release PR is GITHUB_TOKEN's, so its checks wait for "Approve and run" or the PR's next push.
+# Without REPO_PLATFORM_TOKEN the release PR is GITHUB_TOKEN's: GitHub holds its pull_request run for approval, so approve it from the PR's merge box or the Actions tab, or push to the PR.
 # Once the draft exists a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
 # `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
 

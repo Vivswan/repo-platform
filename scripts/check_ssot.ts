@@ -14,6 +14,7 @@ import { allGreenRules } from "./check/ssot/all_green.ts";
 import type { Mismatch } from "./check/ssot/comparison.ts";
 import { deliveryPinRules } from "./check/ssot/delivery_pins.ts";
 import { harnessImportRules } from "./check/ssot/harness_imports.ts";
+import { heldRunNoticeRules } from "./check/ssot/held_run_notice.ts";
 import { labelRules } from "./check/ssot/labels.ts";
 import { literalAnchorRules } from "./check/ssot/literal_anchors.ts";
 import { postGreenRules } from "./check/ssot/post_green.ts";
@@ -32,6 +33,7 @@ const rules: Rule[] = [
   ...toolchainRules,
   ...deliveryPinRules,
   ...stickyCommentRules,
+  ...heldRunNoticeRules,
   ...allGreenRules,
   ...skillRules,
   ...settingsWorkflowRules,

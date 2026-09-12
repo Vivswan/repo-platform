@@ -1,8 +1,9 @@
 # Repo-owned: seeded once by the fleet sync, never
-# overwritten by a later sync - adjust the format commands freely. The
-# push uses github.token, which starts no workflows; a PAT would
-# re-trigger CI, but any same-repo PR's formatter tooling runs in this
-# checkout before the push - only wire in a token you would expose to it.
+# overwritten by a later sync - adjust the format commands freely. GitHub
+# holds the new head's pull_request run for approval after this workflow's
+# github.token push; a PAT would start it outright, but any same-repo PR's
+# formatter tooling runs in this checkout before the push - only wire in a
+# token you would expose to it.
 
 name: Auto Format
 
@@ -41,6 +42,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # One string for the run warning and the sticky comment; after the seam it says
+          # what the dedupe-bun-lockfile action's notice says.
+          NOTICE: >-
+            Formatting commit pushed with the workflow token: GitHub holds the new head's pull_request run
+            for approval, so its checks stay unreported. Approve the run from the PR's merge box or the
+            Actions tab, or push a commit to this branch.
         run: |
           if git diff --quiet; then
             echo "nothing to format"
@@ -51,18 +58,15 @@ jobs:
           git add -A
           git commit -m "style: apply automated formatting"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
-          # The push succeeded, so the pending approval is a notice, not a failure.
-          echo "no_retrigger=true" >> "$GITHUB_OUTPUT"
-          echo "::warning::formatting commit pushed with github.token: the new head's pull_request run waits for approval. Open it in the Actions tab and choose Approve and run, or push an empty commit."
-      - name: Comment that checks will not re-run
-        if: steps.push.outputs.no_retrigger == 'true'
+          # The push succeeded: the held run is a notice, not a failure.
+          echo "notice=$NOTICE" >> "$GITHUB_OUTPUT"
+          echo "::warning::$NOTICE"
+      - name: Comment how to release the held run
+        if: steps.push.outputs.notice != ''
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: repo-platform/auto-format
-          message: >
-            Pushed a formatting commit with the default workflow token, which starts no workflows,
-            so the new head's `pull_request` run waits for approval.
-            Open it in the Actions tab and choose **Approve and run**, or push an empty commit.
+          message: ${{ steps.push.outputs.notice }}
       # The label is a one-shot request: remove it even when a step failed,
       # so a broken run cannot loop.
       - name: Remove the fix-lint label
