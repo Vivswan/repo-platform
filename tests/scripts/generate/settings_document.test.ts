@@ -1,7 +1,16 @@
 // The one-byte edit is the drift check's negative control.
 
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { capture } from "../../../.github/scripts/shared/proc.ts";
@@ -87,6 +96,26 @@ describe("renderOwnSettings", () => {
     expect(run(root)).toEqual({ exitCode: 0, stdout: `rewrote ${RENDERED}`, stderr: "" });
     expect(readFileSync(join(root, RENDERED), "utf-8")).toBe(original);
     expect(run(root, "--check").exitCode).toBe(0);
+  });
+
+  test("a symbolic link at the rendered path is refused in --check and in the rewrite, even when its target is the render", () => {
+    const root = scratchRoot();
+    const abs = join(root, RENDERED);
+    const aside = ".github/settings.aside.yml";
+    const render = readFileSync(abs, "utf-8");
+    renameSync(abs, join(root, aside));
+    symlinkSync("settings.aside.yml", abs);
+    const refusal = {
+      exitCode: 1,
+      stdout: "",
+      stderr: `error: ${RENDERED} is a symbolic link to settings.aside.yml; the rendered document is a regular file, as the writer requires at every managed path`,
+    };
+    expect(run(root, "--check")).toEqual(refusal);
+    expect(run(root)).toEqual(refusal);
+    expect([readlinkSync(abs), readFileSync(join(root, aside), "utf-8")]).toEqual([
+      "settings.aside.yml",
+      render,
+    ]);
   });
 
   test.each([
