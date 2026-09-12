@@ -39,6 +39,7 @@ export const RULE_ROSTER = [
   "settings-starter",
   "step-output-gates",
   "settings-apply-input",
+  "settings-lane-newest-wins",
   "labels",
   "release-guard-labels",
   "dependabot-label-tuples",

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
+import { FLEET_WRITERS, POST_GREEN_REL } from "../../../scripts/check/ssot/post_green.ts";
 import {
   OWN_OVERLAY,
   overlayMismatches,
@@ -9,6 +11,7 @@ import {
   SETTINGS_WORKFLOW,
   settingsApplyInputMismatches,
   settingsIdentityMismatches,
+  settingsLaneMismatches,
   starterMismatches,
   stepOutputGateMismatches,
   unsafeStepCondition,
@@ -691,6 +694,88 @@ ${SELECT}${APPLY_STEP.replace(STEP_GATE, "        if: steps.select.outputs.repos
 
   test("the live workflow is ARMED: it passes the rule's judgment", () => {
     expect(settingsApplyInputMismatches(readFileSync(SETTINGS_WORKFLOW, "utf-8"))).toEqual([]);
+  });
+});
+
+describe("settingsLaneMismatches (settings-lane-newest-wins)", () => {
+  // The lane's two holders, each built from its cancel-in-progress line
+  // (or none): the writer's own workflow-level group and the caller job.
+  const workflow = (cancel: string | null) =>
+    [
+      "concurrency:",
+      "  group: settings-repos",
+      ...(cancel === null ? [] : [`  cancel-in-progress: ${cancel}`]),
+      "jobs: {}",
+      "",
+    ].join("\n");
+  const postGreen = (lane: string[] | null) =>
+    [
+      "jobs:",
+      "  settings-fleet:",
+      ...(lane === null ? [] : ["    concurrency:", ...lane.map((line) => `      ${line}`)]),
+      "    uses: ./.github/workflows/settings-repos.yml",
+      "",
+    ].join("\n");
+  const CALLER = `${POST_GREEN_REL} job ${FLEET_WRITERS[SETTINGS_WORKFLOW].callerJob}`;
+  const expected =
+    "cancel-in-progress: false on the settings lane (a lane orders by arrival, so cancelling would let an older commit's late run cancel the newer apply in flight; the selector stands that run down instead)";
+  const mismatch = (file: string, got: string) => ({ file, expected, got });
+
+  test("both holders declaring cancel-in-progress: false is the clean shape", () => {
+    expect(
+      settingsLaneMismatches(
+        workflow("false"),
+        postGreen(["group: settings-repos", "cancel-in-progress: false"]),
+      ),
+    ).toEqual([]);
+  });
+
+  test.each<{ reason: string; text: string; caller: string; expected: Mismatch[] }>([
+    {
+      reason: "cancel-in-progress: true on the writer's own lane",
+      text: workflow("true"),
+      caller: postGreen(["group: settings-repos", "cancel-in-progress: false"]),
+      expected: [mismatch(SETTINGS_WORKFLOW, "cancel-in-progress: true")],
+    },
+    {
+      reason:
+        "cancel-in-progress left unset on the writer (GitHub's default is false, the pin is the point)",
+      text: workflow(null),
+      caller: postGreen(["group: settings-repos", "cancel-in-progress: false"]),
+      expected: [mismatch(SETTINGS_WORKFLOW, "cancel-in-progress unset")],
+    },
+    {
+      reason: "cancel-in-progress: true on the caller job",
+      text: workflow("false"),
+      caller: postGreen(["group: settings-repos", "cancel-in-progress: true"]),
+      expected: [mismatch(CALLER, "cancel-in-progress: true")],
+    },
+    {
+      reason: "no lane on the caller job at all",
+      text: workflow("false"),
+      caller: postGreen(null),
+      expected: [mismatch(CALLER, "no concurrency block")],
+    },
+    {
+      reason: "both holders wrong: one mismatch each, the writer's first",
+      text: workflow("true"),
+      caller: postGreen(["group: settings-repos"]),
+      expected: [
+        mismatch(SETTINGS_WORKFLOW, "cancel-in-progress: true"),
+        mismatch(CALLER, "cancel-in-progress unset"),
+      ],
+    },
+  ])("$reason", ({ text, caller, expected }) => {
+    expect(settingsLaneMismatches(text, caller)).toEqual(expected);
+  });
+
+  test("the live workflow and its caller hold the lane without cancelling", () => {
+    expect(
+      settingsLaneMismatches(
+        readFileSync(SETTINGS_WORKFLOW, "utf-8"),
+        readFileSync(POST_GREEN_REL, "utf-8"),
+      ),
+    ).toEqual([]);
   });
 });
 

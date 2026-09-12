@@ -15,6 +15,7 @@ import {
 } from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
 import type { Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
+import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
 
 interface WorkflowStep {
@@ -196,6 +197,7 @@ interface WorkflowJob {
   name?: string;
   needs?: string | string[];
   if?: string;
+  concurrency?: unknown;
   strategy?: { "fail-fast"?: boolean; matrix?: unknown };
   outputs?: Record<string, unknown>;
   steps?: WorkflowStep[];
@@ -207,6 +209,34 @@ function jobsOf(text: string, rel: string): Record<string, WorkflowJob> {
   return Object.fromEntries(
     Object.entries(jobs).map(([name, job]) => [name, asRecord(job ?? {}, `${rel} job`)]),
   ) as Record<string, WorkflowJob>;
+}
+
+/** GitHub orders a lane by ARRIVAL and CI durations vary, so with `cancel-in-progress: true` an older commit's late run would
+ *  cancel the newer apply mid-flight and then stand down itself (select_settings_repos.ts), leaving the fleet unapplied until
+ *  the nightly. Both holders are judged: the writer's own group and the caller job's. */
+export function settingsLaneMismatches(workflowText: string, postGreenText: string): Mismatch[] {
+  const caller = FLEET_WRITERS[SETTINGS_WORKFLOW].callerJob;
+  const holders: [string, unknown][] = [
+    [SETTINGS_WORKFLOW, asRecord(parseYaml(workflowText), SETTINGS_WORKFLOW).concurrency],
+    [`${POST_GREEN_REL} job ${caller}`, jobsOf(postGreenText, POST_GREEN_REL)[caller]?.concurrency],
+  ];
+  const mismatches: Mismatch[] = [];
+  for (const [file, lane] of holders) {
+    const cancel = asRecord(lane ?? {}, `${file} concurrency`)["cancel-in-progress"];
+    if (cancel === false) continue;
+    mismatches.push({
+      file,
+      expected:
+        "cancel-in-progress: false on the settings lane (a lane orders by arrival, so cancelling would let an older commit's late run cancel the newer apply in flight; the selector stands that run down instead)",
+      got:
+        lane === undefined
+          ? "no concurrency block"
+          : cancel === undefined
+            ? "cancel-in-progress unset"
+            : `cancel-in-progress: ${String(cancel)}`,
+    });
+  }
+  return mismatches;
 }
 
 const stepsIn = (job: WorkflowJob): WorkflowStep[] => (Array.isArray(job.steps) ? job.steps : []);
@@ -459,5 +489,11 @@ export const settingsWorkflowRules: Rule[] = [
     // tagged pin, one job per target.
     name: "settings-apply-input",
     run: () => settingsApplyInputMismatches(read(SETTINGS_WORKFLOW)),
+  },
+  {
+    // Newest wins has two halves: the selector stands a superseded run
+    // down, and the lane lets the newer run finish. This pins the second.
+    name: "settings-lane-newest-wins",
+    run: () => settingsLaneMismatches(read(SETTINGS_WORKFLOW), read(POST_GREEN_REL)),
   },
 ];
