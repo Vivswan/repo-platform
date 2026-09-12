@@ -68,6 +68,18 @@ describe("the manifest's shape", () => {
     expect(stderr).toContain("does not list itself");
   });
 
+  test("the self entry carries class, hash, and commit alone", () => {
+    const entries = {
+      ...stampedBaseline(),
+      [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}", "kind": "symlink"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
+      `error: ${MANIFEST}: entry '${MANIFEST}' carries "kind", which the sync never records on the manifest's own entry; revert the edit (git history has the stamped original) or ${RESYNC}`,
+    ]);
+  });
+
   test.each([
     { reason: "a null commit (before the first sync stamps it)", commit: "null", ok: true },
     { reason: "the build's full sha", commit: `"${COMMIT}"`, ok: true },
@@ -100,7 +112,7 @@ describe("the manifest's shape", () => {
     });
     expect(stale.exitCode).toBe(1);
     expect(stale.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; the next sync restamps the entry without them, or revert the edit`,
+      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; revert the edit (git history has the stamped original) or ${RESYNC}`,
     ]);
     const control = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
     expect({ exitCode: control.exitCode, stderr: control.stderr }).toEqual({
@@ -181,7 +193,9 @@ describe("byte parity, entry by entry", () => {
       }),
     });
     expect(hashed.exitCode).toBe(1);
-    expect(hashed.stderr).toContain("a starter carrying a hash");
+    expect(hashed.stderr).toContain(
+      'carries "hash", which the sync never records on a starter entry',
+    );
   });
 
   test("a mirror entry is verified like a managed file: byte parity, presence", () => {
@@ -281,7 +295,10 @@ describe("byte parity, entry by entry", () => {
       { env: gitFreeEnv() },
     );
     expect(drifted.exitCode).toBe(1);
-    expect(drifted.stderr).toContain("CLAUDE.md: content does not match the sha256");
+    expect(drifted.stderr).toContain(
+      `CLAUDE.md: its link target does not match the sha256 recorded in ${MANIFEST} - the link ` +
+        "drifted from the last sync; local edits to the link are replaced by the next sync",
+    );
   });
 
   test("a link record on a regular file fails parity by class", () => {
@@ -522,6 +539,12 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/relabeled.md": "repo-owned now\n",
       "docs/odd.md": "content\n",
       "docs/file-as-link.md": "intact.md",
+      "docs/copy-mirror.md": "managed content\n",
+      "docs/file-as-mirror-link.md": "../intact.md",
+      "docs/kind-on-managed.md": "managed content\n",
+      "docs/grammar-on-managed.md": "managed content\n",
+      "docs/commit-on-managed.md": "managed content\n",
+      "docs/commit-on-mirror.md": "managed content\n",
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
@@ -530,6 +553,10 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     symlinkSync("intact.md", join(root, "docs/link.md"));
     symlinkSync("intact.md", join(root, "docs/linked.md"));
     symlinkSync("drifted.md", join(root, "docs/repointed.md"));
+    symlinkSync("intact.md", join(root, "docs/mirror-link.md"));
+    symlinkSync("drifted.md", join(root, "docs/mirror-link-elsewhere.md"));
+    symlinkSync("intact.md", join(root, "docs/link-as-copy-mirror.md"));
+    symlinkSync("intact.md", join(root, "docs/mirror-odd-kind.md"));
     mkdirSync(join(root, "docs/dir.md"));
     mkdirSync(join(root, ".github"));
     writeFileSync(join(root, ".repo-platform.yml"), "modules: []\n");
@@ -559,6 +586,16 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/repointed.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
       "docs/file-as-link.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
       "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
+      "docs/copy-mirror.md": `{"class": "mirror", "hash": "${sha("managed content\n")}"}`,
+      "docs/mirror-link.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("intact.md")}"}`,
+      "docs/mirror-link-elsewhere.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("intact.md")}"}`,
+      "docs/file-as-mirror-link.md": `{"class": "mirror", "kind": "symlink", "hash": "${sha("../intact.md")}"}`,
+      "docs/link-as-copy-mirror.md": `{"class": "mirror", "hash": "${sha("intact.md")}"}`,
+      "docs/mirror-odd-kind.md": `{"class": "mirror", "kind": "hardlink", "hash": "${sha("intact.md")}"}`,
+      "docs/kind-on-managed.md": `{"class": "managed", "kind": "symlink", "hash": "${sha("managed content\n")}"}`,
+      "docs/grammar-on-managed.md": `{"class": "managed", "grammar": "managed-region", "hash": "${sha("managed content\n")}"}`,
+      "docs/commit-on-managed.md": `{"class": "managed", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
+      "docs/commit-on-mirror.md": `{"class": "mirror", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
     const findings = checkManifestParity(
@@ -574,16 +611,24 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/unknown-grammar.md' declares split grammar "prefix", which this validator does not read (one grammar exists: managed-region)`,
       `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
       `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (unstamped)`,
-      `${MANIFEST_NAME}: entry 'docs/starter.md' is a starter carrying a hash`,
+      `${MANIFEST_NAME}: entry 'docs/starter.md' carries "hash", which the sync never records on a starter entry`,
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
       `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be null or a lowercase sha256 hex digest`,
       `docs/link.md: recorded as managed in ${MANIFEST_NAME} but is a symbolic link`,
       `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,
       `docs/deleted.md: listed as managed in ${MANIFEST_NAME} but missing from the repo`,
-      `docs/repointed.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,
+      `docs/repointed.md: its link target does not match the sha256 recorded in ${MANIFEST_NAME}`,
       `docs/file-as-link.md: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link`,
       `docs/link-gone.md: listed as link in ${MANIFEST_NAME} but missing from the repo`,
+      `docs/mirror-link-elsewhere.md: its link target does not match the sha256 recorded in ${MANIFEST_NAME}`,
+      `docs/file-as-mirror-link.md: recorded as a symlink mirror in ${MANIFEST_NAME} but is not a symbolic link`,
+      `docs/link-as-copy-mirror.md: recorded as mirror in ${MANIFEST_NAME} but is a symbolic link`,
+      `${MANIFEST_NAME}: entry 'docs/mirror-odd-kind.md' carries kind "hardlink"`,
+      `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries "kind", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/grammar-on-managed.md' carries "grammar", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/commit-on-managed.md' carries "commit", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/commit-on-mirror.md' carries "commit", which the sync never records on a mirror entry`,
     ]);
     for (const finding of findings) expect(finding.message).not.toContain("template");
   });

@@ -163,6 +163,9 @@ export const registrationSchema = z.strictObject({
       z.strictObject({
         source: z.string().min(1),
         targets: z.array(z.string().min(1)).min(1),
+        // How each target carries the source: its bytes, or a relative
+        // symbolic link to it (docs/sync.md, Mirrors).
+        kind: z.enum(["copy", "symlink"]).default("copy"),
       }),
     )
     .optional(),

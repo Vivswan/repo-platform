@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
-import { isRecordedClass, RECORDED_CLASSES } from "../../../shared/manifest.ts";
+import {
+  isEntryField,
+  isRecordedClass,
+  RECORD_FIELDS,
+  RECORDED_CLASSES,
+  SELF_ENTRY_FIELDS,
+  strayFields,
+} from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
@@ -22,6 +29,17 @@ export function checkManifestParity(ctx: Context): Finding[] {
     // holds the provenance stamp (null or a string; manifest_shape judges
     // the value).
     if (rel === MANIFEST_NAME) {
+      const stray = strayFields(SELF_ENTRY_FIELDS, entry).filter(isEntryField);
+      if (stray.length > 0) {
+        findings.push(
+          error(
+            `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
+              "sync never records on the manifest's own entry; revert the edit (git history has " +
+              `the stamped original) or ${RESYNC}`,
+          ),
+        );
+        continue;
+      }
       if (
         entry.class !== "managed" ||
         entry.hash !== null ||
@@ -38,11 +56,34 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
+    // A key outside the vocabulary is manifest_shape's report; this names a vocabulary field on the wrong class.
+    const stray = isRecordedClass(entry.class)
+      ? strayFields(RECORD_FIELDS[entry.class], entry).filter(isEntryField)
+      : [];
+    if (stray.length > 0) {
+      findings.push(
+        error(
+          `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
+            `sync never records on a ${entry.class} entry; revert the edit (git history has the ` +
+            `stamped original) or ${RESYNC}`,
+        ),
+      );
+      continue;
+    }
     if (!isRecordedClass(entry.class)) {
       findings.push(
         error(
           `${where} has unknown class ${JSON.stringify(entry.class)} (expected one of ` +
             `${RECORDED_CLASSES.join(", ")}); re-run the sync to regenerate the manifest`,
+        ),
+      );
+      continue;
+    }
+    if (entry.class === "mirror" && "kind" in entry && entry.kind !== "symlink") {
+      findings.push(
+        error(
+          `${where} carries kind ${JSON.stringify(entry.kind)} - the sync records only "symlink" ` +
+            `as a mirror's kind; revert the edit (git history has the stamped original) or ${RESYNC}`,
         ),
       );
       continue;
@@ -68,21 +109,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
-    if (entry.class === "starter") {
-      if ("hash" in entry) {
-        findings.push(
-          error(
-            `${where} is a starter carrying a hash - starters are repo-owned ` +
-              "after the first write, so sync makes no byte-parity promise " +
-              "about them; re-run the sync to regenerate the manifest",
-          ),
-        );
-      }
-      continue;
-    }
-    // A mirror is a byte copy the sync wrote, its hash the whole file's,
-    // so it is verified exactly like a managed file. A link is a symlink
-    // the sync placed, its hash the target string's.
+    if (entry.class === "starter") continue;
     const hash = "hash" in entry ? entry.hash : undefined;
     if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
       findings.push(
@@ -156,14 +183,16 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     let actual: string;
-    if (entry.class === "link") {
+    const linkRecorded =
+      entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
+    if (linkRecorded) {
       if (!stat.isSymbolicLink()) {
         findings.push(
           error(
-            `${rel}: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link - ` +
-              "the sync writes a relative symlink there and never reads through one, so " +
-              "a regular file at the path is a local replacement; restore the link from " +
-              "git history or re-run the sync",
+            `${rel}: recorded as ${entry.class === "link" ? "a link" : "a symlink mirror"} in ` +
+              `${MANIFEST_NAME} but is not a symbolic link - the sync writes a relative symlink ` +
+              "there and never reads through one, so a regular file at the path is a local " +
+              `replacement; restore the link from git history or ${RESYNC}`,
           ),
         );
         continue;
@@ -213,12 +242,17 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
     }
     if (actual !== hash) {
+      const what =
+        split !== null
+          ? "its managed region"
+          : stat.isSymbolicLink()
+            ? "its link target"
+            : "content";
       findings.push(
         error(
-          `${rel}: ${split !== null ? "its managed region does" : "content does"} ` +
-            `not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
-            "drifted from the last sync; local edits to " +
-            `${split !== null ? "the managed region" : "a managed file"} are ` +
+          `${rel}: ${what} does not match the sha256 recorded in ${MANIFEST_NAME} - the ` +
+            `${stat.isSymbolicLink() ? "link" : "file"} drifted from the last sync; local edits to ` +
+            `${split !== null ? "the managed region" : stat.isSymbolicLink() ? "the link" : "a managed file"} are ` +
             "replaced by the next sync (move them to a repo-owned " +
             "location), and platform-side updates restamp on that sync",
         ),

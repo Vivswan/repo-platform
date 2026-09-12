@@ -4,13 +4,13 @@ import { join } from "node:path";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
+  readRecord,
   readRecords,
-  recordedHash,
   renderManifest,
   sha256,
   writeManifest,
 } from "../../../.github/scripts/sync/writer/manifest.ts";
-import { parseManifestFiles } from "../../../actions/shared/manifest.ts";
+import { type ManifestEntryShape, parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -35,6 +35,7 @@ describe("renderManifest", () => {
         },
         "s.yml": { class: "starter" },
         "m/copy.txt": { class: "mirror", hash: HASH },
+        "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
         "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       },
       BUILD,
@@ -53,6 +54,7 @@ describe("renderManifest", () => {
       "b.txt": { class: "managed", hash: HASH },
       "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       "m/copy.txt": { class: "mirror", hash: HASH },
+      "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
       "s.yml": { class: "starter" },
     });
     expect(Object.keys(parsed.files ?? {})).toEqual([
@@ -61,6 +63,7 @@ describe("renderManifest", () => {
       "a.md",
       "b.txt",
       "m/copy.txt",
+      "m/link.txt",
       "s.yml",
     ]);
     const link = sha256("AGENTS.md");
@@ -73,6 +76,7 @@ describe("renderManifest", () => {
       `    "a.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"},`,
       `    "b.txt": {"class": "managed", "hash": "${HASH}"},`,
       `    "m/copy.txt": {"class": "mirror", "hash": "${HASH}"},`,
+      `    "m/link.txt": {"class": "mirror", "kind": "symlink", "hash": "${sha256("../s.yml")}"},`,
       '    "s.yml": {"class": "starter"}',
       "  }",
       "}",
@@ -81,7 +85,68 @@ describe("renderManifest", () => {
   });
 });
 
-describe("readRecords and recordedHash", () => {
+describe("readRecord", () => {
+  const split = (grammar: string) => ({
+    class: "split",
+    grammar,
+    begin: "<!-- B -->",
+    end: "<!-- E -->",
+    hash: HASH,
+  });
+  const cases: [string, ManifestEntryShape | undefined, ManifestRecord | null][] = [
+    ["a managed record", { class: "managed", hash: HASH }, { class: "managed", hash: HASH }],
+    ["a record without a hash", { class: "managed" }, null],
+    ["a hash that is no digest", { class: "managed", hash: "nothex" }, null],
+    [
+      "a record carrying a field its class does not",
+      { class: "managed", hash: HASH, kind: "symlink" },
+      null,
+    ],
+    [
+      "the manifest's own entry, no record of a written file",
+      { class: "managed", hash: null, commit: BUILD },
+      null,
+    ],
+    ["a commit on a managed record", { class: "managed", hash: HASH, commit: BUILD }, null],
+    ["a starter", { class: "starter" }, { class: "starter" }],
+    ["a starter carrying a hash", { class: "starter", hash: HASH }, null],
+    ["a link", { class: "link", hash: HASH }, { class: "link", hash: HASH }],
+    ["a mirror copy", { class: "mirror", hash: HASH }, { class: "mirror", hash: HASH }],
+    [
+      "a symlink mirror",
+      { class: "mirror", kind: "symlink", hash: HASH },
+      { class: "mirror", kind: "symlink", hash: HASH },
+    ],
+    [
+      "a mirror kind the writer does not write",
+      { class: "mirror", kind: "hardlink", hash: HASH },
+      null,
+    ],
+    [
+      "a mirror whose copy kind is spelled out",
+      { class: "mirror", kind: "copy", hash: HASH },
+      null,
+    ],
+    [
+      "a split with its markers",
+      split("managed-region"),
+      { ...split("managed-region"), grammar: "managed-region" } as ManifestRecord,
+    ],
+    ["a split of a grammar the writer does not read", split("other"), null],
+    [
+      "a split without its markers",
+      { class: "split", grammar: "managed-region", hash: HASH },
+      null,
+    ],
+    ["a class the writer does not record", { class: "bespoke", hash: HASH }, null],
+    ["no record", undefined, null],
+  ];
+  test.each(cases)("reads %s", (_name, entry, record) => {
+    expect(readRecord(entry)).toEqual(record);
+  });
+});
+
+describe("readRecords", () => {
   test("a missing manifest is no records and no problem", () => {
     expect(readRecords(temp.dir("writer-manifest-none-"))).toEqual({ records: {}, problem: null });
   });
@@ -91,10 +156,10 @@ describe("readRecords and recordedHash", () => {
     writeManifest(target, { "a.txt": { class: "managed", hash: HASH } }, BUILD);
     const { records, problem } = readRecords(target);
     expect(problem).toBeNull();
-    expect(recordedHash(records, "a.txt")).toBe(HASH);
-    expect(recordedHash(records, MANIFEST_NAME)).toBeNull();
-    expect(recordedHash(records, "missing")).toBeNull();
-    expect(recordedHash({ "a.txt": { class: "managed", hash: "nothex" } }, "a.txt")).toBeNull();
+    expect(records).toEqual({
+      "a.txt": { class: "managed", hash: HASH },
+      [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
+    });
     mkdirSync(join(target, ".github"), { recursive: true });
     writeFileSync(join(target, MANIFEST_NAME), "{ not json");
     expect(readRecords(target)).toEqual({
@@ -120,11 +185,9 @@ describe("readRecords and recordedHash", () => {
     expect(Object.keys(read).sort()).toEqual([MANIFEST_NAME, PROTO, CTOR]);
     expect(read[PROTO]).toEqual({ class: "managed", hash: HASH });
     expect(read[CTOR]).toEqual({ class: "starter" });
-    expect(recordedHash(read, PROTO)).toBe(HASH);
     const empty = readRecords(temp.dir("writer-manifest-proto-none-")).records;
     expect(empty[PROTO]).toBeUndefined();
     expect(empty[CTOR]).toBeUndefined();
-    expect(recordedHash(empty, PROTO)).toBeNull();
   });
 
   test("a symlink at the manifest path is refused for reading and writing", () => {

@@ -9,6 +9,10 @@ import { type FilesConfig, pathProblem, type Selection, selectEntries } from "./
 import type { Registration } from "./registration.ts";
 
 export type Mirrors = NonNullable<Registration["mirrors"]>;
+export type Mirror = Mirrors[number];
+export type MirrorKind = Mirror["kind"];
+/** The paths a declaration claims; its kind never changes where a target may land. */
+export type Declared = Pick<Mirror, "source" | "targets">;
 
 /** What files.yml claims in one repository. */
 export interface OwnedPaths {
@@ -120,7 +124,10 @@ export function patternMatches(pattern: string, path: string): boolean {
  *  reason (docs/sync.md lists the rules). A target the grammar refuses is
  *  judged by that alone: the nesting and matching walks need a clean
  *  relative path. */
-export function mirrorDeclarationProblems(mirrors: Mirrors, owned: OwnedPaths): MirrorProblem[] {
+export function mirrorDeclarationProblems(
+  mirrors: readonly Declared[],
+  owned: OwnedPaths,
+): MirrorProblem[] {
   const problems: MirrorProblem[] = [];
   const declared = mirrors.flatMap(({ source, targets }) =>
     targets.map((target) => ({ source, target })),

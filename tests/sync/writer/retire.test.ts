@@ -75,35 +75,67 @@ describe("keepReason", () => {
 });
 
 describe("keepReason on symbolic links", () => {
-  test("a link is judged by its target string under a link record, and by class under any other", () => {
-    const target = checkout({ "AGENTS.md": "agents\n", "as-file.md": "not a link\n" });
+  test("a link is judged by its target string under a link or symlink-mirror record, and by class under any other", () => {
+    // as-mirror-file.md holds the link target string itself, so only the record's kind can tell it from the link.
+    const target = checkout({
+      "AGENTS.md": "agents\n",
+      "as-file.md": "not a link\n",
+      "as-mirror-file.md": "AGENTS.md",
+    });
     symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
     symlinkSync("../AGENTS.md", join(target, "other.md"));
+    symlinkSync("AGENTS.md", join(target, "mirror-link.md"));
+    symlinkSync("AGENTS.md", join(target, "mirror-copy-as-link.md"));
+    // Raw target bytes that decode to the recorded target's text: only a byte comparison tells them apart.
+    symlinkSync(Buffer.from([0xff, 0x2e, 0x6d, 0x64]), join(target, "malformed.md"));
     const records: Records = {
+      "malformed.md": { class: "link", hash: sha256("\uFFFD.md") },
       "CLAUDE.md": { class: "managed", hash: sha256("AGENTS.md") },
       "other.md": { class: "link", hash: sha256("AGENTS.md") },
       "as-file.md": { class: "link", hash: sha256("AGENTS.md") },
+      "mirror-link.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
+      "as-mirror-file.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
+      "mirror-copy-as-link.md": { class: "mirror", hash: sha256("AGENTS.md") },
     };
     expect(keepReason(target, "CLAUDE.md", records)).toBe(
       "a symbolic link sits where the platform wrote a file",
     );
+    expect(keepReason(target, "mirror-link.md", records)).toBeNull();
     expect(keepReason(target, "other.md", records)).toBe(
       "the path is a symbolic link whose target is not the recorded one",
     );
-    expect(keepReason(target, "as-file.md", records)).toBe(
-      "a regular file sits where the platform wrote a link",
+    for (const path of ["as-file.md", "as-mirror-file.md"]) {
+      expect(keepReason(target, path, records)).toBe(
+        "a regular file sits where the platform wrote a link",
+      );
+    }
+    expect(keepReason(target, "mirror-copy-as-link.md", records)).toBe(
+      "a symbolic link sits where the platform wrote a file",
+    );
+    expect(keepReason(target, "malformed.md", records)).toBe(
+      "the path is a symbolic link whose target is not the recorded one",
     );
     expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toBe("agents\n");
   });
 });
 
 describe("retire", () => {
-  test("deletes matches, holds the rest, keeps starters, skips absent and unrecorded paths", () => {
-    const target = checkout({ same: "v1\n", edited: "v2\n", starter: "s\n", unrecorded: "u\n" });
+  test("deletes matches, holds the rest, keeps starters, skips absent paths and records it has none of or cannot read", () => {
+    const target = checkout({
+      same: "v1\n",
+      edited: "v2\n",
+      starter: "s\n",
+      unrecorded: "u\n",
+      "odd-kind": "v1\n",
+      "no-markers": REGION,
+    });
     const records: Records = {
       same: { class: "managed", hash: sha256("v1\n") },
       edited: { class: "managed", hash: sha256("v1\n") },
       starter: { class: "starter" },
+      // Hand edits the writer cannot read: their files match the hashes, and are still not its to touch.
+      "odd-kind": { class: "mirror", kind: "hardlink", hash: sha256("v1\n") },
+      "no-markers": { class: "split", grammar: "managed-region", hash: sha256(REGION) },
     };
     const rows = retire(
       target,
@@ -113,6 +145,8 @@ describe("retire", () => {
         { path: "starter" },
         { path: "absent" },
         { path: "unrecorded" },
+        { path: "odd-kind" },
+        { path: "no-markers" },
       ],
       [],
       new Set(),
@@ -124,9 +158,20 @@ describe("retire", () => {
       { path: "starter", outcome: "kept", detail: "a starter is repo-owned" },
     ]);
     expect(existsSync(join(target, "same"))).toBe(false);
-    expect(existsSync(join(target, "edited"))).toBe(true);
+    expect(readFileSync(join(target, "edited"), "utf-8")).toBe("v2\n");
+    expect(readFileSync(join(target, "starter"), "utf-8")).toBe("s\n");
     expect(readFileSync(join(target, "unrecorded"), "utf-8")).toBe("u\n");
-    expect(records.same).toBeUndefined();
+    expect(readFileSync(join(target, "odd-kind"), "utf-8")).toBe("v1\n");
+    expect(readFileSync(join(target, "no-markers"), "utf-8")).toBe(REGION);
+    expect(records).toEqual({
+      edited: { class: "managed", hash: sha256("v1\n") },
+      starter: { class: "starter" },
+      "odd-kind": { class: "mirror", kind: "hardlink", hash: sha256("v1\n") },
+      "no-markers": { class: "split", grammar: "managed-region", hash: sha256(REGION) },
+    });
+    for (const path of ["unrecorded", "odd-kind", "no-markers"]) {
+      expect(keepReason(target, path, records)).toBe("no record of the platform writing it");
+    }
   });
 
   test("moves through git mv with the record, holds when the new path exists, retires when the new path is not selected", () => {

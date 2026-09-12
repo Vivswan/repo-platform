@@ -12,9 +12,11 @@ export function writeLink(
   if (found.kind === "file") {
     return { change: "held", reason: "a regular file sits where a link is declared" };
   }
-  if (found.kind === "link" && found.target === linkTarget) return { change: "unchanged" };
+  if (found.kind === "link" && found.target.equals(Buffer.from(linkTarget))) {
+    return { change: "unchanged" };
+  }
   placeLink(target, path, linkTarget);
   if (found.kind === "absent") return { change: "created" };
   if (recorded !== null && sha256(found.target) === recorded) return { change: "updated" };
-  return { change: "replaced local edits", replaced: found.target };
+  return { change: "replaced local edits", replaced: found.target.toString("utf-8") };
 }

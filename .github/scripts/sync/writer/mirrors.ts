@@ -1,12 +1,13 @@
-// A declaration that cannot be written fails the run before any copy of its pass is written, so no PR carries a repository out of
+// A declaration that cannot be written fails the run before any target of its pass is written, so no PR carries a repository out of
 // sync; actions/plan/mirrors.ts holds the declaration rules, and this file adds what only the checkout shows.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
+import { dirname, join, posix } from "node:path";
 import { pathProblem } from "../../../../actions/plan/files_config.ts";
 import {
   describeMirrorProblem,
   literalPrefix,
+  type MirrorKind,
   type MirrorProblem,
   type Mirrors,
   mirrorDeclarationProblems,
@@ -16,8 +17,15 @@ import {
   segmentPattern,
 } from "../../../../actions/plan/mirrors.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
-import { type Records, recordedHash, sha256 } from "./manifest.ts";
-import { removeFile, removeTree, writeFile } from "./target_files.ts";
+import {
+  type MirrorRecord,
+  mirrorKind,
+  mirrorRecord,
+  type Records,
+  readRecord,
+  sha256,
+} from "./manifest.ts";
+import { removeFile, removeTree, writeFile, writeLink } from "./target_files.ts";
 
 export type MirrorRow = { source: string; target: string } & (
   | { outcome: "written" | "current" | "replaced local edits"; detail: "" }
@@ -125,11 +133,21 @@ function linksToFile(path: string): boolean {
   }
 }
 
+export function linkTarget(path: string, source: string): string {
+  return posix.relative(posix.dirname(path), source);
+}
+
 interface Claim {
   source: string;
   path: string;
-  bytes: Buffer;
+  kind: MirrorKind;
+  /** What the target carries once written: the source's bytes, or the link target. */
+  placed: Buffer;
 }
+
+type Standing = { kind: MirrorKind; carries: Buffer } | null;
+
+type Pass = "literal" | "glob";
 
 /** Literal targets are written before any `*` pattern expands, so a directory a literal creates is matched in the same run.
  *  `owned` is what files.yml claims here plus the stale records the run retires; `records` are the previous sync's, read for the
@@ -140,21 +158,41 @@ export function applyMirrors(
   written: ReadonlyMap<string, Buffer>,
   owned: OwnedPaths,
   records: Records,
-): { rows: MirrorRow[]; replaced: ReplacedText[]; hashes: Map<string, string> } {
+): { rows: MirrorRow[]; replaced: ReplacedText[]; records: Map<string, MirrorRecord> } {
   const declared = mirrorDeclarationProblems(mirrors, owned);
   if (declared.length > 0) throw new MirrorFailure(declared);
   const rows: MirrorRow[] = [];
   const replaced: ReplacedText[] = [];
-  const hashes = new Map<string, string>();
-  const settled = new Set<string>();
+  const next = new Map<string, MirrorRecord>();
+  const settled = new Map<string, MirrorKind>();
+
+  const standing = (path: string): Standing => {
+    const abs = join(target, path);
+    const stat = lstatOrNull(abs);
+    if (stat?.isSymbolicLink()) {
+      return { kind: "symlink", carries: readlinkSync(abs, { encoding: "buffer" }) };
+    }
+    return stat?.isFile() ? { kind: "copy", carries: readFileSync(abs) } : null;
+  };
+  /** Only a mirror record of the kind that stands there vouches for it: a split or link record's hash covers a region or
+   *  a link target, not the file. A record of either kind vouches for its own write, so a declaration's kind can change over it. */
+  const own = (path: string, found: Standing): boolean => {
+    const record = readRecord(records[path]);
+    return (
+      found !== null &&
+      record?.class === "mirror" &&
+      mirrorKind(record) === found.kind &&
+      record.hash === sha256(found.carries)
+    );
+  };
 
   const claimsOf = (
-    patterns: { source: string; pattern: string }[],
-    kind: "literal" | "glob",
+    patterns: { source: string; pattern: string; kind: MirrorKind }[],
+    pass: Pass,
     failures: MirrorProblem[],
   ): Claim[] => {
     const claims: Claim[] = [];
-    for (const { source, pattern } of patterns) {
+    for (const { source, pattern, kind } of patterns) {
       const bytes = written.get(source);
       if (bytes === undefined) {
         failures.push({
@@ -164,8 +202,14 @@ export function applyMirrors(
         });
         continue;
       }
-      if (kind === "literal") {
-        claims.push({ source, path: pattern, bytes });
+      const claim = (path: string): Claim => ({
+        source,
+        path,
+        kind,
+        placed: kind === "symlink" ? Buffer.from(linkTarget(path, source)) : bytes,
+      });
+      if (pass === "literal") {
+        claims.push(claim(pattern));
         continue;
       }
       const blocked = blockedPrefix(target, pattern);
@@ -182,50 +226,51 @@ export function applyMirrors(
         failures.push({ source, target: pattern, problem: "the pattern matches nothing" });
         continue;
       }
-      for (const path of paths) claims.push({ source, path, bytes });
+      for (const path of paths) claims.push(claim(path));
     }
     return claims;
   };
 
-  const pathFailure = (path: string, kind: "literal" | "glob"): string | null => {
+  const pathFailure = (path: string, pass: Pass): string | null => {
     const problem = mirrorPathProblem(path, owned);
     if (problem !== null) return `the target ${problem}`;
     const blocked = blockedAncestor(target, path);
     if (blocked?.is === "a symbolic link") {
       return `the target's ancestor '${blocked.dir}' is a symbolic link`;
     }
-    if (kind === "glob") {
+    if (pass === "glob") {
       if (blocked !== null) return `the target's ancestor '${blocked.dir}' is a file`;
       if (lstatOrNull(join(target, dirname(path)))?.isDirectory() !== true) {
         return `the target's directory '${dirname(path)}' does not exist`;
       }
     }
     const stat = blocked === null ? lstatOrNull(join(target, path)) : null;
-    if (stat?.isSymbolicLink()) return "the target is a symbolic link";
-    if (stat !== null && !stat.isFile() && !stat.isDirectory()) {
+    if (stat !== null && !stat.isFile() && !stat.isDirectory() && !stat.isSymbolicLink()) {
       return "the target is neither a file nor a directory";
     }
     return null;
   };
 
-  /** Nesting fails both sides, so declaration order never picks the winner. A path an earlier pass settled is this source's own:
-   *  mirrorDeclarationProblems refuses every glob that matches another source's literal. */
-  const settle = (
-    claims: Claim[],
-    kind: "literal" | "glob",
-    failures: MirrorProblem[],
-  ): Claim[] => {
-    const claimants = new Map<string, Set<string>>();
-    for (const { source, path } of claims) {
-      if (settled.has(path)) continue;
-      const sources = claimants.get(path) ?? new Set<string>();
-      sources.add(source);
-      claimants.set(path, sources);
+  /** Nesting fails both sides, so declaration order never picks the winner. A path an earlier pass settled is this source's own
+   *  (mirrorDeclarationProblems refuses every glob that matches another source's literal) and is current when the kinds agree. */
+  const settle = (claims: Claim[], pass: Pass, failures: MirrorProblem[]): Claim[] => {
+    const claimants = new Map<string, { sources: Set<string>; kinds: Set<MirrorKind> }>();
+    for (const { source, path, kind } of claims) {
+      const prior = settled.get(path);
+      if (prior === kind) continue;
+      const claimant = claimants.get(path) ?? {
+        sources: new Set<string>(),
+        kinds: new Set<MirrorKind>(prior === undefined ? [] : [prior]),
+      };
+      claimant.sources.add(source);
+      claimant.kinds.add(kind);
+      claimants.set(path, claimant);
     }
-    const every = new Set([...settled, ...claimants.keys()]);
-    for (const [path, sources] of claimants) {
+    const every = new Set([...settled.keys(), ...claimants.keys()]);
+    for (const [path, { sources, kinds }] of claimants) {
       const problems: string[] = [];
-      const failure = pathFailure(path, kind);
+      const [kind] = kinds;
+      const failure = pathFailure(path, pass);
       if (failure !== null) problems.push(failure);
       const nested = nestedWith(path, every);
       if (nested !== null) {
@@ -236,41 +281,46 @@ export function applyMirrors(
         );
       }
       if (sources.size > 1) problems.push("the target is claimed by more than one source");
+      if (kinds.size > 1) problems.push("the target is claimed as a copy and as a symbolic link");
       for (const source of sources) {
         for (const problem of problems) failures.push({ source, target: path, problem });
       }
-      if (problems.length === 0) settled.add(path);
+      if (problems.length === 0) settled.set(path, kind);
     }
     if (failures.length > 0) throw new MirrorFailure(failures);
     return claims;
   };
 
-  /** Only a mirror record vouches for the previous copy's bytes: a split or link record's hash covers a region or a link target, not the file. */
   const apply = (claims: Claim[]) => {
-    for (const { source, path, bytes } of claims) {
-      hashes.set(path, sha256(bytes));
+    for (const { source, path, kind, placed } of claims) {
+      next.set(path, mirrorRecord(kind, sha256(placed)));
       let detail = "";
       const blocked = blockedAncestor(target, path);
       if (blocked !== null) {
         removeFile(target, blocked.dir);
         detail = `a file stood at ancestor '${blocked.dir}'`;
       }
-      const stat = lstatOrNull(join(target, path));
-      if (stat?.isDirectory()) {
+      if (lstatOrNull(join(target, path))?.isDirectory()) {
         removeTree(target, path);
         detail = "a directory stood at the target";
       }
-      const found = stat?.isFile() ? readFileSync(join(target, path)) : null;
-      if (found?.equals(bytes)) {
+      const found = standing(path);
+      if (found?.kind === kind && found.carries.equals(placed)) {
         rows.push({ source, target: path, outcome: "current", detail: "" });
         continue;
       }
-      const previous = records[path]?.class === "mirror" ? recordedHash(records, path) : null;
-      writeFile(target, path, bytes);
+      const previous = own(path, found);
+      if (found !== null && found.kind !== kind) removeFile(target, path);
+      if (kind === "symlink") writeLink(target, path, placed.toString("utf-8"));
+      else writeFile(target, path, placed);
       if (detail !== "") {
         rows.push({ source, target: path, outcome: "replaced", detail });
-      } else if (found !== null && sha256(found) !== previous) {
-        replaced.push({ path, before: found.toString("utf-8"), after: bytes.toString("utf-8") });
+      } else if (found !== null && !previous) {
+        replaced.push({
+          path,
+          before: found.carries.toString("utf-8"),
+          after: placed.toString("utf-8"),
+        });
         rows.push({ source, target: path, outcome: "replaced local edits", detail: "" });
       } else {
         rows.push({ source, target: path, outcome: "written", detail: "" });
@@ -278,17 +328,17 @@ export function applyMirrors(
     }
   };
 
-  const patterns = mirrors.flatMap(({ source, targets }) =>
-    targets.map((pattern) => ({ source, pattern })),
+  const patterns = mirrors.flatMap(({ source, targets, kind }) =>
+    targets.map((pattern) => ({ source, pattern, kind })),
   );
-  for (const kind of ["literal", "glob"] as const) {
+  for (const pass of ["literal", "glob"] as const) {
     const failures: MirrorProblem[] = [];
     const claims = claimsOf(
-      patterns.filter(({ pattern }) => pattern.includes("*") === (kind === "glob")),
-      kind,
+      patterns.filter(({ pattern }) => pattern.includes("*") === (pass === "glob")),
+      pass,
       failures,
     );
-    apply(settle(claims, kind, failures));
+    apply(settle(claims, pass, failures));
   }
-  return { rows, replaced, hashes };
+  return { rows, replaced, records: next };
 }
