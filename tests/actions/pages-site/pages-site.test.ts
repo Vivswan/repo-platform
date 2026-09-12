@@ -68,8 +68,8 @@ describe("parseSiteConfig", () => {
       docs: { path: "docs", include: [skills] },
       linkRotLabel: "docs-link-rot",
     });
-    expect(parseSiteConfig(config({ site_title: "", include: [], link_rot_label: "" }))).toEqual({
-      siteTitle: "",
+    expect(parseSiteConfig(config({ include: [], link_rot_label: "" }))).toEqual({
+      siteTitle: "Site",
       docs: { path: "docs", include: [] },
       linkRotLabel: "",
     });
@@ -85,6 +85,7 @@ describe("parseSiteConfig", () => {
     ["a list", "[]", "must be a JSON object"],
     ["an unknown key", config({ docs_dir: "docs" }), "unknown keys: docs_dir"],
     ["a non-string title", config({ site_title: 3 }), "config.site_title must be a string"],
+    ["an empty title", config({ site_title: "" }), "config.site_title must not be empty"],
     [
       "a title with a line break",
       config({ site_title: "Docs\npublish=false" }),

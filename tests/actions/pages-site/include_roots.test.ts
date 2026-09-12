@@ -11,14 +11,16 @@ import { parseSiteConfig } from "../../../actions/pages-site/lib.ts";
 
 const SKILLS = { path: "skills", mount: "skills", page: "SKILL.md" };
 
-/** A config whose include list is `include`, the other keys neutral. */
 const config = (include: unknown) =>
-  JSON.stringify({ site_title: "", docs_path: "docs", include, link_rot_label: "" });
+  JSON.stringify({ site_title: "Site", docs_path: "docs", include, link_rot_label: "" });
 
 describe("parseSiteConfig include roots", () => {
-  test("the include list is carried as written", () => {
-    expect(parseSiteConfig(config([SKILLS])).docs).toEqual({ path: "docs", include: [SKILLS] });
-    expect(parseSiteConfig(config([])).docs).toEqual({ path: "docs", include: [] });
+  test.each([[[SKILLS]], [[]]])("the include list %j is carried as written", (include) => {
+    expect(parseSiteConfig(config(include))).toEqual({
+      siteTitle: "Site",
+      docs: { path: "docs", include },
+      linkRotLabel: "",
+    });
   });
 
   test.each([

@@ -29,7 +29,6 @@ import {
  *  parsed): the plan action's site mode resolves it from the registration,
  *  a registration-less caller passes it as JSON. */
 export interface SiteConfig {
-  /** Empty means the repository name. */
   siteTitle: string;
   /** Null is the docs half turned off: docs/ is left out even when it exists. */
   docs: DocsConfig | null;
@@ -144,6 +143,8 @@ export function parseSiteConfig(json: string): SiteConfig {
       throw new Error(`config.${key} must be one line - it contains a line break`);
     }
   }
+  // The plan's schema already requires project.name; a hand-written document meets the same bar here.
+  if (site_title === "") throw new Error("config.site_title must not be empty");
   if (docs_path !== null && typeof docs_path !== "string") {
     throw new Error("config.docs_path must be a string, or null for no docs half");
   }

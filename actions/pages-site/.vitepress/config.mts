@@ -61,7 +61,7 @@ const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   link: string;
 }[];
 const facts = JSON.parse(required("DOCS_SITE_FACTS")) as ProjectFacts;
-const title = process.env.DOCS_SITE_TITLE || "Documentation";
+const title = required("DOCS_SITE_TITLE");
 const base = process.env.DOCS_SITE_BASE || "/";
 const editBase = process.env.DOCS_SITE_EDIT_BASE || "";
 // An icon link only for an icon the docs tree ships (VitePress serves
