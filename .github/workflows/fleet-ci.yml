@@ -170,9 +170,9 @@ jobs:
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
-  # knip resolves imports through node_modules, so the repository's own bun installs first; the fleet
-  # configuration applies unless the repository carries its own knip configuration. A repository
-  # committed right after selecting the module has no package.json yet, so the job stands down then.
+  # knip resolves imports through node_modules, so the repository's own bun installs first; it runs on its
+  # own defaults plus whatever knip configuration the repository carries. A repository committed right after
+  # selecting the module has no package.json yet, so the job stands down then.
   knip:
     needs: [plan]
     if: contains(fromJSON(needs.plan.outputs.modules), 'bun') && github.event_name != 'schedule'

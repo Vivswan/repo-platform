@@ -1,35 +1,17 @@
 name: Knip
 description: >-
   The fleet's dead-code gate for JavaScript toolchains: knip (unused files,
-  exports, and dependencies) over the caller's installed checkout, with the
-  default configuration shipped beside this action unless the repository
-  carries its own knip configuration (any of knip's config file names, or
-  a knip key in package.json). The caller installs the
-  toolchain and the dependencies first (knip resolves imports through
-  node_modules). A finding fails the step; the only bypass is an ignore
-  entry in the repository's own knip configuration, with a reason.
+  exports, and dependencies) over the caller's installed checkout, on
+  knip's own defaults plus whatever configuration the repository carries
+  (any of knip's config file names, or a knip key in package.json). The
+  caller installs the toolchain and the dependencies first (knip resolves
+  imports through node_modules). A finding fails the step; the only bypass
+  is an ignore entry in the repository's own knip configuration, with a
+  reason.
 
 runs:
   using: composite
   steps:
-    # knip discovers the repository's file itself (any of its config names,
-    # or a knip key in package.json); --config only fills the gap when
-    # there is none. The fleet default names the whole fleet's layout, so
-    # its patterns a repository has nothing for are not hints worth printing.
-    - name: Resolve the configuration
-      id: config
-      shell: bash
-      env:
-        FLEET_CONFIG: ${{ github.action_path }}/knip.jsonc
-      run: |
-        for own in knip.json knip.jsonc .knip.json .knip.jsonc knip.ts knip.js knip.config.ts knip.config.js; do
-          [ -f "$own" ] && { echo "flag=" >>"$GITHUB_OUTPUT"; exit 0; }
-        done
-        if [ -f package.json ] && jq -e '.knip' package.json >/dev/null; then echo "flag="; else echo "flag=--config $FLEET_CONFIG --no-config-hints"; fi >>"$GITHUB_OUTPUT"
-
     - name: Find unused files, exports, and dependencies
       shell: bash
-      env:
-        CONFIG_FLAG: ${{ steps.config.outputs.flag }}
-      # Unquoted on purpose: the flag is three words or empty.
-      run: npx --yes knip@6.35.1 $CONFIG_FLAG
+      run: npx --yes knip@6.35.1
