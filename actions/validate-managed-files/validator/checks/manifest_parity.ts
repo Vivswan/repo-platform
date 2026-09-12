@@ -175,12 +175,18 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     // The occupant's kind is judged before its hash: a hash-null record over a link where a file is recorded would
-    // otherwise be offered a resync the class writer holds. The mirror writer replaces whatever stands at a declared
-    // target; every other writer holds a path whose occupant is the wrong kind, so the occupant must go first.
+    // otherwise be offered a resync the class writer holds. A mirror remedy never says to remove the occupant first:
+    // the writer replaces a wrong-kind file or link itself, and removing a pattern's only match can fail the run.
     const linkRecorded =
       entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
     const resync =
       entry.class === "mirror" ? `or ${RESYNC}` : `or remove what stands at the path and ${RESYNC}`;
+    const directoryResync =
+      entry.class === "mirror"
+        ? `or ${RESYNC}, which writes over the directory at a target a declaration reaches (a * in the ` +
+          "pattern's last segment matches files and links alone, so it passes the directory by) or fails the run " +
+          "by name; a record no declaration reaches is dropped"
+        : resync;
     if (linkRecorded && !stat.isSymbolicLink()) {
       findings.push(
         error(
@@ -205,18 +211,22 @@ export function checkManifestParity(ctx: Context): Finding[] {
       findings.push(
         error(
           `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink; ` +
-            `restore the file from git history, ${resync}`,
+            `restore the file from git history, ${directoryResync}`,
         ),
       );
       continue;
     }
     if (hash === null) {
+      const remedy =
+        entry.class === "mirror"
+          ? `${RESYNC}, which restamps every target a declaration reaches; a record none reaches is dropped, ` +
+            "or held with its file at a path files.yml retires"
+          : "the sync carries such a record as it found it; for a path a selected entry writes now, " +
+            `${RESYNC} and a write that goes through restamps the record; for any other, delete the file and its entry`;
       findings.push(
         error(
           `${rel}: ${MANIFEST_NAME} records no hash for it (hash null), so there is no recorded write to ` +
-            "verify the file against - the sync carries such a record as it found it; for a path the sync " +
-            `writes now (a selected entry or a declared mirror target), ${RESYNC} and the record is ` +
-            "restamped; for any other, delete the file and its entry",
+            `verify the file against - ${remedy}`,
         ),
       );
       continue;

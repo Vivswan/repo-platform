@@ -28,12 +28,8 @@ describe("manifest keys are the repository paths the sync writes", () => {
 
   const STARTER = '{"class": "starter"}';
   const MANAGED = `{"class": "managed", "hash": "${"0".repeat(64)}"}`;
-  // Every key breaks the path grammar; `./x` and `a//b` also resolve to the
-  // declared file while string-matching no declaration, so without the rule
-  // the class gate never saw them. The parse refuses the key once, so the
-  // record behind it is never read: parity would read the traversal key's
-  // hash from outside the repository, and the field check would report the
-  // stray field a second time.
+  // Every key breaks the path grammar; `./x` and `a//b` also resolve to the declared file while string-matching no
+  // declaration, and the traversal key's hash would be read from outside the repository.
   test.each([
     [`./${CI}`, "carries an empty, '.', or '..' segment", STARTER],
     [".github//workflows/ci.yml", "carries an empty, '.', or '..' segment", STARTER],

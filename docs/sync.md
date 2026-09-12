@@ -213,7 +213,7 @@ Without the rule, a managed file that becomes split would have the region prepen
 
 ## Retirement
 
-Retirement runs before writing. Rows appear only for files present. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since the platform never wrote it and it is not its to retire.
+Retirement runs before writing. Rows appear only for files present. A `moved_to` whose destination is written for this repository is moved or held whatever the record says; every other retirement of an unrecorded file produces no row, since no manifest record vouches for it and it is not the platform's to retire.
 
 | State of the retired file | Outcome |
 | --- | --- |

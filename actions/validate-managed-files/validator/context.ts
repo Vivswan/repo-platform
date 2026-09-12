@@ -26,9 +26,9 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-/** A manifest key the sync would never write (`./x`, `a//b`, a traversal), with pathProblem's reason. The parse
- *  refuses it here once, so no check reads a record behind it: parity would read a traversal key's hash from outside
- *  the root, and `./x` resolves to a declared file while matching no declaration. */
+/** A manifest key the sync would never write (`./x`, `a//b`, a traversal), with pathProblem's reason. Read as a
+ *  record, a traversal key's hash would come from outside the root, and `./x` resolves to a declared file while
+ *  matching no declaration. */
 export interface RefusedKey {
   key: string;
   problem: string;
