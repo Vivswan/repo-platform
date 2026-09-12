@@ -1,17 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import {
   ASYNC_SPAWN_FILES,
   actionTestFileMismatches,
   asyncSpawnMismatches,
   asyncStreamWriteMismatches,
   BUN_TEST_FILE,
-  mkdtempSites,
   spawnSyncHazard,
   spawnSyncSites,
-  TEMP_DIR_HELPER,
-  tempDirSiteMismatches,
-  tempDirTreeMismatches,
   topLevelProperties,
 } from "../../../scripts/check/ssot/process_discipline.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
@@ -505,88 +500,8 @@ describe("asyncSpawnMismatches", () => {
   });
 });
 
-describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", () => {
-  test.each([
-    { shape: "named import", source: 'import { mkdtempSync } from "node:fs";\n' },
-    { shape: "aliased import", source: 'import { mkdtempSync as mk } from "node:fs";\n' },
-    { shape: "promises import", source: 'import { mkdtemp } from "node:fs/promises";\n' },
-    { shape: "namespace member", source: 'import * as fs from "node:fs";\nfs.mkdtempSync(p);\n' },
-    { shape: "promises member", source: "const d = await fs.promises.mkdtemp(p);\n" },
-    { shape: "require destructure", source: 'const { mkdtempSync } = require("node:fs");\n' },
-    { shape: "bare reference", source: "const make = mkdtempSync;\n" },
-  ])("a $shape is a site, reported by line", ({ source }) => {
-    const found = tempDirSiteMismatches("tests/x/y.test.ts", source);
-    expect(found.map((m) => m.file)).toEqual([
-      `tests/x/y.test.ts:${source.trim().split("\n").length}`,
-    ]);
-    expect(found[0].expected).toContain(TEMP_DIR_HELPER);
-  });
-
-  test("every identifier is a site, import and calls alike, two on one line included", () => {
-    const source = [
-      'import { mkdtempSync } from "node:fs";',
-      'const a = mkdtempSync(join(tmpdir(), "a-")), b = mkdtempSync(join(tmpdir(), "b-"));',
-      "",
-      'const c = mkdtempSync(join(tmpdir(), "c-"));',
-    ].join("\n");
-    expect(mkdtempSites(source)).toEqual([1, 2, 2, 4]);
-  });
-
-  test("comments, strings, and template bodies are not sites (the launcher test's probe source)", () => {
-    const source = [
-      "// a mkdtempSync(join(tmpdir(), x)) mention in a comment",
-      "const probe = 'const fixture = mkdtempSync(join(tmpdir(), \"probe-\"));';",
-      "const line = `${probe} and mkdtemp too`;",
-      'import { tempDirs } from "../shared/temp_dir";',
-      "const temp = tempDirs();",
-      'const root = temp.dir("stamp-manifest-");',
-    ].join("\n");
-    expect(mkdtempSites(source)).toEqual([]);
-    expect(tempDirSiteMismatches("tests/x/y.test.ts", source)).toEqual([]);
-  });
-
-  test("the helper itself must call mkdtemp, or the scan has lost its anchor", () => {
-    const helper = "const dir = mkdtempSync(join(tmpdir(), prefix));\n";
-    expect(tempDirSiteMismatches(TEMP_DIR_HELPER, helper)).toEqual([]);
-    expect(() => tempDirSiteMismatches(TEMP_DIR_HELPER, "export const x = 1;\n")).toThrow(
-      /anchor lost/,
-    );
-  });
-
-  test("selection and judgment together: symlinks fail closed, actions/ is not selected", () => {
-    const helperSource = "const dir = mkdtempSync(join(tmpdir(), prefix));\n";
-    const bare = 'import { mkdtempSync } from "node:fs";\n';
-    const sources: Record<string, string> = {
-      [TEMP_DIR_HELPER]: helperSource,
-      "tests/sync/clean.test.ts": 'import { tempDirs } from "../shared/temp_dir";\n',
-      "tests/shared/support.ts": bare,
-      // actions/ belongs to the no-tests-under-actions rule, test-named or not.
-      "actions/x/x.test.ts": bare,
-      "actions/x/x.ts": bare,
-      "tests/fixtures/a/README.md": "mkdtempSync in prose\n",
-    };
-    const read = (rel: string) => {
-      if (rel === "tests/shared/leaky.ts") throw new Error("a symlink's target must not be read");
-      return sources[rel];
-    };
-    const files = [
-      ...Object.keys(sources).map((path) => ({ path, symlink: false })),
-      // Non-test-named, so a selection keyed on the test pattern alone
-      // would let it through unread.
-      { path: "tests/shared/leaky.ts", symlink: true },
-      { path: "tests/fixtures/a/CLAUDE.md", symlink: true },
-    ];
-    const found = tempDirTreeMismatches(files, read);
-    expect(found.map((m) => [m.file, m.got])).toEqual([
-      [
-        "tests/shared/support.ts:1",
-        "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
-      ],
-      ["tests/shared/leaky.ts", "a symlink"],
-    ]);
-  });
-
-  test("actionTestFileMismatches: a clean actions/ tree passes, every planted test spelling reds by name", () => {
+describe("actionTestFileMismatches (no-tests-under-actions)", () => {
+  test("a clean actions/ tree passes, every planted test spelling reds by name", () => {
     const clean = [
       { path: "actions/x/x.ts" },
       { path: "actions/x/lib/helper.ts" },
@@ -615,26 +530,12 @@ describe("mkdtempSites and tempDirSiteMismatches (temp-dirs-through-helper)", ()
     ]);
   });
 
-  test("a missing or symlinked helper is a lost anchor, not a clean pass", () => {
-    const files = [{ path: "tests/sync/clean.test.ts", symlink: false }];
-    expect(() => tempDirTreeMismatches(files, () => "")).toThrow(/anchor lost/);
-    const linked = [...files, { path: TEMP_DIR_HELPER, symlink: true }];
-    expect(() => tempDirTreeMismatches(linked, () => "")).toThrow(/anchor lost/);
-  });
-
   test("BUN_TEST_FILE matches what bun test discovers, and only that", () => {
     // .mjs and .cts measured as discovered on bun 1.4.0.
     const discovered = ["a.test.ts", "a_test.ts", "a.spec.tsx", "a_spec.mjs", "dir/b.test.cts"];
     const skipped = ["a.ts", "test.ts", "atest.ts", "a.test.md", "a.tests.ts", "spec/a.ts"];
     expect(discovered.filter((f) => BUN_TEST_FILE.test(f))).toEqual(discovered);
     expect(skipped.filter((f) => BUN_TEST_FILE.test(f))).toEqual([]);
-  });
-
-  test("the landed helper is the one file on the roster path", () => {
-    expect(TEMP_DIR_HELPER).toBe("tests/shared/temp_dir.ts");
-    // The import specifier and the one call, nothing else: a second
-    // call would mean a fixture path the afterAll might not own.
-    expect(mkdtempSites(readFileSync(TEMP_DIR_HELPER, "utf-8"))).toHaveLength(2);
   });
 });
 

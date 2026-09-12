@@ -2,6 +2,8 @@
 // removes everything the file made. Call tempDirs() at the file's top
 // level: bun:test binds hooks to the registering file, so a module-level
 // hook would serve only its first importer.
+// biome.json bans mkdtemp under tests/** and exempts this one path by name,
+// so a rename or move of this file must update that exemption with it.
 
 import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
