@@ -221,7 +221,6 @@ export function stemMismatches(pins: SelfPin[], exists: (rel: string) => boolean
   });
 }
 
-/** The files whose `uses:` lines the fleet runs: this repository's workflows, the writer's sources (workflow block files included), and the action manifests. */
 function pinSites(): string[] {
   return [
     ...walkFiles(".github/workflows").map((f) => f.path),
