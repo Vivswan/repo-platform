@@ -1,7 +1,7 @@
 // The sync operator's log shape (docs/sync.md, "The operator"): the row
 // job's steps print nothing but the vocabulary, the matrix carries row
-// indexes, and the resolve step is the boundary the target's name crosses
-// behind a mask.
+// indexes and the plan's opaque keys, and the resolve step is the boundary
+// the target's name crosses behind a mask.
 
 import { parse as parseYaml } from "yaml";
 import { rowBudgetMinutes } from "../../../.github/scripts/sync/row_budget.ts";
@@ -52,17 +52,26 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
   const rowSteps = steps(sync);
   if (rowSteps.length === 0) throw new Error(`${rel}: no sync job steps - anchor lost`);
 
-  const matrix = mapping(mapping(sync.strategy).matrix);
-  const matrixKeys = Object.keys(matrix).sort().join(",");
-  if (
-    matrixKeys !== "row" ||
-    String(matrix.row) !== "${{ fromJSON(needs.plan.outputs.indexes) }}"
-  ) {
+  const matrix = mapping(sync.strategy).matrix;
+  if (matrix !== "${{ fromJSON(needs.plan.outputs.matrix) }}") {
     mismatches.push({
       file: rel,
       expected:
-        "a sync matrix of row indexes alone: row: ${{ fromJSON(needs.plan.outputs.indexes) }}",
-      got: matrixKeys === "" ? "no matrix" : `matrix keys ${matrixKeys}`,
+        "the plan's matrix of row indexes and keys alone: matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+      got: matrix === undefined ? "no matrix" : `matrix: ${JSON.stringify(matrix)}`,
+    });
+  }
+  // The selector is the one producer that keys rows without naming them, so the plan's matrix
+  // output may come from nowhere else.
+  const planSelector = steps(plan).find((step) => runOf(step).startsWith(SELECTOR));
+  if (planSelector === undefined) throw new Error(`${rel}: no plan selector step - anchor lost`);
+  const selectorMatrix = `\${{ steps.${String(planSelector.id ?? "")}.outputs.matrix }}`;
+  const planMatrix = mapping(plan.outputs).matrix;
+  if (planMatrix !== selectorMatrix) {
+    mismatches.push({
+      file: rel,
+      expected: `the plan's matrix output wired to the selector's (matrix: ${selectorMatrix})`,
+      got: planMatrix === undefined ? "no matrix output" : `matrix: ${JSON.stringify(planMatrix)}`,
     });
   }
   if (String(sync.name ?? "") !== "sync (row ${{ matrix.row }})") {
@@ -163,7 +172,7 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
     if (!steps(sync).some((step) => runOf(step).startsWith(command))) {
       mismatches.push({
         file: rel,
-        expected: `the sync job re-running the ${label} (${command}) so row indexes mean the plan's repositories`,
+        expected: `the sync job re-running the ${label} (${command}) so a row's key finds the plan's repository`,
         got: `no ${label} step in the sync job`,
       });
     }

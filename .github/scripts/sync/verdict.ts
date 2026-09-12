@@ -52,7 +52,6 @@ function plan(): number {
   const count = rowCount(readFileSync(file, "utf-8"));
   if (count < 0) return 1;
   setOutput("count", String(count));
-  setOutput("indexes", JSON.stringify([...Array(count).keys()]));
   console.log(planLine(count));
   return 0;
 }

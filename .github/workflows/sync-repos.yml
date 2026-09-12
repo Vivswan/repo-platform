@@ -71,7 +71,7 @@ jobs:
     outputs:
       build: ${{ steps.build.outputs.build }}
       count: ${{ steps.plan.outputs.count }}
-      indexes: ${{ steps.plan.outputs.indexes }}
+      matrix: ${{ steps.select.outputs.matrix }}
     steps:
       - name: Require the fleet token
         env:
@@ -126,7 +126,8 @@ jobs:
         id: plan
         run: bun .github/scripts/sync/verdict.ts plan
 
-  # One job per row index; the job name never carries a repository name.
+  # One job per matrix row: an index for the job name, which never carries a repository name, and
+  # the plan's opaque key for the resolver.
   # The target checkout and the writer continue on error so deliver.ts can
   # file the failure in the target; the job is red only before that point.
   sync:
@@ -139,8 +140,7 @@ jobs:
       # Every row writes with the same PAT, and PR creation is
       # content-creating (secondary rate limits): bound the fleet's burst.
       max-parallel: 5
-      matrix:
-        row: ${{ fromJSON(needs.plan.outputs.indexes) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: sync (row ${{ matrix.row }})
     runs-on: ubuntu-latest
     # At least the budget row_budget.ts sums from the steps' bounds (the
@@ -165,7 +165,7 @@ jobs:
           path: build
 
       # The plan, recomputed: the same discovery and selection the plan job
-      # ran, so row indexes mean the same repositories.
+      # ran, so the row's key finds its repository among the rows.
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -185,8 +185,8 @@ jobs:
       - name: Resolve the row's target
         id: target
         env:
-          ROW: ${{ matrix.row }}
-          PLANNED: ${{ needs.plan.outputs.count }}
+          ROW_KEY: ${{ matrix.key }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/resolve_row.ts
 
       # A captured clone, not actions/checkout: git quotes target file text

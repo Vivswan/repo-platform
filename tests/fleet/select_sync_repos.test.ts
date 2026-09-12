@@ -3,10 +3,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
+import { planMatrix, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
+const RUN_ID = "4242";
+const keyOf = rowKeyOf("stub-token", RUN_ID);
+const outputFor = (rows: { repo: string; private: boolean }[]) =>
+  `count=${rows.length}\nmatrix=${JSON.stringify(planMatrix(rows, keyOf))}\n`;
 
 const temp = tempDirs();
 
@@ -128,6 +133,7 @@ describe("select_sync_repos.ts", () => {
         // Neutralize the real event payload CI runs carry; the dispatch
         // tests set their own.
         GITHUB_EVENT_PATH: "",
+        GITHUB_RUN_ID: RUN_ID,
         RUNNER_TEMP: join(work, "temp"),
         GITHUB_OUTPUT: outputFile,
         ...env,
@@ -168,9 +174,9 @@ describe("select_sync_repos.ts", () => {
     expect(main.exitCode).toBe(0);
   });
 
-  test("the rows file carries the real slugs, sorted, with the visibility; the output carries the count alone", () => {
+  test("the rows file carries the real slugs, sorted, with the visibility; the output carries the count and the keyed matrix", () => {
     expect(main.rows).toEqual([HIDDEN_SERVER_ROW, STEADY_ROW]);
-    expect(main.output).toBe("count=2\n");
+    expect(main.output).toBe(outputFor([HIDDEN_SERVER_ROW, STEADY_ROW]));
   });
 
   test("the operator repository is discovered but never a row", () => {
@@ -322,7 +328,7 @@ describe("select_sync_repos.ts", () => {
         exitCode: 0,
         stdout,
         stderr: "",
-        output: `count=${rows?.length ?? 0}\n`,
+        output: outputFor(rows ?? []),
         rows,
       });
       for (const channel of [r.stdout, r.stderr, r.output]) {
@@ -483,7 +489,7 @@ describe("select_sync_repos.ts", () => {
         exitCode: 0,
         stdout,
         stderr: "",
-        output: `count=${rows?.length ?? 0}\n`,
+        output: outputFor(rows ?? []),
         rows,
       });
       for (const channel of [r.stdout, r.stderr, r.output]) {
