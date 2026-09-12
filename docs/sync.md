@@ -12,7 +12,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | What does `files.yml` look like, and what does the loader refuse? | [actions/plan/files_config.ts](../actions/plan/files_config.ts), the grammar every reader shares (the writer, the fleet plan, the checks); the writer's own checks against the `files/` tree and the placeholder defaults are in [sync/writer/files_config.ts](../.github/scripts/sync/writer/files_config.ts) |
 | Which placeholder tokens exist? | `PLACEHOLDER_NAMES` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | How are the values derived from `.repo-platform.yml`? | [sync/writer/registration.ts](../.github/scripts/sync/writer/registration.ts) |
-| Which entries apply to one repository? | `applies` and `selectEntries` in [actions/plan/files_config.ts](../actions/plan/files_config.ts) |
+| Which entries apply to one repository? | `applies` in [actions/shared/selection.ts](../actions/shared/selection.ts), the one rule the writer, the fleet plan, and the validator select by; `selectEntries` in [actions/plan/files_config.ts](../actions/plan/files_config.ts) |
 | How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |

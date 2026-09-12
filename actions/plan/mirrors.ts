@@ -6,7 +6,8 @@
 import { dirname } from "node:path";
 import { MANIFEST_NAME, REGISTRATION_PATH } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
-import { type FilesConfig, type Selection, selectEntries } from "./files_config.ts";
+import type { Selection } from "../shared/selection.ts";
+import { type FilesConfig, selectEntries } from "./files_config.ts";
 import type { Registration } from "./registration.ts";
 
 export type Mirrors = NonNullable<Registration["mirrors"]>;

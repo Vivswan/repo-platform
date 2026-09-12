@@ -3,7 +3,8 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type FileEntry, parseFilesConfig, type When } from "../actions/plan/files_config.ts";
+import { type FileEntry, parseFilesConfig } from "../actions/plan/files_config.ts";
+import type { When } from "../actions/shared/selection.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 export const BEGIN =
