@@ -87,7 +87,7 @@ jobs:
         if: steps.hook.outcome == 'success'
         env:
           DIST: ${{ steps.hook.outputs.dist }}
-        run: '[ -n "$DIST" ] || echo "::notice::the site-build hook ran and named no dist directory; the docs publish alone"'
+        run: '[ -n "$DIST" ] || echo "::notice::the site-build hook ran and named no dist directory; only the docs directory publishes, when there is one"'
 
       - name: Assemble the site
         id: site
