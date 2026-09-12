@@ -45,6 +45,11 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
+  # The owner's standing approval on a pull request: whoever runs the
+  # landing merges it once every check is green, with no second ask.
+  - name: merge-when-green
+    color: "0e8a16"
+    description: "Owner approved: merge once every gate is green"
   # The fleet-wide nightly Trivy stream's tracking label (docs/security-scans.md):
   # fleet-ci files findings under it on every repository, so it is fleet
   # data, not a module's tracking label; the plan job lists it among the
