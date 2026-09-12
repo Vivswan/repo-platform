@@ -103,7 +103,7 @@ The loader refuses, all problems at once:
 - `render` or `displaces` on an entry that is not managed; a rendered entry with a `source` or `blocks`, or without `displaces`
 - a `displaces` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; starters listed after the entry that displaces them; starters not selected exactly when the displacing entry is (an unconditional displacer needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`
-- a declared settings layer missing from the tree or not a YAML mapping; a `settings.yml`, `settings-public.yml`, or `settings-private.yml` in a module directory that its `settings_layers` does not declare
+- a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice; a `settings.yml`, `settings-public.yml`, or `settings-private.yml` in a module directory that its `settings_layers` does not declare
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last

@@ -11,7 +11,9 @@
 // unions those by name; any other shape would fall into wholesale replace
 // and silently discard the managed roster - the apply then deletes every
 // undeclared label, green either way), and an alias that names its own
-// ancestor (the merge walks the document and would never end).
+// ancestor (the merge walks the document and would never end). A layer
+// FILE is also refused for naming one label or ruleset twice; an overlay
+// doing the same is the render's hold.
 //
 // MergedSettings is OUTPUT: the finished document the apply hands to GitHub.
 // `null` is ABSENT from MergedValue, so a merged document still carrying the
@@ -71,6 +73,50 @@ export function rulesetLabel(entry: unknown): string {
   return isMapping(entry) && typeof entry.name === "string"
     ? `ruleset ${JSON.stringify(entry.name)}`
     : "";
+}
+
+/** A name-keyed entry's name, null for a nameless one, which the apply
+ *  rejects on its own terms and no name judgment here touches. */
+export function entryName(entry: unknown): string | null {
+  if (!isMapping(entry)) return null;
+  return typeof entry.name === "string" ? entry.name : null;
+}
+
+/** The name-keyed sections and when two names are one name: labels
+ *  case-insensitively, as GitHub deduplicates them; rulesets exactly. The
+ *  merge unions by these folds. */
+export const NAME_FOLDS: Record<"labels" | "rulesets", (name: string) => string> = {
+  labels: (name) => name.toLowerCase(),
+  rulesets: (name) => name,
+};
+
+export interface NameCollision {
+  section: keyof typeof NAME_FOLDS;
+  /** The first entry's name, then the later one that folds to the same. */
+  prior: string;
+  name: string;
+}
+
+/** Every pair of one section's entries that are one name to the merge,
+ *  in document order; nameless entries pass. */
+export function duplicateNames(doc: SettingsLayer): NameCollision[] {
+  const collisions: NameCollision[] = [];
+  for (const [section, fold] of Object.entries(NAME_FOLDS) as [
+    NameCollision["section"],
+    (name: string) => string,
+  ][]) {
+    const declared = doc[section];
+    if (!Array.isArray(declared)) continue;
+    const seen = new Map<string, string>();
+    for (const entry of declared) {
+      const name = entryName(entry);
+      if (name === null) continue;
+      const prior = seen.get(fold(name));
+      if (prior === undefined) seen.set(fold(name), name);
+      else collisions.push({ section, prior, name });
+    }
+  }
+  return collisions;
 }
 
 const layerScalarSchema = z.custom<LayerScalar>(
@@ -226,7 +272,17 @@ export function parseSettingsDoc(text: string, where: string): SettingsLayer {
 /** The same boundary for a fleet or module layer FILE, which the render
  *  selects from its declared roster: a file that exists but declares no
  *  mapping is an authoring accident, not the empty layer that retiring it
- *  from the roster already expresses. */
+ *  from the roster already expresses, and a name declared twice is
+ *  refused here, once, as operator data (an overlay's duplicate is the
+ *  render's hold instead). */
 export function parseLayerFile(text: string, where: string): SettingsLayer {
-  return asSettingsLayer(parseYamlText(text, where), where);
+  const layer = asSettingsLayer(parseYamlText(text, where), where);
+  const [collision] = duplicateNames(layer);
+  if (collision !== undefined) {
+    throw new Error(
+      `${where}: ${collision.section} ${JSON.stringify(collision.prior)} and ` +
+        `${JSON.stringify(collision.name)} are one name to the merge; a layer declares each name once`,
+    );
+  }
+  return layer;
 }

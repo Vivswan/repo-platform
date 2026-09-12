@@ -137,6 +137,32 @@ describe("the name-keyed sections must be lists of mappings", () => {
 });
 
 describe("parseLayerFile", () => {
+  test.each([
+    {
+      reason: "two labels one name apart in case",
+      text: 'labels:\n  - {name: bug, color: "d73a4a"}\n  - {name: BUG, color: "d73a4a"}\n',
+      message:
+        'files/settings/baseline.yml: labels "bug" and "BUG" are one name to the merge; a layer declares each name once',
+    },
+    {
+      reason: "two rulesets of one name",
+      text: "rulesets:\n  - {name: main, rules: [{type: deletion}]}\n  - {name: main}\n",
+      message:
+        'files/settings/baseline.yml: rulesets "main" and "main" are one name to the merge; a layer declares each name once',
+    },
+  ])("a layer file declaring $reason is refused, naming the file", ({ text, message }) => {
+    // Operator data: refused here once, so no target holds on it. The
+    // overlay boundary admits the same text; its duplicate is the render's hold.
+    expect(() => parseLayerFile(text, "files/settings/baseline.yml")).toThrow(message);
+    expect(() => parseSettingsDoc(text, ".github/settings.local.yml")).not.toThrow();
+  });
+
+  test("a layer file may repeat a ruleset name in different case: ruleset names match exactly", () => {
+    expect(
+      parseLayerFile("rulesets:\n  - {name: main}\n  - {name: MAIN}\n", "files/x/settings.yml"),
+    ).toEqual({ rulesets: [{ name: "main" }, { name: "MAIN" }] });
+  });
+
   test("a fleet or module layer file must declare a mapping", () => {
     // A declared layer that says nothing is an authoring accident: not
     // declaring it already expresses an empty layer. A repository's own
