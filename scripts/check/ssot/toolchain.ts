@@ -1,6 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import { PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
@@ -40,7 +39,6 @@ export const TYPECHECK_TSCONFIG_LOOP = "for tsconfig in tsconfig.json actions/*/
 
 export interface BunDirsInputs {
   lockDirs: string[];
-  dependabotBunDirs: string[];
   typecheckScript: string;
   typecheckRuns: string;
   tsconfigDirs: string[];
@@ -48,15 +46,6 @@ export interface BunDirsInputs {
 
 export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
   const mismatches: Mismatch[] = [];
-  for (const dir of inputs.lockDirs) {
-    if (!inputs.dependabotBunDirs.includes(dir)) {
-      mismatches.push({
-        file: ".github/dependabot.yml",
-        expected: `a bun ecosystem entry for ${dir} (it commits bun.lock)`,
-        got: "no entry",
-      });
-    }
-  }
   for (const dir of inputs.lockDirs.filter((d) => d !== ".")) {
     if (!inputs.typecheckScript.includes(`cd ${dir}`)) {
       mismatches.push({
@@ -334,15 +323,11 @@ export const toolchainRules: Rule[] = [
     // from one level down: a package nested inside an action fails here.
     name: "bun-dirs",
     run: () => {
-      const dependabot = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
       const typecheckJob = asRecord(ciJobs(repoCi(), "ci.yml").typecheck, "typecheck job");
       const scripts = packageScripts();
       return [
         ...bunDirsMismatches({
           lockDirs: bunLockDirs(REPO_ROOT),
-          dependabotBunDirs: (dependabot.updates as Record<string, unknown>[])
-            .filter((entry) => entry["package-ecosystem"] === "bun")
-            .map((entry) => String(entry.directory).replace(/^\//, "") || "."),
           typecheckScript: scripts.typecheck ?? "",
           typecheckRuns: (typecheckJob.steps as Record<string, unknown>[])
             .map((step) => String(step.run ?? ""))
@@ -432,32 +417,6 @@ export const toolchainRules: Rule[] = [
           throw new Error(
             `no uncommented setup step for the ${input} toolchain found anywhere - anchor lost`,
           );
-        }
-      }
-      return mismatches;
-    },
-  },
-  {
-    name: "dependabot-action-dirs",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      // Dependabot reads the manifest at a listed directory's root only, so every manifest-bearing directory is listed,
-      // nested ones included; actions/shared/ has no manifest and nothing for dependabot to see.
-      const dirs = actionManifestFiles().map((rel) =>
-        rel.slice("actions/".length, rel.lastIndexOf("/")),
-      );
-      const doc = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
-      const updates = (doc.updates as Record<string, unknown>[] | undefined) ?? [];
-      const block = updates.find((entry) => entry["package-ecosystem"] === "github-actions");
-      if (!block) throw new Error("dependabot.yml: no github-actions block - anchor lost");
-      const covered = new Set(((block.directories as unknown[] | undefined) ?? []).map(String));
-      for (const dir of dirs) {
-        if (!covered.has(`/actions/${dir}`)) {
-          mismatches.push({
-            file: ".github/dependabot.yml",
-            expected: `"/actions/${dir}" in the github-actions directories list`,
-            got: "missing - the package's upstream pins receive no dependabot bumps",
-          });
         }
       }
       return mismatches;

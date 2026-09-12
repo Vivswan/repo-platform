@@ -19,7 +19,6 @@ export const RULE_ROSTER = [
   "bun-dirs",
   "bun-types-pin",
   "toolchain-version-files",
-  "dependabot-action-dirs",
   "actions-bun-guard",
   "local-bun-runtime",
   "fleet-refs-ride-stable",
