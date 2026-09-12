@@ -134,7 +134,7 @@ describe("resolve_settings_target.ts", () => {
 
   test.each<{ reason: string; env: Record<string, string | undefined>; outcome: Run }>([
     {
-      reason: "a row whose repository left the token's grant since the plan",
+      reason: "a row whose repository is missing from the owner's listing since the plan (a public repository can stay listed after its grant is revoked; this proves the missing-listing refusal only)",
       env: { ROW_KEY: keyOf(GONE) },
       outcome: refused(1, MOVED),
     },

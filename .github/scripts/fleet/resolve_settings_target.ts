@@ -1,14 +1,9 @@
 #!/usr/bin/env bun
-// The one step of an apply job that sees its target's name in the clear. The row's key is the
-// plan's (sync/resolve_row.ts: an HMAC of the slug under the fleet token and the run id), and this
-// step finds the repository it names in one listing of the owner's writable repositories, so a
-// row never re-runs the plan's probes and the fleet's size widens the matrix alone. Before
-// anything else reaches stdout, every form of the name is registered with the runner's masker;
-// the name then leaves this step as TARGET through GITHUB_ENV, the way the sync's resolver hands
-// its row's name on.
-//
-// Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER,
-// GITHUB_ENV.
+// The row's key is the plan's (sync/resolve_row.ts: an HMAC of the slug under the fleet token and
+// the run id), matched against ONE listing of the owner's writable repositories instead of a
+// re-selection: a row never re-runs the plan's probes, and a repository missing from the listing
+// is refused. Every form of the name is masked before anything reaches stdout;
+// settings-repos.yml reads the result as TARGET from GITHUB_ENV.
 
 import { appendFileSync } from "node:fs";
 import { addMask, fail, requireEnv } from "../shared/gha.ts";
