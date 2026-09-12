@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { declaredModules } from "../../../actions/plan/registration.ts";
+import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { moduleRoster } from "../sync/modules.ts";
@@ -87,7 +88,7 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
   const adoption = captureNetwork([
     "gh",
     "api",
-    `repos/${slug}/contents/.repo-platform.yml`,
+    `repos/${slug}/contents/${REGISTRATION_PATH}`,
     "-H",
     "Accept: application/vnd.github.raw",
   ]);
@@ -107,7 +108,7 @@ for (const entry of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) 
     const declared = declaredModules(adoption.stdout);
     if (declared === null) {
       warning(
-        `${display}: its .repo-platform.yml has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
+        `${display}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
       );
       continue;
     }

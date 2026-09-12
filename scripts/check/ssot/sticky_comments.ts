@@ -8,11 +8,11 @@ import {
   type YAMLMap,
   type Node as YamlNode,
 } from "yaml";
+import { stickyCommentHeader } from "../../../actions/shared/platform.ts";
 import { escapeRegExp, type Mismatch } from "./comparison.ts";
 import { readSource, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The header is `repo-platform/<host>`, the host being the workflow stem or the action name, so two posters can never edit each other's comment. */
 export const STICKY_COMMENT_ACTION = "marocchino/sticky-pull-request-comment";
 
 const STICKY_PIN_RE = new RegExp(
@@ -239,10 +239,10 @@ export function stickyCommentMismatches(
     }
     const inputs = step.get("with");
     const header = isMap(inputs) ? inputs.get("header") : undefined;
-    if (header !== `repo-platform/${hosts[0]}`) {
+    if (header !== stickyCommentHeader(hosts[0])) {
       flag(
         line,
-        `with.header: repo-platform/${hosts[0]}`,
+        `with.header: ${stickyCommentHeader(hosts[0])}`,
         typeof header === "string" && header !== ""
           ? `with.header: ${header}`
           : "no header: on the step",

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Subprocess } from "bun";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
+import { PLATFORM_NAME } from "../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 // tests/ is the one root: check_ssot.ts's no-tests-under-actions rule keeps
@@ -50,7 +51,7 @@ async function main(argv: string[]): Promise<number> {
   // The first await sits after the spawn and handlers run from the event loop, so the child is always there when one fires.
   let child: Subprocess | undefined;
   for (const signal of FORWARDED_SIGNALS) process.on(signal, () => child?.kill(signal));
-  const scratch = mkdtempSync(join(tmpdir(), "repo-platform-tests-"));
+  const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-tests-`));
   try {
     // Async on purpose (ASYNC_SPAWN_FILES in
     // scripts/check/ssot/process_discipline.ts): a synchronous spawn would

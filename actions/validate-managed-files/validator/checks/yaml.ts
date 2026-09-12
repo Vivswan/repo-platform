@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
+import { REGISTRATION_PATH } from "../../../shared/platform.ts";
 import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 
@@ -9,7 +10,7 @@ import { advisory, error, type Finding } from "../findings.ts";
  *    .github/ and the registration  -> GitHub's workflow parser and the settings apply refuse duplicates; a merge can duplicate settings.yml keys
  *    elsewhere                      -> a duplicate can be deliberate (a parser fixture, a vendored config) */
 function isStrictYaml(rel: string): boolean {
-  return rel === ".repo-platform.yml" || rel.startsWith(".github/");
+  return rel === REGISTRATION_PATH || rel.startsWith(".github/");
 }
 
 /** Duplicate mapping keys do not count as parsing: the last value silently wins at consumption time. */

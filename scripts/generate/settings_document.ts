@@ -12,7 +12,7 @@ import { parseSettingsDoc } from "../../.github/scripts/sync/writer/settings_doc
 import { renderSettings } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { declaredPrivate } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import type { FilesConfig, RenderedEntry } from "../../actions/plan/files_config.ts";
-import { OWNER } from "../check/ssot/inputs.ts";
+import { PLATFORM_OWNER, REGISTRATION_PATH } from "../../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const FILES_CONFIG = "files.yml";
@@ -58,7 +58,7 @@ export function renderOwnSettings(root: string): OwnSettings {
   const { selected, dropped } = resolveModules(config, registration.modules);
   if (dropped.length > 0) {
     throw new Error(
-      `.repo-platform.yml selects module(s) ${FILES_CONFIG} does not know: ${dropped.join(", ")}`,
+      `${REGISTRATION_PATH} selects module(s) ${FILES_CONFIG} does not know: ${dropped.join(", ")}`,
     );
   }
   const rendered = renderSettings({
@@ -69,7 +69,7 @@ export function renderOwnSettings(root: string): OwnSettings {
     registration,
     overlay,
     overlayPath,
-    owner: OWNER,
+    owner: PLATFORM_OWNER,
   });
   if ("held" in rendered) throw new Error(`${entry.path} cannot be rendered: ${rendered.held}`);
   return { path: entry.path, overlayPath, content: rendered.content };

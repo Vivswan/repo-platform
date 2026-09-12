@@ -21,7 +21,8 @@ import {
   selectEntries,
 } from "../../../../actions/plan/files_config.ts";
 import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
-import { REGISTRATION_PATH, type Registration } from "../../../../actions/plan/registration.ts";
+import type { Registration } from "../../../../actions/plan/registration.ts";
+import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";

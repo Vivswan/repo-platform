@@ -1,4 +1,4 @@
-// The registration file's grammar (.repo-platform.yml), shared by every
+// The registration file's grammar, shared by every
 // reader: the module list the fleet plans and the sync select on (checked
 // against files.yml's modules by the reader that has it), and the strict
 // full document the plan action resolves a repository's CI from. It lives
@@ -16,8 +16,7 @@ import {
   relPathProblem,
   urlSegmentProblem,
 } from "../pages-site/.vitepress/conventions.ts";
-
-export const REGISTRATION_PATH = ".repo-platform.yml";
+import { REGISTRATION_PATH } from "../shared/platform.ts";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -12,10 +12,6 @@ import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
-/** The GitHub owner of this repository and of every fleet member: the
- *  owner slot every fleet-facing pin and PAT URL spells. */
-export const OWNER = "Vivswan";
-
 /** A bare `{{` opens a YAML flow mapping, so placeholders become a plain word before parsing, line count preserved;
  *  `${{ }}` expressions ride through. */
 export function neutralizePlaceholders(text: string): string {

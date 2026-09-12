@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { bunLockDirs } from "../../bootstrap.ts";
 import {
   actionSetsUpBun,
@@ -16,7 +17,6 @@ import {
   asRecord,
   ciJobs,
   modules,
-  OWNER,
   packageScripts,
   REPO_ROOT,
   read,
@@ -208,7 +208,7 @@ export const ACTION_BUN_PIN = "${{ github.action_path }}/.bun-version";
 
 export const RESOLVER_STEP_ID = "action-bun";
 
-export const BUN_SETUP_USES = `${OWNER}/repo-platform/${BUN_SETUP_ACTION}@${DELIVERY_REF}`;
+export const BUN_SETUP_USES = `${PLATFORM_SLUG}/${BUN_SETUP_ACTION}@${DELIVERY_REF}`;
 
 const stepName = (step: Record<string, unknown>): string =>
   String(step.name ?? step.id ?? step.uses ?? "<unnamed>");
@@ -465,7 +465,7 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // The CALLER checkout's bun may be older than the lockfiles repo-platform writes and unable to parse them,
+    // The CALLER checkout's bun may be older than the lockfiles the platform writes and unable to parse them,
     // so each bun-using action pins its own (the shared bun-setup action excepted: it takes the pin as an input).
     name: "actions-bun-guard",
     run: () => {

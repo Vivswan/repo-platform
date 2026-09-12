@@ -4,6 +4,7 @@
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { toolchainPins } from "../../../scripts/generate/toolchain_pins.ts";
 import { must } from "../shared/proc.ts";
 
@@ -127,7 +128,7 @@ export function majorJumps(bumps: Bump[]): string {
 /** Both failure messages are fixed strings: fetch()'s rejections and response.json()'s carry runtime-generated text, and main()
  *  publishes this message as a public ::warning. */
 export async function fetchJson(url: string): Promise<unknown> {
-  const headers: Record<string, string> = { "user-agent": "repo-platform-refresh-toolchains" };
+  const headers: Record<string, string> = { "user-agent": `${PLATFORM_NAME}-refresh-toolchains` };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   if (token && url.startsWith("https://api.github.com/")) {
     headers.authorization = `Bearer ${token}`;

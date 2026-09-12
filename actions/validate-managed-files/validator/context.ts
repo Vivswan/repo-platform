@@ -1,15 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  MANIFEST_NAME,
-  type ManifestEntryShape,
-  parseManifestFiles,
-} from "../../shared/manifest.ts";
+import { type ManifestEntryShape, parseManifestFiles } from "../../shared/manifest.ts";
+import { MANIFEST_NAME, REGISTRATION_PATH } from "../../shared/platform.ts";
 import { hasConflictMarker, isRecord, isRegularFile, shapeOfYaml } from "./readers.ts";
 import { applies, type Selection, type When, whenOf } from "./selection.ts";
-
-export const REGISTRATION_PATH = ".repo-platform.yml";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -58,7 +53,7 @@ export interface Context {
   root: string;
   /** Every regular file below root, sorted, relative paths. */
   files: readonly string[];
-  /** .repo-platform.yml's top-level `modules` value as written (undefined
+  /** The registration's top-level `modules` value as written (undefined
    *  when the key is missing, null when the document is not a mapping);
    *  the record is null when the file is absent. */
   registration: { modules: unknown } | null;

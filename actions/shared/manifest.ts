@@ -10,8 +10,6 @@ import {
   type SplitShapes,
 } from "./grammar.ts";
 
-export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
-
 /** Every class a recorded entry can carry. The sync writer's record union
  *  and the validator's class dispatch are both pinned to this table, so a
  *  class one side learns reaches the other or the build fails. */

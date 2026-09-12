@@ -9,7 +9,7 @@
 import { dirname, normalize } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { MANIFEST_NAME } from "../shared/manifest.ts";
+import { MANIFEST_NAME } from "../shared/platform.ts";
 
 export type FileClass = "managed" | "split" | "starter" | "link";
 export type RegionKind = "hash" | "html";

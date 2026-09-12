@@ -24,7 +24,7 @@ import {
   type RegionMarkers,
   substringCount,
 } from "../../../../actions/shared/grammar.ts";
-import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
+import { MANIFEST_NAME } from "../../../../actions/shared/platform.ts";
 import { walkFiles } from "../walk.ts";
 import {
   blocksAnchorProblem,

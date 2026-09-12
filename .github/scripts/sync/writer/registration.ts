@@ -4,11 +4,8 @@
 // (the registration never names its own owner) and the module-declared
 // defaults files.yml carries for what the registration may leave unset.
 
-import {
-  parseRegistration,
-  REGISTRATION_PATH,
-  type Registration,
-} from "../../../../actions/plan/registration.ts";
+import { parseRegistration, type Registration } from "../../../../actions/plan/registration.ts";
+import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
 import type { PlaceholderName, PlaceholderValues } from "./placeholders.ts";
 import { existingFile } from "./target_files.ts";
 
