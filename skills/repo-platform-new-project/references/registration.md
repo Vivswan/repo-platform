@@ -1,6 +1,6 @@
 # The registration file: `.repo-platform.yml`
 
-The registration is the only file a repository writes to be managed. The sync and fleet CI read it; the platform rewrites it exactly once, on the cutover of a repository registered the old way (a file holding only `modules`, and possibly `mirrors`, beside `.github/.copier-answers.yml`), when the sync derives the keys below from the recorded answers and holds that PR with a `cutover:` Registration note. Unknown keys, wrong types, and a missing `modules` list are refused by the `plan` job on every PR and by the sync.
+The registration is the only file a repository writes to be managed. The sync and fleet CI read it and never rewrite it. Unknown keys, wrong types, and a missing `modules` list are refused by the `plan` job on every PR and by the sync.
 
 ## Keys
 

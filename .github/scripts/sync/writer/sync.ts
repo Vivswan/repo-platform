@@ -11,7 +11,7 @@
 // Usage:
 //   bun sync.ts --files <files.yml> --tree <files dir> --target <checkout>
 //     --build <sha> --repository <owner/name> --private <true|false>
-//     [--previous-files <files.yml>] [--summary <path>] [--cutover true]
+//     [--previous-files <files.yml>] [--summary <path>]
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +25,6 @@ import { REGISTRATION_PATH, type Registration } from "../../../../actions/plan/r
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
-import { cutover } from "./cutover.ts";
 import { type Displacement, displace } from "./displace.ts";
 import { blockSources, loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import {
@@ -77,9 +76,6 @@ export interface SyncOptions {
   repository: string;
   private: boolean;
   previousFiles?: string;
-  /** Derive a v2 registration first when the target still carries a v1
-   *  one beside its answers file (cutover.ts). */
-  cutover?: boolean;
 }
 
 /** A previous record carried into the new manifest when its file stays (a
@@ -266,7 +262,7 @@ function writeEntry(
 export function runSync(options: SyncOptions): SyncReport {
   const config = loadFilesConfig(options.files, options.tree, options.previousFiles);
   const slug = parseRepositorySlug(options.repository);
-  const notes = options.cutover === true ? cutover(options.target, config, slug) : [];
+  const notes: string[] = [];
   const registration = readRegistration(options.target);
   const facts: Facts = {
     registration,
@@ -451,13 +447,10 @@ function main(argv: string[]): number {
   const flags = parseFlags(
     argv,
     ["--files", "--tree", "--target", "--build", "--repository", "--private"] as const,
-    ["--previous-files", "--summary", "--cutover"] as const,
+    ["--previous-files", "--summary"] as const,
   );
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
-  }
-  if (flags["--cutover"] !== undefined && flags["--cutover"] !== "true") {
-    fail("--cutover takes only the value true");
   }
   let report: SyncReport;
   try {
@@ -469,7 +462,6 @@ function main(argv: string[]): number {
       repository: flags["--repository"],
       private: flags["--private"] === "true",
       previousFiles: flags["--previous-files"],
-      cutover: flags["--cutover"] === "true",
     });
   } catch (error) {
     if (error instanceof MirrorFailure) fail(error.failures.map(describeMirrorProblem));

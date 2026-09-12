@@ -210,7 +210,7 @@ jobs:
           BUILD: ${{ needs.plan.outputs.build }}
         run: >-
           bun .github/scripts/sync/writer/sync.ts --files build/files.yml --tree build/files --target target
-          --build "$BUILD" --repository "$TARGET" --private "$TARGET_PRIVATE" --cutover true
+          --build "$BUILD" --repository "$TARGET" --private "$TARGET_PRIVATE"
           --summary "$RUNNER_TEMP/summary.json" > "$RUNNER_TEMP/sync.log" 2>&1
 
       - name: Deliver to the target

@@ -23,7 +23,7 @@ function walk(root: string, prefix = ""): string[] {
 }
 
 describe("the files/ tree speaks the sync's vocabulary", () => {
-  // The spellings the cutover retired, wrapped ones included, against the
+  // The spellings the platform retired, wrapped ones included, against the
   // uses that stay legitimate: the tripwire below is only as good as this.
   test.each([
     ["# Local edits may be replaced during template updates.", ["during template"]],

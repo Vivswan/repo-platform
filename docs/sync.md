@@ -231,7 +231,7 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: the outcomes above apply |
 
-A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file and a held entry keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note, and so is a `mirror` record no declaration reaches any more (the copy stays as the repository's own; a mirror declared again adopts it while it still holds the source's content).
+A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file and a held entry keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note, and so is a `mirror` record no declaration reaches any more (the copy stays as the repository's own; a mirror declared again adopts it while it still holds the source's content). A repository-owned tail left in a retired `CONTRIBUTING.md` or `.github/SECURITY.md` hides the account default, so the PR's reviewer deletes or completes it before merging, in one commit on the sync branch ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-retirement)).
 
 ## Mirrors
 
@@ -251,7 +251,7 @@ Every row's target is recorded as class `mirror` with the copy's hash, so the ne
 
 ## The manifest
 
-`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the build sha in `commit` and no hash. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror`, `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
+`.github/repo-platform-manifest.json`, the layout `actions/shared/manifest.ts` already parses: one entry per line, sorted by path. The manifest's own entry carries the build sha in `commit` (`null` before the first sync, else the build's full sha) and no hash. That entry is the one record of the build commit: `validate-managed-files` judges its shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)), and nothing fetches the build branch to learn it. Classes recorded: `managed`, `split` (with `grammar`, `begin`, `end`), `starter`, `mirror`, `link` (hash of the target string). The record is how the next sync tells the platform's own previous write from a local edit, for replacement and for retirement.
 
 ## The report
 
@@ -281,7 +281,7 @@ The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/del
 | row 1: check out | actions/checkout | repo-platform, then the build at the plan's commit under `build/` |
 | row 2: resolve | [sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts) | discovery and selection re-run with the plan's inputs (their output in `$RUNNER_TEMP` files), the row count checked against the plan, the index read off the rows file; every form of the name is registered with the masker before anything else prints, and the name and its visibility ride `GITHUB_ENV` (which the runner never echoes) from here |
 | row 3: check out the target | [sync/checkout_target.ts](../.github/scripts/sync/checkout_target.ts) | a captured `git clone` with the fleet token (actions/checkout echoes git's diagnostics, which can quote target file text); the token is stripped from the remote afterwards; `continue-on-error` |
-| row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) `--cutover true` | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
+| row 4: write | [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) | the one writer step: report to `$RUNNER_TEMP/sync.log`, summary to `summary.json`, `continue-on-error` |
 | row 5: deliver | [sync/deliver.ts](../.github/scripts/sync/deliver.ts) | a commit on `automation/repo-platform`, pushed with a lease, and a PR whose body is the report (auto-merge armed only when `hold` is false and the run's `manual` input is false); a refresh re-bases the PR onto the checkout's default branch, and a fork's PR from a same-named branch is never taken for the sync's; a tree that already matches the build closes any open sync PR as obsolete (disarmed, closed with a one-line comment, its branch deleted); a failed checkout, writer, or push files or refreshes one `[repo-platform] sync failed` issue in the target with the log tails; every line goes to `$RUNNER_TEMP/deliver.log` |
 | row 6: print | [sync/verdict.ts](../.github/scripts/sync/verdict.ts) `row` | one verdict line |
 
@@ -332,24 +332,3 @@ Limits, stated plainly:
 - The `repo=` input typed into a dispatch stays off the log: the plan reads it from the event payload, never from step env, and refusals count entries instead of quoting them.
 - The failure issue and the PR body are write-forward: a report delivered while the repository was private stays in the issue's edit history forever. Flipping a repository public publishes it; delete the report issue before a deliberate flip.
 - The [site module](site.md) publishes a PUBLIC site even from a private repository, `<owner>.github.io/<repo>` included; that is outside this model entirely.
-
-### Cutover
-
-A repository still registered the old way (`.repo-platform.yml` holding only `modules`, its files recorded in `.github/.copier-answers.yml`) is converted by the writer's `--cutover true` flag ([sync/writer/cutover.ts](../.github/scripts/sync/writer/cutover.ts)) before the registration is read, once:
-
-| Written | From |
-| --- | --- |
-| `project.name`, `project.slug`, `project.description` | `project_name`, `project_slug`, `description`; when absent, the repository name, the repository name made kebab-case (lowercase, every run outside `[a-z0-9]` one dash, none at either end), and an empty description |
-| `project.copyright_holder` | `copyright_holder`, only when it differs from the owner login |
-| nothing, a `cutover:` note instead | a selected `pages` or `docs-site` module: each yields a note to select `site`; the `pages` note carries the recorded `pages_*` answers (the build belongs in the repo-owned `.github/actions/site-build/action.yml` hook now), the `docs-site` note the recorded `docs_site_path` and `docs_site_label` where they differ from the `site` defaults (`site.path` and `labels.site` now) |
-| nothing, a `site cutover:` note instead | a target still carrying `.github/workflows/pages.yml` (the retired deploy) with no hook at `.github/actions/site-build/action.yml`: whatever the registration's shape, the note holds the PR until the former pages build has moved into the hook, since the seeded no-op would otherwise publish the docs alone |
-| `skills.dir` | `skills_dir`, when it differs from the `skills_dir` placeholder default the module data declares (`modules.<m>.skills_dir.default`, else `skills`) |
-| `labels.<key>` | `<key>_label` for each selected module carrying `tracking_label: {key, default}`, when it differs from the default |
-| `mirrors` | carried from the old file |
-
-- The module list is the old file's selection in `files.yml` order (the order the writer selects in); an unknown name is dropped and noted.
-- The derived document must pass the registration schema, or the writer fails (the row files its issue).
-- The answers file leaves through the `retired` entry for `.github/.copier-answers.yml` that the files.yml conversion carries (files.yml retires it); the cutover notes hold the PR for review.
-- After the cutover the manifest's self entry is the one record of the build commit: the writer stamps it (`null` before the first sync, else the build's full sha) and `validate-managed-files` judges that shape in place ([manifest_shape.ts](../actions/validate-managed-files/validator/checks/manifest_shape.ts)); nothing fetches the build branch to learn it. The tracking labels come from the registration's `labels` block ([settings.md](settings.md)).
-- A repository whose registration already carries `project`, or that has no answers file, is left alone.
-- A repository-owned tail left in a retired `CONTRIBUTING.md` or `.github/SECURITY.md` hides the account default, so the cutover PR's reviewer deletes or completes it before merging, in one commit on the sync branch ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-cutover)).
