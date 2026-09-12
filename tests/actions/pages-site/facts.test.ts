@@ -101,7 +101,7 @@ describe("collectFacts", () => {
     });
   });
 
-  test("degrades every missing or unparsable file to null or empty", () => {
+  test("degrades missing files and a non-mapping settings.yml to null or empty", () => {
     expect(collectFacts(treeOf({}), HEAD_INPUT)).toEqual(EMPTY_FACTS);
     expect(
       collectFacts(treeOf({ ".github/settings.yml": "- just\n- a list\n" }), HEAD_INPUT),
