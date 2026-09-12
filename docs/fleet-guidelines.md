@@ -113,7 +113,7 @@ Conventions every managed repository follows, whether the file is managed by syn
 | shell | `.sh`, `.bash`, `.zsh` | 1000 lines | 800 lines |
 | markdown | `.md` | 1300 lines | 1040 lines |
 | line width | every kind but markdown (one source line per paragraph is the fleet rule) | 256 code points | 150 code points |
-| comment block | a run of lines holding nothing but comment tokens as the file's grammar tokenizes them (a multi-line comment counts every line between its delimiters; a string or here-doc holding comment syntax is code); a blank line or a code line ends the run, a line with code on it is code (an inline comment after it is not a block), and markdown is prose | never fails | 10 lines; 25 for the file header (the first block, when nothing but a shebang or a generated region precedes it) |
+| comment block | a run of lines holding nothing but comment tokens as the file's grammar tokenizes them (a multi-line comment counts every line between its delimiters; a string or here-doc holding comment syntax is code); a blank line or a code line ends the run, a line with code on it is code (an inline comment after it is not a block), and markdown is prose | never fails | 10 lines; 25 for the file header (the first block, when nothing but a shebang, blank lines, or a generated region precedes it) |
 
 - Why: a file past these sizes is several files wearing one name; a line past the width is unreadable in any review pane; a comment past its cap is narration or a workaround defense, and the code is the source of truth. The caps are generous on purpose: they catch drift, not style.
 - Exempt by construction:

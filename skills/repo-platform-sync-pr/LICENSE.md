@@ -1,4 +1,3 @@
-<!-- BEGIN REPO-PLATFORM MANAGED -->
 # Individual and Small Organization License 1.1.0
 
 <https://github.com/Vivswan/licenses/blob/main/individual-small-organization-license/1.1.0/LICENSE.md>
@@ -556,6 +555,3 @@ software incorporates into what it produces are output. The software's
 
 **Use** means anything you do with the software requiring one of your
 licenses.
-
-<!-- The license text between the BEGIN/END markers is managed by Vivswan/repo-platform and replaced on template sync. Repository-specific license notices (third-party components, differently licensed paths) go below the END marker; they are this repository's own and survive template updates. -->
-<!-- END REPO-PLATFORM MANAGED -->

@@ -8,7 +8,7 @@ metadata:
 
 # repo-platform: Adding or Removing a Module
 
-Module selection is the top-level `modules:` list in the repository's own `.repo-platform.yml`. The sync reads it and writes the files each selected module brings; `ci.yml` is the same file in every repository and never changes with the selection. No edit in repo-platform is needed.
+Module selection is the top-level `modules:` list in the repository's own `.repo-platform.yml`. The sync reads it and writes the files each selected module brings; `ci.yml` is the same file in every repository and never changes with the selection. No edit in the platform repository is needed.
 
 Work in this order, always:
 
@@ -23,11 +23,11 @@ Work in this order, always:
 - "Remove a module" / "drop the fuzzer" / "we do not need pr-title anymore"
 - "Change the nightly label" / "move the skills directory" / "mount the docs under another path": module keys, not selection. The site build itself is the repo-owned `.github/actions/site-build/action.yml` hook, edited like any file of the repo
 
-For enrolling a repo that is not managed yet, use the `repo-platform-new-project` skill instead. Inside repo-platform itself, "add a module" means adding a `files/<module>/` folder and its `files.yml` entries; this skill is for managed repos.
+For enrolling a repo that is not managed yet, use the `repo-platform-new-project` skill instead. Inside the platform repository itself, "add a module" means adding a `files/<module>/` folder and its `files.yml` entries; this skill is for managed repos.
 
 ## The module roster
 
-One line each, the `description` of each module in repo-platform's `files.yml`.
+One line each, the `description` of each module in the platform's `files.yml`.
 
 | Module | What it gives the repo |
 |---|---|
@@ -47,7 +47,7 @@ One line each, the `description` of each module in repo-platform's `files.yml`.
 
 ## What each module writes
 
-From repo-platform's `files.yml` (`bun scripts/files_table.ts` prints the live table). Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
+From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live table). Managed files are rewritten on every sync; starters are written once and then repo-owned; split files get the module's block inside their managed region.
 
 | Module | Files | Class |
 |---|---|---|

@@ -40,7 +40,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 ## Editing your settings
 
 - Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`. The next sync re-renders the managed file from the new overlay; a hand edit of the rendered file is replaced on that sync, reported under Replaced local edits with the diff, and holds the PR. Before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it (manifest parity).
-- An overlay edit is two PRs: the overlay PR in the repository, then the sync PR carrying the re-render (`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` brings it at once; the weekly run is paused until the fleet cutover). The rendered file stays stale in between, and the apply keeps applying the old render until the sync PR merges.
+- An overlay edit is two PRs: the overlay PR in the repository, then the sync PR carrying the re-render (the Tuesday cron brings it, a `[fleet-sync: <scope>]` directive on a merged platform PR brings it from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)), and `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` brings it at once). The rendered file stays stale in between, and the apply (the nightly cron plus every green main run, [below](#when-it-runs)) keeps applying the old render until the sync PR merges.
 - An overlay that names one label twice, or that does not parse, holds the rendered row with the reason; the overlay itself is never rewritten.
 
 ## When it runs

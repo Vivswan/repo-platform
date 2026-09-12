@@ -1,6 +1,6 @@
 ---
 name: repo-platform-new-project
-description: Create or adopt a repository managed by Vivswan/repo-platform - create the repo, write .repo-platform.yml, grant the fleet token, run the first sync, review its report, and watch the first CI run. Use when someone wants a new repo on repo-platform, says "new project on the platform", "create a repo-platform repo", "set this repo up with repo-platform", "set it up like my other repos", "with my standard CI setup", "scaffold a repo with my usual standards", "bring this repo into the fleet", or asks how to bring a project under fleet management.
+description: Create or adopt a repository managed by Vivswan/repo-platform - create the repo, write .repo-platform.yml, grant the fleet token, run the first sync, review its report, and watch the first CI run. Use when someone wants a new repo on the platform, says "new project on the platform", "create a repo-platform repo", "set this repo up with repo-platform", "set it up like my other repos", "with my standard CI setup", "scaffold a repo with my usual standards", "bring this repo into the fleet", or asks how to bring a project under fleet management.
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -8,7 +8,7 @@ metadata:
 
 # repo-platform: New Project
 
-Bring a repository under Vivswan/repo-platform management. The platform writes its files into the repository from the outside: the repo carries a registration file, the fleet token can push to it, and every sync arrives as a PR with a report. Nothing is generated locally and the repo holds no sync workflow and no sync secret.
+Bring a repository under the platform's management. The platform writes its files into the repository from the outside: the repo carries a registration file, the fleet token can push to it, and every sync arrives as a PR with a report. Nothing is generated locally and the repo holds no sync workflow and no sync secret.
 
 ## When to Apply
 
@@ -19,7 +19,7 @@ Bring a repository under Vivswan/repo-platform management. The platform writes i
 ## Key facts before you start
 
 - The platform is standards-only: CI, settings, gitignore, agent instructions, license. The project skeleton comes from the native tool (`uv init`, `bun init`).
-- Two facts make a repo managed: `.repo-platform.yml` on its default branch, and the fleet token's write grant. Nothing in repo-platform lists the fleet.
+- Two facts make a repo managed: `.repo-platform.yml` on its default branch, and the fleet token's write grant. Nothing in the platform repository lists the fleet.
 - Every managed repo gets the same `ci.yml`. It never changes with the module selection; the legs after the gate read the selection at run time.
 - Steps that need repository-settings access are collected under "Owner actions".
 
@@ -133,7 +133,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
-A `site` repository that publishes its own website needs one more thing of yours before the first run on main: the website build in `.github/actions/site-build/action.yml` (seeded as a no-op, which is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing). repo-platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
+A `site` repository that publishes its own website needs one more thing of yours before the first run on main: the website build in `.github/actions/site-build/action.yml` (seeded as a no-op, which is the whole configuration for a docs-only site; until filled in the site is the docs alone, or nothing). The platform's [docs/site.md](https://github.com/Vivswan/repo-platform/blob/main/docs/site.md) has the hook contract and the docs conventions.
 
 ### 7. Watch the first CI run
 
@@ -152,7 +152,7 @@ A grey leg on main has three ordinary causes: its module is not in `modules`, th
 
 ### 8. Settings
 
-Repository settings (labels, rulesets, fields) are rendered into the managed `.github/settings.yml` by the sync (the fleet layers, the selected modules' layers, and your `.github/settings.local.yml` overlay folded into one document) and applied from repo-platform for every registered repo whose rendered file has merged. The branch protection that makes `all-green` required arrives with the first apply after the first sync PR merges:
+Repository settings (labels, rulesets, fields) are rendered into the managed `.github/settings.yml` by the sync (the fleet layers, the selected modules' layers, and your `.github/settings.local.yml` overlay folded into one document) and applied by the platform for every registered repo whose rendered file has merged. The branch protection that makes `all-green` required arrives with the first apply after the first sync PR merges:
 
 ```bash
 gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project

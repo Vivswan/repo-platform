@@ -1,6 +1,6 @@
 # Agent skills
 
-Portable agent skills for working with repo-platform from other repositories: each folder is a standalone skill an agent installs wherever it needs the platform knowledge. They live in this operator repo but are not platform files - the sync never writes them into managed repos.
+Portable agent skills for working with the platform from other repositories: each folder is a standalone skill an agent installs wherever it needs the platform knowledge. They live in this operator repo but are not platform files - the sync never writes them into managed repos.
 
 | Skill | Purpose |
 |---|---|
