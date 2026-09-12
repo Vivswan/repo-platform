@@ -6,13 +6,6 @@ import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
-// End-to-end harness for the sync plan's discovery step, stub-gh style
-// (see discovery.test.ts). This script replaced sync-repos.yml's inline
-// jq pipeline, so the tests pin its two output contracts: the
-// {repo, private} rows in discovered.json (the selectors parse them;
-// `private` decides what their public logs may name) and the public log
-// line, byte-identical to the jq era, which prints only a count and the
-// owner login.
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
   const root = temp.dir("discover-repos-");
@@ -88,16 +81,11 @@ describe("discover_repos.ts", () => {
     const r = run("scope", { STUB_PAYLOAD: payload });
     expect(r.stderr).toBe("");
     expect(r.exitCode).toBe(0);
-    // Row shape and key order pinned to the retired jq step's
-    // `{repo: .full_name, private: (.private != false)}` projection.
-    // Deliberately no trailing newline (jq -c emitted one): the file's
-    // consumer JSON.parses it.
+    // The sync selector (select_sync_repos.ts) parses these rows, and `private` decides what its public log may name.
     expect(readFileSync(r.discoveredPath, "utf-8")).toBe(
       '[{"repo":"Vivswan/hidden","private":true},{"repo":"Vivswan/pub","private":false}]',
     );
-    // The log line is this public run's only discovery output: pinned
-    // byte-for-byte to the inline step's echo, and it never carries a
-    // repo name.
+    // The public run's log must never carry a repo name.
     expect(r.stdout).toBe("discovered 2 writable repos for Vivswan\n");
   });
 

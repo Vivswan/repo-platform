@@ -1,19 +1,11 @@
 #!/usr/bin/env bun
-// The operator's log vocabulary: the only lines sync-repos.yml prints on
-// its own behalf. Everything else a run learns goes to $RUNNER_TEMP files
-// or to the target repository (docs/sync.md, "The operator").
-//
-// plan: the selector's rows file in RUNNER_TEMP -> "plan: <N> rows",
-//   outputs count and indexes ([0..N-1], the matrix).
-// row: env ROW, TARGET (empty when no step resolved the target), RUNNER_TEMP
-//   -> one "row <i>: ..." line from the verdict deliver.ts wrote; a resolved
-//   target with no verdict exits 1 silently (the delivery channel broke).
+// The only lines sync-repos.yml prints on its own behalf; everything else a run learns goes to $RUNNER_TEMP files or the target
+// repository (docs/sync.md, "The operator").
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv, setOutput } from "../shared/gha.ts";
 
-/** What deliver.ts records for a row, one word in VERDICT_FILE. */
 export const DELIVERY_VERDICTS = ["unchanged", "opened", "refreshed", "failed"] as const;
 export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
 
@@ -25,7 +17,6 @@ export const ROWS_FILE = "rows.json";
 
 export const UNRESOLVED = "failed before the target was resolved; re-run the workflow";
 
-/** The row line's tail per delivery verdict. */
 export const ROW_LINES: Record<DeliveryVerdict, string> = {
   unchanged: "unchanged",
   opened: "PR opened",

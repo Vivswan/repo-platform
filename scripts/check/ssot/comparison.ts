@@ -1,22 +1,13 @@
-// The Mismatch shape every rule reports and the comparison primitives
-// (canonical JSON, set and line diffs, loud anchors) the rule modules under
-// this directory build on.
-
 export interface Mismatch {
   file: string;
   expected: string;
   got: string;
 }
 
-/** The marker tokens a generated markdown region is fenced with:
- *  `<!-- BEGIN GENERATED: <name> ... -->` through `<!-- END GENERATED: <name> -->`. */
 export const MARKER_TOKENS = { begin: "BEGIN GENERATED:", end: "END GENERATED:" } as const;
 
-/** A markdown doc with its generated regions removed (and how many), so a
- *  doc-quoted constant must live in HAND prose to satisfy a rule: a value
- *  inside a generated region has its generator as its author (files:check
- *  polices those). Markers are parsed pairwise - a duplicate BEGIN, a
- *  mismatched name, a dangling END, or an unclosed region all throw. */
+/** A value inside a generated region has its generator as its author (files:check polices those),
+ *  so a rule's doc-quoted constant must be found in hand prose. */
 export function stripGeneratedRegions(
   text: string,
   where: string,
@@ -66,14 +57,10 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
   return match;
 }
 
-/** `text` as a regex fragment matching itself: every metacharacter,
- *  the backslash included, escaped. */
 export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** JSON with recursively sorted object keys, for order-insensitive
- *  deep-equality messages. */
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (typeof value === "object" && value !== null) {
@@ -89,15 +76,11 @@ export function sortedSet(values: string[]): string {
   return [...new Set(values)].sort().join(", ");
 }
 
-/** One mismatch when `got` is not exactly the same set as `expected`. */
 export function setMismatch(file: string, expected: string[], got: string[]): Mismatch[] {
   if (sortedSet(expected) === sortedSet(got)) return [];
   return [{ file, expected: sortedSet(expected), got: sortedSet(got) }];
 }
 
-/** Mismatches when `got` is not `expected` name for name in the same
- *  order: each missing and each extra name on its own, then the sequence
- *  of the shared names when it differs. */
 export function orderedListMismatches(file: string, expected: string[], got: string[]): Mismatch[] {
   const mismatches: Mismatch[] = [];
   for (const name of expected) {
@@ -120,7 +103,6 @@ export function orderedListMismatches(file: string, expected: string[], got: str
   return mismatches;
 }
 
-/** First index where two line sequences differ, or -1 when equal. */
 export function firstDiff(expected: string[], got: string[]): number {
   const max = Math.max(expected.length, got.length);
   for (let i = 0; i < max; i++) {

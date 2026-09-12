@@ -1,9 +1,5 @@
-// The yamllint action's contract: the content assertions that left the
-// smoke harness when the fleet ci.yml job became a thin caller. What the
-// fleet relies on is exactly two steps - the pip install and the STRICT
-// lint (-s: warnings fail too) of the caller's whole checkout - so a
-// loosened flag or a narrowed path is a deliberate edit here, not a quiet
-// render change.
+// The fleet relies on exactly two steps: the pip install and the strict lint (-s: warnings fail too) of the whole checkout.
+// A loosened flag or a narrowed path is a deliberate edit here.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";

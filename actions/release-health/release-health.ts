@@ -1,19 +1,7 @@
 /**
- * Gate a release on the repository's health, at two points selected by
- * MODE: pull-request (a release-please PR's CI; the PR's own labels supply
- * the override) and release (the main-push path just before release-please
- * cuts). In release mode only the merge commit of a release-please PR is
- * gated; every other main push exits 0, because gating ordinary pushes
- * would paint all of main red while one issue is open.
- * Release mode also reports `release-cut` ("true" on a release-PR merge) as a step output.
- * fleet-release.yml lets release-please tag only on "true", so an ordinary-push run cannot release a merge its gate never judged.
- *
- * Three gate families, all evaluated even under the override so the report
- * is complete: one tracking gate per label in TRACKING_LABELS (each open
- * tracking issue blocks under its own label), the open blocker issue
- * (BLOCKER_LABEL), and open Dependabot alerts at or above
- * SECURITY_SEVERITY. Without the override label failures are ::error and
- * exit 1; with it they become ::warning plus a loud ::notice and exit 0.
+ * In release mode only a release-please PR's merge commit is gated; every other main push exits 0, because gating
+ * ordinary pushes would paint all of main red while one issue is open. fleet-release.yml lets release-please tag only
+ * on a "true" `release-cut` output, so an ordinary-push run cannot release a merge its gate never judged.
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -21,7 +9,6 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
 
-/** Run gh and return stdout; throws with gh's stderr on a non-zero exit. */
 const gh: GhRunner = async (args) => {
   const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([
@@ -85,7 +72,6 @@ export function parseTrackingLabels(env: NodeJS.ProcessEnv): string[] {
   return labels;
 }
 
-/** Parse the environment into a Config, or throw naming the first problem. */
 export function parseConfig(env: NodeJS.ProcessEnv): Config {
   const repo = env.GITHUB_REPOSITORY;
   if (!repo) {
@@ -125,7 +111,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
   };
 }
 
-/** The severities that meet or exceed the threshold, mildest first. */
 export function severitiesAtOrAbove(threshold: Severity): Severity[] {
   return SEVERITIES.slice(SEVERITIES.indexOf(threshold));
 }
@@ -143,12 +128,9 @@ interface PrPayload {
 }
 
 /**
- * Pull-request mode: the override label read from the PR named by the event
- * payload. The labels come from a live `gh pr view`, never the payload's
- * label snapshot: the override flow is applying the label AFTER a failing
- * run and re-running, and a removed label must stop counting, so a stale
- * snapshot is wrong in both directions. A failed lookup propagates - a gate
- * that cannot determine override state must not pass one (fail closed).
+ * The labels come from a live `gh pr view`, never the payload's label snapshot: the override flow is applying the label
+ * AFTER a failing run and re-running, and a removed label must stop counting, so a stale snapshot is wrong in both
+ * directions. A failed lookup propagates: a gate that cannot determine override state must not pass one (fail closed).
  */
 export async function overrideFromPullRequest(
   run: GhRunner,
@@ -187,12 +169,9 @@ export interface ReleaseLookup {
 }
 
 /**
- * The release-please PR whose MERGE produced the commit. The gate applies
- * only to an actual release-PR merge, so a candidate counts solely with
- * merged_at set: an open release-please PR that happens to be associated
- * with a pushed commit is not a merge and yields the trivial pass. More
- * than one merged candidate is unresolvable ambiguity and fails closed
- * rather than gating on an arbitrary PR's labels.
+ * A candidate counts solely with merged_at set: an open release-please PR that happens to be associated with a pushed
+ * commit is not a merge and yields the trivial pass. More than one merged candidate is unresolvable ambiguity and fails
+ * closed rather than gating on an arbitrary PR's labels.
  */
 export async function findReleasePr(
   run: GhRunner,
@@ -246,7 +225,6 @@ export type GateOutcome =
  * reported as "at least" so the message never understates the backlog. */
 const ISSUE_LIMIT = 100;
 
-/** A gate that fails while any open issue carries the label. */
 export async function issueGate(
   run: GhRunner,
   repo: string,
@@ -284,8 +262,6 @@ export async function issueGate(
   };
 }
 
-/** A gate that fails while any Dependabot alert at or above the threshold is
- * open. */
 export async function securityGate(
   run: GhRunner,
   repo: string,
@@ -331,7 +307,6 @@ export async function securityGate(
   };
 }
 
-/** Run the gates and emit workflow commands via `out`; returns the exit code. */
 export async function runHealthCheck(
   cfg: Config,
   run: GhRunner,
@@ -365,6 +340,7 @@ export async function runHealthCheck(
   }
 
   const overrideHint = `or apply the '${cfg.overrideLabel}' label to the release PR and re-run this check`;
+  // Every gate runs even under the override, so the report is complete.
   const outcomes: GateOutcome[] = [];
   for (const label of cfg.trackingLabels) {
     outcomes.push(

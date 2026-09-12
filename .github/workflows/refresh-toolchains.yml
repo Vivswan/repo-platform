@@ -1,8 +1,3 @@
-# Weekly: bump the toolchain version pins (files.yml modules.<module>.pin)
-# to the latest upstream releases, regenerate the pinned dotfiles, and
-# open a PR when anything moved.
-# Merging the PR reaches the build branch automatically via the post-green publish.
-
 name: Refresh toolchains
 
 on:
@@ -27,7 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Base the refresh on the default branch regardless of trigger ref.
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
 
@@ -45,11 +39,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun .github/scripts/refresh-toolchains/refresh_toolchains.ts
 
-      # open_refresh_pr.ts composes the body (its optional MAJOR banner is
-      # a multiline string, which expressions cannot build) and hands it
-      # to open_automation_pr.ts. REFRESH_TITLE: a later run can bump
-      # different versions onto the same branch, so an existing PR's title
-      # is refreshed too.
+      # REFRESH_TITLE: a later run can bump different versions onto the same branch, so an existing PR's title is refreshed too.
       - name: Commit, push, and open PR
         if: steps.refresh.outputs.bumps != ''
         env:

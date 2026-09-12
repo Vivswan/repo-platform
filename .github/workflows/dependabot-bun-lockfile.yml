@@ -39,8 +39,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
-      # Regenerates every tracked lockfile from scratch, commits, and pushes
-      # to the PR head; no_retrigger flags a push github.token made.
       - name: Regenerate, commit, and push the deduped lockfiles
         id: push
         uses: Vivswan/repo-platform/actions/dedupe-bun-lockfile@build
@@ -48,8 +46,6 @@ jobs:
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           can-retrigger: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
           head-ref: ${{ github.event.pull_request.head.ref }}
-      # One comment per PR, edited in place on later runs; a failed post
-      # fails the step.
       - name: Comment that checks will not re-run
         if: steps.push.outputs.no_retrigger == 'true'
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5

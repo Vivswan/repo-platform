@@ -12,11 +12,6 @@ export function isLandingFile(filePath: string): boolean {
   return LANDING_FILES.has(filePath.split("/").pop() ?? "");
 }
 
-/** The repository path of the source behind `filePath` (VitePress's
- *  page.filePath, relative to the staged docs tree): under an include
- *  root's mount it is that root's own path, else the docs directory's. The
- *  longest mount wins, so a root mounted inside another's segment resolves
- *  to itself. */
 export function sourcePathOf(
   docsDir: string,
   includes: readonly { path: string; mount: string }[],

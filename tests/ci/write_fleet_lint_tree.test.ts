@@ -1,7 +1,3 @@
-// The fleet-workflow lint tree (ci.yml's actionlint job): the writer lands
-// every selection's workflows in scratch, run through the script as CI
-// does, and the written files parse as YAML with their placeholders gone.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -31,7 +27,6 @@ describe("write_fleet_lint_tree.ts", () => {
         expect(() => parseYaml(text)).not.toThrow();
       }
     }
-    // The module workflows land only with their modules selected.
     expect(readdirSync(join(dest, "all", ".github/workflows"))).toContain("pr-title.yml");
     expect(readdirSync(join(dest, "none", ".github/workflows"))).not.toContain("pr-title.yml");
     // Each target is a git project carrying the starter actionlint config,
@@ -40,10 +35,8 @@ describe("write_fleet_lint_tree.ts", () => {
       expect(existsSync(join(dest, name, ".git"))).toBe(true);
       expect(existsSync(join(dest, name, ".github/actionlint.yaml"))).toBe(true);
     }
-    // With actionlint on PATH (CI's job puts it there before this step),
-    // the written workflows lint clean from each target's root, the same
-    // invocation ci.yml makes; a planted content error through the same
-    // invocation goes red, so a clean run is a verdict, not a no-op.
+    // CI's job puts actionlint on PATH before this step; locally the lint leg is skipped without it.
+    // The planted error through the same invocation goes red, so a clean run is a verdict, not a no-op.
     const which = boundedSpawnSync(["sh", "-c", "command -v actionlint"], { cwd: REPO_ROOT });
     if (which.exitCode === 0) {
       for (const name of ["all", "none"]) {

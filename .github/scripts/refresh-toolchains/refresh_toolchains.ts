@@ -1,21 +1,6 @@
 #!/usr/bin/env bun
-// Weekly refresher for the toolchain version pins: fetch each pinned
-// toolchain's latest upstream version (bun's latest GitHub release, Node's
-// newest LTS line, Deno's latest stable release), rewrite files.yml's pin
-// entries in place (line-targeted, so comments and layout survive), and
-// regenerate the pinned dotfiles from them. The workflow around it commits
-// and opens the PR, mirroring refresh-gitignore.
-//
-// Emits to GITHUB_OUTPUT: `bumps=<prose list>` (empty when everything is
-// already current), e.g. "bun to 1.3.15 and deno to 2.9.6", and
-// `major=<fragments>` naming any major-version jumps ("node 24 -> 26")
-// for the PR body's prominent callout. A source that cannot be fetched or
-// parsed is a per-module ::warning (the others still refresh); the run
-// aborts only when no source at all could be fetched. A fetched "latest"
-// LOWER than the current pin (date-ordered /releases/latest can surface a
-// backport on an older line) is warned about and never applied.
-//
-// Usage: bun .github/scripts/refresh-toolchains/refresh_toolchains.ts
+// files.yml's pin lines are rewritten in place, line-targeted, so its comments and layout survive; the workflow around it commits
+// and opens the PR.
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -33,16 +18,13 @@ function versionFrom(value: unknown, pattern: RegExp, what: string): string {
   return match[1];
 }
 
-/** GitHub releases/latest payload for oven-sh/bun: tag bun-vX.Y.Z. */
 export function latestBunVersion(payload: unknown): string {
   const tag = (payload as { tag_name?: unknown } | null)?.tag_name;
   return versionFrom(tag, /^bun-v(\d+\.\d+\.\d+)$/, "oven-sh/bun latest release tag");
 }
 
-/** nodejs.org/dist/index.json: the first (newest) entry whose lts field is
- *  a non-empty codename string is the newest release of the newest LTS
- *  line (non-LTS entries carry lts: false; anything else is malformed and
- *  must not be mistaken for an LTS). */
+/** The dist index is newest-first, and `lts` is false or the line's codename, so the first entry whose `lts` is a non-empty string
+ *  is the newest LTS release. */
 export function latestNodeLts(payload: unknown): string {
   if (!Array.isArray(payload)) {
     throw new Error("nodejs.org dist index: expected an array of releases");
@@ -62,15 +44,12 @@ export function latestNodeLts(payload: unknown): string {
   );
 }
 
-/** GitHub releases/latest payload for denoland/deno: tag vX.Y.Z (the
- *  endpoint never returns prereleases, so this is the latest stable). */
+/** releases/latest never returns a prerelease, so this is the latest stable. */
 export function latestDenoVersion(payload: unknown): string {
   const tag = (payload as { tag_name?: unknown } | null)?.tag_name;
   return versionFrom(tag, /^v(\d+\.\d+\.\d+)$/, "denoland/deno latest release tag");
 }
 
-/** Upstream source per pinned module. A files.yml pin without an entry
- *  here (or a stale entry without a pin) fails the run. */
 export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown) => string }> = {
   bun: {
     url: "https://api.github.com/repos/oven-sh/bun/releases/latest",
@@ -83,10 +62,6 @@ export const PIN_SOURCES: Record<string, { url: string; parse: (payload: unknown
   },
 };
 
-/** Rewrite files.yml's `pin: {file: X, version: Y}` line under
- *  `modules.<module>`, leaving every other byte untouched. The line must be
- *  exactly that flow mapping (the form the committed file uses); anything
- *  else fails loudly rather than being skipped or half-rewritten. */
 export function bumpFilesPin(text: string, module: string, version: string, where: string): string {
   const lines = text.split("\n");
   const modulesAt = lines.indexOf("modules:");
@@ -116,7 +91,6 @@ export interface Bump {
   version: string;
 }
 
-/** Numeric X.Y.Z comparison: negative when a < b, zero when equal. */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);
   const pb = b.split(".").map(Number);
@@ -126,10 +100,8 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** What a fetched version means for the pin. GitHub's /releases/latest is
- *  most-recent-by-DATE, so a backport patch on an older line can surface
- *  as "latest" - never auto-downgrade (a genuine rollback is a deliberate
- *  hand edit, not an automated bump). */
+/** GitHub's /releases/latest is most-recent-by-DATE, so a backport patch on an older line can surface as "latest"; a genuine
+ *  rollback is a deliberate hand edit, never an automated downgrade. */
 export function decideBump(pinned: string, fetched: string): "bump" | "current" | "downgrade" {
   const order = compareVersions(fetched, pinned);
   return order === 0 ? "current" : order < 0 ? "downgrade" : "bump";
@@ -152,12 +124,8 @@ export function majorJumps(bumps: Bump[]): string {
     .join(", ");
 }
 
-/** Fetch and JSON-parse one upstream source. Both failure diagnostics are
- *  fixed strings BY CONSTRUCTION - fetch()'s pre-response rejections (DNS,
- *  TLS, refused connection, timeout) and response.json()'s invalid-body
- *  rejection all carry runtime-generated messages, and this error's
- *  message is published as a public ::warning by main() - so only the
- *  endpoint is named, never the runtime's error text. */
+/** Both failure messages are fixed strings: fetch()'s rejections and response.json()'s carry runtime-generated text, and main()
+ *  publishes this message as a public ::warning. */
 export async function fetchJson(url: string): Promise<unknown> {
   const headers: Record<string, string> = { "user-agent": "repo-platform-refresh-toolchains" };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;

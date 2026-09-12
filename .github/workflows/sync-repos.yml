@@ -1,24 +1,6 @@
-# The push-only sync operator: the plan job resolves the build and the rows
-# (which managed repositories, from the REPO_PLATFORM_TOKEN's grant, probed
-# per repository), and one row job per index copies the build into its
-# target and delivers a PR. Managed repositories carry no sync workflow and
-# no secret; the fleet PAT lives here alone.
-#
-# The public log carries the operator's vocabulary and nothing else
-# (docs/sync.md, "The operator"): the matrix holds row indexes, the
-# selector writes its rows to a $RUNNER_TEMP file and prints counts, the
-# row's resolve step masks the name before any other step prints, every
-# later run step writes to $RUNNER_TEMP files, and the details land in the
-# target repository itself (the PR body, or a failure issue). The same job
-# runs for public and private targets.
-#
-# The `sync-repos` concurrency group makes this the single automated writer
-# of every target's automation branch: rows fan out in parallel, each to a
-# different repository. GitHub keeps ONE pending run per group, so
-# multi-repo work belongs in a single run (repo=all, or a comma list). A
-# merged PR opts into an immediate sync with a [fleet-sync: <scope>]
-# directive (fleet_sync_marker.ts): post-green.yml's sync-fleet leg then
-# CALLS this workflow in the merge's own CI run.
+# The push-only sync operator (docs/sync.md, "The operator"): the public log carries the operator's vocabulary and
+# nothing else, so a row's steps write their detail to $RUNNER_TEMP files or to the target repository itself.
+# GitHub keeps ONE pending run per concurrency group, so multi-repo work belongs in a single run (repo=all, or a comma list).
 
 name: Sync Repos
 
@@ -42,11 +24,8 @@ on:
         required: false
         type: boolean
         default: false
-  # The opt-in path: post-green.yml's sync-fleet leg calls this workflow
-  # from the merge's CI run. Named `repos`, not `repo`, on purpose - the
-  # dispatch input may be a private slug and never rides in step env,
-  # while this value is public text off the merged PRs of a main range and
-  # is passed as ONLY_REPO below. The dispatch-only `manual` keeps its default here.
+  # Named `repos`, not `repo`, on purpose: the dispatch input may be a private slug and never rides in step env,
+  # while this value is public text off merged PRs and is passed as ONLY_REPO below.
   workflow_call:
     inputs:
       repos:
@@ -72,10 +51,8 @@ on:
 permissions:
   contents: read
 
-# Cron and dispatch runs hold the sync-repos lane. A CALLED run takes a
-# per-run group instead: its caller (post-green.yml's sync-fleet job)
-# already holds sync-repos, and a called workflow must never wait on the
-# lane its caller holds (the deadlock law in post-green.yml's header).
+# A CALLED run takes a per-run group: its caller (post-green.yml's sync-fleet job) already holds sync-repos,
+# and a called workflow must never wait on the lane its caller holds.
 concurrency:
   group: ${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}
   cancel-in-progress: false
@@ -96,7 +73,6 @@ jobs:
       count: ${{ steps.plan.outputs.count }}
       indexes: ${{ steps.plan.outputs.indexes }}
     steps:
-      # A missing token is a misconfiguration of this repo: fail loudly.
       - name: Require the fleet token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -129,17 +105,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/sync/resolve_build.ts
 
-      # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json.
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/discover_repos.ts
 
-      # ONLY_REPO carries only the workflow_call scope (public text off the
-      # merged PRs of a main range; empty on cron and dispatch runs). The typed dispatch
-      # input never rides here: it may be a private slug, and the runner
-      # prints step env values into this public log - the script reads it
-      # from the event payload instead.
+      # The dispatch input never rides in step env (the runner prints env values into this public log);
+      # the script reads it from the event payload instead.
       - name: Select repos and check adoption
         id: select
         env:
@@ -209,10 +181,7 @@ jobs:
           TARGET_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_sync_repos.ts > "$RUNNER_TEMP/select.log" 2>&1
 
-      # The only step that sees the name in the clear: it reads its row
-      # from the selector's file, registers every form with the masker
-      # before writing anything, then hands the name on through GITHUB_ENV
-      # (TARGET) alone.
+      # The only step that sees the name in the clear: resolve_row.ts masks the target before anything else prints.
       - name: Resolve the row's target
         id: target
         env:

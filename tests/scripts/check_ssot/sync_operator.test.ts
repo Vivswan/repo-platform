@@ -1,7 +1,3 @@
-// The operator-verdict-only model (scripts/check/ssot/sync_operator.ts):
-// the live workflow passes, and each way a step could print a target's
-// detail into the public log is a mismatch.
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { rowBudgetMinutes } from "../../../.github/scripts/sync/row_budget.ts";
@@ -12,7 +8,6 @@ import {
 
 const live = readFileSync(SYNC_WORKFLOW, "utf-8");
 
-// The operator's pinned action lines, spelled exactly as the workflow does.
 const CHECKOUT = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
 const SETUP_BUN =
   "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0";

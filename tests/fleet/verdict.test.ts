@@ -1,7 +1,3 @@
-// The operator's vocabulary is exhaustive: verdict.ts, run as the workflow
-// runs it, prints one line from the fixed set on every path or nothing at
-// all, and every line of the set is reachable.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -82,7 +78,6 @@ describe("verdict.ts", () => {
     );
     speaks(result, "plan: 2 rows");
     expect(result.outputs).toBe("count=2\nindexes=[0,1]\n");
-    // The names stay in the file: the printer's line never carries one.
     expect(result.stdout).not.toContain("o/");
   });
 

@@ -1,24 +1,14 @@
-// Split files: the writer owns the marker-bounded region and the repository
-// owns everything above and below it. A file without markers keeps its
-// whole content below the new region and is reported for review; a file
-// whose markers are duplicated or out of order is refused loudly, since no
-// slice of it is honest. A symbolic link at the path is held, like a
-// managed file's.
-
 import { cleanManagedRegion, type RegionMarkers } from "../../../../actions/shared/grammar.ts";
 import { mentionsMarkers } from "./files_config.ts";
 import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
 import { LINK_IN_THE_WAY, type WriteOutcome } from "./write_managed.ts";
 
-/** `text` ending in exactly the newline it needs to be followed by more. */
 export function terminated(text: string): string {
   return text === "" || text.endsWith("\n") ? text : `${text}\n`;
 }
 
-/** The region text: the BEGIN line, the body (newline-terminated), the END
- *  line. A body that already mentions a marker (a placeholder value can
- *  carry one) is refused: the file would have no honest slice next run. */
+/** A body mentioning a marker (a placeholder value can carry one) is refused: the file would have no honest slice next run. */
 export function renderRegion(body: string, markers: RegionMarkers): string {
   if (mentionsMarkers(body, markers)) {
     throw new Error("the region body mentions the marker text the writer adds itself");

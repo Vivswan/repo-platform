@@ -1,16 +1,10 @@
-// The fleet token's ACTUAL write grant on a repo, probed via git's
-// push-service advertisement: 200 only with push permission. Fine-grained
-// PATs read every public repo and user/repos reports the USER's
-// permissions, so this is the only honest enrollment signal. Read-only,
-// no side effects. curl stays a subprocess (not fetch) so the test
+// git's push-service advertisement answers 200 only with push permission; fine-grained PATs read every public repo and user/repos
+// reports the USER's permissions, so this is the only honest enrollment signal. curl stays a subprocess, not fetch, so the test
 // harnesses can stub it on PATH.
 
 import { captureNetwork } from "./discovery.ts";
 
-/** HTTP status of the push probe; 0 for a transport failure (DNS, TLS,
- * the fleet network deadline expiring), like curl's 000. A status printed
- * by a FAILING curl is not trusted: only exit 0 output counts as an
- * answer. */
+/** 0 for a transport failure, like curl's 000; a status printed by a FAILING curl is not trusted. */
 export function pushProbeStatus(slug: string, pat: string): number {
   const proc = captureNetwork([
     "curl",

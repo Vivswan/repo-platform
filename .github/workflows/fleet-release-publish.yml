@@ -1,9 +1,5 @@
-# The fleet's release publish, called by every managed ci.yml after
-# fleet-release.yml cut the draft and the repository's own update-release
-# hook ran: attests the draft's assets (public repositories only: the
-# attestation needs a public repository, so non-public releases publish
-# unattested) and flips the release live. Gates are runtime on purpose:
-# the assets are only knowable at run time.
+# Attestation needs a public repository, so non-public releases publish unattested.
+# The gates are step-level on purpose: whether the draft has assets is only knowable at run time.
 
 name: Fleet Release Publish
 
@@ -30,8 +26,7 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.tag }}
-      # One Sigstore bundle covering every asset, under the attest action's
-      # own file name.
+      # The attest action's own bundle file name.
       BUNDLE_NAME: attestation.json
     steps:
       # A stale bundle from a prior attempt is deleted from the RELEASE, so

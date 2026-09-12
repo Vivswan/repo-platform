@@ -1,9 +1,3 @@
-// dedupe-bun-lockfile.ts: the whole argv sequence the action spawns against
-// a checkout, judged per scenario through stub git and bun on PATH (the
-// script itself runs under the real bun, by path). Each row pins every call,
-// the exit code, the GITHUB_OUTPUT file, the log, and the lockfiles left on
-// disk, so a drifted flag or a swallowed failure reds the row.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -135,10 +129,6 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-/** A checkout with two tracked lockfiles beside stub git and bun: ls-files
- *  lists both, checkout restores the named path, diff and push exit as the
- *  scenario says, and install writes the lockfile unless the scenario names
- *  its directory as one bun emptied. */
 function plant(root: string) {
   const checkout = join(root, "checkout");
   mkdirSync(join(checkout, "pkg"), { recursive: true });

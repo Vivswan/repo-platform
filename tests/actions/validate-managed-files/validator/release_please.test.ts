@@ -1,6 +1,3 @@
-// release-please-config.json: a release-as pin at either level is an error
-// naming the footer recipe; a malformed config never passes silently.
-
 import { describe, expect, test } from "bun:test";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 import { validatorRunner } from "./fixtures";

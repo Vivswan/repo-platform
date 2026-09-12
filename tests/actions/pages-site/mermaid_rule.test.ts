@@ -47,11 +47,8 @@ test("a page keeps its prose and its other fences around the mount, tilde fences
   expect(html).toBe(`<h1>Title</h1>\n${MOUNT}<p>Prose.</p>\n<HIGHLIGHTED ts>\n`);
 });
 
-// Through VitePress's own renderer, whose code-group container marks its
-// first fence active and whose tabs show the block carrying `.active`: a
-// mount in a group is a `vp-block` (the class VitePress gives a group's
-// non-code block), active when first, and the fence's `[Title]` names its
-// tab; outside a group the mount carries neither class.
+// VitePress's code-group container marks its first fence active and its tabs show the block carrying `.active`.
+// `vp-block` is the class it gives a group's non-code block.
 test("a mermaid fence in a code group is a vp-block the tabs can switch, active when first", async () => {
   const md = await vitepressRenderer();
   const group = (first: string, second: string) =>

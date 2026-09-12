@@ -1,6 +1,5 @@
-// Per-run scratch roots for the build-branch producers, minted fresh under
-// RUNNER_TEMP (or os.tmpdir()) so concurrent producers never share a worktree,
-// and removed at process exit; a signal kill leaves the root to its owner.
+// Minted fresh per run so concurrent producers never share a worktree; a signal kill skips the exit hook and leaves the root to
+// RUNNER_TEMP's owner.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,9 +16,7 @@ export interface ScratchWorktrees {
   out: string;
 }
 
-/** Mints this run's scratch worktree paths and arms their removal at process
- * exit, followed by a prune of the calling checkout's worktree list: a
- * registered-but-missing entry would block the path from being added again. */
+/** The prune after removal matters: a registered-but-missing worktree entry would block the path from being added again. */
 export function scratchWorktrees(): ScratchWorktrees {
   const checkout = process.cwd();
   const root = mkdtempSync(join(env("RUNNER_TEMP") || tmpdir(), "build-branches-"));

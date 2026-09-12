@@ -1,11 +1,6 @@
 import { type Context, REGISTRATION_PATH } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
-/** The registration every managed repository carries (repo-platform
- *  itself included): .repo-platform.yml exists, its `modules` is a list,
- *  and every name is a module files.yml knows. The vocabulary comes from
- *  the data file the caller named; a data file that cannot be read is
- *  reported once and the names stand unjudged. */
 export function checkRegistration(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   if (ctx.registration === null) {

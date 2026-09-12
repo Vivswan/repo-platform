@@ -1,10 +1,3 @@
-// The stamp-health battery (shared/stamp_checks.ts): checks 1+2 of the
-// build-tip trust chain, shared by the sync's provenance verifier (a
-// reason fails the sync) and publish.ts's no-change skip guard (a reason
-// means publish a recovery commit instead of skipping). Pure logic with
-// injected git answers; the two consumers' wiring is proven in their own
-// suites.
-
 import { describe, expect, test } from "bun:test";
 import { stampUnhealthyReason } from "../../.github/scripts/shared/stamp_checks.ts";
 
@@ -16,8 +9,6 @@ const OFFMAIN = "d".repeat(40);
 
 const STAMP = (sha: string) => `source: https://github.com/o/r/commit/${sha}`;
 
-/** Injected git: `resolvable` answers resolveCommit, `ancestry` ("A:B"
- * pairs) answers isAncestor. */
 function git(resolvable: string[], ancestry: string[]) {
   return {
     resolveCommit: (revspec: string) => (resolvable.includes(revspec) ? revspec : ""),

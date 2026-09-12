@@ -1,9 +1,3 @@
-// The fixture owner's contract through a child `bun test`: a probe file
-// mints a directory at collection time, exercises one bun shape, and the
-// directory must be gone once the child exits. The rows where bun runs no
-// hook at all pin the fixture SURVIVING, the fact the launcher's carve-out
-// rests on.
-
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,9 +25,8 @@ function probeSource(body: string): string {
   ].join("\n");
 }
 
-/** Runs a probe under `bun test` and returns its whole outcome, output
- * included. CI=false is set, not deleted: bun also reads runner markers
- * such as GITHUB_ACTIONS, and CI=false is the override that beats them. */
+/** CI=false is set, not deleted: bun also reads runner markers such as
+ * GITHUB_ACTIONS, and CI=false is the override that beats them. */
 let probes = 0;
 function runProbe(
   body: string,
@@ -58,8 +51,8 @@ function runProbe(
   };
 }
 
-/** Asserts a probe's whole outcome, with the child's output as the failure
- * message so a mismatch says why (an equal field would collapse in a diff). */
+/** The child's output rides as the failure message, so a mismatch says why
+ * instead of showing a two-field diff. */
 function expectOutcome(
   r: ReturnType<typeof runProbe>,
   expected: { exitCode: number; fixtureSurvives: boolean },
@@ -91,8 +84,6 @@ describe("tempDirs", () => {
       exitCode: 1,
     },
     {
-      // A fixture minted inside a nested describe's beforeAll rides the
-      // same file-level afterAll.
       shape: "nested describe with beforeAll",
       body: [
         'describe("outer", () => { describe("inner", () => {',
@@ -110,8 +101,6 @@ describe("tempDirs", () => {
       exitCode: 0,
     },
     {
-      // The override the probes rest on: a runner marker with CI=false set
-      // is not CI to bun.
       shape: ".only under GITHUB_ACTIONS=true with the CI=false override",
       body: 'test.only("chosen", () => {});',
       env: { GITHUB_ACTIONS: "true" },
@@ -129,9 +118,7 @@ describe("tempDirs", () => {
   );
 
   test("a cleanup failure is reported beside the test's own failure, never in its place", () => {
-    // An unwritable fixture with a child makes rmSync fail; the original
-    // assertion failure must still be in the report, with the cleanup
-    // error as its own failing entry.
+    // chmod 0o500 on a directory holding a child is what makes rmSync fail.
     const r = runProbe(
       [
         'test("original", () => {',
@@ -152,9 +139,9 @@ describe("tempDirs", () => {
   });
 
   // Shapes where bun runs no hook at all, so the fixture SURVIVES; the
-  // launcher's per-run TMPDIR is what removes it. If the name-filter row
-  // goes green-by-removal on a future bun, the launcher's filter
-  // carve-out can go with it.
+  // launcher's per-run TMPDIR (scripts/run_tests.ts) is what removes it. If
+  // the name-filter row goes green-by-removal on a future bun, the launcher's
+  // filter carve-out can go with it.
   test.each<{
     shape: string;
     body: string;

@@ -1,7 +1,3 @@
-// Rules pinning the bun toolchain: package homes and lockfiles, the
-// @types/bun coupling, version-file setup steps, the composite actions' bun
-// guard, the local runtime, and dependabot's action directories.
-
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -29,9 +25,7 @@ import {
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The action directories carrying `file`, as sorted repo-relative paths:
- *  every package under actions/ sits at the action root (the ci.yml
- *  typecheck glob and the root postinstall loop key on that level). */
+/** Every package under actions/ sits at the action root: the ci.yml typecheck glob and the root postinstall loop key on that level. */
 function actionDirsCarrying(file: string): string[] {
   return readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !EXCLUDED_ACTION_DIRS.has(entry.name))
@@ -45,20 +39,13 @@ function actionDirsCarrying(file: string): string[] {
 export const TYPECHECK_TSCONFIG_LOOP = "for tsconfig in tsconfig.json actions/*/tsconfig.json";
 
 export interface BunDirsInputs {
-  /** Directories committing a bun.lock, "." for the root. */
   lockDirs: string[];
-  /** Directories dependabot's bun ecosystem entries name, "." for the root. */
   dependabotBunDirs: string[];
-  /** package.json's typecheck script. */
   typecheckScript: string;
-  /** The ci.yml typecheck job's run blocks, joined. */
   typecheckRuns: string;
-  /** Directories carrying a tsconfig.json, "." for the root. */
   tsconfigDirs: string[];
 }
 
-/** Every directory committing a bun.lock is under dependabot, in the local
- *  typecheck script, and carries the tsconfig.json the CI loop keys on. */
 export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
   const mismatches: Mismatch[] = [];
   for (const dir of inputs.lockDirs) {
@@ -98,25 +85,17 @@ export function bunDirsMismatches(inputs: BunDirsInputs): Mismatch[] {
   return mismatches;
 }
 
-/** MAJOR.MINOR of a plain version or a single caret/tilde range - the only
- *  grammars the coupled manifests use. Anything else (compound ranges,
- *  prerelease tags, trailing junk) throws rather than reading a prefix: a
- *  half-parsed range passing vacuously is exactly the silent drift the
- *  rule exists to stop. */
+/** Anything beyond a plain version or a single caret/tilde range throws rather than reading a prefix:
+ *  a half-parsed range passing vacuously is the silent drift the rule exists to stop. */
 export function majorMinor(version: string, where: string): [number, number] {
   const match = /^[\^~]?(\d+)\.(\d+)(?:\.\d+)?$/.exec(version);
   if (!match) throw new Error(`${where}: cannot read MAJOR.MINOR from '${version}'`);
   return [Number(match[1]), Number(match[2])];
 }
 
-/** Mismatches where an installed @types/bun MAJOR.MINOR is AHEAD of the
- *  pinned bun runtime's. One direction on purpose: the two sides have
- *  two updaters that each move only their own (dependabot bumps the types,
- *  refresh-toolchains bumps the runtime pin), so symmetric equality would
- *  make their PRs mutually blocking - each red until the other lands.
- *  Types ahead means typechecking against APIs the pinned runtime does not
- *  have, so that direction holds until the runtime catches up; a runtime
- *  ahead of the types is dependabot's next cycle and passes. */
+/** One direction on purpose: dependabot bumps the types and refresh-toolchains bumps the runtime pin,
+ *  so symmetric equality would make their PRs mutually blocking.
+ *  Types ahead means typechecking against APIs the pinned runtime lacks; a runtime ahead of the types is dependabot's next cycle and passes. */
 export function bunTypesAheadMismatches(
   runtimeVersion: string,
   types: { file: string; version: string }[],
@@ -136,14 +115,7 @@ export function bunTypesAheadMismatches(
   return mismatches;
 }
 
-/** The resolved @types/bun version a bun.lock INSTALLS: the packages
- *  section's top-level `"@types/bun"` entry, whose first tuple element is
- *  `@types/bun@<version>`. The lock is what typechecking actually runs
- *  against: a caret range in package.json admits a lock resolving a newer
- *  MINOR, so the declared floor alone cannot vouch for the installed version.
- *  mustMatch keeps a lockfile that stops carrying the entry loud; nested
- *  per-package resolutions ("x/@types/bun") are not the version the root
- *  typecheck sees and do not match the anchored key. */
+/** Nested per-package resolutions (`"x/@types/bun"`) are not the version the root typecheck sees, so the key is anchored to the top-level entry. */
 export function lockedTypesBunVersion(lockText: string, where: string): string {
   return mustMatch(
     lockText,
@@ -162,8 +134,6 @@ export const SCRATCH_SCOPED_SCRIPTS: Record<string, string> = {
   "docs:check": "bun scripts/docs_check.ts",
 };
 
-/** Mismatch per pinned script whose live command differs (a missing script
- *  counts as a difference). */
 export function scratchScopedScriptMismatches(
   scripts: Record<string, string>,
   pins: Record<string, string>,
@@ -181,12 +151,9 @@ export function scratchScopedScriptMismatches(
   );
 }
 
-/** Mismatch when the LOCAL bun runtime's MAJOR.MINOR differs from the
- *  pinned one - injectable versions so the failing pair is testable
- *  without downgrading the real runtime. Exactly one direction exists:
- *  a local gate run under a runtime the pin does not name proves nothing
- *  about CI's behavior in either direction (semantics moved BOTH ways
- *  across 1.3/1.4 - spawnSync pipe-EOF waits, pipe-buffer sizes). */
+/** MAJOR.MINOR equality, not a direction: a local run under a runtime the pin does not name proves nothing about CI either way
+ *  (semantics moved both ways across 1.3/1.4: spawnSync pipe-EOF waits, pipe-buffer sizes).
+ *  The versions are injected so the failing pair is testable without downgrading the real runtime. */
 export function bunRuntimeMismatches(runtimeVersion: string, pinnedVersion: string): Mismatch[] {
   const [runtimeMajor, runtimeMinor] = majorMinor(runtimeVersion, "the local bun runtime");
   const [pinnedMajor, pinnedMinor] = majorMinor(pinnedVersion, ".bun-version");
@@ -200,22 +167,14 @@ export function bunRuntimeMismatches(runtimeVersion: string, pinnedVersion: stri
   ];
 }
 
-/** The pinned-toolchain setup actions and the version-file input each must
- *  carry (matched against a trimmed `uses:` line, commented or not). */
 export const SETUP_VERSION_FILES: [action: RegExp, input: string][] = [
   [/^-? ?uses: oven-sh\/setup-bun@/, "bun-version-file:"],
   [/^-? ?uses: actions\/setup-node@/, "node-version-file:"],
   [/^-? ?uses: denoland\/setup-deno@/, "deno-version-file:"],
 ];
 
-/** Whether the workflow step whose `uses:` line sits at `usesAt` carries
- *  `key` as a DIRECT child of its OWN with: block. Structural,
- *  indentation-scoped: the step's keys live two columns inside the `- ` item
- *  start, the scan stops where the step ends, and the key only counts at the
- *  with: block's direct-child level (the first child fixes it), so a nested
- *  mapping or a block scalar body that merely LOOKS like the key is a value,
- *  not an input, and a comment, a neighbouring step's input, or a look-alike
- *  elsewhere never matches. */
+/** Indentation-scoped rather than a text search: a nested mapping or a block scalar body that merely looks like the key
+ *  is a value, not an input, and a neighbouring step's input never matches. */
 export function stepCarriesWithKey(lines: string[], usesAt: number, key: string): boolean {
   const usesLine = lines[usesAt];
   const usesIndent = usesLine.length - usesLine.trimStart().length;
@@ -245,33 +204,23 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
-/** The action-local pin a composite action's bun setup reads: the
- *  .bun-version beside its action.yml. */
 export const ACTION_BUN_PIN = "${{ github.action_path }}/.bun-version";
 
-/** The step id every later step binds ACTION_BUN to. */
 export const RESOLVER_STEP_ID = "action-bun";
 
-/** The one spelling of the shared bun-setup step's `uses:`: this repository's
- *  published action at the delivery ref. */
 export const BUN_SETUP_USES = `${OWNER}/repo-platform/${BUN_SETUP_ACTION}@${DELIVERY_REF}`;
 
 const stepName = (step: Record<string, unknown>): string =>
   String(step.name ?? step.id ?? step.uses ?? "<unnamed>");
 
-/** Whether a step mentions bun in its run or env. */
 function mentionsBun(step: Record<string, unknown>): boolean {
   return /bun/i.test(JSON.stringify([step.run ?? "", step.env ?? {}]));
 }
 
-/** Whether a step uses any action or mentions bun. */
 function touchesBun(step: Record<string, unknown>): boolean {
   return typeof step.uses === "string" || mentionsBun(step);
 }
 
-/** Why `steps` lack exactly one bun setup (the `action-bun` step: the shared
- *  action with the action-local pin) ahead of every other action-using or
- *  bun-touching step, or null. Every step naming the shared action counts. */
 export function bunSetupShapeProblem(steps: Record<string, unknown>[]): string | null {
   const shared = steps.filter(usesBunSetup);
   if (shared.length > 1) return `${shared.length} shared bun-setup steps`;
@@ -293,8 +242,6 @@ export function bunSetupShapeProblem(steps: Record<string, unknown>[]): string |
   return problems.length === 0 ? null : problems.join(", ");
 }
 
-/** Whether a step sets a `path` output: the shared bun-setup action, or a
- *  run step echoing `path=...` into GITHUB_OUTPUT. */
 function emitsPath(step: Record<string, unknown>): boolean {
   return (
     usesBunSetup(step) ||
@@ -302,14 +249,9 @@ function emitsPath(step: Record<string, unknown>): boolean {
   );
 }
 
-/** How one action.yml violates the pinned-bun contract: one bun setup
- *  (bunSetupShapeProblem), no dangling `steps.<id>.outputs.path`, every
- *  setup-bun step reading its pin, no step running `bun` by name. */
 export function actionsBunGuardMismatches(file: string, text: string): Mismatch[] {
   const steps = actionSteps(text);
-  // A run line starting with "bun " counts, block scalars included; a
-  // prose line shaped that way would over-demand the guard, which fails
-  // closed.
+  // A prose line in a run block shaped `bun ...` over-demands the guard; that direction fails closed.
   const bareBunLines = steps.flatMap((step) =>
     typeof step.run === "string"
       ? step.run
@@ -380,15 +322,13 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
   return mismatches;
 }
 
-/** The bun module's runtime pin in files.yml, the single source every
- *  .bun-version dotfile is written from. */
+/** The single source every .bun-version dotfile is written from (bun run pins). */
 export function bunRuntimePin(): string {
   const pin = modules().find((m) => m.name === "bun")?.pin;
   if (pin === undefined) throw new Error("files.yml modules.bun declares no pin - anchor lost");
   return pin.version;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const toolchainRules: Rule[] = [
   {
     // Lockfiles come from the bootstrap's recursive walk, the other homes
@@ -418,13 +358,8 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // The INSTALLED @types/bun (each lockfile's resolved entry, root plus the
-    // actions/ packages declaring it, the bun-dirs directories) against
-    // files.yml's bun runtime pin, ahead-direction only
-    // (bunTypesAheadMismatches says why). The lock is the compared side on
-    // purpose: package.json's caret range is only a floor, so a lock resolving
-    // a newer MINOR while the range stays put would typecheck against APIs the
-    // pinned runtime lacks and previously passed here.
+    // The lock is the compared side on purpose: package.json's caret range is only a floor,
+    // so a lock resolving a newer MINOR while the range stays put would typecheck against APIs the pinned runtime lacks.
     name: "bun-types-pin",
     run: () => {
       const types: { file: string; version: string }[] = [];
@@ -448,15 +383,9 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // Every pinned-toolchain setup step must read its version dotfile: the
-    // pin dotfiles only govern anything while the workflows actually pass
-    // the version-file input. Real steps are matched structurally (the key
-    // inside that step's own with: block); commented starter examples are
-    // checked as comment text and can never satisfy the per-action
-    // anchors. actions/ is out of scope but not unpinned: each composite
-    // action reads its own .bun-version (the actions-bun-guard rule pins
-    // that, action_path-anchored so the CALLER's dotfiles never pick the
-    // version).
+    // The pin dotfiles govern nothing unless the workflows pass the version-file input.
+    // actions/ is out of scope but not unpinned: each bun-using composite action reads its own .bun-version
+    // (the actions-bun-guard rule pins that; the shared bun-setup action takes the pin as an input instead).
     name: "toolchain-version-files",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -473,8 +402,6 @@ export const toolchainRules: Rule[] = [
           for (const [action, input] of SETUP_VERSION_FILES) {
             const trimmed = line.trim();
             if (trimmed.startsWith("#")) {
-              // Commented starter example: the commented step must carry
-              // its commented input nearby (text match suffices there).
               if (
                 action.test(trimmed.replace(/^#\s*/, "")) &&
                 !lines
@@ -512,16 +439,11 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // Every composite-action package must sit in the github-actions
-    // block's directories list, or its upstream pins quietly stop
-    // receiving dependabot bumps.
     name: "dependabot-action-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // Only manifest-bearing directories carry upstream `uses:` pins to
-      // bump, nested manifests included (dependabot reads the manifest at a
-      // listed directory's root only); actions/shared/ is the
-      // dependency-free library zone with nothing for dependabot to see.
+      // Dependabot reads the manifest at a listed directory's root only, so every manifest-bearing directory is listed,
+      // nested ones included; actions/shared/ has no manifest and nothing for dependabot to see.
       const dirs = actionManifestFiles().map((rel) =>
         rel.slice("actions/".length, rel.lastIndexOf("/")),
       );
@@ -543,9 +465,8 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // Every bun-touching composite action carries exactly one bun setup
-    // reading its own .bun-version, never the CALLER checkout's (whose
-    // older bun cannot parse the lockfiles repo-platform's writes).
+    // The CALLER checkout's bun may be older than the lockfiles repo-platform writes and unable to parse them,
+    // so each bun-using action pins its own (the shared bun-setup action excepted: it takes the pin as an input).
     name: "actions-bun-guard",
     run: () => {
       const files = actionManifestFiles();
@@ -557,12 +478,8 @@ export const toolchainRules: Rule[] = [
     },
   },
   {
-    // The LOCAL bun runtime must be the pinned MAJOR.MINOR (.bun-version,
-    // the files.yml bun pin): a full local `bun run check` under a different
-    // runtime is unreliable evidence - it once passed clean under 1.3.14
-    // while CI's 1.4.0 went red on the same commit. In CI this rule can
-    // never fire (setup-bun installs from bun-version-file), so it exists
-    // exclusively as a local-gate guard.
+    // A full local `bun run check` once passed clean under 1.3.14 while CI's 1.4.0 went red on the same commit.
+    // In CI this rule can never fire (setup-bun installs from bun-version-file); it is a local-gate guard.
     name: "local-bun-runtime",
     run: () => bunRuntimeMismatches(Bun.version, read(".bun-version").trim()),
   },

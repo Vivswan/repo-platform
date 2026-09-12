@@ -1,14 +1,6 @@
 #!/usr/bin/env bun
-// Commits the working tree onto a rolling automation branch, force-pushes
-// it, and creates or refreshes its PR. Shared by the refresh-gitignore and
-// refresh-toolchains workflows' "Commit, push, and open PR" steps; each
-// run regenerates the branch, so the PR body (and, when REFRESH_TITLE is
-// "true", the title) is refreshed to describe what the branch now ships.
-// git push authenticates via the checkout step's persisted credentials;
-// the gh calls use GH_TOKEN.
-//
-// Env: BRANCH, BASE_BRANCH, COMMIT_MESSAGE, PR_TITLE, PR_BODY,
-// REFRESH_TITLE (optional), GH_TOKEN.
+// Called from the refresh-gitignore and refresh-toolchains workflows' "Commit, push, and open PR" steps.
+// git push relies on the checkout step's persisted credentials; only the gh calls use GH_TOKEN.
 
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";

@@ -1,12 +1,5 @@
 #!/usr/bin/env bun
-// Runs the validator over the caller's checkout on the action's own bun and
-// writes the one verdict: the child's exit and the report files it wrote
-// are two witnesses to one event (verdict.ts), and the exit code follows
-// the verdict for the step's colour only; the gate reads report.ts.
-//
-// Env: ACTION_BUN (the action's bun), ACTION_PATH, FILES_CONFIG (the build
-// branch's files.yml, the module vocabulary), SCRATCH_DIR (the report
-// files' directory), VERDICT_FILE. Runs from the caller's checkout.
+// The exit code follows the verdict for the step's colour only; the gate reads report.ts. Runs from the caller's checkout.
 
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";

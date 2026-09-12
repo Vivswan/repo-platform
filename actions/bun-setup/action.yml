@@ -72,9 +72,7 @@ runs:
       with:
         bun-version-file: ${{ inputs.pin }}
 
-    # Ready means an absolute path that prints the pinned version and exits
-    # 0; a later setup-bun can put another bun first on PATH, so callers run
-    # the path, never the name.
+    # A later setup-bun can put another bun first on PATH, so callers run the path, never the name.
     - name: Resolve the pinned bun
       id: resolve
       shell: bash

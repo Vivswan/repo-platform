@@ -1,14 +1,8 @@
-# This repository's own dependabot configuration.
-
 version: 2
 updates:
-  # One entry covering the workflows AND the composite actions' action.yml
-  # files: the ssot action-pins rule requires one sha per action repo-wide
-  # (`@<sha> # vX.Y.Z`, the shape dependabot bumps comment included), and
-  # the catch-all group folds every action bump across every listed
-  # directory into ONE PR per cycle (multi-directory alone still opens one
-  # PR per directory). Pins inside files/** are invisible to dependabot
-  # and must be bumped BY HAND in that PR before all-green passes.
+  # The action-pins ssot rule wants one sha per action repo-wide, so every action bump must land in ONE PR:
+  # the group does that (multi-directory alone still opens one PR per directory).
+  # Pins under files/** are invisible to dependabot; bump them by hand in that PR, or all-green stays red.
   - package-ecosystem: "github-actions"
     directories:
       - "/"
@@ -45,7 +39,6 @@ updates:
       prefix: "ci"
       include: "scope"
 
-  # Root tooling manifest (biome, husky).
   - package-ecosystem: "bun"
     directory: "/"
     schedule:
@@ -56,7 +49,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the check-file-size action.
   - package-ecosystem: "bun"
     directory: "/actions/check-file-size"
     schedule:
@@ -67,9 +59,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # monaco-editor dependency of the check-typography action. The action dir
-  # commits bun.lock, so the bun ecosystem keeps both manifest and lockfile
-  # current.
   - package-ecosystem: "bun"
     directory: "/actions/check-typography"
     schedule:
@@ -80,7 +69,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the dedupe-bun-lockfile action.
   - package-ecosystem: "bun"
     directory: "/actions/dedupe-bun-lockfile"
     schedule:
@@ -91,7 +79,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/node, typescript) for the commit-names action.
   - package-ecosystem: "bun"
     directory: "/actions/validate-commit-names"
     schedule:
@@ -102,7 +89,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the fuzz-issue action.
   - package-ecosystem: "bun"
     directory: "/actions/fuzz-issue"
     schedule:
@@ -113,9 +99,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Runtime deps of the pages-site action (vitepress - pinned EXACT while
-  # 2.x is prerelease, so a bump is always a deliberate PR - plus the llms
-  # plugin, mermaid, linkinator, vue) and its dev-only typing manifest.
   - package-ecosystem: "bun"
     directory: "/actions/pages-site"
     schedule:
@@ -126,9 +109,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # The plan action: its yaml and zod runtime dependencies plus its dev-only
-  # typing manifest. It commits bun.lock, so the bun ecosystem keeps both
-  # manifest and lockfile current.
   - package-ecosystem: "bun"
     directory: "/actions/plan"
     schedule:
@@ -139,7 +119,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the release-health action.
   - package-ecosystem: "bun"
     directory: "/actions/release-health"
     schedule:
@@ -150,7 +129,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the trivy action.
   - package-ecosystem: "bun"
     directory: "/actions/trivy"
     schedule:
@@ -161,7 +139,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript) for the validate-skills action.
   - package-ecosystem: "bun"
     directory: "/actions/validate-skills"
     schedule:
@@ -172,9 +149,6 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # The validate-managed-files action: the validator's yaml runtime
-  # dependency plus its dev-only typing manifest. It commits bun.lock, so
-  # the bun ecosystem keeps both manifest and lockfile current.
   - package-ecosystem: "bun"
     directory: "/actions/validate-managed-files"
     schedule:

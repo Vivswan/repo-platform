@@ -1,7 +1,3 @@
-// Rules anchoring facts quoted as literals across hand-written docs,
-// workflows, and scripts: doc-quoted constants, the owner slug, PAT URLs,
-// and inlined twin functions.
-
 import { parse as parseYaml } from "yaml";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
@@ -20,10 +16,8 @@ import {
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-// The docs carrying a generated region (scripts/files_table.ts's table). A
-// strip over one of these that removes nothing means the marker grammar
-// drifted and every stripped-prose rule is silently checking unstripped
-// text.
+// A strip that removes nothing from one of these means the marker grammar drifted from scripts/files_table.ts,
+// and every stripped-prose rule would silently check unstripped text.
 const DOCS_WITH_REGIONS = new Set(["docs/new-repo.md"]);
 
 function handProse(rel: string): string {
@@ -37,10 +31,6 @@ function handProse(rel: string): string {
   return prose;
 }
 
-/** Every `async function <name>() { ... }` block in `text`, matched from
- *  the declaration to the closing brace at the declaration's own indent,
- *  raw bytes included - for rules that pin inline script copies
- *  byte-identical. */
 export function inlineFunctionCopies(text: string, name: string): string[] {
   // The name is a function identifier the calling rule spells out, never input.
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
@@ -48,16 +38,10 @@ export function inlineFunctionCopies(text: string, name: string): string[] {
   return [...text.matchAll(block)].map((match) => match[0]);
 }
 
-/** The release-cut wiring across its four files, pinned on the parsed documents, not a grep.
- *  A commented-out write or a stray literal would still match as text.
- *  release-health.ts writes the output only in release mode, so the health step's `mode: release` is pinned too.
- *  action.yml declares the output off the step that runs the script.
- *  fleet-release.yml runs release-please twice off it: the cut step tags only when it reads "true", the propose step never tags.
- *  A rename or a dropped `id:` on any side reads as an empty output, which is not "true": every run would skip the cut, silently.
- *  A release-please step outside those two, or a cut step without its condition, would tag on every push run.
- *  The cut job's lane is keyed by the judged commit and the skeleton's caller holds none.
- *  A shared lane keeps one pending call and cancels the older one,
- *  so a release commit's call could be cancelled. */
+/** Pinned on the parsed documents, not a grep: a commented-out write or a stray literal would still match as text.
+ *
+ *  a renamed or dropped `id:` on any side   -> an empty output, which is not "true": every run skips the cut, silently
+ *  the health step without `mode: release`  -> release-health.ts never writes the output at all */
 export function releaseCutWiringMismatches(files: {
   workflow: string;
   action: string;
@@ -213,13 +197,6 @@ export function releaseCutWiringMismatches(files: {
   return mismatches;
 }
 
-/** Whether the owner-slug rule's match at `index` (its owner segment in
- *  `segment`) sits inside this repository's OWN Pages origin,
- *  `<username>.github.io/<slug>` (the docs site's URL): the io segment
- *  must be preceded by exactly `<username>.github.` at a hostname boundary
- *  - start of text or a non-hostname character - so any other owner's
- *  Pages URL still flags, a username-suffixed near miss like
- *  `not<username>.github.io` included. */
 export function isOwnPagesOrigin(
   text: string,
   index: number,
@@ -237,7 +214,6 @@ export function isOwnPagesOrigin(
   return boundary === "" || !/[a-z0-9.-]/.test(boundary);
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const literalAnchorRules: Rule[] = [
   {
     name: "pins-and-identities",
@@ -247,7 +223,6 @@ export const literalAnchorRules: Rule[] = [
       // No git-identity arm: every committer is TypeScript and imports
       // shared/git_identity.ts, so the import is the guarantee.
 
-      // Every PAT URL in every file must match, not just the first per file.
       const patUrls = (rel: string) => {
         const urls = [
           ...read(rel).matchAll(
@@ -356,12 +331,10 @@ export const literalAnchorRules: Rule[] = [
       }
 
       const settingsProse = handProse("docs/settings.md");
-      // Only the two labels the hand prose quotes: the per-toolchain
-      // dependabot labels are the dependabot-label-tuples rule's. Name
-      // and color must appear in the exact quoted shape `name` (`color`) /
-      // `name` (color `color`) - a spannable gap would let a wrong
-      // hand-written color pass by matching a backticked color later in
-      // the doc.
+      // Only the two labels the hand prose quotes; the per-toolchain dependabot labels are the dependabot-label-tuples rule's.
+      // Name and color are matched jointly: a spannable gap would let a wrong hand-written color pass
+      // by matching a backticked color later in the doc.
+      //   `name` (`color`)  or  `name` (color `color`)
       const roster = new Map(managedLabelRoster().map((label) => [label.name, label]));
       for (const name of ["dependencies", "github_actions"]) {
         const label = roster.get(name);
@@ -376,9 +349,6 @@ export const literalAnchorRules: Rule[] = [
         }
       }
 
-      // Every tracking stream's default is quoted in its module doc and in
-      // docs/settings.md, whose hand prose also quotes the label color
-      // (files.yml is the anchor, so the docs follow the same source).
       for (const stream of trackingStreams()) {
         for (const doc of [`docs/${stream.module}.md`, "docs/settings.md"]) {
           if (!handProse(doc).includes(`\`${stream.default}\``)) {
@@ -416,8 +386,6 @@ export const literalAnchorRules: Rule[] = [
           if (/^\.[A-Za-z0-9]/.test(text.slice(match.index + match[0].length))) continue;
           // The sync branch name is not an owner slug either.
           if (match[1] === "automation") continue;
-          // <username>.github.io/<slug> is this repository's OWN Pages
-          // origin (the docs site), not an owner slug.
           if (isOwnPagesOrigin(text, match.index, match[1], OWNER)) continue;
           if (match[1].toLowerCase() === OWNER.toLowerCase()) {
             sawExpected = true;
@@ -436,12 +404,9 @@ export const literalAnchorRules: Rule[] = [
     },
   },
   {
-    // The release-PR predicates of fleet-ci.yml's two release gates,
-    // compared on the PARSED jobs (they share the same condition text, so
-    // a whole-file grep would stay green with one of them changed or
-    // deleted): a renamed release-please branch prefix would make the job
-    // skip and the gate stand down; a dropped module clause would run the
-    // release gates in repositories without release-please.
+    // Compared on the parsed jobs: the two share one condition text, so a whole-file grep would stay green with one of them changed or deleted.
+    //   a renamed release-please branch prefix -> the job skips and the gate stands down
+    //   a dropped module clause                -> the release gates run in repositories without release-please
     name: "release-gate-predicates",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -463,7 +428,6 @@ export const literalAnchorRules: Rule[] = [
     },
   },
   {
-    // Why the wiring is pinned is on releaseCutWiringMismatches.
     name: "release-cut-wiring",
     run: () =>
       releaseCutWiringMismatches({
@@ -474,13 +438,7 @@ export const literalAnchorRules: Rule[] = [
       }),
   },
   {
-    // The CODEOWNERS assignee-resolution function is inlined twice: once
-    // in reusable-auto-assign.yml and once in
-    // reusable-auto-assign-alerts.yml (split for permissions - see the file
-    // headers). It cannot be hoisted: a reusable workflow runs from the
-    // CALLER's checkout, where this repo's scripts do not exist. Pin the
-    // copies byte-identical so a fix to one cannot silently leave the
-    // other behind.
+    // The copies cannot be hoisted into a shared script: a reusable workflow runs from the CALLER's checkout, where this repo's scripts do not exist.
     name: "auto-assign-codeowners-parity",
     run: () => {
       const mismatches: Mismatch[] = [];

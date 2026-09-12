@@ -1,10 +1,6 @@
 #!/usr/bin/env bun
-// Renders the theme's token data (actions/pages-site/.vitepress/theme/
-// tokens.ts) into tokens.css: the shared tokens on :root and .dark with
-// their media overrides, the light palette on :root, the dark one on .dark,
-// one block per hue slot and mode, and the print overrides on html:root
-// (which outranks :root, .dark and the hue blocks at equal or higher
-// specificity, so it must come last).
+// The print block is rendered last on purpose: its selectors (html:root, html:root.dark) only tie
+// the light and dark hue blocks on specificity, so cascade order decides.
 //
 // Usage: bun scripts/generate/theme_tokens.ts [--check]
 
@@ -27,7 +23,6 @@ export const THEME_TOKENS_CSS = "actions/pages-site/.vitepress/theme/tokens.css"
 const THEME_TOKENS_SOURCE = "actions/pages-site/.vitepress/theme/tokens.ts";
 const BOTH_MODES = ":root,\n.dark";
 
-/** The generated file's fence: a reader sees where the bytes come from. */
 const MARKER = {
   begin: `/* BEGIN GENERATED: theme-tokens (scripts/generate/theme_tokens.ts - edit ${THEME_TOKENS_SOURCE}, not this block) */`,
   end: "/* END GENERATED: theme-tokens */",
@@ -87,7 +82,6 @@ export function themeTokensCss(): string {
   return lines.join("\n");
 }
 
-/** Whether the CSS at `path` is exactly the rendered token data. */
 export function themeCssCurrent(path: string): boolean {
   return existsSync(path) && readFileSync(path, "utf-8") === themeTokensCss();
 }

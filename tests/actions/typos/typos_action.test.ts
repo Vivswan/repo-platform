@@ -1,12 +1,7 @@
-// The typos action's contract: one pinned upstream step, the fleet
-// allowlist passed as --config (typos layers it over the file it discovers
-// at the checkout root, so a repository's _typos.toml extends it), and a
-// fleet allowlist that excludes only generated files, hashes, and the
-// hyphenated mis- prefix and accepts one spelling variant - proved on the
-// patterns themselves, and end to end
-// with a typos binary on PATH: skipped without one locally, mandatory under
-// TYPOS_REQUIRED=1 (the ci.yml script-tests job installs the action's
-// pinned release and sets it).
+// typos layers --config over the _typos.toml it discovers at the checkout root, so a repository's own file extends the fleet allowlist.
+// The end-to-end runs need a typos binary on PATH.
+//   locally            -> skipped without one
+//   TYPOS_REQUIRED=1   -> mandatory; ci.yml's script-tests job installs the pinned release and sets it
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -46,9 +41,7 @@ describe("actions/typos", () => {
     expect(Object.keys(config.files)).toEqual(["extend-exclude"]);
     const excludes = config.files["extend-exclude"] as string[];
     expect(excludes).toContain("*.lock");
-    // Exactly these: lockfiles, minified bundles, SVGs, installed packages,
-    // and a root dist/, never a source glob (a root lib/ is source in a Node
-    // repository; one that generates it excludes it itself).
+    // Never a source glob: a root lib/ is source in a Node repository, and one that generates it excludes it itself.
     expect(excludes).toEqual([
       "*.lock",
       "*.lockb",
@@ -62,12 +55,7 @@ describe("actions/typos", () => {
     expect(Object.keys(config.default).sort()).toEqual(["extend-ignore-re", "extend-words"]);
     // The only accepted word: a variant typos corrects to unparsable.
     expect(config.default["extend-words"]).toEqual({ unparseable: "unparseable" });
-    // The patterns as regexes, typos' leading inline flags mapped to JS
-    // flags (R, its CRLF flag, has none): the hex ignore must cover a sha
-    // and leave an ordinary word alone, the inline marker must cover only a
-    // line carrying it, under either comment leader, and the mis- ignore
-    // must cover the hyphenated prefix in any case, never a bare `mis` or a
-    // word that merely ends in it.
+    // typos' leading inline flags become JS flags; R, its CRLF flag, has no JS counterpart and is dropped.
     const patterns = config.default["extend-ignore-re"] as string[];
     expect(patterns).toHaveLength(3);
     const [hex, marker, misPrefix] = patterns.map((pattern) => {
@@ -149,8 +137,6 @@ describe("actions/typos", () => {
       );
       writeFileSync(join(repo, "test/fixtures/negative.txt"), "permision DELET entires\n");
       const run = typos(repo);
-      // `teh` and the fixture folder allowed by the repository, the sha and
-      // `unparseable` by the fleet; `recieve` still found.
       expect(run.exitCode).toBe(2);
       expect(run.stdout).toContain("`recieve`");
       expect(run.stdout).not.toContain("`teh`");

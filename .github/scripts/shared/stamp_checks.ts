@@ -1,20 +1,11 @@
-// The build tip's STAMP-health battery: checks 1 (main history) and 2 (no
-// rollback) of the sync's provenance gate (docs/build-provenance.md, "The
-// provenance proof"), shared with the publisher so the two can never
-// drift: verify_build_provenance.ts fails the sync on any reason here, and
-// publish.ts's no-change skip guard treats a reason as "do not skip", so a
-// dispatch can always heal a tampered, unparsable, or orphaned stamp with
-// a freshly stamped commit instead of wedging every sync until the next
-// content change.
+// Checks 1 and 2 of the provenance proof (docs/build-provenance.md), shared so the sync and the publisher cannot drift.
+// verify_build_provenance.ts fails the sync on any reason; publish.ts's no-change skip treats one as "do not skip",
+// so a dispatch can heal a bad stamp with a freshly stamped commit.
 //
-// The rollback walk covers every ancestor through all parents (a merge tip
-// cannot hide the previous tip) plus the tip itself, whose own stamp
-// compares equal. Only stamps that resolve AND sit on main's history order
-// the comparison: a planted stamp naming an off-main DESCENDANT of main's
-// tip must not poison the branch against every legitimate build that
-// follows, and stamps orphaned by a main history rewrite must not block
-// the next publish (the replay window that opens lasts until the
-// rewrite's own push publishes, or a stamp-recovery commit lands).
+// The rollback walk skips two kinds of ancestor stamp on purpose. Skipping the first opens a replay window, which closes when the
+// rewrite publishes or a recovery commit lands:
+//   unresolvable (orphaned by a main rewrite)        -> must not block the next publish
+//   resolvable but off main (a planted descendant)   -> must not poison the branch against every legitimate build that follows
 
 import { commitStampParseAll } from "./commit_stamp.ts";
 
@@ -28,12 +19,8 @@ export interface StampCheckGit {
   isAncestor: (ancestor: string, descendant: string) => boolean;
 }
 
-/** The reason `sourceSha` (the tip's parsed source stamp; "" when the
- * tip carries none) fails the stamp-health battery against `history`
- * (the full `git log --format=%B` of the tip's ancestry), or "" when
- * healthy. Reasons are caller-agnostic fragments: the sync prepends its
- * subject and appends its rebuild hint, the publisher logs them as the
- * recovery note. */
+/** `history` is the full `git log --format=%B` of the tip's ancestry through all parents, so a merge tip cannot hide the previous tip.
+ * A reason is a fragment: the sync prepends its subject and appends its rebuild hint, the publisher logs it as the recovery note. */
 export function stampUnhealthyReason(options: {
   sourceSha: string;
   history: string;

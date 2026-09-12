@@ -1,15 +1,7 @@
 #!/usr/bin/env bun
 
-// Two-tier caps on file length and line width: HARD fails, WARN annotates.
-// One warn-only cap on comment block length.
-// Judged over the tracked files of a checkout.
-// .file-size-allow.local exempts a path; its `# reason` is mandatory.
-// `comment-cap: ignore <reason>` exempts one comment block.
+// Comments and literals are exactly what the file's tree-sitter grammar tokenizes; every other token, ERROR included, is code.
 // Policy: docs/fleet-guidelines.md.
-// Comments and literals are exactly what the file's tree-sitter grammar tokenizes.
-// Comment tokens are comments; every other token, ERROR included, is code.
-// A file whose grammar is missing or failed to load gets neither judgement.
-// Such files are reported once as unjudged.
 
 import {
   appendFileSync,
@@ -35,12 +27,10 @@ export interface Caps {
   width: number;
 }
 
-/** The failing tier. */
 export const HARD: Caps = {
   lines: { source: 2000, test: 3200, workflow: 1000, shell: 1000, markdown: 1300 },
   width: 256,
 };
-/** The annotating tier's share of each hard LINE cap. */
 const WARN_RATIO = 0.8;
 /** The annotating tier: line caps derived from HARD so the two can never
  *  disagree; the width cap stays well under the hard one, since a long
@@ -104,12 +94,11 @@ const TEST_NAME =
 /** Directory names whose contents are vendored or generated wholesale. */
 const EXEMPT_DIRS = new Set(["node_modules", "vendor", "third_party", "goldens", "__snapshots__"]);
 
-/** A comment in the file's first lines declaring it generated: the common
- *  phrasings, anywhere on the line. Only comment lines count, so a string
- *  literal holding "do not edit" is not a header; prose that merely uses the
- *  word "generate" ("copies generated from the manifests") matches no
- *  phrasing; and a generator's path is no signal at all, since hand-written
- *  headers name the generators they serve. */
+/** Only comment lines count and only these phrasings match; a generator's path is no signal, since hand-written
+ *  headers name the generators they serve.
+ *    "do not edit" inside a string literal        -> not a header
+ *    "copies generated from the manifests" prose  -> no phrasing matches
+ */
 const HEADER_LINES = 10;
 const COMMENT_LINE = /^\s*(#|\/\/|\/\*|\*|<!--|--|;|%|\{#|"""|''')/;
 const GENERATED_HEADER =
@@ -176,9 +165,6 @@ export function isUnbreakable(line: string): boolean {
   return token !== "" && !/\s/.test(token);
 }
 
-/** Which lines sit inside a matched BEGIN/END GENERATED pair, markers
- *  included (both markers on one line fence that line); an unmatched BEGIN
- *  fences nothing, and regions do not nest. */
 function generatedRegionMask(lines: string[]): boolean[] {
   const mask = lines.map(() => false);
   let begin = -1;
@@ -196,8 +182,6 @@ function generatedRegionMask(lines: string[]): boolean[] {
 }
 
 // The per-language surface is this table and nothing else.
-// A literal is a token the warn width tier leaves alone.
-// A comment type maps to the delimiters that end an exemption marker's reason, or null when it runs to the line end.
 // JS's html_comment is null: `<!-- a -->` and a line-start `-->` both run to the line end, so `-->` is text.
 interface Delimiters {
   open: string;
@@ -206,6 +190,7 @@ interface Delimiters {
 interface GrammarSpec {
   wasm: string;
   comments: Readonly<Record<string, Delimiters | null>>;
+  /** Token types the warn width tier leaves alone. */
   literals: readonly string[];
 }
 
@@ -269,7 +254,6 @@ export interface Unjudged {
   reason: string;
 }
 
-// The grammar for each judged extension, or why it has none.
 // C headers go to C++, the superset.
 const EXTENSION_GRAMMAR: Readonly<Record<string, GrammarName | Unjudged>> = {
   ts: "typescript",
@@ -332,8 +316,6 @@ async function loadGrammar(spec: GrammarSpec): Promise<Grammar | Unjudged> {
   }
 }
 
-// Loads each grammar once, on its first extension.
-// A grammar that cannot load leaves its extensions unjudged instead of stopping the run.
 export async function loadGrammars(): Promise<Grammars> {
   await Parser.init();
   const loaded = new Map<GrammarName, Grammar | Unjudged>();
@@ -355,20 +337,17 @@ export async function loadGrammars(): Promise<Grammars> {
 const SHEBANG = /^#!\s*\//;
 
 interface Token {
-  // A comment or literal node counts whole, whatever it contains.
-  // A literal in a grammar `key` field is a key.
-  // Every other leaf is code: named (an identifier) or anonymous (punctuation, a keyword).
+  // Named and anonymous are tree-sitter's leaf classes: an identifier is named, punctuation and keywords are anonymous.
   kind: "comment" | "literal" | "key" | "named" | "anonymous" | "shebang";
   /** The grammar's node type. */
   type: string;
   startRow: number;
   /** The last row it puts a character on. */
   endRow: number;
-  /** Comment text, read for the exemption markers. */
+  /** Set for comments (read for the exemption markers) and for row-0 tokens (read for the shebang). */
   text?: string;
 }
 
-// A node on the path from the root to the cursor.
 // Some grammars put the `key` field on a wrapper spanning exactly the literal (yaml's flow_node).
 interface Ancestor {
   field: string | null;
@@ -427,7 +406,6 @@ function tokenize(tree: Tree, grammar: Grammar): Token[] {
   return tokens;
 }
 
-/** Whether a literal, or a wrapper spanning exactly it, sits in a `key` field. */
 function isKey(
   field: string | null,
   ancestors: readonly Ancestor[],
@@ -458,7 +436,6 @@ const ROW_KIND: Readonly<Record<Token["kind"], RowKind>> = {
 interface Analysis {
   rows: RowKind[];
   // Rows the warn width tier leaves alone.
-  // The rule: one literal, preceded by an anonymous token or nothing, followed by anonymous tokens only, and no comment on the row.
   literalRows: boolean[];
   comments: Token[];
 }
@@ -495,7 +472,6 @@ function analyze(grammar: Grammar, text: string, rowCount: number): Analysis {
 interface CommentBlock {
   /** The block's first line, 1-based. */
   line: number;
-  /** Its length in lines. */
   length: number;
   scope: CommentScope;
   /** Every exemption marker in the block: its 1-based line and the reason
@@ -505,11 +481,6 @@ interface CommentBlock {
 
 const MARKER = new RegExp(`\\b${COMMENT_MARKER}\\b`, "g");
 
-// Runs of comment rows.
-// A blank row, a code row, or a `skip`ped row ends a run; only code demotes the header.
-// The shebang is neither.
-// A marker belongs to the block holding its row, so one on a code or skipped row is not read.
-// A reason ends at the marker's line end, the next marker, or the closer of the comment holding it.
 // The closer applies only when the token opens with its pair: JS's `comment` type covers `//` and `/* */` alike.
 function commentBlocks(analysis: Analysis, grammar: Grammar, skip: boolean[]): CommentBlock[] {
   const { rows, comments } = analysis;
@@ -569,10 +540,7 @@ interface Measured {
   value: number;
   cap: number;
 }
-/** A line-count finding names the file; a width finding names the 1-based
- *  line as well; a comment finding names the block's first line and scope;
- *  a marker finding names the line of a `comment-cap: ignore` with no
- *  reason. */
+/** `line` is 1-based. */
 export type Finding =
   | (FindingBase & Measured & { measure: "lines" })
   | (FindingBase & Measured & { measure: "width"; line: number })
@@ -580,15 +548,12 @@ export type Finding =
       Measured & { measure: "comment"; tier: "warn"; line: number; scope: CommentScope })
   | (FindingBase & { measure: "marker"; tier: "warn"; line: number });
 
-/** The tier a value lands in, with the cap it exceeded; null under both. */
 function exceeded(value: number, hard: number, warn: number): { tier: Tier; cap: number } | null {
   if (value > hard) return { tier: "hard", cap: hard };
   if (value > warn) return { tier: "warn", cap: warn };
   return null;
 }
 
-// Generated regions are excluded from every measure.
-// Without a grammar for the path there is no comment judgement and no literal exemption.
 export function judgeFile(path: string, kind: Kind, text: string, grammars: Grammars): Finding[] {
   const findings: Finding[] = [];
   const lines = splitLines(text);
@@ -636,9 +601,6 @@ export function judgeFile(path: string, kind: Kind, text: string, grammars: Gram
   return findings;
 }
 
-/** The one-line log form: `path: 3021 lines (cap 2000 for source)`,
- *  `path:412: 613 chars (cap 256)`, `path:1: 26 comment lines (cap 25 for a
- *  header)`, or `path:7: comment-cap: ignore needs a reason`. */
 export function describe(finding: Finding): string {
   switch (finding.measure) {
     case "lines":
@@ -654,7 +616,6 @@ export function describe(finding: Finding): string {
   }
 }
 
-/** The Size and Cap cells of a finding's table row. */
 function sizeCells(finding: Finding): [size: string, cap: string] {
   switch (finding.measure) {
     case "lines":
@@ -679,8 +640,6 @@ export interface AllowEntry {
 export const REASON_RULE =
   "an allowlist entry needs a reason a reader accepts (vendored or upstream-shaped, generated but missed by the header exemption, a split that would break an external contract)";
 
-/** Parses the allowlist: `path # reason` per line, blank lines and
- *  whole-line comments skipped. An entry without a reason is a failure. */
 export function parseAllowlist(text: string): { entries: AllowEntry[]; failures: string[] } {
   const entries: AllowEntry[] = [];
   const failures: string[] = [];
@@ -699,7 +658,6 @@ export function parseAllowlist(text: string): { entries: AllowEntry[]; failures:
   return { entries, failures };
 }
 
-/** Tracked paths under `root`, relative to `root`. */
 function trackedFiles(root: string): string[] {
   const args = ["git", "-C", root, "ls-files", "-z"];
   const proc = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
@@ -721,13 +679,9 @@ export interface Verdict {
   allowlistErrors: string[];
   /** Files skipped for carrying repo-platform's managed header. */
   managedSkipped: number;
-  /** Judged files whose extension has no working grammar, counted per extension. */
   unjudged: { extension: string; files: number; reason: string }[];
 }
 
-/** The whole verdict for a checkout: every tracked, classified,
- *  non-generated, non-managed file judged, the allowlist applied to both
- *  tiers, and stale or reasonless allowlist entries reported. */
 export function check(root: string, grammars: Grammars): Verdict {
   const allowFile = join(root, ALLOWLIST_FILE);
   const allow = existsSync(allowFile)
@@ -801,9 +755,6 @@ export function outcomeOf(verdict: Verdict): Outcome {
   return { state: silent ? "clean" : "findings", verdict };
 }
 
-/** The step summary body on every outcome, and the sticky comment's on
- *  findings: hard failures first, then warnings (over a sensible size, or a
- *  bare exemption marker). */
 export function report(outcome: Outcome): string {
   const parts = ["## File size check", ""];
   if (outcome.state === "error") {
@@ -843,7 +794,6 @@ export function report(outcome: Outcome): string {
   return `${parts.join("\n")}\n`;
 }
 
-/** `[root]`: the checkout to scan, the working directory by default. */
 export function parseArgs(argv: string[]): { root: string } {
   if (argv.length > 1) throw new Error(`unexpected argument(s): ${argv.slice(1).join(" ")}`);
   return { root: resolve(argv[0] ?? ".") };

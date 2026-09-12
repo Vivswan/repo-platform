@@ -1,16 +1,7 @@
-// The commit-msg gate's forcing tests and the single-source proof. The
-// motivating failure (2026-08-30): `docs(all-green,build-provenance): ...`
-// - a comma in the scope - reached main and went red there, because the
-// pre-commit gates run before the message exists and nothing local ever
-// judged the subject. Two guards bind here: the subject refusal and the
-// hook wiring; each has a forcing test below that goes red when the
-// guard is stubbed out.
-//
-// The equivalence table runs BOTH real consumers as subprocesses - the
-// hook script on a message file, the CI validator on a synthetic push
-// payload - so a fork of the shared grammar
-// (actions/validate-commit-names/subject.ts) reds here even though each
-// consumer stays green in isolation.
+// The motivating landing, `docs(all-green,build-provenance): ...` with a comma in the scope,
+// reached main and went red there because the pre-commit gates run before the message exists.
+// The equivalence table runs BOTH real consumers as subprocesses, so a fork of the shared grammar
+// (actions/validate-commit-names/subject.ts) reds here even though each consumer stays green alone.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -30,8 +21,7 @@ let serial = 0;
 // core.commentChar from git config: pin the global and system homes shut
 // and pin commentChar at command scope (GIT_CONFIG_*, which outranks even
 // repo-local config) so no developer or repository configuration can flip
-// these verdicts. Applies to the direct candidateSubjects calls below
-// and, via HOOK_ENV, to every spawned consumer.
+// these verdicts.
 const GIT_PINS = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
@@ -42,7 +32,6 @@ const GIT_PINS = {
 Object.assign(process.env, GIT_PINS);
 const HOOK_ENV = { PATH: process.env.PATH, ...GIT_PINS };
 
-/** The hook script's verdict on a raw commit-message file. */
 function runHook(
   message: string,
   env: Record<string, string | undefined> = HOOK_ENV,
@@ -56,9 +45,7 @@ function runHook(
   return { exitCode, stderr };
 }
 
-/** The .husky/commit-msg wiring's verdict: the checked-in hook file run
- *  the way husky's shim runs it (`sh` from the repo root, the message
- *  path as $1). */
+/** Run the way husky's shim runs the hook: `sh` from the repo root, the message path as $1. */
 function runWiring(message: string): number {
   const messagePath = join(scratch, `msg-${serial++}.txt`);
   writeFileSync(messagePath, message);
@@ -66,9 +53,7 @@ function runWiring(message: string): number {
     .exitCode;
 }
 
-/** The REAL CI validator's verdict on one subject, via a synthetic push
- *  payload (zero `before` sha, so the validator reads the payload's
- *  commit list and never needs a git repo). */
+/** A zero `before` sha makes the validator read the payload's commit list, so no git repo is needed. */
 function runCiValidator(subject: string): number {
   const eventPath = join(scratch, `event-${serial++}.json`);
   writeFileSync(
@@ -92,7 +77,6 @@ function runCiValidator(subject: string): number {
 const COMMA_SCOPE_SUBJECT =
   "docs(all-green,build-provenance): restructure both guides for skimmability";
 
-/** Subjects and the one verdict BOTH consumers must reach. */
 const TABLE: { subject: string; verdict: "pass" | "refuse" }[] = [
   { subject: "feat: add setup flow", verdict: "pass" },
   { subject: "chore(main): release 3.0.0", verdict: "pass" },
@@ -101,9 +85,9 @@ const TABLE: { subject: string; verdict: "pass" | "refuse" }[] = [
   { subject: "feat!: simplify bootstrap", verdict: "pass" },
   { subject: "refactor(build)!: retire the snapshot", verdict: "pass" },
   { subject: COMMA_SCOPE_SUBJECT, verdict: "refuse" }, // the motivating landing
-  { subject: "wip: half-done things", verdict: "refuse" }, // type outside the list
-  { subject: "feat add setup flow", verdict: "refuse" }, // missing colon
-  { subject: "feat:", verdict: "refuse" }, // no description
+  { subject: "wip: half-done things", verdict: "refuse" },
+  { subject: "feat add setup flow", verdict: "refuse" },
+  { subject: "feat:", verdict: "refuse" },
   { subject: "feat(): empty scope", verdict: "refuse" },
   { subject: "feat(a b): space in scope", verdict: "refuse" },
   { subject: "Feat: capitalized type", verdict: "refuse" },

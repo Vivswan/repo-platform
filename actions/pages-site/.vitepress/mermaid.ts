@@ -20,8 +20,6 @@ const ACTIVE_MARKER = / active( |$)/;
 const CODE_GROUP_OPEN = "container_code-group_open";
 const CODE_GROUP_CLOSE = "container_code-group_close";
 
-/** Whether the fence at `idx` sits inside a `::: code-group` container: the
- *  nearest unmatched open before it. */
 function inCodeGroup(tokens: Token[], idx: number): boolean {
   let closed = 0;
   for (let i = idx - 1; i >= 0; i -= 1) {

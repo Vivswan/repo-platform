@@ -1,19 +1,7 @@
-// The ownership manifest's ONE entry layout and ONE parser.
+// One entry per line, 4-space indent, the JSON-quoted path, one inline JSON object, so two syncs' manifests differ in
+// hash values alone and a review diff reads line by line.
 //
-// .github/repo-platform-manifest.json is written by the sync writer and
-// read by the writer's next run and by validate-managed-files, and each
-// once carried its own copy of the entry-line layout or the
-// duplicate-tolerant parse, which drifted. Consumers keep their own DATA:
-// the validator's expectations come from files.yml, never from the
-// manifest, because a hand-flipped class would self-certify. Only the
-// CODE that turns bytes into entries lives here.
-//
-// Layout contract: one entry per line, 4-space indent, the JSON-quoted
-// path, one inline JSON object, so two syncs' manifests differ in hash
-// values alone and a review diff reads line by line.
-//
-// DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal
-// imports only.
+// DEPENDENCY-FREE ZONE (see grammar.ts): node builtins and zone-internal imports only.
 
 import {
   type AssertNever,
@@ -22,7 +10,6 @@ import {
   type SplitShapes,
 } from "./grammar.ts";
 
-/** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
 /** Every class a recorded entry can carry. The sync writer's record union
@@ -36,7 +23,6 @@ export function isRecordedClass(value: string): value is RecordedClass {
   return RECORDED_CLASS_SET.has(value);
 }
 
-/** What JSON.parse returns and JSON.stringify prints without loss. */
 export type JsonValue =
   | null
   | boolean
@@ -45,9 +31,7 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-/** One entry object in the manifest's one-line layout: fields in the given
- *  order, `"key": value` pairs joined by `, `. The writer prints every
- *  entry through this, so two syncs' manifests share one byte layout. */
+/** The writer prints every entry through this, so two syncs' manifests share one byte layout. */
 export function entryBody(fields: Record<string, JsonValue>): string {
   return `{${Object.entries(fields)
     .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`)
@@ -61,11 +45,7 @@ type SplitDeclarationField = {
   [K in GrammarId]: Exclude<keyof SplitShapes[K], "grammar">;
 }[GrammarId];
 
-/** One parsed entry's known field vocabulary; every value stays unknown
- *  because manifest text is target-repo content on updates - consumers
- *  validate what they use. The split marker-string fields are the
- *  grammars' own declaration fields (SplitDeclarationField); the rest is
- *  the wire-common set. */
+/** Every value stays unknown because manifest text is target-repo content on updates: consumers validate what they use. */
 export type ManifestEntryShape = {
   class: string;
   hash?: unknown;
@@ -89,12 +69,10 @@ export type EntryFieldsExhaustive = AssertNever<
 >;
 const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
 
-/** Whether `key` is in the entry-field vocabulary. */
 export function isEntryField(key: string): boolean {
   return ENTRY_FIELD_SET.has(key);
 }
 
-/** Each entry carrying a field outside ENTRY_FIELDS, with the offending keys, in manifest order. */
 export function unknownEntryFields(
   files: Record<string, ManifestEntryShape>,
 ): { path: string; fields: string[] }[] {
@@ -104,13 +82,8 @@ export function unknownEntryFields(
   });
 }
 
-/** The manifest's files mapping parsed from `text`, or a problem string
- *  when the text cannot be trusted. Every consumer reads through here, so no station
- *  can act on a manifest another one refused. Every problem string is
- *  VALUE-FREE: the text is target-repo content on updates and the strings
- *  reach public logs. A null entry is refused because a consumer would throw
- *  at entry.class, turning warn-and-continue contracts into hard failures; a
- *  scalar or classless entry and duplicate keys (below) are refused too. */
+/** Every consumer reads through here, so no station can act on a manifest another one refused. Every problem string
+ *  is VALUE-FREE: the text is target-repo content on updates and the strings reach public logs. */
 export function parseManifestFiles(
   text: string,
 ): { files: Record<string, ManifestEntryShape>; problem: null } | { files: null; problem: string } {
@@ -137,6 +110,7 @@ export function parseManifestFiles(
     };
   }
   const files = manifest.files as Record<string, unknown>;
+  // A null entry is refused because a consumer would throw at entry.class, turning warn-and-continue contracts into hard failures.
   for (const value of Object.values(files)) {
     const entry = value as ManifestEntryShape | null;
     if (entry === null || typeof entry !== "object" || typeof entry.class !== "string") {

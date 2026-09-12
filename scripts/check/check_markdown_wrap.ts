@@ -1,22 +1,6 @@
 #!/usr/bin/env bun
 
-// Guards the unwrapped-markdown convention: prose lives on one source line
-// per paragraph, list item, or blockquote paragraph - never hard-wrapped at
-// a column width. A violation is a line that merely continues the previous
-// line's text; the fix is always joining it onto that line.
-//
-// Scope: every tracked .md file, the writer's markdown block files
-// (`<stem>.block.<value>.md`) among them. Symlinks are skipped (their
-// targets are scanned directly). Vendored and generated texts keep their
-// upstream formatting: LICENSE*, CHANGELOG*.
-//
-// Ignored regions, where multi-line content is structural rather than
-// wrapped prose: YAML frontmatter, fenced code blocks, HTML comment
-// interiors, GFM tables (header + delimiter row), headings (ATX and
-// setext), thematic breaks, link reference definitions, and bare HTML tag
-// lines. Indented (four-space) code
-// blocks are outside the house dialect - use fenced code - and are
-// reported as wrapped prose.
+// Indented (four-space) code blocks are outside the house dialect and are reported as wrapped prose; use fenced code.
 //
 // Usage: bun scripts/check/check_markdown_wrap.ts   # exit 1 listing violations
 
@@ -28,7 +12,6 @@ const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 
 export type LineKind = "blank" | "structural" | "list" | "prose";
 
-/** Blockquote nesting depth and the line body behind the `>` markers. */
 export function quoteDepth(raw: string): { depth: number; rest: string } {
   let rest = raw;
   let depth = 0;
@@ -39,9 +22,6 @@ export function quoteDepth(raw: string): { depth: number; rest: string } {
   return { depth, rest };
 }
 
-/** Classifies one line outside fences/frontmatter/comments/tables.
- *  Blockquote markers are stripped first: a quoted paragraph carries the
- *  same kinds as an unquoted one (nesting is the scanner's concern). */
 export function classify(raw: string): LineKind {
   const t = quoteDepth(raw).rest.trim();
   if (t === "") return "blank";
@@ -55,9 +35,6 @@ export function classify(raw: string): LineKind {
   return "prose";
 }
 
-/** A GFM header/delimiter row: dash cells (optional colons) split by
- *  pipes. A table exists only where a header line with a pipe is followed
- *  by this row at the same quote depth (leading pipes optional). */
 const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
 
 /** A line that is exactly one HTML tag (<details>, </summary>, <br/>).
@@ -65,25 +42,14 @@ const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
  *  <https://example.com> and <user@example.com> stay prose. */
 const HTML_TAG_LINE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(\s[^>]*)?\/?>$/;
 
-/** An HTML comment left open on this line (no `-->` after the last
- *  `<!--`), wherever the opener sits. Inline code spans (any backtick run
- *  length) are masked first so a literal `<!--` token cannot swallow the
- *  rest of the file. Masks here substitute a space rather than deleting:
- *  deletion changes adjacency, so the text around a removed match can
- *  splice into syntax that was never in the document (`` <`x`!-- `` would
- *  mask to `<!--`). */
+/** Inline code spans are masked first, so a literal `<!--` in a span cannot swallow the rest of the file.
+ *  The mask is a space, not a deletion: deleting changes adjacency, and `` <`x`!-- `` would splice into `<!--`. */
 function opensComment(raw: string): boolean {
   const masked = raw.replace(/(`+)(.*?)\1/g, " ");
   const last = masked.lastIndexOf("<!--");
   return last !== -1 && !masked.includes("-->", last + 4);
 }
 
-/** Scans one file's content. `hits` are the 1-based line numbers of
- *  wrapped continuations: prose lines that directly extend the previous
- *  prose or list-item line at the same or shallower blockquote depth
- *  (deeper means a new quote opened). `unterminated` is a fence or
- *  comment still open at EOF - a malformed region the scanner cannot see
- *  past, reported loudly instead of silently swallowing the file's tail. */
 export function scanMarkdown(content: string): {
   hits: number[];
   unterminated: "fence" | "comment" | null;
@@ -121,9 +87,6 @@ export function scanMarkdown(content: string): {
       structural();
       continue;
     }
-    // Fences open with at most three spaces of indentation and close only
-    // on the opener's character, at least as long, with nothing after it
-    // (a closer cannot carry an info string).
     const fenceMark = rest.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fence !== null) {
       const closer = rest.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
@@ -138,11 +101,8 @@ export function scanMarkdown(content: string): {
       structural();
       continue;
     }
-    // GFM tables: a header line with a pipe whose next line is the
-    // delimiter row at the same quote depth opens a table; rows with
-    // pipes at that depth continue it. Inline marker comments may ride
-    // on the delimiter row (docs/toolchains.md), so mask them (to a
-    // space, same rationale as opensComment) before matching.
+    // A generated-region marker comment riding on the delimiter row would hide the table,
+    // so comments are masked (to a space, as in opensComment) before matching.
     if (table !== null && (!rest.includes("|") || depth !== table.depth)) table = null;
     const next = quoteDepth(lines[index + 1] ?? "");
     if (
@@ -159,6 +119,7 @@ export function scanMarkdown(content: string): {
       continue;
     }
     const kind = classify(raw);
+    // A deeper blockquote opens a new quote, so only the same or a shallower depth continues the previous line.
     if (kind === "prose" && (prev === "prose" || prev === "list") && depth <= prevDepth) {
       hits.push(index + 1);
     }
@@ -169,8 +130,6 @@ export function scanMarkdown(content: string): {
   return { hits, unterminated: fence !== null ? "fence" : inComment ? "comment" : null };
 }
 
-/** True when the tracked path is markdown; a writer block file spliced
- *  into a markdown file (`<stem>.block.<value>.md`) keeps the extension. */
 export function isMarkdown(path: string): boolean {
   return basename(path).endsWith(".md");
 }

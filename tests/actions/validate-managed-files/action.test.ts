@@ -1,11 +1,4 @@
-// Behaviour tests for the validate-managed-files action's scripts: the
-// REAL run.ts and report.ts run here, run.ts over a stand-in validator so
-// every classification of the child (clean, findings, crashed, timed out,
-// signal-killed, a report pair that disagrees with the exit) reaches
-// report.ts as the one verdict. The report step never fails, so a
-// blocking verdict is readable in the PR conversation before the caller
-// fails the job. Every scenario is judged WHOLE (summary, comment body,
-// outputs file, verdict file).
+// The report step never fails, so a blocking verdict is readable in the PR conversation before the caller fails the job.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -24,9 +17,6 @@ const temp = tempDirs();
 const ACTION = join(import.meta.dir, "../../../actions/validate-managed-files");
 const RUN_URL = "https://example.invalid/run/1";
 
-// Stands in for the validator: writes the report pair (unless told to
-// skip), then exits or dies as told, so run.ts's classification is what
-// the test sees.
 const fakeValidator = `import { writeFileSync } from "node:fs";
 if (!process.env.FAKE_SKIP_REPORT) {
   writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
@@ -46,7 +36,6 @@ const read = (path: string): string => {
 
 interface Scenario {
   env?: Record<string, string>;
-  /** Skip run.ts: the verdict file stays as `verdict` writes it (or absent). */
   verdict?: Integrity | "absent" | "garbage";
   clearOutcome?: string;
 }
@@ -64,7 +53,6 @@ function play(scenario: Scenario): Outcome {
   const root = temp.dir("validate-managed-action-");
   const actionPath = join(root, "action");
   mkdirSync(join(actionPath, "validator"), { recursive: true });
-  // The action's own scripts, the validator swapped for the stand-in.
   for (const name of ["src/run.ts", "src/report.ts", "src/verdict.ts"]) {
     mkdirSync(join(actionPath, "src"), { recursive: true });
     writeFileSync(

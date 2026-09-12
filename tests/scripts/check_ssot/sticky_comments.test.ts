@@ -1,5 +1,3 @@
-// The sticky-PR-comment scan (scripts/check/ssot/sticky_comments.ts).
-
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
@@ -126,10 +124,6 @@ describe("sticky-pr-comments", () => {
     });
   });
 
-  // Steps are read as the runner reads them: `run` as YAML folds it, each
-  // command line's words as the shell splits them, `gh pr close`'s comment
-  // option in every spelling, and any string of the step (a github-script
-  // body too), flagged at the line the command starts on.
   test.each<{ form: string; text: string; flagged: [line: number, got: string][] }>([
     {
       form: "a plain gh pr comment",
@@ -290,9 +284,6 @@ describe("sticky-pr-comments", () => {
     });
   });
 
-  // A source with no step list (an action's script) is read as command
-  // lines: `\` continuations and open argv lists join, `//` comment lines
-  // are skipped, and a gh helper's argv reads with or without its `gh`.
   test.each<{ form: string; rel: string; text: string[]; flagged: [line: number, got: string][] }>([
     {
       form: "the retired report.ts upsert and its helper cousins",
@@ -450,8 +441,6 @@ describe("sticky-pr-comments", () => {
       text: step(HEADER, PIN, ["        continue-on-error: true"]),
       mismatches: [{ file: `${WORKFLOW}:3`, expected: swallowed, got: "continue-on-error set" }],
     },
-    // Keys are a mapping: written above `uses:` they are the step's just
-    // the same, and a `- ` bullet in the message body is not a step.
     {
       reason: "continue-on-error and with: written above uses, a bullet in the message",
       rel: WORKFLOW,

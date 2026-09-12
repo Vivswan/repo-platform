@@ -1,15 +1,11 @@
-# The fleet's release stage, called by every managed ci.yml downstream of the all-green gate, on the run that judged the commit.
-# Two paths in one job, told apart by release-health's release-cut output:
-#   cut: the judged commit is a release-PR merge. release-please tags that merge commit (never the branch head) and drafts the release; no PR work.
-#   release-pr: any other push. release-please proposes or refreshes the release PR, only while main's head is still the judged commit.
-# Refreshing the release PR is newest-wins work: a run whose commit is no longer main's head skips it instead of racing the newer run's refresh.
-# The job lane is keyed by the judged commit: no other run shares it, so nothing can cancel a pending cut.
-# A re-run of the same commit waits its turn and finds the release already cut.
-# Known limit: two release PRs merged before either is cut are both tagged by the first cut run (release-please builds every pending release PR).
-# Draft-first because published releases freeze (a late upload gets 422); the caller then runs its update-release hook and fleet-release-publish.yml.
-# Without REPO_PLATFORM_TOKEN the release PR is created by GITHUB_TOKEN.
-# Its checks then wait in the Actions tab for "Approve and run", or start on the PR's next push.
-# If the pipeline dies after the draft exists, a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
+# The release leg every managed ci.yml calls after the all-green gate (docs/all-green.md, "After the gate").
+# release-please tags the judged merge commit, never the branch head, and drafts first: a published release freezes (a late upload gets 422).
+#
+#   release-cut true   -> the cut: tag the release-PR merge and draft the release; no PR work
+#   release-cut false  -> propose or refresh the release PR, only while main's head is still the judged commit
+#
+# Without REPO_PLATFORM_TOKEN the release PR is GITHUB_TOKEN's, so its checks wait for "Approve and run" or the PR's next push.
+# Once the draft exists a rerun cannot recreate it (the tag is forced): re-run the failed jobs, or finish by hand with
 # `gh release upload <tag> <assets> --clobber` and `gh release edit <tag> --draft=false`.
 
 name: Fleet Release

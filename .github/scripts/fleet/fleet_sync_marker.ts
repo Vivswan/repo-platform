@@ -1,12 +1,7 @@
 #!/usr/bin/env bun
 
-// The directives block: each PR body's FIRST paragraph, one `[fleet-sync: <scope>]` per line
-// (sync_scope.ts's grammar; a bare `all` requires a justification), read over judged_range.ts's
-// range and unioned. The squash commit carries the PR title alone (the fleet override's
-// squash_merge_commit_message: BLANK), so each commit's merged pull request is looked up and its
-// title and body parsed; a commit with no pull request (a direct push) is read from its message.
-// Only the judged commit's body fails the leg; an older one warns (docs/all-green.md).
-// Env: GITHUB_REPOSITORY, GH_TOKEN (read), plus judged_range.ts's.
+// The squash commit carries the PR title alone (the fleet's squash_merge_commit_message is BLANK), so each commit's merged pull
+// request is looked up for its body; a commit no pull request produced (a direct push) is read from its own message (docs/all-green.md).
 
 import { z } from "zod";
 import { fail, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
@@ -50,9 +45,8 @@ const POSITION =
 // and no span pairs across it. Read on the container-stripped line.
 const FENCE_LINE = /^(?:`{3,}[^`]*|~{3,}.*)$/;
 
-/** The line behind its leading whitespace and blockquote markers, in any mix: what the mention
- *  scan reads (a quoted fence is a fence, a quoted span a span). The block grammar reads raw lines.
- *  Generous on purpose: stripping more can only expose a mention, never hide one. */
+/** Generous on purpose: stripping more can only expose a mention, never hide one. Only the mention scan reads these lines; the block
+ *  grammar reads raw lines. */
 function containerBody(line: string): string {
   return line.replace(/^[ \t]*(?:>[ \t]*)*/, "");
 }
@@ -74,9 +68,8 @@ const INTERRUPTS_PARAGRAPH = [
   /^ {0,3}<[A-Za-z/!?]/,
 ];
 
-/** One inline run of lines (no fence line inside) with its code spans blanked, line count kept
- *  (CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks; an
- *  unclosed run is literal text). Linear: one tokenizing pass, one right-to-left pairing pass. */
+/** CommonMark: a run of N backticks closes at the next run of exactly N, across line breaks, and an unclosed run is literal text.
+ *  The line count is kept so the callers' per-line indexes still line up. */
 function blankCodeSpans(lines: string[]): string[] {
   const text = lines.join("\n");
   const runs: { start: number; end: number }[] = [];
@@ -113,10 +106,8 @@ function blankCodeSpans(lines: string[]): string[] {
   return (out + text.slice(cursor)).split("\n");
 }
 
-/** One paragraph's lines with their code spans blanked: each stretch between fence lines, and
- *  before a line `opensBlock` says starts a new block, is one inline run scanned as a whole (a
- *  commit message, the direct-push source, may carry a 72-column wrap, so a one-line span can
- *  arrive as several lines here); a fence line passes through as written. */
+/** Each stretch between fence lines (and block-opening lines) is scanned as one run: a commit message, the direct-push source, may
+ *  carry a 72-column wrap, so a one-line span can arrive as several lines here. */
 function withoutCodeSpans(
   lines: string[],
   opensBlock: (at: number, runStart: number) => boolean,
@@ -217,8 +208,6 @@ function paragraphs(text: string): Paragraph[] {
   return result;
 }
 
-/** The bracketed text of a block line without its optional backtick pair;
- * null when the fencing is anything but one pair or none. */
 function unwrap(line: string): string | null {
   const open = line.length - line.replace(/^`+/, "").length;
   const close = line.length - line.replace(/`+$/, "").length;
@@ -227,8 +216,6 @@ function unwrap(line: string): string | null {
   return null;
 }
 
-/** Parses a message (the subject, then the body) for its directives block.
- * Pure: every problem comes back as data, all at once. */
 export function parseDirectives(body: string): Directives {
   const paras = paragraphs(body);
   const isBlockShaped = (lines: string[]) =>
@@ -338,9 +325,7 @@ const associatedPulls = z.array(
   }),
 );
 
-/** The message the directives are read from: the merged pull request's title and body, or the
- *  commit's own message when no pull request produced it (a direct push). A failed lookup throws:
- *  an unreadable pull request must never read as "no directive". */
+/** A failed lookup throws: an unreadable pull request must never read as "no directive". */
 function directiveSource(cwd: string, repository: string, commit: string): string {
   const endpoint = `repos/${repository}/commits/${commit}/pulls`;
   const lookup = captureNetwork(["gh", "api", endpoint]);

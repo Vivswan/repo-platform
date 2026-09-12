@@ -1,7 +1,5 @@
-// The range the read-directives leg covers: (newest ancestor build stamp, judged commit], so a
-// push whose CI run was evicted is still read (docs/all-green.md).
-// Env (judgedRangeEnv): SOURCE_SHA, BEFORE_SHA (the fallback base: the stable tag's previous
-// commit, else the push's `before`, all zeros on branch creation).
+// The range is (newest ancestor build stamp, judged commit], so a push whose CI run was evicted is still read (docs/all-green.md).
+// BEFORE_SHA is the fallback base: the stable tag's previous commit, else the push's `before`, all zeros on branch creation.
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
@@ -24,11 +22,8 @@ export type DiffBase =
   | { kind: "fallback"; base: string }
   | { kind: "empty-tree"; base: string };
 
-/** The newest build stamp that is a strict ancestor of `sha`, verified in the checkout at `cwd`;
- *  the fallback `before` (the empty tree when all zeros) only when no build branch exists or its
- *  every stamp is `sha` itself or a newer commit (the first publish ever, landed by this run or a
- *  neighbouring one: main runs overlap). An unstamped build branch, or one with no ancestor stamp
- *  once those are set aside, is refused. */
+/** The fallback applies only when no stamp older than `sha` exists: the first publish ever, landed by this run or a neighbouring one
+ *  (main runs overlap). */
 export function resolveBase(cwd: string, sha: string, before: string): DiffBase {
   const stamped = stampedBase(cwd, sha);
   if (stamped !== undefined) return stamped;
@@ -79,8 +74,8 @@ function stampedBase(cwd: string, sha: string): DiffBase | undefined {
   throw new Error(notAncestor(what, candidates[0], sha));
 }
 
-/** Whether `stamped` is `sha` or a descendant of it: a publish that says nothing about the pushes before `sha`.
- *  A stamp the checkout cannot see is not walked past: stampedBase reports it. */
+/** A stamp at or after `sha` says nothing about the pushes before it. One the checkout cannot see is not walked past: stampedBase
+ *  reports it. */
 function publishedAtOrAfter(cwd: string, sha: string, stamped: string): boolean {
   if (stamped === sha) return true;
   if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${stamped}^{commit}`], { cwd })) {
@@ -105,8 +100,7 @@ function notAncestor(what: string, base: string, sha: string): string {
   );
 }
 
-/** The commits in (base, sha] along main's first-parent line, oldest first: every push since the
- *  last publish, one commit per squash merge. An empty-tree base means the whole history. */
+/** First-parent only: one commit per squash merge, never a merged branch's inner commits. */
 export function rangeCommits(cwd: string, sha: string, base: DiffBase): string[] {
   const range = base.kind === "empty-tree" ? sha : `${base.base}..${sha}`;
   return mustCapture(["git", "-C", cwd, "rev-list", "--first-parent", "--reverse", range])

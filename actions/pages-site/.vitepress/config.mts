@@ -1,27 +1,14 @@
-// The central VitePress config every fleet docs site builds with. The
-// caller repository contributes its markdown tree plus the repo-level facts
-// (settings.yml identity, toolchain pins, LICENSE.md) the action reads from the
-// tier's git tree; everything here is driven by the environment the
-// pages-site action sets per tier (build.ts owns that contract):
+// Every fleet docs site builds with this config; the pages-site action sets the environment per tier (build.ts owns that contract).
 //
-//   DOCS_SITE_SRC           the docs tree to render (required)
-//   DOCS_SITE_TITLE         site title
-//   DOCS_SITE_BASE          URL base path for this tier
-//   DOCS_SITE_VERSIONS      JSON [{label, link}] for the version dropdown
-//   DOCS_SITE_CURRENT       this tier's version label
-//   DOCS_SITE_FACTS         JSON ProjectFacts (facts.ts) for the theme's
-//                           facts card, provenance line, and per-repo hue
-//                           (required)
-//   DOCS_SITE_INCLUDES      JSON IncludeRoot[] (lib.ts): the other roots
-//                           staged inside the docs tree, each child
-//                           directory's page file serving like a README
-//   DOCS_SITE_EDIT_BASE     the repository's edit URL up to the repo root,
-//                           set only where editing can change THIS content
-//                           (latest tiers); a page appends its source path
-//   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead
-//                           internal links are fatal on current content
-//                           (that failure is the docs PR check's value),
-//                           but history cannot be fixed
+//   DOCS_SITE_SRC                the docs tree to render
+//   DOCS_SITE_TITLE              site title
+//   DOCS_SITE_BASE               URL base path for this tier
+//   DOCS_SITE_VERSIONS           JSON [{label, link}] for the version dropdown
+//   DOCS_SITE_CURRENT            this tier's version label
+//   DOCS_SITE_FACTS              JSON ProjectFacts (facts.ts)
+//   DOCS_SITE_INCLUDES           JSON IncludeRoot[] (lib.ts), the other roots staged inside the docs tree
+//   DOCS_SITE_EDIT_BASE          the repository's edit URL up to the repo root; set only where editing can change THIS content
+//   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead internal links are fatal on current content, but history cannot be fixed
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -100,17 +87,15 @@ const markdown: MarkdownOptions = {
   // Heading ids are GitHub's (anchors.ts): the fleet writes its links for
   // the README on GitHub, and the headers plugin reads the anchor's id.
   anchor: { slugify: githubSlug, getTokensText: headingText },
-  // One highlighter theme whose colors are custom properties: the theme's
-  // tokens.ts owns the code palette per mode (--fleet-code-*), so token contrast is
-  // a token value the contrast test can guard, not a hex baked into every
-  // span. No italics: the fleet reads emphasis by weight. Normalized once
-  // here because shiki normalizes a raw theme on every fence and mutates
-  // its colors in place; the second pass then loses the ansi var() mapping
-  // and an ansi fence prints in the placeholder hex.
+  // The code palette is custom properties the theme's tokens.ts owns per mode (--fleet-code-*), so token
+  // contrast is a token value the contrast test can guard, not a hex baked into every span. Normalized once
+  // here because shiki normalizes a raw theme on every fence and mutates its colors in place; the second
+  // pass then loses the ansi var() mapping and an ansi fence prints in the placeholder hex.
   theme: normalizeTheme(
     createCssVariablesTheme({
       name: "fleet",
       variablePrefix: "--fleet-code-",
+      // No italics: the fleet reads emphasis by weight.
       fontStyle: false,
     }),
   ),
@@ -186,12 +171,10 @@ export default async () => {
         postcss: {
           plugins: [
             {
-              // Carbon's utils.css imports Google Fonts and cdnfonts (two third-party
-              // calls per page load) and declares its bundled Mona Sans, which nothing
-              // selects once tokens.css sets the families yet carbon's transformHead
-              // preloads (137 KB per page) for as long as the @font-face survives.
-              // A Once hook, not AtRule visitors: vite emits url() assets from
-              // its own Once hook, and PostCSS runs every Once before any visitor.
+              // Carbon's utils.css ships fonts nothing selects once tokens.css sets the families, so both are dropped here.
+              //   @import of Google Fonts and cdnfonts  -> two third-party calls per page load
+              //   the bundled Mona Sans @font-face      -> carbon's transformHead preloads it, 137 KB per page
+              // A Once hook, not AtRule visitors: vite emits url() assets from its own Once hook, and PostCSS runs every Once before any visitor.
               postcssPlugin: "fleet-drop-carbon-fonts",
               Once(root) {
                 root.walkAtRules("import", (rule) => {
@@ -209,16 +192,11 @@ export default async () => {
       },
     },
     markdown,
-    // Every page's filePath becomes its REPOSITORY path (docs/guide/README.md,
-    // skills/x/SKILL.md): the edit link's `:path` and the provenance line
-    // read it, and nothing on the node side reads it after this hook.
-    // Landing pages (a README.md or index.md source at any depth) are the
-    // site's front matter, not an article: the theme lays them out from the
-    // flag and they carry no outline. An include root's page serves at its
-    // directory URL too but stays an article. A page with neither a title
-    // key nor an h1 is titled the way derive.ts titles its sidebar row: by
-    // its `name` key (the SKILL.md convention) when that says something,
-    // else by its file name.
+    // filePath becomes the page's REPOSITORY path (docs/guide/README.md): the edit link's `:path` and the
+    // provenance line read it, and nothing on the node side reads it after this hook. A page with neither
+    // a title key nor an h1 is titled the way derive.ts titles its sidebar row, so the two agree.
+    //   README.md or index.md at any depth  -> fleetLanding, no outline: the theme lays it out as front matter, not an article
+    //   an include root's page              -> serves at its directory URL too, but stays an article
     transformPageData(pageData) {
       const source = {
         filePath: sourcePathOf(facts.docsDir, includes, pageData.filePath),

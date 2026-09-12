@@ -1,8 +1,3 @@
-// Unit tests for the toolchain-pin refresher's pure pieces: the upstream
-// payload parsers (fixture payloads, no network), the line-targeted
-// files.yml rewrite, the bump prose, and the PIN_SOURCES <-> files.yml
-// cross-check against the live repo.
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -71,10 +66,8 @@ describe("fetchJson", () => {
 });
 
 describe("decideBump", () => {
-  // Three-way verdict on the fetched version relative to the pin; the
-  // comparison is numeric per component, never lexicographic. A
-  // "downgrade" is never applied: GitHub's date-ordered /releases/latest
-  // can surface a backport on an older line.
+  // A downgrade is never applied: GitHub's date-ordered /releases/latest can
+  // surface a backport on an older line.
   test.each([
     ["1.3.15", "1.2.22", "downgrade", "backport on an older line surfaces as date-ordered latest"],
     ["2.0.0", "1.99.99", "downgrade", "major below the pin"],

@@ -1,6 +1,3 @@
-// The sticky-PR-comment scan: every comment anything repo-platform ships
-// posts goes through the one pinned action, judged over YAML step lists.
-
 import {
   isMap,
   isScalar,
@@ -15,42 +12,27 @@ import { escapeRegExp, type Mismatch } from "./comparison.ts";
 import { readSource, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The one action anything repo-platform ships posts PR comments through
- *  (the writer's workflow sources, its own workflows, its composite actions): one
- *  comment per header key per PR, upserted. Headers are
- *  `repo-platform/<host>`, the host being the workflow stem or the action
- *  name, so two posters can never edit each other's comment. */
+/** The header is `repo-platform/<host>`, the host being the workflow stem or the action name, so two posters can never edit each other's comment. */
 export const STICKY_COMMENT_ACTION = "marocchino/sticky-pull-request-comment";
 
 const STICKY_PIN_RE = new RegExp(
   `${escapeRegExp(STICKY_COMMENT_ACTION)}@[0-9a-f]{40}["']? # v\\d+\\.\\d+\\.\\d+\\s*$`,
 );
 
-/** What a source's sticky steps may do: the hosts its header may name
- *  (exactly one), and whether a step may carry continue-on-error. A
- *  composite action posts under the CALLER's token, which a fork or
- *  Dependabot PR grants no pull-requests write, so its comment is a
- *  convenience sink beside the step summary; a workflow owns its token and
- *  a failed post fails its step. */
+/** A composite action posts under the CALLER's token, which a fork or Dependabot PR grants no pull-requests write,
+ *  so its post may fail; a workflow owns its token and a failed post fails its step. */
 export interface StickyScope {
   hosts: readonly string[];
   postMayFail: boolean;
 }
 
-/** The workflow stem a writer source lands as, or null for any other
- *  path: `files/<module>/.github/workflows/<stem>[.<variant>].yml`, block
- *  files (`<stem>.block.<value>.yml`) included, since a block is spliced
- *  into the workflow whose name it carries. The stem is the filename up to
- *  its first dot (`auto-assign.codeql.yml` lands as auto-assign.yml). */
+/** A block file (`<stem>.block.<value>.yml`) counts too: it is spliced into the workflow whose name it carries.
+ *    files/base/.github/workflows/auto-assign.codeql.yml -> auto-assign */
 export function sourceWorkflowStem(rel: string): string | null {
   const match = /^files\/[^/]+\/\.github\/workflows\/([^/.]+)[^/]*\.ya?ml$/.exec(rel);
   return match?.[1] ?? null;
 }
 
-/** A source's scope by where it lives: a writer workflow source hosts the
- *  workflow it lands as, a repo-platform workflow itself, and every file of
- *  a composite action the action; anything else hosts nothing, so a sticky
- *  step there has no header it could carry. */
 export function stickyScopeOf(rel: string): StickyScope {
   const stem = sourceWorkflowStem(rel);
   if (stem !== null) return { hosts: [stem], postMayFail: false };
@@ -61,15 +43,10 @@ export function stickyScopeOf(rel: string): StickyScope {
   return { hosts: [], postMayFail: false };
 }
 
-/** A comment line in YAML or TypeScript. */
 const COMMENT_LINE_RE = /^\s*(#|\/\/)/;
 
-/** The command lines of a text, each with the 1-based line it starts on:
- *  a line ending in a shell continuation or an open argv list (`\`, `,`,
- *  `[`, `(`) continues on the next, so a `gh pr close \` with `--comment`
- *  below and a formatter's one-element-per-line `["gh",\n"pr",\n"comment"]`
- *  read whole. Blank and comment lines are dropped, and never end a line
- *  they interrupt. */
+/** A line ending in `\`, `,`, `[`, or `(` continues on the next, so `gh pr close \` with `--comment` below
+ *  and a formatter's one-element-per-line `["gh",\n"pr",\n"comment"]` read whole. */
 export function commandLines(text: string): { line: number; text: string }[] {
   const commands: { line: number; text: string }[] = [];
   let open: { line: number; text: string } | null = null;
@@ -87,11 +64,6 @@ export function commandLines(text: string): { line: number; text: string }[] {
   return commands;
 }
 
-/** The words of one command line as the shell, or the argv array a
- *  script's gh helper prepends `gh` to, delivers them: an Actions
- *  expression or a shell substitution is one word however many spaces it
- *  holds, then whitespace of any width, commas, and brackets split, and
- *  quoting is shed. */
 export function shellWords(command: string): string[] {
   // A substitution's body is a command line of its own, scanned after the
   // outer words; the outer line sees it as one word.
@@ -109,14 +81,8 @@ export function shellWords(command: string): string[] {
   return [...words, ...substituted.flatMap(shellWords)];
 }
 
-/** Where a folded block scalar's value line sits in the source, searched from
- *  `from`: folding joins each paragraph with spaces and keeps more-indented
- *  lines whole, so every value line begins with the text of exactly one
- *  source line of the block (which ends at the first non-blank line indented
- *  less than its first). `line` is that source line, 1-based; `next` is the
- *  index after the last source line the value line consumed (a joined
- *  paragraph or `\` continuation spans several, blank lines included), where
- *  the following value line's search starts. Null when nothing matches. */
+/** YAML folding joins each paragraph with spaces and keeps more-indented lines whole,
+ *  so every value line begins with the text of exactly one source line of the block. */
 export function foldedSourceLine(
   lines: readonly string[],
   indicatorLine: number,
@@ -153,11 +119,8 @@ const PR_COMMENT_ROUTE_RE = /\/issues\/(?:[^/\s]+\/)?comments\b/;
 const isCloseCommentOption = (word: string): boolean =>
   word === "--comment" || word.startsWith("--comment=") || /^-[a-zA-Z]*c[a-zA-Z]*(=|$)/.test(word);
 
-/** Whether one command line posts a PR comment by hand: `pr comment`
- *  (the leading `gh` optional, a helper may prepend it), `pr close` with
- *  its comment option, or a comments REST route. `gh issue comment` is
- *  not judged: the issue-tracking actions comment on ISSUES by design,
- *  and the number alone cannot tell an issue from a PR. */
+/** `gh issue comment` is not judged: the issue-tracking actions comment on issues by design, and the number alone cannot tell an issue from a PR.
+ *  The leading `gh` is optional: a script's helper may prepend it. */
 export function postsPrComment(words: readonly string[]): boolean {
   if (words.some((word) => PR_COMMENT_ROUTE_RE.test(word))) return true;
   return words.some((word, index) => {
@@ -168,17 +131,11 @@ export function postsPrComment(words: readonly string[]): boolean {
   });
 }
 
-/** A step of a parsed YAML source: the mapping, and the 1-based line of
- *  each node for reporting. */
 interface ParsedSteps {
   steps: YAMLMap[];
   lineOf: (node: YamlNode) => number;
 }
 
-/** The steps of a YAML text - every mapping carrying `uses` or `run`
- *  inside a sequence, wherever the sequence sits: a workflow's
- *  `jobs.*.steps` or a composite action's `runs.steps`. Null when the
- *  text is not YAML or holds no steps: the scanner then reads it as text. */
 export function parsedSteps(text: string): ParsedSteps | null {
   const lineCounter = new LineCounter();
   const doc = parseDocument(text, { lineCounter });
@@ -199,7 +156,6 @@ export function parsedSteps(text: string): ParsedSteps | null {
   return { steps, lineOf: (node) => lineCounter.linePos(node.range?.[0] ?? 0).line };
 }
 
-/** Every string scalar under a node, depth first. */
 function stringScalars(node: unknown, out: Scalar<string>[] = []): Scalar<string>[] {
   if (isScalar(node)) {
     if (typeof node.value === "string") out.push(node as Scalar<string>);
@@ -211,14 +167,6 @@ function stringScalars(node: unknown, out: Scalar<string>[] = []): Scalar<string
   return out;
 }
 
-/** One source judged against its scope. YAML step lists (a workflow, a composite
- *  action, a block file) are read as the runner reads them: keys in any order,
- *  `run` as YAML folds it (`>-` is one shell line, `|` one per line), each command
- *  line's words as the shell splits them; anything else is read as command lines
- *  of text. Everywhere: no hand-rolled PR comment; every sticky step pinned
- *  `@<40-hex sha> # vX.Y.Z` (the version comment is text no parser keeps, so that
- *  check is textual) with one `header:` host and, unless the scope allows it, no
- *  continue-on-error; the sticky action in an unparsable source is a mismatch. */
 export function stickyCommentMismatches(
   rel: string,
   text: string,
@@ -260,8 +208,8 @@ export function stickyCommentMismatches(
   let stickySteps = 0;
   for (const step of parsed.steps) {
     for (const scalar of stringScalars(step)) {
-      // A literal block's first line is the one after its `|` indicator; a
-      // folded block's value lines are looked up in the source, in order.
+      // lineOf(scalar) is the block indicator's line, so a literal block's first content line is one below;
+      // a folded block's lines are looked up in the source.
       const indicator = parsed.lineOf(scalar);
       const first = indicator + (scalar.type === "BLOCK_LITERAL" ? 1 : 0);
       let cursor = indicator;
@@ -315,9 +263,6 @@ export function stickyCommentMismatches(
   return { mismatches, stickySteps };
 }
 
-/** The rule over every source under files/, .github/workflows/, and
- *  actions/. Throws when no writer workflow source or no sticky step is
- *  present at all: a scan with nothing to judge has lost its anchor. */
 export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mismatch[] {
   if (!sources.some(([rel]) => sourceWorkflowStem(rel) !== null)) {
     throw new Error("no writer workflow sources found - anchor lost");
@@ -331,13 +276,8 @@ export function stickyTreeMismatches(sources: [rel: string, text: string][]): Mi
   return judged.flatMap((j) => j.mismatches);
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const stickyCommentRules: Rule[] = [
   {
-    // Everything repo-platform ships posts PR comments through the sticky
-    // action only (stickyCommentMismatches states the shape): every file
-    // under the writer's sources, its own workflows, and its composite
-    // actions is the scan.
     name: "sticky-pr-comments",
     run: () =>
       stickyTreeMismatches(

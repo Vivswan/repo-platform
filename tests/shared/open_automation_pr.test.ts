@@ -8,10 +8,8 @@ const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/shared/open_automation_pr.ts");
 
-// Records every git/gh invocation to CALLS_LOG with arguments separated by
-// \x1f and records by \x1e, so split arguments and multiline values stay
-// distinguishable. `gh pr list` answers the canned PR_LOOKUP, and
-// GIT_FAIL/GH_FAIL pick a subcommand that exits 1.
+// \x1f between arguments and \x1e between records, so a split argument stays
+// distinguishable from a multiline value.
 const stub = (tool: string) => `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "${tool}"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
@@ -24,12 +22,10 @@ if [ "${tool}" = "gh" ] && [ "\${2:-}" = "list" ]; then
 fi
 `;
 
-// Multiline on purpose: the body must reach gh as ONE argv (the \x1f
-// record separator keeps a split argument distinguishable from a newline).
+// Multiline on purpose: the body must reach gh as ONE argv.
 const PR_BODY = "**MAJOR VERSION JUMP: bun 2 - review before merging.**\n\nAutomated refresh body.";
 const PR_TITLE = "chore: refresh x from upstream";
 
-// The six git records every successful run opens with, then the lookup.
 const GIT_PREFIX = [
   ["git", "config", "user.name", "repo-platform-sync"],
   ["git", "config", "user.email", "repo-platform-sync@users.noreply.github.com"],
@@ -98,8 +94,7 @@ describe("open_automation_pr.ts", () => {
     ]);
   });
 
-  // An existing PR is edited, never re-created: the whole call list makes
-  // the absent `gh pr create` explicit. Rows are [reason, env, edit record].
+  // The whole call list is asserted so the absent `gh pr create` is explicit.
   test.each([
     [
       "an existing PR gets its body refreshed, not a duplicate PR",

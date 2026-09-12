@@ -1,7 +1,3 @@
-// Runs one composite-action bash step the way the runner does: the step's
-// `run` with its `${{ ... }}` expressions filled from the caller's map,
-// its env: block applied, and the GITHUB_OUTPUT it wrote parsed back.
-
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -35,8 +31,6 @@ export interface StepRun {
   outputs: Record<string, string>;
 }
 
-/** Every `${{ ... }}` in `text` replaced from `fills`; an expression the
- *  caller did not fill throws, so a step never runs with a literal one. */
 export function fill(text: string, fills: Record<string, string>): string {
   let filled = text;
   for (const [expr, value] of Object.entries(fills)) filled = filled.replaceAll(expr, value);

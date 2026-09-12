@@ -35,13 +35,10 @@ const item = (
 
 const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
-// Under bun the bare `vitepress` specifier resolves to the node entry,
-// which has no useData (Vite aliases the client one), and the data
-// loader runs only inside a VitePress build. Virtual modules stand in
-// for both, registered once (bun caches them): the stub's locale is a
-// shared ref each render sets, its page index the list each test sets.
-// The node entry, which the markdown-rule tests import by path, is
-// untouched.
+// Under bun the bare `vitepress` specifier resolves to the node entry, which has no useData, and the data loader runs only inside a VitePress build.
+// Virtual modules stand in for both, registered once (bun caches them); the node entry vitepress_renderer.ts imports by path stays untouched.
+//   "vitepress"                      -> useData over a shared locale ref each render sets
+//   .vitepress/theme/pages.data.ts   -> the page index list each test fills
 const pages: PageIndexEntry[] = [];
 async function loadStubs() {
   const vue = await import(resolve(ACTION_DIR, "node_modules/vue/index.mjs"));
@@ -336,10 +333,6 @@ describe("the rendered list", () => {
     page("/repo/guide/intro.html", "Intro", "guide", 1),
   );
 
-  /** The listbox's options in document order, each with its row index:
-   *  `<index> <href>` for a link, `<index> fold: <label>` for a fold row.
-   *  The pattern pins the option contract: the option IS the anchor or the
-   *  fold element, unselected, and a link is out of the Tab order. */
   function outline(html: string): string[] {
     const OPTION_RE =
       /<a class="fleet-launcher-link" role="option" id="v-\d+-row-(\d+)" aria-selected="false" tabindex="-1" href="([^"]*)"|<div class="fleet-launcher-fold" role="option" id="v-\d+-row-(\d+)" aria-selected="false">([^<]*)</g;
@@ -348,8 +341,6 @@ describe("the rendered list", () => {
     );
   }
 
-  /** Each group's aria-expanded in document order: absent on a group with
-   *  nothing to fold. */
   function groupStates(html: string): (string | null)[] {
     const GROUP_RE =
       /<div class="fleet-launcher-group" role="group" aria-labelledby="v-\d+-group-\d+"( aria-expanded="(true|false)")?>/g;
@@ -414,9 +405,6 @@ describe("the rendered list", () => {
 });
 
 describe("the input modality behind the field's focus ring", () => {
-  /** A DOM-less element for Vue's custom renderer: enough surface for the
-   *  nav launcher (focus, the dialog's showModal, one querySelector that
-   *  finds the input) and for the launcher's mount. */
   interface Node {
     tag: string;
     props: Record<string, unknown>;

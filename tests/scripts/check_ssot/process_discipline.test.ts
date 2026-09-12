@@ -1,5 +1,3 @@
-// The process-discipline scanners (scripts/check/ssot/process_discipline.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
@@ -93,7 +91,6 @@ describe("spawnSyncSites", () => {
     expect(spawnSyncSites("const x = `${Bun.spawnSync(cmd)}`;", "f")).toEqual([
       { line: 1, kind: "call", options: null },
     ]);
-    // The template's TEXT is still masked.
     expect(spawnSyncSites("const x = `Bun.spawnSync(cmd)`;", "f")).toEqual([]);
   });
 
@@ -114,8 +111,6 @@ describe("spawnSyncSites", () => {
       { line: 1, kind: "call", options: "{ timeout: 5 }" },
     ]);
     expect(spawnSyncSites("fakeBun.spawnSync(cmd);", "f")).toEqual([]);
-    // Line numbers stay exact: the receiver pattern must not swallow
-    // the preceding newline into the match (reviewer's probe).
     expect(spawnSyncSites("const a = 1;\nBun.spawnSync(cmd);", "f")).toEqual([
       { line: 2, kind: "call", options: null },
     ]);
@@ -142,7 +137,7 @@ describe("spawnSyncSites", () => {
   test("a source the parser must recover throws instead of judging recovered shapes", () => {
     // A truncated call's recovered nodes can read as benign (an intact
     // options object before the missing paren), so the scan refuses the
-    // whole file - the old lexer's loud contract, kept.
+    // whole file.
     expect(() => spawnSyncSites("Bun.spawnSync([cmd", "f")).toThrow("syntax errors");
     expect(() => spawnSyncSites("Bun.spawnSync(cmd, { timeout: 5 }", "f")).toThrow("syntax errors");
   });
@@ -285,10 +280,8 @@ describe("spawnSyncHazard", () => {
     expect(spawnSyncHazard('{ stdio: ["ignore", ...streams, "inherit"] }')).toContain(
       "cannot audit",
     );
-    // Wrapping parentheses do not hide the array from the slot reader.
     expect(spawnSyncHazard('{ stdio: (["ignore", ...streams]) }')).toContain("cannot audit");
     expect(spawnSyncHazard('{ stdio: (["inherit"]) }')).toContain("stdout and stderr");
-    // A bound still bounds the hazard regardless of the stdio shape.
     expect(spawnSyncHazard('{ stdio: ["ignore", ...streams], timeout: 5_000 }')).toBeNull();
   });
 
@@ -341,15 +334,11 @@ describe("asyncSpawnMismatches", () => {
       'const doc = "Bun.spawn(cmd)";',
     ].join("\n");
     expect(asyncSpawnMismatches("scripts/x.ts", source, false)).toEqual([]);
-    // Optional chaining and an alias-shaped mention are still sites.
     expect(asyncSpawnMismatches("scripts/x.ts", "Bun?.spawn(cmd);\n", false)).toHaveLength(1);
     expect(asyncSpawnMismatches("scripts/x.ts", "const s = Bun.spawn;\n", false)).toHaveLength(1);
   });
 
   test("a re-punctuated callee is still an async site; a different receiver is not", () => {
-    // The laundering hardening: `(Bun).spawn` and `Bun!.spawn` must not
-    // exit the scan by re-punctuating the receiver, and fakeBun's
-    // method is not Bun's.
     expect(asyncSpawnMismatches("scripts/x.ts", "(Bun).spawn(cmd);\n", false)).toHaveLength(1);
     expect(asyncSpawnMismatches("scripts/x.ts", "Bun!.spawn(cmd);\n", false)).toHaveLength(1);
     expect(asyncSpawnMismatches("scripts/x.ts", "fakeBun.spawn(cmd);\n", false)).toEqual([]);

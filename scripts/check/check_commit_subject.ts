@@ -1,20 +1,8 @@
 #!/usr/bin/env bun
-// Commit-msg-stage gate: judges the pending commit's SUBJECT line against
-// the SAME grammar CI's commit-names job enforces
-// (actions/validate-commit-names), so a bad subject dies at `git commit`
-// instead of going red on main after the push. Motivating failure
-// (2026-08-30): `docs(all-green,build-provenance): ...` - a COMMA in the
-// scope - passed every local gate (pre-commit runs before the message
-// exists) and reddened main.
-//
-// SINGLE SOURCE: the grammar is imported from
-// actions/validate-commit-names/subject.ts, never duplicated. The
-// direction is forced by the build branch: it ships actions/ but not
-// scripts/, so the shared module must live inside the action to keep it
-// self-contained for fleet `uses:` refs, while this hook only runs in a
-// full checkout where actions/ exists.
-// tests/scripts/check/check_commit_subject.test.ts proves the hook and the CI
-// validator judge identically and reds if the grammar ever forks.
+// The grammar lives in actions/validate-commit-names/subject.ts, not here:
+// the build branch ships actions/ but not scripts/, so the shared module must sit inside the action.
+// Motivating failure: `docs(all-green,build-provenance): ...`, a comma in the scope,
+// passed every local gate (pre-commit runs before the message exists) and reddened main.
 //
 // Usage (wired by .husky/commit-msg):
 //   bun scripts/check/check_commit_subject.ts <commit-msg-file>
@@ -28,10 +16,8 @@ import {
   scopeCharacterClass,
 } from "../../actions/validate-commit-names/subject.ts";
 
-// The subject sits in the first content line; the bound only limits how
-// far the search reaches past leading blanks and comments, and keeps a
-// commit -v buffer's multi-megabyte diff out of the child's stdout
-// (execFileSync's default maxBuffer dies on it).
+// A commit -v message carries the whole diff; the bound caps the text handed to the stripspace child,
+// and the subject is in the first content line anyway.
 const CLEANUP_INPUT_BOUND = 1024 * 1024;
 
 function firstContentLine(text: string): string {
@@ -42,14 +28,12 @@ function firstContentLine(text: string): string {
   return "";
 }
 
-/** The subjects git could store for this message file, deduplicated. Git
- *  cleans the message AFTER the commit-msg hook and the mode is unknowable
- *  here: `git commit -m` cleans whitespace only (comment lines survive as
- *  the subject), editor commits also strip comment lines, delegated to `git
- *  stripspace --strip-comments` (the cleanup's own path, honoring
- *  core.commentChar). The gate refuses only when NO mode could store a valid
- *  subject; the residual false-pass (candidates diverge and the stored one
- *  is invalid, e.g. `-m "#..."`) is CI's: the hook is the local echo. */
+/** Git cleans the message AFTER this hook and the mode is unknowable here,
+ *  so both subjects it could store are judged; the gate refuses only when neither is valid.
+ *  The residual false-pass (candidates diverge and the stored one is invalid, e.g. `-m "#..."`) is CI's to catch.
+ *
+ *  git commit -m   -> whitespace cleanup only, a comment line survives as the subject
+ *  editor commit   -> comment lines stripped too (git stripspace --strip-comments, honoring core.commentChar) */
 export function candidateSubjects(raw: string): string[] {
   const bounded = raw.slice(0, CLEANUP_INPUT_BOUND);
   const cleaned = execFileSync("git", ["stripspace", "--strip-comments"], {
@@ -67,7 +51,6 @@ export function main(argv: string[]): number {
     return 2;
   }
   const candidates = candidateSubjects(readFileSync(messagePath, "utf-8"));
-  // Merge commits are exempt exactly as CI exempts them (isMergeSubject).
   const acceptable = (subjectLine: string) =>
     isMergeSubject(subjectLine) || conventionalSubject.test(subjectLine);
   if (!candidates.some(acceptable)) {

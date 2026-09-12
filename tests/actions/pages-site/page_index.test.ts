@@ -20,9 +20,7 @@ const SRC_DIR = "/site/docs";
 const PAGE = "/site/docs/guide/page.md";
 
 describe("sourceHeaders", () => {
-  // Each case: the source, the regular files present, the headers expected,
-  // and the paths the rule must ask about (VitePress's resolution of every
-  // directive, in order, until one resolves to a readable file).
+  // The last column is every path the rule probes, in VitePress's resolution order, until one resolves to a readable file.
   const cases: [string, string, string[], PageHeader[], string[]][] = [
     [
       "a page without a directive keeps its headings",

@@ -1,5 +1,3 @@
-// The toolchain rules' pure helpers (scripts/check/ssot/toolchain.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
@@ -148,8 +146,6 @@ describe("actionsBunGuardMismatches", () => {
         ACTION_BUN: \${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
 `;
-  // A minimal composite: the shared bun-setup step, then one step running
-  // the recorded bun.
   const canonical = `runs:
   using: composite
   steps:
@@ -186,8 +182,6 @@ ${RUN_STEP}`;
     got: line,
   });
 
-  // Exactly one shared step, spelled one way, ahead of everything else: each
-  // row is one deviation and the whole mismatch list it earns.
   test.each<{ reason: string; text: string; expected: ReturnType<typeof shapeMismatch>[] }>([
     {
       reason: "no setup at all while a step binds the recorded path",
@@ -295,8 +289,6 @@ ${RUN_STEP}`;
     expect(actionsBunGuardMismatches(FILE, preceded)).toEqual([]);
   });
 
-  // An action whose only bun is an env binding of its own is still a bun
-  // runner: with no setup, the rule names the missing step.
   test("an action running a bun it names only in env, with no setup, is refused", () => {
     const text = `runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n`;
     expect(actionsBunGuardMismatches(FILE, text)).toEqual([
@@ -543,8 +535,6 @@ describe("bunRuntimeMismatches", () => {
 });
 
 describe("bunDirsMismatches", () => {
-  // An action package: each control drops it from exactly one of the four
-  // homes and the rule names that home and the directory.
   const ACTION = "actions/validate-managed-files";
   const green: BunDirsInputs = {
     lockDirs: [".", "actions/check-typography", ACTION],

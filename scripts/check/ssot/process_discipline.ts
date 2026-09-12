@@ -1,7 +1,3 @@
-// Rules over process hygiene in the executable trees: bounded spawnSync,
-// temp dirs through the shared helper, no tests beside actions, and
-// synchronous stream writes.
-
 import {
   type CallExpression,
   type Expression,
@@ -19,9 +15,6 @@ import type { Mismatch } from "./comparison.ts";
 import { read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The single expression `text` parses to (wrapping parentheses
- *  unwrapped), or null when it is not a lone, clean expression - the
- *  shared entry for reading option and stdio literals structurally. */
 function parsedExpression(text: string): Expression | null {
   const wrapped = `(${text});`;
   if (syntaxErrorCount(wrapped) > 0) return null; // recovered nodes are unauditable
@@ -31,14 +24,8 @@ function parsedExpression(text: string): Expression | null {
   return unwrapExpression(statement.getExpression());
 }
 
-/** The top-level properties of an options OBJECT LITERAL: property name
- *  -> initializer text (a shorthand property maps to its own name),
- *  read off the parsed literal, so a comma or colon inside a nested
- *  value or a string can never split or fake a property. Null when the
- *  text is not an auditable literal - a variable, a call result, a
- *  top-level spread, a method, a computed or non-identifier-shaped key
- *  - which the caller treats as a hazard, so the unreadable shapes fail
- *  closed. */
+/** Read off the parsed literal, not split on commas: a comma or colon inside a nested value or a string could split or fake a property.
+ *  Null means unauditable; the caller treats it as a hazard, so unreadable shapes fail closed. */
 export function topLevelProperties(options: string): Map<string, string> | null {
   const text = options.trim();
   if (!text.startsWith("{") || !text.endsWith("}")) return null;
@@ -66,13 +53,9 @@ export function topLevelProperties(options: string): Map<string, string> | null 
   return props;
 }
 
-/** A stdio value's shape, decided on the PARSED expression (wrapping
- *  parentheses and type dressing unwrap first, so `(["pipe"])` is still
- *  the array it is): slot texts for a spread-free array literal (an
- *  elided slot reads as empty), unauditable for a spread-carrying array
- *  or unparsable text (a spread can shift or inject stream slots), and
- *  scalar for everything else (a named constant, trusted by its key
- *  like other variable values). */
+/** A spread can shift or inject stream slots, so a spread-carrying array is unauditable; any non-array value
+ *  is trusted whole like a variable value (house style writes a named constant there), so a call or a literal escapes too: a recorded residual.
+ *  Parentheses and type dressing unwrap first: `(["pipe"])` is still the array it is. */
 function stdioShape(
   text: string,
 ): { kind: "slots"; slots: string[] } | { kind: "unauditable" } | { kind: "scalar" } {
@@ -89,31 +72,21 @@ function stdioShape(
   };
 }
 
-// A GLOBAL receiver (Bun, process), shared by the spawn and stream-write
-// scans and hardened against decorative spellings: parentheses, the TS
-// non-null `!`, and type-only wrappers unwrap to the same receiver, and a
-// property access ENDING in the global's name (globalThis.Bun) counts too,
-// since over-matching someone else's `.Bun` is the loud direction.
-// Identifier names match EXACTLY, so a look-alike like `fakeprocess` is not
-// the global. The recorded residual: an alias of the global itself (`const b
-// = Bun; b.spawnSync(...)`), which nothing in house style writes.
+// A property access ending in the global's name (globalThis.Bun) counts too: over-matching someone else's `.Bun` is the loud direction.
+// The recorded residual: an alias of the global itself (`const b = Bun; b.spawnSync(...)`), which nothing in house style writes.
 function isGlobalReceiver(expression: Expression, name: string): boolean {
   const node = unwrapExpression(expression);
   if (Node.isIdentifier(node)) return node.getText() === name;
   return Node.isPropertyAccessExpression(node) && node.getName() === name;
 }
 
-/** Whether a property-name text names spawnSync as a whole word - the
- *  destructure scans' test, so a computed spelling (["spawnSync"], or a
- *  variable named spawnSync) fails closed exactly like the plain key. */
+/** Whole-word, not exact: a computed spelling in a destructure (`["spawnSync"]`) fails closed exactly like the plain key. */
 function namesSpawnSync(nameText: string): boolean {
   return /(^|[^\w$])spawnSync([^\w$]|$)/.test(nameText) || nameText === "spawnSync";
 }
 
-/** The CallExpression `node` is the callee of (parentheses and non-null
- *  wrappers between them unwrapped), or null when the access is not
- *  directly called - `f(Bun.spawnSync)` passes it as a value, and
- *  `Bun.spawnSync.call(...)` calls a DIFFERENT member off it. */
+/** `f(Bun.spawnSync)` passes the access as a value and `Bun.spawnSync.call(...)` calls a different member off it;
+ *  neither is a direct call, so both read as null. */
 function enclosingCall(node: Node): CallExpression | null {
   let current: Node = node;
   for (;;) {
@@ -127,19 +100,12 @@ function enclosingCall(node: Node): CallExpression | null {
   }
 }
 
-/** A spawnSync occurrence in parsed source: a direct `Bun.spawnSync`
- *  call with its options text, or any other reference - an alias, a
- *  destructure pulling spawnSync off Bun, bracket access - a sum, so
- *  the rule cannot forget to judge the non-call shapes. */
 export type SpawnSyncSite =
   | { line: number; kind: "call"; options: string | null }
   | { line: number; kind: "reference" };
 
-/** The options argument's text for a direct spawnSync call: the second
- *  argument, the whole argument list for the object-form overload
- *  (whose options ride beside `cmd`; extra arguments keep riding along
- *  so topLevelProperties refuses the unauditable shape), or null when
- *  the call passes the command alone. */
+/** The object-form overload carries its options beside `cmd`, so the whole argument list is returned;
+ *  extra arguments ride along so topLevelProperties refuses the unauditable shape. */
 function spawnOptionsText(call: CallExpression): string | null {
   const args = call.getArguments();
   if (args.length === 0) return null;
@@ -153,17 +119,8 @@ function spawnOptionsText(call: CallExpression): string | null {
     .join(", ");
 }
 
-/** Every spawnSync site in a source file, read off the AST (a mention in a
- *  comment, string, or regex body is not a node; a template INTERPOLATION is
- *  code and is). A direct call, plain, optional, or re-punctuated, carries
- *  its options argument's text. Everything else is a reference the rule
- *  fails closed: a bare `Bun.spawnSync` (an alias binding, `.call`), a
- *  destructure pulling spawnSync off Bun, and ANY computed access on Bun,
- *  whose property expression can spell spawnSync any way it likes. */
 export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
-  // A file the parser had to RECOVER must not be judged: a truncated
-  // call's recovered options can read as a benign shape, so the scan
-  // throws instead of passing vacuously (the old lexer's contract).
+  // A file the parser had to recover must not be judged: a truncated call's recovered options can read as a benign shape.
   if (syntaxErrorCount(source) > 0) {
     throw new Error(`${where}: source has syntax errors - the spawn scan cannot audit it`);
   }
@@ -180,15 +137,14 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
       else sites.push({ line, kind: "call", options: spawnOptionsText(call) });
       continue;
     }
+    // Any computed access on Bun is a reference: its property expression can spell spawnSync any way it likes.
     if (Node.isElementAccessExpression(node) && isGlobalReceiver(node.getExpression(), "Bun")) {
       sites.push({ line: node.getStartLineNumber(), kind: "reference" });
       continue;
     }
-    // The destructure shapes: `const { spawnSync } = Bun` (a binding
-    // pattern, parameter defaults included) and `({ spawnSync } = Bun)`
-    // (an assignment target). The initializer counts when its ROOT
-    // identifier is Bun (`= Bun.anything` fails closed too) or when it
-    // is the global receiver itself in any spelling (globalThis.Bun).
+    // The initializer counts whenever its root identifier is Bun, so `= Bun.anything` fails closed too.
+    //   const { spawnSync } = Bun  -> a binding pattern (parameter defaults included)
+    //   ({ spawnSync } = Bun)      -> an assignment target (the BinaryExpression branch below)
     if (Node.isObjectBindingPattern(node)) {
       const owner = node.getParent();
       const initializer =
@@ -235,14 +191,10 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
   return sites.sort((a, b) => a.line - b.line);
 }
 
-/** Why a spawnSync call is an unbounded piped hazard, or null when safe. Measured on the
- *  pinned bun: a PIPED sync spawn without an effective `timeout` returns at pipe EOF, not
- *  child exit, so a descendant holding the inherited pipe fds wedges the caller, and a bare
- *  call pipes BOTH streams. Safe: a top-level `timeout` that is a positive finite numeric
- *  literal or a plain identifier/member path, or every output stream explicitly non-"pipe";
- *  unprovable shapes (an expression, nested options, unparsable text) fail closed. Variable
- *  VALUES are trusted by their key (rejecting identifiers would red proc.ts's own shorthand
- *  `timeout` option), so a variable smuggling "pipe" or zero escapes: the recorded residual. */
+/** Measured on the pinned bun: a piped sync spawn without an effective `timeout` returns at pipe EOF, not child exit,
+ *  so a descendant holding the inherited pipe fds wedges the caller, and a bare call pipes both streams.
+ *  Variable values are trusted by their key (rejecting identifiers would red proc.ts's own shorthand `timeout`),
+ *  so a variable smuggling "pipe" or zero escapes: the recorded residual. */
 export function spawnSyncHazard(options: string | null): string | null {
   if (options === null) {
     return "no options - stdout and stderr pipe by default, and nothing bounds a pipe-holding descendant";
@@ -254,14 +206,9 @@ export function spawnSyncHazard(options: string | null): string | null {
   const timeout = props.get("timeout");
   let bounded = false;
   if (timeout !== undefined && !["undefined", "null", "NaN", "Infinity"].includes(timeout)) {
-    // Numeric-separator spellings (10_000) are literals too - strip the
-    // separators before folding, so a bounded call does not misread as
-    // unprovable (and every separator spelling of zero still folds to 0).
+    // `10_000` is a literal too; without stripping the separators a bounded call would misread as unprovable.
     const n = Number(timeout.replaceAll("_", ""));
-    // Number() folds every numeric spelling of zero (0, 0.0, 0x0, 0e0,
-    // -0, +0) onto 0; a non-numeric value only counts when it is a plain
-    // identifier or member path - an expression can evaluate to zero
-    // (`1 - 1`) and is unprovable, so it fails closed.
+    // An expression can evaluate to zero (`1 - 1`) and is unprovable, so only a plain identifier or member path counts as a non-numeric bound.
     bounded = Number.isNaN(n)
       ? /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(timeout)
       : Number.isFinite(n) && n > 0;
@@ -274,10 +221,7 @@ export function spawnSyncHazard(options: string | null): string | null {
   }
   const unset = (value: string | undefined) =>
     value === undefined || value === "" || value === "undefined" || value === "null";
-  // A stdio ARRAY literal shapes each stream through its own slot
-  // (1 = stdout, 2 = stderr): an omitted, elided, or undefined/null slot
-  // leaves that stream on the piped default. A non-array stdio value (a
-  // named constant) is trusted by its key, like other variable values.
+  // An omitted, elided, or undefined/null stdio slot leaves that stream on the piped default; slot 1 is stdout, slot 2 stderr.
   const stdio = props.get("stdio");
   const stdioTrimmed = stdio?.trim();
   const shape = stdioTrimmed === undefined ? { kind: "scalar" as const } : stdioShape(stdioTrimmed);
@@ -298,14 +242,12 @@ export function spawnSyncHazard(options: string | null): string | null {
   return null;
 }
 
-// ASYNC Bun.spawn is a different hazard model, judged as an EXACT-SET
-// enumeration rather than the sync rule's bounded-or-unpiped bar: an async
-// site draining both pipes has no pipe-EOF deadlock to bound and no
-// `timeout` option to pin, so every file calling Bun.spawn appears here with
-// the rationale that bounds it. The set pins NAMES, not a count: a bounded
-// spawnSync rewritten as async would EXIT the sync gate silently, reading as
-// an improvement, so the laundering must fail by introducing a name this pin
-// does not carry. Residual: an alias of Bun escapes both scans, Bun["spawn"] this one.
+// Async Bun.spawn is enumerated rather than bounded: an async site draining both pipes has no pipe-EOF deadlock,
+// so each caller records the rationale that bounds it.
+// The set pins names, not a count: a bounded spawnSync rewritten as async would exit the sync gate silently,
+// so the laundering must fail by introducing a name this pin does not carry.
+//   an alias of Bun  -> escapes both scans
+//   Bun["spawn"]     -> escapes this one
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
   "actions/fuzz-issue/fuzz-issue.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
@@ -320,13 +262,6 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
     "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child, fails a run that left entries in the per-run TMPDIR, and removes that TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
 };
 
-/** The exact-set judgment for one file's async Bun.spawn mentions
- *  (property accesses on the Bun receiver, read off the AST, so
- *  comments and strings never count, `spawn` cannot match inside
- *  spawnSync, and a re-punctuated callee - `(Bun).spawn`, `Bun!.spawn`
- *  - is still a site). An unenumerated file with any site fails per
- *  site; an enumerated file with none left is a stale entry - the set
- *  stays exact in both directions. */
 export function asyncSpawnMismatches(rel: string, source: string, enumerated: boolean): Mismatch[] {
   if (syntaxErrorCount(source) > 0) {
     throw new Error(`${rel}: source has syntax errors - the spawn scan cannot audit it`);
@@ -362,26 +297,16 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
   return [];
 }
 
-/** The one file allowed to call mkdtemp in the test trees: the fixture
- *  owner whose afterAll removes what it made. */
 export const TEMP_DIR_HELPER = "tests/shared/temp_dir.ts";
 
-/** A file `bun test` discovers and runs: `.test`, `_test`, `.spec`, or
- *  `_spec` before a script extension. Measured on bun 1.4.0: the .mts,
- *  .cts, and .mjs spellings run too, beyond the four the docs list; JSX
- *  variants are included (none exist here, and one would fail the parse
- *  loudly rather than escape). */
+/** Measured on bun 1.4.0: the .mts, .cts, and .mjs spellings run too, beyond the four extensions the docs list.
+ *  JSX variants are included as well; one would fail the parse loudly rather than escape. */
 export const BUN_TEST_FILE = /[._](test|spec)\.[mc]?[jt]sx?$/;
 
 const SCRIPT_FILE = /\.[mc]?[jt]sx?$/;
 
-/** Every mkdtemp identifier in a source file, one entry per identifier,
- *  read off the AST: a named import (`mkdtempSync`, `mkdtemp`, from
- *  node:fs or fs/promises, any alias), a member access (`fs.mkdtempSync`,
- *  `promises.mkdtemp`), a destructure, a bare reference - any Identifier
- *  node spelling either name is a site, so a mention in a comment, a
- *  string, or a template body (the launcher test's generated probe
- *  source) is not one. */
+/** Any Identifier node spelling either name is a site; a template body is not one
+ *  (the launcher test's generated probe source spells mkdtemp there). */
 export function mkdtempSites(source: string): number[] {
   return parseTs(source)
     .forEachDescendantAsArray()
@@ -389,11 +314,6 @@ export function mkdtempSites(source: string): number[] {
     .map((node) => node.getStartLineNumber());
 }
 
-/** The judgment for one selected file: a symlink fails closed (its
- *  target is not audited in place, wherever it points); otherwise,
- *  outside TEMP_DIR_HELPER no mkdtemp at all, per site; the helper
- *  itself must carry one, or the scan has lost its anchor (the
- *  identifier detection proven against the real call). */
 export function tempDirFileMismatches(
   file: { path: string; symlink: boolean },
   source: () => string,
@@ -410,9 +330,6 @@ export function tempDirFileMismatches(
   return tempDirSiteMismatches(file.path, source());
 }
 
-/** Selection and judgment for the walked tests/ tree: every script under
- *  it, each judged by tempDirFileMismatches; the helper must be among them
- *  as a regular file, or the anchor is lost. */
 export function tempDirTreeMismatches(
   files: { path: string; symlink: boolean }[],
   read: (rel: string) => string,
@@ -424,9 +341,6 @@ export function tempDirTreeMismatches(
   return selected.flatMap((f) => tempDirFileMismatches(f, () => read(f.path)));
 }
 
-/** Every file bun test would discover under actions/ is a mismatch: tests
- *  live under tests/actions/<action>/, the launcher's one root is tests/,
- *  and the build tree ships actions without tests (branch_tree.ts). */
 export function actionTestFileMismatches(files: { path: string }[]): Mismatch[] {
   return files
     .filter((f) => BUN_TEST_FILE.test(f.path))
@@ -453,13 +367,7 @@ export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
   }));
 }
 
-/** Async stream-write call sites - `process.stdout.write(...)` and the
- *  stderr twin, optional chaining and decorative wrappers tolerated -
- *  read off the AST, so a mention in a comment, a string, or a regex
- *  body never fires while a template INTERPOLATION's call does. The
- *  residual: an alias of the stream or the method
- *  (`const out = process.stdout; out.write(x)`) escapes - nothing in
- *  house style writes that, and writeSync is the sanctioned route. */
+/** The residual: an alias of the stream (`const out = process.stdout; out.write(x)`) escapes; nothing in house style writes that. */
 function asyncStreamWriteCalls(source: string): CallExpression[] {
   return parseTs(source)
     .forEachDescendantAsArray()
@@ -478,12 +386,8 @@ function asyncStreamWriteCalls(source: string): CallExpression[] {
     });
 }
 
-/** Whether anything exit-capable sits at or after `at`: process.exit
- *  itself (a reference suffices), an uncaught `throw` (the abort path
- *  drains no queued writes either), and calls to the helpers that exit
- *  (gha's fail/requireEnv, proc's must/mustCapture). Lexical order over
- *  a roster, not control-flow proof: a locally defined wrapper around
- *  process.exit called after the write stays a reviewable residual. */
+/** A throw counts because the abort path drains no queued writes either; the roster names gha.ts's fail/requireEnv and proc.ts's must/mustCapture.
+ *  Lexical order, not control-flow proof: a locally defined wrapper around process.exit stays a reviewable residual. */
 function exitCapableAfter(source: string, at: number): boolean {
   const EXIT_CALLEES = new Set(["fail", "requireEnv", "must", "mustCapture"]);
   return parseTs(source)
@@ -505,20 +409,10 @@ function exitCapableAfter(source: string, at: number): boolean {
     });
 }
 
-/** Files allowed to keep async stream writes because every exit-capable
- *  call precedes the first async write, so the writes ride to a natural
- *  exit, which drains. The reason is EXECUTABLE, not prose:
- *  asyncStreamWriteMismatches re-proves it per entry (nothing exit-capable
- *  may follow the first write) and flags an entry whose file has no async
- *  write left as stale. Empty since open_pr.ts converted its auto-merge
- *  re-emission to writeSync; the mechanism stays fixture-tested in
- *  tests/scripts/check_ssot/process_discipline.test.ts. */
+/** Every exit-capable call in these files precedes the first async write, so the writes ride to a natural exit, which drains;
+ *  asyncStreamWriteMismatches re-proves that per entry. */
 export const NATURAL_EXIT_WRITE_FILES: ReadonlySet<string> = new Set([]);
 
-/** How `source` violates the stream-write-sync contract. An unlisted
- *  file may carry no async stream write at all; an allowlisted file must
- *  still carry one (else the entry is stale) with nothing exit-capable
- *  after the first. */
 export function asyncStreamWriteMismatches(
   rel: string,
   source: string,
@@ -565,17 +459,13 @@ export function asyncStreamWriteMismatches(
   return [];
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const processDisciplineRules: Rule[] = [
   {
-    // No PIPED Bun spawnSync without a hard `timeout`: on the pinned bun a piped synchronous
-    // spawn returns at pipe EOF, not child exit, and pipes both streams by default
-    // (spawnSyncHazard has the measured semantics), so one bare git call can wedge a checker
-    // forever behind a descendant holding the pipe. tests/** is in scope: a sync spawn blocks
-    // the runner, so bun-test's per-test timeout cannot interrupt a hung child, and its 5s
-    // hook cap trips on cold starts, so suites carry their own bounds. Tests need stdio/env
-    // shapes proc.ts lacks, so its helpers are the remedy, not the bar. actions/ sync spawns
-    // are the actions-bun-guard review surface; ASYNC Bun.spawn is judged under ASYNC_SPAWN_FILES.
+    // spawnSyncHazard carries the measured bun semantics; the scope is this rule's.
+    //   tests/**   -> in scope: a sync spawn blocks the runner, so bun-test's per-test timeout cannot interrupt a hung child,
+    //                 and its 5s hook cap trips on cold starts; suites carry their own bounds
+    //   proc.ts    -> not the bar for tests: they need stdio/env shapes it lacks, so tests/shared/bounded_spawn.ts is their remedy
+    //   actions/** -> out of the sync walk: its sync spawns are the actions-bun-guard review surface
     name: "spawn-sync-hang-bound",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -612,8 +502,6 @@ export const processDisciplineRules: Rule[] = [
           }
         }
       }
-      // The async pass, actions/ included: every Bun.spawn caller must
-      // sit in ASYNC_SPAWN_FILES by name (exact set, both directions).
       const asyncFiles = [
         ...files,
         ...walkFiles("actions")
@@ -648,19 +536,16 @@ export const processDisciplineRules: Rule[] = [
   },
   {
     // Tests never sit beside an action's sources: the launcher runs
-    // tests/ alone, and the build tree ships actions without tests.
+    // tests/ alone, and the build tree ships actions without tests (branch_tree.ts).
     name: "no-tests-under-actions",
     run: () => actionTestFileMismatches(walkFiles("actions")),
   },
   {
-    // No async process stream write in the executable trees: on pipe-backed
-    // stdio (the Actions runner shape) bun queues these writes, and a
-    // process.exit later in the run drops everything past the pipe buffer
-    // (measured at 64 KiB on bun 1.3.14, 128 KiB on 1.4.0); 13 sites were
-    // converted one truncation at a time before this rule pinned the class.
-    // Scope: scripts/**, .github/scripts/**, actions/** minus *.test.ts; tests
-    // are excluded because bun-test owns a test's process lifecycle, so the
-    // shape cannot occur there (tests/shared/stream_write_discipline.test.ts guards that side).
+    // On pipe-backed stdio (the Actions runner shape) bun queues async stream writes, and a later process.exit drops everything past the pipe buffer.
+    // Tests are excluded: bun-test owns a test's process lifecycle, so the shape cannot occur there
+    // (tests/shared/stream_write_discipline.test.ts guards that side).
+    //   bun 1.3.14 -> 64 KiB pipe buffer
+    //   bun 1.4.0  -> 128 KiB
     name: "stream-write-sync",
     run: () => {
       const files = ["scripts", ".github/scripts", "actions"].flatMap((root) => {

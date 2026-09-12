@@ -16,7 +16,6 @@ export interface OwnedPaths {
   sources: ReadonlySet<string>;
   /** Every selected entry path, the manifest included. */
   writes: ReadonlySet<string>;
-  /** Every path files.yml retires. */
   retires: ReadonlySet<string>;
   /** Every recorded path the run retires as no longer selected: the
    *  writer's alone (it reads the manifest), empty at the plan. */
@@ -48,8 +47,7 @@ function reserved(owned: OwnedPaths): [ReadonlySet<string>, string][] {
   ];
 }
 
-/** The path among `others` that `path` sits under, or that sits under
- *  `path`; null when it nests with none (itself included). */
+/** An exact match is not nesting: `path` itself among `others` is null here, and the caller judges equality first. */
 export function nestedWith(
   path: string,
   others: ReadonlySet<string>,
@@ -63,11 +61,9 @@ export function nestedWith(
   return null;
 }
 
-/** Why `path` can never be a mirror target whatever the checkout holds, or
- *  null. A path above or below one files.yml writes or retires is as
- *  impossible as the path itself: the file would have to be a directory
- *  too. The registration is the one repo-owned file the sync reads, so a
- *  copy over it, or a directory made of it, would unregister the repository. */
+/** A path above or below one files.yml writes or retires is as impossible as the path itself: the file would have to be
+ *  a directory too. The registration is the one repo-owned file the sync reads, so a copy over it, or a directory made
+ *  of it, would unregister the repository. */
 export function mirrorPathProblem(path: string, owned: OwnedPaths): string | null {
   const problem = pathProblem(path);
   if (problem !== null) return problem;
@@ -86,7 +82,6 @@ export function mirrorPathProblem(path: string, owned: OwnedPaths): string | nul
   return null;
 }
 
-/** One declared target that cannot be written, and why. */
 export interface MirrorProblem {
   source: string;
   target: string;
@@ -97,17 +92,13 @@ export function describeMirrorProblem({ source, target, problem }: MirrorProblem
   return `${REGISTRATION_PATH}: mirrors: source '${source}', target '${target}': ${problem}`;
 }
 
-/** The literal directories a pattern names before its first `*`, "" when
- *  it starts with one. */
 export function literalPrefix(pattern: string): string {
   const segments = pattern.split("/");
   const star = segments.findIndex((segment) => segment.includes("*"));
   return star === -1 ? pattern : segments.slice(0, star).join("/");
 }
 
-/** The names one pattern segment matches: each `*` any run of characters
- *  but `/`, everything else itself. The writer lists directories through
- *  this and the plan matches known paths with it, so the two agree. */
+/** The writer lists directories through this and the plan matches known paths with it, so the two agree. */
 export function segmentPattern(segment: string): RegExp {
   const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // A mirror glob segment from the repository's .repo-platform.yml, escaped.
@@ -115,8 +106,7 @@ export function segmentPattern(segment: string): RegExp {
   return new RegExp(`^${segment.split("*").map(literal).join("[^/]*")}$`);
 }
 
-/** Whether a pattern names `path` segment for segment: what the writer
- *  would expand it to if `path` were a file in the checkout. */
+/** What the writer would expand the pattern to, if `path` were a file in the checkout. */
 export function patternMatches(pattern: string, path: string): boolean {
   const segments = pattern.split("/");
   const parts = path.split("/");

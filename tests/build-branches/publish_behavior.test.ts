@@ -1,7 +1,3 @@
-// publish.ts run for real - real git, real rsync, a stubbed gh, and a real
-// compose through a stub branch_tree.ts committed in the fixture source - so
-// each publish decision is proven behaviorally (the wiring suite pins shape).
-
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -24,10 +20,8 @@ const script = join(import.meta.dir, "../../.github/scripts/build-branches/publi
 const SERVER = "https://x.test";
 const REPO = "o/r";
 
-// The all-green gate reads check runs through gh; a completed successful
-// verdict JSON greens every source, keeping the behavioral focus on the
-// publish decision (the gate's own truth table lives in
-// tests/shared/all_green.test.ts).
+// A completed successful verdict greens every source; the gate's own truth
+// table is tests/shared/all_green.test.ts.
 const ghVerdict = JSON.stringify({
   check_runs: [
     {
@@ -43,11 +37,9 @@ const ghStub = `#!/usr/bin/env bash
 printf '%s' '${ghVerdict}'
 `;
 
-/** The source commit's builder: publish.ts runs the SOURCE's own
- * .github/scripts/build-branches/branch_tree.ts after a frozen install
- * there, so the fixture commits this stub, which copies the committed
- * composed/ directory to --dest (the real builder needs the whole
- * template tree). */
+/** publish.ts runs the SOURCE's own branch_tree.ts after a frozen install
+ * there, so the fixture commits this stub; the real builder needs the whole
+ * template tree. */
 const STUB_BUILDER = `
 import { cpSync } from "node:fs";
 import { join } from "node:path";
@@ -91,34 +83,13 @@ function heldRsyncStub(hold: Hold): string {
 }
 
 interface Scenario {
-  /** "same" gives the build tip a tree byte-identical to the composed
-   * one; "drift" makes the tip carry a different tree (the source
-   * commit's), so the composed tree is a content change. */
   tipTree: "same" | "drift";
-  /** The build tip's commit message, handed both main commits; healthy
-   * scenarios stamp a real on-main commit with the REAL writer shape. */
   tipMessage: (main: { m1: string; m2: string }) => string;
-  /** The SOURCE_SHA under publish: M2 (main's HEAD, which carries the
-   * builder) unless a scenario names M1 or the side-branch commit. */
   source?: "m1" | "m2" | "side";
-  /** Plants the two measured staging-skew vectors: a .gitignore INSIDE
-   * the composed tree hiding a sibling, and an info/exclude in the
-   * fixture repo - which the publish's branch worktree inherits - hiding
-   * rendered.txt. The publish must stage both hidden files anyway
-   * (shared/stage_tree.ts's hermetic argv). */
   hostileIgnores?: boolean;
-  /** Composes a tree WITHOUT actions/, the shape publish.ts's
-   * unified-tree guard refuses - a publish that exits 1 after its
-   * scratch worktrees exist. */
   malformedTree?: boolean;
-  /** Puts heldRsyncStub on the publish's PATH. */
   holdInRsync?: boolean;
-  /** Parks the release marker under a missing directory, so the harness's
-   * own release write fails after the hold. */
   unreleasable?: boolean;
-  /** The RUNNER_TEMP handed to the publish; absent = a private one under
-   * the fixture. Two publishes sharing one prove the per-run root is
-   * what keeps them apart, as on the runner where a job has one. */
   runnerTemp?: string;
 }
 
@@ -157,10 +128,7 @@ function prepareFixture(scenario: Scenario): Fixture {
   fixtureGit(work, ["remote", "add", "origin", origin]);
   fixtureGit(work, ["config", "user.name", "t"]);
   fixtureGit(work, ["config", "user.email", "t@t.test"]);
-  // Two main commits: M1 (an older landing with NO builder, so a publish
-  // that composes it fails - which is how the stale test proves the
-  // preflight runs first) and M2 (main's HEAD: the builder, its lockfile,
-  // and the composed/ tree the builder ships).
+  // M1 has no builder on purpose: the stale-source test relies on composing it failing.
   writeFileSync(join(work, "base.txt"), "one\n");
   fixtureGit(work, ["add", "-A"]);
   fixtureGit(work, ["commit", "--quiet", "-m", "one"]);
@@ -215,9 +183,6 @@ function prepareFixture(scenario: Scenario): Fixture {
     mkdirSync(join(work, ".git/info"), { recursive: true });
     writeFileSync(join(work, ".git/info/exclude"), "rendered.txt\n");
   }
-  // The pre-existing build tip: the composed tree ("same") or the source
-  // commit's own tree ("drift" - anything but the composed tree),
-  // carrying the scenario's stamp state.
   const tipTree =
     scenario.tipTree === "same" ? composedTree : fixtureGit(work, ["rev-parse", `${m2}^{tree}`]);
   const tip = fixtureGit(work, ["commit-tree", tipTree, "-m", scenario.tipMessage({ m1, m2 })]);
@@ -246,12 +211,10 @@ function prepareFixture(scenario: Scenario): Fixture {
   };
 }
 
-/** The publish's whole observable outcome: its exit and output, plus
- * accessors read at assertion time for the fixture origin's build tip and the scratch residue - anything under the run's RUNNER_TEMP plus
- * any worktree still registered in the checkout beyond the checkout
- * itself (git lists registered worktrees by real path). The residue
- * must be empty once every publish sharing that RUNNER_TEMP has exited,
- * however each ended. */
+/** git lists registered worktrees by real path, hence realpathSync on the
+ * checkout. The scratch residue must be empty once every publish sharing the
+ * RUNNER_TEMP has exited, on the success and the failure route alike (a
+ * SIGKILLed publish skips its exit hook). */
 function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: string }) {
   const own = realpathSync(f.work);
   return {
@@ -283,9 +246,8 @@ function runPublish(scenario: Scenario): Outcome {
   return outcome(f, boundedSpawnSync([process.execPath, script], { cwd: f.work, env: f.env }));
 }
 
-/** Runs a holdInRsync publish, runs `meanwhile` while it is parked, releases
- * it, and returns both results. Child and stub are dead and the pipes drained
- * before this returns or throws; a signal death or a pre-hold exit throws. */
+/** Child and stub are dead and the pipes drained before this returns or
+ * throws; a signal death or a pre-hold exit throws. */
 async function runPublishHeldAcross<T>(
   f: Fixture,
   meanwhile: () => T,
@@ -347,7 +309,7 @@ async function runPublishHeldAcross<T>(
   }
 }
 
-/** Whether `pid` still exists; a zombie counts until its parent reaps it. */
+/** A zombie counts as alive until its parent reaps it. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -389,13 +351,8 @@ describe("publish.ts behavior (real git)", () => {
   });
 
   test("a composed tree carrying its own .gitignore publishes VERBATIM - producer staging matches the verifier's", () => {
-    // The staging-skew class end-to-end: the composed tree hides
-    // hidden.txt behind an in-tree .gitignore and rendered.txt behind
-    // the repo's own info/exclude (which the branch worktree, a worktree
-    // of the checkout, inherits). The old plain `add -A` dropped both,
-    // publishing a tree the verifier's hermetic rebuild could never
-    // match - a fleet-wide false tamper accusation. The published tree
-    // must BE the composed tree, byte for byte.
+    // A plain `add -A` dropped both hidden files, publishing a tree the verifier's
+    // hermetic rebuild could never match: a fleet-wide false tamper accusation.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, hostileIgnores: true });
     expectContentChangePublished(r);
     const names = fixtureGit(r.origin, ["ls-tree", "-r", "--name-only", r.originTipTree()]);
@@ -418,8 +375,7 @@ describe("publish.ts behavior (real git)", () => {
     // The guarded exception: an unstamped tip (a hand-push shape) with
     // an identical tree must not skip - the composed tree never changes
     // just because the stamp broke, so without this lane no dispatch
-    // could ever heal it. The recovery commit is tree-identical and
-    // carries the full fresh message shape.
+    // could ever heal it.
     const r = runPublish({
       tipTree: "same",
       tipMessage: () => "build(build): seeded\n\nno stamp lines here",
@@ -474,8 +430,7 @@ describe("publish.ts behavior (real git)", () => {
 
   test("a refused publish leaves no scratch behind either - the exit hook runs on the failure route", () => {
     // The shape guard fires after every scratch worktree exists, so this
-    // exit 1 is the failure route WITH scratch on disk: the tip must not
-    // move, and the worktrees must be gone and unregistered.
+    // exit 1 is the failure route WITH scratch on disk.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, malformedTree: true });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("carries no actions/ subtree");
@@ -486,14 +441,9 @@ describe("publish.ts behavior (real git)", () => {
   test(
     "a publish held mid-flight is untouched by another running start to finish",
     async () => {
-      // The collision the per-run root retires, under ONE RUNNER_TEMP as
-      // a runner job has: one publish is parked in rsync with every
-      // scratch worktree populated - visibly, as the sole root under
-      // that RUNNER_TEMP - while the other runs start to finish. Under
-      // one shared path the second would have replaced the first's
-      // branch worktree with its own, and the first's commit would have
-      // landed on the second's origin. Each fixture's outcome must be
-      // the single-publish outcome, scratch residue included.
+      // Under ONE RUNNER_TEMP, as a runner job has: with a shared scratch path the
+      // second publish would have replaced the first's branch worktree, and the
+      // first's commit would have landed on the second's origin.
       const runnerTemp = temp.dir("publish-behavior-runner-temp-");
       const { held, meanwhile } = await runPublishHeldAcross(
         prepareFixture({

@@ -10,9 +10,7 @@ export type Integrity =
   | { kind: "findings"; findings: string; advisories: string }
   | { kind: "not-judged"; reason: string };
 
-/** A report file's text with trailing newlines stripped, or null when the
- *  validator never wrote it. Only a regular file counts: a directory, a
- *  device, or a link planted at the path (a read of /dev/null would pass
+/** Only a regular file counts: a directory, a device, or a link planted at the path (a read of /dev/null would pass
  *  as an empty findings file) is absent. */
 function reportText(path: string): string | null {
   try {
@@ -23,8 +21,6 @@ function reportText(path: string): string | null {
   }
 }
 
-/** The verdict a validator run earns. `deadlineMs` names the run's own
- *  deadline in the timeout reason. */
 export function classify(
   exit: ChildExit,
   deadlineMs: number,
@@ -83,10 +79,8 @@ export function writeVerdict(path: string, verdict: Integrity): void {
   writeFileSync(path, serialized(verdict));
 }
 
-/** The verdict a step wrote, or `not-judged` when there is none to read.
- *  Only writeVerdict's own bytes are a verdict: the parsed value must print
- *  back to the file exactly, so a duplicate key or a stray field (which
- *  JSON.parse would quietly resolve) is not one. */
+/** Only writeVerdict's own bytes are a verdict: the parsed value must print back to the file exactly, so a duplicate
+ *  key or a stray field (which JSON.parse would quietly resolve) is not one. */
 export function readVerdict(path: string): Integrity {
   const none: Integrity = {
     kind: "not-judged",

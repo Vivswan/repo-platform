@@ -1,7 +1,3 @@
-// Unit tests for the toolchain pin writer: the pins read off files.yml,
-// the dotfiles derived from them (module pins, action-local .bun-version
-// files, the root pin), and the live check against the committed tree.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";

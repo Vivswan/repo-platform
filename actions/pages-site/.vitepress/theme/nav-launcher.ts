@@ -1,11 +1,6 @@
-// The nav's entry to the launcher: a field-shaped button that opens the
-// launcher in a native modal dialog. It renders on every page; launcher.css
-// hides it while a landing panel is on the page, so a landing page without
-// a curated table keeps its search. Owns the keyboard shortcut everywhere
-// (Cmd K, Ctrl K, and `/` outside a field): a capturing window listener
-// that stops carbon's own search hotkeys and then focuses the panel when
-// there is one, else opens (or refocuses) the dialog. The same listener,
-// with a pointerdown twin, keeps the page's input modality for the
+// launcher.css hides the button while a landing panel is on the page, so a landing page without a curated table keeps
+// its search. The keyboard shortcut (Cmd K, Ctrl K, and `/` outside a field) is a capturing window listener that stops
+// carbon's own search hotkeys; the same listener, with a pointerdown twin, keeps the page's input modality for the
 // launcher's focus ring.
 
 import {

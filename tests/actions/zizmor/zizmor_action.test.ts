@@ -1,8 +1,4 @@
-// The zizmor action's contract: the fleet policy is copied into the
-// workspace (the upstream container mounts nothing else) unless the
-// repository carries its own, the SARIF pass is visibility-keyed and never
-// the verdict, the verdict pass fails on high alone, each pass's retry
-// alone carries its result, and the copy is removed whatever the passes said.
+// The upstream container mounts nothing but the workspace, so the fleet policy is copied into it unless the repository carries its own.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

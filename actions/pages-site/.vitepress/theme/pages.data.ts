@@ -1,16 +1,7 @@
-// The launcher's page index, built once per site build: every markdown page
-// of the docs tree, in sidebar order (sidebar.ts, so the launcher's page
-// and directory groups follow the sidebar), rendered through VitePress's
-// shared markdown-it instance for its headings, mapped by page-index.ts,
-// and inlined into the client bundle as `data`. Runs only inside a vitepress process, like any data
-// loader. Pages render from their source as written, and VitePress expands
-// `<!-- @include -->` only in its page transform, so a page with a directive
-// VitePress would expand (one naming a readable file, resolved the way its
-// processIncludes does) lists NO heading rows (page-index.ts's
-// sourceHeaders): the unexpanded source would shift or collide the anchors
-// after the include, and full-text search still reaches those headings. A
-// directive whose file VitePress cannot read (missing, a directory, a path
-// through a file) stays literal there too, so it changes nothing here.
+// Pages are listed in sidebar order (sidebar.ts), so the launcher's page and directory groups follow the sidebar.
+// VitePress expands `<!-- @include -->` only in its page transform, so a page with a directive it would expand lists NO
+// heading rows (page-index.ts's sourceHeaders): the unexpanded source would shift or collide the anchors after the
+// include, and full-text search still reaches those headings.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,15 +1,8 @@
-// The per-tier project facts the theme renders. Pure by construction: every
-// repository file arrives through the injected reader (build.ts hands it
-// treeFile at the tier's own ref, so a tagged version shows that tag's
-// toolchains and license). An absent or malformed file degrades to null or
-// [] instead of failing the build; a failed git read inside the reader still
-// throws, because a broken checkout is a build fault, not a missing fact.
-//
-// Identity (description, homepage, topics) comes from .github/settings.yml's
-// repository block: the repository edits its identity there (the file is
-// repo-owned once written). A description the settings file lacks falls
-// back to the registration's project.description, so a tag from before the
-// settings file existed still shows one.
+// Every repository file arrives through the injected reader (build.ts hands it treeFile at the tier's own ref), so a tagged
+// version shows that tag's facts. A description the settings file lacks falls back to the registration's project.description,
+// so a tag from before the settings file existed still shows one.
+//   an absent or malformed file       -> null or [], never a failed build
+//   a failed git read in the reader   -> still throws: a broken checkout is a build fault, not a missing fact
 
 export interface ProjectFacts {
   /** owner/name */
@@ -108,7 +101,6 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-/** The text when it parses as an http(s) URL with a host, else null. */
 function httpUrl(text: string): string | null {
   try {
     return new URL(text).hostname === "" ? null : text;
@@ -159,8 +151,7 @@ function parseYamlRecord(text: string): Record<string, unknown> | null {
   }
 }
 
-/** The settings file's repository block, or null when the file is absent,
- *  malformed, or carries no such block (older tags predate it). */
+/** Null for a missing block too: older tags predate the settings file. */
 function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null {
   const text = read(SETTINGS_FILE);
   if (text === null) return null;
@@ -168,8 +159,6 @@ function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null
   return settings === null ? null : asRecord(settings.repository);
 }
 
-/** The registration's project.description, or undefined when the file is
- *  absent, malformed, or carries no project block. */
 function readRegistrationDescription(read: FactsReader): unknown {
   const text = read(REGISTRATION_FILE);
   if (text === null) return undefined;
@@ -201,7 +190,6 @@ function firstHeading(lines: string[]): string | null {
   return null;
 }
 
-/** The head's paragraphs: runs of non-empty trimmed lines. */
 function paragraphs(lines: string[]): string[][] {
   const result: string[][] = [];
   let current: string[] = [];
@@ -221,12 +209,10 @@ function knownLicense(title: string): string | null {
   return KNOWN_LICENSES.find(([pattern]) => pattern.test(bare))?.[1] ?? null;
 }
 
-/** A markdown heading is authoritative: canonicalized when it starts
- *  with a known name, kept verbatim otherwise ("# Not the MIT License"
- *  stays a custom license whatever the body says). Plain text names the
- *  license in its opening paragraph (Apache and the GPL center theirs
- *  over two lines) or, under a publisher banner, at the start of the
- *  next one (GitHub's CC0 opens "Creative Commons Legal Code"). */
+/** A markdown heading is authoritative: canonicalized when it starts with a known name, kept verbatim otherwise.
+ *    "# Not the MIT License"                       -> a custom license, whatever the body says
+ *    Apache, the GPL: the name centered over 2 lines -> read from the opening paragraph joined
+ *    GitHub's CC0: "Creative Commons Legal Code"    -> a publisher banner; read from the next paragraph's first line */
 function licenseName(text: string): string {
   const lines = text.split("\n").slice(0, LICENSE_HEAD_LINES);
   const heading = firstHeading(lines);

@@ -1,11 +1,5 @@
-// Plain text for inline tokens, computed once per parse in the shared
-// markdown-it instance: a core rule stamps every inline token's visible
-// text on it before markdown-it's text_join merges entity and escape
-// tokens back into text (VitePress keeps `&amp;` as written there so Vue
-// can decode it). The landing-table rule and the page index read the
-// stamp, so a label, a note, and a heading title all spell text one way:
-// entities and escapes decoded, code spans literal, emoji as their glyph,
-// images as their alt text, a <br> a space, markup dropped.
+// Stamped before text_join: VitePress's text_join puts `&amp;` back as written so Vue can decode it, and the stamp wants the decoded text.
+// The landing-table rule and the page index read the stamp, so a label, a note, and a heading title all spell text one way.
 
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
@@ -22,9 +16,7 @@ export function inlineTextRule(md: MarkdownRenderer): void {
   });
 }
 
-/** The stamped text of an inline token, whitespace collapsed. Throws when
- *  the token came from a renderer without inlineTextRule: the stamp is the
- *  contract, not an optional extra. */
+/** A token from a renderer without inlineTextRule throws: the stamp is the contract, not an optional extra. */
 export function plainTextOf(token: Token): string {
   const stamped: unknown = token.meta?.[STAMP];
   if (typeof stamped !== "string") {

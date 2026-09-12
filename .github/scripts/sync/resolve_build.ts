@@ -1,13 +1,6 @@
 #!/usr/bin/env bun
-// The build the whole run ships, resolved once in sync-repos.yml's plan
-// job: the build branch's tip, proven the builder's own output of a green
-// main commit (verify_build_provenance.ts, then the all-green read at the
-// stamped source) and carrying the writer's data file. Every row job
-// checks out exactly this commit, so a build pushed mid-run changes
+// Resolved once in sync-repos.yml's plan job: every row job checks out exactly this commit, so a build pushed mid-run changes
 // nothing a row reads.
-//
-// Env: GH_TOKEN (checks read), GITHUB_REPOSITORY, RUNNER_TEMP, GITHUB_OUTPUT.
-// Outputs: build (the tip sha), source (its stamped main commit).
 
 import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";

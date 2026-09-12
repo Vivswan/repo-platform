@@ -1,7 +1,4 @@
-// The launcher's pure model: turns the landing page's curated rows plus the
-// build-time page index into the groups the launcher renders, and filters
-// them by a query. Browser-safe by construction (no node imports): the
-// theme's client bundle imports it, and so does the data loader's mapping.
+// Browser-safe by construction (no node imports): the theme's client bundle imports it, and so does the data loader's mapping.
 
 import { dirTitle } from "../dir-title.ts";
 
@@ -56,11 +53,8 @@ export interface LauncherGroup {
 /** A directory group with more items than this starts folded. */
 export const FOLD_THRESHOLD = 8;
 
-/** A group's rows split around its fold row: `kept` rows show whatever the
- *  fold state, `foldable` rows only while the group is open. A directory
- *  group hides its pages (headings ride along); a page group hides its
- *  headings and keeps its curated and page rows in view, so a curated row
- *  is never behind a fold. */
+/** A page group keeps its curated and page rows in view, so a curated row is never behind a fold; a directory group
+ *  hides every row (headings ride along with their pages). */
 export function splitRows(
   kind: LauncherGroup["kind"],
   items: LauncherItem[],
@@ -72,9 +66,7 @@ export function splitRows(
   };
 }
 
-/** Whether a group starts folded: a directory group past FOLD_THRESHOLD
- *  items, a page group with two or more headings (a fold row hiding one
- *  row would save nothing). */
+/** A page group folds only past one heading: a fold row hiding one row would save nothing. */
 function startsFolded(kind: LauncherGroup["kind"], items: LauncherItem[]): boolean {
   if (kind === "dir") return items.length > FOLD_THRESHOLD;
   return splitRows(kind, items).foldable.length > 1;
@@ -102,8 +94,6 @@ export interface ResolvedHref {
   suffix: string;
 }
 
-/** A markdown href resolved against the landing page URL. External hrefs
- *  (a scheme or `//`) pass through unresolved. */
 export function resolveHref(href: string, landingUrl: string): ResolvedHref {
   if (SCHEME_RE.test(href)) return { key: null, href, suffix: "" };
   const { pathname } = new URL(href, `http://launcher.invalid${landingUrl}`);
@@ -142,9 +132,6 @@ function landingUrlOf(pages: PageIndexEntry[]): string {
   return first.slice(0, first.lastIndexOf("/") + 1);
 }
 
-/** A page row's note: where the page lives, as its URL relative to the site
- *  base without the `.html` or a directory index's trailing slash
- *  (`guide/setup`, `guide`), the way a heading row's note names its page. */
 function pagePath(url: string, base: string): string {
   return url
     .slice(base.length)
@@ -152,14 +139,8 @@ function pagePath(url: string, base: string): string {
     .replace(/\/$/, "");
 }
 
-/** The launcher groups for one locale, in display order: curated rows
- *  first, grouped under the page each href resolves to in table order
- *  (an href naming no page keeps its own single-row group); then every
- *  root page not yet reached as its own group; then one group per
- *  subdirectory. Pages and subdirectories follow the index's order,
- *  which is the sidebar's (pages.data.ts). Every page's headings join its group; an href appears
- *  once, whichever source reached it first. The landing page itself is
- *  the launcher's host and is not listed. */
+/** Pages and subdirectories follow the index's order, which is the sidebar's (pages.data.ts); an href appears once,
+ *  whichever source reached it first. */
 export function buildGroups(
   curated: CuratedRow[],
   pages: PageIndexEntry[],
@@ -249,14 +230,10 @@ export function foldCase(text: string): string {
   return out;
 }
 
-/** The query's search tokens: whitespace-separated, case-folded. */
 export function queryTokens(query: string): string[] {
   return foldCase(query).split(/\s+/).filter(Boolean);
 }
 
-/** The groups matching a query: every token must match an item's label,
- *  note, or group title (AND, case-insensitive); a group keeps only its
- *  matching items and unfolds. An empty query returns the groups as built. */
 export function filterGroups(groups: LauncherGroup[], query: string): LauncherGroup[] {
   const tokens = queryTokens(query);
   if (tokens.length === 0) return groups;
@@ -275,8 +252,6 @@ export function filterGroups(groups: LauncherGroup[], query: string): LauncherGr
   return result;
 }
 
-/** The `[start, end)` character ranges of `text` that any token matches,
- *  case-insensitive, merged and in order, for the UI to bold. */
 export function matchRanges(text: string, tokens: string[]): [number, number][] {
   const lower = foldCase(text);
   const found: [number, number][] = [];

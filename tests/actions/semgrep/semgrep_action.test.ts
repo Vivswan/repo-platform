@@ -1,6 +1,3 @@
-// The semgrep action's contract, run here against fixture results.
-// Semgrep itself never runs: the scan step gets a stand-in on PATH, the drop and judge steps get hand-written files.
-
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -51,7 +48,6 @@ describe("actions/semgrep", () => {
     expect(judge.env).toEqual({ SCAN_STATUS: "${{ steps.scan.outputs.status }}" });
   });
 
-  // The scan step against a stand-in semgrep on PATH that exits as told.
   const scan = (semgrepExit: number) => {
     const root = temp.dir("semgrep-scan-");
     const bin = join(root, "bin");
@@ -75,9 +71,7 @@ describe("actions/semgrep", () => {
     expect([run.exitCode, run.outputs]).toEqual([0, { status: "2" }]);
   });
 
-  // The drop step against a SARIF copy: a result carrying a suppression
-  // (semgrep's shape for a nosemgrep-marked finding) leaves; everything
-  // else in the document (version, tool, invocations, every run) stays.
+  // A result carrying a suppression is semgrep's shape for a nosemgrep-marked finding.
   const suppressed = (ruleId: string) => ({ ruleId, suppressions: [{ kind: "inSource" }] });
   const sarifWith = (firstRunResults: object[]) => ({
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",

@@ -1,6 +1,3 @@
-// The files/ tree speaks the sync's vocabulary. The retired phrases are read
-// across comment-wrapped lines (`template\n# sync` is the same phrase).
-
 import { describe, expect, test } from "bun:test";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,13 +7,11 @@ const FILES_TREE = new URL("../../files", import.meta.url).pathname;
 const RETIRED_WORDING =
   /\btemplate (sync|updates)|during template|repo-platform's template|copier/gi;
 
-/** The retired phrases in `text`, as they appear there. */
 function retiredWording(text: string): string[] {
   const unwrapped = text.replace(/\n[ \t]*(?:#|\/\/|<!--)?[ \t]*/g, " ");
   return unwrapped.match(RETIRED_WORDING) ?? [];
 }
 
-/** Every path under `root` (symlinks included, directories descended). */
 function walk(root: string, prefix = ""): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {

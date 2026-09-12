@@ -1,7 +1,3 @@
-// The three class writers over a scratch target: managed replacement and
-// its local-edit detection through the recorded hash, split region
-// rewriting around repository-owned text, and starters written once.
-
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -87,7 +83,6 @@ describe("writeSplit", () => {
       change: "region added",
     });
     expect(read(target, "plain")).toBe(`${region("a")}mine\n`);
-    // With a record but no markers the verdict is the same: the region went above repo content.
     writeFileSync(join(target, "unmarked"), "theirs\n");
     expect(writeSplit(target, "unmarked", region("a"), markers, sha256(region("a")))).toEqual({
       change: "region added",
@@ -144,7 +139,6 @@ describe("writeStarter", () => {
     symlinkSync("n.yml", join(target, "l.yml"));
     expect(writeStarter(target, "l.yml", never)).toEqual({ change: "unchanged" });
     expect(readlinkSync(join(target, "l.yml"))).toBe("n.yml");
-    // An absent starter whose source lacks values is not written at all.
     expect(writeStarter(target, "m.yml", () => ({ missing: ["description"] }))).toEqual({
       missing: ["description"],
     });

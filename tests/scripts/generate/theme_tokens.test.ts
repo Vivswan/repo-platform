@@ -1,7 +1,3 @@
-// The theme CSS generator: the committed tokens.css is exactly what the
-// token data renders (the live check), and the rendered text carries the
-// selector order the cascade depends on (print last).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";

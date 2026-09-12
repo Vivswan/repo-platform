@@ -1,6 +1,3 @@
-// The registration every managed repository carries: present, a modules
-// list, every name known to the module data file the caller handed in.
-
 import { describe, expect, test } from "bun:test";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 import { FILES_YML, validatorRunner } from "./fixtures";

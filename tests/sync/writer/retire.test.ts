@@ -1,9 +1,3 @@
-// Retirement over a fixture git checkout: deletion only on a recorded-hash
-// match, a split file's repository-owned content handed over once with its
-// region removed byte-exactly, holds for every other state, starters kept,
-// moves through git mv with the record travelling, and stale records
-// treated like retirements.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -184,11 +178,9 @@ describe("retire", () => {
     writeFileSync(join(target, PROTO), "mine\n");
     writeManifest(target, { "old.md": { class: "managed", hash: sha256("o\n") } }, "b".repeat(40));
     const records = readRecords(target).records;
-    // Unrecorded, so not the platform's to retire: no row, file untouched.
     expect(retire(target, [{ path: PROTO }], [], new Set(), records)).toEqual([]);
     expect(readFileSync(join(target, PROTO), "utf-8")).toBe("mine\n");
     expect(keepReason(target, PROTO, records)).toBe("no record of the platform writing it");
-    // Moved onto that name, the record travels as an own entry.
     rmSync(join(target, PROTO));
     expect(
       retire(target, [{ path: "old.md", moved_to: PROTO }], [], new Set([PROTO]), records),
@@ -209,7 +201,6 @@ describe("retire", () => {
       { path: "docs.yml", outcome: "deleted", detail: "no longer selected" },
       { path: "CLAUDE.md", outcome: "deleted", detail: "no longer selected" },
     ]);
-    // The link went, never what it pointed at.
     expect(existsSync(join(target, "CLAUDE.md"))).toBe(false);
     expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toBe("a\n");
   });
@@ -249,7 +240,6 @@ describe("retire", () => {
       ]);
       expect(readFileSync(join(target, "CONTRIBUTING.md"))).toEqual(Buffer.from(kept, "utf-8"));
       expect(records["CONTRIBUTING.md"]).toBeUndefined();
-      // The next run: no record, no platform content, so the retired entry produces no row.
       expect(retire(target, [{ path: "CONTRIBUTING.md" }], [], new Set(), records)).toEqual([]);
       expect(readFileSync(join(target, "CONTRIBUTING.md"))).toEqual(Buffer.from(kept, "utf-8"));
     },

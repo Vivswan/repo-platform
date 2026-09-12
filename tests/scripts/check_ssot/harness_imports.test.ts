@@ -1,5 +1,3 @@
-// The CI-harness import boundary (scripts/check/ssot/harness_imports.ts).
-
 import { describe, expect, test } from "bun:test";
 import {
   HARNESS_ROOT,
@@ -79,14 +77,12 @@ describe("harnessImportMismatches", () => {
     };
     const source = 'import { f } from "../../.github/scripts/ci/probe";\nf();';
     expect(harnessImportMismatches({ [entry.importer]: source }, [entry])).toEqual([]);
-    // The same import from another file is not excused.
     const elsewhere = 'import { f } from "../../../.github/scripts/ci/probe";\nf();';
     expect(
       harnessImportMismatches({ [LEG]: elsewhere, [entry.importer]: source }, [entry]).map(
         (m) => m.file,
       ),
     ).toEqual([LEG]);
-    // An entry nothing imports is a stale excuse.
     expect(harnessImportMismatches({ [LEG]: CLEAN_LEG }, [entry])).toEqual([
       {
         file: entry.importer,
@@ -97,8 +93,6 @@ describe("harnessImportMismatches", () => {
   });
 
   test("the live tree is clean, and the allowlist is exactly the in-process reaches it carries", () => {
-    // The forcing control: an unallowlisted reach into .github/scripts from
-    // any harness file, or an allowlist entry no file uses, goes red here.
     const files = Object.fromEntries(
       walkFiles(HARNESS_ROOT)
         .filter((f) => !f.symlink && /\.[mc]?[jt]sx?$/.test(f.path))

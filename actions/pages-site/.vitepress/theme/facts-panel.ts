@@ -19,7 +19,6 @@ interface FactsTheme {
 
 type Cell = string | VNode | (string | VNode)[];
 
-/** One label-value pair of a section's definition list. */
 function row(label: Cell, value: Cell): VNode {
   return h("div", { class: "fleet-facts-row" }, [h("dt", label), h("dd", value)]);
 }

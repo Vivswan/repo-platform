@@ -1,6 +1,4 @@
-// The mirror rules files.yml alone decides: what a repository's files.yml
-// claims, which paths can never be a target, and every problem a
-// declaration has (the plan fails the PR on them; the writer fails the run).
+// Every declaration problem here fails a consumer: actions/plan/plan.ts fails the PR on it, the sync writer fails the run.
 
 import { describe, expect, test } from "bun:test";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";

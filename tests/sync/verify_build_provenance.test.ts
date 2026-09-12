@@ -1,19 +1,3 @@
-// Provenance verification (verify_build_provenance.ts): the sync-side
-// guard that the build tip is the build-branches workflow's own output
-// before it is templated into managed repos. The stamp-health battery
-// (checks 1+2) is unit-tested in tests/shared/stamp_checks.test.ts; this
-// suite proves the SCRIPT wires it - the on-main check and the rollback
-// walk reject, and only a tip that passes both reaches the tree rebuild,
-// the content anchor.
-//
-// git is a PATH stub: it answers merge-base/rev-parse from injected
-// ancestry and resolvability sets and serves the tip's history from a
-// file. No gh stub - the retired run-proof leg was the script's only API
-// consumer, and its absence is asserted below. No bun stub either: the
-// script itself runs under real bun, and the ACCEPT case is asserted by
-// the flow reaching the tree rebuild (`git worktree add`), which only
-// happens once the stamp checks have passed.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,14 +9,10 @@ const temp = tempDirs();
 const script = join(import.meta.dir, "../../.github/scripts/sync/verify_build_provenance.ts");
 
 const MAIN = "refs/remotes/origin/main";
-const SOURCE = "a".repeat(40); // the tip's stamped source
-const OLDER = "c".repeat(40); // an earlier source, for the rollback walk
-const OFFMAIN = "d".repeat(40); // a commit not on main history
+const SOURCE = "a".repeat(40);
+const OLDER = "c".repeat(40);
+const OFFMAIN = "d".repeat(40);
 
-// git stub: records calls; answers `merge-base --is-ancestor A B` from
-// IS_ANCESTOR (space-separated "A:B" pairs), `rev-parse --verify --quiet
-// X^{commit}` from RESOLVABLE, `log --format=%B TIP` from the history
-// file, and `worktree`/anything else exit 0.
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
@@ -99,12 +79,8 @@ function run(opts: Options = {}) {
 
 describe("verify_build_provenance.ts", () => {
   test("accepts a resolvable on-main stamp with no newer stamped ancestor - reaches the tree rebuild", () => {
-    // This must pass the whole stamp battery and REACH the deterministic
-    // tree rebuild (git worktree add), the content anchor and last line
-    // of defense. The rebuild itself needs a real checkout, so it fails
-    // under the git stub - but reaching it proves the stamp checks all
-    // passed, and no gh call ever happens (the retired run-proof leg was
-    // the script's only API read).
+    // Reaching `git worktree add` is the accept proof: the rebuild itself needs a real
+    // checkout, which the git stub cannot give, so the exit code is not asserted.
     const r = run();
     const reachedRebuild = r.calls.some((args) => args[1] === "worktree" && args[2] === "add");
     expect(reachedRebuild).toBe(true);
@@ -130,13 +106,11 @@ describe("verify_build_provenance.ts", () => {
     const r = run({ resolvable: [] });
     expect(r.exitCode).not.toBe(0);
     expect(r.output).toContain("is unreachable");
-    // The same run's rejection hint. A dispatch heals a broken stamp or a
-    // drifted tree, but not a hand-pushed tip whose tree already matches
-    // main's composition under a healthy stamp: publish.ts stages nothing
-    // and its skip guard reads the stamp as fine, so the dispatch is a
-    // no-op against that tip. The hint must name the remedy that always
-    // works too - an admin reset of refs/heads/build (or the next
-    // tree-moving landing).
+    // A dispatch is a no-op against a hand-pushed tip whose tree already matches main's
+    // composition under a healthy stamp (publish.ts stages nothing and its skip guard reads
+    // the stamp as fine), so the hint must also name the remedy that always works.
+    //   broken stamp or drifted tree       -> dispatch post-green.yml
+    //   tip publish.ts would skip          -> admin reset of refs/heads/build, or the next tree-moving landing
     expect(r.output).toContain("dispatch post-green.yml with sha=");
     expect(r.output).toContain("(the tip's stamped MAIN source");
     expect(r.output).toContain("to rebuild it from main");
@@ -145,9 +119,6 @@ describe("verify_build_provenance.ts", () => {
   });
 
   test("rejects a tip whose ancestry stamped a NEWER source (rollback replay)", () => {
-    // The tip stamps OLDER, but its history already stamped SOURCE, a newer
-    // on-main source it descends from - a replayed old build. The rollback
-    // walk caps freshness at the newest source already in the branch.
     const r = run({
       sourceSha: OLDER,
       isAncestor: [`${OLDER}:${MAIN}`, `${SOURCE}:${MAIN}`, `${OLDER}:${SOURCE}`],

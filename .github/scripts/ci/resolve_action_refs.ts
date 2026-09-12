@@ -1,19 +1,9 @@
-// Prove every action pin resolves to a real git ref, and that a sha pin's
-// trailing version comment names the release that sha is.
+// Nothing offline can tell that a ref exists upstream or that `# v7.0.1` is the commit pinned beside it: a dangling ref passes every
+// offline gate and fails at job start, fleet-wide once synced. This asks the GitHub API, so it runs as its own CI job, outside
+// `bun run check` (which must work offline).
 //
-// actionlint and the ssot action-pins rule keep pins consistent and
-// sha-shaped, but nothing local can tell that a ref exists upstream or
-// that `# v7.0.1` really is the commit pinned beside it: a dangling ref
-// passes every offline gate and then fails at job start, fleet-wide once
-// synced, and a lying comment misleads every reviewer and Dependabot.
-// This script asks the GitHub API, so it runs as its own CI job rather
-// than inside `bun run check` (which must work offline).
-//
-// Scanned: workflow YAML, composite action manifests, and the sync
-// writer's files/ sources (its workflow block files end in .yml). Skipped: local
-// `./` paths and self-references carrying a placeholder owner (the writer
-// substitutes it). A comment naming a branch (`# master`) is not judged:
-// branch heads move by design.
+//   local `./` paths, refs carrying a writer placeholder  -> skipped; the writer substitutes the owner
+//   a comment naming a branch (`# master`)                -> not judged; branch heads move by design
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +16,6 @@ export interface ActionRef {
   /** The release tag a trailing `# vX.Y.Z` comment claims the ref is;
    *  null for no comment or a branch comment. */
   version: string | null;
-  /** Files that carry this pin, for the error message. */
   sources: string[];
 }
 
@@ -40,10 +29,8 @@ export type Resolution =
   | { ok: false; kind: "dangling" | "unverifiable"; ref: string; detail: string }
   | { ok: false; kind: "stale-comment"; detail: string };
 
-/** The commit a ref names, or why it could not be read: HTTP 404/422 mean
- * the ref (or repo) does not exist; any other failure is an operational
- * problem (rate limit, auth, outage) reported as such so the error never
- * advises repinning a ref that may be fine. */
+/** 404 and 422 mean the ref or repo does not exist; any other failure is operational and must never advise repinning a ref that
+ * may be fine. */
 function commitOf(
   repo: string,
   ref: string,
@@ -63,8 +50,6 @@ function commitOf(
   return { ok: false, kind: "unverifiable", ref, detail: result.stderr.trim() };
 }
 
-/** Resolvable = the ref names a commit (tag, branch, or SHA) and, when a
- * version comment rides beside it, that tag's commit IS the pinned ref. */
 export function resolve(repo: string, ref: string, version: string | null = null): Resolution {
   const pinned = commitOf(repo, ref);
   if (!pinned.ok) return pinned;
@@ -79,9 +64,8 @@ export function resolve(repo: string, ref: string, version: string | null = null
   };
 }
 
-/** Collect unique owner/repo@ref pins from the given file contents, keyed
- * by ref AND version comment so one sha claiming two releases stays two
- * entries (the ssot rule reds that split; here each claim is verified). */
+/** Keyed by ref AND version comment: one sha claiming two releases stays two entries, so each claim is verified (the ssot rule
+ * reds the split itself). */
 export function collectRefs(files: Array<{ path: string; text: string }>): ActionRef[] {
   const byPin = new Map<string, ActionRef>();
   for (const { path, text } of files) {

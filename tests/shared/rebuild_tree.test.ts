@@ -30,13 +30,10 @@ let sourceSha: string;
 let savedCwd: string;
 const savedGitEnv: Record<string, string> = {};
 
-/** Explicit env OVERLAY deleting every GIT_* variable, handed to this
- * file's own spawns at the call site (ambient process.env mutation around
- * a spawn stays fragile under parallel test execution). capture() MERGES
- * options.env over live process.env, so the scrub must be undefined-VALUED
- * entries (bun then omits the keys), never a filtered env copy, which
- * would delete nothing. The same shape works spread into a raw spawn's
- * replacement env (bun omits undefined values there too). */
+/** capture() merges options.env over live process.env, so the scrub must be
+ * undefined-VALUED entries (bun omits those keys); a filtered env copy would
+ * delete nothing. Handed at each call site because an ambient process.env
+ * mutation around a spawn is fragile under parallel tests. */
 function gitFreeOverlay(): Record<string, string | undefined> {
   const overlay: Record<string, string | undefined> = {};
   for (const key of Object.keys(process.env)) {
@@ -58,14 +55,11 @@ function git(...args: string[]): string {
 }
 
 beforeAll(() => {
-  // Hook-driven runs export GIT_DIR/GIT_INDEX_FILE, which would redirect
-  // git subprocesses away from the scratch repo. rebuildBranchTree takes no
-  // env parameter, so this ambient scrub is the one channel that can clean
-  // ITS children, and it reaches them only because every spawn under the
-  // helper is handed live process.env (proc.ts's contract; bun's default
-  // process-start snapshot kept this scrub silently inert, and the
-  // poison-GIT_DIR test below pins that it bites now). This file's own
-  // spawns take the gitFreeOverlay() scrub explicitly instead.
+  // Hook-driven runs export GIT_DIR/GIT_INDEX_FILE, which would redirect git
+  // away from the scratch repo. rebuildBranchTree takes no env parameter, so
+  // this ambient scrub is the one channel that reaches ITS children; it works
+  // only because the helper hands every spawn live process.env (the
+  // poison-GIT_DIR test below pins that).
   for (const key of Object.keys(process.env)) {
     if (key.startsWith("GIT_")) {
       savedGitEnv[key] = process.env[key] as string;
@@ -77,7 +71,6 @@ beforeAll(() => {
   writeFileSync(join(scratch, ".github/scripts/build-branches/branch_tree.ts"), STUB_BUILDER);
   writeFileSync(join(scratch, "package.json"), '{ "name": "fixture", "private": true }\n');
   // A committed lockfile so the helper's --frozen-lockfile install passes.
-  // Through capture(): explicit scrub overlay and a bounded spawn.
   capture(["bun", "install", "--silent"], { cwd: scratch, env: gitFreeOverlay() });
   writeFileSync(join(scratch, ".gitignore"), "node_modules/\n");
   git("init", "-q", "-b", "main");
@@ -99,14 +92,11 @@ afterAll(() => {
   }
 });
 
-/** Per-test bound for the tests that run full rebuilds: each rebuild is
- * six sequential subprocesses (worktree add, bun install, builder,
- * staging), and the hostile-config test nests two of them inside driver
- * bun processes - under parallel machine load their aggregate exceeds
- * bun's 5s default. This is load headroom only; hang detection lives in
- * the child-side deadlines (capture's bound, the drivers' 10s,
- * REBUILD_STEP_TIMEOUT_MS), which sync spawns keep out of bun's timer's
- * reach anyway. The fast-failing tests keep the default. */
+/** Load headroom only, for the tests that run full rebuilds: under parallel
+ * machine load their sequential subprocesses exceed bun's 5s default. Hang
+ * detection lives in the child-side deadlines (capture's bound, the drivers'
+ * 10s, REBUILD_STEP_TIMEOUT_MS), which a sync spawn keeps out of bun's timer's
+ * reach anyway. */
 const REBUILD_TEST_TIMEOUT_MS = 30_000;
 
 describe("rebuildBranchTree", () => {
@@ -141,14 +131,10 @@ describe("rebuildBranchTree", () => {
   test(
     "a hostile GIT_DIR mutation genuinely reaches the helper's children, and deleting it clears them",
     () => {
-      // beforeAll's scrub relies on process.env mutations reaching the
-      // helper's spawned children - the exact channel bun's default
-      // snapshot env silently severed. CONTROL first: a poison GIT_DIR
-      // must break the helper (the first step's git runs against the
-      // poison instead of the scratch repo). Then the deletion arm:
-      // removing the poison must clear the child again - beforeAll's scrub
-      // is this same delete. On a snapshot regression the control arm
-      // fails loudly instead of the scrub going quietly inert.
+      // beforeAll's scrub relies on process.env mutations reaching the helper's
+      // children, the channel bun's default snapshot env silently severed; the
+      // poison control makes a snapshot regression fail loudly instead of
+      // leaving the scrub quietly inert.
       const saved = process.env.GIT_DIR;
       process.env.GIT_DIR = join(scratch, "poison-not-a-git-dir");
       try {
@@ -169,10 +155,8 @@ describe("rebuildBranchTree", () => {
         treeDir: join(scratch, "work-unpoisoned", "tree"),
       });
       expect(hash).toMatch(/^[0-9a-f]{40}$/);
-      // The poison arm died at its FIRST step (git worktree add ran against
-      // the poison, not the scratch repo), so it registered nothing to
-      // remove - prune any half-registration; only the unpoisoned rebuild
-      // holds a real worktree.
+      // The poison arm died at its first step and registered no worktree, so
+      // prune covers any half-registration.
       git("worktree", "prune");
       git("worktree", "remove", "--force", join(scratch, "work-unpoisoned", "src"));
     },
@@ -182,12 +166,10 @@ describe("rebuildBranchTree", () => {
   test(
     "every helper spawn is handed live process.env, never bun's startup snapshot",
     () => {
-      // The poison control above proves delivery end-to-end, but a partial
-      // regression - ONE spawn site dropping its env argument - could hide
-      // behind whichever site still fails loudly first. This pin inspects
-      // every spawn the helper makes: a marker set AFTER process start
-      // must ride each call's env argument (an absent env means bun's
-      // startup snapshot, which no caller scrub can touch).
+      // A partial regression, ONE spawn site dropping its env argument, could
+      // hide behind whichever site still fails loudly first, so every spawn is
+      // inspected: an absent env means bun's startup snapshot, which no caller
+      // scrub can touch.
       process.env.REBUILD_ENV_CANARY = "live";
       const spy = spyOn(Bun, "spawnSync");
       try {
@@ -291,14 +273,11 @@ describe("rebuildBranchTree", () => {
   test(
     "hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash",
     () => {
-      // The scratch staging feeds the provenance tree proof, so a silent
-      // staging skew becomes a false tamper accusation. Three measured skew
-      // vectors, planted at once: a .gitignore INSIDE the composed tree
-      // hiding a sibling (only `add --force` covers it; an excludesFile
-      // override does not), a machine-global core.excludesFile hiding
-      // another file, and a machine-global core.attributesFile whose
-      // `* text` filter rewrites a CRLF blob at add time. The hash must
-      // not move, and the hidden files must be IN the tree.
+      // The scratch staging feeds the provenance tree proof, so a silent staging
+      // skew becomes a false tamper accusation. Three measured skew vectors, planted at once:
+      //   .gitignore INSIDE the composed tree  -> hides ignored.txt; only `add --force` covers it
+      //   machine-global core.excludesFile     -> hides content.txt
+      //   machine-global core.attributesFile   -> `* text` rewrites crlf.txt at add time
       const hostileBuilder = `${STUB_BUILDER}
 writeFileSync(join(dest, "ignored.txt"), "must be staged\\n");
 writeFileSync(join(dest, "crlf.txt"), "windows line\\r\\n");
@@ -321,14 +300,10 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
         join(cfg, "config"),
         `[core]\n\texcludesFile = ${join(cfg, "ignore")}\n\tattributesFile = ${join(cfg, "attributes")}\n`,
       );
-      // BOTH arms run in DRIVER subprocesses with pinned startup
-      // environments: as an in-process mutation the config never reached
-      // the helper's then-snapshot-env `git add`, the exact spawn the
-      // excludesFile must fail to skew. Drivers also keep the arms
-      // SYMMETRIC, differing ONLY in which file the global scope reads, so
-      // a hash move is attributable to the hostile config alone; unpinned,
-      // the machine's real global config leaks into the clean arm (a
-      // developer core.autocrlf=input was measured doing exactly that).
+      // Both arms run in driver subprocesses so they differ ONLY in which file
+      // the global scope reads, and a hash move is attributable to the hostile
+      // config alone; unpinned, the machine's real global config leaks into the
+      // clean arm (a developer core.autocrlf=input was measured doing that).
       writeFileSync(join(cfg, "empty-gitconfig"), "");
       mkdirSync(join(cfg, "empty-xdg"));
       const baseEnv = {
@@ -341,8 +316,7 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
       const hostileEnv = { ...baseEnv, GIT_CONFIG_GLOBAL: join(cfg, "config") };
       // Control: under the hostile env git genuinely ignores content.txt
       // (exit 0) - without a live vector the agreement assertions pass
-      // vacuously. The overlay entries already ride hostileEnv, so capture's
-      // merge delivers exactly the pinned scopes.
+      // vacuously.
       expect(
         capture(["git", "-C", scratch, "check-ignore", "-q", "content.txt"], {
           env: hostileEnv,
@@ -361,10 +335,7 @@ writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
       );
       const rebuildInDriver = (name: string, env: Record<string, string | undefined>): string => {
         const { srcDir, treeDir } = dirs(name);
-        // Through capture(): the env carries a full process.env copy plus
-        // the pinned scopes, so the merge hands the driver exactly that
-        // startup environment - deadline-bounded with SIGKILL, so a hung
-        // rebuild dies loudly inside the test budget.
+        // 10s so a hung rebuild dies loudly inside the test budget.
         const run = capture([process.execPath, driver, hostileSha, srcDir, treeDir], {
           cwd: scratch,
           env,

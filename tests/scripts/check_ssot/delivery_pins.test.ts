@@ -1,5 +1,3 @@
-// The delivery-pin rules' pure helpers (scripts/check/ssot/delivery_pins.ts).
-
 import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
@@ -219,7 +217,6 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
       "repo-platform/.github/workflows/reusable-pages.yml@build",
     );
     expect(mismatches[0].got).toBe("@main");
-    // Restored to the delivery ref, the same content is green.
     const restored = planted.replace("@main", "@build");
     expect(deliveryRefMismatches(sourceSelfPins(restored, file), "build")).toEqual([]);
   });

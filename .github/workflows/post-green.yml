@@ -1,13 +1,10 @@
-# The post-green home (docs/build-provenance.md, docs/all-green.md). Two ways in:
-# the workflow_call from ci.yml's post-green job runs every leg on the judged
-# sha, and a workflow_dispatch runs the two delivery legs alone (publish-build
-# and move-stable) on a green main sha.
+# The legs after the all-green gate (docs/all-green.md, "After the gate"; the trust model: docs/build-provenance.md).
+# Inside a called run github.event_name is the CALLER's event, so `!= 'workflow_dispatch'` is what gates the call-only legs.
 #
-# Invariants every leg must hold: STATE-shaped (a leg replaced while pending
-# at its lane is covered by its evictor or healed by the next trigger); the commit comes from
-# the sha input, never re-derived from context; a leg that mutates shared state
-# keeps its own green verification. Inside a called run github.event_name is
-# the caller's event, so `!= 'workflow_dispatch'` gates the call-only legs.
+# Every leg holds three invariants:
+#   state-shaped        -> a leg evicted while pending at its lane is covered by its evictor or healed by the next trigger
+#   sha from the input  -> every leg reads the judged commit from `inputs.sha`, never from github.sha or a read of main
+#   own green check     -> a leg that mutates shared state re-verifies the all-green check itself
 
 name: Post Green
 
@@ -39,10 +36,8 @@ on:
           .github/workflows/ files GITHUB_TOKEN may not push (the
           publish-build job's checkout).
         required: true
-  # The self-heal: publish one green main commit by hand. publish.ts and
-  # move_stable.ts each refuse anything that is not main history with a
-  # completed successful all-green check at that exact sha (re-run that
-  # commit's CI first when the check is missing - the all-green job posts it).
+  # The self-heal: the scripts refuse any sha that is not green main history, so re-run that commit's CI first
+  # when its all-green check is missing.
   workflow_dispatch:
     inputs:
       sha:
@@ -55,24 +50,13 @@ on:
 permissions: {}
 
 jobs:
-  # The build-branch publisher, on both ways in (docs/build-provenance.md):
-  # composes the tree from the sha's own script in this run and advances
-  # refs/heads/build. On the call the caller releases this job needs-ordered
-  # behind the all-green gate, and publish.ts still hard-verifies the check
-  # at the source before any mutation (defense in depth there, the sole gate
-  # on a dispatch). State-shaped: newest-green wins behind a staleness
-  # preflight, the plain push is the compare-and-swap, and the residual is an
-  # out-of-order eviction leaving the branch one push stale, never rolled back.
+  # publish.ts owns the publish invariants and re-verifies the all-green check at the source before any mutation:
+  # defense in depth on the call, the sole gate on a dispatch.
   publish-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # THE single publisher lane: one repo-scoped group serializes every
-    # writer of refs/heads/build, the called runs and the dispatched ones,
-    # which are runs of DIFFERENT workflows. LITERAL on purpose: derived from
-    # github.workflow, which inside a workflow_call'd workflow resolves to
-    # the CALLER's name, it would silently split the lane. The calling job
-    # in ci.yml holds NO lane, the deadlock law's other half: a caller must
-    # never hold the resource its called workflow requires.
+    # LITERAL on purpose: github.workflow inside a called workflow is the CALLER's name, which would split the lane
+    # between called and dispatched runs. ci.yml's calling job holds no lane: a caller never holds what its callee waits on.
     concurrency:
       group: build-branches-publish
       cancel-in-progress: false
@@ -83,10 +67,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # The persisted push credential for publish.ts: a PAT with
-          # workflow scope (see the secret's description; the branch
-          # stays inert by construction - branch_tree.ts refuses shipped
-          # workflows with any trigger beyond workflow_call).
+          # publish.ts pushes with this persisted credential; the branch stays inert by construction
+          # (branch_tree.ts refuses a shipped workflow with any trigger beyond workflow_call).
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
       - name: Set up bun
@@ -94,11 +76,6 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      # SOURCE_SHA is the sha input on both ways in - the judged commit
-      # on the call, the operator's commit on a dispatch - never a read of
-      # origin/main: main can already have advanced to a newer, even red,
-      # commit this run must not touch (that commit's own run publishes
-      # it).
       - name: Publish the build branch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -106,14 +83,8 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
 
-  # The stable tag mover, on both ways in (docs/build-provenance.md): moves
-  # refs/tags/stable to the sha, beside the build branch until the fleet's
-  # pins follow it. State-shaped like the publisher: newest-green wins behind
-  # a staleness read of the tag, and the lease push is the compare-and-swap,
-  # so a racing mover loses loudly with the tag untouched. move_stable.ts
-  # re-verifies main history and the all-green check at the sha before the
-  # push (defense in depth on the call, the sole gate on a dispatch). Its
-  # previous output is the directives leg's base after a move.
+  # move_stable.ts owns the tag's invariants and re-verifies the all-green check at the sha before the push:
+  # defense in depth on the call, the sole gate on a dispatch.
   move-stable:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -146,15 +117,8 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/post-green/move_stable.ts
 
-  # The merged PRs' opt-in to an immediate fleet sync, read off the merged
-  # pull request of every commit since the last published build (the squash
-  # commit carries the title alone; a direct push is read from its message:
-  # fleet_sync_marker.ts) and handed to sync-fleet. State-shaped: mutates
-  # nothing; the range covers the merges whose publish this run evicted. A bad directive fails the leg on the judged
-  # commit only; an older one already failed its own run and warns here.
-  # Needs-ordered behind the mover for its fallback base (the tag's previous
-  # commit, else the push's `before`) and run on every mover result: only
-  # this run is sure to read this commit (docs/all-green.md).
+  # Ordered behind the mover for its fallback base, and run on every mover result: only this run is sure to read
+  # this commit's directives (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()
@@ -188,15 +152,9 @@ jobs:
           BEFORE_SHA: ${{ needs.move-stable.outputs.previous || inputs.before }}
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
-  # The opted-in sync: sync-repos.yml called in this run, needs-ordered
-  # behind the publish so the sync renders from the tip as the publish left
-  # it (a red publish skips it rather than sync the previous build); the
-  # publish and the opt-in are judged by name, so a red mover upstream of
-  # the directives read does not swallow the sync. State-shaped: the called sync re-verifies the build's green source and
-  # provenance itself, and a swallowed run leaves a repo one sync behind,
-  # healed by the weekly cron. THIS job holds the fleet's single-writer lane
-  # (the literal sync-repos.yml's cron and dispatch runs hold at workflow
-  # level) while the called run takes a per-run group: the deadlock law above.
+  # Ordered behind the publish so the sync renders from the tip it left (a red publish skips the sync rather than
+  # ship the previous build); judged by name, so a red mover upstream of the directives read does not swallow it.
+  # This job holds the sync-repos lane the weekly cron also holds; the called run keys a per-run group instead.
   sync-fleet:
     needs: [publish-build, read-directives]
     if: >-
@@ -216,9 +174,8 @@ jobs:
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
-  # Every target on EVERY called run: the apply is idempotent and reads each target's own state,
-  # so no diff decides it. Ordered behind sync-fleet whatever its result, so a synced repo is
-  # applied after its sync. Holds the settings-repos lane the called run keys around (deadlock law).
+  # Every target on every called run: the apply is idempotent and reads each target's own state, so no diff decides it.
+  # Ordered behind sync-fleet whatever its result, so a synced repo is applied after its sync; holds the lane the called run keys around.
   settings-fleet:
     needs: [sync-fleet]
     if: github.event_name != 'workflow_dispatch' && !cancelled()

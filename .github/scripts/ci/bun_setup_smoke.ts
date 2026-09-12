@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-// CI entry for ci.yml's bun-setup-smoke job. `plant` writes two pins under
-// RUNNER_TEMP (the manifests' version, first on PATH by then, and an earlier
-// release that therefore is not); `judge` reads both calls' outputs.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -9,9 +6,7 @@ import { env, requireEnv, setOutput } from "../shared/gha.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
-/** A released version below `version` (one patch back, or the previous
- *  minor's .0: every bun minor line starts at .0), so it cannot be the bun
- *  first on PATH once `version` is. */
+/** The previous minor's .0 always exists: every bun minor line starts at .0. */
 export function earlierRelease(version: string): string {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
   if (match === null) throw new Error(`not a release version: '${version}'`);
@@ -38,9 +33,7 @@ export interface SmokeReading {
   second: CallOutputs;
 }
 
-/** Every way the two calls miss the contract (first: current bun reused;
- *  second: earlier release installed), judged on each call's own recorded
- *  outputs: the second install can overwrite the first call's binary. */
+/** Judged on each call's recorded outputs, not a live probe: the second install can overwrite the first call's binary. */
 export function smokeProblems(reading: SmokeReading): string[] {
   const problems: string[] = [];
   const expect = (call: "first" | "second", pin: string, installed: string) => {

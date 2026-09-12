@@ -1,10 +1,5 @@
-// The sidebar, derived from the docs tree and what its markdown says: the
-// fleet's repos carry only markdown, so a page's place comes from its own
-// frontmatter (`order`, `group`) and from the level's landing page (the
-// first link-column table of a README is the author's reading order), and
-// a tree that says nothing keeps the file order. The launcher's page index
-// (theme/pages.data.ts) lists pages in the same order, so the two agree.
-// Imported by config.mts at build time and by the action's tests directly.
+// A page's place comes from its own frontmatter (`order`, `group`) and from the level's landing table: the fleet's repos carry only markdown.
+// The launcher's page index (theme/pages.data.ts) lists pages in the same order, so the two agree.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,14 +32,10 @@ export interface PageSource {
   tableLinks(file: string): string[];
 }
 
-/** The source reading the files under `srcDir` through VitePress's own
- *  renderer (the same instance the pages render with, so containers and
- *  links parse exactly as they will on the page): the landing-table rule
- *  stamps the table's links on the env. A landing whose include directive
- *  VitePress would expand names NO links, as the page index lists no
- *  headings for such a page: the directive expands only inside the page
- *  transform, so the source as written may not hold the table the page
- *  shows, and file order is the honest fallback. */
+/** `md` must be the instance the pages render with, so containers and links parse exactly as they will on the page.
+ *  A landing whose include directive VitePress would expand names NO links, as the page index lists no headings for such
+ *  a page: the directive expands only inside the page transform, so the source as written may not hold the table the
+ *  page shows, and file order is the honest fallback. */
 export function fileSource(
   srcDir: string,
   md: Pick<MarkdownRenderer, "render">,
@@ -66,9 +57,6 @@ export function fileSource(
   };
 }
 
-/** The sidebar trees of a docs tree: the root (every file outside a
- *  locale directory) at prefix "", then one per locale at `<lang>/`,
- *  locales sorted. */
 export function sidebarTrees(files: string[]): { prefix: string; files: string[] }[] {
   const locales = detectLocales(files);
   return [
@@ -91,11 +79,7 @@ export interface SidebarOptions {
   indexPages?: readonly string[];
 }
 
-/** The sidebar for one tree. Each level lists its own pages in reading
- *  order (orderedLevel), pages sharing a `group` under one plain heading
- *  placed where the group's first member falls, then one collapsible
- *  group per subdirectory, recursively. `site` is what the table's hrefs
- *  resolve against (the URLs VitePress writes carry the base). */
+/** `site` is what the table's hrefs resolve against: the URLs VitePress writes carry the base. */
 export function deriveSidebar(
   files: string[],
   source: PageSource,
@@ -111,8 +95,6 @@ export function deriveSidebar(
   return sidebarLevel(options.prefix ?? "", context, options.siteTitle ?? null);
 }
 
-/** Every page of `files` in the order the sidebars present them: the root
- *  tree's pages depth-first, then each locale's. */
 export function sidebarOrder(
   files: string[],
   source: PageSource,
@@ -176,7 +158,6 @@ function sidebarLevel(
 interface LevelPage {
   file: string;
   meta: PageMeta;
-  /** Whether the file is one of the level's landing pages. */
   landing: boolean;
 }
 
@@ -188,12 +169,7 @@ interface Level {
 
 const LANDING_NAMES = new Set(["README.md", "index.md"]);
 
-/** One level's own pages in reading order: its landing pages first, then
- *  the pages carrying `order` ascending (ties by title), then the pages
- *  the landing's link table names in the order it first names them, then
- *  the rest in file order; finally the pages sharing a `group` gathered
- *  where the group's first member falls. The landing read is the one
- *  serving the directory route: index.md when both spellings exist. */
+/** The landing read is the one serving the directory route: index.md when both spellings exist. */
 function orderedLevel(prefix: string, context: LevelContext): Level {
   const here = context.files.filter((file) => file.startsWith(prefix));
   const local = (file: string) => file.slice(prefix.length);
@@ -233,9 +209,7 @@ function orderedLevel(prefix: string, context: LevelContext): Level {
   };
 }
 
-/** The pages among `candidates` the landing's table names, in the order
- *  it first names them, matched the way the launcher attaches a curated
- *  row to its page: both sides as page keys of served URLs. */
+/** Matched the way the launcher attaches a curated row to its page: both sides as page keys of served URLs. */
 function tablePlaced(
   landing: LevelPage,
   candidates: LevelPage[],
@@ -253,8 +227,6 @@ function tablePlaced(
   return placed;
 }
 
-/** `pages` with each group's members made contiguous at the position of
- *  the group's first member; ungrouped pages keep their places. */
 function grouped(pages: LevelPage[]): LevelPage[] {
   const runs: LevelPage[][] = [];
   const byGroup = new Map<string, LevelPage[]>();

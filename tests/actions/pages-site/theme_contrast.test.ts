@@ -1,11 +1,5 @@
-// The theme's text tokens are small type on every ground the theme declares
-// (the 12.5px provenance line and the code block's language label both read
-// --vp-c-text-3), so each text token must clear WCAG AA's 4.5:1 on each
-// ground of its mode; the code palette (--fleet-code-*, the shiki theme's
-// variables) must clear it on the code ground, and the two alert colors
-// that are not the hue on the custom block's panel ground. The token test
-// next door only proves a reader exists; this pins the values themselves,
-// per mode (light, dark, and the print sheet), as tokens.ts declares them.
+// The tertiary ink is small type (the 12.5px provenance line, the code block's language label), so every text token must clear WCAG AA's 4.5:1.
+// theme_tokens.test.ts only proves a reader exists; this pins the values tokens.ts declares, per mode and ground, the print sheet included.
 
 import { expect, test } from "bun:test";
 import { mermaidThemeVariables } from "../../../actions/pages-site/.vitepress/theme/mermaid-theme.ts";
@@ -40,9 +34,6 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
-/** The text-on-ground pairs that fail AA, one line each; a pair whose
- *  either side is not a six-digit hex (a var() alias, a short hex, a color
- *  name) fails outright instead of being skipped. */
 function failures(declared: Map<string, string>, pairs: [string, string][]): string[] {
   return pairs.flatMap(([text, ground]) => {
     const fg = declared.get(text);
@@ -84,9 +75,6 @@ test.each([...MODES])(
   },
 );
 
-// The instrument's controls, through the same reader and assertion path as
-// the green runs above: the comment token set to a var() alias or to a
-// failing hex must fail, and as the only failure.
 test.each([
   ["var(--vp-c-bg-code)", "is not declared as a six-digit hex"],
   ["#8c94a6", "on --vp-c-bg-code #eaecf0: 2.57:1"],
@@ -99,18 +87,14 @@ test.each([
   expect(failing[0]).toEndWith(message);
 });
 
-// The hue band is a hover tint on the page ground (the pager links, the
-// launcher's rows), so the text it sits under must clear AA on the
-// composite in every hue and mode: the secondary ink does, the tertiary
-// ink does not (its control), which is why a hovered pager label lifts
-// to the secondary ink.
+// The hue band is a hover tint on the page ground (pager links, the launcher's rows), so the ink under it must clear AA on the composite.
+// The tertiary ink does not, which is why a hovered pager label lifts to the secondary ink.
 const RGBA = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*(0?\.\d+)\)$/;
 
 function channels(hex: string): number[] {
   return [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
 }
 
-/** The band composited over `ground`, as a six-digit hex. */
 function tinted(band: string, ground: string): string {
   const match = RGBA.exec(band);
   if (match === null) throw new Error(`the hue band is not an rgba(): ${band}`);
@@ -150,10 +134,8 @@ test("the pre-fix tertiary values and the github-theme token colors fail on the 
   expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
 });
 
-// The mermaid theme bakes literal colors into every diagram's SVG, so its
-// text meets the same bar on the surface it is drawn over: each text
-// variable paired with its own ground, per mode and hue (the hue is a
-// border color only, so it may not move any of these).
+// The mermaid theme bakes literal colors into every diagram's SVG, so its text meets the same bar on the ground it is drawn over.
+// The hue is a border color only, so it may not move any of these pairs.
 const MERMAID_TEXT_PAIRS: [string, string][] = [
   ["primaryTextColor", "primaryColor"],
   ["secondaryTextColor", "secondaryColor"],

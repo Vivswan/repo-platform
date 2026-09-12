@@ -1,36 +1,20 @@
-// Subprocess helpers shared by the workflow scripts. Commands are argv
-// arrays (never shell strings), so target-derived values cannot be
-// re-parsed as syntax. Two bun >= 1.4.0 semantics the code cannot show:
+// Commands are argv arrays, never shell strings, so target-derived values cannot be re-parsed as syntax.
+// Two bun >= 1.4.0 quirks shape every spawn here (the first unreported upstream as of 2026-08):
 //
-// - Every piped run carries a timeout (default DEFAULT_HANG_BOUND_MS): a
-//   piped Bun.spawnSync WITHOUT `timeout` returns at pipe EOF, not at
-//   child exit, so a child that leaves a descendant holding the inherited
-//   pipe fds blocks the caller until that descendant exits. WITH a timeout
-//   it returns at the deadline regardless, turning an unbounded silent
-//   hang into a bounded loud failure. Unreported upstream as of 2026-08.
-// - Every spawn is handed `{ ...process.env, ...options.env }` EXPLICITLY:
-//   bun's default child environment is a snapshot taken at PROCESS START
-//   (later additions missing, later deletions still present), which
-//   silently disarms a caller that pins or scrubs process.env before
-//   spawning. A per-call entry still wins, and an undefined value deletes
-//   the key for the child.
+//   piped spawnSync, no `timeout`   -> returns at pipe EOF, not child exit; a descendant holding the pipe hangs the caller until it exits
+//   piped spawnSync with `timeout`  -> returns by the deadline even with a descendant still holding the pipe, so every piped run carries one
+//   the default child env           -> a snapshot from PROCESS START; a caller's process.env scrub never reaches the child unless passed explicitly
+//   an undefined entry in `env`     -> deletes that key for the child
 
 import { constants } from "node:os";
 
-/** The default hang bound: a BOUND ON HANGING, not an operational
- * deadline. Generous enough that no legitimate subprocess ever hits it
- * (whole-tree pushes, validators, and writer runs all run well under it),
- * small enough to fire with room to spare inside the 10-minute job
- * timeouts, so a wedged call dies loudly and named instead of as a
- * runner-level kill. Call sites with a real operational deadline pass
- * their own `timeoutMs`, which always wins. */
+/** A bound on hanging, not an operational deadline: above every legitimate run (whole-tree pushes, validators, writer runs)
+ * and inside the 10-minute job timeouts, so a wedged call dies named instead of as a runner-level kill. */
 export const DEFAULT_HANG_BOUND_MS = 300_000;
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
-  /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
-   * the result reports `timedOut`. Absent = DEFAULT_HANG_BOUND_MS. */
   timeoutMs?: number;
 }
 
@@ -38,27 +22,20 @@ export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** True when the run was cut off by the deadline (the explicit
-   * `timeoutMs` or the default hang bound); `exitCode` is then always
-   * nonzero. */
   timedOut: boolean;
   /** The child's pid, recorded so cleanup-sensitive callers can verify
    * the process is gone after the run. */
   pid: number;
 }
 
-/** Text with credentials redacted - URL userinfo (`scheme://user:pass@` ->
- * `scheme://***@`) and the bare `x-access-token:<token>@` shape - for any
- * child output re-emitted to a public log: git quotes push URLs back. */
+/** For child output re-emitted to a public log: git quotes push URLs, userinfo included, back in its errors. */
 export function redactText(text: string): string {
   return text
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1***@")
     .replace(/x-access-token:[^/?#\s]+@/gi, "x-access-token:***@");
 }
 
-/** Argv rendered for a log line, each argument redacted like redactText:
- * sync argv carries the fleet PAT inside push URLs, and Actions logs are
- * public. */
+/** Sync argv carries the fleet PAT inside push URLs, and Actions logs are public. */
 export function redactCommand(command: string[]): string {
   return command.map(redactText).join(" ");
 }
@@ -73,11 +50,8 @@ export function exitCodeOf(proc: { exitCode: number | null; signalCode?: string 
   return signal !== undefined ? 128 + signal : 1;
 }
 
-/** Exit code for a run cut off by its deadline: the signal code when the
- * child was killed still running, and 124 (the timeout(1) convention)
- * when the child had already exited 0 - under bun >= 1.4.0 a piped run
- * can hit the deadline waiting for pipe EOF after a clean child exit,
- * and a deadline expiry must never read as success. */
+/** 124 (timeout(1)'s convention) when the child had already exited 0: a piped run can hit the deadline waiting for pipe EOF
+ * after a clean exit, and an expiry must never read as success. */
 export function timeoutExitCode(proc: {
   exitCode: number | null;
   signalCode?: string | null;
@@ -86,25 +60,18 @@ export function timeoutExitCode(proc: {
   return code === 0 ? 124 : code;
 }
 
-/** The env handed to every spawn: live process.env merged under the
- * call's explicit entries (see the module comment). One helper so the
- * three wrappers cannot drift apart. */
 function spawnEnv(
   env: Record<string, string | undefined> | undefined,
 ): Record<string, string | undefined> {
   return { ...process.env, ...(env ?? {}) };
 }
 
-/** The hang bound every piped run carries: `timeoutMs` when given,
- *  DEFAULT_HANG_BOUND_MS otherwise. One owner, so the default cannot be
- *  applied at one wrapper and forgotten at its twin; each call site still
- *  spells its spawn options as a literal (the spawn-sync-hang-bound rule
- *  audits them structurally and a spread is opaque to it). */
+/** Each call site still spells its spawn options as a literal: the spawn-sync-hang-bound ssot rule reads them structurally,
+ * and a spread is opaque to it. */
 function hangBound(options: RunOptions): number {
   return options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
 }
 
-/** Run with stdout/stderr captured. */
 export function capture(command: string[], options: RunOptions = {}): RunResult {
   const timeout = hangBound(options);
   const proc = Bun.spawnSync(command, {
@@ -125,9 +92,7 @@ export function capture(command: string[], options: RunOptions = {}): RunResult 
   };
 }
 
-/** Run with inherited stdio; returns the exit code. Inherited stdio has
- * no pipe-EOF hazard, so no hang bound applies (and `timeoutMs` is not
- * accepted). */
+/** Inherited stdio has no pipe-EOF hazard, so no hang bound applies. */
 export function passthrough(
   command: string[],
   options: Omit<RunOptions, "timeoutMs"> = {},
@@ -140,18 +105,12 @@ export function passthrough(
   return exitCodeOf(proc);
 }
 
-/** Run with inherited stdio; exits the process with the command's code on
- * failure. */
 export function must(command: string[], options: Omit<RunOptions, "timeoutMs"> = {}): void {
   const exitCode = passthrough(command, options);
   if (exitCode !== 0) process.exit(exitCode);
 }
 
-/** Run with stdout captured and stderr inherited; exits the process with
- * the command's code on failure. Returns stdout with trailing newlines
- * stripped (command-substitution semantics). A deadline expiry is a
- * failure like any other, except a line naming the deadline precedes the
- * exit - a SIGKILLed child usually dies without printing anything. */
+/** The deadline line is printed here because a SIGKILLed child usually dies without printing anything. */
 export function mustCapture(command: string[], options: RunOptions = {}): string {
   const timeout = hangBound(options);
   const proc = Bun.spawnSync(command, {

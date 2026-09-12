@@ -30,8 +30,6 @@ const TEXT_SUFFIXES = new Set([
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 
-/** No unresolved merge-conflict markers in text files (suffix-listed or
- *  extensionless; binary content, detected as invalid UTF-8, is skipped). */
 export function checkConflictMarkers(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const rel of ctx.files) {

@@ -1,18 +1,6 @@
-// Links resolve in REPOSITORY space, the way they read on GitHub. A page's
-// relative link is resolved from the page's own repository path (the docs
-// tree and every include root are staged from different places), then
-// turned back into what the site serves: a rendered page inside the docs
-// tree or an include root becomes its on-site route (a source file name
-// such as README.md or SKILL.md through the rewrite map, since VitePress
-// rewrites only the href's `.md` to `.html` and knows nothing of the map),
-// a directory with an index page becomes its directory URL, a file under
-// the docs tree's public/ becomes its URL at the base, and anything the
-// site never publishes (a file elsewhere in the repository, a plugin.json
-// or a script beside a SKILL.md) becomes a link to that file on GitHub at
-// the tier's own ref, a directory (written with its slash, or the
-// repository root) to its tree there. Without this, `../.github/workflows/ci.yml` and
-// `guide/README.md` both read fine on GitHub and 404 on the site, while
-// VitePress's own dead-link check passes them.
+// Links resolve in REPOSITORY space, the way they read on GitHub, then turn back into what the site serves: a route through
+// the rewrite map, a directory URL, an asset at the base, or the file on GitHub at the tier's ref. Without this, `guide/README.md`
+// and `../.github/workflows/ci.yml` both read fine on GitHub and 404 on the site, while VitePress's own dead-link check passes them.
 
 import { posix } from "node:path";
 import type { MarkdownEnv, MarkdownRenderer } from "vitepress";
@@ -20,10 +8,6 @@ import type { IncludeRoot } from "../lib.ts";
 import { sourcePathOf } from "./source-path.ts";
 import { decodePathSegments, encodePathSegments } from "./url-path.ts";
 
-/** What a link resolves against: the staging layout (the docs directory,
- *  the include roots, the markdown files walked from the staged tree,
- *  derive.ts's rewrite map), the site base, and where the rest of the
- *  repository is read (its URL and this tier's ref). */
 export interface LinkScope {
   docsDir: string;
   includes: readonly IncludeRoot[];
@@ -35,9 +19,8 @@ export interface LinkScope {
   ref: string;
 }
 
-/** A rewritten link. A verbatim one is final, base included: VitePress's
- *  link rule would append `.html` to it or its router would take it as a
- *  page, so the rule marks the token for both to leave alone. */
+/** A verbatim link is final, base included: VitePress's link rule would append `.html` to it or its router
+ *  would take it as a page, so the rule marks the token for both to leave alone. */
 export interface RewrittenLink {
   href: string;
   verbatim: boolean;
@@ -47,10 +30,6 @@ export interface RewrittenLink {
  *  fragment-only or query-only links. */
 const NOT_A_PATH = /^([a-z][a-z0-9+.-]*:|\/\/|[?#])/i;
 
-/** The staged path a repository path serves from, or null when it is not
- *  on the site: under the docs directory it is the rest, under an include
- *  root's path it is that root's mount plus the rest (the longest path
- *  wins), a root directory itself is its mount ("" for the docs tree). */
 function stagedPath(repoPath: string, scope: LinkScope): string | null {
   const roots = [
     { path: scope.docsDir, mount: "" },
@@ -64,17 +43,8 @@ function stagedPath(repoPath: string, scope: LinkScope): string | null {
   return null;
 }
 
-/** Where a staged path is served, or null when the site never publishes
- *  it. Under the docs tree's public/ it is at the base, where VitePress
- *  copies it, at the exact path written (a directory's slash included).
- *  Written as a directory it is a directory URL, its index page or not
- *  (VitePress's dead-link check reports a missing one). A page is the
- *  rewrite map's route for a README.md or SKILL.md, else itself; a
- *  directory with an index page (its own index.md or a file the map sends
- *  there) is its directory URL, the way GitHub shows its README; an
- *  extensionless name is the page of that stem, or else stays a site path
- *  for the dead-link check. A file with any other extension is not on the
- *  site. */
+/** A directory written with its slash and an unknown extensionless name stay site paths, so VitePress's dead-link check
+ *  reports a missing one; a directory with an index page is its directory URL, the way GitHub shows its README. */
 function servedRoute(
   staged: string,
   writtenAsDirectory: boolean,

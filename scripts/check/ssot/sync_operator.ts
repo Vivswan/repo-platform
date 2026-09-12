@@ -16,9 +16,7 @@ export const CHECKOUT = "bun .github/scripts/sync/checkout_target.ts";
 export const SELECTOR = "bun .github/scripts/fleet/select_sync_repos.ts";
 export const DISCOVERY = "bun .github/scripts/fleet/discover_repos.ts";
 export const WRITER = "bun .github/scripts/sync/writer/sync.ts";
-/** A run step that is ONE bun command (a script or the install) with plain
- *  word arguments, its whole output landing in a $RUNNER_TEMP file: no
- *  shell operator can put a second command in front of the redirect. */
+/** The argument character class admits no shell operator, so nothing can put a second command's output in front of the redirect. */
 export const REDIRECTED =
   /^bun (\.github\/scripts\/[A-Za-z0-9_./-]+\.ts|install)( [A-Za-z0-9_./"$=:+-]+)* > "\$RUNNER_TEMP\/[A-Za-z0-9._-]+" 2>&1$/;
 /** The actions a row job may `uses:`; anything else runs code whose output
@@ -37,7 +35,6 @@ const steps = (job: Record<string, unknown>): Step[] =>
 
 const runOf = (step: Step) => String(step.run ?? "").trim();
 
-/** The selector step's env, as `key=value` lines, for the two-job parity check. */
 function selectorEnv(job: Record<string, unknown>): string | null {
   const step = steps(job).find((s) => runOf(s).startsWith(SELECTOR));
   if (step === undefined) return null;
@@ -182,9 +179,6 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
       got: "a selector env that differs between the two jobs",
     });
   }
-  // The row's timeout covers the budget its steps' bounds sum to
-  // (row_budget.ts); the writer step's own timeout is the budget's writer
-  // term, so it must be declared.
   const writer = rowSteps.find((step) => runOf(step).startsWith(WRITER));
   if (writer === undefined) throw new Error(`${rel}: no writer step - anchor lost`);
   const writerTimeout = Number(writer["timeout-minutes"]);
@@ -208,7 +202,6 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const syncOperatorRules: Rule[] = [
   {
     // The operator prints only its vocabulary: redaction is the job's

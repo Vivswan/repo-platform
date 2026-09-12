@@ -1,8 +1,3 @@
-// ignore_check.ts: the bypass file's contract, judged pure (checkIgnoreFile)
-// and through the script the action step runs (exit code, GITHUB_OUTPUT
-// row, annotations) against checkouts carrying no file, a valid file, an
-// invalid one, and the refused plain format.
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

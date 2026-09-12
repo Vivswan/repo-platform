@@ -1,8 +1,3 @@
-// report.ts: Trivy's JSON to the fuzz-issue report directory, judged pure
-// (grouping, ordering, the row cap, directory names) and through the
-// script the action step runs (the directories on disk and the
-// GITHUB_OUTPUT rows) on a scan with findings and on a clean one.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

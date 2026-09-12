@@ -40,10 +40,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Repo-owned tuning: a .github/codeql/codeql-config.yml in the
-      # calling repository is picked up automatically (the managed ci.yml
-      # cannot carry per-repo scan parameters). The inline config input
-      # wins when a caller passes one.
+      # The managed ci.yml cannot carry per-repo scan parameters, so a repo-owned .github/codeql/codeql-config.yml is picked up here.
       - name: Detect the repository's CodeQL config
         id: config
         if: inputs.config == ''

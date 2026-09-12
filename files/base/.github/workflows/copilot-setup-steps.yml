@@ -1,6 +1,6 @@
 # Copilot runs this job (it MUST be named copilot-setup-steps) to prepare
 # its environment; the push/PR triggers exist so edits to this file are
-# validated in CI. Written once by {{github_username}}/repo-platform,
+# validated in CI. Seeded once by the fleet sync,
 # never overwritten by a later sync.
 
 name: Copilot Setup Steps

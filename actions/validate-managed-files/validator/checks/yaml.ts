@@ -4,23 +4,15 @@ import { parseAllDocuments, parse as parseYaml } from "yaml";
 import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 
-/** Whether a duplicate mapping key in this path is an error rather than an
- *  advisory. Strict for .github/ (the workflows, dependabot.yml, and
- *  settings.yml live there) plus the root registration file: their
- *  consumers refuse duplicate keys anyway (GitHub's workflow parser, the
- *  settings apply's parse boundary in settings_document.ts), and a
- *  three-way merge can duplicate settings.yml's identity keys.
- *  Elsewhere a duplicate can be deliberate (a parser fixture, a vendored
- *  config) - and a sync walks the whole target repo, so erroring there
- *  would make every sync PR permanently red. */
+/** A duplicate key is an error only where the consumers refuse it anyway, and an advisory elsewhere: a sync walks the
+ *  whole target repo, so erroring there would make every sync PR permanently red.
+ *    .github/ and the registration  -> GitHub's workflow parser and the settings apply refuse duplicates; a merge can duplicate settings.yml keys
+ *    elsewhere                      -> a duplicate can be deliberate (a parser fixture, a vendored config) */
 function isStrictYaml(rel: string): boolean {
   return rel === ".repo-platform.yml" || rel.startsWith(".github/");
 }
 
-/** Every .yml/.yaml file parses. Duplicate mapping keys do not count as
- *  parsing (the last value silently wins at consumption time); a
- *  multi-document stream is an error in the strict set, whose consumers
- *  read one mapping and would silently ignore the rest. */
+/** Duplicate mapping keys do not count as parsing: the last value silently wins at consumption time. */
 export function checkYaml(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const rel of ctx.files) {

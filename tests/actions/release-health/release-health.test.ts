@@ -1,10 +1,3 @@
-/**
- * Unit tests for the release-health action: config parsing, each gate, the
- * override resolution in both modes, and the end-to-end outcome through an
- * injected fake gh runner. The real gh calls are not tested here (they need
- * a live GitHub).
- */
-
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,36 +19,24 @@ import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 
-/**
- * A recording gh runner: captures every command and answers issue-list,
- * dependabot-alert, commit-pulls, and pr-view queries from the fixture.
- * Like the real CI environment (the fleet gate job runs with no checkout),
- * it refuses any call that does not name the repository explicitly.
- */
 interface Fixture {
-  /** Open issue numbers per label. */
   issues?: Record<string, number[]>;
-  /** Open Dependabot alert numbers (returned for any severity query). */
   alerts?: number[];
-  /** Error message thrown by the alerts endpoint instead of answering. */
   alertsError?: string;
-  /** PRs returned by the commit->pulls lookup. */
   commitPulls?: Array<{
     number: number;
     head: { ref: string };
     labels: Array<{ name: string }>;
     merged_at?: string | null;
   }>;
-  /** Labels returned by `gh pr view`; undefined makes pr view fail. */
   prViewLabels?: string[];
 }
 
 const REPO = "o/r";
 
+// The fleet gate job runs with no checkout, so gh cannot infer the repository: every call must name it.
 function assertNamesRepo(args: string[]): void {
   if (args[0] === "api") {
-    // The endpoint path is the first non-flag argument after "api"
-    // (flags like --paginate may precede it).
     const path = args.slice(1).find((arg) => !arg.startsWith("--"));
     if (!path?.startsWith(`repos/${REPO}/`)) {
       throw new Error(`gh api path does not name the repo: ${args.join(" ")}`);
@@ -132,7 +113,6 @@ function releaseConfig(overrides: Partial<Config> = {}): Config {
   return { ...prConfig(overrides), context: { mode: "release", sha: "abc123" } };
 }
 
-/** The exact gh commands the action issues, for whole-transcript pins. */
 const PR_VIEW_CALL = ["pr", "view", "12", "--repo", REPO, "--json", "labels"];
 const COMMIT_PULLS_CALL = [
   "api",
@@ -334,8 +314,6 @@ describe("issueGate", () => {
     const { run, calls } = fakeGh({ issues: { "release-blocker": open } });
     const outcome = await issueGate(run, REPO, "blocker", "release-blocker", "close them");
     expect(outcome).toEqual(expected);
-    // One fixed command, naming the repo explicitly (no checkout to infer it
-    // from) and capped at gh's list limit.
     expect(calls).toEqual([issueListCall("release-blocker")]);
   });
 });
@@ -738,7 +716,6 @@ describe("runHealthCheck", () => {
     expect(lines).toEqual([
       "::notice::release health: abc123 is not a release-PR merge; nothing to gate",
     ]);
-    // No gate was queried: the lookup is the only gh call.
     expect(calls).toEqual([COMMIT_PULLS_CALL]);
   });
 

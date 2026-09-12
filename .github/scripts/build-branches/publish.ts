@@ -1,17 +1,6 @@
 #!/usr/bin/env bun
-// Composes and publishes the `build` branch (the model, the flow, and the
-// residuals: docs/build-provenance.md). One invoker, post-green.yml's
-// publish-build job: SOURCE_SHA is the judged commit on the call, the sha
-// input on a dispatch; both compose here from that commit's own script.
-//
-// Invariants this file owns: the branch is an orphan, append-only chain (a
-// build commit never parents a main commit); a publish commits only on a
-// content change, stamp recovery being the one tree-identical exception;
-// newest-green wins (a stale source never rolls the tip back), with the plain
-// push as the compare-and-swap; only green main history is ever stamped.
-//
-// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
-// SOURCE_SHA.
+// One invoker, post-green.yml's publish-build job: SOURCE_SHA is the judged commit on the call, the sha input on a dispatch.
+// The model, the flow, and the residuals: docs/build-provenance.md.
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -50,12 +39,8 @@ function isAncestor(ancestor: string, descendant: string): boolean {
   return capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]).exitCode === 0;
 }
 
-/** Whether a ref exists on origin, distinguishing ABSENT (git ls-remote
- * --exit-code returns 2) from an OPERATIONAL failure (any other non-zero:
- * a network blip, an auth error). A blip must never read as "branch
- * absent" - that would send the publisher down the orphan seed path over
- * a live branch and mint a `build` history disconnected from the fleet's
- * recorded _commit ancestry. */
+/** ls-remote --exit-code returns 2 for an absent ref; any other failure is a blip, which must never read as "absent": the orphan seed
+ * path would then mint a build history disconnected from the live branch. */
 function refExistsOnOrigin(ref: string): boolean {
   const probe = capture(["git", "ls-remote", "--exit-code", "origin", ref]);
   if (probe.exitCode === 0) return true;
@@ -65,14 +50,11 @@ function refExistsOnOrigin(ref: string): boolean {
   );
 }
 
-/** Newest-green-wins: the reason publishing `candidateSource` onto a tip
- * stamped `tipSource` would ROLL THE BRANCH BACK, or "" when publishing
- * may proceed. An empty or unresolvable tip stamp is NOT stale (the
- * stamp-recovery lane owns damaged stamps), an equal source is NOT stale
- * (a replay proceeds to the tree diff, which publishes nothing when
- * nothing changed and republishes on drift), and a DIVERGED source is
- * not stale either (a main history rewrite; the provenance machinery
- * reports it). */
+/** Newest-green-wins: publishing onto a tip stamped with a descendant of `candidateSource` would roll the branch back.
+ * Three cases are NOT stale, each owned elsewhere:
+ *   empty or unresolvable tip stamp -> the stamp-recovery lane owns damaged stamps
+ *   equal source                    -> a replay proceeds to the tree diff and the no-change skip's stamp check
+ *   diverged source                 -> a main history rewrite; the provenance machinery reports it */
 function staleReason(candidateSource: string, tipSource: string): string {
   if (tipSource === "" || tipSource === candidateSource) return "";
   const bothResolve =
@@ -87,10 +69,6 @@ function staleReason(candidateSource: string, tipSource: string): string {
   return "";
 }
 
-/** Whether `dir` is a real actions/ directory holding at least one
- * <name>/action.yml - the unified-tree shape the guard in publish()
- * requires. A mere path named actions (a file, a dangling entry) does
- * not count. */
 function hasActionManifest(dir: string): boolean {
   let stat: ReturnType<typeof lstatSync>;
   try {
@@ -104,13 +82,7 @@ function hasActionManifest(dir: string): boolean {
   );
 }
 
-/** Composes the tree for `sourceSha` and, when it CHANGED (or the tip's
- * stamp needs recovery), chains a stamped commit onto the tip. Two skips
- * return early: stale (a newer publisher already delivered; newest-green
- * wins, decided BEFORE the compose so a stale run costs nothing) and
- * no-change-with-healthy-stamp (the tip already IS this source's tree).
- * The seed arm (a missing branch) never hits the no-change skip: that skip
- * needs an existing tip, and the seed stages the whole tree. */
+/** The stale skip runs before the compose, so a stale run costs nothing. */
 function publish(sourceSha: string): void {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   const scratch = scratchWorktrees();

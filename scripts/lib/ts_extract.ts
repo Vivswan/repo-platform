@@ -1,18 +1,10 @@
-// AST-based extraction over TypeScript SOURCES for the SSOT rules: every
-// fact a rule pulls out of a .ts file (a pinned const's value, an argv
-// array's elements, a template-literal URL shape, a type or property the
-// wiring must carry) is read from the parsed syntax tree, never from a
-// regex over the raw text - so a look-alike in a comment, a string, or a
-// template can neither satisfy an anchor nor hide the real declaration.
-// Parsing only, no type checker: ts-morph is repo-side tooling (a root
-// devDependency) and must never reach actions/ or the composed build.
+// Facts are read from the syntax tree, never a regex over the text,
+// so a look-alike in a comment, a string, or a template can neither satisfy an anchor nor hide the real declaration.
+// Parsing only, no type checker: ts-morph is repo-side tooling (a root devDependency) and must never reach actions/ or the composed build.
 //
-// Error discipline mirrors check_ssot's split between mustMatch and
-// matchAll/includes: the single-fact anchors (the const and argv-run
-// readers) THROW naming the file and the fact when the anchor is lost,
-// while the presence helpers (templateCarries, the type/property probes,
-// moduleSpecifiers) return empty or false and the RULE consuming them
-// owns its anchor-lost throw - exactly where the emptiness checks live.
+// When an anchor is lost:
+//   constStringValue, constNumberValue, constRegexSource        -> throw naming the file and the fact
+//   templateCarries, the type/property probes, moduleSpecifiers -> empty or false; the calling rule owns its anchor-lost throw
 
 import { type Expression, Node, Project, type SourceFile, SyntaxKind } from "ts-morph";
 
@@ -22,13 +14,9 @@ const project = new Project({ useInMemoryFileSystem: true });
 const parsedByText = new Map<string, SourceFile>();
 let serial = 0;
 
-/** The parsed source file for `source`, cached by content, ONLY when the
- *  parser recovered nothing: extraction over a recovered tree is unauditable
- *  (a truncated declaration can read as a benign shape), so any syntax
- *  diagnostic throws here, at the one entry every extractor parses through;
- *  callers needing a softer or better-located failure check syntaxErrorCount
- *  first. Read-only by contract: the cache hands the SAME tree to every
- *  caller, so mutating it would corrupt later reads of the same text. */
+/** A truncated declaration in a recovered tree can read as a benign shape, so any syntax diagnostic throws here;
+ *  a caller wanting a softer or better-located failure checks syntaxErrorCount first.
+ *  Read-only by contract: the cache hands the same tree to every caller, so mutating it would corrupt later reads of the same text. */
 export function parseTs(source: string): SourceFile {
   const errors = syntaxErrorCount(source);
   if (errors > 0) {
@@ -51,9 +39,6 @@ function anchorLost(where: string, what: string, detail: string): never {
   throw new Error(`${where}: anchor for ${what} not found (${detail})`);
 }
 
-/** Syntactic (parse-level) diagnostics count for `source` - the check
- *  parseTs enforces, exported for callers that name their own file or
- *  fail soft on unauditable text. */
 export function syntaxErrorCount(source: string): number {
   const compilerNode = parseAny(source).compilerNode as {
     parseDiagnostics?: readonly unknown[];
@@ -61,10 +46,6 @@ export function syntaxErrorCount(source: string): number {
   return compilerNode.parseDiagnostics?.length ?? 0;
 }
 
-/** An expression with decorative wrappers removed - parentheses, the TS
- *  non-null `!`, and the type-only wrappers (`as`, `satisfies`, angle
- *  assertions), none of which change what runs - so a re-punctuated or
- *  type-dressed spelling reads as its subject. */
 export function unwrapExpression(expression: Expression): Expression {
   let node = expression;
   while (
@@ -79,9 +60,6 @@ export function unwrapExpression(expression: Expression): Expression {
   return node;
 }
 
-/** The root identifier of an access/call chain (`Bun.foo().bar` -> Bun),
- *  wrappers unwrapped at every hop; null when the chain bottoms out on
- *  anything but an identifier. */
 export function rootIdentifier(expression: Expression): string | null {
   let node = unwrapExpression(expression);
   while (
@@ -97,18 +75,12 @@ export function rootIdentifier(expression: Expression): string | null {
 interface ConstAnchor {
   where: string;
   what: string;
-  /** Require the `export` keyword on the declaration (the pinned homes
-   *  where being exported IS part of the fact, e.g. CHECK_NAME). */
+  /** Set where being exported is part of the pinned fact (CHECK_NAME). */
   exported?: boolean;
 }
 
-/** The single top-level `const <name> = <initializer>` declaration.
- *  Top-level only (a local shadow in some function is not the pinned
- *  declaration), exactly one, `const` kind, sole declarator of its
- *  statement, never ambient (`declare const` carries no initializer
- *  semantics), and the name matched on its RAW spelling (a unicode
- *  escape cooking to the pinned name is a decoy, not the declaration).
- *  Anything else is a lost anchor. */
+/** Two of the filters refuse decoys the code cannot explain by itself: a local shadow in some function
+ *  is not the pinned declaration, and `declare const` carries no initializer semantics. */
 function topLevelConst(source: string, name: string, anchor: ConstAnchor) {
   const matches = parseTs(source)
     .getVariableStatements()
@@ -137,9 +109,7 @@ function topLevelConst(source: string, name: string, anchor: ConstAnchor) {
   return matches[0];
 }
 
-/** The string value of a top-level const pinned to a plain string
- *  literal; a concatenation, template, or any other initializer shape is
- *  a lost anchor (the pin must stay a value a reader sees whole). */
+/** Only a plain literal counts: the pin must stay a value a reader sees whole. */
 export function constStringValue(source: string, name: string, anchor: ConstAnchor): string {
   const initializer = topLevelConst(source, name, anchor).getInitializer();
   if (initializer === undefined || !Node.isStringLiteral(initializer)) {
@@ -148,8 +118,6 @@ export function constStringValue(source: string, name: string, anchor: ConstAnch
   return initializer.getLiteralValue();
 }
 
-/** The numeric value of a top-level const pinned to a numeric literal
- *  (separator spellings like 60_000 included). */
 export function constNumberValue(source: string, name: string, anchor: ConstAnchor): number {
   const initializer = topLevelConst(source, name, anchor).getInitializer();
   if (initializer === undefined || !Node.isNumericLiteral(initializer)) {
@@ -158,10 +126,7 @@ export function constNumberValue(source: string, name: string, anchor: ConstAnch
   return Number(initializer.getText().replaceAll("_", ""));
 }
 
-/** The pattern body of a top-level const pinned to a flagless regex
- *  literal (the text between the slashes - the shape the coupled copies
- *  quote); flags would make the quoted body an incomplete statement of
- *  the regex, so they are a lost anchor. */
+/** Flags would make the quoted body an incomplete statement of the regex, so they are a lost anchor. */
 export function constRegexSource(source: string, name: string, anchor: ConstAnchor): string {
   const initializer = topLevelConst(source, name, anchor).getInitializer();
   if (initializer === undefined || !Node.isRegularExpressionLiteral(initializer)) {
@@ -170,7 +135,6 @@ export function constRegexSource(source: string, name: string, anchor: ConstAnch
   return regexBody(initializer.getText(), anchor, `const ${name}`);
 }
 
-/** The body between a regex literal's slashes; flags are a lost anchor. */
 function regexBody(text: string, anchor: ConstAnchor, subject: string): string {
   const close = text.lastIndexOf("/");
   if (!text.startsWith("/") || close <= 0) {
@@ -182,14 +146,10 @@ function regexBody(text: string, anchor: ConstAnchor, subject: string): string {
   return text.slice(1, close);
 }
 
-/** Whether any TEMPLATE literal in `source` carries `needle` in its RAW
- *  spelling, reconstructed token by token with interpolations contributing
- *  raw text only when they are plain IDENTIFIERS (the only shape the pinned
- *  needles name); anything else contributes an unmatchable placeholder, so
- *  no string or nested template smuggling the needle's characters can
- *  satisfy a needle whose real wiring is gone. Raw source slices, never
- *  getText(): the compiler cooks unicode escapes, which would let an
- *  escape-spelled identifier cook into the pinned one. */
+/** Raw source slices, never getText(): the compiler cooks unicode escapes, which would let an escape-spelled identifier cook into the pinned one.
+ *
+ *  ${identifier}     -> its raw text (the only interpolation shape the pinned needles name)
+ *  any other ${...}  -> an unmatchable placeholder, so no smuggled string or nested template satisfies a needle whose wiring is gone */
 export function templateCarries(source: string, needle: string): boolean {
   const raw = (node: Node) => source.slice(node.getStart(), node.getEnd());
   const interpolated = (node: Expression) => (Node.isIdentifier(node) ? raw(node) : "\u0000");
@@ -213,8 +173,6 @@ export function templateCarries(source: string, needle: string): boolean {
     });
 }
 
-/** Whether any intersection type in `source` carries a member spelled
- *  exactly `name` - the `... & RedactionState` wiring shape. */
 export function intersectionCarriesType(source: string, name: string): boolean {
   return parseTs(source)
     .forEachDescendantAsArray()
@@ -225,8 +183,6 @@ export function intersectionCarriesType(source: string, name: string): boolean {
     );
 }
 
-/** Whether any object literal in `source` carries the property
- *  `key: <valueText>` (initializer text compared exactly). */
 export function propertyAssignmentCarries(source: string, key: string, valueText: string): boolean {
   return parseTs(source)
     .forEachDescendantAsArray()
@@ -238,9 +194,6 @@ export function propertyAssignmentCarries(source: string, key: string, valueText
     );
 }
 
-/** Whether any call in `source` has callee text `callee` and a plain
- *  string literal `firstArg` as its first argument. A call in a comment
- *  or inside a string is not a call. */
 export function callCarriesLiteral(source: string, callee: string, firstArg: string): boolean {
   return parseTs(source)
     .getDescendantsOfKind(SyntaxKind.CallExpression)
@@ -253,11 +206,6 @@ export function callCarriesLiteral(source: string, callee: string, firstArg: str
     });
 }
 
-/** Every module specifier `source` names: static imports (type-only
- *  included), re-exports, `import x = require()`, `import("...")` type
- *  nodes, and `import()` / `require()` calls. `nonLiteral` names the
- *  shapes whose specifier is not a string literal, so a caller can fail
- *  closed on them. */
 export function moduleSpecifiers(source: string): { literal: string[]; nonLiteral: string[] } {
   const file = parseTs(source);
   const literalOf = (node: Node | undefined): string | null =>

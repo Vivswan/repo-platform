@@ -1,6 +1,4 @@
-// Starters are written once: an existing file or link, whatever it holds,
-// is the repository's own from then on, and its source is rendered only
-// when the file is created (a present starter needs no placeholder values).
+// `content` is rendered only on creation: a present starter is the repository's own and must not fail on missing placeholder values.
 
 import { probe, writeFile } from "./target_files.ts";
 import type { WriteOutcome } from "./write_managed.ts";

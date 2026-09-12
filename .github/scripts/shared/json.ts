@@ -1,20 +1,11 @@
-// Boundary validation for external JSON (gh api responses, files handed
-// between jobs): a malformed payload fails right here with a shape
-// diagnosis instead of a confusing TypeError later. The diagnosis names
-// paths and issue codes only - never received values, which can be
-// target-derived (hide-details discipline).
-//
-// Two forms, one implementation: the throwing forms are for callers that
-// own their failure containment (a fleet lane's malformed verdict must
-// become that lane's failure row, never abort the whole run); the exiting
-// forms are the default for scripts where any malformed payload is fatal.
+// The diagnosis names paths and issue codes, never received values: a payload can be target-derived, and the message lands in a public log.
+// The throwing forms exist for callers that contain their own failures
+// (a fleet lane's malformed verdict becomes that lane's failure row, not the run's abort).
 
 import type { ZodType } from "zod";
 
-/** The one error the throwing forms raise. exitOnThrow prints ONLY this
- * type, so an unexpected exception (a throwing zod transform, an fs
- * error) keeps its stack instead of masquerading as a payload diagnosis
- * - its message was not written under the value-free discipline. */
+/** exitOnThrow prints only this type: an unexpected exception's message was not written value-free,
+ * so it keeps its stack instead of masquerading as a payload diagnosis. */
 export class JsonShapeError extends Error {}
 
 export function parseWithThrow<T>(schema: ZodType<T>, data: unknown, label: string): T {
@@ -39,8 +30,6 @@ export function parseJsonThrow(text: string, label: string): unknown {
   }
 }
 
-/** Validate text that must first survive JSON.parse; both failure modes
- * throw with the value-free diagnostics above. */
 export function parseJsonWithThrow<T>(schema: ZodType<T>, text: string, label: string): T {
   return parseWithThrow(schema, parseJsonThrow(text, label), label);
 }
@@ -67,11 +56,8 @@ export function parseJsonWith<T>(schema: ZodType<T>, text: string, label: string
   return exitOnThrow(() => parseJsonWithThrow(schema, text, label));
 }
 
-/** True when any object in valid-JSON `text` declares the same key twice.
- * JSON.parse keeps only the LAST duplicate silently - a conflict-mangled
- * ownership manifest could reclassify an entry unseen. Keys compare
- * DECODED (JSON.parse's own collision, so escape variants are caught);
- * the caller must have JSON.parse'd `text`, so tokens are well-formed. */
+/** JSON.parse keeps only the LAST duplicate key silently, so a conflict-mangled ownership manifest could reclassify an entry unseen.
+ * Keys compare decoded, so escape variants collide as JSON.parse would; `text` must already have survived JSON.parse. */
 export function hasDuplicateJsonKeys(text: string): boolean {
   /** keys === null marks an array frame (its strings are never keys). */
   type Frame = { keys: Set<string> | null; expectKey: boolean };

@@ -1,12 +1,6 @@
 #!/usr/bin/env bun
-// Clones the target repository for a sync row with git's every line kept
-// off the public log: actions/checkout echoes git's diagnostics, and git
-// quotes target file text in some of them (a malformed .gitattributes
-// entry), so the clone runs here with both streams captured. The token
-// rides the clone URL alone and is stripped from the remote afterwards;
-// deliver.ts authenticates its own push.
-//
-// Env: TARGET (GITHUB_ENV), PAT, RUNNER_TEMP; TARGET_DIR (default target).
+// The clone runs here with both streams captured: actions/checkout echoes git's diagnostics, and git quotes target file text in some
+// of them (a malformed .gitattributes entry). The token is stripped from the remote afterwards; deliver.ts authenticates its own push.
 
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-// settings-repos.yml's green gate: the one fleet-wide settings writer applies only from a commit
-// with a green all-green check (shared/all_green.ts). A red tip halts the run on every trigger,
-// the nightly heal included - fix main, then the next nightly or a manual dispatch applies
-// (docs/settings.md).
 
 import {
   allGreenFailure,
@@ -20,12 +16,8 @@ export interface GreenWaitOptions {
   log?: (message: string) => void;
 }
 
-/** A wait bound from env: unset means the fallback, and anything that is
- *  not a non-negative number is refused - Number("junk") is NaN, every
- *  comparison against NaN is false, and a NaN deadline would make the
- *  wait unbounded up to the job's own timeout. Throws rather than
- *  exiting: waitForGreen is a library function, and the CLI wrapper owns
- *  the process exit. */
+/** Number("junk") is NaN, every comparison against NaN is false, and a NaN deadline would make the wait unbounded up to the job's
+ *  own timeout. Throws rather than exiting: the CLI wrapper owns the process exit. */
 function boundedMs(name: string, fallback: number): number {
   const raw = env(name, "");
   if (raw === "") return fallback;
@@ -36,11 +28,7 @@ function boundedMs(name: string, fallback: number): number {
   return value;
 }
 
-/** Null when a completed, successful all-green verdict exists at `sha`
- *  (waiting out an in-flight CI run and its verdict up to the deadline),
- *  else the reason the commit cannot be treated as green. The predicate's
- *  own internal verdict poll is zeroed: THIS loop owns all waiting, on
- *  its own clock and injections. */
+/** allGreenFailure's own verdict poll is zeroed: THIS loop owns all waiting, on its own clock and injections. */
 export function waitForGreen(
   repository: string,
   sha: string,
@@ -74,12 +62,8 @@ function main(): void {
   if (!/^[0-9a-f]{40}$/.test(sha)) {
     fail(`GITHUB_SHA is not a full commit sha (got '${sha}')`);
   }
-  // The publisher's ref guard (build-branches/publish.ts), tightened to a
-  // required read: a workflow_dispatch can aim at any branch, and a
-  // dispatched CI run on that branch counts as a direct event - so this
-  // is the one guard between an unmerged branch's layer files and the
-  // fleet, and an unset GITHUB_REF (never the case on a real runner) must
-  // refuse rather than skip it.
+  // A workflow_dispatch can aim at any branch, so this is the one guard between an unmerged branch's layer files and the fleet;
+  // an unset GITHUB_REF (never the case on a real runner) must refuse rather than skip it.
   const ref = requireEnv("GITHUB_REF");
   if (ref !== "refs/heads/main") {
     fail(
@@ -87,10 +71,8 @@ function main(): void {
         "alone. Dispatch this workflow on the default branch.",
     );
   }
-  // tipRefusal throws for a malformed wait bound (boundedMs); the exit
-  // belongs to this CLI wrapper, not the library function. SOURCE_SHA set
-  // is the called path; empty is a schedule or dispatch run, whose inputs
-  // context has no sha.
+  // SOURCE_SHA set is the called path; a schedule or dispatch run has no sha in its inputs context. The catch owns the exit for
+  // boundedMs's throw.
   const sourceSha = env("SOURCE_SHA", "");
   let refusal: string | null;
   try {
@@ -103,9 +85,8 @@ function main(): void {
   console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
 }
 
-/** Null when the tip may be applied from, else the halt. Every trigger
- *  halts alike on a red tip: the nightly heal never applies from an older
- *  green commit, so a red nightly is the signal that drift goes unhealed. */
+/** Every trigger halts alike on a red tip: the nightly heal never applies from an older green commit, so a red nightly is the signal
+ *  that drift goes unhealed. */
 export function tipRefusal(
   repository: string,
   sha: string,
@@ -122,9 +103,7 @@ export function tipRefusal(
   );
 }
 
-/** The called path: `sourceSha` must be the run's own `sha` (the checkouts
- *  read GITHUB_SHA) and carry a completed all-green success, read through
- *  the publisher's bounded poll - the Checks API can trail the gate job. */
+/** The Checks API can trail the gate job, so the read goes through the publisher's bounded poll. */
 export function calledRefusal(
   repository: string,
   sha: string,

@@ -1,11 +1,6 @@
 #!/usr/bin/env bun
-// The validate-managed-files job's reporting and the ONE reader of the
-// verdict: the `integrity` output, the step summary, and the comment body
-// that the sticky steps in action.yml post come from the same parsed value.
-// Never fails the job; the caller re-raises `integrity` last.
-//
-// Env: GITHUB_STEP_SUMMARY, GITHUB_OUTPUT, COMMENT_FILE, VERDICT,
-// CLEAR_OUTCOME, RUN_URL.
+// The ONE reader of the verdict: the `integrity` output, the step summary, and the sticky comment body come from the
+// same parsed value. Never fails the job; the caller re-raises `integrity` last.
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { env, requireEnv } from "../../shared/action_runtime.ts";
@@ -28,8 +23,7 @@ const runUrl = requireEnv("RUN_URL");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 const commentFile = requireEnv("COMMENT_FILE");
 
-/** The findings' remedy: the writer replaces a managed file whole, and
- *  holds a path whose kind changed (write_link.ts) rather than replace it. */
+/** The kind-change hold is write_link.ts's rule. */
 const REMEDY =
   "Managed content changed outside a sync. Restore the file from git history, or re-run the sync: it rewrites managed files whole but holds a path whose kind changed (a file in a link's place) for this repository to restore. This FAILS the check.";
 

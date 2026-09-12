@@ -7,10 +7,6 @@
 
 import { type Hue, MODE_TOKENS, type ScreenMode, SHARED_TOKENS } from "./tokens.ts";
 
-/** Mermaid's `themeVariables` for its `base` theme: the diagram ground is
- *  the code ground (the mount's own), nodes and actors sit on the panel
- *  ground with the hue as their border, notes and labels on the raised
- *  ground, lines in the secondary ink, every text in the primary ink. */
 export function mermaidThemeVariables(mode: ScreenMode, hue: Hue) {
   const ground = MODE_TOKENS.grounds["--vp-c-bg-code"][mode];
   const panel = MODE_TOKENS.grounds["--vp-c-bg-soft"][mode];

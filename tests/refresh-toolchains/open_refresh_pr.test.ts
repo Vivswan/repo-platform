@@ -1,8 +1,3 @@
-// open_refresh_pr.ts: composes the toolchain refresh PR body and hands it
-// to open_automation_pr.ts over its env. A stub bun records the argv and
-// the two env values it was handed, so the banner-or-not body and the
-// title-as-commit-message are asserted whole.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,8 +43,6 @@ function run(env: Record<string, string | undefined>) {
 }
 
 describe("open_refresh_pr.ts", () => {
-  // Whole outcome per row: exactly one opener call, the body it was
-  // handed, and the title as the commit message.
   test.each([
     {
       reason: "a minor refresh hands the fixed summary",

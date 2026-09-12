@@ -1,8 +1,3 @@
-// Mirrors: the pattern grammar, the byte copies, what is replaced for
-// review (other content, a directory, a file where a directory must be),
-// and what fails the run (an impossible declaration, a symbolic link, a
-// held source, a glob landing on a nested or contested path).
-
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
@@ -44,7 +39,6 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
-/** What files.yml claims: every source is written, plus the manifest. */
 function owned(
   sources: string[],
   writes: string[] = [],
@@ -71,7 +65,6 @@ const failure = (source: string, target: string, problem: string): MirrorProblem
   problem,
 });
 
-/** The failures a run throws, or null when it completes. */
 function failuresOf(run: () => unknown): MirrorProblem[] | null {
   try {
     run();
@@ -94,11 +87,6 @@ describe("expandPattern", () => {
     symlinkSync("c.txt", join(root, "skills/l.txt"));
     symlinkSync("loop", join(root, "skills/loop"));
     symlinkSync("../other", join(root, "skills/a/sub"));
-    // A symlink matches a final segment; in a directory segment one that
-    // resolves to a directory or to nothing (a loop) makes a linked prefix
-    // that the rest of the pattern rides along literally, never listed
-    // through, while a link to a file is skipped like a file. A literal
-    // segment that is a link (skills/a/sub) links the prefix the same way.
     expect(expandPattern(root, "skills/*/LICENSE.md")).toEqual([
       "skills/a/LICENSE.md",
       "skills/b/LICENSE.md",
@@ -359,9 +347,6 @@ describe("applyMirrors", () => {
       "skills/long",
       "skills/loop",
     ];
-    // The star after a linked directory is never expanded (outside/x.md is
-    // not listed): the rest of the pattern rides along and fails by its
-    // linked ancestor. A glob never creates a directory.
     expect(failures).toEqual([
       failure("B.md", "nowhere/*/x", "the pattern matches nothing"),
       failure(

@@ -18,9 +18,7 @@ function run(snippet: string): { exitCode: number; stdout: string } {
 }
 
 describe("parseFlags", () => {
-  // Happy paths pin the WHOLE returned record (toStrictEqual: an
-  // undefined-valued key is not an absent key). Rows are [reason, argv,
-  // required, optional, expected record].
+  // toStrictEqual, so an undefined-valued key is not read as an absent key.
   const parses: [string, string[], string[], string[], Record<string, string>][] = [
     [
       "required and optional flags land as a typed record",
@@ -50,8 +48,6 @@ describe("parseFlags", () => {
     expect(parseFlags(argv, required, optional)).toStrictEqual(expected);
   });
 
-  // Failures exit 1 with ONE ::error:: line on stdout and nothing else.
-  // Rows are [reason, snippet, expected stdout].
   const failures: [string, string, string][] = [
     [
       "an inherited object key does not satisfy a required flag",

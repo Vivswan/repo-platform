@@ -1,18 +1,7 @@
-// The actions/shared/ zone contract: it ships on the build branch and its
-// code runs where nothing was installed (the composite actions before
-// their own installs), so every module there must resolve with ZERO
-// installation.
-// This scan is what keeps the zone shippable: node builtins (node:-prefixed
-// so the intent is explicit) and zone-internal relative imports only - a
-// bare specifier ("zod", even bare "fs"), a parent-relative escape into an
-// action's own sources, or a dynamic import this scan cannot read would all
-// break silently only once a rendered repository runs the hook.
-//
-// The scan is the transpiler's, not a regex: Bun.Transpiler.scanImports
-// parses the source, so comment-interrupted forms (`from/* */"zod"`) and
-// literal dynamic import/require calls are all seen. Non-literal dynamic
-// forms, which no static scan can resolve, are banned outright on the
-// comment-stripped transform output.
+// actions/shared ships on the build branch and runs before any install, so every module there must resolve with zero installation.
+// The scan is Bun.Transpiler's, not a regex: a regex misses `from/* */"zod"`.
+//   bare "zod"  -> breaks only once a rendered repository runs the hook
+//   bare "fs"   -> resolves, but is refused so the builtin intent is explicit (node:fs)
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -23,10 +12,8 @@ const SHARED = resolve(import.meta.dir, "..", "..", "actions", "shared");
 
 const transpiler = new Bun.Transpiler({ loader: "ts" });
 
-/** A node: specifier that actually resolves: the runtime's own verdict
- *  (node:module's isBuiltin), so "node:not-real" fails here instead of at
- *  hook time - and prefix-only builtins like "node:test", which the
- *  builtinModules ARRAY omits, still count. */
+/** isBuiltin, not the builtinModules array: the array omits prefix-only builtins like "node:test".
+ *  "node:not-real" must fail here rather than at hook time. */
 function nodeBuiltin(spec: string): boolean {
   return spec.startsWith("node:") && isBuiltin(spec);
 }
@@ -50,12 +37,8 @@ describe("actions/shared stays dependency-free", () => {
     // The transpiler rejects shebang lines; blank it out (keeping offsets)
     // rather than slicing, so nothing else moves.
     const source = readFileSync(join(SHARED, name), "utf-8").replace(/^#![^\n]*/, "");
-    // Dynamic import/require in ANY form is banned: the literal ones are
-    // pointless next to static imports, and a non-literal one cannot be
-    // statically verified against the zone contract. Checked on the
-    // transform output so a comment inside the call cannot hide it (the
-    // transform also erases type-only imports, which cost nothing at run
-    // time and are judged by the typecheck instead).
+    // A non-literal dynamic import cannot be verified against the zone contract, so dynamic forms are banned outright.
+    // Checked on the transform output: a comment inside the call cannot hide it, and type-only imports (erased, judged by the typecheck) drop out.
     const stripped = transpiler.transformSync(source);
     expect(stripped).not.toMatch(/\brequire\s*\(/);
     expect(stripped).not.toMatch(/\bimport\s*\(/);
@@ -67,8 +50,6 @@ describe("actions/shared stays dependency-free", () => {
   });
 
   test("the builtin predicate is the runtime's own verdict (controls)", () => {
-    // Accepts prefix-only builtins the builtinModules array omits, rejects
-    // fakes and unprefixed builtins (the zone spells the prefix out).
     expect(nodeBuiltin("node:fs")).toBe(true);
     expect(nodeBuiltin("node:test")).toBe(true);
     expect(nodeBuiltin("node:not-real")).toBe(false);

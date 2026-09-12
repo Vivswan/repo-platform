@@ -30,8 +30,7 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # issues: write lets the fuzz-issue action file and close the tracking
-    # issue. The action assigns the owner at creation, so nothing else runs.
+    # issues: write is for the fuzz-issue action; an issue it creates fires no issues:opened event, so it assigns the owner itself.
     permissions:
       contents: read
       issues: write
@@ -60,12 +59,9 @@ jobs:
             SEED="$RANDOM$RANDOM"
           fi
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
-          # Replace with your fuzzer. Contract (docs/fuzzer.md): run
-          # seeded with $SEED for $ITERATIONS iterations; on failure write
-          # one .fuzz-failures/<name>/report.md per crash - first line a
-          # `# title` heading, body carrying the exact replay command in a
-          # fenced block. A green no-op until then: an uncustomized
-          # starter must not file issues.
+          # Replace with your fuzzer: seeded with $SEED for $ITERATIONS iterations, writing one
+          # .fuzz-failures/<name>/report.md per crash (the contract: docs/fuzzer.md).
+          # A green no-op until then: an uncustomized starter must not file issues.
           echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/fuzzer.md)"
 
       - name: Upload failure artifacts

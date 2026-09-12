@@ -1,4 +1,3 @@
-// The trivy action's contract. A loosened flag is a deliberate edit here.
 // The nightly inputs are pinned to report.ts's constants: the replay command must see what the scan saw.
 
 import { describe, expect, test } from "bun:test";

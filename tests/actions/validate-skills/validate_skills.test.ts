@@ -1,8 +1,3 @@
-// Tests for the validate-skills action: the frontmatter/JSON loaders (edge
-// cases adapted from the reference skills repository's own suite), the
-// plugin-manifest loader, the per-skill contract, and the structure mode
-// end-to-end over temporary fixture trees.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,7 +28,6 @@ function tempFile(content: string, name = "SKILL.md"): string {
   return path;
 }
 
-/** A fixture repo with one valid skill and the starter-shaped manifests. */
 function fixtureRepo(options: { skills?: string[]; skillNames?: string[] } = {}): string {
   const root = tempDir();
   const skillNames = options.skillNames ?? ["good-skill"];
@@ -331,7 +325,6 @@ describe("validateStructure", () => {
       "---\nname: a-skill\ndescription: d\n---\n",
     );
     expect(validateStructure(root, "lib/skills", ".claude-plugin/plugin.json")).toEqual([]);
-    // The same manifest against the default dir fails containment.
     expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
       ".claude-plugin/plugin.json: skill path ./lib/skills/a-skill must be a direct child of skills/",
     ]);
@@ -464,7 +457,6 @@ describe("symlink policy", () => {
     const errors = validateStructure(root, "lib/skills", ".claude-plugin/plugin.json");
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/lib\/skills: lib is a symlink \(dangling or diverted\)/);
-    // The genuinely-missing chain still passes as the starter state.
     expect(validateStructure(root, "absent/skills", ".claude-plugin/plugin.json")).toEqual([]);
   });
 

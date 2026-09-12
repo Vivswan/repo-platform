@@ -1,6 +1,4 @@
-// The all-green gate's judgment, run as the REAL run block of
-// actions/all-green/action.yml (never a copy, so nothing here can drift
-// from what ships) under the runner's bash, one needs payload per case.
+// The judge runs as the real run block of actions/all-green/action.yml, never a copy, so nothing here can drift from what ships.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -21,7 +19,6 @@ if (judge === undefined || typeof judge.run !== "string") {
 }
 const run = judge.run;
 
-/** The judge's own environment: NEEDS only, PATH for bash and jq. */
 const judged = (needs: string) =>
   boundedSpawnSync([...RUNNER_BASH, run], { env: { PATH: process.env.PATH, NEEDS: needs } });
 
@@ -44,9 +41,7 @@ describe("the all-green judgment", () => {
     });
   });
 
-  // Whole stdout per scenario: the census in needs order, then the one
-  // verdict line; an empty stderr proves the exit code is the verdict's
-  // own and not an incidental crash on the way there.
+  // stdout, stderr, and the exit code are pinned together, so an incidental crash on the way to the verdict cannot pass as the verdict.
   test.each<{ name: string; results: Results; exitCode: number; verdict: string }>([
     {
       name: "every needed job succeeded",
@@ -101,11 +96,8 @@ describe("the all-green judgment", () => {
     ]);
   });
 
-  // The first jq crashes under errexit before any census line prints;
-  // only never-zero matters for the code (jq's own varies by version).
-  // The job-shaped ARRAY is the sharp case: to_entries walks arrays too
-  // (index-keyed), so without the explicit object check it would read as
-  // one green job.
+  // jq's exit code varies by version, so only never-zero is pinned.
+  // The job-shaped array is the sharp case: to_entries walks arrays too, so without the explicit object check it would read as one green job.
   test.each([
     { name: "malformed input", needs: "not json" },
     { name: "non-object input", needs: '["success"]' },

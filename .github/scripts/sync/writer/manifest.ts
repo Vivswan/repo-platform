@@ -1,9 +1,5 @@
-// The writer's record of what it last wrote: .github/repo-platform-manifest.json
-// in the shape actions/shared/manifest.ts already emits and parses (one
-// entry per line, sha256 of the whole file for managed, of the marker-bounded
-// region for split, of the link target for a symbolic link), so a repository
-// stamped by the previous pipeline reads as already-recorded. The manifest's own entry carries the build sha in
-// its `commit` slot and no hash (a self-hash would be circular).
+// The shape is actions/shared/manifest.ts's own, so its parser reads what this writer emits. The manifest's own entry carries the
+// build sha in its `commit` slot and no hash (a self-hash would be circular).
 
 import { createHash } from "node:crypto";
 import type { RegionKind } from "../../../../actions/plan/files_config.ts";
@@ -56,9 +52,6 @@ export function regionMarkers(kind: RegionKind): RegionMarkers {
   return kind === "hash" ? HASH_REGION_MARKERS : HTML_REGION_MARKERS;
 }
 
-/** The previous records: empty for a repository with no manifest yet, a
- *  problem string for one whose manifest cannot be trusted (the caller
- *  reports it and treats every file as unrecorded). */
 export function readRecords(target: string): { records: Records; problem: string | null } {
   const bytes = existingFile(target, MANIFEST_NAME);
   if (bytes === null) return { records: recordsOf(), problem: null };
@@ -70,8 +63,6 @@ export function readRecords(target: string): { records: Records; problem: string
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 
-/** The recorded sha256 for `path`, or null when the entry is missing, has
- *  no hash, or carries one the writer would never have written. */
 export function recordedHash(records: Records, path: string): string | null {
   const hash = records[path]?.hash;
   return typeof hash === "string" && HASH_RE.test(hash) ? hash : null;
@@ -86,7 +77,6 @@ const COMMENT =
   ".repo-platform.yml), link (a relative symbolic link; hash is sha256 of its target). This " +
   "file's own entry records the build commit that wrote the tree.";
 
-/** The manifest text for `records` plus the self entry, entries sorted by path. */
 export function renderManifest(records: Record<string, ManifestRecord>, build: string): string {
   const lines = Object.entries(records)
     .filter(([path]) => path !== MANIFEST_NAME)
