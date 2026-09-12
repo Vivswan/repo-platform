@@ -43,7 +43,7 @@ import type { Rule } from "./rule_roster.ts";
  *  takes its line here with it. */
 export const OWN_COPIES: Record<string, string> = {
   ".github/workflows/ci.yml":
-    "gates this working tree by local path; the fleet skeleton rides the published build (docs/all-green.md)",
+    "its gating jobs are this repository's own, with no fleet callers to hide behind (docs/all-green.md)",
   ".github/dependabot.yml":
     "one github-actions entry over every action package directory, grouped so the action-pins rule sees one PR; the fleet shape spells one directory",
   ".yamllint": "ignores files/, whose placeholder tokens are not YAML before substitution",

@@ -30,7 +30,6 @@ export const RULE_ROSTER = [
   "local-gates",
   "all-green-roster",
   "skeleton-gate",
-  "all-green-judge-substitutions",
   "fleet-ci-roster",
   "fleet-ci-plan-unconditional",
   "fleet-nightly-roster",

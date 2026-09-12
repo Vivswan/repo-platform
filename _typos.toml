@@ -8,3 +8,5 @@ extend-exclude = ["tests/actions/typos/typos_action.test.ts"]
 [default.extend-words]
 # Test fixtures spell cafe with an escaped e-acute (caf\xe9, Caf&eacute;).
 caf = "caf"
+# The gate's judge is re-actors/alls-green; the fleet's rendered ci.yml needs no entry, since its sha-pinned `uses:` token reads as an identifier.
+alls = "alls"
