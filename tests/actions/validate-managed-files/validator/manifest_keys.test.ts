@@ -14,21 +14,27 @@ describe("manifest keys are the repository paths the sync writes", () => {
     "(git history has the stamped original) or re-run the sync (dispatch sync-repos.yml in " +
     "repo-platform with repo=<owner>/<name>), which replaces platform files whole";
 
-  // Each key resolves to (or beside) a declared file while string-matching
-  // no declaration, so without the rule the class gate never sees it.
+  const STARTER = '{"class": "starter"}';
+  const MANAGED = `{"class": "managed", "hash": "${"0".repeat(64)}"}`;
+  // Every key breaks the path grammar; `./x` and `a//b` also resolve to the
+  // declared file while string-matching no declaration, so without the rule
+  // the class gate never saw them. The managed row's hash is never checked:
+  // parity skips a refused key, or the traversal key would be read from
+  // outside the repository and add a content finding.
   test.each([
-    [`./${CI}`, "carries an empty, '.', or '..' segment"],
-    [".github//workflows/ci.yml", "carries an empty, '.', or '..' segment"],
-    ["..", "carries an empty, '.', or '..' segment"],
-    [".github/workflows/ci.yml/", "carries an empty, '.', or '..' segment"],
-    [".github\\workflows\\ci.yml", "contains a backslash"],
+    [`./${CI}`, "carries an empty, '.', or '..' segment", STARTER],
+    [".github//workflows/ci.yml", "carries an empty, '.', or '..' segment", STARTER],
+    ["..", "carries an empty, '.', or '..' segment", STARTER],
+    [".github/workflows/ci.yml/", "carries an empty, '.', or '..' segment", STARTER],
+    [".github\\workflows\\ci.yml", "contains a backslash", STARTER],
+    ["../../../../etc/passwd", "carries an empty, '.', or '..' segment", MANAGED],
   ])(
-    "a respelled key beside a deleted canonical entry is one error naming the key: %s",
-    (key, problem) => {
+    "a refused key beside a deleted canonical entry is one error naming the key: %s",
+    (key, problem, record) => {
       const { [CI]: _canonical, ...rest } = stampedBaseline();
       const { exitCode, stderr } = runValidator({
         [CI]: "name: edited\non: [push]\njobs: {}\n",
-        [MANIFEST]: manifestOf({ ...rest, [key]: '{"class": "starter"}' }),
+        [MANIFEST]: manifestOf({ ...rest, [key]: record }),
       });
       expect(exitCode).toBe(1);
       expect(errors(stderr)).toEqual([keyError(key, problem)]);

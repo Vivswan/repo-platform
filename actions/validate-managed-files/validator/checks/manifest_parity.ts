@@ -11,6 +11,7 @@ import {
   strayFields,
 } from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
+import { pathProblem } from "../../../shared/repo_path.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 import { RESYNC } from "./manifest_shape.ts";
@@ -23,6 +24,9 @@ export function checkManifestParity(ctx: Context): Finding[] {
   if (ctx.mode === "self" || ctx.manifest.state !== "parsed") return [];
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
+    // manifest_shape reports a key outside the path grammar; parity never
+    // reads one (`../../../../etc/passwd` would be read from outside the root).
+    if (pathProblem(rel) !== null) continue;
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
     // The self entry's invariant comes before any class dispatch: a
     // corrupted class (say, starter) must not slip past it. Its commit slot
@@ -99,8 +103,9 @@ export function checkManifestParity(ctx: Context): Finding[] {
           `${where} is recorded as ${entry.class} but files.yml declares the path ` +
             `${declared} - the class decides what parity verifies, and the ` +
             "sync records the declared one; revert a hand edit (git history has the stamped " +
-            "original: the sync holds a drifted file whose record it cannot verify, never " +
-            "restamps it), merge the pending sync PR when the platform changed the path's class " +
+            "original: the sync judges a file under a stale class record as unrecorded, writes it " +
+            "by the declared class, and restamps it; only a write it must hold keeps the old record), merge the " +
+            "pending sync PR when the platform changed the path's class " +
             "since the last sync (a row that PR holds keeps the old record until it is resolved), " +
             "or, when this registration's module change flips it (a mirror target a newly " +
             "selected entry writes, say), land the edit that retires the old record first " +

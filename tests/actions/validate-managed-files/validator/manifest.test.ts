@@ -326,8 +326,9 @@ describe("the recorded class against files.yml", () => {
   const classError = (path: string, recorded: string, declared: string) =>
     `error: ${MANIFEST}: entry '${path}' is recorded as ${recorded} but files.yml declares ` +
     `the path ${declared} - the class decides what parity verifies, and the sync records the ` +
-    "declared one; revert a hand edit (git history has the stamped original: the sync holds a " +
-    "drifted file whose record it cannot verify, never restamps it), merge the pending sync PR " +
+    "declared one; revert a hand edit (git history has the stamped original: the sync judges a " +
+    "file under a stale class record as unrecorded, writes it by the declared class, and restamps it; only a " +
+    "write it must hold keeps the old record), merge the pending sync PR " +
     "when the platform changed the path's class since the last sync (a row that PR holds keeps " +
     "the old record until it is resolved), or, when this registration's module change flips it " +
     "(a mirror target a newly selected entry writes, say), land the edit that retires the old " +

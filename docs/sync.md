@@ -203,7 +203,7 @@ A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`,
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record or a record without a hash included | the record is stale, and the file is written as an unrecorded one under the new class: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one, `held` when a regular file sits where a `link` is declared or a symlink where a file is; the detail reads `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`, the write's own record replaces the stale one, and the PR holds once (a held row keeps the previous record, as every held row does) |
+| anything else, a `starter` record or a record without a hash included | the record is stale, and the file is written as an unrecorded one under the new class, with the detail `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`. Written: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one; the write's own record replaces the stale one and the PR holds once. Already the incoming content (a `split` region above a repository-owned tail, say): `unchanged` with the same detail, the record restamped, no hold. Held (a regular file where a `link` is declared, a symlink where a file is): the detail is the writer's refusal reason, the previous record is kept, and the path is held again next run |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
@@ -230,7 +230,7 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 Beyond the `retired` list:
 
 - A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted.
-- A sync's record always names a path some `files.yml` entry declares or retires, so a stale record at any other path was added by hand: it is retired the same way and, while a file sits at the path, noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
+- A stale record at a path that no `files.yml` entry declares or retires now (a hand edit, or an entry deleted without a `retired` row) is retired the same way and, while a file sits at the path, noted (`manifest record for <path> had no writer: ...`), which holds the PR for the Retired row's outcome.
 - A held or kept file and a held entry keep their records in the new manifest every run (a record with `hash: null` is carried as such), so the file is held again next time and never becomes an unrecorded orphan.
 - A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a hash that is neither null nor a sha256 digest or is missing where the class carries one, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) is never held: it is dropped with a note whichever list names its path. The path is unrecorded from then on: a selected entry or a declared mirror writes it as any unrecorded path, and anywhere else the file is the repository's own.
 - A `mirror` record no declaration reaches any more is dropped with a note too; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
@@ -267,10 +267,10 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 | Section | Content |
 | --- | --- |
 | header | Build, Modules, Visibility |
-| Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
+| Written | path, class, change, detail for every selected entry (detail is a held row's reason, or the stale-class explanation on a class-flip row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
-| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a mirror record no declaration reaches |
+| Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a stale record no `files.yml` entry declares or retires now, while a file sits at its path; a mirror record no declaration reaches |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 

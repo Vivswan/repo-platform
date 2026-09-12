@@ -64,8 +64,8 @@ const UNHASHED = "# unhashed notes\n";
 const HANDMADE = "# my own notes, recorded by hand\n";
 const LOCAL_DEPENDABOT = "version: 2\n# my own update schedule\n";
 const noWriterNote = (path: string) =>
-  `manifest record for \`${path}\` had no writer: no files.yml entry declares the path, so no sync ` +
-  "recorded it; it is retired as a stale record (the Retired row has the outcome)";
+  `manifest record for \`${path}\` had no writer: no files.yml entry declares or retires the path now; ` +
+  "it is retired as a stale record (the Retired row has the outcome)";
 const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
 // The repository's overlay: identity keys, a ruleset of its own, comment
 // lines, a CRLF line, and no trailing newline, so the starter's hands-off
@@ -361,7 +361,6 @@ describe("sync.ts end to end", () => {
       `${HASH_BEGIN}\n* text=auto\n${HASH_END}\n${OLD_GITATTRIBUTES}`,
     );
     expect(read(".yamllint")).toBe(`${HASH_BEGIN}\nextends: default\n${HASH_END}\n${OLD_YAMLLINT}`);
-    // The starter record was stale: the managed content replaced the file, its diff reported.
     expect(read("constructor")).toBe("platform notes\n");
     // An unrecorded, marker-less file selected as split gets the region above it, for review.
     expect(read(".dockerignore")).toBe(
@@ -650,7 +649,6 @@ describe("sync.ts end to end", () => {
       class: "link",
       hash: sha256("../AGENTS.md"),
     });
-    // A stale record is replaced by the write's own, whatever it said before.
     const regionRecord = (body: string) => ({
       class: "split",
       grammar: "managed-region",
@@ -666,7 +664,6 @@ describe("sync.ts end to end", () => {
     });
     expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files["HANDMADE-GONE.md"]).toBeUndefined();
-    // The unreadable record vouched for nothing: the write's own record replaces it.
     expect(manifest.files[".github/dependabot.yml"]).toEqual({
       class: "managed",
       hash: sha256(read(".github/dependabot.yml")),
@@ -790,7 +787,6 @@ describe("sync.ts end to end", () => {
       },
       { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
     ]);
-    // The region-added files are marked split files now: current, no longer held.
     for (const path of [".dockerignore", ".gitattributes", ".yamllint"]) {
       expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(path));
     }
@@ -798,10 +794,6 @@ describe("sync.ts end to end", () => {
     expect(again.summary.holdReasons).not.toContainEqual(
       expect.stringContaining("CONTRIBUTING.md"),
     );
-    // The local edits are gone, the replaced mirrors are current, and the
-    // unsafe, hand-added, and dropped records left the manifest; the other
-    // reasons stand until a human acts, the carried UNHASHED.md record's note
-    // among them.
     expect(again.summary.holdReasons).toEqual(
       summary.holdReasons.filter(
         (r) =>
@@ -915,8 +907,6 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
           "class changed from starter to managed; the record was stale, so the file was judged unrecorded",
         ),
       ],
-      // A starter record vouches for no bytes either: the same one hold,
-      // and the write's own record replaces the stale one.
       holds: [`local edits replaced in ${SETTINGS}`],
       still: (target: string) => {
         const text = readFileSync(join(target, SETTINGS), "utf-8");

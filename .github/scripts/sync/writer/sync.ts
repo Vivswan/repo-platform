@@ -268,9 +268,10 @@ export function runSync(options: SyncOptions): SyncReport {
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
   const owned = ownedPaths(config, { modules: selected, private: options.private });
-  // Every path files.yml writes for any selection: a sync's record names
-  // one of these or a retired path, so a stale record at any other path was
-  // added by hand and its retirement is noted, which holds the PR.
+  // Every path files.yml declares today, for any selection. A stale record
+  // at none of these and at no retired path is one the current files.yml
+  // cannot account for (a hand edit, or an entry deleted with no `retired`
+  // row), so its retirement is noted, which holds the PR.
   const declared = new Set(config.files.map((entry) => entry.path));
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
@@ -292,11 +293,10 @@ export function runSync(options: SyncOptions): SyncReport {
       continue;
     }
     stale.push(path);
-    // Absent, there is nothing to review: the record leaves silently.
     if (!declared.has(path) && occupant(options.target, path) !== null) {
       notes.push(
-        `manifest record for \`${path}\` had no writer: no files.yml entry declares the path, so no sync ` +
-          "recorded it; it is retired as a stale record (the Retired row has the outcome)",
+        `manifest record for \`${path}\` had no writer: no files.yml entry declares or retires the path now; ` +
+          "it is retired as a stale record (the Retired row has the outcome)",
       );
     }
   }
