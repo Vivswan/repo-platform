@@ -24,11 +24,6 @@ export const IN_PROCESS_SCRIPT_IMPORTS: readonly InProcessScriptImport[] = [
     script: ".github/scripts/ci/bun_setup_smoke",
     reason: "the smoke's plant and judge helpers are pure functions over recorded step outputs",
   },
-  {
-    importer: "tests/ci/resolve_action_refs.test.ts",
-    script: ".github/scripts/ci/resolve_action_refs",
-    reason: "collectRefs is the pure ref parser the CI script wraps",
-  },
 ];
 
 export function resolvedImport(importer: string, specifier: string): string | null {

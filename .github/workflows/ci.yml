@@ -22,7 +22,7 @@ concurrency:
 jobs:
   # The sources under files/ carry placeholders actionlint cannot read, so the writer lands them in
   # two scratch repositories (every module, none). Each is linted from its own root, where the
-  # starter actionlint.yaml's path-scoped ignores apply.
+  # starter actionlint.yaml's path-scoped ignores apply; pinact judges the same roots and this checkout.
   actionlint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -40,6 +40,30 @@ jobs:
         run: |
           for target in all none; do
             (cd "$RUNNER_TEMP/fleet-lint/$target" && actionlint -color)
+          done
+      # The archive's sha256 is the pin: the release's checksums file comes from the same place as the archive.
+      - name: Install the pinned pinact release
+        env:
+          PINACT_VERSION: 4.1.1
+          PINACT_SHA256: d1cffebe5704b74e2e5f8a864efb9f7e54768972dc686188c008033fb1797841
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/pinact.tar.gz" \
+            "https://github.com/suzuki-shunsuke/pinact/releases/download/v${PINACT_VERSION}/pinact_linux_amd64.tar.gz"
+          echo "${PINACT_SHA256}  $RUNNER_TEMP/pinact.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/pinact-bin"
+          tar -xzf "$RUNNER_TEMP/pinact.tar.gz" -C "$RUNNER_TEMP/pinact-bin" pinact
+          echo "$RUNNER_TEMP/pinact-bin" >>"$GITHUB_PATH"
+      # Networked, so outside `bun run check`: a dangling pin passes every offline gate and fails at job start, fleet-wide
+      # once synced. Every third-party pin is a full sha whose comment names the tag GitHub resolves to that sha (pinact
+      # codes 001 and 005); the config names the two refs that are not release pins by design, and reaches the written
+      # trees only through the variable (pinact discovers a config relative to its working directory).
+      - name: Verify every pin in the checkout and the written workflows
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINACT_CONFIG: ${{ github.workspace }}/.github/pinact.yaml
+        run: |
+          for root in . "$RUNNER_TEMP"/fleet-lint/*/; do
+            (cd "$root" && pinact run -check -verify-comment)
           done
 
   # fetch-depth 0 so the event's commit range resolves; pull-requests read because the action lists
@@ -154,21 +178,6 @@ jobs:
             (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
             echo "::endgroup::"
           done
-
-  # Networked, so outside `bun run check`: a dangling pin (a retired moving-major tag) passes every
-  # offline gate and fails at job start, fleet-wide once synced.
-  action-refs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Resolve every pinned action ref
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun .github/scripts/ci/resolve_action_refs.ts
 
   # The offline invariants, each the twin of a `bun run check` gate (the
   # local-gates rule pins the pairing both ways).
@@ -409,7 +418,6 @@ jobs:
       - file-size
       - commit-names
       - typecheck
-      - action-refs
       - invariants
       - build-tree
       - script-tests

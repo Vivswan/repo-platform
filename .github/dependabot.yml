@@ -1,8 +1,9 @@
 version: 2
 updates:
-  # The action-pins ssot rule wants one sha per action repo-wide, so every action bump must land in ONE PR:
-  # the group does that (multi-directory alone still opens one PR per directory).
-  # Pins under files/** are invisible to dependabot; bump them by hand in that PR, or all-green stays red.
+  # One sha per action repo-wide rests on this group alone: every action bump lands in ONE PR
+  # (multi-directory alone still opens one PR per directory), so no two sites can drift apart.
+  # Pins under files/** are invisible to dependabot and nothing compares them with the bumped ones: bump them by
+  # hand in that PR, the commented toolchain examples in checks.block.toolchain.yml included.
   - package-ecosystem: "github-actions"
     directories:
       - "/"

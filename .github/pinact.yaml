@@ -1,0 +1,16 @@
+# pinact judges every third-party pin in this checkout and in the written fleet trees (ci.yml's actionlint job);
+# these are the only two refs that are not release pins by design, so pinact skips exactly them.
+version: 3
+rules:
+  # The platform's own actions and reusable workflows ride the delivery ref, which the fleet-refs-ride-stable ssot rule judges;
+  # the ref is spelled out so a mistyped one is judged (and refused) like any other branch. A rename of the delivery ref
+  # lands here too: tests/workflows/ci_shape.test.ts holds this expression to DELIVERY_REF.
+  - ignore: true
+    conditions:
+      - expr: ActionRepoName == "repo-platform" && ActionVersion == "stable"
+  # Vivswan/skills publishes no tags, so its pin is a full sha carrying the branch name, which no tag can verify; pinact
+  # reads a branch name as no comment at all, so the sha is the whole condition (tests/workflows/ci_shape.test.ts holds
+  # the two lines to one sha and the `main` comment) and that action at a moving ref is judged like the rest.
+  - ignore: true
+    conditions:
+      - expr: ActionRepoFullName == "Vivswan/skills" && ActionVersion matches "^[0-9a-f]{40}$"
