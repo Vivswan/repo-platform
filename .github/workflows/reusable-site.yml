@@ -62,18 +62,30 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.sha }}
 
+      # Hosts are lowercased: lychee reports them that way, so the own-site
+      # exclude matches a custom domain however the variable spells it. The
+      # two excludes are regexes, hence the escaped dots (the assembly's
+      # ownSitePattern escapes the same way).
       - name: Resolve the site URLs
         id: urls
         env:
           CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
         run: |
           if [ -n "$CUSTOM_DOMAIN" ]; then
-            echo "base_path=/" >> "$GITHUB_OUTPUT"
-            echo "origin=https://$CUSTOM_DOMAIN" >> "$GITHUB_OUTPUT"
+            base_path=/
+            origin="https://$(echo "$CUSTOM_DOMAIN" | tr '[:upper:]' '[:lower:]')"
           else
-            echo "base_path=/${GITHUB_REPOSITORY#*/}/" >> "$GITHUB_OUTPUT"
-            echo "origin=https://$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]').github.io" >> "$GITHUB_OUTPUT"
+            base_path="/${GITHUB_REPOSITORY#*/}/"
+            origin="https://$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]').github.io"
           fi
+          site_url="$origin${base_path%/}"
+          edit_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/edit/"
+          {
+            echo "base_path=$base_path"
+            echo "origin=$origin"
+            echo "own_links=^${site_url//./\\.}([/?#]|$)"
+            echo "edit_links=^${edit_url//./\\.}"
+          } >> "$GITHUB_OUTPUT"
 
       # The repository's own website, built by its hook from the checkout;
       # a repository that has not filled the hook in publishes docs/ alone.
@@ -124,18 +136,20 @@ jobs:
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           workingDirectory: ${{ steps.site.outputs.site-dir }}
-          # http(s) links alone: own-site links resolve to files under
-          # --root-dir and the assembly already judged them. The theme's
-          # "Edit this page" links are theme output an anonymous crawl
-          # cannot judge (auth redirect, 404 on a private repository).
+          # http(s) links alone and none of the site's own: relative links
+          # resolve to files under --root-dir, absolute ones match own_links,
+          # and the assembly judged both against the artifact. The theme's
+          # "Edit this page" links are theme output an anonymous crawl cannot
+          # judge (auth redirect, 404 on a private repository).
           args: >-
             --no-progress
             --root-dir ${{ steps.site.outputs.site-dir }}
             --scheme https --scheme http
             --exclude-all-private
-            --exclude '^${{ github.server_url }}/${{ github.repository }}/edit/'
+            --exclude '${{ steps.urls.outputs.own_links }}'
+            --exclude '${{ steps.urls.outputs.edit_links }}'
             --timeout 30 --max-retries 3 --retry-wait-time 5
-            '**/*.html'
+            --glob-ignore-case '**/*.html' '**/*.htm'
           fail: false
           format: markdown
           # One failure directory of the fuzz-issue action's report contract

@@ -177,7 +177,7 @@ The issue body is lychee's report: a count table, then every failing URL with it
 |---|---|
 | the theme's "Edit this page" links | theme output an anonymous crawl cannot judge (auth redirect, 404 on a private repository) |
 | private-network and loopback URLs, mail links | never reachable from the runner |
-| same-site links and assets | judged against the artifact at build time, not over the network |
+| same-site links and assets, relative or spelled with the site's own URL | judged against the artifact at build time, not over the network |
 
 ## Module parameters (registration keys)
 

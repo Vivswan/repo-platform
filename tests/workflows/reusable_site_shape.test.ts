@@ -120,6 +120,7 @@ describe("reusable-site.yml", () => {
       env: {
         PATH: process.env.PATH ?? "",
         GITHUB_OUTPUT: output,
+        GITHUB_SERVER_URL: "https://github.com",
         GITHUB_REPOSITORY: "Vivswan/Example-Repo",
         CUSTOM_DOMAIN: customDomain,
       },
@@ -127,12 +128,33 @@ describe("reusable-site.yml", () => {
     return { status: result.status, stdout: result.stdout, output: readFileSync(output, "utf8") };
   };
 
+  const CUSTOM_DOMAIN_OUTPUT = [
+    "base_path=/",
+    "origin=https://docs.example.com",
+    "own_links=^https://docs\\.example\\.com([/?#]|$)",
+    "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
+    "",
+  ].join("\n");
+
   test.each([
     {
       customDomain: "",
-      output: "base_path=/Example-Repo/\norigin=https://vivswan.github.io\n",
+      output: [
+        "base_path=/Example-Repo/",
+        "origin=https://vivswan.github.io",
+        "own_links=^https://vivswan\\.github\\.io/Example-Repo([/?#]|$)",
+        "edit_links=^https://github\\.com/Vivswan/Example-Repo/edit/",
+        "",
+      ].join("\n"),
     },
-    { customDomain: "docs.example.com", output: "base_path=/\norigin=https://docs.example.com\n" },
+    {
+      customDomain: "docs.example.com",
+      output: CUSTOM_DOMAIN_OUTPUT,
+    },
+    {
+      customDomain: "Docs.Example.com",
+      output: CUSTOM_DOMAIN_OUTPUT,
+    },
   ])(
     "the urls step, executed with CUSTOM_DOMAIN=$customDomain, resolves the base path and origin",
     ({ customDomain, output }) => {
@@ -211,9 +233,10 @@ describe("reusable-site.yml", () => {
         "--root-dir ${{ steps.site.outputs.site-dir }}",
         "--scheme https --scheme http",
         "--exclude-all-private",
-        "--exclude '^${{ github.server_url }}/${{ github.repository }}/edit/'",
+        "--exclude '${{ steps.urls.outputs.own_links }}'",
+        "--exclude '${{ steps.urls.outputs.edit_links }}'",
         "--timeout 30 --max-retries 3 --retry-wait-time 5",
-        "'**/*.html'",
+        "--glob-ignore-case '**/*.html' '**/*.htm'",
       ].join(" "),
       fail: false,
       format: "markdown",
