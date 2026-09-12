@@ -302,7 +302,13 @@ export function runSync(options: SyncOptions): SyncReport {
   // A starter whose module was deselected stays the repository's own; its
   // record stays too, so a later retirement still reads it as kept.
   for (const [path, entry] of Object.entries(records)) {
-    if (entry.class !== "starter" || entryPaths.has(path) || pathProblem(path) !== null) continue;
+    if (
+      readRecord(entry)?.class !== "starter" ||
+      entryPaths.has(path) ||
+      pathProblem(path) !== null
+    ) {
+      continue;
+    }
     if (occupant(options.target, path) !== null) carry(path);
   }
   const written = new Map<string, Buffer>();

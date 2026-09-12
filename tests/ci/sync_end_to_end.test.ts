@@ -1121,3 +1121,32 @@ describe("sync.ts over retired paths whose records the writer cannot read", () =
     expect(readFileSync(join(target, "CONTRIBUTING.md"), "utf-8")).toBe(OLD_CONTRIBUTING_REGION);
   });
 });
+
+describe("sync.ts over a starter record it cannot read under a linked directory", () => {
+  test("the record is dropped with a note and never probed, so the run exits 0", () => {
+    const target = temp.dir("sync-e2e-linked-starter-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+    );
+    mkdirSync(join(target, ".github"));
+    writeFileSync(
+      join(target, MANIFEST),
+      `{\n  "files": {\n    "docs/old.md": {"class": "starter", "hash": null}\n  }\n}\n`,
+    );
+    symlinkSync("elsewhere", join(target, "docs"));
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const { summary } = runSync(
+      target,
+      join(temp.dir("sync-e2e-linked-starter-summary-"), "summary.json"),
+    );
+    expect(summary.notes).toEqual([
+      "manifest record for `docs/old.md` dropped: its class or shape is not one the writer records",
+    ]);
+    const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+      files: Record<string, unknown>;
+    };
+    expect(manifest.files["docs/old.md"]).toBeUndefined();
+    expect(readlinkSync(join(target, "docs"))).toBe("elsewhere");
+  });
+});

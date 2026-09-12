@@ -701,7 +701,7 @@ describe("applyMirrors with kind symlink", () => {
       owned(["LICENSE.md"]),
       Object.fromEntries(records),
     );
-    expect(again.rows.map((r) => r.outcome)).toEqual(Array(6).fill("current"));
+    expect(again.rows).toEqual(rows.map((r) => ({ ...r, outcome: "current", detail: "" })));
     expect(again.replaced).toEqual([]);
     expect(Object.fromEntries(again.records)).toEqual(Object.fromEntries(records));
   });
