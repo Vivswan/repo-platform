@@ -1,46 +1,27 @@
 import { writeFileSync } from "node:fs";
 
-/** Errors fail the run; advisories are printed and never touch the exit code. */
-export type Finding = { severity: "error" | "advisory"; message: string };
+export type Finding = { message: string };
 
 export function error(message: string): Finding {
-  return { severity: "error", message };
+  return { message };
 }
 
-export function advisory(message: string): Finding {
-  return { severity: "advisory", message };
-}
-
-export function errorsOf(findings: readonly Finding[]): string[] {
-  return findings.filter((f) => f.severity === "error").map((f) => f.message);
-}
-
-export function advisoriesOf(findings: readonly Finding[]): string[] {
-  return findings.filter((f) => f.severity === "advisory").map((f) => f.message);
-}
-
-/** TWO files because the streams have different consequences: a caller must not read "has content" as "blocks".
- *  An empty set writes an EMPTY file rather than none, which is how a caller tells "nothing to report" from
- *  "the validator never ran". */
-export function writeReports(findings: readonly Finding[], env: NodeJS.ProcessEnv): void {
-  const section = (title: string, items: string[]): string =>
-    items.length === 0
+/** An empty set writes an EMPTY file rather than none, which is how the action tells "nothing to report" from
+ *  "the validator never ran" (src/verdict.ts reads the file as one of its two witnesses). */
+export function writeReport(findings: readonly Finding[], env: NodeJS.ProcessEnv): void {
+  const path = env.FINDINGS_FILE;
+  if (path === undefined || path === "") return;
+  const text =
+    findings.length === 0
       ? ""
-      : `#### ${title} (${items.length})\n\n${items.map((i) => `- ${i}`).join("\n")}\n`;
-  const write = (variable: string, text: string): void => {
-    const path = env[variable];
-    if (path !== undefined && path !== "") writeFileSync(path, text);
-  };
-  write("FINDINGS_FILE", section("Errors", errorsOf(findings)));
-  write("ADVISORIES_FILE", section("Advisories", advisoriesOf(findings)));
+      : `#### Errors (${findings.length})\n\n${findings.map((f) => `- ${f.message}`).join("\n")}\n`;
+  writeFileSync(path, text);
 }
 
 export function print(findings: readonly Finding[]): number {
-  for (const message of advisoriesOf(findings)) console.log(`advisory: ${message}`);
-  const errors = errorsOf(findings);
-  if (errors.length > 0) {
-    for (const message of errors) console.error(`error: ${message}`);
-    console.error(`\n${errors.length} error(s).`);
+  if (findings.length > 0) {
+    for (const finding of findings) console.error(`error: ${finding.message}`);
+    console.error(`\n${findings.length} error(s).`);
     return 1;
   }
   console.log("Validation passed.");

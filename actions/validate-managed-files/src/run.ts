@@ -19,10 +19,7 @@ const conclude: (verdict: Integrity) => never = (verdict) => {
 };
 
 mkdirSync(scratch, { recursive: true });
-const files = {
-  findings: join(scratch, "findings.md"),
-  advisories: join(scratch, "advisories.md"),
-};
+const findingsFile = join(scratch, "findings.md");
 const exit = run(
   [
     requireEnv("ACTION_BUN"),
@@ -35,8 +32,8 @@ const exit = run(
   ],
   {
     cwd: root,
-    env: { FINDINGS_FILE: files.findings, ADVISORIES_FILE: files.advisories },
+    env: { FINDINGS_FILE: findingsFile },
     timeoutMs: VALIDATE_TIMEOUT_MS,
   },
 );
-conclude(classify(exit, VALIDATE_TIMEOUT_MS, files));
+conclude(classify(exit, VALIDATE_TIMEOUT_MS, findingsFile));

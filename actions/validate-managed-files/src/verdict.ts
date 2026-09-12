@@ -1,13 +1,13 @@
-// The integrity leg's ONE verdict per run: the child's exit and the report
-// files it wrote are two witnesses to one event, and a pair that disagrees
+// The integrity leg's ONE verdict per run: the child's exit and the findings
+// file it wrote are two witnesses to one event, and a pair that disagrees
 // is `not-judged`, never a pass.
 
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import type { ChildExit } from "../../shared/action_runtime.ts";
 
 export type Integrity =
-  | { kind: "clean"; advisories: string }
-  | { kind: "findings"; findings: string; advisories: string }
+  | { kind: "clean" }
+  | { kind: "findings"; findings: string }
   | { kind: "not-judged"; reason: string };
 
 /** Only a regular file counts: a directory, a device, or a link planted at the path (a read of /dev/null would pass
@@ -21,11 +21,7 @@ function reportText(path: string): string | null {
   }
 }
 
-export function classify(
-  exit: ChildExit,
-  deadlineMs: number,
-  files: { findings: string; advisories: string },
-): Integrity {
+export function classify(exit: ChildExit, deadlineMs: number, findingsFile: string): Integrity {
   switch (exit.kind) {
     case "timed-out":
       return {
@@ -35,14 +31,13 @@ export function classify(
     case "signaled":
       return { kind: "not-judged", reason: `the validator died on ${exit.signal}` };
     case "exited":
-      return judgeReports(exit.code, files);
+      return judgeReport(exit.code, findingsFile);
   }
 }
 
-function judgeReports(code: number, files: { findings: string; advisories: string }): Integrity {
-  const findings = reportText(files.findings);
-  const advisories = reportText(files.advisories);
-  if (findings === null || advisories === null) {
+function judgeReport(code: number, findingsFile: string): Integrity {
+  const findings = reportText(findingsFile);
+  if (findings === null) {
     return { kind: "not-judged", reason: `the validator exited ${code} before reporting` };
   }
   if (code === 0 && findings !== "") {
@@ -54,7 +49,7 @@ function judgeReports(code: number, files: { findings: string; advisories: strin
       reason: `the validator exited ${code} without reporting a finding`,
     };
   }
-  return code === 0 ? { kind: "clean", advisories } : { kind: "findings", findings, advisories };
+  return code === 0 ? { kind: "clean" } : { kind: "findings", findings };
 }
 
 /** The one byte form of a verdict: each variant's keys in a fixed order,
@@ -63,10 +58,10 @@ function serialized(verdict: Integrity): string {
   let ordered: Record<string, string>;
   switch (verdict.kind) {
     case "clean":
-      ordered = { kind: verdict.kind, advisories: verdict.advisories };
+      ordered = { kind: verdict.kind };
       break;
     case "findings":
-      ordered = { kind: verdict.kind, findings: verdict.findings, advisories: verdict.advisories };
+      ordered = { kind: verdict.kind, findings: verdict.findings };
       break;
     case "not-judged":
       ordered = { kind: verdict.kind, reason: verdict.reason };
@@ -100,18 +95,10 @@ export function readVerdict(path: string): Integrity {
     Object.keys(record).sort().join(",") === ["kind", ...keys].sort().join(",") &&
     keys.every((key) => typeof record[key] === "string");
   let verdict: Integrity | null = null;
-  if (record.kind === "clean" && shape("advisories")) {
-    verdict = { kind: "clean", advisories: record.advisories as string };
-  } else if (
-    record.kind === "findings" &&
-    shape("findings", "advisories") &&
-    record.findings !== ""
-  ) {
-    verdict = {
-      kind: "findings",
-      findings: record.findings as string,
-      advisories: record.advisories as string,
-    };
+  if (record.kind === "clean" && shape()) {
+    verdict = { kind: "clean" };
+  } else if (record.kind === "findings" && shape("findings") && record.findings !== "") {
+    verdict = { kind: "findings", findings: record.findings as string };
   } else if (record.kind === "not-judged" && shape("reason") && record.reason !== "") {
     verdict = { kind: "not-judged", reason: record.reason as string };
   }

@@ -20,7 +20,6 @@ const RUN_URL = "https://example.invalid/run/1";
 const fakeValidator = `import { writeFileSync } from "node:fs";
 if (!process.env.FAKE_SKIP_REPORT) {
   writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
-  writeFileSync(process.env.ADVISORIES_FILE, process.env.FAKE_ADVISORIES ?? "");
 }
 if (process.env.FAKE_SIGNAL) process.kill(process.pid, process.env.FAKE_SIGNAL);
 process.exit(Number(process.env.FAKE_EXIT ?? "0"));
@@ -87,7 +86,7 @@ function play(scenario: Scenario): Outcome {
     });
     runExit = result.exitCode;
   } else if (scenario.verdict === "garbage") {
-    writeFileSync(verdictFile, '{"kind": "clean", "advisories": "", "extra": 1}\n');
+    writeFileSync(verdictFile, '{"kind": "clean", "extra": 1}\n');
   } else if (scenario.verdict !== "absent") {
     writeVerdict(verdictFile, scenario.verdict);
   }
@@ -117,7 +116,7 @@ describe("the validator's classification reaches the report as one verdict", () 
   test("a clean run passes, deletes any stale comment, and posts nothing", () => {
     const outcome = play({});
     expect(outcome.runExit).toBe(0);
-    expect(outcome.verdict).toEqual({ kind: "clean", advisories: "" });
+    expect(outcome.verdict).toEqual({ kind: "clean" });
     expect(outcome.outputs).toBe("integrity=success\nreport=clean\n");
     expect(outcome.summary).toBe(
       "### Managed files check\n\nPassed - this repository matches the state its last sync recorded.\n",
@@ -125,20 +124,11 @@ describe("the validator's classification reaches the report as one verdict", () 
     expect(outcome.comment).toBe(outcome.summary);
   });
 
-  test("a clean run with advisories is green but worth a comment", () => {
-    const advisories = "#### Advisories (1)\n\n- package.json: packageManager is redundant";
-    const outcome = play({ env: { FAKE_ADVISORIES: `${advisories}\n` } });
-    expect(outcome.runExit).toBe(0);
-    expect(outcome.verdict).toEqual({ kind: "clean", advisories });
-    expect(outcome.outputs).toBe("integrity=success\nreport=findings\n");
-    expect(outcome.comment).toContain(advisories);
-  });
-
   test("findings block, carry the remedy, and are posted", () => {
     const findings = "#### Errors (1)\n\n- ci.yml: content does not match";
     const outcome = play({ env: { FAKE_EXIT: "1", FAKE_FINDINGS: `${findings}\n` } });
     expect(outcome.runExit).toBe(1);
-    expect(outcome.verdict).toEqual({ kind: "findings", findings, advisories: "" });
+    expect(outcome.verdict).toEqual({ kind: "findings", findings });
     expect(outcome.outputs).toBe("integrity=failure\nreport=findings\n");
     expect(outcome.comment).toContain(findings);
     expect(outcome.comment).toContain("Managed content changed outside a sync.");
@@ -187,7 +177,7 @@ describe("the validator's classification reaches the report as one verdict", () 
     },
     {
       reason: "a scratch root that could not be cleared",
-      scenario: { verdict: { kind: "clean", advisories: "" }, clearOutcome: "failure" },
+      scenario: { verdict: { kind: "clean" }, clearOutcome: "failure" },
       text: "the scratch root could not be cleared (clear step outcome: failure)",
     },
   ])("the report alone fails closed on $reason", ({ scenario, text }) => {
@@ -198,16 +188,12 @@ describe("the validator's classification reaches the report as one verdict", () 
 });
 
 describe("verdict.ts", () => {
-  test("classify reads the exit and the report pair as two witnesses", () => {
+  test("classify reads the exit and the report file as two witnesses", () => {
     const dir = temp.dir("verdict-classify-");
-    const files = { findings: join(dir, "f.md"), advisories: join(dir, "a.md") };
-    writeFileSync(files.findings, "");
-    writeFileSync(files.advisories, "note\n");
-    expect(classify({ kind: "exited", code: 0 }, 1000, files)).toEqual({
-      kind: "clean",
-      advisories: "note",
-    });
-    expect(classify({ kind: "timed-out" }, 300_000, files)).toEqual({
+    const findingsFile = join(dir, "f.md");
+    writeFileSync(findingsFile, "");
+    expect(classify({ kind: "exited", code: 0 }, 1000, findingsFile)).toEqual({ kind: "clean" });
+    expect(classify({ kind: "timed-out" }, 300_000, findingsFile)).toEqual({
       kind: "not-judged",
       reason: "the validator ran past its 300s deadline",
     });
@@ -216,12 +202,12 @@ describe("verdict.ts", () => {
   test("readVerdict accepts only writeVerdict's own bytes", () => {
     const dir = temp.dir("verdict-read-");
     const path = join(dir, "verdict.json");
-    const verdict: Integrity = { kind: "findings", findings: "- x", advisories: "" };
+    const verdict: Integrity = { kind: "findings", findings: "- x" };
     writeVerdict(path, verdict);
     expect(readVerdict(path)).toEqual(verdict);
-    writeFileSync(path, '{"findings": "- x", "kind": "findings", "advisories": ""}\n');
+    writeFileSync(path, '{"findings": "- x", "kind": "findings"}\n');
     expect(readVerdict(path).kind).toBe("not-judged");
-    writeFileSync(path, '{"kind": "findings", "findings": "", "advisories": ""}\n');
+    writeFileSync(path, '{"kind": "findings", "findings": ""}\n');
     expect(readVerdict(path).kind).toBe("not-judged");
   });
 });
