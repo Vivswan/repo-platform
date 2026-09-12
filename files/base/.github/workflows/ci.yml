@@ -93,7 +93,7 @@ jobs:
       github.ref == 'refs/heads/main'
     permissions:
       # contents write lets the hook push a fast-forward branch (a packaged latest).
-      # id-token write lets it mint the run's OIDC token for trusted publishing or attestations.
+      # id-token write lets it mint the run's OIDC token for trusted publishing (npm, PyPI).
       # A called job cannot exceed its caller, so both scopes are granted here.
       contents: write
       id-token: write
