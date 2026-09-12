@@ -14,7 +14,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Managed: the version dotfile for bun/deno (`.bun-version`, `.dvmrc`, fleet-pinned) and `deno-audit.yml` (deno). Public repos with bun/deno/uv get the CodeQL variant of `auto-assign.yml`; fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
 - Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
-- Removal: the dotfile and module workflow are retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
+- Removal: the version dotfile is retired, and deno also retires `deno-audit.yml`; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## site
 
