@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { displace } from "../../../.github/scripts/sync/writer/displace.ts";
 import { type Records, sha256 } from "../../../.github/scripts/sync/writer/manifest.ts";
+import { RENDERED_HEADER } from "../../../.github/scripts/sync/writer/settings_entry.ts";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 import { fixtureGit } from "../../shared/fixture_git";
 import { tempDirs } from "../../shared/temp_dir";
@@ -30,6 +31,8 @@ const ENTRIES = parseFilesConfig(
 
 // Comment lines, a CRLF line, and no trailing newline: the move is byte for byte.
 const OWN = "---\n# my settings, my comments\r\nrepository:\n  description: mine\n  private: false";
+// A document an earlier sync rendered, told by its first line.
+const RENDERED = `${RENDERED_HEADER}\n# Rendered by the sync\nrepository:\n  description: stale\n`;
 
 function checkout(files: Record<string, string>, links: Record<string, string> = {}): string {
   const target = temp.dir("writer-displace-");
@@ -115,6 +118,26 @@ describe("displace", () => {
       expect(readFileSync(join(target, ".github/settings.yml"), "latin1")).toBe(OWN);
       still(target);
       expect(seeded).toEqual(records({ ".github/settings.yml": { class: "starter" } }));
+    },
+  );
+
+  test.each<{ reason: string; record: Records[string] | undefined; overlay: boolean }>([
+    { reason: "a recorded starter", record: { class: "starter" }, overlay: true },
+    { reason: "an unrecorded file", record: undefined, overlay: true },
+    { reason: "an unrecorded file, no overlay", record: undefined, overlay: false },
+  ])(
+    "$reason at the managed path carrying the rendered header is left unrecorded for the ordinary write, never moved",
+    ({ record, overlay }) => {
+      const target = checkout({
+        ".github/settings.yml": RENDERED,
+        ...(overlay ? { ".github/settings.local.yml": "theirs\n" } : {}),
+      });
+      const seeded = records(record === undefined ? {} : { ".github/settings.yml": record });
+      expect(displace(target, ENTRIES, seeded)).toEqual([]);
+      expect(seeded).toEqual(records({}));
+      expect(readFileSync(join(target, ".github/settings.yml"), "utf-8")).toBe(RENDERED);
+      expect(existsSync(join(target, ".github/settings.local.yml"))).toBe(overlay);
+      expect(fixtureGit(target, ["status", "--porcelain"])).toBe("");
     },
   );
 

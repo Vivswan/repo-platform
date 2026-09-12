@@ -8,7 +8,8 @@
 import type { FileEntry } from "../../../../actions/plan/files_config.ts";
 import type { Records } from "./manifest.ts";
 import { gitMove } from "./retire.ts";
-import { occupant } from "./target_files.ts";
+import { isRendered } from "./settings_entry.ts";
+import { occupant, probe } from "./target_files.ts";
 
 export type Displacement =
   | { path: string; outcome: "moved"; to: string }
@@ -16,7 +17,11 @@ export type Displacement =
 
 /** Moves each displacing entry's repository-owned file aside when its new
  *  home is free, records the move, and reports a home already taken as a
- *  hold; `records` is updated in place. */
+ *  hold; `records` is updated in place. A rendered document at the path is
+ *  never the repository's own (a lost manifest must not turn it into the
+ *  overlay), so it is left to the ordinary write, which shows the diff
+ *  when no record vouches for its bytes; a starter record cannot describe
+ *  it and is dropped. */
 export function displace(target: string, entries: FileEntry[], records: Records): Displacement[] {
   const rows: Displacement[] = [];
   for (const entry of entries) {
@@ -25,6 +30,11 @@ export function displace(target: string, entries: FileEntry[], records: Records)
     if (occupant(target, entry.path) !== "a regular file") continue;
     const record = records[entry.path];
     if (record !== undefined && record.class !== "starter") continue;
+    const found = probe(target, entry.path);
+    if ("render" in entry && found.kind === "file" && isRendered(found.bytes.toString("utf-8"))) {
+      delete records[entry.path];
+      continue;
+    }
     const taken = occupant(target, to);
     if (taken !== null) {
       rows.push({
