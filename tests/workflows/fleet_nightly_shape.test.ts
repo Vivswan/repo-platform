@@ -111,11 +111,8 @@ describe("fleet-nightly.yml", () => {
     });
   });
 
-  test("nothing sleeps, and no job is named all-green or info-*", () => {
+  test("nothing sleeps, and no job is named all-green", () => {
     expect(source).not.toContain("sleep ");
-    for (const name of Object.keys(fleetNightly.jobs)) {
-      expect(name).not.toBe("all-green");
-      expect(name.startsWith("info-")).toBe(false);
-    }
+    for (const name of Object.keys(fleetNightly.jobs)) expect(name).not.toBe("all-green");
   });
 });

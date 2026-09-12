@@ -177,7 +177,7 @@ The nightly run crawls the deployed site's EXTERNAL links after publishing (inte
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
 | `labels.site` | the link-rot tracking issue's label | `docs-link-rot` |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand. A registration still carrying a `pages:` or `docs_site:` block fails the plan with a message naming this module and the hook.
+The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand.
 
 ## Pages enablement
 

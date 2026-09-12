@@ -42,12 +42,12 @@ jobs:
       - name: Audit dependencies (deno)
         shell: bash
         run: |
-          # Listing into a file: a git failure must abort the step under
-          # -e, not read as "no lockfiles" and go green.
+          # Listing into a file: a git failure aborts the step under -e with
+          # its own error, not read as "no lockfiles".
           git ls-files -z -- 'deno.lock' '*/deno.lock' > "$RUNNER_TEMP/deno-locks"
           if [ ! -s "$RUNNER_TEMP/deno-locks" ]; then
-            echo "::notice::no deno.lock tracked - nothing to audit; commit a lockfile to enable advisory coverage"
-            exit 0
+            echo "::error::no deno.lock tracked, so nothing was audited; commit the lockfile"
+            exit 1
           fi
           while IFS= read -r -d '' lock; do
             echo "auditing $lock"

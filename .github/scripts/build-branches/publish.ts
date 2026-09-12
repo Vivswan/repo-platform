@@ -108,14 +108,13 @@ function publish(sourceSha: string): void {
     "--dest",
     scratch.tree,
   ]);
-  // Unified-tree guard: a pre-unification source composes a template-only
-  // tree (no actions/), and publishing it would 404 every fleet @build ref.
-  // The staleness check cannot catch it when that source IS the tip's own.
+  // The fleet's action refs are actions/<name>@build, so a tree with no action manifest at all would
+  // 404 every one of them; the staleness check cannot catch it when that source IS the tip's own.
   if (!hasActionManifest(join(scratch.tree, "actions"))) {
     fail(
       `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree ` +
-        `with an action.yml, so the source predates the unified build branch. Re-run the workflow ` +
-        `for a main commit that carries the unification.`,
+        `with an action.yml, so every fleet action ref would 404. Re-run the workflow for a main ` +
+        `commit whose build tree carries the actions.`,
     );
   }
   // --checksum: the quick size+mtime check can miss a changed file when

@@ -28,7 +28,6 @@ const ghVerdict = JSON.stringify({
       name: "all-green",
       status: "completed",
       conclusion: "success",
-      external_id: "workflow_run",
       app: { slug: "github-actions" },
     },
   ],
@@ -39,7 +38,7 @@ printf '%s' '${ghVerdict}'
 
 /** publish.ts runs the SOURCE's own branch_tree.ts after a frozen install
  * there, so the fixture commits this stub; the real builder needs the whole
- * template tree. */
+ * build tree. */
 const STUB_BUILDER = `
 import { cpSync } from "node:fs";
 import { join } from "node:path";

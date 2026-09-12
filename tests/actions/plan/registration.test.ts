@@ -167,16 +167,6 @@ describe("parseRegistration", () => {
       error: `${FILE}: site.include.0.page: Invalid input: expected string, received undefined`,
     },
     {
-      reason: "a pages block, whose build moved into the site-build hook",
-      text: "modules: [site]\npages:\n  build: bun run build\n",
-      error: `${FILE}: pages: is no longer a registration key - the website build lives in the repo-owned hook .github/actions/site-build/action.yml and the module is \`site\` (docs/site.md)`,
-    },
-    {
-      reason: "a docs_site block, renamed site",
-      text: "modules: [site]\ndocs_site:\n  path: manual\n",
-      error: `${FILE}: docs_site: is no longer a registration key - it is \`site\` now (\`site.path\`, \`site.include\`; the label key is \`labels.site\`), and a website build belongs in the repo-owned hook .github/actions/site-build/action.yml`,
-    },
-    {
       reason: "a label starting with a dash",
       text: "modules: []\nlabels:\n  fuzzer: -x\n",
       error: `${FILE}: labels.fuzzer: must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters`,

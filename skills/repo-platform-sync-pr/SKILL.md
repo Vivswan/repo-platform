@@ -116,7 +116,7 @@ The platform no longer writes the community health files; GitHub serves the acco
 | `CONTRIBUTING.md` | Move the repo-specific content into `README.md` and delete the file, so the account default shows | It states the Conventional Commit PR-title rule and the CI gate (`all-green` as the required check) |
 | `.github/SECURITY.md` | Move anything repo-specific into `README.md` and delete the file | It lists the supported versions and the private reporting route |
 
-A sync PR that retires a workflow or reshapes the CI legs also orphans the comments that named the old shape, so grep the repository's own markdown and workflow comments for every name under `retired` in `files.yml` (`release.yml` and `pages.yml` among them) and rewrite every hit. A comment that names a workflow the repository no longer has is a false statement about the repository.
+A sync PR that retires a workflow or reshapes the CI legs also orphans the comments that named the old shape, so grep the repository's own markdown and workflow comments for every name under `retired` in `files.yml` and rewrite every hit. A comment that names a workflow the repository no longer has is a false statement about the repository.
 
 - The fix is ONE commit pushed onto `automation/repo-platform` BEFORE merging, never a separate PR: the branch is rewritten on the next run, and a follow-up PR leaves the merged tree wrong in between.
 - Repeat the check on every later sync PR that retires or reshapes a file: each retirement can leave a tail, and each reshaped workflow can orphan a comment that named the old shape.

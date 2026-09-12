@@ -25,11 +25,9 @@ const COMMIT_SUBJECT = "build(deps): dedupe bun lockfile";
 /** Keeps Dependabot rebasing and updating the PR over this commit. */
 const COMMIT_TRAILER = "[dependabot skip]";
 /** The caller's sticky PR comment says the same: files/bun/.github/workflows/dependabot-bun-lockfile.yml. */
-const NO_RETRIGGER_WARNING =
-  "lockfile fix pushed without REPO_PLATFORM_TOKEN: the new head's pull_request run waits for approval. " +
-  "Open it in the Actions tab and choose Approve and run, or push an empty commit. " +
-  "Durable fix: register REPO_PLATFORM_TOKEN as a Dependabot secret " +
-  "(Settings > Secrets and variables > Dependabot) so the push comes from the PAT and its run starts on its own.";
+const PUSHED_WARNING =
+  "lockfile fix pushed with github.token, which starts no workflows: the new head's pull_request run waits for approval. " +
+  "Open it in the Actions tab and choose Approve and run, or push an empty commit.";
 
 function exitCodeOf(exit: ChildExit): number {
   return exit.kind === "exited" ? exit.code : 1;
@@ -109,7 +107,6 @@ function commitAndPush(
 function main(): void {
   const token = requireEnv("TOKEN");
   const headRef = requireEnv("HEAD_REF");
-  const canRetrigger = requireEnv("CAN_RETRIGGER");
   const repository = requireEnv("GITHUB_REPOSITORY");
   const lockfiles = trackedLockfiles();
   regenerate(lockfiles);
@@ -118,12 +115,8 @@ function main(): void {
     return;
   }
   commitAndPush(lockfiles, repository, headRef, token);
-  if (canRetrigger === "true") return;
-  // github.token starts no workflows: flag it for the sticky PR comment and
-  // as an annotation, but stay green - the fleet legitimately runs without
-  // the token.
-  appendFileSync(requireEnv("GITHUB_OUTPUT"), "no_retrigger=true\n");
-  warning(NO_RETRIGGER_WARNING);
+  appendFileSync(requireEnv("GITHUB_OUTPUT"), "pushed=true\n");
+  warning(PUSHED_WARNING);
 }
 
 main();

@@ -29,8 +29,8 @@ const temp = tempDirs();
 const REPO_ROOT = join(import.meta.dir, "../../..");
 const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 
-const TEMPLATE = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"));
-const MODULES = TEMPLATE.modules;
+const FILES_DATA = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"));
+const MODULES = FILES_DATA.modules;
 
 /** files.yml reduced to the modules block the plan cannot load without. */
 const MINIMAL_FILES = [
@@ -65,9 +65,9 @@ function input(text: string, isPrivate = false, modules: Module[] = MODULES): Pl
   return {
     registration: registration(text),
     modules,
-    defaults: TEMPLATE.defaults,
-    files: TEMPLATE.files,
-    retired: TEMPLATE.retired,
+    defaults: FILES_DATA.defaults,
+    files: FILES_DATA.files,
+    retired: FILES_DATA.retired,
     reservedLabels: RESERVED,
     private: isPrivate,
   };
@@ -99,11 +99,11 @@ describe("loadModuleData", () => {
       default: "fuzz-nightly",
     });
     expect(byName.get("site")?.tracking_label?.key).toBe("site");
-    expect(TEMPLATE.defaults).toEqual({ skillsDir: "skills", docsPath: "docs" });
+    expect(FILES_DATA.defaults).toEqual({ skillsDir: "skills", docsPath: "docs" });
   });
 
   test("the minimal modules block loads; a default the plan reads going missing fails, naming the file and key", () => {
-    expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(TEMPLATE.defaults);
+    expect(loadModuleData(MINIMAL_FILES).defaults).toEqual(FILES_DATA.defaults);
     const cases: [drop: string, replacement: string, error: string][] = [
       ["  site: { path: docs }\n", "", "modules.site.path: missing"],
       ["{ skills_dir: { default: skills } }", "{}", "modules.skills.skills_dir.default: missing"],
@@ -514,33 +514,20 @@ describe("plan.ts as a child", () => {
     expect(mode.stdout).toContain("::error::MODE must be one of default, site; got 'pages'");
   });
 
-  // The two registration blocks the site module replaced fail the plan in
-  // EVERY mode, so a repository's next main run names the move before a
-  // deploy could read the stale keys as nothing.
-  test.each([
-    {
-      key: "pages",
-      text: "modules: [bun, site]\npages: { setup: bun, build: bun run build }\n",
-      error:
-        "::error::.repo-platform.yml: pages: is no longer a registration key - the website build lives in the repo-owned hook .github/actions/site-build/action.yml and the module is `site` (docs/site.md)",
-    },
-    {
-      key: "docs_site",
-      text: "modules: [site]\ndocs_site: { path: manual }\n",
-      error:
-        "::error::.repo-platform.yml: docs_site: is no longer a registration key - it is `site` now (`site.path`, `site.include`; the label key is `labels.site`), and a website build belongs in the repo-owned hook .github/actions/site-build/action.yml",
-    },
-  ])(
-    "a registration still carrying $key: fails in both modes naming the move",
-    ({ text, error }) => {
-      for (const env of [{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]) {
-        const result = run({ ".repo-platform.yml": text }, env);
-        expect(result.exitCode).toBe(1);
-        expect(result.stdout).toContain(error);
-        expect(result.output).toBe("");
-      }
-    },
-  );
+  // Site mode reads the registration too, so a refused key fails the plan before a deploy could read it as nothing.
+  test("an unknown registration key fails in both modes", () => {
+    for (const env of [{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]) {
+      const result = run(
+        { ".repo-platform.yml": "modules: [site]\npages: { build: bun run build }\n" },
+        env,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain(
+        '::error::.repo-platform.yml: (top level): Unrecognized key: "pages"',
+      );
+      expect(result.output).toBe("");
+    }
+  });
 
   test("every default comes from files.yml: other defaults there change the outputs, a missing one fails", () => {
     const real = readFileSync(FILES_CONFIG, "utf-8");

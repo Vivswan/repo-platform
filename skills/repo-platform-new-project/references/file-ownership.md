@@ -12,4 +12,4 @@ Who owns what after the first sync. The classes come from the platform's `files.
 | Repo-owned, read by the platform | `.repo-platform.yml` | The registration: the sync and fleet CI read it and never rewrite it |
 | Mirror | the targets declared under `mirrors` in `.repo-platform.yml` | Copies of a file the sync wrote, refreshed every sync from the source; edit the source, never the copy |
 
-Retired paths (files the platform used to write and no longer does, `.github/workflows/release.yml` and `.github/workflows/pages.yml` among them) are deleted by the sync when they still hold the platform's own content, kept when they were starters (yours), and held for your decision otherwise.
+Retired paths (files the platform used to write and no longer does, the `retired` list in the platform's `files.yml`) are deleted by the sync when they still hold the platform's own content, kept when they were starters (yours), and held for your decision otherwise.

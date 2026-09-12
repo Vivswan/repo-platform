@@ -10,7 +10,7 @@ const temp = tempDirs();
 // The helper resolves git against the process cwd and the builder script
 // against the SOURCE worktree, so the fixture is a self-contained scratch
 // repo carrying a stub branch_tree.ts - the real builder needs the whole
-// template tree and would turn this into an integration test.
+// build tree and would turn this into an integration test.
 const STUB_BUILDER = `
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

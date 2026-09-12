@@ -11,6 +11,7 @@ on:
         required: true
         type: string
     secrets:
+      # The fleet's ci.yml stops passing this on its next sync; the declaration leaves in the round after that one.
       REPO_PLATFORM_TOKEN:
         description: The fleet PAT; the publish falls back to github.token without it.
         required: false

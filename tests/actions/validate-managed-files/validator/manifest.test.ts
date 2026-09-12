@@ -242,7 +242,7 @@ describe("byte parity, entry by entry", () => {
     expect(reordered.stderr).toContain(".gitignore: the managed-region marker lines");
   });
 
-  test("a symlink's hash covers the link target, under the link class or an older managed record", () => {
+  test("a symlink's hash covers the link target under the link class; a managed record on a symlink fails by class", () => {
     const build = (claudeEntry: string): string => {
       const root = temp.dir("validate-managed-link-");
       for (const [rel, content] of Object.entries(BASELINE)) {
@@ -259,15 +259,22 @@ describe("byte parity, entry by entry", () => {
     };
     const dataFile = join(temp.dir("validate-managed-link-data-"), "files.yml");
     writeFileSync(dataFile, "placeholders: []\nmodules: {uv: {}}\nfiles: []\n");
-    for (const cls of ["managed", "link"]) {
-      const root = build(`{"class": "${cls}", "hash": "${sha("AGENTS.md")}"}`);
-      const result = boundedSpawnSync(
-        [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", root],
-        { env: gitFreeEnv() },
-      );
-      expect(result.stderr).toBe("");
-      expect(result.exitCode).toBe(0);
-    }
+    const linked = build(`{"class": "link", "hash": "${sha("AGENTS.md")}"}`);
+    const intact = boundedSpawnSync(
+      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", linked],
+      { env: gitFreeEnv() },
+    );
+    expect(intact.stderr).toBe("");
+    expect(intact.exitCode).toBe(0);
+    const managed = build(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`);
+    const byClass = boundedSpawnSync(
+      [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", managed],
+      { env: gitFreeEnv() },
+    );
+    expect(byClass.exitCode).toBe(1);
+    expect(byClass.stderr).toContain(
+      `CLAUDE.md: recorded as managed in ${MANIFEST} but is a symbolic link`,
+    );
     const repointed = build(`{"class": "link", "hash": "${sha("docs/AGENTS.md")}"}`);
     const drifted = boundedSpawnSync(
       [process.execPath, VALIDATOR, "--files", dataFile, "--private", "false", repointed],
@@ -571,6 +578,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
       `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be null or a lowercase sha256 hex digest`,
+      `docs/link.md: recorded as managed in ${MANIFEST_NAME} but is a symbolic link`,
       `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,
       `docs/deleted.md: listed as managed in ${MANIFEST_NAME} but missing from the repo`,
       `docs/repointed.md: content does not match the sha256 recorded in ${MANIFEST_NAME}`,

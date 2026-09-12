@@ -133,7 +133,7 @@ describe("parseScope", () => {
     expect(parseScope(raw, ROSTER)).toEqual(expected);
   });
 
-  test("the roster names what the message lists, so a module the template retires drops out", () => {
+  test("the roster names what the message lists, so a module files.yml drops leaves the roster", () => {
     expect(parseScope("modules:site", new Set(["uv", "rust"]))).toEqual({
       kind: "error",
       message:

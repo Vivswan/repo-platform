@@ -166,7 +166,6 @@ gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-p
 
 - Grant the fleet PAT access to the repo (step 3).
 - `site`: the module's settings layer enables Pages on the first settings apply (step 8); for a deploy before it, enable Pages with Source: GitHub Actions in the repo's Settings -> Pages, or `gh api -X POST repos/Vivswan/my-project/pages -f build_type=workflow`.
-- `bun`: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
 
 ## Private repositories
 

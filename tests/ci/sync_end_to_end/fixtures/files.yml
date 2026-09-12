@@ -107,7 +107,7 @@ files:
     class: managed
     when: {modules: [pages]}
 retired:
-  - path: .github/.copier-answers.yml
+  - path: .github/old-tool.yml
   - path: .github/workflows/release.yml
   - path: SECURITY.md
     moved_to: .github/SECURITY.md

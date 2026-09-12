@@ -41,7 +41,7 @@ interface Options {
 }
 
 const STAMP = (source: string, runId = "5") =>
-  `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${source}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/${runId}\n`;
+  `build(build): main from ${source.slice(0, 12)}\n\nsource: https://github.com/Vivswan/repo-platform/commit/${source}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/${runId}\n`;
 
 function run(opts: Options = {}) {
   const root = temp.dir("provenance-");

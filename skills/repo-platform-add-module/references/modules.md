@@ -14,7 +14,6 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Managed: the version dotfile for bun/node/deno (`.bun-version`, `.node-version`, `.dvmrc`, fleet-pinned), `dependabot-bun-lockfile.yml` (bun), `deno-audit.yml` (deno). Public repos with bun/node/deno/uv get the CodeQL variant of `auto-assign.yml`; fleet CI runs CodeQL for their language.
 - Blocks: a gitignore section and a Toolchain section in `AGENTS.md` (split files), and a Dependabot ecosystem entry (the managed `.github/dependabot.yml`).
 - Starter: `auto-format.yml` for every toolchain but rust, written only when absent. An existing `auto-format.yml`, `checks.yml`, `.gitleaks.toml`, or `copilot-setup-steps.yml` does not gain a later toolchain's piece; add it by hand.
-- Companion, bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT. Without it the lockfile fix lands but cannot re-trigger checks.
 - Removal: the dotfile and module workflow are retired; the blocks leave the split regions and the managed `.github/dependabot.yml`. `auto-format.yml` stays. The Dependabot label leaves the rendered `.github/settings.yml` once no selected toolchain carries it.
 
 ## site
@@ -24,7 +23,7 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Keys: `site.path` (URL segment the docs mount under beside a website; default `docs`; `null` turns the docs half off, for a website that renders `docs/` itself), `site.include` (extra trees rendered into the docs: `{path, mount, page}`, every entry naming its page file), `labels.site` (link-rot tracking label; default `docs-link-rot`).
 - Conventions: `docs/README.md` is the landing page and must exist when the repo has `docs/`; titles, order, and groups come from frontmatter and the landing's link table; links resolve inside `docs/` or are absolute.
 - Companion: Pages is enabled by the module's settings layer on the next settings apply; before it, enable Pages with Source: GitHub Actions by hand.
-- Removal: the leg skips; the hook stays (a starter); the live site stays until you turn Pages off. A registration still carrying a `pages:` or `docs_site:` block fails the plan.
+- Removal: the leg skips; the hook stays (a starter); the live site stays until you turn Pages off.
 
 ## release-please
 

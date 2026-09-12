@@ -26,6 +26,7 @@ on:
         type: string
         default: ""
     secrets:
+      # The fleet's ci.yml stops passing this on its next sync; the declaration leaves in the round after that one.
       REPO_PLATFORM_TOKEN:
         description: The fleet PAT; release-please falls back to github.token without it.
         required: false

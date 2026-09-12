@@ -175,24 +175,6 @@ export type Registration = Omit<z.infer<typeof registrationSchema>, "modules"> &
 
 export type RegistrationRead = { registration: Registration } | { errors: string[] };
 
-/** The registration keys the `site` module replaced, each with where its
- *  content went: a strict schema would report them as unrecognized, which
- *  says nothing about the move. */
-const RETIRED_KEYS: Record<string, string> = {
-  pages:
-    "the website build lives in the repo-owned hook .github/actions/site-build/action.yml " +
-    "and the module is `site` (docs/site.md)",
-  docs_site:
-    "it is `site` now (`site.path`, `site.include`; the label key is `labels.site`), and a " +
-    "website build belongs in the repo-owned hook .github/actions/site-build/action.yml",
-};
-
-function retiredKeyErrors(data: Record<string, unknown>, label: string): string[] {
-  return Object.entries(RETIRED_KEYS)
-    .filter(([key]) => key in data)
-    .map(([key, where]) => `${label}: ${key}: is no longer a registration key - ${where}`);
-}
-
 /** The registration a TEXT declares, fail-closed: a YAML error, a non-mapping
  *  document, an unknown key, a wrong type, or a malformed module list are all
  *  errors naming the file. */
@@ -206,8 +188,6 @@ export function parseRegistration(text: string, label = REGISTRATION_PATH): Regi
   }
   const modules = readModules(data, label);
   if (modules.modules === null) return { errors: modules.errors };
-  const moved = retiredKeyErrors(data as Record<string, unknown>, label);
-  if (moved.length > 0) return { errors: moved };
   const result = registrationSchema.safeParse(data);
   if (!result.success) {
     return {

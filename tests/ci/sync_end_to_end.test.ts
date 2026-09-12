@@ -43,7 +43,7 @@ const REGION_WITH_FUZZER = `${BUN_REGION_PREFIX}## Fuzzer\n/.fuzz-failures/\n${H
 const OLD_LICENSE = "MIT License\n\nCopyright (c) 2020 Someone\n";
 const OLD_CI = "name: platform ci v1\n";
 const LOCAL_CI = "name: my own ci\non: push\n";
-const OLD_ANSWERS = "_commit: 0000000000000000000000000000000000000000\n";
+const OLD_TOOL = "version: 1\n";
 const RELEASE_EDITED = "name: release (hand tuned)\n";
 const OLD_SECURITY = "# Security policy (old home)\n";
 const HTML_BEGIN = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
@@ -60,7 +60,7 @@ const OLD_GITATTRIBUTES = "* text=auto eol=lf\n";
 const OLD_YAMLLINT = "rules: {}\n";
 const LOCAL_CONSTRUCTOR = "local notes\n";
 const LOCAL_DOCKERIGNORE = "dist/\n";
-const LEGACY = "# legacy notes\n";
+const UNHASHED = "# unhashed notes\n";
 const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
 // The repository's overlay: identity keys, a ruleset of its own, comment
 // lines, a CRLF line, and no trailing newline, so the starter's hands-off
@@ -93,7 +93,7 @@ function oldManifest(): string {
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha256(OLD_CI)}"}`,
     "LICENSE.md": `{"class": "managed", "hash": "${sha256(OLD_LICENSE)}"}`,
     ".gitignore": `{"class": "split", "grammar": "managed-region", "begin": "${HASH_BEGIN}", "end": "${HASH_END}", "hash": "${sha256(OLD_REGION)}"}`,
-    ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha256(OLD_ANSWERS)}"}`,
+    ".github/old-tool.yml": `{"class": "managed", "hash": "${sha256(OLD_TOOL)}"}`,
     ".github/workflows/release.yml": `{"class": "managed", "hash": "${sha256("name: release\n")}"}`,
     "SECURITY.md": `{"class": "managed", "hash": "${sha256(OLD_SECURITY)}"}`,
     "OLD_NOTES.md": `{"class": "managed", "hash": "${sha256(OLD_NOTES)}"}`,
@@ -108,10 +108,9 @@ function oldManifest(): string {
     // A mirror record under a directory that is now a symlink loop: the
     // record is noted, never looked up through the loop.
     "other/loop/sub/x.md": `{"class": "mirror", "hash": "${sha256(OLD_LICENSE)}"}`,
-    // The previous pipeline recorded its symlinks as managed, hashing the
-    // link target string.
-    "CLAUDE.md": `{"class": "managed", "hash": "${sha256("AGENTS.md")}"}`,
-    ".github/copilot-instructions.md": `{"class": "managed", "hash": "${sha256("../AGENTS.md")}"}`,
+    // Two link records: one still selected, one no entry writes any more.
+    "CLAUDE.md": `{"class": "link", "hash": "${sha256("AGENTS.md")}"}`,
+    ".github/copilot-instructions.md": `{"class": "link", "hash": "${sha256("../AGENTS.md")}"}`,
     // Two managed records whose entries are split now: one still the
     // recorded content, one edited since.
     ".editorconfig": `{"class": "managed", "hash": "${sha256(OLD_EDITORCONFIG)}"}`,
@@ -124,7 +123,7 @@ function oldManifest(): string {
     constructor: `{"class": "starter"}`,
     // A hash-less managed record for a path nothing selects or retires: held
     // every run, its record carried, never a silent orphan.
-    "LEGACY.md": `{"class": "managed", "hash": null}`,
+    "UNHASHED.md": `{"class": "managed", "hash": null}`,
     // A class the writer does not record: the record is dropped with a note.
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
     "../escape.txt": `{"class": "managed", "hash": "${sha256("x")}"}`,
@@ -153,7 +152,7 @@ function seedTarget(): string {
     ".github/workflows/ci.yml": LOCAL_CI,
     "LICENSE.md": OLD_LICENSE,
     ".gitignore": `# my ignores above\n${OLD_REGION}# my ignores below\n.idea/\n`,
-    ".github/.copier-answers.yml": OLD_ANSWERS,
+    ".github/old-tool.yml": OLD_TOOL,
     ".github/workflows/release.yml": RELEASE_EDITED,
     "SECURITY.md": OLD_SECURITY,
     "OLD_NOTES.md": OLD_NOTES,
@@ -178,7 +177,7 @@ function seedTarget(): string {
     ".yamllint": OLD_YAMLLINT,
     constructor: LOCAL_CONSTRUCTOR,
     ".dockerignore": LOCAL_DOCKERIGNORE,
-    "LEGACY.md": LEGACY,
+    "UNHASHED.md": UNHASHED,
     "BESPOKE.md": "b\n",
     [MANIFEST]: oldManifest(),
   };
@@ -460,7 +459,7 @@ describe("sync.ts end to end", () => {
 
   test("retires: deletes the clean file, holds the edited one, moves the relocated one", () => {
     expect(summary.retired).toEqual([
-      { path: ".github/.copier-answers.yml", outcome: "deleted", detail: "retired" },
+      { path: ".github/old-tool.yml", outcome: "deleted", detail: "retired" },
       {
         path: ".github/workflows/release.yml",
         outcome: "held",
@@ -488,11 +487,11 @@ describe("sync.ts end to end", () => {
         outcome: "deleted",
         detail: "no longer selected",
       },
-      { path: "LEGACY.md", outcome: "held", detail: "the record carries no hash" },
+      { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
     ]);
-    expect(read("LEGACY.md")).toBe(LEGACY);
+    expect(read("UNHASHED.md")).toBe(UNHASHED);
     expect(summary.retired.map((row) => row.path)).not.toContain("CLAUDE.md");
-    expect(existsSync(join(target, ".github/.copier-answers.yml"))).toBe(false);
+    expect(existsSync(join(target, ".github/old-tool.yml"))).toBe(false);
     // The destination is gated on an unselected module: nothing moves there.
     expect(existsSync(join(target, "OLD_NOTES.md"))).toBe(false);
     expect(existsSync(join(target, "docs/NOTES.md"))).toBe(false);
@@ -568,7 +567,7 @@ describe("sync.ts end to end", () => {
         ".gitattributes",
         ".yamllint",
         "constructor",
-        "LEGACY.md",
+        "UNHASHED.md",
         ".dockerignore",
         "skills/new/LICENSE.md",
         "skills/alpha/AGENTS.md",
@@ -609,8 +608,6 @@ describe("sync.ts end to end", () => {
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
     expect(manifest.files[OVERLAY]).toEqual({ class: "starter" });
     expect(manifest.files[SETTINGS]).toEqual({ class: "managed", hash: sha256(read(SETTINGS)) });
-    // The adopted symlink's record flips to link with the hash the previous
-    // pipeline already wrote; the held flip keeps its managed record.
     expect(manifest.files["CLAUDE.md"]).toEqual({ class: "link", hash: sha256("AGENTS.md") });
     expect(manifest.files[".github/agents.md"]).toEqual({
       class: "link",
@@ -623,7 +620,7 @@ describe("sync.ts end to end", () => {
     expect(Object.entries(manifest.files).find(([path]) => path === "constructor")?.[1]).toEqual({
       class: "starter",
     });
-    expect(manifest.files["LEGACY.md"]).toEqual({ class: "managed", hash: null });
+    expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files[".yamllint"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files[".editorconfig"]).toMatchObject({
       class: "split",
@@ -696,7 +693,7 @@ describe("sync.ts end to end", () => {
       "local edits replaced in skills/gamma/LICENSE.md",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",
       "retirement of CONTRIBUTING.md: the managed region was removed and the repository-owned content kept",
-      "retirement of LEGACY.md held: the record carries no hash",
+      "retirement of UNHASHED.md held: the record carries no hash",
       "mirror plain replaced: a directory stood at the target",
       "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
@@ -727,7 +724,7 @@ describe("sync.ts end to end", () => {
         outcome: "kept",
         detail: "a starter is repo-owned",
       },
-      { path: "LEGACY.md", outcome: "held", detail: "the record carries no hash" },
+      { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
     ]);
     // The region-added file is now a marked split file: current, no longer held.
     expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(".dockerignore"));

@@ -36,7 +36,7 @@ files:
   - { path: .github/workflows/nightly-fuzz.yml, class: starter, when: { modules: [fuzzer] } }
   - { path: CLAUDE.md, class: link, target: AGENTS.md }
 retired:
-  - { path: .github/.copier-answers.yml }
+  - { path: .github/old-tool.yml }
   - { path: SECURITY.md, moved_to: .github/SECURITY.md }
 `;
 
@@ -387,7 +387,7 @@ describe("blockSources and verifySources", () => {
     );
     expect(() =>
       loadFilesConfig(join(root, "files.yml"), join(root, "files"), join(root, "previous.yml")),
-    ).toThrow("b.txt was in the previous files.yml but is neither written nor retired now");
+    ).toThrow("b.txt was written by the previous files.yml but is neither written nor retired now");
   });
 
   test("loadFilesConfig names the placeholder and grammar problems of a document in one error", () => {
@@ -456,12 +456,16 @@ describe("checkRetirements", () => {
     expect(() => checkRetirements(previous, current)).not.toThrow();
   });
 
-  test("a previously retired path dropped from retired: is an error too", () => {
+  test("a previously written path neither written nor retired now is the error; a dropped retired entry is not", () => {
     const previous = parseFilesConfig(
-      "placeholders: []\nfiles: []\nretired:\n  - { path: old.yml }\n",
+      "placeholders: []\nfiles:\n  - { path: gone.yml, class: managed }\nretired:\n  - { path: old.yml }\n",
     );
     expect(() => checkRetirements(previous, current)).toThrow(
-      "old.yml was in the previous files.yml",
+      "gone.yml was written by the previous files.yml but is neither written nor retired now",
     );
+    const onlyRetired = parseFilesConfig(
+      "placeholders: []\nfiles: []\nretired:\n  - { path: old.yml }\n",
+    );
+    expect(() => checkRetirements(onlyRetired, current)).not.toThrow();
   });
 });
