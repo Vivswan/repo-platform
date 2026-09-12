@@ -37,10 +37,13 @@ export type Manifest =
   | { state: "malformed"; problem: string }
   | { state: "parsed"; files: Record<string, ManifestEntryShape> };
 
-/** The module vocabulary files.yml declares (its `modules` keys), or the
- *  reason it could not be read: the registration check reports that once,
- *  and the module names then stand unjudged. */
-export type ModuleVocabulary = { modules: ReadonlySet<string> } | { problem: string };
+/** What files.yml declares: its module names (the `modules` keys) and the
+ *  class each `files` path is written under; or the reason it could not be
+ *  read, which the registration check reports once, leaving both unjudged.
+ *  A path listed under several `when` conditions collects every class. */
+export type Vocabulary =
+  | { modules: ReadonlySet<string>; classes: ReadonlyMap<string, ReadonlySet<string>> }
+  | { problem: string };
 
 /** Every cross-check dependency (a missing modules list, a conflicted manifest, self mode) is a field here, never an
  *  ordering between checks. */
@@ -53,7 +56,7 @@ export interface Context {
    *  when the key is missing, null when the document is not a mapping);
    *  the record is null when the file is absent. */
   registration: { modules: unknown } | null;
-  vocabulary: ModuleVocabulary;
+  vocabulary: Vocabulary;
   manifest: Manifest;
 }
 
@@ -69,7 +72,7 @@ function loadRegistration(root: string): { modules: unknown } | null {
   return { modules: isRecord(data) ? data.modules : null };
 }
 
-function loadVocabulary(filesConfig: string): ModuleVocabulary {
+function loadVocabulary(filesConfig: string): Vocabulary {
   if (!isRegularFile(filesConfig)) {
     return { problem: `${filesConfig}: the module data file is missing` };
   }
@@ -83,7 +86,22 @@ function loadVocabulary(filesConfig: string): ModuleVocabulary {
   if (!isRecord(modules)) {
     return { problem: `${filesConfig}: the module data file carries no modules mapping` };
   }
-  return { modules: new Set(Object.keys(modules)) };
+  const files = isRecord(data) ? data.files : undefined;
+  if (!Array.isArray(files)) {
+    return { problem: `${filesConfig}: the module data file carries no files list` };
+  }
+  const classes = new Map<string, Set<string>>();
+  for (const entry of files) {
+    if (!isRecord(entry) || typeof entry.path !== "string" || typeof entry.class !== "string") {
+      return {
+        problem: `${filesConfig}: the module data file carries a files entry without a string path and class`,
+      };
+    }
+    const declared = classes.get(entry.path) ?? new Set<string>();
+    declared.add(entry.class);
+    classes.set(entry.path, declared);
+  }
+  return { modules: new Set(Object.keys(modules)), classes };
 }
 
 function loadManifest(root: string): Manifest {

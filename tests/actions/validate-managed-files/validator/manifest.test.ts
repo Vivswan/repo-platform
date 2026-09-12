@@ -230,15 +230,13 @@ describe("byte parity, entry by entry", () => {
   test("a split entry whose markers are missing, duplicated, or out of order fails closed", () => {
     const entries = {
       ...SELF_ENTRY,
-      ".github/workflows/ci.yml":
+      "LICENSE.md":
         `{"class": "split", "grammar": "managed-region", "begin": "# no-such-begin", ` +
         `"end": "# no-such-end", "hash": "${"c".repeat(64)}"}`,
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      ".github/workflows/ci.yml: the managed-region marker lines ('# no-such-begin'",
-    );
+    expect(stderr).toContain("LICENSE.md: the managed-region marker lines ('# no-such-begin'");
     const reordered = runValidator({ ".gitignore": [HE, HB, ""].join("\n") });
     expect(reordered.exitCode).toBe(1);
     expect(reordered.stderr).toContain(".gitignore: the managed-region marker lines");
@@ -299,6 +297,96 @@ describe("byte parity, entry by entry", () => {
   });
 });
 
+describe("the recorded class against files.yml", () => {
+  const CI = ".github/workflows/ci.yml";
+  const CHECKS = ".github/workflows/checks.yml";
+  const classError = (path: string, recorded: string, declared: string) =>
+    `error: ${MANIFEST}: entry '${path}' is recorded as ${recorded} but files.yml declares ` +
+    `the path ${declared} - the class decides what parity verifies, and the sync records the ` +
+    "declared one; revert a hand edit (git history has the stamped original: the sync holds a " +
+    "drifted file whose record it cannot verify, never restamps it), or merge the pending sync " +
+    "PR when the platform changed the path's class since the last sync (a row that PR holds " +
+    "keeps the old record until it is resolved)";
+  const errors = (stderr: string) => stderr.split("\n").filter((line) => line.startsWith("error:"));
+
+  // The starter row is the one that passed before: its branch verifies
+  // nothing, so a relabel with the hash dropped switched parity off.
+  test.each([
+    { recorded: "starter", entry: '{"class": "starter"}' },
+    {
+      recorded: "split",
+      entry:
+        '{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
+    },
+    { recorded: "link", entry: '{"class": "link", "hash": null}' },
+    { recorded: "mirror", entry: '{"class": "mirror", "hash": null}' },
+  ])(
+    "a managed path recorded as $recorded is one error, whatever the file holds",
+    ({ recorded, entry }) => {
+      const { exitCode, stderr } = runValidator({
+        [CI]: "name: edited\non: [push]\njobs: {}\n",
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: entry }),
+      });
+      expect(exitCode).toBe(1);
+      expect(errors(stderr)).toEqual([classError(CI, recorded, "managed")]);
+    },
+  );
+
+  test("a starter path recorded as managed, with the file's true hash, is the same error", () => {
+    const content = "name: checks\n";
+    const { exitCode, stderr } = runValidator({
+      [CHECKS]: content,
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CHECKS]: managedEntry(content) }),
+    });
+    expect(exitCode).toBe(1);
+    expect(errors(stderr)).toEqual([classError(CHECKS, "managed", "starter")]);
+  });
+
+  test("the declared starter passes whatever it holds; an undeclared path is dispatched as recorded", () => {
+    const declared = runValidator({
+      [CHECKS]: "name: edited\n",
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CHECKS]: '{"class": "starter"}' }),
+    });
+    expect(declared.stderr).toBe("");
+    expect(declared.exitCode).toBe(0);
+    const copy = "mirrored\n";
+    const undeclared = runValidator({
+      "docs/copy.md": copy,
+      "docs/own.md": "repo-owned\n",
+      [MANIFEST]: manifestOf({
+        ...stampedBaseline(),
+        "docs/copy.md": `{"class": "mirror", "hash": "${sha(copy)}"}`,
+        "docs/own.md": '{"class": "starter"}',
+      }),
+    });
+    expect(undeclared.stderr).toBe("");
+    expect(undeclared.exitCode).toBe(0);
+  });
+
+  test("an unknown class at a declared path is the unknown-class error alone", () => {
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "bespoke"}' }),
+    });
+    expect(exitCode).toBe(1);
+    expect(errors(stderr)).toEqual([
+      `error: ${MANIFEST}: entry '${CI}' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link); re-run the sync to regenerate the manifest`,
+    ]);
+  });
+
+  test("a data file without a files list is one error and the classes stand unjudged", () => {
+    const { exitCode, stderr } = runValidator(
+      { [MANIFEST]: manifestOf({ ...stampedBaseline(), [CI]: '{"class": "starter"}' }) },
+      [],
+      { filesYml: "placeholders: []\nmodules: {uv: {}}\n" },
+    );
+    expect(exitCode).toBe(1);
+    expect(errors(stderr)).toHaveLength(1);
+    expect(errors(stderr)[0]).toContain(
+      "the module data file carries no files list - neither the registration's module names nor the manifest's classes can be judged without it",
+    );
+  });
+});
+
 describe("checkManifestParity over one tree walking every dispatch branch", () => {
   test("reports exactly these verdicts, in manifest order", () => {
     const root = temp.dir("manifest-parity-");
@@ -311,6 +399,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/unknown-grammar.md": region,
       "docs/unstamped.md": "content\n",
       "docs/starter.md": "repo-owned\n",
+      "docs/relabeled.md": "repo-owned now\n",
       "docs/odd.md": "content\n",
       "docs/file-as-link.md": "intact.md",
     };
@@ -323,6 +412,10 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
     symlinkSync("drifted.md", join(root, "docs/repointed.md"));
     mkdirSync(join(root, "docs/dir.md"));
     mkdirSync(join(root, ".github"));
+    writeFileSync(
+      join(root, "files.yml"),
+      "modules: {}\nfiles:\n  - {path: docs/relabeled.md, class: managed}\n",
+    );
     const split = (hash: string, grammar = "managed-region") =>
       `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": "${hash}"}`;
     const entries: Record<string, string> = {
@@ -335,6 +428,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/no-grammar.md": `{"class": "split", "begin": "# b", "end": "# e", "hash": "${"d".repeat(64)}"}`,
       "docs/unstamped.md": '{"class": "managed", "hash": null}',
       "docs/starter.md": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
+      "docs/relabeled.md": '{"class": "starter"}',
       "docs/odd.md": '{"class": "bespoke"}',
       "docs/short-hash.md": '{"class": "managed", "hash": "abc"}',
       "docs/link.md": `{"class": "managed", "hash": "${sha("intact.md")}"}`,
@@ -346,7 +440,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/link-gone.md": `{"class": "link", "hash": "${sha("intact.md")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
-    const findings = checkManifestParity(loadContext(root, false, join(root, "no-files.yml")));
+    const findings = checkManifestParity(loadContext(root, false, join(root, "files.yml")));
     const messages = findings.map((finding) => {
       expect(finding.severity).toBe("error");
       return finding.message.split(" - ")[0].split(";")[0];
@@ -358,6 +452,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
       `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (unstamped)`,
       `${MANIFEST_NAME}: entry 'docs/starter.md' is a starter carrying a hash`,
+      `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
       `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be null or a lowercase sha256 hex digest`,
       `docs/dir.md: listed in ${MANIFEST_NAME} but is neither a regular file nor a symlink`,

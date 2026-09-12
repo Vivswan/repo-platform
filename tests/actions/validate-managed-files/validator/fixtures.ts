@@ -23,7 +23,13 @@ export const FILES_YML = [
   "  uv: {}",
   "  pages: {}",
   "  release-please: {}",
-  "files: []",
+  "files:",
+  "  - {path: .gitignore, class: split, region: hash}",
+  "  - {path: .editorconfig, class: split, region: hash}",
+  "  - {path: LICENSE.md, class: split, region: html}",
+  "  - {path: AGENTS.md, class: split, region: html}",
+  "  - {path: .github/workflows/ci.yml, class: managed}",
+  "  - {path: .github/workflows/checks.yml, class: starter}",
   "",
 ].join("\n");
 

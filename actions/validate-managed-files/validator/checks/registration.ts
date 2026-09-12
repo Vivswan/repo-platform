@@ -25,8 +25,8 @@ export function checkRegistration(ctx: Context): Finding[] {
   if ("problem" in ctx.vocabulary) {
     findings.push(
       error(
-        `${ctx.vocabulary.problem} - the registration's module names cannot be judged ` +
-          "without it",
+        `${ctx.vocabulary.problem} - neither the registration's module names nor the ` +
+          "manifest's classes can be judged without it",
       ),
     );
     return findings;

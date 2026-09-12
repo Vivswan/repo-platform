@@ -146,7 +146,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 | YAML | a YAML file anywhere in the repository that does not parse |
 | Conflict markers | a merge's conflict markers left in a source, config, or markdown file (the validator's text suffixes) |
 | Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, or an entry carrying a field the vocabulary lacks |
-| Manifest parity | managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
+| Manifest parity | an entry recorded under a class other than the one `files.yml` declares for its path (a relabel to `starter` would switch parity off), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 
 - Errors block; advisories inform. The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.
 - The report step always runs, reads the verdict once, and exports it as the `integrity` output; a missing or malformed verdict exports failure. When no bun matching the action's pin is available the step exports the failure itself, with no verdict to read.
