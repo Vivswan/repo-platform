@@ -19,7 +19,7 @@ import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
 import { canonical, keyedMatrix, RESOLVER_ENV } from "./sync_operator.ts";
 
-interface WorkflowStep {
+export interface WorkflowStep {
   id?: string;
   name?: string;
   uses?: string;
@@ -32,7 +32,7 @@ interface WorkflowStep {
 
 /** Rules about steps read the parsed document, never the file's text:
  *  a matching string in a comment, or on some other step, must not satisfy them. */
-function stepsOf(text: string, rel: string): WorkflowStep[] {
+export function stepsOf(text: string, rel: string): WorkflowStep[] {
   const doc = asRecord(parseYaml(text), rel);
   const jobs = asRecord(doc.jobs ?? {}, `${rel} jobs`);
   const steps: WorkflowStep[] = [];

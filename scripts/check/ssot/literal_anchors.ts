@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import { type GitIdentity, SYNC_IDENTITY } from "../../../.github/scripts/shared/git_identity.ts";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { PLATFORM_NAME, PLATFORM_OWNER, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
@@ -12,8 +13,10 @@ import {
   repoSlug,
   trackedFiles,
   trackingStreams,
+  walkFiles,
 } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
+import { stepsOf } from "./settings_workflow.ts";
 
 // A strip that removes nothing from one of these means the marker grammar drifted from scripts/files_table.ts,
 // and every stripped-prose rule would silently check unstripped text.
@@ -213,6 +216,38 @@ export function isOwnPagesOrigin(
   return boundary === "" || !/[a-z0-9.-]/.test(boundary);
 }
 
+export const AUTOMATION_PR_ACTION = "peter-evans/create-pull-request";
+
+/** A workflow cannot import SYNC_IDENTITY, so every create-pull-request step spells it in both inputs; the action's
+ *  defaults would commit as github-actions[bot] authored by whoever dispatched the run. */
+export function automationPrIdentityMismatches(
+  workflows: Record<string, string>,
+  identity: GitIdentity,
+): Mismatch[] {
+  const signature = `${identity.name} <${identity.email}>`;
+  const mismatches: Mismatch[] = [];
+  let steps = 0;
+  for (const [rel, text] of Object.entries(workflows)) {
+    for (const step of stepsOf(text, rel)) {
+      if (!step.uses?.startsWith(`${AUTOMATION_PR_ACTION}@`)) continue;
+      steps += 1;
+      const inputs = step.with ?? {};
+      for (const key of ["committer", "author"]) {
+        if (inputs[key] === signature) continue;
+        mismatches.push({
+          file: `${rel} step "${step.name ?? step.uses}"`,
+          expected: `with.${key}: ${signature}`,
+          got: key in inputs ? `with.${key}: ${String(inputs[key])}` : `no ${key}: on the step`,
+        });
+      }
+    }
+  }
+  if (steps === 0) {
+    throw new Error(`no ${AUTOMATION_PR_ACTION} step in any workflow - anchor lost`);
+  }
+  return mismatches;
+}
+
 const PLATFORM_NAME_SOURCE = "actions/shared/platform.ts";
 const PLATFORM_NAME_CODE_DIRS = [".github/scripts/", "actions/", "scripts/"];
 /** The two spellings no import can replace: a skill directory's name, and docs_check.ts's SITE_CONFIG, which the
@@ -247,10 +282,13 @@ export const literalAnchorRules: Rule[] = [
   {
     name: "pins-and-identities",
     run: () => {
-      const mismatches: Mismatch[] = [];
-
-      // No git-identity arm: every committer is TypeScript and imports
-      // shared/git_identity.ts, so the import is the guarantee.
+      // TypeScript committers import shared/git_identity.ts, so only the workflow-spelled identities are judged.
+      const mismatches = automationPrIdentityMismatches(
+        Object.fromEntries(
+          walkFiles(".github/workflows").map((f) => [f.path, read(f.path)] as const),
+        ),
+        SYNC_IDENTITY,
+      );
 
       const patUrls = (rel: string) => {
         const urls = [
