@@ -1,9 +1,7 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-/** All regular files below root as sorted root-relative paths. Symbolic
- *  links are neither walked nor listed: the files/ tree holds none, and a
- *  link would otherwise be read as the file it points at. */
+/** Symbolic links are neither walked nor listed: the files/ tree holds none, and a link would otherwise be read as the file it points at. */
 export function walkFiles(root: string): string[] {
   const found: string[] = [];
   const visit = (rel: string) => {

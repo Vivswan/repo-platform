@@ -1,20 +1,13 @@
-// Rebuild the build-branch tree from a source commit exactly as the builder
-// does (the SOURCE commit's own script and dependencies); the consumer,
-// sync/verify_build_provenance.ts's tree proof, owns the hash and the cleanup.
+// The steps run the SOURCE commit's own branch_tree.ts and lockfile, never this checkout's,
+// so the proof compares against what that commit could have built.
 
 import { join } from "node:path";
 import { env } from "./gha.ts";
 import { capture, exitCodeOf, redactCommand } from "./proc.ts";
 import { stageComposedTreeArgv } from "./stage_tree.ts";
 
-/** Per-step operational deadline, read at call time so tests can shrink
- * it: generous next to the measured normal (install + compose run
- * ~0.6-2 s warm, low minutes on a cold bun cache), small enough that a
- * wedged `bun install` throws here - into the provenance verifier's
- * loud failure - instead of eating the job's headroom toward an unnamed
- * runner-level kill. Local on purpose: proc.ts's passthrough is deadline-free by
- * contract, and this is its only inherited-stdio caller with a real
- * deadline. */
+/** Read at call time so tests can shrink it. The default sits well above the measured normal (0.6-2 s warm, low minutes on a
+ * cold bun cache) and inside the job's headroom, so a wedged `bun install` fails named here instead of as a runner-level kill. */
 function stepTimeoutMs(): number {
   const raw = env("REBUILD_STEP_TIMEOUT_MS", "300000");
   const timeoutMs = Number(raw);
@@ -28,15 +21,11 @@ function stepTimeoutMs(): number {
   return timeoutMs;
 }
 
-// redactCommand in the error text: the message can end up in a public
-// log, and argv is exactly where the sync pipeline carries its
-// PAT-in-URL shapes.
+// Its own spawn rather than proc.ts's passthrough, which is deadline-free by contract; the other two choices mirror proc.ts:
+//   env: { ...process.env }    -> a caller's GIT_* scrub reaches the child; a stray startup GIT_DIR would otherwise redirect the git steps
+//   redactCommand in the error -> argv is where the sync pipeline carries its PAT-in-URL shapes, and the message can land in a public log
 function step(command: string[]): void {
   const timeoutMs = stepTimeoutMs();
-  // Live process.env handed DELIBERATELY, matching proc.ts's env
-  // contract: bun's default is a process-start snapshot, so a caller's
-  // GIT_* scrub would otherwise never reach these children and a stray
-  // startup GIT_DIR would redirect the git steps at another repository.
   const proc = Bun.spawnSync(command, {
     env: { ...process.env },
     stdio: ["inherit", "inherit", "inherit"],
@@ -59,11 +48,8 @@ function stepCapture(command: string[]): string {
   return result.stdout.trimEnd();
 }
 
-/** Build the branch tree from `sourceSha` into `treeDir` (via a detached
- * git worktree at `srcDir`) and return its git tree hash, computed through
- * a scratch repo's index so file modes and symlinks land in the comparison
- * too. Throws on any command failure; the CALLER owns removing srcDir (a
- * registered worktree) and treeDir, success or not. */
+/** The hash goes through a scratch repo's index so file modes and symlinks land in the comparison too.
+ * The caller owns removing srcDir (a registered worktree) and treeDir, success or not. */
 export function rebuildBranchTree(options: {
   sourceSha: string;
   srcDir: string;

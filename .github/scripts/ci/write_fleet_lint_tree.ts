@@ -1,13 +1,6 @@
 #!/usr/bin/env bun
-// Writes what the fleet receives so ci.yml's actionlint job can lint the
-// written workflows: the sources under files/ carry placeholders and
-// block anchors, which actionlint cannot read, so the writer produces a
-// scratch git repository per selection (every module, and none) and the
-// lint runs over their .github/workflows with the starter actionlint.yaml
-// the writer landed.
-//
-// Usage: bun .github/scripts/ci/write_fleet_lint_tree.ts <dest>
-//   writes <dest>/all and <dest>/none; prints each target's workflow count.
+// The sources under files/ carry placeholders and block anchors actionlint cannot read, so ci.yml's actionlint job lints what the
+// writer lands instead: one scratch repository per selection (every module, and none).
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -37,7 +30,6 @@ export function registrationFor(modules: string[]): string {
   ].join("\n");
 }
 
-/** The workflow files a written target carries, sorted. */
 export function writtenWorkflows(target: string): string[] {
   const dir = join(target, ".github/workflows");
   return existsSync(dir)

@@ -6,9 +6,7 @@
 
 import { capture, type RunOptions } from "./proc.ts";
 
-/** Whether `git ...args` answered yes (exit 0). A no is exit 1; anything else throws, and so
- *  does a deadline expiry even beside an exit code (a child that left a descendant holding the
- *  pipe reports its own exit at the deadline). */
+/** A deadline expiry throws even beside an exit code: a child that left a descendant holding the pipe reports its own exit at the deadline. */
 export function gitAnswersYes(args: string[], options: RunOptions = {}): boolean {
   const probe = capture(["git", ...args], options);
   if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {

@@ -1,8 +1,3 @@
-// Link entries: a relative symbolic link the writer creates and repairs.
-// A link elsewhere is re-pointed (its old target is the "local edit" the
-// report shows); a regular file at the path is held, never replaced, unless
-// the class-flip rule has already judged it the platform's own write.
-
 import { sha256 } from "./manifest.ts";
 import { writeLink as placeLink, probe } from "./target_files.ts";
 import type { WriteOutcome } from "./write_managed.ts";

@@ -1,18 +1,8 @@
 #!/usr/bin/env bun
-// Moves the `stable` tag to SOURCE_SHA, a green main commit (the tag's
-// contract: docs/build-provenance.md; its place after the gate:
-// docs/all-green.md). One invoker, post-green.yml's move-stable job:
-// SOURCE_SHA is the judged commit on the call, the sha input on a dispatch.
-//
-// Invariants this file owns: the tag only ever names main history with a
-// completed successful all-green check; newest-green wins (a stale source
-// never moves the tag back); the lease push is the compare-and-swap on the
-// value read here, so a racing mover loses loudly with the tag untouched.
-//
-// Output: previous, the base the directives read takes from the tag: the
-// commit it named before this run moved it, "" when nothing moved (the first
-// move included). Env: GITHUB_REPOSITORY, GITHUB_REF, SOURCE_SHA,
-// GITHUB_OUTPUT, GH_TOKEN.
+// One invoker, post-green.yml's move-stable job: SOURCE_SHA is the judged commit on the call, the sha input on a dispatch (the tag's
+// contract: docs/build-provenance.md; its place after the gate: docs/all-green.md).
+// Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
+// nothing moved (the first move included).
 
 import { allGreenFailure } from "../shared/all_green.ts";
 import { env, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
@@ -31,11 +21,8 @@ if (ref !== "" && ref !== "refs/heads/main") {
   );
 }
 
-/** The tag's value on origin (the ref itself, a tag object for an
- * annotated tag), "" when ABSENT (ls-remote --exit-code returns 2). Any
- * other failure is operational and fatal: a blip must never read as a
- * first move, whose empty lease would refuse the push anyway but whose
- * outputs would misreport the tag. */
+/** For an annotated tag the value is the tag object, which is what the lease must name. ls-remote --exit-code returns 2 for an
+ * absent tag; any other failure is fatal, since read as a first move it would misreport the tag in the outputs. */
 function remoteTag(): string {
   const probe = capture(["git", "ls-remote", "--exit-code", "origin", TAG]);
   if (probe.exitCode === 2) return "";

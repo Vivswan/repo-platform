@@ -9,7 +9,6 @@ import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
 import { DEFAULT_HANG_BOUND_MS } from "../shared/proc.ts";
 import { DELIVERY_CALL_BOUND_MS, DELIVERY_CALLS } from "./deliver.ts";
 
-/** The fleet size the re-run probe is budgeted for. */
 export const PROBE_FLEET_SIZE = 10;
 /** Discovery's two listings, then a push probe and an adoption read per
  *  repository, each under the fleet network bound. */
@@ -23,9 +22,7 @@ export const DELIVERY_BUDGET_MS = DELIVERY_CALLS * DELIVERY_CALL_BOUND_MS;
  *  runner's own. */
 export const SETUP_MINUTES = 5;
 
-/** The row's budget in minutes, given its writer step's own
- *  timeout-minutes (the writer's git calls are local to the clone, so the
- *  step's timeout is its bound). */
+/** The writer's git calls are local to the clone, so its step's own timeout-minutes is its bound. */
 export function rowBudgetMinutes(writerMinutes: number): number {
   const bounded = PROBE_BUDGET_MS + CHECKOUT_BUDGET_MS + DELIVERY_BUDGET_MS;
   return Math.ceil(bounded / 60_000) + writerMinutes + SETUP_MINUTES;

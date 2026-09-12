@@ -1,10 +1,4 @@
 #!/usr/bin/env bun
-// Composes the toolchain refresh PR's body - an optional MAJOR banner
-// ahead of the fixed summary; Actions expressions cannot build multiline
-// strings - and hands it to open_automation_pr.ts over its env, with the
-// PR title doubling as the commit message.
-//
-// Env: BUMPS, MAJOR, PR_TITLE, plus everything open_automation_pr.ts reads.
 
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";

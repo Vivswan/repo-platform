@@ -1,14 +1,10 @@
-// The bot identities this repository commits with, owned here alone.
-// Every committer is a TypeScript script that imports these constants, so
-// no other copy exists to police.
+// Every committer is a TypeScript script importing these constants; no workflow or action carries its own copy.
 
 export interface GitIdentity {
   name: string;
   email: string;
 }
 
-/** The push sync's committer: sync-branch commits into managed repos and
- * this repo's own automation commits. */
 export const SYNC_IDENTITY: GitIdentity = {
   name: "repo-platform-sync",
   email: "repo-platform-sync@users.noreply.github.com",

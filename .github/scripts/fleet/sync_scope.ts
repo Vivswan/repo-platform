@@ -1,7 +1,5 @@
-// The fleet scope grammar, one owner for the directive parser and both selectors: `all`, the
-// tokens `public` and `private`, owner/name slugs, or `modules:<a>+<b>` filters (the repos whose
-// .repo-platform.yml selects every named module). Only the plans know visibility and module
-// selections (fail-closed: not discovered as public counts as private), so they expand the tokens.
+// One owner for the directive parser and both selectors. Only the plans know visibility and module selections, so the tokens are
+// expanded there, not here.
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 
@@ -30,10 +28,8 @@ export type Scope =
   | { kind: "all" }
   | { kind: "list"; visibility: Set<Visibility>; slugs: Set<string>; modules: Set<string>[] };
 
-/** The whole fleet for "" and "all", else the folded list. `roster` is files.yml's module list
- *  (sync/modules.ts's moduleRoster): a filter naming anything else is refused here, before any
- *  repository is probed. Messages carry counts, never entries: a dispatch entry
- *  may be a private slug and the caller's log is public. */
+/** Messages carry counts, never entries: a dispatch entry may be a private slug and the caller's log is public. A filter naming a
+ *  module outside `roster` (sync/modules.ts's moduleRoster) is refused here, before any repository is probed. */
 export function parseScope(
   raw: string,
   roster: ReadonlySet<string>,
@@ -104,9 +100,6 @@ export function parseScope(
  *  private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 
-/** Whether the scope admits `repo` before its module selection is known: named by slug, or passed
- *  by the visibility tokens (any visibility when only modules: filters constrain the fleet). The
- *  filters then still judge it: modulesFilterFor, then modulesAdmit over its declared list. */
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
   if (scope.kind === "all") return true;
   if (scope.slugs.has(repo.toLowerCase())) return true;
@@ -114,15 +107,11 @@ export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): bo
   return scope.visibility.has(isPrivate ? "private" : "public");
 }
 
-/** The modules: filters `repo` must pass, or null when none applies: the scope carries no filter,
- *  or it named the repo by slug (a slug is admitted as typed, its selection unread). */
 export function modulesFilterFor(scope: Scope, repo: string): Set<string>[] | null {
   if (scope.kind !== "list" || scope.modules.length === 0) return null;
   return scope.slugs.has(repo.toLowerCase()) ? null : scope.modules;
 }
 
-/** The filters' verdict over a repo's declared module list: some filter names only modules the
- *  repo selects (AND inside a filter, OR across filters). */
 export function modulesAdmit(
   filters: readonly ReadonlySet<string>[],
   declared: readonly string[],
@@ -131,16 +120,13 @@ export function modulesAdmit(
   return filters.some((names) => [...names].every((name) => selected.has(name)));
 }
 
-/** The plan's one line about the adopted repos its modules: filters left out, counts only (a
- *  left-out repo may be private). Null when the scope carries no filter. */
+/** Counts only: a left-out repo may be private. */
 export function modulesLeftOutLine(scope: Scope, leftOut: number): string | null {
   if (scope.kind !== "list" || scope.modules.length === 0) return null;
   return `modules filter: ${leftOut} adopted ${leftOut === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
 }
 
-/** Why a list scope cannot run, counts only: a slug naming no known repo, or on the called path
- *  a slug naming a private one (private repos ride under the token). `known`: folded slug ->
- *  private; `owner` names the discovery scope in the unknown-slug diagnosis. Null when it can run. */
+/** Counts only: a slug may be private. `known` maps folded slug -> private. */
 export function scopeRefusal(
   scope: Scope,
   known: ReadonlyMap<string, boolean>,

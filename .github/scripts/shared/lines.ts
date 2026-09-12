@@ -27,16 +27,13 @@ export function joinLines(lines: Buffer[]): Buffer {
   return Buffer.concat(parts);
 }
 
-/** The line without its trailing CR bytes (CRLF input split on LF). */
 export function stripCr(line: Buffer): Buffer {
   let end = line.length;
   while (end > 0 && line[end - 1] === 0x0d) end--;
   return line.subarray(0, end);
 }
 
-/** The last non-blank line of a text, trimmed ("" for all-blank input) -
- * the "final verdict line" read of a subprocess's output, shared so the
- * gate readers cannot drift on what counts as the last line. */
+/** The gate readers' "final verdict line" read, shared so they cannot drift on what counts as the last line. */
 export function lastLine(text: string): string {
   const lines = text
     .split("\n")

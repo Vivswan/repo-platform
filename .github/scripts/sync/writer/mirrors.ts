@@ -1,11 +1,5 @@
-// Mirrors: byte copies of files this sync wrote, declared in the target's
-// registration. A declaration that cannot be written (the rules in
-// actions/plan/mirrors.ts, plus what only the checkout shows: a symbolic
-// link at the target or above it, a glob landing on a nested or contested
-// path, a held source) fails the run before any copy of its pass is
-// written, so no PR carries a repository out of sync; whatever else stands
-// at a target (a directory, a file where a directory must be, other
-// content) is replaced and reported for review.
+// A declaration that cannot be written fails the run before any copy of its pass is written, so no PR carries a repository out of
+// sync; actions/plan/mirrors.ts holds the declaration rules, and this file adds what only the checkout shows.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,30 +25,24 @@ export type MirrorRow = { source: string; target: string } & (
   | { outcome: "replaced"; detail: string }
 );
 
-/** The text a copy replaced and what replaced it, for the report's diff. */
 export interface ReplacedText {
   path: string;
   before: string;
   after: string;
 }
 
-/** Every declared target the run cannot write, each named with its reason. */
 export class MirrorFailure extends Error {
   constructor(readonly failures: MirrorProblem[]) {
     super(failures.map(describeMirrorProblem).join("\n"));
   }
 }
 
-/** An ancestor directory a write cannot pass through, and what it is. */
 export interface BlockedAncestor {
   dir: string;
   is: "a symbolic link" | "a file";
 }
 
-/** The shallowest ancestor of `path` that cannot be written through: a
- *  symbolic link (the write would land outside the checkout) or a file (no
- *  directory can be made of it). Null when every ancestor is a directory or
- *  nothing yet. */
+/** A symbolic link ancestor could land the write outside the checkout; a file ancestor can have no directory made of it. */
 export function blockedAncestor(root: string, path: string): BlockedAncestor | null {
   const segments = path.split("/");
   for (let depth = 1; depth < segments.length; depth++) {
@@ -67,28 +55,17 @@ export function blockedAncestor(root: string, path: string): BlockedAncestor | n
   return null;
 }
 
-/** blockedAncestor over the literal directories a pattern names before its
- *  first `*`: a readdir through a link would list names from outside the
- *  checkout, so the whole pattern fails. */
+/** A readdir through a linked ancestor could list names from outside the checkout, so the whole pattern fails. */
 export function blockedPrefix(root: string, pattern: string): BlockedAncestor | null {
   const prefix = literalPrefix(pattern);
   return prefix === "" ? null : blockedAncestor(root, `${prefix}/x`);
 }
 
-/** The concrete paths a single-segment `*` pattern names under `root`: a
- *  `*` in a directory segment matches directories, a final `*` matches
- *  existing regular files, a literal final segment lands in every matched
- *  directory. A pattern without `*` is itself.
- *
- *  Symbolic links are matched, never skipped, and never listed through: a
- *  link in a final segment, or one in a directory segment that does not
- *  provably resolve to a file, ends the probing there, and so does a prefix
- *  pathProblem refuses (one grown past the length bound through long
- *  directory names, which a stat could not name). From there the rest of
- *  the pattern rides along literally (`skills/link/sub/*.md`) so
- *  applyMirrors fails the path by its linked ancestor or by name. A link
- *  to a file in a directory segment is no directory and is skipped like a
- *  file. */
+/** Probing stops at a symbolic link, or at a prefix pathProblem refuses, and the rest of the pattern rides along literally
+ *  (`skills/link/sub/*.md`) so applyMirrors fails the path by its linked ancestor or by name rather than dropping it silently.
+ *    link in a literal segment, or in the final segment            -> rides literally
+ *    link matched by a `*` directory segment, not provably a file  -> rides literally
+ *    link matched by a `*` directory segment, resolving to a file  -> skipped, like a file */
 export function expandPattern(root: string, pattern: string): string[] {
   if (!pattern.includes("*")) return [pattern];
   const segments = pattern.split("/");
@@ -138,10 +115,8 @@ export function expandPattern(root: string, pattern: string): string[] {
   return out.sort();
 }
 
-/** Whether the link at `path` provably resolves to a regular file. Any
- *  failure to look (dangling, a loop, a name too long, a directory the
- *  runner may not traverse) is a no: the link is then failed by name
- *  instead of skipped, so no lookup failure can abort the pass. */
+/** Any failure to look (dangling, a loop, a name too long, an untraversable directory) is a no: the link is then failed by name
+ *  instead of skipped, so no lookup failure aborts the pass. */
 function linksToFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -150,21 +125,15 @@ function linksToFile(path: string): boolean {
   }
 }
 
-/** One concrete path a source claims, with the bytes it would copy. */
 interface Claim {
   source: string;
   path: string;
   bytes: Buffer;
 }
 
-/** Copies every declared mirror. `written` maps the managed and split paths
- *  written this run to their bytes, `owned` is what files.yml claims here
- *  plus the stale records the run retires, and `records` are the previous
- *  sync's, read for the last mirror hash.
- *  Literal targets are written before any `*` pattern expands, so a
- *  directory a literal creates is matched in the same run. Every path of a
- *  pass is judged before the pass writes; a path that cannot be written
- *  throws MirrorFailure with every such path of the pass. */
+/** Literal targets are written before any `*` pattern expands, so a directory a literal creates is matched in the same run.
+ *  `owned` is what files.yml claims here plus the stale records the run retires; `records` are the previous sync's, read for the
+ *  last mirror hash. */
 export function applyMirrors(
   target: string,
   mirrors: Mirrors,
@@ -176,13 +145,9 @@ export function applyMirrors(
   if (declared.length > 0) throw new MirrorFailure(declared);
   const rows: MirrorRow[] = [];
   const replaced: ReplacedText[] = [];
-  /** Every target's sha256 once its copy holds the source: its record. */
   const hashes = new Map<string, string>();
   const settled = new Set<string>();
 
-  /** The concrete claims of a pass: a literal is its own path; a glob fails
-   *  whole when it reads through a link or matches nothing, else expands.
-   *  A held source has nothing to copy, so every target of it fails. */
   const claimsOf = (
     patterns: { source: string; pattern: string }[],
     kind: "literal" | "glob",
@@ -222,8 +187,6 @@ export function applyMirrors(
     return claims;
   };
 
-  /** Why a concrete path cannot be written by anyone, or null. A glob
-   *  names files in directories that exist; only a literal creates one. */
   const pathFailure = (path: string, kind: "literal" | "glob"): string | null => {
     const problem = mirrorPathProblem(path, owned);
     if (problem !== null) return `the target ${problem}`;
@@ -245,14 +208,8 @@ export function applyMirrors(
     return null;
   };
 
-  /** Settles every path the pass claims: an unwritable path, one nested
-   *  with another target (both sides, so declaration order never picks the
-   *  winner), or one claimed by two sources fails; the rest are one
-   *  source's to write. A path an earlier pass settled is this source's
-   *  own: mirrorDeclarationProblems refuses every glob that matches another
-   *  source's literal. Throws with every failure of the pass before
-   *  anything is written, so the claims it returns are all writable by
-   *  their source. */
+  /** Nesting fails both sides, so declaration order never picks the winner. A path an earlier pass settled is this source's own:
+   *  mirrorDeclarationProblems refuses every glob that matches another source's literal. */
   const settle = (
     claims: Claim[],
     kind: "literal" | "glob",
@@ -288,11 +245,7 @@ export function applyMirrors(
     return claims;
   };
 
-  /** Writes the settled claims. What stands in the way is removed and
-   *  named: a file where a directory must be, a directory at the target;
-   *  other content is replaced and kept for the report's diff. Only a
-   *  mirror record vouches for the previous copy's bytes: another class's
-   *  hash covers something else (a region, a link target). */
+  /** Only a mirror record vouches for the previous copy's bytes: a split or link record's hash covers a region or a link target, not the file. */
   const apply = (claims: Claim[]) => {
     for (const { source, path, bytes } of claims) {
       hashes.set(path, sha256(bytes));

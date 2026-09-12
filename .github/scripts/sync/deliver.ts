@@ -1,17 +1,6 @@
 #!/usr/bin/env bun
-// Delivers one sync row's result into the target repository and nothing
-// into the public log: a clean writer run becomes a commit on the rolling
-// automation branch and a PR carrying the writer's report (auto-merge
-// armed only when the report holds nothing and the run is not manual);
-// a tree that already matches the build closes any open sync PR as
-// obsolete; a failed checkout, writer, or push becomes one reused issue
-// in the target carrying the log tails. Every line this script would say goes to
-// $RUNNER_TEMP/deliver.log; the verdict for verdict.ts goes to
-// $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed.
-//
-// Env: TARGET, TARGET_PRIVATE (GITHUB_ENV), PAT, GH_TOKEN, RUNNER_TEMP,
-// BUILD, CHECKOUT_OUTCOME, WRITER_OUTCOME (the steps' outcomes), MANUAL,
-// RUN_URL, GITHUB_REPOSITORY; TARGET_DIR (default target).
+// Nothing this script says reaches the public log: every line goes to $RUNNER_TEMP/deliver.log, and the verdict verdict.ts reads
+// goes to $RUNNER_TEMP/verdict.txt, `failed` only once the issue is filed.
 
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,7 +17,6 @@ export const CHECKOUT_LOG = "checkout.log";
 export const SYNC_LOG = "sync.log";
 export const DELIVER_LOG = "deliver.log";
 export const SUMMARY_FILE = "summary.json";
-/** The bytes of each log a filed issue carries, from the end. */
 export const TAIL_BYTES = 20_000;
 /** Every subprocess here is one gh call, one git network call, or one
  *  local git call on the clone, each answering in seconds, so the fleet's
@@ -45,7 +33,6 @@ export function prTitle(build: string): string {
   return `chore: sync repo-platform build ${build.slice(0, 12)}`;
 }
 
-/** The last `bytes` of a file, decoded, or "" when it is absent. */
 export function tail(path: string, bytes = TAIL_BYTES): string {
   if (!existsSync(path)) return "";
   const size = statSync(path).size;
@@ -54,7 +41,6 @@ export function tail(path: string, bytes = TAIL_BYTES): string {
   return size > bytes ? `... (${size - bytes} earlier bytes not shown)\n${cut}` : cut;
 }
 
-/** A code fence longer than any backtick run in `text`. */
 export function fenceFor(text: string): string {
   const longest = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
   return "`".repeat(Math.max(4, longest + 1));
@@ -91,7 +77,6 @@ export function failureBody(input: {
  *  after the branch is pushed; the report is cut under this. */
 export const BODY_CAP = 60_000;
 
-/** `text` cut to at most `budget` characters on a line boundary. */
 export function truncatedLines(text: string, budget: number): string {
   if (text.length <= budget) return text;
   const cut = text.lastIndexOf("\n", budget);
@@ -100,10 +85,8 @@ export function truncatedLines(text: string, budget: number): string {
 
 const FENCE_LINE = /^ {0,3}(`{3,})(.*)$/;
 
-/** The fence `text` leaves open after its last line, "" when none. A
- *  fence line opens a block; inside one, only a run at least as long and
- *  alone on its line closes it (a report's diff fence is longer than any
- *  run its lines quote, so they never do). */
+/** Only a run at least as long and alone on its line closes a block (CommonMark), so the report's diff fence stays open across the
+ *  backtick runs its lines quote. */
 export function openFence(text: string): string {
   let open = "";
   for (const line of text.split("\n")) {
@@ -115,8 +98,7 @@ export function openFence(text: string): string {
   return open;
 }
 
-/** `text` with the fence a cut left open closed by a run of its own
- *  length, so what follows renders as Markdown rather than as code. */
+/** A cut can leave a fence open, and everything after it would then render as code. */
 export function closedFences(text: string): string {
   const open = openFence(text);
   return open === "" ? text : `${text}\n${open}`;
@@ -132,9 +114,6 @@ const longestFence = (text: string): string =>
 const cutMarker = (omitted: number) =>
   `\n\n> [!WARNING]\n> ${omitted} characters of this section were cut to fit GitHub's body limit.\n`;
 
-/** `section` cut to fit `room`: its lines up to the room less the marker
- *  naming the omitted count, an open fence closed; "" when its heading
- *  line and the marker do not both fit. */
 function cutSection(section: string, room: number): string {
   const headingEnd = section.indexOf("\n", 1);
   const heading = headingEnd === -1 ? section : section.slice(0, headingEnd);
@@ -145,7 +124,6 @@ function cutSection(section: string, room: number): string {
   return `${closedFences(kept)}${cutMarker(section.length - kept.length)}`;
 }
 
-/** The report's header (up to the first H3), then one part per H3. */
 function sections(report: string): string[] {
   const parts: string[] = [];
   let start = 0;
@@ -157,10 +135,8 @@ function sections(report: string): string[] {
   return parts;
 }
 
-/** The report cut to the body cap, section by section: the header and
- *  the Review section (the hold reasons) take their room first, then the
- *  tables and notes, then the replaced-edit diffs (a diff can carry lines
- *  of any length); a section the room runs out on is cut with a marker. */
+/** Section by section, the Review section (the hold reasons) takes its room right after the header and the replaced-edit diffs last:
+ *  a diff can carry lines of any length. */
 export function boundedReport(report: string, cap = BODY_CAP): string {
   if (report.length <= cap) return report;
   const parts = sections(report);
@@ -202,8 +178,6 @@ function commandLabel(argv: string[]): string {
   return words.slice(0, 2).join(" ");
 }
 
-/** One row's delivery: the env read once, every subprocess logged to the
- *  file, the verdict written last. */
 class Delivery {
   readonly runnerTemp = requireEnv("RUNNER_TEMP");
   readonly target = requireEnv("TARGET");
@@ -224,7 +198,6 @@ class Delivery {
     writeFileSync(join(this.runnerTemp, VERDICT_FILE), `${value}\n`);
   }
 
-  /** A subprocess whose streams land in the log, never on stdout. */
   run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): RunResult {
     const result = capture(argv, {
       timeoutMs: DELIVERY_CALL_BOUND_MS,
@@ -239,8 +212,6 @@ class Delivery {
     return ["git", "-C", this.targetDir, ...args];
   }
 
-  /** The token user's oldest issue with the failure title: number and
-   *  state, "" when none, null when the lookup failed. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
     if (login.exitCode !== 0) return null;
@@ -276,7 +247,6 @@ class Delivery {
     return { number, state };
   }
 
-  /** Files the failure issue; exits 1 when the target cannot take it. */
   fileFailure(reason: string): never {
     this.log(`filing the failure report: ${reason}`);
     const bodyFile = join(this.runnerTemp, "failure-issue-body.md");
@@ -330,7 +300,6 @@ class Delivery {
     process.exit(0);
   }
 
-  /** Closes an open failure issue after a clean delivery; best-effort. */
   closeFailureIssue(): void {
     const found = this.findFailureIssue();
     if (found === null || found === "" || found.state !== "open") return;
@@ -356,8 +325,7 @@ class Delivery {
     );
   }
 
-  /** The target's own open PR from the automation branch. `--head` matches
-   *  the branch name in forks too, and a fork's PR is never the sync's. */
+  /** `--head` matches the branch name in forks too, and a fork's PR is never the sync's. */
   openPr(): { number: string } | null {
     const list = this.run(
       [
@@ -386,8 +354,7 @@ class Delivery {
     return own === undefined ? null : { number: String(own.number) };
   }
 
-  /** Turns auto-merge off on the sync PR when it is on; a failed read or
-   *  disarm files the failure, since an armed PR could merge on its own. */
+  /** A failed read or disarm files the failure: an armed PR could merge on its own. */
   disarm(number: string): void {
     const armed = this.run(
       [
@@ -415,9 +382,7 @@ class Delivery {
       this.fileFailure("disarming the sync pull request's auto-merge failed");
   }
 
-  /** A tree that already matches the build makes any open sync PR
-   *  obsolete (a selection reverted on the default branch, say): it is
-   *  disarmed, closed, and its branch deleted so stale files never merge. */
+  /** A selection reverted on the default branch, say, leaves the open sync PR carrying stale files that must never merge. */
   closeObsoletePr(): void {
     const existing = this.openPr();
     if (existing === null) return;

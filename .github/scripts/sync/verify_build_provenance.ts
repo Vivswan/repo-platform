@@ -1,21 +1,7 @@
 #!/usr/bin/env bun
-// Proves the build branch tip is the builder's own output before the sync
-// templates it into managed repos: the stamp lines in the commit message
-// are plain text anyone can write, and the ruleset model cannot pin the
-// ref to one workflow, so the tip's CONTENT is what gets anchored
-// (docs/build-provenance.md, "The provenance proof": the three checks, and
-// why the fourth, the Actions-API run proof, was retired). Invoked by
-// sync/resolve_refs.ts after it parses the tip's source stamp.
-//
-// Checks 1 (main history) and 2 (no rollback) are shared/stamp_checks.ts,
-// shared with publish.ts's skip guard. Check 3, owned here: rebuild the
-// tree from the stamped source with that commit's own build script, exactly
-// as publish.ts does, and require the rebuilt git tree hash to equal the
-// tip's; branch_tree.ts output is fully deterministic, so a mismatch means
-// content the builder never produced from that source.
-//
-// Env: TIP_SHA (the fetched branch tip), SOURCE_SHA (its parsed source
-// stamp), RUNNER_TEMP. No token: the checks are git plus a local rebuild.
+// The stamp lines are plain text anyone can write, and the ruleset model cannot pin the ref to one workflow, so the tip's CONTENT is
+// what gets anchored (docs/build-provenance.md, "The provenance proof"). Check 3, owned here: branch_tree.ts output is fully
+// deterministic, so a rebuilt tree hash that differs from the tip's means content the builder never produced from that source.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -41,14 +27,9 @@ const rebuildHint =
   `tree already matches main's composition under a healthy stamp), have an admin reset ` +
   `refs/heads/build, or land any change that moves the composed tree.`;
 
-// The battery's git questions answer with exit 0/1; anything else (or a
-// deadline expiry) is an errored look, not a verdict, and this gate
-// fails closed on it: read as a verdict, an errored call during the
-// rollback walk would skip a newer ancestral stamp and pass a replayed
-// old build to the tree proof - which a replay PASSES, since its tree
-// rebuilds cleanly from its old source. Failing here is safe: the
-// battery runs before any worktree exists, so there is no cleanup to
-// skip.
+// Fails closed: read as a "no", an errored look during the rollback walk would skip a newer ancestral stamp and pass a replayed old
+// build to the tree proof, which a replay PASSES (its tree rebuilds cleanly from its old source). The battery runs before any worktree
+// exists, so nothing is left to clean up.
 function verdictExit(probe: { exitCode: number; timedOut: boolean }, what: string): number {
   if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {
     fail(`${subject}: ${what} could not answer (exit ${probe.exitCode}); refusing to guess.`);
@@ -76,17 +57,11 @@ if (stampProblem !== "") {
   fail(`${subject} fails the stamp checks: ${stampProblem}. ${rebuildHint}`);
 }
 
-// Rebuild exactly as publish.ts does (the shared rebuildBranchTree: the
-// SOURCE commit's own script and dependencies, so the check reproduces
-// that commit's composition).
 const workDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), "build-provenance."));
 const srcDir = join(workDir, "src");
 const treeDir = join(workDir, "tree");
 
-/** Rebuild the branch tree and compare; returns the failure message for
- * a tree mismatch, null when the tip verifies. Command failures throw
- * (never process.exit) so the finally cleanup always runs, like the bash
- * version's EXIT trap. */
+/** Command failures throw, never process.exit, so the finally cleanup always runs. */
 function rebuildMismatch(): string | null {
   const builtTree = rebuildBranchTree({ sourceSha, srcDir, treeDir });
   const tip = capture(["git", "rev-parse", `${tipSha}^{tree}`]);
