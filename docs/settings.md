@@ -42,6 +42,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 - Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`. The next sync re-renders the managed file from the new overlay; a hand edit of the rendered file is replaced on that sync, reported under Replaced local edits with the diff, and holds the PR. Before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it (manifest parity).
 - An overlay edit is two PRs: the overlay PR in the repository, then the sync PR carrying the re-render (the Tuesday cron brings it, a `[fleet-sync: <scope>]` directive on a merged platform PR brings it from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)), and `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` brings it at once). The rendered file stays stale in between, and the apply (the nightly cron plus every green main run, [below](#when-it-runs)) keeps applying the old render until the sync PR merges.
 - An overlay that names one label twice, or that does not parse, holds the rendered row with the reason; the overlay itself is never rewritten.
+- A fleet or module layer that names one label or ruleset twice fails the whole run once, naming the layer file: it is operator data, never a per-repository hold. An overlay label without a `name` rides through to the apply, which refuses it by name.
 
 ## When it runs
 
@@ -155,6 +156,7 @@ A repository whose `.github/settings.yml` predates the render (the hand-written 
 | a regular file, recorded as a starter or unrecorded, and `.github/settings.local.yml` absent | `git mv` to `.github/settings.local.yml`, verbatim, comments kept; the rendered document is created at the old path; the row reads `moved` with the detail `to .github/settings.local.yml`, and the PR holds once with the reason `.github/settings.yml: the repository's file moved to .github/settings.local.yml and the rendered document replaced it`. When the render refuses the moved file as an overlay (a label named twice, a document that does not parse), the move has still happened and the row reads `held` with the reason; fix the overlay and the next sync renders |
 | the same, but something is already at `.github/settings.local.yml` | `held` with `class changed from starter to managed, and .github/settings.local.yml is already taken by <what>, so the file was not moved over it` (`<what>` is a regular file, a symbolic link, a directory, or something that is not a regular file); both files stay untouched, decide which is the overlay and delete the other |
 | a symbolic link | `held`: the writer never reads through a link |
+| a file that already carries the render's header (a rendered document, recorded or not) | never moved: the render is written in place; unrecorded, the row reads `replaced local edits` with the diff, and a matching render reads `unchanged` |
 
 Until that PR merges, the apply skips the repository with the un-rendered notice, so the old file is never applied alone.
 
