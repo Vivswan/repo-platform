@@ -16,7 +16,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
-| How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts) and [merge_settings_layers.ts](../.github/scripts/sync/writer/merge_settings_layers.ts) ([settings.md](settings.md)) |
+| How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts), which folds with the github-settings-as-code library ([settings.md](settings.md)) |
 | When does a retired file leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../.github/scripts/sync/writer/report.ts) |

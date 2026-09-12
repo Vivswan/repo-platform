@@ -12,7 +12,8 @@ import {
 import {
   identityKeyIssues,
   loadOverrideLayer,
-} from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
+  sectionEntries,
+} from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import type { Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
@@ -450,7 +451,7 @@ export const settingsWorkflowRules: Rule[] = [
       // The override layer must still own the rulesets the overlay is
       // judged against, or the judgment is vacuous.
       const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
-      const overrideRulesets = (override.rulesets ?? []) as Record<string, unknown>[];
+      const overrideRulesets = sectionEntries(override.doc, "rulesets");
       for (const name of OVERRIDE_RULESETS) {
         if (!overrideRulesets.some((ruleset) => ruleset.name === name)) {
           throw new Error(`files/settings/override.yml: no ${name} ruleset - anchor lost`);

@@ -377,13 +377,21 @@ describe("sync.ts end to end", () => {
       `# Rendered by the sync from the fleet settings layers, this repository's module selection (.repo-platform.yml), and ${OVERLAY}. Edit that file or the registration; the next sync re-renders this one.`,
       "# Applied by OwnerOrg/repo-platform's settings run.",
     ]);
+    // The name-keyed sections come out of the fold in the library's wrapper
+    // form, the apply's undeclared policy spelled out.
     const doc = parseYaml(text) as {
       repository: Record<string, unknown>;
-      labels: { name: string; color: string; description: string }[];
-      rulesets: (Record<string, unknown> & {
-        name: string;
-        rules?: (Record<string, unknown> & { type: string })[];
-      })[];
+      labels: {
+        _undeclared: string;
+        entries: { name: string; color: string; description: string }[];
+      };
+      rulesets: {
+        _undeclared: string;
+        entries: (Record<string, unknown> & {
+          name: string;
+          rules?: (Record<string, unknown> & { type: string })[];
+        })[];
+      };
     };
     // The overlay's identity keys over the baseline, the override on top.
     expect(doc.repository).toEqual({
@@ -396,19 +404,24 @@ describe("sync.ts end to end", () => {
     });
     // Baseline labels, the bun layer's, then the tracking label with the
     // registration's name and the fuzzer module's tuple.
-    expect(doc.labels).toEqual([
-      { name: "bug", color: "d73a4a", description: "Something isn't working" },
-      { name: "dependencies", color: "0366d6", description: "Dependency updates" },
-      {
-        name: "javascript",
-        color: "168700",
-        description: "Pull requests that update javascript code",
-      },
-      { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
-    ]);
-    expect(doc.rulesets.map((r) => r.name)).toEqual(["pr-title", "main", "release-branches"]);
+    expect(doc.labels).toEqual({
+      entries: [
+        { name: "bug", color: "d73a4a", description: "Something isn't working" },
+        { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+        {
+          name: "javascript",
+          color: "168700",
+          description: "Pull requests that update javascript code",
+        },
+        { name: "fuzz-me", color: "B60205", description: "Automated nightly fuzz failure" },
+      ],
+      _undeclared: "delete",
+    });
+    expect(doc.rulesets._undeclared).toBe("keep");
+    const rulesets = doc.rulesets.entries;
+    expect(rulesets.map((r) => r.name)).toEqual(["pr-title", "main", "release-branches"]);
     // The baseline's disabled ruleset and the seed's own ride through whole.
-    expect(doc.rulesets[0]).toEqual({
+    expect(rulesets[0]).toEqual({
       name: "pr-title",
       target: "branch",
       enforcement: "disabled",
@@ -419,14 +432,14 @@ describe("sync.ts end to end", () => {
         },
       ],
     });
-    expect(doc.rulesets[2]).toEqual({
+    expect(rulesets[2]).toEqual({
       name: "release-branches",
       target: "branch",
       enforcement: "active",
       rules: [{ type: "deletion" }],
       bypass_actors: [],
     });
-    expect(doc.rulesets[1]?.rules?.map((r) => r.type)).toEqual([
+    expect(rulesets[1]?.rules?.map((r) => r.type)).toEqual([
       "code_quality",
       "deletion",
       "required_status_checks",

@@ -308,15 +308,13 @@ describe("blockSources and verifySources", () => {
       ],
       [
         "a layer that is not a mapping",
-        { ...LAYERS, "settings/public.yml": "# nothing declared\n" },
-        "files/settings/public.yml: not a YAML mapping",
+        { ...LAYERS, "settings/public.yml": "- nothing declared\n" },
+        'files/settings/public.yml must be a YAML mapping of section names to settings, but its top level parsed as a list. Rewrite the top level as "section: ..." keys',
       ],
       [
         "a layer whose labels are not a list",
         { ...LAYERS, "bun/settings.yml": "labels: {javascript: x}\n" },
-        expect.stringContaining(
-          "files/bun/settings.yml: labels: labels must be a list of mappings",
-        ),
+        'layer "files/bun/settings.yml": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
       ],
     ])("%s is a load problem naming the file", (_reason, files, problem) => {
       expect(problemsOf(files)).toEqual([problem]);

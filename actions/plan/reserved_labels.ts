@@ -25,7 +25,13 @@ function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Lowercased: GitHub deduplicates label names case-insensitively. */
+/** Every name a layer's label claims, lowercased: GitHub deduplicates
+ *  label names case-insensitively, and a renaming label claims its
+ *  `new_name` too. This is the settings library's own label identity, the
+ *  one its merge pairs entries by, read here without the library so the
+ *  plan action stays dependency-light; the writer's `labelClaims` is the
+ *  library's reading and tests/actions/plan/reserved_labels.test.ts pins
+ *  the two to each other. */
 export function reservedLabelNames(config: LayerSources, tree: string): Set<string> {
   const names = new Set<string>();
   for (const rel of declaredLayers(config)) {
@@ -35,23 +41,26 @@ export function reservedLabelNames(config: LayerSources, tree: string): Set<stri
         `settings layer ${SOURCE_PREFIX}${rel} is missing from the tree beside files.yml - the reserved label roster cannot be derived without it`,
       );
     }
-    const layer: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" });
+    // What the writer's layer boundary (the settings library's) accepts, no more and no less, so the two
+    // readings cannot diverge: an empty document is an empty layer, `null` is the dialect's opt-out marker, an
+    // absent section declares nothing, and the section is a list or the library's `{_undeclared, entries}` wrapper.
+    const layer: unknown = parseYaml(readFileSync(path, "utf-8"), { logLevel: "error" }) ?? {};
     if (!isMapping(layer)) {
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: must be a YAML mapping`);
     }
-    // `null` is the dialect's opt-out marker, an absent section declares nothing; any other shape is the
-    // writer's refusal too (settings_document.ts), so the two readings cannot diverge on a damaged layer.
     if (layer.labels === undefined || layer.labels === null) continue;
-    if (!Array.isArray(layer.labels)) {
+    const labels = isMapping(layer.labels) ? layer.labels.entries : layer.labels;
+    if (!Array.isArray(labels)) {
       throw new Error(`settings layer ${SOURCE_PREFIX}${rel}: labels must be a list of mappings`);
     }
-    layer.labels.forEach((label, index) => {
+    labels.forEach((label, index) => {
       if (!isMapping(label) || typeof label.name !== "string") {
         throw new Error(
           `settings layer ${SOURCE_PREFIX}${rel}: labels[${index}] must be a mapping with a string name`,
         );
       }
       names.add(label.name.toLowerCase());
+      if (typeof label.new_name === "string") names.add(label.new_name.toLowerCase());
     });
   }
   return names;
