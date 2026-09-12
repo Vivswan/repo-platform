@@ -1,7 +1,7 @@
 version: 2
 updates:
   # One sha per action repo-wide rests on this group alone: every action bump lands in ONE PR
-  # (multi-directory alone still opens one PR per directory), so no two sites can drift apart.
+  # (multi-directory alone still opens one PR per directory), so every site Dependabot reaches moves at once.
   # Pins under files/** are invisible to dependabot and nothing compares them with the bumped ones: bump them by
   # hand in that PR, the commented toolchain examples in checks.block.toolchain.yml included.
   - package-ecosystem: "github-actions"
