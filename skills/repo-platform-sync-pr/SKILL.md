@@ -26,7 +26,7 @@ Work in this order, always:
 
 ## What the PR is
 
-- A copy, not a merge. The writer copies each selected file from repo-platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. Nothing is three-way merged and no conflict marker ever lands in the branch.
+- A copy, not a merge. The writer copies each selected file from repo-platform's `files/` tree: managed files whole, split files only between their `BEGIN/END REPO-PLATFORM MANAGED` markers, starters once when absent. The one rendered file is `.github/settings.yml`, folded from the fleet settings layers and the repo's own `.github/settings.local.yml`. Nothing is three-way merged and no conflict marker ever lands in the branch.
 - The writer tells its own previous write from a local edit through `.github/repo-platform-manifest.json`, which records a hash per managed file and per split region. A managed file, or a split region, whose content is neither the recorded hash nor the new content is replaced and reported with a diff.
 - The head branch is rewritten on every sync run (a dispatch, a merge directive, or the weekly cron). Commits parked on it between runs are replaced; fix-then-merge promptly.
 - A PR whose report holds nothing arms auto-merge and lands once the required check passes (`all-green`, plus `pr-title` where selected). A run dispatched with `manual=true`, or any hold reason, waits for a human.
@@ -45,7 +45,7 @@ Exactly one open sync PR should exist per repo; when none exists, or more than o
 | Section | Content | What to verify |
 |---|---|---|
 | header | Build sha, the modules the registration selected, the visibility | The module list matches `.repo-platform.yml`; visibility matches the repo |
-| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `held` wrote nothing and its Detail says why (the list below). A starter is only ever `created`, `unchanged`, or `held` |
+| Written | one row per selected path: class and change (`created`, `updated`, `unchanged`, `replaced local edits`, `region added`, `moved`, `held`) | `created` is explained by a new module or a first sync; `updated` and `unchanged` need no look; `replaced local edits` (a managed file, or a split file's region) has a diff below; `region added` is a split file that had no markers, its whole prior content now below the new region; `moved` is the settings flip: the repo's hand-written `.github/settings.yml` went to `.github/settings.local.yml` verbatim (the Detail column says `to .github/settings.local.yml`) and the rendered document took its place; `held` wrote nothing and its Detail says why (the list below). A starter is only ever `created`, `unchanged`, or `held` |
 | Replaced local edits | one unified diff per replaced file or region (40 lines shown, the rest counted) | Decide per diff: the content moves into a repo-owned hook or upstream, or it was a stray edit and goes |
 | Retired | one row per file the platform no longer writes: `deleted`, `region removed`, `held`, `kept`, `moved` | `deleted` removed the platform's own content; `region removed` took the managed region and its markers out of a split file and left the repository-owned content as a plain file (the record leaves with it, so the row appears once); `held` left a file with content it did not write, for your decision; `kept` is a starter (yours); `moved` is a git rename |
 | Registration notes | one line per note: an unknown module dropped, an unreadable manifest, a placeholder with no value, a manifest record dropped or ignored, or a `cutover:` note (the exact forms below) | Fix the registration. An unreadable manifest is rewritten by this sync; a managed file or region that differs from the incoming content reads as replaced in the same report. A dropped mirror record means that copy is the repository's own now. A cutover note means the sync rewrote `.repo-platform.yml`: review the derived keys in the diff |
@@ -68,8 +68,10 @@ The `held` details of a Written row, exactly:
 - `a regular file sits where a link is declared`
 - `no value for {{<placeholder>}}` (a Registration note names the key to set)
 - `class changed from <old> to <new>, and <reason>`: `files.yml` moved the path to another class, and the file is not provably the platform's last write (its content differs, its record is a starter's or carries no hash, or a split file has repository-owned content outside the region), so the new class was not applied
+- `no overlay at .github/settings.local.yml (its starter is held or missing)`, `.github/settings.local.yml is <what>, which the render does not read through` (a directory, a symbolic link, or something that is not a regular file stands at the overlay path), an overlay problem (a YAML parse error or a duplicated label or ruleset name in `.github/settings.local.yml`, or a tracking label the plan refuses, in the plan's words), or the settings flip's displacement hold (the `class changed` form above, naming `.github/settings.local.yml`): the rendered `.github/settings.yml`; the Settings row of the table below says what to do
+- `<what> sits at the path, and the writer will not replace it`: a directory, or something that is neither a regular file nor a link, stands where an entry of any class is declared
 
-The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `retirement of <path>: the managed region was removed and the repository-owned content kept`, `mirror <target> replaced: <detail>`, `registration: <note>`.
+The hold reasons, exactly: `local edits replaced in <path>`, `<path>: the managed region was added above repository-owned content`, `<path>: the repository's file moved to <new path> and the rendered document replaced it`, `<path> held: <detail>`, `retirement of <path> held: <detail>`, `retirement of <path>: the managed region was removed and the repository-owned content kept`, `mirror <target> replaced: <detail>`, `registration: <note>`.
 
 ## Check the diff against the report
 
@@ -79,7 +81,16 @@ The report lists what the writer did; the diff is what lands. Compare them befor
 gh pr diff <number> --name-only
 ```
 
-Every changed path must be one of: a Written row whose change is not `unchanged`, a Retired row reading `deleted`, `region removed`, or `moved`, a Mirrors row reading `written`, `replaced local edits`, or `replaced` (a `replaced` row also explains the deleted paths under its target and the ancestor file its detail names), `.github/repo-platform-manifest.json` (rewritten every sync, no row), or `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either). Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
+Every changed path must be one of:
+
+- a Written row whose change is not `unchanged`
+- the destination named by a `moved` Written row (`.github/settings.local.yml`, whose own starter row reads `unchanged` because the moved file was already there when the starter's turn came), or the same destination beside a `held` `.github/settings.yml` row (the old file moved, then the render refused it as an overlay; the hold names the line to fix)
+- a Retired row reading `deleted`, `region removed`, or `moved`
+- a Mirrors row reading `written`, `replaced local edits`, or `replaced` (a `replaced` row also explains the deleted paths under its target and the ancestor file its detail names)
+- `.github/repo-platform-manifest.json` (rewritten every sync, no row)
+- `.repo-platform.yml` when a `cutover:` Registration note says the sync derived it (no Written row either)
+
+Any other path with no row in the sync's own commit is a sync bug: do not merge, report it on Vivswan/repo-platform. One exception: a body carrying a section-ending warning of the form `<N> characters of this section were cut to fit GitHub's body limit.` lost the rows after the cut, so judge those paths by their class in [references/file-ownership.md](references/file-ownership.md) instead. A replaced diff cut at 40 lines is read in full from git:
 
 ```bash
 git fetch origin main automation/repo-platform
@@ -95,6 +106,7 @@ git diff origin/main...origin/automation/repo-platform -- <path>
 | Removed region | A retired split file carried repository-owned content around its recorded region: the region and its markers went, the rest stayed as a plain file | Read the file that remains; it is yours now, and no row returns for it |
 | Replaced mirror | A declared target held other content (`replaced local edits`, diff below), or a directory or a blocking file stood in the copy's way (`replaced`, the detail names it) | Read the diff; the platform copy stays. Content worth keeping moves to a path no declaration names |
 | Registration drop | `modules:` names a module the platform does not know | Fix the name; the module's files were not written |
+| Settings | `.github/settings.yml` reads `moved` (the first sync after the rendered settings arrived: the repo's hand-written file went to `.github/settings.local.yml`), `replaced local edits` (someone edited the rendered file), or `held` (`no overlay at .github/settings.local.yml (its starter is held or missing)`, an overlay naming one label twice, a tracking label the plan refuses, or `class changed from starter to managed, and .github/settings.local.yml is already taken by <what>, so the file was not moved over it`) | `moved`: confirm the overlay is the old file byte for byte (`git diff origin/main:.github/settings.yml origin/automation/repo-platform:.github/settings.local.yml` prints nothing) and read the rendered file as the merge of the fleet layers and that overlay; `replaced local edits`: move the edit into `.github/settings.local.yml` (the rendered file is never edited by hand); `held` with the already-taken detail: decide which of the two files is the overlay, delete the other, dispatch the sync again; the other holds name the registration key or the overlay line to fix |
 | Cutover | The first sync after the platform changed shape: `.repo-platform.yml` rewritten from `.github/.copier-answers.yml` (a `cutover:` Registration note holds the PR; the file has no Written row), a Written row for every managed file whose content changed (`updated` where the manifest recorded the old content, `replaced local edits` with a diff where it did not; `ci.yml` among them), a long Retired section (`.github/.copier-answers.yml`, `release.yml`, `CONTRIBUTING.md`, `.github/CODE_OF_CONDUCT.md`, `.github/SECURITY.md`). The issue forms were starters: nothing retires them, they stay in place with no row | Review the derived registration key by key; check every `held` retirement; run [the repository-owned markdown check](#repository-owned-markdown-after-a-cutover) before merging; expect the CI job list to change on the next push to main |
 
 Something that matches none of the above: do not merge. The branch is rewritten on the next run, so nothing is lost by waiting. Escalate with an issue on Vivswan/repo-platform.
@@ -129,6 +141,7 @@ A split file (`AGENTS.md`, `LICENSE.md`, `.gitignore`, `.editorconfig`, `.gitatt
 | the managed region of a split file | above BEGIN or below END of the same file |
 | a module workflow or a pin dotfile | repo-platform's `files/` (a PR there reaches the whole fleet), or a repo-owned workflow beside it |
 | a module setting | the module's key in `.repo-platform.yml` (`labels.*`, `pages.*`, `docs_site.*`, `skills.dir`) |
+| the rendered `.github/settings.yml` (a label, a ruleset, an identity key) | `.github/settings.local.yml`, the overlay the render reads; the next sync re-renders the managed file from it |
 
 ## Fix the PR
 

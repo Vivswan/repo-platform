@@ -43,7 +43,7 @@ For an existing repository, skip this step and work on a branch of the repo as i
 
 ### 2. Write `.repo-platform.yml`
 
-Only `modules` is required, but write `project` too: the settings starter and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the settings starter while it is still absent, with a Registration note until the key is set. `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
+Only `modules` is required, but write `project` too: the settings overlay starter (`.github/settings.local.yml`) and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the overlay starter while it is still absent (the rendered `.github/settings.yml` is held with it, having no overlay to read), with a Registration note until the key is set. `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
 
 Minimal:
 
@@ -133,7 +133,7 @@ Starters arrive once and are yours afterwards. Put real content in the ones your
 | `.github/workflows/nightly-fuzz.yml` | fuzzer: replace the placeholder step |
 | `.github/workflows/nightly.yml` | nightly: replace the placeholder step |
 | `.claude-plugin/plugin.json` | skills: list each published skill in `skills` |
-| `.github/settings.yml` | the repo's own settings on top of the fleet baseline |
+| `.github/settings.local.yml` | the repo's own settings overlay: identity keys, your labels and rulesets; the sync renders the managed `.github/settings.yml` from it and the fleet layers, so never edit the rendered file |
 
 The ownership table for every path is in [references/file-ownership.md](references/file-ownership.md). Local content in a split file (`AGENTS.md`, `.gitignore`, `LICENSE.md`, `.editorconfig`, `.gitattributes`, `.github/CODEOWNERS`) lives outside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 
@@ -160,13 +160,15 @@ A grey leg on main has three ordinary causes: its module is not in `modules`, th
 
 ### 8. Settings
 
-Repository settings (labels, rulesets, fields) are applied from repo-platform for every registered repo. The branch protection that makes `all-green` required arrives with the first apply:
+Repository settings (labels, rulesets, fields) are rendered into the managed `.github/settings.yml` by the sync (the fleet layers, the selected modules' layers, and your `.github/settings.local.yml` overlay folded into one document) and applied from repo-platform for every registered repo whose rendered file has merged. The branch protection that makes `all-green` required arrives with the first apply after the first sync PR merges:
 
 ```bash
 gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-The apply reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys, the module's default when a key is unset, and declares them on the repository.
+- The sync renders the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys (the module's default when a key is unset) into the file; the apply declares them on the repository.
+- Your own labels, rulesets, and identity keys go in `.github/settings.local.yml`; an edit there lands in the rendered file on the next sync PR (`gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project -f manual=true` brings it at once). A hand edit of `.github/settings.yml` is replaced by the next sync and reds the managed files check before that.
+- Until the sync PR carrying the rendered file has merged, the apply skips the repository with a notice.
 
 ## Owner actions (need repository-settings access)
 

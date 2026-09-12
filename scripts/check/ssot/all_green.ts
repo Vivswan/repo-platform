@@ -770,6 +770,7 @@ export const allGreenRules: Rule[] = [
         "bun run test",
         "bun run pins:check",
         "bun run theme:check",
+        "bun run settings:check",
         "bun run gitignore:topology",
         "bun run files:check",
         "bun run validate",
@@ -996,11 +997,11 @@ export const allGreenRules: Rule[] = [
       const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
       mismatches.push(
         ...setMismatch(
-          ".github/settings-override.yml main ruleset required checks",
+          "files/settings/override.yml main ruleset required checks",
           [gateName],
           contexts(
             (override.rulesets ?? []) as Record<string, unknown>[],
-            ".github/settings-override.yml",
+            "files/settings/override.yml",
           ),
         ),
       );

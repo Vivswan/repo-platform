@@ -1,23 +1,15 @@
-# Central settings apply: merges each target's settings LAYERS
-# (docs/settings.md). render_managed_settings.ts selects and merges layers
-# 1 to 4 - the fleet baseline, the fleet visibility overlay, and each
-# selected module's own layer and visibility overlay - driven by the
-# target's .repo-platform.yml module selection and its effective
-# visibility. merge_settings_layers.ts then adds the repo's own
-# .github/settings.yml and the fleet override on top, and runs
-# Vivswan/github-settings-as-code in
-# single-repo mode once per repository in a fail-fast-free matrix. Targets
-# are enrolled, adopted repos (a readable .repo-platform.yml is the
-# opt-in) plus this repository itself (its facts come from its own
-# .repo-platform.yml). Repos heal independently: one target's
-# failure is its own red "apply (<repo>)" job and never blocks the others.
+# Central settings apply: one Vivswan/github-settings-as-code step in repos
+# mode over the selected targets, each applied from its own rendered
+# .github/settings.yml (docs/settings.md). Targets are enrolled, adopted
+# repositories whose settings the sync has rendered, this repository
+# included; the action applies them one at a time and reports per target,
+# so one failure never blocks the others.
 #
-# Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
-# this workflow from a green main push's own CI run (see that workflow
-# for when it calls), the nightly cron heals out-of-band drift, and a
-# dispatch applies or checks by hand. No push trigger: the apply reaches
-# the fleet only behind the all-green gate, and the post-green call is
-# that gate's one exit.
+# Three ways in, one apply: post-green.yml's settings-fleet leg CALLS this
+# workflow from a green main push's own CI run, the nightly cron heals
+# out-of-band drift, and a dispatch applies or checks by hand. No push
+# trigger: the apply reaches the fleet only behind the all-green gate, and
+# the post-green call is that gate's one exit.
 
 name: Settings Repos
 
@@ -62,8 +54,7 @@ on:
       sha:
         description: >-
           The judged main commit - the caller's own github.sha, which
-          the gate step requires (its checkouts read that commit) and
-          verifies green
+          the gate step requires and verifies green
         required: true
         type: string
     secrets:
@@ -87,13 +78,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  select:
+  apply:
     runs-on: ubuntu-latest
-    # Room for the green gate's bounded wait (up to 20 minutes on a
-    # dispatch) on top of selection itself.
-    timeout-minutes: 30
-    outputs:
-      targets: ${{ steps.targets.outputs.targets }}
+    # 30 for the green gate's bounded wait, plus about 5 per target run
+    # sequentially by the action; sized at the fleet's count (11 today).
+    timeout-minutes: 90
     steps:
       # A missing token is a misconfiguration of this repo: fail loudly.
       # So is a narrowed one here: settings need Administration + Issues
@@ -111,6 +100,8 @@ jobs:
             exit 1
           fi
 
+      # Exactly one, without a ref: it lands on the trigger commit the gate
+      # judges (the settings-green-gate ssot rule pins that).
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -129,15 +120,16 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/require_green_commit.ts
 
-      # One matrix entry per target repo. Probes retry and then warn-and-skip
-      # a repo they cannot answer for; only selection-infrastructure failures
-      # (failed discovery) fail this job. ONLY_REPO carries only the
+      # Probes retry and then warn-and-skip a repo they cannot answer for;
+      # only a failed discovery fails this job. ONLY_REPO carries only the
       # workflow_call scope ("all", or public text off the merged PRs of a
       # main range; empty on cron and dispatch runs). The typed dispatch input never rides
       # here: it may be a private slug, and the runner prints step env into
       # this public log, so the script reads it from the event payload.
+      # The repos output is a STEP output on purpose: a job output holding a
+      # masked private slug is dropped by the runner.
       - name: Select settings targets
-        id: targets
+        id: select
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -148,215 +140,24 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
-  apply:
-    needs: select
-    # fromJSON on an empty list would create a matrix with no jobs, which
-    # GitHub rejects; an empty fleet is a no-op, not a failure.
-    if: needs.select.outputs.targets != '[]'
-    strategy:
-      # Independence between repos lives HERE: one repo's failed apply
-      # stays a red job but never cancels or blocks its siblings. Within
-      # a job everything stays strict - no continue-on-error, no
-      # softened exit codes. (GitHub caps a matrix at 256 jobs; the
-      # fleet is far smaller.)
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.select.outputs.targets) }}
-    # matrix.repo is the redaction hint for a private target - the real
-    # slug never enters the matrix or this job name; the resolve step
-    # recovers it.
-    name: apply (${{ matrix.repo }})
-    # Job level so the deliver step's `if:` can read it - a step-level env
-    # is invisible to another step's condition. Rendered as the string
-    # "true"/"false", which is what the comparison below expects. The one
-    # private flag: hint-not-slug for the resolve step, and hidden
-    # target-derived output for every step after it.
-    env:
-      HIDE_DETAILS: ${{ matrix.private }}
-      # Distinct from the sync's report: failure_issue.ts matches
-      # by exact title, so a shared one would let either workflow's green
-      # run close the other's open report.
-      SETTINGS_REPORT_TITLE: "[automated] repo-platform settings: private failure report"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      # The trigger commit, the one the select job's green gate vouched
-      # for: github.sha is fixed for the run, so both jobs read scripts
-      # and layer files from one vouched revision (no ref override here -
-      # the settings-green-gate ssot rule pins that).
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      # Before the resolve step: the resolver is a bun script and imports
-      # the redaction module, which needs the zod dependency.
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # Recovers the real slug for a private target and registers it with
-      # the runner's masker before anything else prints; public rows pass
-      # straight through.
-      - name: Resolve the target repository
-        id: resolve
-        env:
-          TARGET_INPUT: ${{ matrix.repo }}
-          VERIFY: ${{ matrix.verify }}
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bun .github/scripts/fleet/resolve_private_repo.ts
-
-      # The managed baseline for THIS repository's facts, then the repo's own
-      # settings.yml merged over it. settings_layer_step.ts picks the source:
-      # the operator row reads its own checkout's .repo-platform.yml and
-      # layer, every other target is fetched at the pinned commit. Scratch
-      # filenames are fixed and neutral: a redacted slug reaches the scripts
-      # only through env (already masked). Both run BEFORE the settings
-      # action, so its own private-repos redaction cannot cover what they
-      # print, and both quote repo-owned content when they fail;
-      # run_hidden.ts captures that for a private target.
-      - name: Render the managed settings baseline
-        id: render
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          TARGET: ${{ steps.resolve.outputs.repo }}
-        run: bun .github/scripts/fleet/settings_layer_step.ts render
-
-      - name: Merge the repository's settings.yml over the baseline
-        id: merge
-        # No baseline was written when the target turned settings off at
-        # the pinned revision, so there is nothing to merge.
-        if: steps.render.outputs.skipped == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          TARGET: ${{ steps.resolve.outputs.repo }}
-          PINNED: ${{ steps.render.outputs.ref }}
-        run: bun .github/scripts/fleet/settings_layer_step.ts merge
-
-      # The opt-in was rechecked at the pinned commit, but the apply runs
-      # later and the branch keeps moving; re-resolving the head narrows that
-      # window to this step (a moved target skips, and the next run reads the
-      # new revision). It cannot CLOSE the window (no compare-and-swap exists
-      # on "still opted in"), so this is damage limitation. Behind the hidden
-      # capture boundary: the moved warning quotes the head sha and the
-      # failure strings name the target's default BRANCH; the pinned sha in
-      # this step's env still echoes into the log header, an accepted opaque id.
-      - name: Check the target has not moved
-        id: freshness
-        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          TARGET: ${{ steps.resolve.outputs.repo }}
-          PINNED: ${{ steps.render.outputs.ref }}
-        run: |
-          bun .github/scripts/sync/run_hidden.ts "settings freshness" -- \
-            bun .github/scripts/fleet/check_target_fresh.ts
-
-      # Outside the hidden capture on purpose: for a hide-details target
-      # the capture swallows the merge step's SUCCESS output (its
-      # not-onboarded warning) and the freshness step's moved warning
-      # alike, so each of these skips would otherwise be a green job with
-      # no signal at all. matrix.repo is the masked hint for a redacted
-      # row, so this says WHICH target without saying anything about its
-      # contents.
-      - name: Report a skipped target
-        if: >-
-          steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true' ||
-          steps.freshness.outputs.moved == 'true'
-        env:
-          HINT: ${{ matrix.repo }}
-          RENDER_SKIPPED: ${{ steps.render.outputs.skipped }}
-          MERGE_SKIPPED: ${{ steps.merge.outputs.skipped }}
-        run: bun .github/scripts/fleet/report_skipped_target.ts
-
-      # Referenced-label invariant, FAIL-CLOSED side (docs/settings.md, "Label
-      # preflight"): the apply's reconciliation deletes and renames labels the
-      # target's files may still reference, so before the action runs the
-      # preflight fails THIS repo's apply naming the label and file. Facts
-      # come from this checkout for the operator, from the target at the
-      # pinned ref otherwise (the render's split); the action's mode is
-      # mirrored so a check_only run warns (a check deletes nothing). Same
-      # moved-target gate and hidden-capture boundary as the render and merge.
-      - name: Preflight labels the target still references
-        id: labels
-        if: steps.freshness.outputs.moved == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          TARGET: ${{ steps.resolve.outputs.repo }}
-          MODE: ${{ inputs.check_only && 'check' || 'apply' }}
-          PINNED: ${{ steps.render.outputs.ref }}
-        run: bun .github/scripts/fleet/settings_layer_step.ts labels
-
-      # Outside the hidden capture, like the skip notices above: for a
-      # hide-details target the capture swallows the preflight's own
-      # stood-down line, and a guard that silently stood down looks
-      # exactly like one that checked and passed. The reason is one of the
-      # script's fixed categories - value-free by construction.
-      - name: Report a stood-down label preflight
-        if: steps.labels.outputs.not_applicable == 'true'
-        run: |
-          echo "::notice::label preflight stood down for ${{ matrix.repo }}: ${{ steps.labels.outputs.reason }}"
-
+      # An empty selection is a no-op, not a failure - and never an empty
+      # repos input, which the action would read as single-repo mode.
       - name: Apply repository settings
-        id: apply
-        # Skipped for a target that has no settings.yml yet: the merge
-        # step writes no document, because
-        # applying the baseline alone would delete the repo's own labels.
-        if: steps.freshness.outputs.moved == 'false'
-        # Pinned to an immutable commit that is on none of the action's
-        # branches or tags, hence the impostor-commit ignore; the pin moves
-        # to the action's packaged latest branch in a separate PR.
-        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3 # zizmor: ignore[impostor-commit]
+        if: steps.select.outputs.repos != ''
+        uses: Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          # Single-repo mode, scoped by the resolved slug (already masked
-          # when the row is redacted, so this with: line renders *** in
-          # the log); the merged scratch document is the settings source.
-          repository: ${{ steps.resolve.outputs.repo }}
-          settings-file: ${{ runner.temp }}/merged-settings.yml
+          # The selector's newline-joined slugs: each target is applied from
+          # its own default-branch .github/settings.yml.
+          repos: ${{ steps.select.outputs.repos }}
+          # A private target appears in this public log as "private
+          # repository #N"; its failure or drift details land as a reused
+          # issue on the target repository instead (needs the PAT's Issues
+          # write).
           private-repos: redact
-          # A redacted target's failure/drift details cannot appear in
-          # this public log; they land as a reused issue on the target
-          # repo instead. Needs the PAT's Issues write.
           private-report: issue
-          # Strict: a token that cannot reach a declared section fails
-          # this repo's job (the action's default) - settings drift must
-          # not hide behind a green run.
+          # Strict: a token that cannot reach a declared section fails that
+          # target (the action's default) - drift must not hide behind a
+          # green run.
           on-missing-permission: fail
-
-      # run_hidden.ts keeps a hide-details target's render/merge output out
-      # of this public log, which means the detail only exists in
-      # RUNNER_TEMP. Without this step it would die with the runner and
-      # the operator would see an exit code and nothing else, breaking the
-      # private-target contract in docs/settings.md. TARGET comes
-      # from the resolve step via GITHUB_ENV.
-      - name: Deliver hidden failure diagnostics
-        if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REPORT_TITLE: ${{ env.SETTINGS_REPORT_TITLE }}
-          REPORT_KIND: settings apply
-        run: bun .github/scripts/sync/failure_issue.ts deliver
-
-      # Without this the issue stays open after a recovered run, and the
-      # sync's own green run could close a report the settings apply is
-      # still failing on - which is why the two carry different titles. A
-      # green job is not enough on its own: a MOVED target means this run
-      # never checked the settings, so an open report stays open until a
-      # run actually applies. The two skips are terminal - the repo
-      # opted out, or has no settings.yml to layer yet - so they resolve.
-      - name: Resolve the settings failure report
-        if: >-
-          success() && env.HIDE_DETAILS == 'true' && env.TARGET != '' &&
-          (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true' ||
-          steps.merge.outputs.skipped == 'true')
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REPORT_TITLE: ${{ env.SETTINGS_REPORT_TITLE }}
-          REPORT_KIND: settings apply
-        run: bun .github/scripts/sync/failure_issue.ts resolve

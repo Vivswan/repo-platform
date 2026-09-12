@@ -103,7 +103,7 @@ gh run watch -R Vivswan/repo-platform <id> --exit-status
 
 The run's job log (`gh run view <id> --log`) reads `plan: 1 rows` and then `row 0: PR opened` (rows are numbered from 0; `PR refreshed` when a sync PR was already open). The sync PR's report should be explained by the module diff:
 
-- Written: the module's files as `created`; a starter the repo already had reads `unchanged`; every other row `unchanged` or `updated`.
+- Written: the module's files as `created`; a starter the repo already had reads `unchanged`; `.github/settings.yml` as `managed`, `updated` when the module changes the render (a label or ruleset no other selected module already declares, a tracking label); every other row `unchanged` or `updated`.
 - Split files: the diff stays inside the `BEGIN/END REPO-PLATFORM MANAGED` markers.
 - Retired: empty, except for `custom-license`, which retires the fleet `LICENSE.md` (below).
 - Review: `Hold for review: no` on a clean add; `manual=true` keeps it waiting for you anyway.
@@ -116,7 +116,7 @@ Anything the module diff does not explain is reviewed with the `repo-platform-sy
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Labels: the settings apply reads the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys (the module's default when the key is unset) and declares them; a `labels.*` key for a module the repo does not select fails the apply and the plan.
+- Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `docs-site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for a module the repo does not select fails the plan and holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
 - `skills`: a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
 - `bun`: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
@@ -135,7 +135,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | `nightly` | `labels.nightly` | `nightly-failure` |
 | any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
 
-- A key change alone needs no sync: the pages and docs-site legs read the registration at run time. `mirrors` and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), while an existing starter (`.github/settings.yml`, the plugin manifests) keeps its content, so edit it yourself.
+- A key change alone needs no sync: the pages and docs-site legs read the registration at run time. `mirrors`, `labels.*`, and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), a `labels.*` value is rendered into `.github/settings.yml`, while an existing starter (`.github/settings.local.yml`, the plugin manifests) keeps its content, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `docs_site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 
@@ -143,15 +143,15 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 
 Remove the name from `modules:` and the module's own keys (`labels.<key>`, `pages`, `docs_site`, `skills`), merge, run the sync. What the report shows:
 
-- Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `held` with the reason when someone edited it or a split file carries a repo-owned tail (decide, then delete or keep it yourself).
-- Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.yml`.
-- Labels: the module's labels leave the settings baseline and the next apply removes them from the repo.
-- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched and `held` when you had written outside its region. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content, reported `region added`, which holds the PR); delete the old text in the sync PR.
+- Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `region removed` when a split file's region was untouched but the repo had written around it (the region and its markers go, your content stays as a plain file); `held` with the reason when someone edited the content (decide, then delete or keep it yourself).
+- Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.local.yml`.
+- Labels: the module's labels leave the rendered `.github/settings.yml` on that sync (`managed`, `updated`) and the next apply removes them from the repo, unless another selected module still declares them (bun and node share `javascript`) or your `.github/settings.local.yml` does: a label still declared stays rendered and applied.
+- Adding `custom-license`: the fleet `LICENSE.md` is retired on that sync, `deleted` when untouched, `region removed` when you had written outside its region (your text stays as a plain file), and `held` when the region itself was edited. Commit the repo's own `LICENSE.md` after that PR merges. Removing it: the fleet license region is written above whatever `LICENSE.md` holds (a split file without markers gets the region above its content, reported `region added`, which holds the PR); delete the old text in the sync PR.
 
 ## Verify
 
 - The sync run's job log ends `row 0: PR opened` and every Written row is explained by the module diff.
 - After merging, the module's leg or job runs on the next push to main (`release` for release-please, `pages`, `docs-site`; `validate-skills` inside the `ci` job for skills). Many modules add no job at all.
-- For label-carrying modules, the label exists on the repo after the next settings apply: `gh label list -R Vivswan/<repo>`.
+- For label-carrying modules, the label exists on the repo after the next settings apply once the sync PR has merged: `gh label list -R Vivswan/<repo>`.
 
 Two end-to-end walkthroughs, adding `nightly` to a repo that already has `fuzzer` and adding `skills`, are in [references/worked-examples.md](references/worked-examples.md).
