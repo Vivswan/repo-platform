@@ -57,8 +57,6 @@ modules:
   release-please:
     description: release-please releases through the fleet's release pipeline, plus autorelease labels
     settings_layers: [settings.yml]
-  issue-templates:
-    description: bug/feature issue forms (served by the account's .github repository; no files here)
   skills:
     description: agent skills hosting (plugin manifests, skill validation)
     skills_dir: {default: skills}

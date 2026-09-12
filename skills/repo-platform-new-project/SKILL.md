@@ -48,13 +48,13 @@ Only `modules` is required, but write `project` too: the settings overlay starte
 Minimal:
 
 ```yaml
-modules: [uv, release-please, issue-templates, pr-title]
+modules: [uv, release-please, pr-title]
 ```
 
 Full:
 
 ```yaml
-modules: [bun, site, release-please, issue-templates, pr-title, skills, fuzzer, nightly]
+modules: [bun, site, release-please, pr-title, skills, fuzzer, nightly]
 project:
   name: My Project
   slug: my-project

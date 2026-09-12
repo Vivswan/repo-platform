@@ -31,7 +31,6 @@ One line each, the `description` of each module in the platform's `files.yml`:
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 - `site`: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
 - `release-please`: release-please releases through the fleet's release pipeline, plus autorelease labels
-- `issue-templates`: bug/feature issue forms (served by the account's .github repository; no files here)
 - `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check, its own required workflow
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close

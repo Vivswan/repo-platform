@@ -82,7 +82,6 @@ describe("loadModuleData", () => {
       "rust",
       "site",
       "release-please",
-      "issue-templates",
       "skills",
       "pr-title",
       "fuzzer",

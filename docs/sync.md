@@ -153,7 +153,7 @@ The three links carry no `when`: every repository gets them.
 
 Placeholders in use beyond the project block: `skills_dir` in `validate-skills.yml` (its trigger paths and the action's `skills-dir`), `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
 
-A module with no files still appears under `modules` (`issue-templates`, `custom-license`) so a registration selecting it is known and a `when` can name it.
+A module with no files still appears under `modules` (`custom-license`) so a registration selecting it is known and a `when` can name it.
 
 ## Placeholders
 

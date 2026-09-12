@@ -217,9 +217,9 @@ describe("layerPaths", () => {
       ],
     },
     {
-      // issue-templates ships no settings layer at all, so it must not appear.
+      // custom-license ships no settings layer at all, so it must not appear.
       reason: "a module with no layer files contributes none",
-      selection: selection({ modules: ["issue-templates"] }),
+      selection: selection({ modules: ["custom-license"] }),
       paths: ["settings/baseline.yml", "settings/public.yml"],
     },
   ])("$reason", ({ selection: s, paths }) => {

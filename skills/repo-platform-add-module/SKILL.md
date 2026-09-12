@@ -37,7 +37,6 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
 | `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
-| `issue-templates` | bug/feature issue forms (served by the account's .github repository; no files here) |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
@@ -57,7 +56,6 @@ From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live ta
 | every toolchain but `rust` | `.github/workflows/auto-format.yml`; the CodeQL variant of `auto-assign.yml` on public repos | starter; managed |
 | `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |
 | `release-please` | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow` | starter; managed |
-| `issue-templates` | nothing: the forms are served by the account's `.github` repository | - |
 | `skills` | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`; `.github/workflows/validate-skills.yml` | starter; managed |
 | `pr-title` | `.github/workflows/pr-title.yml` | managed |
 | `fuzzer` | `.github/workflows/nightly-fuzz.yml` | starter |
@@ -73,7 +71,7 @@ The release and site legs of `ci.yml` exist in every repository and run only whe
 ```bash
 git checkout -b add-nightly
 # .repo-platform.yml: add the name to the top-level list
-#   modules: [release-please, issue-templates, pr-title, nightly]
+#   modules: [release-please, pr-title, nightly]
 # and the module's keys only when the defaults are wrong:
 #   labels:
 #     nightly: slow-suite-failure

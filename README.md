@@ -32,7 +32,7 @@ The measure of the design is the cost of a simple change, not the number of chec
 
 ## Modules
 
-Modules (pick any combination): `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
+Modules (pick any combination): `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `skills`, `pr-title`, `fuzzer`, `nightly`, `custom-license`. Module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change. The roster is the `modules` section of [files.yml](files.yml).
 
 ## Onboarding a repo
 

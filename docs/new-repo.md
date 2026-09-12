@@ -35,7 +35,7 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-`modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
+`modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the published `build` branch, whose tip is provenance-verified against a rebuild from its stamped main commit before any row consumes it ([build provenance](build-provenance.md#the-provenance-proof)).
 

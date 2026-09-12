@@ -35,10 +35,6 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
 - Removal: the legs skip; the starters stay.
 
-## issue-templates
-
-- No files: the account's `.github` repository serves the forms to every repo without its own. Selecting the module records the choice; removing it changes nothing in the repo.
-
 ## skills
 
 - Managed: `validate-skills.yml` (advisory CLI discovery). Fleet CI's `validate-skills` job gates the catalog structure through all-green.
