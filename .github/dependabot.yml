@@ -135,3 +135,13 @@ updates:
     commit-message:
       prefix: "build"
       include: "scope"
+
+  - package-ecosystem: "pip"
+    directory: "/actions/yamllint"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"

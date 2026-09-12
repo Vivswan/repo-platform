@@ -1,16 +1,17 @@
 name: Yamllint
 description: >-
-  The fleet's YAML lint step: installs yamllint and lints the caller's
-  checkout in strict mode (warnings fail too), honoring the repository's
-  own .yamllint config. One implementation for every managed repo, so the
-  install and the invocation cannot drift per repository.
+  The fleet's YAML lint step: installs the yamllint pinned in this action's
+  requirements.txt and lints the caller's checkout in strict mode (warnings
+  fail too), honoring the repository's own .yamllint config. One
+  implementation for every managed repo, so the install, the version, and
+  the invocation cannot drift per repository.
 
 runs:
   using: composite
   steps:
     - name: Install yamllint
       shell: bash
-      run: python3 -m pip install --quiet yamllint
+      run: python3 -m pip install --quiet --requirement "$GITHUB_ACTION_PATH/requirements.txt"
 
     - name: Lint YAML
       shell: bash
