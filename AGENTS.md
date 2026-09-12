@@ -11,16 +11,14 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 - Repo-agnostic. Anything that serves one or two repositories belongs in those repositories, not here. Delete before adding. No compatibility code: repositories are migrated instead.
 - Defensive. A repository that fails for a good reason fixes itself; the platform fails loudly and never bends a rule for it.
 - One shape. One implementation per rule; a knob with one value is a constant; a special case is a parameter or it goes.
-- Generated content is never hand-edited. Edit the source, run `bun run regen`; CI fails on drift.
-- Logic lives in TypeScript run with bun; shell is one command of glue in a `run:` step. No `.sh` files.
+- Generated content is never hand-edited: edit the source and rerun the generator.
+- Logic lives in TypeScript run with bun; shell is one command of glue in a `run:` step.
 - A behavior change updates the `docs/` guide that describes it.
 
-## Working here
+## Decisions to keep
 
-- `bun run check` is the whole local gate.
-- Conventional Commit subjects with one scope; PRs are squash-merged; `all-green` is the required check.
-- Plain ASCII punctuation; markdown is never hard-wrapped.
-- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` line in a merged PR body; a manual `sync-repos.yml` dispatch only when neither fits. Unsure which is right: ask the owner.
+- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` line in a merged PR body; a manual dispatch only when neither fits. Unsure which is right: ask the owner.
+- The owner merges every PR of this repository.
 
 ## Where the contracts live
 
