@@ -11,18 +11,13 @@ export interface When {
 
 /** One repository's side of every `when` clause. */
 export interface Selection {
-  /** Selected modules in files.yml order. */
+  /** Selected modules. */
   modules: readonly string[];
   private: boolean;
 }
 
 /** The ONE "this entry applies to this repository" rule (docs/sync.md, Selection): the writer, the fleet plan, and
- *  the validator select by it, so a clause the validator judges live is the clause the writer wrote. Absent clauses hold.
- *
- *  modules  -> every listed module is selected
- *  any      -> at least one listed module is selected
- *  without  -> none of the listed modules is selected
- *  private  -> the repository's visibility matches */
+ *  the validator select by it, so a clause the validator judges live is the clause the writer wrote. Absent clauses hold. */
 export function applies(when: When | null, selection: Selection): boolean {
   if (when === null) return true;
   const selected = (name: string) => selection.modules.includes(name);

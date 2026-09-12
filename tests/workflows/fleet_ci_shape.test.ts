@@ -104,7 +104,8 @@ describe("fleet-ci.yml", () => {
     ]);
     // The token serves the sticky comment; the visibility is the plan's
     // resolved output, so the validator and the plan select by one reading
-    // (the event payload has no repository object on every trigger).
+    // (the plan resolves it from the payload, or the API when the event
+    // carries no repository object).
     expect(steps[1]?.id).toBe("validate");
     expect(steps[1]?.with).toEqual({
       "github-token": "${{ secrets.GITHUB_TOKEN }}",
