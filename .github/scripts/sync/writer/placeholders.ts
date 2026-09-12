@@ -12,7 +12,6 @@ export const PLACEHOLDER_NAMES = [
   "github_username_lower",
   "copyright_holder",
   "year",
-  "skills_dir",
   "fuzzer_label",
   "nightly_label",
   "site_label",

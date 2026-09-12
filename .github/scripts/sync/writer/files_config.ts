@@ -43,7 +43,7 @@ export interface TrackingTuple {
 
 /** The data file as the writer runs on it: the grammar plus the
  *  module-declared fallback for each placeholder the registration may
- *  leave unset (tracking labels, the skills directory), and each tracking
+ *  leave unset (the tracking labels), and each tracking
  *  stream's label tuple, complete for every module that declares one when
  *  the data file renders settings. */
 export interface WriterFilesConfig extends FilesConfig {
@@ -58,12 +58,7 @@ export function mentionsMarkers(text: string, markers: RegionMarkers): boolean {
 
 /** The placeholders whose value the registration may leave unset, so a
  *  module must declare their default before a source may use them. */
-const DEFAULTED: readonly PlaceholderName[] = [
-  "skills_dir",
-  "fuzzer_label",
-  "nightly_label",
-  "site_label",
-];
+const DEFAULTED: readonly PlaceholderName[] = ["fuzzer_label", "nightly_label", "site_label"];
 
 export interface PlaceholderDefaults {
   defaults: PlaceholderValues;
@@ -95,9 +90,6 @@ export function placeholderDefaults(config: FilesConfig): PlaceholderDefaults {
     if (data.tracking_label !== undefined) {
       const { key, default: value } = data.tracking_label;
       declare(`${key}_label`, value, module, `modules.${module}.tracking_label`);
-    }
-    if (data.skills_dir !== undefined) {
-      declare("skills_dir", data.skills_dir.default, module, `modules.${module}.skills_dir`);
     }
   }
   for (const name of config.placeholders) {
@@ -283,14 +275,16 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
 }
 
 /** A path the previous data file wrote must still be written or retired: dropped, the file would
- *  stay in every repository with nothing to remove it. A retired entry leaves on the owner's probe
- *  that no repository carries the path (docs/sync.md), which this check cannot see. */
+ *  stay in every repository with nothing to remove it. Starters are exempt: a written starter is
+ *  repo-owned and the writer never retires one. A retired entry leaves on the owner's probe that no
+ *  repository carries the path (docs/sync.md), which this check cannot see. */
 export function checkRetirements(previous: FilesConfig, current: FilesConfig): void {
   const known = new Set([
     ...current.files.map((entry) => entry.path),
     ...current.retired.map((entry) => entry.path),
   ]);
   const problems = previous.files
+    .filter((entry) => entry.class !== "starter")
     .map((entry) => entry.path)
     .filter((path, index, all) => !known.has(path) && all.indexOf(path) === index)
     .map(

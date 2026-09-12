@@ -45,14 +45,7 @@ const fleetCi = parseYaml(source) as {
 };
 
 describe("fleet-ci.yml", () => {
-  const PLAN_OUTPUTS = [
-    "modules",
-    "private",
-    "skills-dir",
-    "codeql-languages",
-    "tracking-labels",
-    "weekly",
-  ];
+  const PLAN_OUTPUTS = ["modules", "private", "codeql-languages", "tracking-labels", "weekly"];
   // The nightly schedule carries only the jobs that ask for it: the
   // other gate jobs stand down there with this exact clause.
   const SKIP_ON_SCHEDULE = "github.event_name != 'schedule'";
@@ -361,8 +354,6 @@ describe("fleet-ci.yml", () => {
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {
     const GUARDS = {
-      "validate-skills":
-        "contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'",
       "docs-check":
         "contains(fromJSON(needs.plan.outputs.modules), 'site') && github.event_name == 'pull_request'",
       "release-freshness":
@@ -373,14 +364,6 @@ describe("fleet-ci.yml", () => {
     for (const [job, guard] of Object.entries(GUARDS)) {
       expect(fleetCi.jobs[job]?.if).toBe(guard);
     }
-  });
-
-  test("validate-skills calls its action at @build with the skills-dir input forwarded", () => {
-    const steps = fleetCi.jobs["validate-skills"]?.steps ?? [];
-    const action = steps.find((step) =>
-      (step.uses ?? "").includes("repo-platform/actions/validate-skills@build"),
-    );
-    expect(action?.with?.["skills-dir"]).toBe("${{ needs.plan.outputs.skills-dir }}");
   });
 
   test("docs-check builds docs/ strictly through pages-site at @build, standing down without a docs/ tree", () => {

@@ -250,27 +250,6 @@ jobs:
           TYPOS_REQUIRED: "1"
         run: bun run test
 
-  validate-skills:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/validate-skills
-        with:
-          skills-dir: skills
-
-  # Advisory in the fleet (validate-skills.yml: npx needs the npm registry), gating here: a listing
-  # regression in the action this repo ships should block its own merges.
-  skills-discovery:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/validate-skills
-        with:
-          skills-dir: skills
-          mode: discovery
-
   # The config is the site job's, byte for byte: a dead internal link fails here instead of the deploy.
   docs-check:
     runs-on: ubuntu-latest
@@ -414,8 +393,6 @@ jobs:
       - invariants
       - build-tree
       - script-tests
-      - validate-skills
-      - skills-discovery
       - docs-check
       - pages-site-build
       - codeql-javascript

@@ -144,7 +144,6 @@ const moduleDataSchema = z.looseObject({
     })
     .optional(),
   path: z.string().min(1).optional(),
-  skills_dir: z.looseObject({ default: z.string().min(1) }).optional(),
   pin: z
     .strictObject({
       file: z.string().regex(/^\.[a-z][a-z0-9.-]*$/, "not a version dotfile name"),

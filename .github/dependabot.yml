@@ -22,7 +22,6 @@ updates:
       - "/actions/trivy"
       - "/actions/typos"
       - "/actions/validate-commit-names"
-      - "/actions/validate-skills"
       - "/actions/validate-managed-files"
       - "/actions/yamllint"
       - "/actions/zizmor"
@@ -131,16 +130,6 @@ updates:
 
   - package-ecosystem: "bun"
     directory: "/actions/trivy"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  - package-ecosystem: "bun"
-    directory: "/actions/validate-skills"
     schedule:
       interval: "monthly"
     cooldown:

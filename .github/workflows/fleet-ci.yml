@@ -30,7 +30,6 @@ jobs:
     outputs:
       modules: ${{ steps.plan.outputs.modules }}
       private: ${{ steps.plan.outputs.private }}
-      skills-dir: ${{ steps.plan.outputs.skills-dir }}
       codeql-languages: ${{ steps.plan.outputs.codeql-languages }}
       tracking-labels: ${{ steps.plan.outputs.tracking-labels }}
       weekly: ${{ steps.plan.outputs.weekly }}
@@ -221,19 +220,6 @@ jobs:
     uses: ./.github/workflows/reusable-codeql.yml
     with:
       language: ${{ matrix.language }}
-
-  # Offline and inside the gate; the network-dependent discovery check
-  # stays advisory in the standalone validate-skills.yml.
-  validate-skills:
-    needs: [plan]
-    if: contains(fromJSON(needs.plan.outputs.modules), 'skills') && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/validate-skills@build
-        with:
-          skills-dir: ${{ needs.plan.outputs.skills-dir }}
 
   # A dead internal link fails the PR here instead of the site leg after the merge. The hashFiles
   # guard sits on the step: GitHub does not allow hashFiles in a job-level if.

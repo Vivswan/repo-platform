@@ -30,8 +30,6 @@ describe("parseRegistration", () => {
       "  include:",
       "    - { path: skills, mount: skills, page: SKILL.md }",
       "    - { path: guides, mount: guides, page: GUIDE.md }",
-      "skills:",
-      "  dir: lib/skills",
       "labels:",
       "  fuzzer: fuzz-nightly",
       "  site: rot",
@@ -55,7 +53,6 @@ describe("parseRegistration", () => {
             { path: "guides", mount: "guides", page: "GUIDE.md" },
           ],
         },
-        skills: { dir: "lib/skills" },
         labels: { fuzzer: "fuzz-nightly", site: "rot" },
         mirrors: [{ source: "AGENTS.md", targets: ["CLAUDE.md"] }],
       },
@@ -77,8 +74,8 @@ describe("parseRegistration", () => {
     },
     {
       reason: "a wrong type",
-      text: "modules: []\nskills:\n  dir: 3\n",
-      error: `${FILE}: skills.dir: Invalid input: expected string, received number`,
+      text: "modules: []\nproject:\n  name: 3\n  slug: x\n  description: y\n",
+      error: `${FILE}: project.name: Invalid input: expected string, received number`,
     },
     {
       reason: "a non-list modules key",

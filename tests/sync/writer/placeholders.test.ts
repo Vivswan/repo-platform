@@ -18,7 +18,6 @@ const VALUES: PlaceholderValues = {
   github_username_lower: "owner",
   copyright_holder: "Owner Inc",
   year: "2026",
-  skills_dir: "lib/skills",
   fuzzer_label: "fuzz-nightly",
   nightly_label: "nightly-failure",
   site_label: "docs-link-rot",
@@ -48,16 +47,16 @@ describe("placeholders", () => {
 
   test("substitute refuses a name outside the fixed list, or one without a value here", () => {
     expect(() => substitute("{{nope}}", VALUES)).toThrow("unknown placeholder {{nope}}");
-    const { skills_dir: _, ...without } = VALUES;
-    expect(() => substitute("{{skills_dir}}", without)).toThrow(
-      "unknown placeholder {{skills_dir}}",
+    const { fuzzer_label: _, ...without } = VALUES;
+    expect(() => substitute("{{fuzzer_label}}", without)).toThrow(
+      "unknown placeholder {{fuzzer_label}}",
     );
   });
 
   test("the registration-backed names substitute like the rest", () => {
-    expect(
-      substitute("{{skills_dir}} {{fuzzer_label}} {{nightly_label}} {{site_label}}", VALUES),
-    ).toBe("lib/skills fuzz-nightly nightly-failure docs-link-rot");
+    expect(substitute("{{fuzzer_label}} {{nightly_label}} {{site_label}}", VALUES)).toBe(
+      "fuzz-nightly nightly-failure docs-link-rot",
+    );
   });
 
   test.each([
@@ -74,10 +73,10 @@ describe("placeholders", () => {
 describe("missingPlaceholders", () => {
   test("names the tokens whose value is absent or empty, once each", () => {
     const values = { ...VALUES, description: "" };
-    const { skills_dir: _, ...without } = values;
+    const { fuzzer_label: _, ...without } = values;
     expect(
-      missingPlaceholders("{{description}} {{skills_dir}} {{description}} {{year}}", without),
-    ).toEqual(["description", "skills_dir"]);
+      missingPlaceholders("{{description}} {{fuzzer_label}} {{description}} {{year}}", without),
+    ).toEqual(["description", "fuzzer_label"]);
     expect(missingPlaceholders("{{year}} ${{ github.sha }}", VALUES)).toEqual([]);
   });
 });

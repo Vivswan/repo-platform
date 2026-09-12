@@ -35,7 +35,7 @@ git add --all
 git commit -m "chore: initialize"
 ```
 
-`modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `skills`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
+`modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
 The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the published `build` branch, whose tip is provenance-verified against a rebuild from its stamped main commit before any row consumes it ([build provenance](build-provenance.md#the-provenance-proof)).
 
@@ -92,9 +92,6 @@ Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) 
 | `.github/workflows/deno-audit.yml` | managed | modules: `deno` |
 | `.release-please-manifest.json` | starter | modules: `release-please` |
 | `release-please-config.json` | starter | modules: `release-please` |
-| `.claude-plugin/marketplace.json` | starter | modules: `skills` |
-| `.claude-plugin/plugin.json` | starter | modules: `skills` |
-| `.github/workflows/validate-skills.yml` | managed | modules: `skills` |
 | `.github/workflows/pr-title.yml` | managed | modules: `pr-title` |
 | `.github/workflows/nightly-fuzz.yml` | starter | modules: `fuzzer` |
 | `.github/workflows/nightly.yml` | starter | modules: `nightly` |
@@ -156,7 +153,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 A module change is two PRs in the managed repository: the registration edit, then the sync PR carrying the module's files and the manifest stamp that records them. CI itself needs nothing written: ci.yml is the same file for every selection, and fleet-ci's `plan` job reads the new list on the next run, validating the registration on the first PR.
 
 - The managed-files check is green on the first PR by design: it judges the stamped manifest against the classes the new selection makes live, so nothing is bypassed; the one exception is an edit that flips a recorded path's class (see the table below).
-- The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (`skills` reads `.claude-plugin/plugin.json`; a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the sync PR lands unless the first PR adds that file.
+- The one red to expect: a module whose fleet-ci jobs read a file the sync has not written yet (a toolchain module's jobs read its version pin, `.bun-version` for `bun`). It stays red until the sync PR lands unless the first PR adds that file.
 - The module's DATA files (its workflows, starters, and toolchain pins) are what the second PR carries, written by the sync once the first has merged:
 
 ```text

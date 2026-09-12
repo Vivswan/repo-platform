@@ -7,19 +7,18 @@ The registration is the only file a repository writes to be managed. The sync an
 | Key | Meaning | Default |
 |---|---|---|
 | `modules` | The selected modules, a list of names from the roster below. Required: an absent key is refused. An empty list is accepted and deselects every module, so the next sync retires their files | - |
-| `project.name` | Human-readable project name (`AGENTS.md`, the docs site title, the plugin manifest). `project` is all-or-nothing: `name`, `slug`, and `description` are required together whenever the block is present. Values are substituted into every managed file and split region on each sync; an existing starter keeps its content | the repository name |
-| `project.slug` | Kebab-case identifier (the skills plugin name) | the repository name |
+| `project.name` | Human-readable project name (`AGENTS.md`, the docs site title). `project` is all-or-nothing: `name`, `slug`, and `description` are required together whenever the block is present. Values are substituted into every managed file and split region on each sync; an existing starter keeps its content | the repository name |
+| `project.slug` | Kebab-case identifier | the repository name |
 | `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | empty |
 | `project.copyright_holder` | Licensor named in the fleet license's Required Notice; the one optional `project` key | the repository owner |
 | `site.path` | URL segment the docs mount at when the repo-owned site-build hook also builds a website; `null` turns the docs half off (the website publishes alone and `docs-check` stands down), for a website that renders `docs/` itself | `docs` |
 | `site.include` | Extra source roots rendered into the docs site: `{path, mount, page}` each, all three required; `page` names the file that is a page in each child directory (a skills tree uses `SKILL.md`) | none |
-| `skills.dir` | The directory holding the repository's agent skills | `skills` |
 | `labels.fuzzer` | The fuzzer module's tracking-issue label | `fuzz-nightly` |
 | `labels.nightly` | The nightly module's tracking-issue label | `nightly-failure` |
 | `labels.site` | The site module's link-rot tracking label | `docs-link-rot` |
 | `mirrors` | `{source, targets}` entries copying a `managed` or `split` file the sync writes here to other paths; single-segment `*` globs. The `plan` job rejects a target that nests with another, with a path the sync writes or retires, or under `.github/workflows/` | none |
 
-Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowercase URL segment and every `mount` one or more joined by slashes (never a locale-shaped name like `de`, `node_modules`, or `public/`); every `page` is a plain markdown file name other than `index.md`; `skills.dir` and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
+Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowercase URL segment and every `mount` one or more joined by slashes (never a locale-shaped name like `de`, `node_modules`, or `public/`); every `page` is a plain markdown file name other than `index.md`; every `include.path` is a relative path with no `..`; a label is plain text of at most 50 characters not starting with a dash.
 
 ## Module roster
 
@@ -31,7 +30,6 @@ One line each, the `description` of each module in the platform's `files.yml`:
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 - `site`: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
 - `release-please`: release-please releases through the fleet's release pipeline, plus autorelease labels
-- `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check, its own required workflow
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
 - `nightly`: nightly CI starter with failure issue filing and auto-close

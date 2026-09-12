@@ -139,7 +139,7 @@ function seedTarget(): string {
   const target = temp.dir("sync-e2e-target-");
   const files: Record<string, string> = {
     ".repo-platform.yml": [
-      "modules: [bun, deno, docs-site, fuzzer, skills, uv]",
+      "modules: [bun, deno, docs-site, fuzzer, uv]",
       "project: {name: Demo Project, slug: demo, description: A demo repository}",
       "labels: {fuzzer: fuzz-me}",
       "mirrors:",
@@ -267,7 +267,7 @@ describe("sync.ts end to end", () => {
   });
 
   test("selects the known modules; unknown modules and unsafe records become notes", () => {
-    expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer", "skills"]);
+    expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer"]);
     expect(summary.notes).toEqual([
       "dropped unknown module `uv` (files.yml does not know it)",
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
@@ -321,7 +321,6 @@ describe("sync.ts end to end", () => {
       row(".dockerignore", "split", "region added"),
       row(".github/workflows/docs-site.yml", "managed", "created"),
       row(".github/workflows/nightly-fuzz.yml", "starter", "unchanged"),
-      row(".github/workflows/validate-skills.yml", "managed", "created"),
     ]);
     expect(existsSync(join(target, ".github/workflows/private-only.yml"))).toBe(false);
   });
@@ -436,9 +435,8 @@ describe("sync.ts end to end", () => {
   test("substitutes placeholders and leaves Actions expressions alone", () => {
     expect(read(".github/workflows/ci.yml")).toContain('name: "Demo Project CI"');
     expect(read(".github/workflows/ci.yml")).toContain('"${{ github.sha }} for ownerorg/demo"');
-    // The registration's label wins; the skills directory falls back to the module default.
+    // The registration's label wins over the module default.
     expect(read(".github/workflows/ci.yml")).toContain('echo "tracking fuzz-me"');
-    expect(read(".github/workflows/validate-skills.yml")).toContain('paths: ["skills/**"]');
     expect(read("LICENSE.md")).toBe(NEW_LICENSE);
     expect(read("AGENTS.md")).toBe(
       "<!-- BEGIN REPO-PLATFORM MANAGED -->\n# Demo Project\n\nA demo repository\n<!-- END REPO-PLATFORM MANAGED -->\n",
@@ -581,7 +579,6 @@ describe("sync.ts end to end", () => {
         "skills/alpha/README.md/LICENSE.md",
         ".github/workflows/docs-site.yml",
         ".github/workflows/nightly-fuzz.yml",
-        ".github/workflows/validate-skills.yml",
         ".github/workflows/old-starter.yml",
         ".github/workflows/deselected-starter.yml",
         ".github/workflows/release.yml",
@@ -671,7 +668,7 @@ describe("sync.ts end to end", () => {
       expect(stdout).toContain(heading);
     }
     expect(stdout).toContain(
-      `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\`, \`skills\` | public |`,
+      `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\` | public |`,
     );
     expect(stdout).toContain(
       "| `.gitattributes` | split | held | class changed from managed to split, and the content differs from the last write |",

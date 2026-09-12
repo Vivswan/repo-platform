@@ -35,14 +35,6 @@ The roster and every file are in the platform's `files.yml`; the module docs (`d
 - Forcing a version: an empty commit with a `Release-As: x.y.z` footer, never a `release-as` key in the config.
 - Removal: the legs skip; the starters stay.
 
-## skills
-
-- Managed: `validate-skills.yml` (advisory CLI discovery). Fleet CI's `validate-skills` job gates the catalog structure through all-green.
-- Starters: `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, seeded from `project.name` and `project.slug` with an empty `skills` catalog. Existing manifests are kept.
-- Key: `skills.dir` (default `skills`). Fleet CI's `validate-skills` job reads it through the plan, and the managed `validate-skills.yml` is written with it (its `paths` filter and `skills-dir` input), so both checks watch the same directory.
-- Companion: list each published skill in `plugin.json`'s `skills` array as `./<skills.dir>/<name>`; an unlisted folder validates and never ships. A skills tree can also become part of the docs site through `site.include`.
-- Removal: `validate-skills.yml` is retired; the manifests and the skills directory stay.
-
 ## fuzzer / nightly
 
 - Starters: `nightly-fuzz.yml` (fuzzer) / `nightly.yml` (nightly). The placeholder step is a green no-op until customized.

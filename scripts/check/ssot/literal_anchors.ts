@@ -8,7 +8,6 @@ import {
   asRecord,
   ciJobs,
   managedLabelRoster,
-  modules,
   read,
   repoSlug,
   trackedFiles,
@@ -336,27 +335,6 @@ export const literalAnchorRules: Rule[] = [
           file: "actions/fuzz-issue/fuzz-issue.ts",
           expected: "MAX_BODY under GitHub's 65,536-character cap",
           got: String(maxBody),
-        });
-      }
-
-      // Anchored on the parameter table's row (like the pages cells): a
-      // bare backticked "skills" occurs in the doc for unrelated reasons,
-      // so only the row's Default cell can satisfy this.
-      const skillsDefault = modules().find((m) => m.name === "skills")?.skills_dir?.default;
-      if (skillsDefault === undefined) {
-        throw new Error("files.yml modules.skills declares no skills_dir default - anchor lost");
-      }
-      const skillsCell = mustMatch(
-        handProse("docs/skills.md"),
-        /^\| `skills\.dir` \|.+\| ([^|]+) \|$/m,
-        "docs/skills.md",
-        "the skills.dir table row",
-      )[1].trim();
-      if (skillsCell !== `\`${skillsDefault}\``) {
-        mismatches.push({
-          file: "docs/skills.md",
-          expected: `the skills.dir Default cell \`${skillsDefault}\``,
-          got: skillsCell,
         });
       }
 

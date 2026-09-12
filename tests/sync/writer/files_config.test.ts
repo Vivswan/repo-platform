@@ -62,12 +62,11 @@ function writeTree(root: string, files: Record<string, string>): void {
 }
 
 describe("placeholderDefaults", () => {
-  test("come from tracking_label (as <key>_label) and skills_dir; a stream no placeholder names rides along", () => {
+  test("come from tracking_label (as <key>_label); a stream no placeholder names rides along", () => {
     const config = parseFilesConfig(
       [
-        "placeholders: [skills_dir, fuzzer_label, site_label]",
+        "placeholders: [fuzzer_label, site_label]",
         "modules:",
-        "  skills: { skills_dir: { default: skills } }",
         "  fuzzer: { tracking_label: { key: fuzzer, default: fuzz-nightly, color: B60205 } }",
         "  site: { tracking_label: { key: site, default: docs-link-rot } }",
         "  other: { tracking_label: { key: unknown_stream, default: x } }",
@@ -76,7 +75,6 @@ describe("placeholderDefaults", () => {
     );
     expect(placeholderDefaults(config)).toEqual({
       defaults: {
-        skills_dir: "skills",
         fuzzer_label: "fuzz-nightly",
         site_label: "docs-link-rot",
       },
@@ -372,7 +370,7 @@ describe("blockSources and verifySources", () => {
     const root = temp.dir("writer-files-load-");
     writeTree(root, {
       "files.yml":
-        "placeholders: [year, skills_dir]\nmodules:\n  skills: { skills_dir: { default: skills } }\nfiles:\n  - { path: a.txt, class: managed }\n",
+        "placeholders: [year, site_label]\nmodules:\n  site: { tracking_label: { key: site, default: docs-link-rot } }\nfiles:\n  - { path: a.txt, class: managed }\n",
       "unbacked.yml":
         "placeholders: [year, fuzzer_label]\nfiles:\n  - { path: a.txt, class: managed }\n",
       "previous.yml":
@@ -381,7 +379,7 @@ describe("blockSources and verifySources", () => {
     });
     const loaded = loadFilesConfig(join(root, "files.yml"), join(root, "files"));
     expect(loaded.files).toHaveLength(1);
-    expect(loaded.defaults).toEqual({ skills_dir: "skills" });
+    expect(loaded.defaults).toEqual({ site_label: "docs-link-rot" });
     expect(() => loadFilesConfig(join(root, "unbacked.yml"), join(root, "files"))).toThrow(
       "no module declares the default for {{fuzzer_label}}",
     );
@@ -452,6 +450,13 @@ describe("checkRetirements", () => {
   test("a previously written path that is retired now passes", () => {
     const previous = parseFilesConfig(
       "placeholders: []\nfiles:\n  - { path: SECURITY.md, class: managed }\n  - { path: .gitignore, class: managed }\n",
+    );
+    expect(() => checkRetirements(previous, current)).not.toThrow();
+  });
+
+  test("a previously written starter needs no retirement: it is repo-owned once written", () => {
+    const previous = parseFilesConfig(
+      "placeholders: []\nfiles:\n  - { path: .claude-plugin/plugin.json, class: starter }\n  - { path: SECURITY.md, class: managed }\n",
     );
     expect(() => checkRetirements(previous, current)).not.toThrow();
   });

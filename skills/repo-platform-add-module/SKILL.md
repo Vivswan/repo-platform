@@ -1,6 +1,6 @@
 ---
 name: repo-platform-add-module
-description: 'Add or remove a Vivswan/repo-platform module in a managed repository - edit the modules list in .repo-platform.yml, merge it, run the sync for the module files, and finish the companion steps. Use when someone says "add a module", "enable the fuzzer", "add nightly CI to this repo", "publish a site", "host skills in this repo", "add the bun toolchain", "add Python support to this repo", "add Rust support", "start cutting releases here", "publish the docs site", "check PR titles on this repo", "remove a module", "drop the fuzzer", "disable nightly", asks "what modules does this repo have", or asks how to change a module setting like the nightly label, the fuzzer label, the skills directory, or the docs mount path.'
+description: 'Add or remove a Vivswan/repo-platform module in a managed repository - edit the modules list in .repo-platform.yml, merge it, run the sync for the module files, and finish the companion steps. Use when someone says "add a module", "enable the fuzzer", "add nightly CI to this repo", "publish a site", "add the bun toolchain", "add Python support to this repo", "add Rust support", "start cutting releases here", "publish the docs site", "check PR titles on this repo", "remove a module", "drop the fuzzer", "disable nightly", asks "what modules does this repo have", or asks how to change a module setting like the nightly label, the fuzzer label, or the docs mount path.'
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -18,10 +18,10 @@ Work in this order, always:
 
 ## When to Apply
 
-- "Enable the fuzzer" / "add nightly CI" / "publish a site" / "host skills in this repo" / "add the uv toolchain" on a repo that already carries `.repo-platform.yml`
+- "Enable the fuzzer" / "add nightly CI" / "publish a site" / "add the uv toolchain" on a repo that already carries `.repo-platform.yml`
 - Outcome-shaped asks that map to a module: "add Python/Rust support" (uv/rust), "start cutting releases" (release-please), "publish the docs as a website" / "deploy the repo's own website" (site), "check PR titles" (pr-title), "what modules does this repo have" (read `.repo-platform.yml`)
 - "Remove a module" / "drop the fuzzer" / "we do not need pr-title anymore"
-- "Change the nightly label" / "move the skills directory" / "mount the docs under another path": module keys, not selection. The site build itself is the repo-owned `.github/actions/site-build/action.yml` hook, edited like any file of the repo
+- "Change the nightly label" / "mount the docs under another path": module keys, not selection. The site build itself is the repo-owned `.github/actions/site-build/action.yml` hook, edited like any file of the repo
 
 For enrolling a repo that is not managed yet, use the `repo-platform-new-project` skill instead. Inside the platform repository itself, "add a module" means adding a `files/<module>/` folder and its `files.yml` entries; this skill is for managed repos.
 
@@ -37,7 +37,6 @@ One line each, the `description` of each module in the platform's `files.yml`.
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
 | `site` | one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme) |
 | `release-please` | release-please releases through the fleet's release pipeline, plus autorelease labels |
-| `skills` | agent skills hosting (plugin manifests, skill validation) |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
@@ -56,7 +55,6 @@ From the platform's `files.yml` (`bun scripts/files_table.ts` prints the live ta
 | every toolchain but `rust` | `.github/workflows/auto-format.yml`; the CodeQL variant of `auto-assign.yml` on public repos | starter; managed |
 | `site` | no file of its own: the `.github/actions/site-build/action.yml` hook is a base starter every repository carries | - |
 | `release-please` | `release-please-config.json`, `.release-please-manifest.json`; the release variant of `.typography-allow` | starter; managed |
-| `skills` | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`; `.github/workflows/validate-skills.yml` | starter; managed |
 | `pr-title` | `.github/workflows/pr-title.yml` | managed |
 | `fuzzer` | `.github/workflows/nightly-fuzz.yml` | starter |
 | `nightly` | `.github/workflows/nightly.yml` | starter |
@@ -81,14 +79,7 @@ gh pr create
 
 The `plan` job of fleet CI parses `.repo-platform.yml` on the PR: an unknown key, a wrong shape, a duplicate module name, a module name the platform does not offer, or a `labels.*` key whose module is not selected fails there. Merge when green.
 
-Two exceptions to "registration first", where a gate job the selection turns on reads a file of yours on that same PR:
-
-- `site` on a repo with a `docs/` directory: the `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red. A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
-- `skills`: the `validate-skills` gate job reads `.claude-plugin/plugin.json`. Commit a minimal manifest in the PR (the sync reports it `unchanged` afterwards) or the gate stays red until the sync PR lands:
-
-```json
-{ "name": "<slug>-skills", "description": "Agent skills for <name>", "skills": [] }
-```
+One exception to "registration first", where a gate job the selection turns on reads a file of yours on that same PR: `site` on a repo with a `docs/` directory. The `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red. A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
 
 ### 2. Run the sync and review its PR
 
@@ -115,7 +106,6 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 - Labels: the sync renders the tracking labels of `fuzzer`, `nightly`, and `site` from the registration's `labels.*` keys (the module's default when the key is unset) into the managed `.github/settings.yml`, and the settings apply declares them; a `labels.*` key for a module the repo does not select fails the plan and holds the sync PR.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; a custom label also goes into the starter's `label:` inputs.
-- `skills`: a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
 - `site`: the module's settings layer enables Pages on the next settings apply (before it: `gh api -X POST repos/Vivswan/<repo>/pages -f build_type=workflow`); the repo's own website goes into the repo-owned `.github/actions/site-build/action.yml` hook, seeded as a no-op, so fill it in or the site is the docs alone (`docs/README.md` was step 1's business).
 
 ## Module keys
@@ -125,7 +115,6 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | Module | Keys | Default |
 |---|---|---|
 | `site` | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
-| `skills` | `skills.dir` | `skills` |
 | `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
 | `nightly` | `labels.nightly` | `nightly-failure` |
 | any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
@@ -136,7 +125,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 
 ## Removing a module
 
-Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site`, `skills`), merge, run the sync. What the report shows:
+Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site`), merge, run the sync. What the report shows:
 
 - Retired: the module's managed and split files. `deleted` with the detail `no longer selected` when the file still held the platform's own content; `region removed` when a split file's region was untouched but the repo had written around it (the region and its markers go, your content stays as a plain file); `held` with the reason when someone edited the content (decide, then delete or keep it yourself).
 - Starters stay: the sync never deletes a repo-owned file. Dropping `fuzzer` or `nightly` leaves its workflow running; delete it yourself or keep its label declared in `.github/settings.local.yml`.
@@ -146,7 +135,7 @@ Remove the name from `modules:` and the module's own keys (`labels.<key>`, `site
 ## Verify
 
 - The sync run's job log ends `row 0: PR opened` and every Written row is explained by the module diff.
-- After merging, the module's leg or job runs on the next push to main (`release` for release-please, `site`; `validate-skills` inside the `ci` job for skills). Many modules add no job at all.
+- After merging, the module's leg or job runs on the next push to main (`release` for release-please, `site`). Many modules add no job at all.
 - For label-carrying modules, the label exists on the repo after the next settings apply once the sync PR has merged: `gh label list -R Vivswan/<repo>`.
 
-Two end-to-end walkthroughs, adding `nightly` to a repo that already has `fuzzer` and adding `skills`, are in [references/worked-examples.md](references/worked-examples.md).
+An end-to-end walkthrough, adding `nightly` to a repo that already has `fuzzer`, is in [references/worked-examples.md](references/worked-examples.md).

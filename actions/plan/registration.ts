@@ -156,7 +156,6 @@ export const registrationSchema = z.strictObject({
       if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
     })
     .optional(),
-  skills: z.strictObject({ dir: relativePath.optional() }).optional(),
   labels: z.record(z.string(), label).optional(),
   mirrors: z
     .array(
