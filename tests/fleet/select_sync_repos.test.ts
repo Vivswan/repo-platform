@@ -10,7 +10,6 @@ import { tempDirs } from "../shared/temp_dir";
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
-/** The whole job output: the count and the keyed matrix, never a slug. */
 const outputFor = (rows: { repo: string; private: boolean }[]) =>
   `count=${rows.length}\nmatrix=${JSON.stringify(planMatrix(rows, keyOf))}\n`;
 

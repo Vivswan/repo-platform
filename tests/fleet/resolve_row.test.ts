@@ -41,7 +41,6 @@ interface Run {
   outputs: string;
 }
 
-/** The workflow's env for the step; a case sets a variable to undefined to leave it unset. */
 function run(env: Record<string, string | undefined>, list: unknown = rows): Run {
   const root = temp.dir("resolve-row-");
   const runnerTemp = join(root, "temp");
