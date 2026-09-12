@@ -119,17 +119,11 @@ function actionsFixture(): string {
   writeFileSync(join(action, "lib", "helper.ts"), "export {};\n");
   writeFileSync(join(action, "lib", `helper${TEST_FILE_SUFFIX}`), "export {};\n");
   writeFileSync(join(action, "node_modules", "monaco-editor", "index.js"), "module.exports={};\n");
-  // One file under every excluded name, spelled here rather than read from
-  // EXCLUDED_DIRS so a name dropped from the set fails the listing below.
-  for (const excluded of ["dist", ".turbo"]) {
-    mkdirSync(join(action, excluded), { recursive: true });
-    writeFileSync(join(action, excluded, "artifact.js"), "module.exports={};\n");
-  }
   return root;
 }
 
 describe("copyActions", () => {
-  test("publishes source and manifests, never installed dependencies or build output", () => {
+  test("publishes source and manifests, never installed dependencies", () => {
     const root = actionsFixture();
     const dest = temp.dir("branch-actions-dest-");
     const files = copyActions(root, dest);
@@ -187,19 +181,23 @@ describe("copyActions", () => {
     expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
   });
 
-  test("an action's subdirectories ship whole, excluded directories filtered at every depth", () => {
+  test("an action's subdirectories ship whole, installed dependencies filtered at every depth", () => {
     const root = actionsFixture();
     const nested = join(root, "actions", "check-typography", "validator");
     mkdirSync(join(nested, "node_modules", "yaml"), { recursive: true });
     writeFileSync(join(nested, "run.ts"), "export {};\n");
     writeFileSync(join(nested, "node_modules", "yaml", "index.js"), "module.exports={};\n");
+    // No action builds, so a directory named dist is source like any other.
+    mkdirSync(join(nested, "dist"));
+    writeFileSync(join(nested, "dist", "grammar.wasm"), "\0asm");
     const dest = temp.dir("branch-actions-dest-");
-    expect(copyActions(root, dest)).toBe(5);
+    expect(copyActions(root, dest)).toBe(6);
     expect(listing(join(dest, "actions", "check-typography"))).toEqual([
       "action.yml",
       "bun.lock",
       "lib/helper.ts",
       "package.json",
+      "validator/dist/grammar.wasm",
       "validator/run.ts",
     ]);
   });
@@ -212,8 +210,6 @@ describe("copyActions", () => {
     const ghost = join(root, "actions", "ghost");
     mkdirSync(join(ghost, "node_modules", "yaml"), { recursive: true });
     writeFileSync(join(ghost, "node_modules", "yaml", "index.js"), "module.exports={};\n");
-    mkdirSync(join(ghost, "dist"));
-    writeFileSync(join(ghost, "dist", "bundle.js"), "module.exports={};\n");
     writeFileSync(join(ghost, `run${TEST_FILE_SUFFIX}`), "export {};\n");
     mkdirSync(join(root, "actions", "node_modules", "pkg"), { recursive: true });
     writeFileSync(join(root, "actions", "node_modules", "pkg", "index.js"), "module.exports={};\n");

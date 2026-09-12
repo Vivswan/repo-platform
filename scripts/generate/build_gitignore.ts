@@ -42,16 +42,22 @@ const AGENT_SECTION =
   ".worktrees/\n" +
   ".claude/settings.local.json\n";
 
-// Only paths a fleet step creates inside a checked-out workspace are listed: only those can collide with a committed path of the same name.
+// Only paths a fleet step creates inside every checked-out workspace are listed: only those can collide with a committed path of the same name.
 // Root-anchored so a nested source folder of the same name is not swallowed.
-export const CI_WORKSPACE_SECTION =
-  "## CI workspace paths (repo-platform)\n" + "/results.sarif\n" + "/.fuzz-failures/\n";
+export const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)\n" + "/results.sarif\n";
+
+// Sections the platform authors itself, keyed by the files.yml source name a module lists beside its github/gitignore stems.
+// The fuzz failure directory rides the fuzzer module because only its starter produces it.
+export const PLATFORM_SECTIONS: Record<string, string> = {
+  fuzzer: "## Fuzzer workspace paths (repo-platform fuzzer)\n" + "/.fuzz-failures/\n",
+};
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
 
-export function upstreamPath(name: string): string {
-  return `${name}.gitignore`;
+/** A files.yml source name is a platform section's key or a github/gitignore root stem. */
+export function sourceId(name: string): string {
+  return Object.hasOwn(PLATFORM_SECTIONS, name) ? name : `${name}.gitignore`;
 }
 
 export function blockName(path: string): string {
@@ -70,7 +76,7 @@ export function gitignoreSources(filesText: string, label = "files.yml"): [strin
     if (!Array.isArray(names) || names.some((name) => typeof name !== "string")) {
       throw new Error(`${label}: modules.${module}.gitignore_sources must be a list of names`);
     }
-    return [[module, (names as string[]).map(upstreamPath)]];
+    return [[module, (names as string[]).map(sourceId)]];
   });
 }
 
@@ -107,7 +113,7 @@ export function missingBlockFiles(entries: [string, string[]][], filesDir: strin
 }
 
 export function sectionsIn(text: string): Record<string, string> {
-  const headings = [...text.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)];
+  const headings = [...text.matchAll(/^## .+ \((?:github\/gitignore|repo-platform) (.+)\)$/gm)];
   const sections: Record<string, string> = {};
   headings.forEach((match, index) => {
     const end = index + 1 < headings.length ? headings[index + 1].index : text.length;
@@ -128,6 +134,7 @@ async function upstreamHead(): Promise<string> {
 }
 
 async function section(sha: string, path: string): Promise<string> {
+  if (Object.hasOwn(PLATFORM_SECTIONS, path)) return PLATFORM_SECTIONS[path];
   const name = blockName(path);
   // Upstream quirks, each normalized so the outputs stay ASCII and lint-clean downstream:
   //   Windows.gitignore  -> CRLF line endings
@@ -222,6 +229,9 @@ export function topologyProblems(input: {
       const sectionText = sectionsIn(text)[path];
       if (buildBlock(sectionText) !== text) {
         problems.push(`files/${rel} is not exactly its section plus one blank line; ${rerun}`);
+      }
+      if (Object.hasOwn(PLATFORM_SECTIONS, path) && sectionText !== PLATFORM_SECTIONS[path]) {
+        problems.push(`files/${rel} is not the platform-authored section ${path}; ${rerun}`);
       }
       const earlier = blockSections.get(path);
       if (earlier !== undefined && earlier !== sectionText) {

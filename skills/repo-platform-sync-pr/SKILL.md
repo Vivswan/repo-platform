@@ -109,7 +109,7 @@ Something that matches none of the above: do not merge. The branch is rewritten 
 
 ## Repository-owned markdown after a retirement
 
-The platform no longer writes the community health files; GitHub serves the account's defaults from Vivswan/.github, and a default shows ONLY when the repository has no file of the same name. A sync PR that retires the platform's `CONTRIBUTING.md` or `.github/SECURITY.md` can leave a repository-owned tail in it, and that tail (a `held` retirement, or a file the platform never recorded, which stays in place with no row at all) hides the complete default behind a fragment. Before merging, decide each file:
+The platform no longer writes the community health files; GitHub serves the account's defaults from its `<owner>/.github` repository, and a default shows ONLY when the repository has no file of the same name. A sync PR that retires the platform's `CONTRIBUTING.md` or `.github/SECURITY.md` can leave a repository-owned tail in it, and that tail (a `held` retirement, or a file the platform never recorded, which stays in place with no row at all) hides the complete default behind a fragment. Before merging, decide each file:
 
 | File left behind | Either delete it | Or make it complete |
 |---|---|---|

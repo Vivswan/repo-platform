@@ -441,7 +441,7 @@ describe("sync.ts end to end", () => {
     expect(read(".github/workflows/docs-site.yml")).toContain("docs site (standalone)");
   });
 
-  test("rewrites the split region between the repo-owned halves with the module blocks, one Node block for two modules", () => {
+  test("rewrites the split region between the repo-owned halves with the module blocks, one Node block for two modules, the fuzzer block last", () => {
     expect(read(".gitignore")).toBe(
       [
         "# my ignores above",
@@ -452,6 +452,8 @@ describe("sync.ts end to end", () => {
         "*.log",
         "## Bun",
         "bun.lockb",
+        "## Fuzzer",
+        "/.fuzz-failures/",
         HASH_END,
         "# my ignores below",
         ".idea/",

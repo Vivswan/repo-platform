@@ -118,10 +118,7 @@ describe("renderOwnSettings", () => {
       name: "a registration whose tracking label reuses a fleet label",
       mutate: (root: string) => {
         const path = join(root, ".repo-platform.yml");
-        writeFileSync(
-          path,
-          readFileSync(path, "utf-8").replace("site: docs-link-rot", "site: Bug"),
-        );
+        writeFileSync(path, `${readFileSync(path, "utf-8")}labels:\n  site: Bug\n`);
       },
       message: `${RENDERED} cannot be rendered: tracking label "Bug" (site) is a label the platform already manages; a green night would close whatever issues carry it and every settings apply would fight over it`,
     },

@@ -14,11 +14,12 @@ import {
   gitignoreSources,
   main,
   missingBlockFiles,
+  PLATFORM_SECTIONS,
   sectionsIn,
   selfSources,
+  sourceId,
   strayBlockFiles,
   topologyProblems,
-  upstreamPath,
 } from "../../../scripts/generate/build_gitignore";
 import { tempDirs } from "../../shared/temp_dir";
 
@@ -31,6 +32,7 @@ const SECTIONS: Record<string, string> = {
   "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
   "bun.gitignore": "## bun (github/gitignore bun.gitignore)\nbun.lockb\n",
   "Python.gitignore": "## Python (github/gitignore Python.gitignore)\n__pycache__/\n\n*.py[cod]\n",
+  ...PLATFORM_SECTIONS,
 };
 
 const FILES_YML = [
@@ -42,6 +44,9 @@ const FILES_YML = [
   "  uv:",
   "    description: uv",
   "    gitignore_sources: [Python]",
+  "  fuzzer:",
+  "    description: fuzzer",
+  "    gitignore_sources: [fuzzer]",
   "  pages:",
   "    description: pages",
   "files:",
@@ -52,6 +57,7 @@ const FILES_YML = [
 const ENTRIES: [string, string[]][] = [
   ["bun", ["Node.gitignore", "bun.gitignore"]],
   ["uv", ["Python.gitignore"]],
+  ["fuzzer", ["fuzzer"]],
 ];
 
 function generated(): { filesDir: string; selfPath: string } {
@@ -77,10 +83,13 @@ function generated(): { filesDir: string; selfPath: string } {
 const readSelf = (path: string) => capture(["cat", path], {}).stdout;
 
 describe("the source grammar", () => {
-  test("a files.yml name is a github/gitignore root stem, and the block file carries it", () => {
-    expect(upstreamPath("Node")).toBe("Node.gitignore");
+  test("a files.yml name is a github/gitignore root stem or a platform section, and the block file carries it", () => {
+    expect(sourceId("Node")).toBe("Node.gitignore");
+    expect(sourceId("fuzzer")).toBe("fuzzer");
     expect(blockName("Global/macOS.gitignore")).toBe("macOS");
+    expect(blockName("fuzzer")).toBe("fuzzer");
     expect(blockRel("bun", "Node.gitignore")).toBe("bun/.block.Node.gitignore");
+    expect(blockRel("fuzzer", "fuzzer")).toBe("fuzzer/.block.fuzzer.gitignore");
   });
 
   test("gitignoreSources reads the declaring modules in files.yml order", () => {
@@ -98,6 +107,7 @@ describe("the source grammar", () => {
       "Node.gitignore",
       "bun.gitignore",
       "Python.gitignore",
+      "fuzzer",
     ]);
   });
 });
@@ -126,10 +136,11 @@ describe("the outputs", () => {
     expect(Object.keys(sectionsIn(self))).toEqual([...ALWAYS, ...selfSources(ENTRIES)]);
   });
 
-  test("sectionsIn reads each section back, blank lines inside a body kept", () => {
-    const text = `${buildBlock(SECTIONS["Python.gitignore"])}${SECTIONS["Node.gitignore"]}`;
+  test("sectionsIn reads each section back, upstream or platform, blank lines inside a body kept", () => {
+    const text = `${buildBlock(SECTIONS["Python.gitignore"])}${buildBlock(SECTIONS.fuzzer)}${SECTIONS["Node.gitignore"]}`;
     expect(sectionsIn(text)).toEqual({
       "Python.gitignore": SECTIONS["Python.gitignore"],
+      fuzzer: SECTIONS.fuzzer,
       "Node.gitignore": SECTIONS["Node.gitignore"],
     });
   });
@@ -224,6 +235,20 @@ describe("the offline topology check", () => {
     ]);
   });
 
+  test("a platform-authored block whose body drifted from the generator is named", () => {
+    const { filesDir, selfPath } = generated();
+    const drifted = "## Fuzzer workspace paths (repo-platform fuzzer)\n";
+    writeFileSync(join(filesDir, "fuzzer/.block.fuzzer.gitignore"), buildBlock(drifted));
+    expect(
+      topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
+        (p) => p.split(";")[0],
+      ),
+    ).toEqual([
+      "files/fuzzer/.block.fuzzer.gitignore is not the platform-authored section fuzzer",
+      ".gitignore's managed region differs from files/base/.gitignore plus the block files",
+    ]);
+  });
+
   test("a stale base, a self region missing a section, and a missing base are named", () => {
     const { filesDir, selfPath } = generated();
     const selfText = readSelf(selfPath);
@@ -241,7 +266,7 @@ describe("the offline topology check", () => {
         (p) => p.split(";")[0],
       ),
     ).toEqual([
-      ".gitignore's managed region lacks the section(s) [bun.gitignore, Python.gitignore]",
+      ".gitignore's managed region lacks the section(s) [bun.gitignore, Python.gitignore, fuzzer]",
     ]);
     expect(
       topologyProblems({ entries: ENTRIES, filesDir: temp.dir("empty-files-"), selfText }),
@@ -287,11 +312,11 @@ describe("argument parsing", () => {
   });
 });
 
-describe("CI workspace section", () => {
-  function ignoredByGit(rel: string, kind: "dir" | "file"): boolean {
+describe("the platform-authored sections", () => {
+  function ignoredByGit(section: string, rel: string, kind: "dir" | "file"): boolean {
     const repo = temp.dir("gitignore-ci-workspace-");
     expect(capture(["git", "-C", repo, "init", "-q"], {}).exitCode).toBe(0);
-    writeFileSync(join(repo, ".gitignore"), CI_WORKSPACE_SECTION);
+    writeFileSync(join(repo, ".gitignore"), section);
     const abs = join(repo, rel);
     mkdirSync(dirname(abs), { recursive: true });
     if (kind === "dir") mkdirSync(abs);
@@ -305,16 +330,19 @@ describe("CI workspace section", () => {
     return probe.exitCode === 0;
   }
 
-  const cases: [string, "dir" | "file", boolean][] = [
-    ["results.sarif", "file", true],
-    [".fuzz-failures", "dir", true],
-    [".fuzz-failures", "file", false],
-    ["assets/logo.png", "file", false],
-    ["scan/results.sarif", "file", false],
-    ["crate/.fuzz-failures", "dir", false],
+  // Only fuzzer repositories produce .fuzz-failures/, so the base section must leave the name alone.
+  const cases: [string, string, "dir" | "file", boolean][] = [
+    ["base", "results.sarif", "file", true],
+    ["base", ".fuzz-failures", "dir", false],
+    ["base", "assets/logo.png", "file", false],
+    ["base", "scan/results.sarif", "file", false],
+    ["fuzzer", ".fuzz-failures", "dir", true],
+    ["fuzzer", ".fuzz-failures", "file", false],
+    ["fuzzer", "crate/.fuzz-failures", "dir", false],
   ];
 
-  test.each(cases)("%s (%s) ignored: %p", (rel, kind, ignored) => {
-    expect(ignoredByGit(rel, kind)).toBe(ignored);
+  test.each(cases)("%s section: %s (%s) ignored: %p", (section, rel, kind, ignored) => {
+    const text = section === "base" ? CI_WORKSPACE_SECTION : PLATFORM_SECTIONS[section];
+    expect(ignoredByGit(text, rel, kind)).toBe(ignored);
   });
 });
