@@ -106,7 +106,6 @@ const CONFIG = (() => {
   return { ...config, trackingTuples: trackingTuples(config).tuples };
 })();
 
-/** Every registration carries the required project block; the tests vary the rest. */
 function registration(text: string) {
   const read = parseRegistration(`${text}project: {name: Demo, slug: demo, description: Mine}\n`);
   if ("errors" in read) throw new Error(read.errors.join("\n"));

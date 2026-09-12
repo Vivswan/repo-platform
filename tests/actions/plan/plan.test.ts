@@ -54,7 +54,6 @@ function stagedReservedLabels(): string {
 }
 const RESERVED = readReservedLabels(stagedReservedLabels());
 
-/** Every registration carries the required project block; the rows vary the rest. */
 const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo }\n";
 
 function registration(text: string): Registration {

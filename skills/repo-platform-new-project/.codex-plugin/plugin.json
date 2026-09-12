@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Repo Platform: New Project",
     "shortDescription": "Bring a repository under repo-platform fleet management.",
-    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: the native scaffold, the .repo-platform.yml registration (modules plus the keys whose defaults are wrong), the fleet token grant that enrolls it, the first sync dispatch, the sync PR report, and the CI jobs every managed repository shares.",
+    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: the native scaffold, the .repo-platform.yml registration (modules plus the required project block), the fleet token grant that enrolls it, the first sync dispatch, the sync PR report, and the CI jobs every managed repository shares.",
     "developerName": "Vivswan",
     "category": "Developer Tools",
     "capabilities": ["Read", "Edit", "Scaffold"],
