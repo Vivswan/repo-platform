@@ -197,13 +197,13 @@ Change verdicts per written row: `created` (absent before), `updated` (was exact
 
 ## Class flips
 
-A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`, `link`) that `files.yml` now declares under another is a class flip. The recorded content is the platform's own previous write, so:
+A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`, `link`) that `files.yml` now declares under another is a class flip. `files.yml` is the truth for a path's class, and the recorded content is the platform's own previous write, so:
 
 | State | Outcome |
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record or a record with `hash: null` included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
+| anything else, a `starter` record or a record without a hash included | the record is stale, and the file is written as an unrecorded one under the new class: `replaced local edits` with the diff for a `managed` entry, `region added` (or `replaced local edits` when the file already carries the markers) for a `split` one, `held` when a regular file sits where a `link` is declared or a symlink where a file is; the detail reads `class changed from <old> to <new>; the record was stale, so the file was judged unrecorded`, the write's own record replaces the stale one, and the PR holds once (a held row keeps the previous record, as every held row does) |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.

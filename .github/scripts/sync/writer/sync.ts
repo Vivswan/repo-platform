@@ -185,15 +185,17 @@ interface Written {
   record: ManifestRecord;
   /** What a mirror would copy, or a replaced edit is diffed against. */
   content: string;
+  /** The stale record a write set aside, for the row's detail. */
+  detail?: string;
 }
 
 /** One entry written by its class, or the placeholders it lacks a value
  *  for (nothing is written then). A path whose record the writer reads
  *  under another class than the entry declares is a class flip: the
  *  recorded content is the platform's own previous write, so it is
- *  replaced whole when it still matches its record and held otherwise, its
- *  record carried (a flip to starter hands the file over and is never
- *  held). */
+ *  replaced whole when it still matches its record; otherwise the record
+ *  is stale and the file is written as an unrecorded one (a flip to
+ *  starter hands the file over and is never judged). */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -216,13 +218,14 @@ function writeEntry(
     found.kind !== "absent" &&
     !alreadyWritten(found, entry, rendered.content)
   ) {
-    const reason = keepReason(options.target, entry.path, records);
-    if (reason !== null) {
-      const detail = `class changed from ${flipped} to ${entry.class}, and ${reason}`;
+    if (keepReason(options.target, entry.path, records) !== null) {
+      const outcome = rendered.write(null);
+      if ("missing" in outcome) return outcome;
       return {
-        outcome: { change: "held", reason: detail },
+        outcome,
         record: rendered.record,
         content: rendered.content,
+        detail: `class changed from ${flipped} to ${entry.class}; the record was stale, so the file was judged unrecorded`,
       };
     }
     // A file staying a file is overwritten in place, which keeps its mode;
@@ -354,7 +357,7 @@ export function runSync(options: SyncOptions): SyncReport {
       path: entry.path,
       class: entry.class,
       change: outcome.change,
-      detail: outcome.change === "held" ? outcome.reason : "",
+      detail: outcome.change === "held" ? outcome.reason : (result.detail ?? ""),
     });
     if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });

@@ -115,11 +115,12 @@ function oldManifest(): string {
     // recorded content, one edited since.
     ".editorconfig": `{"class": "managed", "hash": "${sha256(OLD_EDITORCONFIG)}"}`,
     ".gitattributes": `{"class": "managed", "hash": "${sha256("* text=auto\n")}"}`,
-    // A managed record without a hash: the flip to split cannot be verified
-    // against it, so the file is held and the record carried as it is.
+    // A managed record without a hash: nothing vouches for the content, so
+    // the flip to split treats the file as unrecorded.
     ".yamllint": `{"class": "managed", "hash": null}`,
-    // A starter flipping to managed is held; its path is named like an
-    // inherited object property to keep every record lookup honest.
+    // A starter record on a managed path is stale, and the file is replaced
+    // like any local edit; the path is named like an inherited object
+    // property to keep every record lookup honest.
     constructor: `{"class": "starter"}`,
     // A hash-less managed record for a path nothing selects or retires: held
     // every run, its record carried, never a silent orphan.
@@ -306,20 +307,20 @@ describe("sync.ts end to end", () => {
       row(
         ".gitattributes",
         "split",
-        "held",
-        "class changed from managed to split, and the content differs from the last write",
+        "region added",
+        "class changed from managed to split; the record was stale, so the file was judged unrecorded",
       ),
       row(
         ".yamllint",
         "split",
-        "held",
-        "class changed from managed to split, and the record carries no hash",
+        "region added",
+        "class changed from managed to split; the record was stale, so the file was judged unrecorded",
       ),
       row(
         "constructor",
         "managed",
-        "held",
-        "class changed from starter to managed, and a starter is repo-owned",
+        "replaced local edits",
+        "class changed from starter to managed; the record was stale, so the file was judged unrecorded",
       ),
       row(".dockerignore", "split", "region added"),
       row(".github/workflows/docs-site.yml", "managed", "created"),
@@ -328,15 +329,19 @@ describe("sync.ts end to end", () => {
     expect(existsSync(join(target, ".github/workflows/private-only.yml"))).toBe(false);
   });
 
-  test("a class flip replaces the recorded content whole and holds anything else", () => {
+  test("a class flip replaces the recorded content whole and writes anything else as unrecorded", () => {
     // .editorconfig was exactly its managed record: the region alone now, mode kept.
     expect(read(".editorconfig")).toBe(`${HASH_BEGIN}\nroot = true\n${HASH_END}\n`);
     expect(lstatSync(join(target, ".editorconfig")).mode & 0o111).toBe(0o111);
-    // .gitattributes was edited since its record: untouched, no region prepended.
-    expect(read(".gitattributes")).toBe(OLD_GITATTRIBUTES);
-    // .yamllint's record had no hash: the flip cannot be verified, so it is held untouched.
-    expect(read(".yamllint")).toBe(OLD_YAMLLINT);
-    expect(read("constructor")).toBe(LOCAL_CONSTRUCTOR);
+    // .gitattributes was edited since its record and .yamllint's record had
+    // no hash: neither is the platform's own write, so each gets the region
+    // above its content like any unrecorded file.
+    expect(read(".gitattributes")).toBe(
+      `${HASH_BEGIN}\n* text=auto\n${HASH_END}\n${OLD_GITATTRIBUTES}`,
+    );
+    expect(read(".yamllint")).toBe(`${HASH_BEGIN}\nextends: default\n${HASH_END}\n${OLD_YAMLLINT}`);
+    // The starter record was stale: the managed content replaced the file, its diff reported.
+    expect(read("constructor")).toBe("platform notes\n");
     // An unrecorded, marker-less file selected as split gets the region above it, for review.
     expect(read(".dockerignore")).toBe(
       `${HASH_BEGIN}\nnode_modules\n${HASH_END}\n${LOCAL_DOCKERIGNORE}`,
@@ -621,15 +626,21 @@ describe("sync.ts end to end", () => {
       class: "link",
       hash: sha256("../AGENTS.md"),
     });
-    expect(manifest.files[".gitattributes"]).toEqual({
-      class: "managed",
-      hash: sha256("* text=auto\n"),
+    // A stale record is replaced by the write's own, whatever it said before.
+    const regionRecord = (body: string) => ({
+      class: "split",
+      grammar: "managed-region",
+      begin: HASH_BEGIN,
+      end: HASH_END,
+      hash: sha256(`${HASH_BEGIN}\n${body}\n${HASH_END}\n`),
     });
+    expect(manifest.files[".gitattributes"]).toEqual(regionRecord("* text=auto"));
+    expect(manifest.files[".yamllint"]).toEqual(regionRecord("extends: default"));
     expect(Object.entries(manifest.files).find(([path]) => path === "constructor")?.[1]).toEqual({
-      class: "starter",
+      class: "managed",
+      hash: sha256("platform notes\n"),
     });
     expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
-    expect(manifest.files[".yamllint"]).toEqual({ class: "managed", hash: null });
     expect(manifest.files[".editorconfig"]).toMatchObject({
       class: "split",
       hash: sha256(read(".editorconfig")),
@@ -689,7 +700,10 @@ describe("sync.ts end to end", () => {
       `| \`${BUILD}\` | \`bun\`, \`deno\`, \`docs-site\`, \`fuzzer\` | public |`,
     );
     expect(stdout).toContain(
-      "| `.gitattributes` | split | held | class changed from managed to split, and the content differs from the last write |",
+      "| `.gitattributes` | split | region added | class changed from managed to split; the record was stale, so the file was judged unrecorded |",
+    );
+    expect(stdout).toContain(
+      "#### `constructor`\n\n```diff\n--- constructor\n+++ constructor\n@@\n-local notes\n+platform notes",
     );
     expect(stdout).toContain(
       '```diff\n--- .github/workflows/ci.yml\n+++ .github/workflows/ci.yml\n@@\n-name: my own ci\n-on: push\n+name: "Demo Project CI"',
@@ -699,11 +713,11 @@ describe("sync.ts end to end", () => {
     );
     expect(summary.hold).toBe(true);
     expect(summary.holdReasons).toEqual([
-      ".gitattributes held: class changed from managed to split, and the content differs from the last write",
-      ".yamllint held: class changed from managed to split, and the record carries no hash",
-      "constructor held: class changed from starter to managed, and a starter is repo-owned",
+      ".gitattributes: the managed region was added above repository-owned content",
+      ".yamllint: the managed region was added above repository-owned content",
       ".dockerignore: the managed region was added above repository-owned content",
       "local edits replaced in .github/workflows/ci.yml",
+      "local edits replaced in constructor",
       "local edits replaced in template/LICENSE.md",
       "local edits replaced in skills/beta/LICENSE.md",
       "local edits replaced in skills/gamma/LICENSE.md",
@@ -742,8 +756,10 @@ describe("sync.ts end to end", () => {
       },
       { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
     ]);
-    // The region-added file is now a marked split file: current, no longer held.
-    expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(".dockerignore"));
+    // The region-added files are marked split files now: current, no longer held.
+    for (const path of [".dockerignore", ".gitattributes", ".yamllint"]) {
+      expect(again.summary.holdReasons).not.toContainEqual(expect.stringContaining(path));
+    }
     // The handed-over split file is the repository's own now: no row, no hold.
     expect(again.summary.holdReasons).not.toContainEqual(
       expect.stringContaining("CONTRIBUTING.md"),
@@ -757,7 +773,7 @@ describe("sync.ts end to end", () => {
           !r.startsWith("local edits") &&
           !r.startsWith("mirror ") &&
           !r.includes("manifest record") &&
-          !r.startsWith(".dockerignore") &&
+          !r.endsWith("the managed region was added above repository-owned content") &&
           !r.startsWith("retirement of CONTRIBUTING.md"),
       ),
     );
@@ -832,6 +848,40 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
       ],
       // No record vouches for its bytes, so the re-render is shown as a
       // replaced edit once, then recorded.
+      holds: [`local edits replaced in ${SETTINGS}`],
+      still: (target: string) => {
+        const text = readFileSync(join(target, SETTINGS), "utf-8");
+        expect(text.startsWith("# Generated by repo-platform - do not edit.\n")).toBe(true);
+        expect(text).not.toContain("description: stale");
+        expect(readFileSync(join(target, OVERLAY), "utf-8")).toBe(THEIRS);
+        const manifest = JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as {
+          files: Record<string, unknown>;
+        };
+        expect(manifest.files[SETTINGS]).toEqual({ class: "managed", hash: sha256(text) });
+      },
+    },
+    {
+      reason:
+        "a rendered settings.yml under a stale starter record, the repository's overlay beside it",
+      seed: (target: string) => {
+        writeFileSync(join(target, SETTINGS), RENDERED_STALE);
+        writeFileSync(join(target, OVERLAY), THEIRS);
+        writeFileSync(
+          join(target, MANIFEST),
+          `{\n  "files": {\n    ${JSON.stringify(MANIFEST)}: {"class": "managed", "hash": null, "commit": null},\n    ${JSON.stringify(SETTINGS)}: {"class": "starter"}\n  }\n}\n`,
+        );
+      },
+      rows: [
+        row(OVERLAY, "starter", "unchanged"),
+        row(
+          SETTINGS,
+          "managed",
+          "replaced local edits",
+          "class changed from starter to managed; the record was stale, so the file was judged unrecorded",
+        ),
+      ],
+      // A starter record vouches for no bytes either: the same one hold,
+      // and the write's own record replaces the stale one.
       holds: [`local edits replaced in ${SETTINGS}`],
       still: (target: string) => {
         const text = readFileSync(join(target, SETTINGS), "utf-8");
