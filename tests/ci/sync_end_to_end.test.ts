@@ -133,13 +133,14 @@ function oldManifest(): string {
     ".github/dependabot.yml": `{"class": "split", "hash": "${sha256(LOCAL_DEPENDABOT)}"}`,
     // A hash-less managed record for a path nothing declares or retires:
     // held every run, its record carried, never a silent orphan, and noted
-    // as no sync's every run.
+    // every run because no current files.yml entry declares or retires the path.
     "UNHASHED.md": `{"class": "managed", "hash": null}`,
     // A class the writer does not record: the record is dropped with a note.
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
     "../escape.txt": `{"class": "managed", "hash": "${sha256("x")}"}`,
     // A hand-added record with the file's true hash, at a path no files.yml
-    // entry declares: retired as stale, and noted as no sync's.
+    // entry declares: retired as stale, and noted because no current files.yml
+    // entry declares or retires the path.
     "HANDMADE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
     // The same with nothing at the path: nothing to review, so no note; the
     // record leaves the manifest like any other stale record of an absent file.
