@@ -70,21 +70,21 @@ describe("verdict.ts", () => {
     expect(result.exitCode).not.toBe(0);
   };
 
-  test("plan prints the row count from the selector's file and derives the index matrix", () => {
+  test("plan prints the row count from the selector's file", () => {
     const result = run(
       "plan",
       {},
       { rows: '[{"repo":"o/a","private":false},{"repo":"o/b","private":true}]' },
     );
     speaks(result, "plan: 2 rows");
-    expect(result.outputs).toBe("count=2\nindexes=[0,1]\n");
+    expect(result.outputs).toBe("count=2\n");
     expect(result.stdout).not.toContain("o/");
   });
 
-  test("an empty plan is zero rows and an empty matrix", () => {
+  test("an empty plan is zero rows", () => {
     const result = run("plan", {}, { rows: "[]" });
     speaks(result, "plan: 0 rows");
-    expect(result.outputs).toBe("count=0\nindexes=[]\n");
+    expect(result.outputs).toBe("count=0\n");
   });
 
   test("a plan over a non-list or a missing rows file is silent and red", () => {

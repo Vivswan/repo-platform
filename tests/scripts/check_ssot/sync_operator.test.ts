@@ -39,10 +39,18 @@ describe("syncOperatorMismatches", () => {
     {
       reason: "a matrix carrying repository slugs",
       text: mutate(
-        "        row: ${{ fromJSON(needs.plan.outputs.indexes) }}",
-        "        repo: ${{ fromJSON(needs.plan.outputs.repos) }}",
+        "      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+        "      matrix:\n        repo: ${{ fromJSON(needs.plan.outputs.repos) }}",
       ),
-      expected: "row indexes alone",
+      expected: "row indexes and keys alone",
+    },
+    {
+      reason: "a plan matrix output built anywhere but the selector (a literal could carry slugs)",
+      text: mutate(
+        "      matrix: ${{ steps.select.outputs.matrix }}",
+        '      matrix: \'{"include":[{"row":0,"key":"o/hidden-repo"}]}\'',
+      ),
+      expected: "wired to the selector's",
     },
     {
       reason: "a job name carrying the repository",
@@ -133,8 +141,8 @@ describe("syncOperatorMismatches", () => {
 
   test("the resolver's own env is judged too: a TARGET there names that step", () => {
     const text = mutate(
-      "          PLANNED: ${{ needs.plan.outputs.count }}\n        run: bun .github/scripts/sync/resolve_row.ts",
-      "          PLANNED: ${{ needs.plan.outputs.count }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
     );
     expect(syncOperatorMismatches(text)).toEqual([
       {
