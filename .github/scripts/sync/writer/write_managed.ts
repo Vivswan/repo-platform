@@ -7,12 +7,9 @@
 import { sha256 } from "./manifest.ts";
 import { probe, writeFile } from "./target_files.ts";
 
-/** `moved` is the displacement verdict (displace.ts): the repository's
- *  file went to `to` verbatim and the entry's content was created here. */
 export type WriteOutcome =
   | { change: "created" | "updated" | "unchanged" | "region added" }
   | { change: "replaced local edits"; replaced: string }
-  | { change: "moved"; to: string }
   | { change: "held"; reason: string };
 
 export type Change = WriteOutcome["change"];

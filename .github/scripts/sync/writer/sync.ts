@@ -25,7 +25,6 @@ import { REGISTRATION_PATH, type Registration } from "../../../../actions/plan/r
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
-import { type Displacement, displace } from "./displace.ts";
 import { blockSources, loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import {
   MANIFEST_NAME,
@@ -134,9 +133,9 @@ function render(
     };
   }
   if ("render" in entry) {
-    // The overlay is the starter this entry displaces, written earlier in
-    // the same loop when absent; only a regular file there is read.
-    const overlayPath = entry.displaces;
+    // The overlay starter is written earlier in the same loop when absent;
+    // only a regular file there is read.
+    const overlayPath = entry.overlay;
     const what = occupant(target, overlayPath);
     if (what !== null && what !== "a regular file") {
       return { held: `${overlayPath} is ${what}, which the render does not read through` };
@@ -296,14 +295,11 @@ export function runSync(options: SyncOptions): SyncReport {
     else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
   }
   const retired = retire(options.target, config.retired, stale, entryPaths, records);
-  const displaced = new Map<string, Displacement>(
-    displace(options.target, entries, records).map((row) => [row.path, row]),
-  );
 
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.
   const next = new Map<string, ManifestRecord>();
-  // A carried record never displaces one this run wrote.
+  // A carried record never overwrites one this run wrote.
   const carry = (path: string) => {
     const previous = records[path];
     const record = previous === undefined ? null : carriedRecord(previous);
@@ -322,17 +318,6 @@ export function runSync(options: SyncOptions): SyncReport {
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];
   for (const entry of entries) {
-    const displacement = displaced.get(entry.path);
-    if (displacement?.outcome === "held") {
-      carry(entry.path);
-      rows.push({
-        path: entry.path,
-        class: entry.class,
-        change: "held",
-        detail: displacement.detail,
-      });
-      continue;
-    }
     // The class writers hold a file or a link in the way; anything else
     // they refuse loudly, and the sync must still end in a report.
     const taken = occupant(options.target, entry.path);
@@ -367,13 +352,7 @@ export function runSync(options: SyncOptions): SyncReport {
       });
       continue;
     }
-    const { record, content } = result;
-    // A displaced file's path was free, so the write created the content;
-    // the row says where the repository's file went instead.
-    const outcome: WriteOutcome =
-      displacement?.outcome === "moved" && result.outcome.change === "created"
-        ? { change: "moved", to: displacement.to }
-        : result.outcome;
+    const { outcome, record, content } = result;
     // A held path keeps its previous record: the file is still that write.
     if (outcome.change === "held") carry(entry.path);
     else next.set(entry.path, record);
@@ -381,12 +360,7 @@ export function runSync(options: SyncOptions): SyncReport {
       path: entry.path,
       class: entry.class,
       change: outcome.change,
-      detail:
-        outcome.change === "held"
-          ? outcome.reason
-          : outcome.change === "moved"
-            ? `to ${outcome.to}`
-            : "",
+      detail: outcome.change === "held" ? outcome.reason : "",
     });
     if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });

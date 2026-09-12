@@ -243,7 +243,7 @@ describe("blockSources and verifySources", () => {
       "  override: files/settings/override.yml",
       "files:",
       "  - { path: .github/settings.local.yml, class: starter }",
-      "  - { path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml }",
+      "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }",
       "",
     ].join("\n");
     const LAYERS: Record<string, string> = {

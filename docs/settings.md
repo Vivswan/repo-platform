@@ -18,7 +18,7 @@ Every managed repository carries a rendered `.github/settings.yml`: a managed fi
 
 Every layer is a plain settings-as-code YAML document a human can read on its own; no settings content derives from code. The mechanics:
 
-- The render is the writer's settings entry ([sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts)): `files.yml` names the four fleet layers in its `settings` block and each module's layer files under `modules.<m>.settings_layers`, and the entry `{path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}` folds them with the overlay ([sync.md](sync.md#filesyml)).
+- The render is the writer's settings entry ([sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts)): `files.yml` names the four fleet layers in its `settings` block and each module's layer files under `modules.<m>.settings_layers`, and the entry `{path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}` folds them with the overlay ([sync.md](sync.md#filesyml)).
 - Layers 1 to 4 are selected by the repository's facts: the module selection from its `.repo-platform.yml` (a name `files.yml` does not know is dropped with a Registration note, which holds the PR) and the visibility the overlay's `repository.private` declares, the operator's own visibility fact standing in when the overlay declares none.
 - Which layer files exist is DECLARED, never discovered from the tree: [sync/writer/settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts) holds `files/` against the declaration in both directions, so a deleted or undeclared layer file fails the writer's load instead of shrinking the stack and letting the apply delete its labels fleet-wide.
 - Layer 6 is the only layer a repository cannot beat. Fleet defaults a repo may tune belong in layer 1.
@@ -149,16 +149,7 @@ The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts 
 
 Every repository receives `.github/settings.local.yml` once (the public or private variant under [files/base/.github/](../files/base/.github/)): the four identity keys (`description` from the registration, `homepage` and `topics` declared empty, `private` by visibility), plus commented examples for local labels and rulesets. It is repo-owned from then on (a starter: written only when absent). The rendered `.github/settings.yml` is written right after it, on every sync.
 
-A repository whose `.github/settings.yml` predates the render (the hand-written starter of the earlier shape) is moved on its first sync after the change, before anything is written ([sync/writer/displace.ts](../.github/scripts/sync/writer/displace.ts)):
-
-| The repository's `.github/settings.yml` | Outcome |
-| --- | --- |
-| a regular file, recorded as a starter or unrecorded, and `.github/settings.local.yml` absent | `git mv` to `.github/settings.local.yml`, verbatim, comments kept; the rendered document is created at the old path; the row reads `moved` with the detail `to .github/settings.local.yml`, and the PR holds once with the reason `.github/settings.yml: the repository's file moved to .github/settings.local.yml and the rendered document replaced it`. When the render refuses the moved file as an overlay (a label named twice, a document that does not parse), the move has still happened and the row reads `held` with the reason; fix the overlay and the next sync renders |
-| the same, but something is already at `.github/settings.local.yml` | `held` with `class changed from starter to managed, and .github/settings.local.yml is already taken by <what>, so the file was not moved over it` (`<what>` is a regular file, a symbolic link, a directory, or something that is not a regular file); both files stay untouched, decide which is the overlay and delete the other |
-| a symbolic link | `held`: the writer never reads through a link |
-| a file that already carries the render's header (a rendered document, recorded or not) | never moved: the render is written in place; unrecorded, the row reads `replaced local edits` with the diff, and a matching render reads `unchanged` |
-
-Until that PR merges, the apply skips the repository with the un-rendered notice, so the old file is never applied alone.
+The rendered file takes the managed rules ([sync.md](sync.md#classes)): it is written on every sync (`updated` when the file was the recorded render, `unchanged` when it already matches the new one), and a file that is neither, hand-written or edited, is replaced with its diff holding the PR (`replaced local edits`); move what it declared into the overlay.
 
 Nothing in the repository applies its settings: settings are applied only centrally, by [settings-repos.yml](../.github/workflows/settings-repos.yml) after every green main merge there and nightly ([all-green.md](all-green.md)). A managed repository carries no apply workflow and no token.
 

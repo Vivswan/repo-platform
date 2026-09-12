@@ -70,7 +70,7 @@ files:
   - path: .github/settings.yml
     class: managed
     render: settings
-    displaces: .github/settings.local.yml
+    overlay: .github/settings.local.yml
   - path: .editorconfig
     class: split
     region: hash

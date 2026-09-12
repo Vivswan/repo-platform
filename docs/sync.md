@@ -16,7 +16,7 @@ The sync writer copies the platform's files into a managed repository. It reads 
 | How is each class written? | [sync/writer/write_managed.ts](../.github/scripts/sync/writer/write_managed.ts), [write_split.ts](../.github/scripts/sync/writer/write_split.ts), [write_starter.ts](../.github/scripts/sync/writer/write_starter.ts), [write_link.ts](../.github/scripts/sync/writer/write_link.ts) |
 | Where do blocks land, and what may a value contain? | `spliceBlocks` and `substitute` in [sync/writer/placeholders.ts](../.github/scripts/sync/writer/placeholders.ts) |
 | What happens when an entry's class differs from its record? | `writeEntry` in [sync/writer/sync.ts](../.github/scripts/sync/writer/sync.ts) |
-| How is `.github/settings.yml` rendered, and how does the old starter move aside? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts) and [merge_settings_layers.ts](../.github/scripts/sync/writer/merge_settings_layers.ts); the move is [sync/writer/displace.ts](../.github/scripts/sync/writer/displace.ts) ([settings.md](settings.md)) |
+| How is `.github/settings.yml` rendered? | [sync/writer/settings_entry.ts](../.github/scripts/sync/writer/settings_entry.ts) over [settings_layers.ts](../.github/scripts/sync/writer/settings_layers.ts) and [merge_settings_layers.ts](../.github/scripts/sync/writer/merge_settings_layers.ts) ([settings.md](settings.md)) |
 | When does a retired file leave? | [sync/writer/retire.ts](../.github/scripts/sync/writer/retire.ts) |
 | What does the manifest record? | [sync/writer/manifest.ts](../.github/scripts/sync/writer/manifest.ts) |
 | What holds a PR for review? | `holdReasons` in [sync/writer/report.ts](../.github/scripts/sync/writer/report.ts) |
@@ -61,7 +61,7 @@ files:
   - {path: .github/dependabot.yml, class: managed, blocks: dependabot_ecosystems}
   - {path: .github/settings.local.yml, class: starter, when: {private: false}}
   - {path: .github/settings.local.yml, class: starter, when: {private: true}, source: files/base/.github/settings.local.private.yml}
-  - {path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}
+  - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
   - {path: CLAUDE.md, class: link, target: AGENTS.md}
   - {path: .github/agents.md, class: link, target: ../AGENTS.md}
   - {path: .typography-allow, class: managed, when: {without: [release-please]}}
@@ -84,8 +84,8 @@ retired:
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
 | `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source three toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
-| `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the overlay at `displaces` ([settings.md](settings.md)). |
-| `files[].displaces` | Managed entries only: the starter path the file found at this entry's path moves to, verbatim, before the write (the class flip of this path from starter to managed, [below](#class-flips)). Required on a rendered entry, whose overlay it names. The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
+| `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the repository's overlay at `overlay` ([settings.md](settings.md)). |
+| `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
 | `settings.baseline`, `settings.public`, `settings.private`, `settings.override` | The four fleet settings layers, clean paths under `files/`; present exactly when a `render: settings` entry exists. |
 | `retired[].path` | A path the platform no longer writes. |
 | `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
@@ -100,8 +100,8 @@ The loader refuses, all problems at once:
 - a `source` outside `files/`, or one missing from the tree (block files included)
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `skills_dir` or `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
-- `render` or `displaces` on an entry that is not managed; a rendered entry with a `source` or `blocks`, or without `displaces`
-- a `displaces` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; starters listed after the entry that displaces them; starters not selected exactly when the displacing entry is (an unconditional displacer needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
+- `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
+- an `overlay` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
 - a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice; a `settings.yml`, `settings-public.yml`, or `settings-private.yml` in a module directory that its `settings_layers` does not declare
 - two entries for one `path` whose conditions can both hold (below)
@@ -115,7 +115,7 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 
 | Entry class | Used for |
 | --- | --- |
-| `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, displacing the `.github/settings.local.yml` starter) |
+| `managed` | the workflows the fleet runs unchanged (`ci.yml`, `auto-assign.yml`, the module workflows), `.github/dependabot.yml`, `.yamllint`, `.typography-allow`, the review instructions, the toolchain pin files, and the rendered `.github/settings.yml` (`render: settings`, over the `.github/settings.local.yml` overlay starter) |
 | `split` (region `hash`) | `.editorconfig`, `.gitattributes`, `.gitignore`, `.github/CODEOWNERS` |
 | `split` (region `html`) | `AGENTS.md`, `LICENSE.md` |
 | `starter` | `checks.yml`, `post-green.yml`, the release hooks, the site-build hook (`.github/actions/site-build/action.yml`), `auto-format.yml`, `copilot-setup-steps.yml`, `.gitleaks.toml`, `.github/actionlint.yaml`, `.github/settings.local.yml`, the release-please, skills, fuzzer, and nightly starters |
@@ -197,7 +197,7 @@ A module with no files still appears under `modules` (`issue-templates`, `custom
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
 | `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string, the hash the previous pipeline already recorded for its symlinks |
 
-Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `moved` (the repository's file moved to the path in the Detail column, `to <path>`, and the entry's content was created here; the displacement below), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there. An entry of any class finding a directory (or anything else that is neither a file nor a link) at its path is held with `<what> sits at the path, and the writer will not replace it`. A rendered entry whose overlay path holds anything but a regular file is held too; the displacement that would free its path is held when the overlay path is taken, with the detail naming what sits there. A rendered entry is also held when its overlay is missing, does not parse, names one label twice, or when the registration's tracking labels are refused ([settings.md](settings.md)).
+Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there. An entry of any class finding a directory (or anything else that is neither a file nor a link) at its path is held with `<what> sits at the path, and the writer will not replace it`. A rendered entry whose overlay path holds anything but a regular file is held too, with the detail naming what sits there. A rendered entry is also held when its overlay is missing, does not parse, names one label twice, or when the registration's tracking labels are refused ([settings.md](settings.md)).
 
 ## Class flips
 
@@ -209,7 +209,6 @@ A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`,
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
 | anything else, a `starter` record or a record without a hash included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
-| the entry declares `displaces`, the path holds a regular file recorded as a `starter` or unrecorded, and the displaced path is absent | the file is moved (`git mv`) to the displaced path verbatim before any write, its record follows as a starter, and the entry's content is created at the freed path: `moved`, which holds the PR once. With the displaced path present: `held` with `class changed from starter to managed, and <path> is already taken by <what>, so the file was not moved over it`, both untouched. A path with a `managed`, `split`, `link`, or `mirror` record takes the rows above. A regular file opening with the rendered document's header (`# Generated by repo-platform - do not edit.`) is never the repository's own, whatever the record: it is not moved (a lost manifest cannot turn a rendered document into the overlay), a `starter` record for it is dropped, and the ordinary write takes it: `unchanged` when it already matches the render, else `replaced local edits` with the diff, since no record vouches for its bytes; the next run finds it recorded. |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
 
@@ -259,14 +258,14 @@ Every row's target is recorded as class `mirror` with the copy's hash, so the ne
 | Section | Content |
 | --- | --- |
 | header | Build, Modules, Visibility |
-| Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row, or `to <path>` for a `moved` one) |
+| Written | path, class, change, detail for every selected entry (detail is the reason of a `held` row) |
 | Replaced local edits | one unified diff per replaced file, capped at 40 lines |
 | Retired | path, outcome, detail |
 | Registration notes | dropped unknown modules; an unparsable manifest; a placeholder with no value and the key that sets it; a manifest record the writer cannot carry; a mirror record no declaration reaches |
 | Mirrors | source, target, outcome, detail |
 | Review | `Hold for review: yes` with the reasons, or `no` |
 
-`hold` is true on any held, `region added`, or `moved` written row (the moved reason reads `<path>: the repository's file moved to <new path> and the rendered document replaced it`; once that PR merges, the next run reports the path `unchanged` and the reason is gone; a re-dispatch before the merge clones the default branch afresh, finds the old file again, and moves it again), any replaced local edit (a mirror's included), any held or `region removed` retirement, any `replaced` mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns. Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own. A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
+`hold` is true on any held or `region added` written row, any replaced local edit (a mirror's included), any held or `region removed` retirement, any `replaced` mirror, or any registration note. Table cells escape `|`, so a path or detail carrying one keeps the columns. Every cell, note, and code-formatted value (the replaced-file headings included) is printed on one line: a newline inside a registration value or a manifest path (the writer copies both into the report verbatim) cannot end the row and start a heading of its own. A replaced diff sits in a fence one backtick longer than any backtick run its lines open with, so the target's own content cannot close it.
 
 The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/deliver.ts](../.github/scripts/sync/deliver.ts)): the header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs; a section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
 

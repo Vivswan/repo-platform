@@ -38,7 +38,7 @@ export function renderOwnSettings(root: string): OwnSettings {
   const tree = join(root, TREE);
   const config = loadFilesConfig(join(root, FILES_CONFIG), tree);
   const entry = renderedEntry(config);
-  const overlayPath = entry.displaces;
+  const overlayPath = entry.overlay;
   const overlayAbs = join(root, overlayPath);
   if (!existsSync(overlayAbs)) {
     throw new Error(
