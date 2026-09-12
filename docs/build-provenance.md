@@ -122,13 +122,13 @@ The branch is both the writer's source and the fleet's executable channel (`uses
 
 ## A new action input lands as a stack
 
-A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repository's root twin of it) calls platform actions at the delivery ref, and the root twin is this repository's own check of that workflow. A workflow PR that feeds an action an input the same PR adds reds itself: its check runs the action's copy at the delivery ref, which does not have the input yet.
+A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repository's root twin of it) calls platform actions at the delivery ref, and the root twin is this repository's own check of that workflow. A workflow PR that feeds an action an input not yet at the delivery ref reds itself, whether the PR adds the input or is stacked on the PR that does: its check runs the action's copy at the delivery ref.
 
 1. Land the action change alone: its own PR against main, so the post-green run carries the new input to the delivery ref.
-2. Stack the workflow PR on the action branch while both are open; retarget it to main once the action PR merges.
-3. Re-run the workflow PR's check (or push a rebase) after the delivery ref has moved, then merge.
+2. Stack the workflow PR on the action branch while both are open. Once the action PR merges, rebase the workflow branch onto main with `--onto main <old action tip>` and retarget the PR: the squash made a new commit, so a plain retarget keeps the action commits in the workflow PR's diff.
+3. Re-run the workflow PR's check after the delivery ref has moved (the rebase push does it), then merge.
 
-Example: a `title` input added to validate-commit-names with the pr-title workflow feeding it in the same PR; the PR's own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
+Example: the pr-title workflow PR feeding validate-commit-names a new `title` input, stacked on the action PR before that PR merged; its own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
 
 ## Residuals
 
