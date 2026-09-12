@@ -226,7 +226,7 @@ describe("parseConfig", () => {
     }
   });
 
-  test("LABEL_RE matches the shape the fuzz-issue action enforces", () => {
+  test("LABEL_RE matches the shape the registration grammar enforces", () => {
     expect(LABEL_RE.test("fuzz-nightly")).toBe(true);
     expect(LABEL_RE.test("autorelease: pending")).toBe(true);
     expect(LABEL_RE.test("-x")).toBe(false);

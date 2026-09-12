@@ -7,15 +7,14 @@ import { type Mismatch, mustMatch } from "./comparison.ts";
 import { managedLabelRoster, modules, read, trackingStreams } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
-/** The hand-copied homes of the fuzz-issue action's LABEL_RE, each read off
- *  its AST: the exported const twins. */
+/** The registration grammar's LABEL_RE is the home; these are its hand-copied twins, each read off its AST as an exported const. */
+export const LABEL_RE_HOME = "actions/plan/registration.ts";
 export const LABEL_RE_COPIES: readonly { file: string; name: string }[] = [
-  { file: "actions/plan/registration.ts", name: "LABEL_RE" },
   { file: "actions/release-health/release-health.ts", name: "LABEL_RE" },
 ];
 
 /** Each copy in LABEL_RE_COPIES whose pattern body differs from `labelRe`
- *  (the fuzz-issue action's), sources read through `readSource`. */
+ *  (the registration grammar's), sources read through `readSource`. */
 export function labelRegexCopyMismatches(
   labelRe: string,
   readSource: (rel: string) => string,
@@ -30,7 +29,7 @@ export function labelRegexCopyMismatches(
     if (got !== labelRe) {
       mismatches.push({
         file: `${copy.file} ${copy.name}`,
-        expected: `${labelRe} (actions/fuzz-issue/fuzz-issue.ts LABEL_RE)`,
+        expected: `${labelRe} (${LABEL_RE_HOME} LABEL_RE)`,
         got,
       });
     }
@@ -86,19 +85,20 @@ export const labelRules: Rule[] = [
       const streams = trackingStreams();
       const fuzzTracking = streams.find((m) => m.module === "fuzzer");
       if (!fuzzTracking) throw new Error("files.yml modules.fuzzer lost tracking_label");
-      const action = read("actions/fuzz-issue/fuzz-issue.ts");
-      const color = constStringValue(action, "DEFAULT_LABEL_COLOR", {
-        where: "fuzz-issue.ts",
-        what: "label color",
-      });
-      const description = constStringValue(action, "DEFAULT_LABEL_DESCRIPTION", {
-        where: "fuzz-issue.ts",
-        what: "label description",
-      });
-      if (color !== fuzzTracking.color || description !== fuzzTracking.description) {
+      const actionYml = read("actions/fuzz-issue/action.yml");
+      const inputDefault = (name: string) =>
+        mustMatch(
+          actionYml,
+          new RegExp(`^ {2}${name}:\n(?: {4}.+\n)*? {4}default: (.+)$`, "m"),
+          "actions/fuzz-issue/action.yml",
+          `${name} default`,
+        )[1];
+      const color = inputDefault("label-color");
+      const description = inputDefault("label-description");
+      if (color !== `"${fuzzTracking.color}"` || description !== fuzzTracking.description) {
         mismatches.push({
-          file: "actions/fuzz-issue/fuzz-issue.ts label defaults",
-          expected: `${fuzzTracking.color} / ${fuzzTracking.description} (files.yml modules.fuzzer.tracking_label)`,
+          file: "actions/fuzz-issue/action.yml label input defaults",
+          expected: `"${fuzzTracking.color}" / ${fuzzTracking.description} (files.yml modules.fuzzer.tracking_label)`,
           got: `${color} / ${description}`,
         });
       }
@@ -113,13 +113,8 @@ export const labelRules: Rule[] = [
       }
       // The fuzz starter's explicit title must stay the action's title
       // default: already-written fleet starters omit the input and depend
-      // on the default (the action's own test pins DEFAULT_TITLE to it).
-      const titleDefault = mustMatch(
-        read("actions/fuzz-issue/action.yml"),
-        /^ {2}title:\n(?: {4}.+\n)*? {4}default: (.+)$/m,
-        "actions/fuzz-issue/action.yml",
-        "title default",
-      )[1];
+      // on the default.
+      const titleDefault = inputDefault("title");
       const starterTitle = mustMatch(
         fuzzStarter,
         /^ {10}title: (.+)$/m,
@@ -254,7 +249,9 @@ export const labelRules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const layer = "files/release-please/settings.yml";
-      const releaseLabels = (loadLayer(layer).labels ?? []) as { name: string }[];
+      const releaseLabels = (loadLayer(layer).labels ?? []) as {
+        name: string;
+      }[];
       if (releaseLabels.length === 0) {
         throw new Error(`${layer} declares no labels - anchor lost`);
       }
@@ -343,14 +340,12 @@ export const labelRules: Rule[] = [
   },
   {
     // Every hand-copied label regex (LABEL_RE_COPIES) must state exactly
-    // the shape the fuzz-issue action enforces: the plan refuses a
-    // registration label the action would refuse, and release-health reads
-    // labels the same way.
+    // the shape the registration grammar enforces: release-health reads
+    // the labels the plan admitted, so it must read them the same way.
     name: "tracking-label-regex",
     run: () => {
-      const action = read("actions/fuzz-issue/fuzz-issue.ts");
-      const labelRe = constRegexSource(action, "LABEL_RE", {
-        where: "fuzz-issue.ts",
+      const labelRe = constRegexSource(read(LABEL_RE_HOME), "LABEL_RE", {
+        where: LABEL_RE_HOME,
         what: "LABEL_RE",
         exported: true,
       });

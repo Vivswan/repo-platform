@@ -110,7 +110,8 @@ const plainText = (what: string) =>
   z.string().refine((value) => !/["\\\p{Cc}]/u.test(value), {
     message: `${what} must not contain double quotes, backslashes, or control characters`,
   });
-/** The label shape the fuzz-issue action enforces. */
+/** The shape of every tracking-stream label: safe as a gh flag value (no leading dash), within GitHub's 50-character label limit.
+ * Hand-copied into actions/release-health/release-health.ts; the tracking-label-regex ssot rule pins the copy. */
 export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 const label = z
   .string()
