@@ -97,8 +97,7 @@ export interface NameCollision {
   name: string;
 }
 
-/** Every pair of one section's entries that are one name to the merge,
- *  in document order; nameless entries pass. */
+/** Every pair merge_settings_layers.ts would fold into one entry. */
 export function duplicateNames(doc: SettingsLayer): NameCollision[] {
   const collisions: NameCollision[] = [];
   for (const [section, fold] of Object.entries(NAME_FOLDS) as [

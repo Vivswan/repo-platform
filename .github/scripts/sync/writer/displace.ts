@@ -15,13 +15,9 @@ export type Displacement =
   | { path: string; outcome: "moved"; to: string }
   | { path: string; outcome: "held"; detail: string };
 
-/** Moves each displacing entry's repository-owned file aside when its new
- *  home is free, records the move, and reports a home already taken as a
- *  hold; `records` is updated in place. A rendered document at the path is
- *  never the repository's own (a lost manifest must not turn it into the
- *  overlay), so it is left to the ordinary write, which shows the diff
- *  when no record vouches for its bytes; a starter record cannot describe
- *  it and is dropped. */
+/** A rendered document at the path is never the repository's own,
+ *  whatever record it carries: a lost manifest must not move the rendered
+ *  settings.yml aside as the overlay. */
 export function displace(target: string, entries: FileEntry[], records: Records): Displacement[] {
   const rows: Displacement[] = [];
   for (const entry of entries) {

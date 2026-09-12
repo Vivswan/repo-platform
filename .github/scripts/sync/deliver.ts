@@ -212,6 +212,8 @@ class Delivery {
     return ["git", "-C", this.targetDir, ...args];
   }
 
+  /** An open report outranks an older closed one: it is the one being
+   *  watched, so a clean run closes it and a failure refreshes it. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
     if (login.exitCode !== 0) return null;
@@ -243,10 +245,14 @@ class Delivery {
       { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
     );
     if (list.exitCode !== 0) return null;
-    const oldest = list.stdout.split("\n").find((line) => line !== "");
-    if (oldest === undefined) return "";
-    const [number, state] = oldest.split(" ");
-    return { number, state };
+    const reports = list.stdout
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => {
+        const [number, state] = line.split(" ");
+        return { number, state };
+      });
+    return reports.find((report) => report.state === "open") ?? reports[0] ?? "";
   }
 
   fileFailure(reason: string): never {

@@ -351,6 +351,22 @@ describe("deliver.ts", () => {
     expect(patch).toContain("state=closed");
   });
 
+  test.each([
+    ["a clean delivery", {}, "opened", "state=closed"],
+    ["a failed delivery", { STUB_PUSH_FAIL: "1" }, "failed", "state=open"],
+  ])(
+    "%s addresses the open failure report, never the older closed one",
+    (_, stub, verdict, state) => {
+      const result = run({ stub: { STUB_DIRTY: "1", ...stub, STUB_ISSUE: "8 closed\n12 open\n" } });
+      silent(result);
+      expect(result.verdict).toBe(verdict);
+      const patches = result.gh
+        .filter((argv) => argv[1] === "api" && argv[4] === "PATCH")
+        .map((argv) => [argv[2], argv.find((word) => word.startsWith("state="))]);
+      expect(patches).toEqual([[`repos/${TARGET}/issues/12`, state]]);
+    },
+  );
+
   test("a failure the target cannot take (the issue write refused) leaves no verdict and exits red", () => {
     const result = run({ writer: "failure", stub: { STUB_ISSUE_FAIL: "1" } });
     silent(result);
