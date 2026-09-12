@@ -163,7 +163,7 @@ A module change is two PRs in the managed repository: the registration edit, the
 
 ```text
 PR edits modules: in .repo-platform.yml
-  -> plan reads the registration and checks it against the build's module data (an unknown module or a malformed file fails the job)
+  -> plan reads the registration and checks it against the module data at the `stable` commit's root (an unknown module or a malformed file fails the job)
   -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> merge the registration edit (the files cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f manual=true
