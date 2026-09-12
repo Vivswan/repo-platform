@@ -197,9 +197,7 @@ describe("single source: the hook and the CI validator judge identically", () =>
     }
   });
 
-  // The words are the shared module's too: a refused row expects, from BOTH consumers, exactly the reason
-  // refusal() returns for it (tests/actions/validate-commit-names pins what those words are). The row's
-  // verdict, never refusal(), decides the expected exit, so a grammar that wrongly accepts a refused row reds here.
+  // tests/actions/validate-commit-names pins what the shared reasons say; this file pins that both consumers print them.
   for (const { subject, verdict } of TABLE) {
     test(`${verdict.toUpperCase()}: ${subject}`, () => {
       const hook = runHook(`${subject}\n`);
