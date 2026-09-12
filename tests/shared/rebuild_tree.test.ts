@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import { rebuildBranchTree } from "../../.github/scripts/shared/rebuild_tree.ts";
+import { harnessBound } from "./harness_bound";
 import { tempDirs } from "./temp_dir";
 
 const temp = tempDirs();
@@ -92,12 +93,9 @@ afterAll(() => {
   }
 });
 
-/** Load headroom only, for the tests that run full rebuilds: under parallel
- * machine load their sequential subprocesses exceed bun's 5s default. Hang
- * detection lives in the child-side deadlines (capture's bound, the drivers'
- * 10s, REBUILD_STEP_TIMEOUT_MS), which a sync spawn keeps out of bun's timer's
- * reach anyway. */
-const REBUILD_TEST_TIMEOUT_MS = 30_000;
+/** Headroom for the full rebuilds, not hang detection: that lives in the child-side deadlines (capture's
+ * bound, REBUILD_STEP_TIMEOUT_MS), which a sync spawn keeps out of bun's timer's reach anyway. */
+const REBUILD_TEST_TIMEOUT_MS = harnessBound(30_000);
 
 describe("rebuildBranchTree", () => {
   test(
@@ -213,6 +211,7 @@ describe("rebuildBranchTree", () => {
       expect(worktrees()).toEqual(mainOnly);
       const savedPath = process.env.PATH;
       process.env.PATH = `${bin}:${savedPath}`;
+      // absolute-bound: the step deadline under test; the regex below quotes it
       process.env.REBUILD_STEP_TIMEOUT_MS = "2000";
       try {
         expect(() =>

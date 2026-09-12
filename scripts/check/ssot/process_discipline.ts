@@ -261,7 +261,9 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
   "scripts/run_tests.ts":
     "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child, fails a run that left entries in the per-run TMPDIR, and removes that TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
   "tests/actions/pages-site/mermaid_labels.test.ts":
-    "headless Chrome for the file's one test: stderr is drained for the DevTools line and on; every wait on it sits under the test's timeout, and afterAll sends Browser.close and SIGKILLs a Chrome still alive 5 s later",
+    "headless Chrome for the file's one test: stderr is drained for the DevTools line and on; every wait on " +
+    "it sits under the test's timeout, and afterAll sends Browser.close and SIGKILLs a Chrome still alive " +
+    "after a harness bound (5 s as written, stretched with load)",
 };
 
 export function asyncSpawnMismatches(rel: string, source: string, enumerated: boolean): Mismatch[] {

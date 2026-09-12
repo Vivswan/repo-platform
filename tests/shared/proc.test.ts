@@ -144,6 +144,7 @@ describe("capture timeoutMs", () => {
     const result = capture(["sleep", "5"], { timeoutMs: 200 });
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
+    // absolute-bound: the 200ms deadline under test must fire promptly; scaled, a stuck one would pass
     expect(Date.now() - start).toBeLessThan(3000);
   });
 
@@ -156,6 +157,7 @@ describe("capture timeoutMs", () => {
     const result = capture(["sh", "-c", "sleep 5 & sleep 5"], { timeoutMs: 200 });
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
+    // absolute-bound: the 200ms deadline under test must fire promptly; scaled, a stuck one would pass
     expect(Date.now() - start).toBeLessThan(3000);
   });
 
@@ -280,6 +282,7 @@ describe("mustCapture timeoutMs", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).not.toContain("unreachable");
     expect(result.stderr).toContain("timed out after 200ms: sleep 5");
+    // absolute-bound: mustCapture's 200ms deadline under test must fire promptly
     expect(Date.now() - start).toBeLessThan(4000);
   });
 
@@ -302,6 +305,7 @@ describe("mustCapture timeoutMs", () => {
     expect(result.stderr).not.toContain("ghp_SUPERSECRET");
     expect(result.stderr).toContain("timed out after 200ms:");
     expect(result.stderr).toContain("https://***@github.com/octo/repo.git");
+    // absolute-bound: mustCapture's 200ms deadline under test must fire promptly
     expect(Date.now() - start).toBeLessThan(4000);
   });
 });

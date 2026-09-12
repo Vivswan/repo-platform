@@ -11,11 +11,16 @@ import { join } from "node:path";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
 import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
 const script = join(import.meta.dir, "../../.github/scripts/build-branches/publish.ts");
+
+// The stub's poll loop and the harness's SIGKILL timer are one bound, so they stretch together under load
+// and the tests' 2x timeout stays above both.
+const HOLD_BOUND_MS = harnessBound(SPAWN_TIMEOUT_MS);
 
 const SERVER = "https://x.test";
 const REPO = "o/r";
@@ -67,7 +72,7 @@ interface Hold {
 function heldRsyncStub(hold: Hold): string {
   const real = Bun.which("rsync");
   if (real === null) throw new Error("rsync is not on PATH; publish.ts needs it");
-  const polls = Math.ceil(SPAWN_TIMEOUT_MS / 50);
+  const polls = Math.ceil(HOLD_BOUND_MS / 50);
   return [
     "#!/usr/bin/env bash",
     `echo $$ > "${hold.ready}.tmp" && mv "${hold.ready}.tmp" "${hold.ready}"`,
@@ -268,7 +273,7 @@ async function runPublishHeldAcross<T>(
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
-  const deadline = setTimeout(killAll, SPAWN_TIMEOUT_MS);
+  const deadline = setTimeout(killAll, HOLD_BOUND_MS);
   const output = Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -467,7 +472,7 @@ describe("publish.ts behavior (real git)", () => {
       expectContentChangePublished(held);
       expectContentChangePublished(meanwhile);
     },
-    2 * SPAWN_TIMEOUT_MS,
+    2 * HOLD_BOUND_MS,
   );
 
   test(
@@ -491,6 +496,6 @@ describe("publish.ts behavior (real git)", () => {
       expect(existsSync(f.hold.expired)).toBe(false);
       expect(fixtureGit(f.origin, ["rev-parse", "refs/heads/build"])).toBe(f.tip);
     },
-    2 * SPAWN_TIMEOUT_MS,
+    2 * HOLD_BOUND_MS,
   );
 });

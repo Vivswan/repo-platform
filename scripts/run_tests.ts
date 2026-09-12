@@ -7,12 +7,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Subprocess } from "bun";
 import { exitCodeOf } from "../.github/scripts/shared/proc.ts";
+import { harnessBound } from "../tests/shared/harness_bound.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 // tests/ is the one root: check_ssot.ts's no-tests-under-actions rule keeps
 // actions/ free of test files.
 const DEFAULT_TARGETS = ["./tests"];
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+// bun's per-test default is the one harness bound no test file can route through harnessBound itself, so the
+// launcher passes it scaled; bun keeps the LAST --timeout, so a caller's own flag in argv still wins.
+const BUN_DEFAULT_TEST_TIMEOUT_MS = 5_000;
 const LISTED_LEFTOVERS = 20;
 
 /** Leftovers are evidence only when every afterAll had its chance.
@@ -57,7 +61,8 @@ async function main(argv: string[]): Promise<number> {
     // hold the signal until the child exited on its own. Inherited stdio,
     // so there is no pipe to drain and no hang to bound beyond the child's
     // own life.
-    child = Bun.spawn(["bun", "test", ...args], {
+    const timeout = ["--timeout", String(harnessBound(BUN_DEFAULT_TEST_TIMEOUT_MS))];
+    child = Bun.spawn(["bun", "test", ...timeout, ...args], {
       cwd: REPO_ROOT,
       env: { ...process.env, TMPDIR: scratch },
       stdio: ["inherit", "inherit", "inherit"],

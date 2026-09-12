@@ -10,6 +10,7 @@ import {
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -165,8 +166,8 @@ describe("select_settings_repos.ts", () => {
   // A cold start pushed the spawning hooks past bun-test's default 5s cap;
   // SPAWN_TIMEOUT_MS turns a wedged child into a diagnostic throw and
   // TEST_TIMEOUT_MS sits above it so that throw beats bun's value-free kill.
-  const SPAWN_TIMEOUT_MS = 15_000;
-  const TEST_TIMEOUT_MS = 20_000;
+  const SPAWN_TIMEOUT_MS = harnessBound(15_000);
+  const TEST_TIMEOUT_MS = harnessBound(20_000);
 
   function run(name: string, env: Record<string, string> = {}): Run {
     const work = join(root, `work-${name}`);

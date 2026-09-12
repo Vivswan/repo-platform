@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { leftoversJudgeable } from "../../scripts/run_tests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const root = join(import.meta.dir, "../..");
@@ -30,10 +31,14 @@ function probeSource(ending: string): string {
 const LEFTOVER_NOTICE = /^run_tests: 1 entry left in the per-run TMPDIR/m;
 const LEAKING_PASS = "expect(true).toBe(true);";
 
-function runLauncher(ending: string, flags: string[] = []) {
+function runLauncher(ending: string, flags: string[] = [], env?: Record<string, string>) {
   const probe = join(temp.dir("run-tests-probe-"), "probe.test.ts");
   writeFileSync(probe, probeSource(ending));
-  const r = boundedSpawnSync(["bun", launcher, ...flags, probe], { cwd: root, timeoutMs: 60_000 });
+  const r = boundedSpawnSync(["bun", launcher, ...flags, probe], {
+    cwd: root,
+    env: env === undefined ? undefined : { ...process.env, ...env },
+    timeoutMs: 60_000,
+  });
   const seen = Object.fromEntries(
     [...r.stderr.matchAll(/^(TMPDIR|FIXTURE)=(.+)$/gm)].map((m) => [m[1], m[2]]),
   );
@@ -89,6 +94,22 @@ describe("run_tests launcher", () => {
     ({ ending, flags, exitCode, leaked }) => {
       expect(runLauncher(ending, flags)).toEqual({ exitCode, noticed: leaked, named: leaked });
     },
+  );
+
+  test(
+    "bun's 5 s per-test default is passed scaled: a 6 s probe passes under TEST_TIME_SCALE=3, and a caller's own --timeout still wins",
+    () => {
+      const clean = (sleepMs: number) =>
+        `Bun.sleepSync(${sleepMs}); rmSync(fixture, { recursive: true }); ${LEAKING_PASS}`;
+      const scale = { TEST_TIME_SCALE: "3" };
+      const unflagged = { noticed: false, named: false };
+      expect(runLauncher(clean(6_000), [], scale)).toEqual({ exitCode: 0, ...unflagged });
+      expect(runLauncher(clean(300), ["--timeout", "100"], scale)).toEqual({
+        exitCode: 1,
+        ...unflagged,
+      });
+    },
+    harnessBound(30_000),
   );
 
   test("leftoversJudgeable: a signal death or a name filter in any bun spelling stands the verdict down", () => {

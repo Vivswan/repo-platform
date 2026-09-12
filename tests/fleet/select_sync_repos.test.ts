@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
+import { harnessBound } from "../shared/harness_bound";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -100,8 +101,8 @@ describe("select_sync_repos.ts", () => {
   // (the full cold-start/load rationale lives there): unbounded, these
   // spawns died under bun-test's default 5s per-test/hook cap, observed
   // here as a ~5003ms test timeout with exitCode null under host load.
-  const SPAWN_TIMEOUT_MS = 15_000;
-  const TEST_TIMEOUT_MS = 20_000;
+  const SPAWN_TIMEOUT_MS = harnessBound(15_000);
+  const TEST_TIMEOUT_MS = harnessBound(20_000);
 
   function run(
     name: string,

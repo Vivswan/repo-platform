@@ -20,6 +20,7 @@ describe("captureNetwork", () => {
   test("passes the deadline through to the proc layer: a hung command dies at expiry", () => {
     const started = Date.now();
     const result = captureNetwork(["sleep", "31337"], 250);
+    // absolute-bound: the 250ms deadline under test must fire promptly; scaled, a stuck one would pass
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);

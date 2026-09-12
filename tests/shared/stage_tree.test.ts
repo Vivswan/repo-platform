@@ -107,12 +107,7 @@ function stagedBlob(
   run(["git", "-C", dir, "init", "--quiet"], env);
   run(argv(dir), env);
   const tree = run(["git", "-C", dir, "write-tree"], env);
-  return Bun.spawnSync(["git", "-C", dir, "cat-file", "-p", `${tree}:crlf.txt`], {
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: 10_000,
-  }).stdout.toString();
+  return boundedSpawnSync(["git", "-C", dir, "cat-file", "-p", `${tree}:crlf.txt`], { env }).stdout;
 }
 
 beforeAll(() => {
