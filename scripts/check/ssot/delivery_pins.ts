@@ -63,7 +63,7 @@ export function pinShapeMismatches(
   branchPinned: Record<string, string>,
 ): Mismatch[] {
   const mismatches: Mismatch[] = [];
-  const self = `${owner}/repo-platform`.toLowerCase();
+  const self = `${owner}/${PLATFORM_NAME}`.toLowerCase();
   const thirdParty = pins.filter((pin) => pin.action.toLowerCase() !== self);
   const shape = (action: string) =>
     action in branchPinned
