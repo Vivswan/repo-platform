@@ -324,13 +324,25 @@ describe("spawnSyncHazard", () => {
   test("a call, an operator expression, or a string bun-types does not list is refused, not trusted", () => {
     for (const value of ["makeStream()", "a || b", '"socket-fd"', "Bun.file(path)"]) {
       expect(spawnSyncHazard(`{ stdout: ${value}, stderr: "inherit" }`)).toBe(
-        "stdout shaped by a value the scanner cannot audit (a call or expression) with no timeout",
+        "stdout shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
       );
     }
     expect(spawnSyncHazard("{ stdout: makeStream(), stderr: makeStream() }")).toBe(
-      "stdout and stderr shaped by a value the scanner cannot audit (a call or expression) with no timeout",
+      "stdout and stderr shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
     );
     expect(spawnSyncHazard("{ stdout: makeStream(), timeout: 5_000 }")).toBeNull();
+  });
+
+  test("an optional chain is refused, not trusted: `options?.log` with options undefined is the piped default", () => {
+    // A `?.` anywhere in the chain, or an element step (an absent element is undefined too): both refused.
+    for (const value of ["options?.log", "a.b?.c", "a?.b.c", "(a?.b)", "a?.[k]", "a[k]"]) {
+      expect(spawnSyncHazard(`{ stdout: ${value}, stderr: "inherit" }`)).toBe(
+        "stdout shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
+      );
+    }
+    // The recorded trust: a plain member path is judged by its key, and a timeout clears the hazard whatever the value.
+    expect(spawnSyncHazard('{ stdout: options.log, stderr: "inherit" }')).toBeNull();
+    expect(spawnSyncHazard("{ stdout: options?.log, timeout: 5_000 }")).toBeNull();
   });
 
   test("a slot past stderr is judged too: spawnSync never drains it, so a pipe there wedges on a full buffer", () => {
@@ -338,7 +350,7 @@ describe("spawnSyncHazard", () => {
       "explicitly piped stdio with no timeout",
     );
     expect(spawnSyncHazard('{ stdio: ["ignore", "ignore", "ignore", makeFd()] }')).toBe(
-      "stdio[3] shaped by a value the scanner cannot audit (a call or expression) with no timeout",
+      "stdio[3] shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with no timeout",
     );
     // An undefined or null extra slot is a closed fd (measured: a writer to it fails with EBADF at once).
     for (const closed of ["undefined", "null", "3"]) {

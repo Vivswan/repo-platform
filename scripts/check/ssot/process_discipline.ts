@@ -58,7 +58,7 @@ export function topLevelProperties(options: string): Map<string, string> | null 
  *    "pipe", "p\x69pe"                               -> pipe
  *    null, "ignore", "inherit", an fd number         -> shaped
  *  An identifier or member path is trusted by its key (the recorded residual: a variable smuggling "pipe" escapes);
- *  a call, an operator expression, or a string bun-types does not list is refused. */
+ *  a call, an optional chain, an operator expression, or a string bun-types does not list is refused. */
 type StreamState = "default" | "pipe" | "shaped" | "unauditable";
 
 function streamState(text: string | undefined): StreamState {
@@ -76,11 +76,15 @@ function streamState(text: string | undefined): StreamState {
   return isMemberPath(node) ? "shaped" : "unauditable";
 }
 
-/** `a.b.c` and nothing else: a call or computed step anywhere in the chain is an expression, not a name. */
+/** `a.b.c` and nothing else: a call or computed step anywhere in the chain is an expression, not a name.
+ *  A `?.` step is refused with them: `options?.log` with options undefined is undefined, the piped default.
+ *  `a[k]` is a computed step, not a path: an absent element is undefined too. */
 function isMemberPath(node: Node): boolean {
   let current: Node = node;
-  while (Node.isPropertyAccessExpression(current))
+  while (Node.isPropertyAccessExpression(current)) {
+    if (current.hasQuestionDotToken()) return false;
     current = unwrapExpression(current.getExpression());
+  }
   return Node.isIdentifier(current);
 }
 
@@ -282,7 +286,7 @@ export function spawnSyncHazard(options: string | null): string | null {
   if (states.some(({ state }) => state === "pipe")) return `explicitly piped stdio with ${why}`;
   const unauditable = states.filter(({ state }) => state === "unauditable");
   if (unauditable.length > 0) {
-    return `${unauditable.map(({ stream }) => stream).join(" and ")} shaped by a value the scanner cannot audit (a call or expression) with ${why}`;
+    return `${unauditable.map(({ stream }) => stream).join(" and ")} shaped by a value the scanner cannot audit (a call, an optional chain, or an expression) with ${why}`;
   }
   const defaulted = states.filter(({ state }) => state === "default");
   if (defaulted.length > 0) {
