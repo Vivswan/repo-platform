@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
-import { isRecordedClass, RECORDED_CLASSES } from "../../../shared/manifest.ts";
+import {
+  isEntryField,
+  isRecordedClass,
+  RECORDED_CLASSES,
+  strayFields,
+} from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
@@ -17,12 +22,16 @@ export function checkManifestParity(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
-    // Only a symlink mirror carries a kind, so any other kind field is a hand edit.
-    if ("kind" in entry && (entry.class !== "mirror" || entry.kind !== "symlink")) {
+    // A key outside the vocabulary is manifest_shape's report; this names a vocabulary field on the wrong class.
+    const stray = isRecordedClass(entry.class)
+      ? strayFields(entry.class, entry).filter(isEntryField)
+      : [];
+    if (stray.length > 0) {
       findings.push(
         error(
-          `${where} carries kind ${JSON.stringify(entry.kind)} - the sync records a kind only on ` +
-            `a mirror, and only "symlink"; revert the edit (git history has the stamped original) or ${RESYNC}`,
+          `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
+            `sync never records on a ${entry.class} entry; revert the edit (git history has the ` +
+            `stamped original) or ${RESYNC}`,
         ),
       );
       continue;
@@ -57,6 +66,15 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
+    if (entry.class === "mirror" && "kind" in entry && entry.kind !== "symlink") {
+      findings.push(
+        error(
+          `${where} carries kind ${JSON.stringify(entry.kind)} - the sync records only "symlink" ` +
+            `as a mirror's kind; revert the edit (git history has the stamped original) or ${RESYNC}`,
+        ),
+      );
+      continue;
+    }
     // The class decides what parity verifies (a starter: nothing), so it is
     // judged before any dispatch, against the declaration the selection
     // makes live. A path no live declaration writes (a mirror target, a
@@ -78,20 +96,7 @@ export function checkManifestParity(ctx: Context): Finding[] {
       );
       continue;
     }
-    if (entry.class === "starter") {
-      if ("hash" in entry) {
-        findings.push(
-          error(
-            `${where} is a starter carrying a hash - starters are repo-owned ` +
-              "after the first write, so sync makes no byte-parity promise " +
-              "about them; re-run the sync to regenerate the manifest",
-          ),
-        );
-      }
-      continue;
-    }
-    // A mirror copy is verified like a managed file, its hash the whole file's; a link, and a mirror
-    // of kind symlink, is a symlink the sync placed, its hash the target string's.
+    if (entry.class === "starter") continue;
     const hash = "hash" in entry ? entry.hash : undefined;
     if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
       findings.push(

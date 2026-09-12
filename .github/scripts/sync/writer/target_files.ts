@@ -31,17 +31,21 @@ export function insideTarget(target: string, path: string): string {
 
 /** What sits at a path: nothing, a regular file with its bytes, or a
  *  symbolic link with its target. Anything else (a directory, a device) is
- *  refused loudly: the writer has no honest way to replace it. */
+ *  refused loudly: the writer has no honest way to replace it.
+ *  The link target is raw bytes, as the mirror writer and the validator hash it: decoding would fold a malformed target
+ *  onto the replacement character and let it pass as the recorded one. */
 export type Found =
   | { kind: "absent" }
   | { kind: "file"; bytes: Buffer }
-  | { kind: "link"; target: string };
+  | { kind: "link"; target: Buffer };
 
 export function probe(target: string, path: string): Found {
   const abs = insideTarget(target, path);
   const stat = lstatOrNull(abs);
   if (stat === null) return { kind: "absent" };
-  if (stat.isSymbolicLink()) return { kind: "link", target: readlinkSync(abs) };
+  if (stat.isSymbolicLink()) {
+    return { kind: "link", target: readlinkSync(abs, { encoding: "buffer" }) };
+  }
   if (!stat.isFile()) {
     throw new Error(
       `${path}: not a regular file in the target repository; the writer will not replace it`,

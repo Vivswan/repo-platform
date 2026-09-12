@@ -15,7 +15,7 @@ import { dirname } from "node:path";
 import type { RetiredEntry } from "../../../../actions/plan/files_config.ts";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { capture } from "../../shared/proc.ts";
-import { type Records, recordedHash, recordedMirrorKind, sha256 } from "./manifest.ts";
+import { mirrorKind, type Records, readRecord, sha256 } from "./manifest.ts";
 import { insideTarget, probe, removeFile, writeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "region removed" | "moved" | "held" | "kept";
@@ -27,10 +27,12 @@ export interface RetireRow {
 }
 
 /** What sits at a path against the writer's last write.
+ *  `unrecorded`: no record, or one the writer does not read (manifest.ts readRecord), so nothing at the path is its to judge.
  *  `blank`: a split whose region is the last write with only blank lines around it, so nothing is worth handing over.
  *  A symbolic link is judged by its target string, never read through, under a `link` record or a `kind: symlink`
  *  mirror record; under any other record it is foreign, as the mirror writer reads it. */
 export type Judgement =
+  | { verdict: "unrecorded" }
   | { verdict: "own" }
   | { verdict: "blank" }
   | { verdict: "handover"; kept: Buffer }
@@ -58,34 +60,28 @@ export function joinHalves(above: string, below: string): string {
 }
 
 export function judge(target: string, path: string, records: Records): Judgement {
-  const entry = records[path];
-  if (entry === undefined) return foreign("no record of the platform writing it");
-  if (entry.class === "starter") return foreign("a starter is repo-owned");
-  const hash = recordedHash(records, path);
-  if (hash === null) return foreign("the record carries no hash");
-  if (entry.class === "mirror" && recordedMirrorKind(entry) === null) {
-    return foreign("the mirror record names a kind the writer does not write");
-  }
+  const record = readRecord(records[path]);
+  if (record === null) return { verdict: "unrecorded" };
+  if (record.class === "starter") return foreign("a starter is repo-owned");
+  if (record.hash === null) return foreign("the record carries no hash");
+  const linkRecorded =
+    record.class === "link" || (record.class === "mirror" && mirrorKind(record) === "symlink");
   const found = probe(target, path);
   if (found.kind === "absent") return { verdict: "own" };
-  const linkRecorded = entry.class === "link" || recordedMirrorKind(entry) === "symlink";
   if (linkRecorded) {
     if (found.kind !== "link")
       return foreign("a regular file sits where the platform wrote a link");
-    return sha256(found.target) === hash
+    return sha256(found.target) === record.hash
       ? { verdict: "own" }
       : foreign("the path is a symbolic link whose target is not the recorded one");
   }
   if (found.kind === "link") return foreign("a symbolic link sits where the platform wrote a file");
-  if (entry.class === "split") {
-    if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
-      return foreign("the split record names no markers");
-    }
+  if (record.class === "split") {
     // latin1 round-trips every byte, so the kept halves are the file's own.
     const text = found.bytes.toString("latin1");
-    const slice = cleanManagedRegion(text, { begin: entry.begin, end: entry.end });
+    const slice = cleanManagedRegion(text, { begin: record.begin, end: record.end });
     if (slice === null) return foreign("the managed-region markers are missing or malformed");
-    if (sha256(Buffer.from(slice.region, "latin1")) !== hash) {
+    if (sha256(Buffer.from(slice.region, "latin1")) !== record.hash) {
       return foreign("the managed region was edited");
     }
     if (slice.above.trim() === "" && slice.below.trim() === "") {
@@ -96,7 +92,7 @@ export function judge(target: string, path: string, records: Records): Judgement
       kept: Buffer.from(joinHalves(slice.above, slice.below), "latin1"),
     };
   }
-  return sha256(found.bytes) === hash
+  return sha256(found.bytes) === record.hash
     ? { verdict: "own" }
     : foreign("the content differs from the last write");
 }
@@ -108,6 +104,7 @@ export function judge(target: string, path: string, records: Records): Judgement
 export function keepReason(target: string, path: string, records: Records): string | null {
   const judgement = judge(target, path, records);
   if (judgement.verdict === "own" || judgement.verdict === "blank") return null;
+  if (judgement.verdict === "unrecorded") return "no record of the platform writing it";
   if (judgement.verdict === "handover") {
     return "the file carries repository-owned content outside the managed region";
   }
@@ -144,8 +141,8 @@ export function retire(
 ): RetireRow[] {
   const rows: RetireRow[] = [];
   const dispose = (path: string, detail: string) => {
-    if (records[path] === undefined) return;
     const judgement = judge(target, path, records);
+    if (judgement.verdict === "unrecorded") return;
     if (judgement.verdict === "own" || judgement.verdict === "blank") {
       removeFile(target, path);
       delete records[path];

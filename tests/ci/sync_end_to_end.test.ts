@@ -545,7 +545,6 @@ describe("sync.ts end to end", () => {
     for (const skill of ["alpha", "beta", "delta", "gamma", "new"]) {
       expect(read(`skills/${skill}/LICENSE.md`)).toBe(NEW_LICENSE);
     }
-    // The symlink targets are relative links that resolve to the source.
     for (const path of ["template/LICENSE.md", "docs/LICENSE.md"]) {
       expect(readlinkSync(join(target, path))).toBe("../LICENSE.md");
       expect(read(path)).toBe(NEW_LICENSE);
@@ -652,7 +651,6 @@ describe("sync.ts end to end", () => {
     for (const path of ["skills/gamma/LICENSE.md", "skills/beta/LICENSE.md", "plain"]) {
       expect(manifest.files[path]).toEqual({ class: "mirror", hash: sha256(NEW_LICENSE) });
     }
-    // A symlink mirror records its kind and the link target's hash.
     for (const path of ["template/LICENSE.md", "docs/LICENSE.md"]) {
       expect(manifest.files[path]).toEqual({
         class: "mirror",
@@ -1057,7 +1055,7 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     expect(existsSync(join(target, "copies"))).toBe(false);
   });
 
-  test("a symbolic link where a copy would land exits nonzero the same way", () => {
+  test("a symbolic link above a target exits nonzero the same way, and the pass writes over no link it could have replaced", () => {
     const target = seed(
       [
         "modules: [bun]",
@@ -1075,5 +1073,51 @@ describe("sync.ts over a mirror declaration it cannot write", () => {
     );
     expect(existsSync(join(target, MANIFEST))).toBe(false);
     expect(readlinkSync(join(target, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
+  });
+});
+
+describe("sync.ts over retired paths whose records the writer cannot read", () => {
+  // Hand edits: a mirror kind the writer never writes, a split record without its markers. Each file matches its hash.
+  const records: Record<string, string> = {
+    ".github/old-tool.yml": `{"class": "mirror", "kind": "hardlink", "hash": "${sha256(OLD_TOOL)}"}`,
+    "CONTRIBUTING.md": `{"class": "split", "grammar": "managed-region", "hash": "${sha256(OLD_CONTRIBUTING_REGION)}"}`,
+  };
+  const dropped = Object.keys(records).map(
+    (path) =>
+      `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
+  );
+
+  test("the first run drops each record with a note and holds; the second has nothing to say, both files untouched", () => {
+    const target = temp.dir("sync-e2e-unreadable-target-");
+    const files: Record<string, string> = {
+      ".repo-platform.yml":
+        "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+      ".github/old-tool.yml": OLD_TOOL,
+      "CONTRIBUTING.md": OLD_CONTRIBUTING_REGION,
+      [MANIFEST]: `{\n  "files": {\n${Object.entries(records)
+        .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
+        .join(",\n")}\n  }\n}\n`,
+    };
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(target, rel)), { recursive: true });
+      writeFileSync(join(target, rel), content);
+    }
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const recorded = () =>
+      Object.keys(
+        (JSON.parse(readFileSync(join(target, MANIFEST), "utf-8")) as { files: object }).files,
+      );
+    const first = runSync(target, join(temp.dir("sync-e2e-unreadable-summary-"), "summary.json"));
+    expect(first.summary.notes).toEqual(dropped);
+    expect(first.summary.retired).toEqual([]);
+    expect(first.summary.hold).toBe(true);
+    expect(recorded()).not.toContain(".github/old-tool.yml");
+    expect(recorded()).not.toContain("CONTRIBUTING.md");
+    const second = runSync(target, join(temp.dir("sync-e2e-unreadable-summary2-"), "summary.json"));
+    expect(second.summary.notes).toEqual([]);
+    expect(second.summary.retired).toEqual([]);
+    expect(second.summary.hold).toBe(false);
+    expect(readFileSync(join(target, ".github/old-tool.yml"), "utf-8")).toBe(OLD_TOOL);
+    expect(readFileSync(join(target, "CONTRIBUTING.md"), "utf-8")).toBe(OLD_CONTRIBUTING_REGION);
   });
 });

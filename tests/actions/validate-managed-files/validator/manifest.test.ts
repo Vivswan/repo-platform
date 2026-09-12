@@ -100,7 +100,7 @@ describe("the manifest's shape", () => {
     });
     expect(stale.exitCode).toBe(1);
     expect(stale.stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
-      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; the next sync restamps the entry without them, or revert the edit`,
+      `error: ${MANIFEST}: entry '.github/workflows/checks.yml' carries field(s) "withheld" outside the manifest's vocabulary - no sync writes them; revert the edit (git history has the stamped original) or ${RESYNC}`,
     ]);
     const control = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
     expect({ exitCode: control.exitCode, stderr: control.stderr }).toEqual({
@@ -181,7 +181,9 @@ describe("byte parity, entry by entry", () => {
       }),
     });
     expect(hashed.exitCode).toBe(1);
-    expect(hashed.stderr).toContain("a starter carrying a hash");
+    expect(hashed.stderr).toContain(
+      'carries "hash", which the sync never records on a starter entry',
+    );
   });
 
   test("a mirror entry is verified like a managed file: byte parity, presence", () => {
@@ -525,6 +527,8 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/copy-mirror.md": "managed content\n",
       "docs/file-as-mirror-link.md": "../intact.md",
       "docs/kind-on-managed.md": "managed content\n",
+      "docs/grammar-on-managed.md": "managed content\n",
+      "docs/commit-on-mirror.md": "managed content\n",
     };
     for (const [rel, content] of Object.entries(files)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
@@ -573,6 +577,8 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/link-as-copy-mirror.md": `{"class": "mirror", "hash": "${sha("intact.md")}"}`,
       "docs/mirror-odd-kind.md": `{"class": "mirror", "kind": "hardlink", "hash": "${sha("intact.md")}"}`,
       "docs/kind-on-managed.md": `{"class": "managed", "kind": "symlink", "hash": "${sha("managed content\n")}"}`,
+      "docs/grammar-on-managed.md": `{"class": "managed", "grammar": "managed-region", "hash": "${sha("managed content\n")}"}`,
+      "docs/commit-on-mirror.md": `{"class": "mirror", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
     const findings = checkManifestParity(
@@ -588,7 +594,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/unknown-grammar.md' declares split grammar "prefix", which this validator does not read (one grammar exists: managed-region)`,
       `${MANIFEST_NAME}: entry 'docs/no-grammar.md' lacks the split grammar field every sync stamps`,
       `docs/unstamped.md: ${MANIFEST_NAME} records no hash for it (unstamped)`,
-      `${MANIFEST_NAME}: entry 'docs/starter.md' is a starter carrying a hash`,
+      `${MANIFEST_NAME}: entry 'docs/starter.md' carries "hash", which the sync never records on a starter entry`,
       `${MANIFEST_NAME}: entry 'docs/relabeled.md' is recorded as starter but files.yml declares the path managed`,
       `${MANIFEST_NAME}: entry 'docs/odd.md' has unknown class "bespoke" (expected one of managed, split, starter, mirror, link)`,
       `${MANIFEST_NAME}: entry 'docs/short-hash.md': hash must be null or a lowercase sha256 hex digest`,
@@ -602,7 +608,9 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `docs/file-as-mirror-link.md: recorded as a symlink mirror in ${MANIFEST_NAME} but is not a symbolic link`,
       `docs/link-as-copy-mirror.md: recorded as mirror in ${MANIFEST_NAME} but is a symbolic link`,
       `${MANIFEST_NAME}: entry 'docs/mirror-odd-kind.md' carries kind "hardlink"`,
-      `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries kind "symlink"`,
+      `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries "kind", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/grammar-on-managed.md' carries "grammar", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/commit-on-mirror.md' carries "commit", which the sync never records on a mirror entry`,
     ]);
     for (const finding of findings) expect(finding.message).not.toContain("template");
   });

@@ -8,14 +8,17 @@ import {
   type AssertNever,
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
+  knownGrammar,
   type RegionMarkers,
 } from "../../../../actions/shared/grammar.ts";
 import {
   entryBody,
+  isRecordedClass,
   type JsonValue,
   type ManifestEntryShape,
   parseManifestFiles,
   type RecordedClass,
+  strayFields,
 } from "../../../../actions/shared/manifest.ts";
 import {
   GENERATED_NOTICE,
@@ -44,11 +47,41 @@ export function mirrorRecord(kind: MirrorKind, hash: string | null): MirrorRecor
   return kind === "symlink" ? { class: "mirror", kind, hash } : { class: "mirror", hash };
 }
 
-/** The kind a mirror record names, or null when the record is not a mirror the writer would write. */
-export function recordedMirrorKind(entry: ManifestEntryShape): MirrorKind | null {
-  if (entry.class !== "mirror") return null;
-  if (!("kind" in entry)) return "copy";
-  return entry.kind === "symlink" ? "symlink" : null;
+export function mirrorKind(record: MirrorRecord): MirrorKind {
+  return "kind" in record ? "symlink" : "copy";
+}
+
+const HASH_RE = /^[0-9a-f]{64}$/;
+
+/** A previous record as this writer would have written it, or null. retire.ts and mirrors.ts judge through this too, so no
+ *  path is held or vouched for on a record the writer could not carry; the validator's parity check reads the same field table,
+ *  so a shape refused here is a finding on the target side. */
+export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecord | null {
+  if (entry === undefined || !isRecordedClass(entry.class)) return null;
+  if (strayFields(entry.class, entry).length > 0) return null;
+  if (entry.class === "starter") return { class: "starter" };
+  const hash =
+    entry.hash === null
+      ? null
+      : typeof entry.hash === "string" && HASH_RE.test(entry.hash)
+        ? entry.hash
+        : undefined;
+  if (hash === undefined) return null;
+  switch (entry.class) {
+    case "managed":
+      return { class: "managed", hash };
+    case "link":
+      return { class: "link", hash };
+    case "mirror":
+      if (!("kind" in entry)) return { class: "mirror", hash };
+      return entry.kind === "symlink" ? { class: "mirror", kind: "symlink", hash } : null;
+    case "split": {
+      const grammar = knownGrammar(entry.grammar);
+      return grammar !== null && typeof entry.begin === "string" && typeof entry.end === "string"
+        ? { class: "split", grammar, begin: entry.begin, end: entry.end, hash }
+        : null;
+    }
+  }
 }
 /** The union and the shared RECORDED_CLASSES table name the same classes, both ways. Compile-time only. @public */
 export type RecordedClassesWritten = AssertNever<Exclude<RecordedClass, ManifestRecord["class"]>>;
@@ -79,13 +112,6 @@ export function readRecords(target: string): { records: Records; problem: string
   if (parsed.problem !== null)
     return { records: recordsOf(), problem: `${MANIFEST_NAME} ${parsed.problem}` };
   return { records: recordsOf(parsed.files), problem: null };
-}
-
-const HASH_RE = /^[0-9a-f]{64}$/;
-
-export function recordedHash(records: Records, path: string): string | null {
-  const hash = records[path]?.hash;
-  return typeof hash === "string" && HASH_RE.test(hash) ? hash : null;
 }
 
 const COMMENT =

@@ -207,7 +207,7 @@ A path recorded under one writer class (`managed`, `split`, `starter`, `mirror`,
 | --- | --- |
 | the path already holds exactly what the entry writes | `unchanged`; the record takes the new class |
 | what sits there is the recorded write (same rule as retirement: whole-file hash, clean region with nothing outside it, or link target) | removed and written whole under the new class: `updated` |
-| anything else, a `starter` record or a record without a hash included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
+| anything else, a `starter` record or a record with `hash: null` included | `held` with `class changed from <old> to <new>, and <reason>`; the file and its previous record stay, and no mirror copies the file |
 | the new class is `starter` | a handover: the file is the repository's own, nothing is held |
 
 Without the rule, a managed file that becomes split would have the region prepended above its old content and report `updated`.
@@ -218,20 +218,26 @@ Retirement runs before writing. Rows appear only for files present. A `moved_to`
 
 | State of the retired file | Outcome |
 | --- | --- |
-| `managed` or `mirror`, content equals the recorded hash | `deleted` |
+| `managed` or a `mirror` copy, content equals the recorded hash | `deleted` |
 | `split`, region equals the recorded hash, nothing outside the region | `deleted` |
 | `split`, region equals the recorded hash, repository-owned content outside it | `region removed`: the marker lines and the region go, the content above and below stays byte for byte as a plain file, and the record leaves; the blank lines that framed the region become one when content stands on both sides and none when it stands on one side only, so a tail under a top region starts at its first content line, and blank lines away from the seam stay. The PR holds this once, with a detail asking the reader to complete the file (a heading and intro if it lost them) or delete it. Next run the path is unrecorded and produces no row. |
 | `split`, region equals the recorded hash, only blank lines outside it | `deleted`, with the detail saying so |
 | `split`, region differs from the recorded hash, or markers missing or malformed | `held` |
 | `link` or a `kind: symlink` mirror, a symlink whose target hashes to the recorded hash | `deleted` (the link goes; what it points at is never touched) |
-| a symlink with another target; a regular file where a `link` or a `kind: symlink` mirror was recorded; a symlink where a `managed`, `split`, or `mirror` copy was recorded; a `mirror` record naming a kind the writer does not write | `held` |
-| content differs, or a record without a hash | `held` |
+| a symlink with another target; a regular file where a `link` or a `kind: symlink` mirror was recorded; a symlink where a `managed`, `split`, or `mirror` copy was recorded | `held` |
+| content differs, or a record with `hash: null` | `held` |
 | recorded as `starter` | `kept` (repo-owned) |
 | `moved_to` given, new path absent | `moved` (`git mv`; the record travels, so the following write of the new path judges it as the platform's own) |
 | `moved_to` given, new path present | `held` |
 | `moved_to` given, new path not written for this repository (its entry is unselected) | treated as a plain retirement: the outcomes above apply |
 
-A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted. A held or kept file and a held entry keep their records in the new manifest every run (a record without a hash is carried as such), so the file is held again next time and never becomes an unrecorded orphan; a record whose class the writer does not know is dropped with a note, and so is a `mirror` record no declaration reaches any more (the copy stays as the repository's own; a mirror declared again adopts it while it still holds the source's content). A repository-owned tail left in a retired `CONTRIBUTING.md` or `.github/SECURITY.md` hides the account default, so the PR's reviewer deletes or completes it before merging, in one commit on the sync branch ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-retirement)).
+Beyond the `retired` list:
+
+- A recorded `managed`, `split`, or `link` path that no selected entry writes and no `retired` entry names (a module was deselected) is retired the same way, with the detail `no longer selected`; a recorded path that is not a clean repository path is ignored and noted.
+- A held or kept file and a held entry keep their records in the new manifest every run (a record with `hash: null` is carried as such), so the file is held again next time and never becomes an unrecorded orphan.
+- A record that is not exactly a shape the writer writes (an unknown class, a field the class does not carry, a missing hash or one that is neither null nor a sha256 digest, a `mirror` kind other than `symlink`, a `split` without a known grammar or its markers) is never held: it is dropped with a note whichever list names its path, and the path is unrecorded from then on (a selected entry writes it as it writes any unrecorded file; anywhere else the file is the repository's own).
+- A `mirror` record no declaration reaches any more is dropped with a note too; the copy stays as the repository's own, and a mirror declared again adopts it while it still holds the source's content.
+- A repository-owned tail left in a retired `CONTRIBUTING.md` or `.github/SECURITY.md` hides the account default, so the PR's reviewer deletes or completes it before merging, in one commit on the sync branch ([the sync-pr skill](../skills/repo-platform-sync-pr/SKILL.md#repository-owned-markdown-after-a-retirement)).
 
 ## Mirrors
 
@@ -249,9 +255,9 @@ A copy the writer cannot make would leave the repository out of sync with only a
 | --- | --- |
 | `written` | the target was absent, or held exactly the previous mirror (the hash of its `mirror` record, of either kind: a copy where a link is declared now, or the reverse, is replaced without a diff; a record of another class does not vouch for the bytes) |
 | `current` | the target already holds the new content: the bytes for a `copy`, a link to the source for a `symlink` |
-| `replaced local edits` | the target held other content: a file with other bytes, a file where a link is declared, or a link elsewhere where a link is declared; the diff (of link targets, for a link) is in the Replaced local edits section and holds the PR |
+| `replaced local edits` | the target held other content: a file with other bytes, a file where a link is declared, a link where a copy is declared, or a link elsewhere where a link is declared; the diff (of link targets where a link is declared; of the old link target against the new bytes where a copy is) is in the Replaced local edits section and holds the PR |
 | `replaced` | a directory stood at the target (removed whole, the links inside unlinked and never followed) or a file stood where an ancestor directory must be (removed); the detail names which, and holds the PR |
-| the run fails | the source was held this run; the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix; a matched path is unsafe, nests with a path `files.yml` writes or retires or a stale record retires, sits under a symbolic link, is a symbolic link the record does not vouch for where a copy is declared, or (a glob's) sits under a file or has no existing directory; a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included); a path is claimed by more than one source, or as a copy and as a link. Every path of a pass is judged before the pass writes |
+| the run fails | the source was held this run; the pattern matches nothing, or reads through a symbolic link or a file in its literal prefix; a matched path is unsafe, nests with a path `files.yml` writes or retires or a stale record retires, sits under a symbolic link, or (a glob's) sits under a file or has no existing directory; a path is a prefix of or sits under another target (both sides; a target an earlier pass settled included); a path is claimed by more than one source, or as a copy and as a link. Every path of a pass is judged before the pass writes |
 
 Every row's target is recorded as class `mirror` with the copy's hash, or with `kind: symlink` and the hash of the link target string, so the next sync can tell its own previous write from a local edit ([docs/new-repo.md](new-repo.md#mirror-copies-of-platform-files)).
 

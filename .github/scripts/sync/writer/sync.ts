@@ -31,11 +31,9 @@ import {
   MANIFEST_NAME,
   type ManifestRecord,
   type MirrorRecord,
-  mirrorRecord,
   type Records,
+  readRecord,
   readRecords,
-  recordedHash,
-  recordedMirrorKind,
   regionMarkers,
   sha256,
   writeManifest,
@@ -79,26 +77,6 @@ export interface SyncOptions {
   repository: string;
   private: boolean;
   previousFiles?: string;
-}
-
-/** A previous record carried into the new manifest when its file stays (a
- *  held or kept retirement, a held entry), so the next
- *  run still holds the file instead of judging it unrecorded; a missing
- *  hash rides along as null. Null when the class is not one the writer
- *  records or a split names no markers. */
-function carriedRecord(entry: Records[string]): ManifestRecord | null {
-  const hash = typeof entry.hash === "string" ? entry.hash : null;
-  if (entry.class === "starter") return { class: "starter" };
-  if (entry.class === "managed") return { class: "managed", hash };
-  if (entry.class === "mirror") {
-    const kind = recordedMirrorKind(entry);
-    return kind === null ? null : mirrorRecord(kind, hash);
-  }
-  if (entry.class === "link") return { class: "link", hash };
-  if (entry.class === "split" && typeof entry.begin === "string" && typeof entry.end === "string") {
-    return { class: "split", grammar: "managed-region", begin: entry.begin, end: entry.end, hash };
-  }
-  return null;
 }
 
 interface Rendered {
@@ -199,7 +177,9 @@ function render(
 
 /** Whether what sits at the path is already exactly what the entry writes. */
 function alreadyWritten(found: Found, entry: FileEntry, content: string): boolean {
-  if (entry.class === "link") return found.kind === "link" && found.target === content;
+  if (entry.class === "link") {
+    return found.kind === "link" && found.target.equals(Buffer.from(content, "utf-8"));
+  }
   return found.kind === "file" && found.bytes.equals(Buffer.from(content, "utf-8"));
 }
 
@@ -211,12 +191,12 @@ interface Written {
 }
 
 /** One entry written by its class, or the placeholders it lacks a value
- *  for (nothing is written then). A path
- *  whose record the writer can carry names another class than the entry
- *  declares is a class flip: the recorded content is the platform's own
- *  previous write, so it is replaced whole when it still matches its record
- *  and held otherwise, its record carried (a flip to starter hands the file
- *  over and is never held). */
+ *  for (nothing is written then). A path whose record the writer reads
+ *  under another class than the entry declares is a class flip: the
+ *  recorded content is the platform's own previous write, so it is
+ *  replaced whole when it still matches its record and held otherwise, its
+ *  record carried (a flip to starter hands the file over and is never
+ *  held). */
 function writeEntry(
   options: SyncOptions,
   config: WriterFilesConfig,
@@ -227,10 +207,13 @@ function writeEntry(
 ): Written | { missing: string[] } | { held: string } {
   const rendered = render(options, config, entry, modules, facts);
   if ("missing" in rendered || "held" in rendered) return rendered;
-  const record = records[entry.path];
-  const previous = record === undefined ? null : carriedRecord(record)?.class;
-  const flipped = previous != null && previous !== entry.class && entry.class !== "starter";
-  const found = flipped ? probe(options.target, entry.path) : null;
+  const previous = readRecord(records[entry.path]);
+  const recorded = previous === null || previous.class === "starter" ? null : previous.hash;
+  const flipped =
+    previous !== null && previous.class !== entry.class && entry.class !== "starter"
+      ? previous.class
+      : null;
+  const found = flipped === null ? null : probe(options.target, entry.path);
   if (
     found !== null &&
     found.kind !== "absent" &&
@@ -238,7 +221,7 @@ function writeEntry(
   ) {
     const reason = keepReason(options.target, entry.path, records);
     if (reason !== null) {
-      const detail = `class changed from ${previous} to ${entry.class}, and ${reason}`;
+      const detail = `class changed from ${flipped} to ${entry.class}, and ${reason}`;
       return {
         outcome: { change: "held", reason: detail },
         record: rendered.record,
@@ -260,7 +243,7 @@ function writeEntry(
       content: rendered.content,
     };
   }
-  const outcome = rendered.write(recordedHash(records, entry.path));
+  const outcome = rendered.write(recorded);
   if ("missing" in outcome) return outcome;
   return { outcome, record: rendered.record, content: rendered.content };
 }
@@ -289,14 +272,16 @@ export function runSync(options: SyncOptions): SyncReport {
   // when its path is one the writer could have written.
   const stale: string[] = [];
   for (const [path, entry] of Object.entries(records)) {
-    if (path === MANIFEST_NAME || entryPaths.has(path) || owned.retires.has(path)) continue;
-    if (carriedRecord(entry) === null) {
+    if (path === MANIFEST_NAME) continue;
+    const record = readRecord(entry);
+    if (record === null) {
       notes.push(
         `manifest record for \`${path}\` dropped: its class or shape is not one the writer records`,
       );
       continue;
     }
-    if (entry.class !== "managed" && entry.class !== "split" && entry.class !== "link") continue;
+    if (entryPaths.has(path) || owned.retires.has(path)) continue;
+    if (record.class !== "managed" && record.class !== "split" && record.class !== "link") continue;
     const problem = pathProblem(path);
     if (problem === null) stale.push(path);
     else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
@@ -308,8 +293,7 @@ export function runSync(options: SyncOptions): SyncReport {
   const next = new Map<string, ManifestRecord>();
   // A carried record never overwrites one this run wrote.
   const carry = (path: string) => {
-    const previous = records[path];
-    const record = previous === undefined ? null : carriedRecord(previous);
+    const record = readRecord(records[path]);
     if (record !== null && !next.has(path)) next.set(path, record);
   };
   for (const row of retired) {
@@ -398,7 +382,9 @@ export function runSync(options: SyncOptions): SyncReport {
   // note; the copy stays as the repository's own. A path under a linked
   // directory is never looked up (the link may loop); its record is noted too.
   for (const [path, entry] of Object.entries(records)) {
-    if (entry.class !== "mirror" || next.has(path) || pathProblem(path) !== null) continue;
+    if (readRecord(entry)?.class !== "mirror" || next.has(path) || pathProblem(path) !== null) {
+      continue;
+    }
     if (
       blockedAncestor(options.target, path)?.is !== "a symbolic link" &&
       lstatOrNull(join(options.target, path)) === null

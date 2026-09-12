@@ -19,10 +19,10 @@ import {
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import {
   type MirrorRecord,
+  mirrorKind,
   mirrorRecord,
   type Records,
-  recordedHash,
-  recordedMirrorKind,
+  readRecord,
   sha256,
 } from "./manifest.ts";
 import { removeFile, removeTree, writeFile, writeLink } from "./target_files.ts";
@@ -133,7 +133,6 @@ function linksToFile(path: string): boolean {
   }
 }
 
-/** The link a symlink target carries: the source, relative to the target's directory. */
 export function linkTarget(path: string, source: string): string {
   return posix.relative(posix.dirname(path), source);
 }
@@ -146,7 +145,6 @@ interface Claim {
   placed: Buffer;
 }
 
-/** A file or a link at a path with what it carries, in the kind's own terms; null for nothing or a directory. */
 type Standing = { kind: MirrorKind; carries: Buffer } | null;
 
 type Pass = "literal" | "glob";
@@ -179,12 +177,12 @@ export function applyMirrors(
   /** Only a mirror record of the kind that stands there vouches for it: a split or link record's hash covers a region or
    *  a link target, not the file. A record of either kind vouches for its own write, so a declaration's kind can change over it. */
   const own = (path: string, found: Standing): boolean => {
-    const record = records[path];
+    const record = readRecord(records[path]);
     return (
       found !== null &&
-      record !== undefined &&
-      recordedMirrorKind(record) === found.kind &&
-      sha256(found.carries) === recordedHash(records, path)
+      record?.class === "mirror" &&
+      mirrorKind(record) === found.kind &&
+      record.hash === sha256(found.carries)
     );
   };
 
@@ -233,9 +231,7 @@ export function applyMirrors(
     return claims;
   };
 
-  /** A link the writer did not place is refused where a copy is declared (the writer never writes over a link it cannot vouch
-   *  for); a file where a link is declared is replaced like any other content, its edits reported. */
-  const pathFailure = (path: string, kind: MirrorKind, pass: Pass): string | null => {
+  const pathFailure = (path: string, pass: Pass): string | null => {
     const problem = mirrorPathProblem(path, owned);
     if (problem !== null) return `the target ${problem}`;
     const blocked = blockedAncestor(target, path);
@@ -249,9 +245,6 @@ export function applyMirrors(
       }
     }
     const stat = blocked === null ? lstatOrNull(join(target, path)) : null;
-    if (stat?.isSymbolicLink() && kind === "copy" && !own(path, standing(path))) {
-      return "the target is a symbolic link";
-    }
     if (stat !== null && !stat.isFile() && !stat.isDirectory() && !stat.isSymbolicLink()) {
       return "the target is neither a file nor a directory";
     }
@@ -277,7 +270,7 @@ export function applyMirrors(
     for (const [path, { sources, kinds }] of claimants) {
       const problems: string[] = [];
       const [kind] = kinds;
-      const failure = pathFailure(path, kind, pass);
+      const failure = pathFailure(path, pass);
       if (failure !== null) problems.push(failure);
       const nested = nestedWith(path, every);
       if (nested !== null) {
@@ -317,7 +310,6 @@ export function applyMirrors(
         continue;
       }
       const previous = own(path, found);
-      // A file staying a file is overwritten in place; a file becoming a link, or the reverse, is removed first.
       if (found !== null && found.kind !== kind) removeFile(target, path);
       if (kind === "symlink") writeLink(target, path, placed.toString("utf-8"));
       else writeFile(target, path, placed);

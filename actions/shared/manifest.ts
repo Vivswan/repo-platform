@@ -70,6 +70,22 @@ export type EntryFieldsExhaustive = AssertNever<
 >;
 const ENTRY_FIELD_SET: ReadonlySet<string> = new Set(ENTRY_FIELDS);
 
+/** The fields a record of each class carries; `commit` rides on the manifest's own managed entry. The sync writer reads a
+ *  previous record and the validator's parity check judges a target's manifest through this one table, so a field on the wrong
+ *  class is a hand edit to both. */
+export const RECORD_FIELDS = {
+  managed: ["class", "hash", "commit"],
+  split: ["class", "hash", "grammar", ...MANAGED_REGION_WIRE_FIELDS],
+  starter: ["class"],
+  mirror: ["class", "hash", "kind"],
+  link: ["class", "hash"],
+} as const satisfies Record<RecordedClass, readonly (typeof ENTRY_FIELDS)[number][]>;
+
+export function strayFields(recorded: RecordedClass, entry: ManifestEntryShape): string[] {
+  const fields: readonly string[] = RECORD_FIELDS[recorded];
+  return Object.keys(entry).filter((key) => !fields.includes(key));
+}
+
 export function isEntryField(key: string): boolean {
   return ENTRY_FIELD_SET.has(key);
 }

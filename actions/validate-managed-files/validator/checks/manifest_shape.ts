@@ -7,10 +7,10 @@ export const RESYNC = `re-run the sync (dispatch sync-repos.yml in ${PLATFORM_NA
 
 /** The manifest is itself a managed file, so managed repositories carry it and the platform itself must NOT (self mode
  *  inverts). The guarantee is VISIBILITY, not tamper-proofing, and nothing lists the selection's paths against the keys.
- *    caught here or at parity  -> a field outside the vocabulary, a damaged self entry, a class other than the one
- *                                 files.yml writes the path under for this repository, a hash or marker pair the file
- *                                 does not verify
- *    not caught                -> an entry removed whole, a vocabulary field on a class that never reads it */
+ *    caught here or at parity  -> a field outside the vocabulary or on a class that does not carry it, a damaged self
+ *                                 entry, a class other than the one files.yml writes the path under for this
+ *                                 repository, a hash or marker pair the file does not verify
+ *    not caught                -> an entry removed whole */
 export function checkManifestShape(ctx: Context): Finding[] {
   if (ctx.mode === "self") {
     if (ctx.manifest.state === "absent") return [];
@@ -50,8 +50,8 @@ export function checkManifestShape(ctx: Context): Finding[] {
       error(
         `${MANIFEST_NAME}: entry '${path}' carries field(s) ${fields
           .map((field) => JSON.stringify(field))
-          .join(", ")} outside the manifest's vocabulary - no sync writes them; the next ` +
-          "sync restamps the entry without them, or revert the edit",
+          .join(", ")} outside the manifest's vocabulary - no sync writes them; revert the ` +
+          `edit (git history has the stamped original) or ${RESYNC}`,
       ),
     );
   }

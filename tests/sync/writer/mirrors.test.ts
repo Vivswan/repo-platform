@@ -261,7 +261,7 @@ describe("applyMirrors", () => {
     expect(existsSync(join(root, "copies"))).toBe(false);
   });
 
-  test("a literal pass fails whole on a link at or above a target, a held source, or a directory the glob pass would need", () => {
+  test("a literal pass fails whole on a link above a target, a held source, or a directory the glob pass would need, and writes over no link it could have replaced", () => {
     const root = tree({
       "LICENSE.md": "v2\n",
       "skills/a/README.md": "",
@@ -294,7 +294,6 @@ describe("applyMirrors", () => {
         "copies/HELD.md",
         "the source was held this run, so there is nothing to copy",
       ),
-      failure("LICENSE.md", "skills/a/LICENSE.md", "the target is a symbolic link"),
       failure(
         "LICENSE.md",
         "linked/LICENSE.md",
@@ -387,11 +386,11 @@ describe("applyMirrors", () => {
         "the target's directory 'skills/b/nope' does not exist",
       ),
       ...links.map((link) => linkAbove(`${link}/nope/LICENSE.md`, link)),
-      failure("B.md", "docs/b.md", "the target is a symbolic link"),
     ]);
     expect(existsSync(join(root, "skills/a/LICENSE.md"))).toBe(false);
     expect(existsSync(join(root, "outside/LICENSE.md"))).toBe(false);
     expect(readFileSync(join(root, "docs/a.md"), "utf-8")).toBe("L\n");
+    expect(readlinkSync(join(root, "docs/b.md"))).toBe("a.md");
   });
 
   test("a glob landing on a path nested with a target fails after the literals are written", () => {
@@ -695,7 +694,6 @@ describe("applyMirrors with kind symlink", () => {
       "skills/d/LICENSE.md": record,
       "skills/e/LICENSE.md": record,
     });
-    // Idempotent: the second run finds every link current and changes nothing.
     const again = applyMirrors(
       root,
       [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])],
@@ -708,36 +706,40 @@ describe("applyMirrors with kind symlink", () => {
     expect(Object.fromEntries(again.records)).toEqual(Object.fromEntries(records));
   });
 
-  test("a copy declared where the writer's own link stands replaces it; any other link still fails the run", () => {
+  test("a copy declared over a link replaces it: the writer's own link without a diff, any other link with the diff of its target against the bytes", () => {
     const root = tree({ "skills/a/README.md": "", "skills/b/README.md": "" });
     symlinkSync("../../LICENSE.md", join(root, "skills/a/LICENSE.md"));
-    symlinkSync("../../LICENSE.md", join(root, "skills/b/LICENSE.md"));
-    const records = {
-      "skills/a/LICENSE.md": { class: "mirror", kind: "symlink", hash: sha256("../../LICENSE.md") },
-    };
-    expect(
-      failuresOf(() =>
-        applyMirrors(
-          root,
-          [copy("LICENSE.md", ["skills/*/LICENSE.md"])],
-          bytes({ "LICENSE.md": "v2\n" }),
-          owned(["LICENSE.md"]),
-          records,
-        ),
-      ),
-    ).toEqual([failure("LICENSE.md", "skills/b/LICENSE.md", "the target is a symbolic link")]);
-    expect(readlinkSync(join(root, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
-    const { rows, replaced } = applyMirrors(
+    symlinkSync("../../OTHER.md", join(root, "skills/b/LICENSE.md"));
+    const { rows, replaced, records } = applyMirrors(
       root,
-      [copy("LICENSE.md", ["skills/a/LICENSE.md"])],
+      [copy("LICENSE.md", ["skills/*/LICENSE.md"])],
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
-      records,
+      {
+        "skills/a/LICENSE.md": {
+          class: "mirror",
+          kind: "symlink",
+          hash: sha256("../../LICENSE.md"),
+        },
+      },
     );
-    expect(rows).toEqual([row("LICENSE.md", "skills/a/LICENSE.md", "written")]);
-    expect(replaced).toEqual([]);
-    expect(lstatSync(join(root, "skills/a/LICENSE.md")).isSymbolicLink()).toBe(false);
-    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
+    expect(rows).toEqual([
+      row("LICENSE.md", "skills/a/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/b/LICENSE.md", "replaced local edits"),
+    ]);
+    expect(replaced).toEqual([
+      { path: "skills/b/LICENSE.md", before: "../../OTHER.md", after: "v2\n" },
+    ]);
+    const record = { class: "mirror", hash: sha256("v2\n") } as const;
+    expect(Object.fromEntries(records)).toEqual({
+      "skills/a/LICENSE.md": record,
+      "skills/b/LICENSE.md": record,
+    });
+    for (const skill of ["a", "b"]) {
+      expect(lstatSync(join(root, `skills/${skill}/LICENSE.md`)).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(root, `skills/${skill}/LICENSE.md`), "utf-8")).toBe("v2\n");
+    }
+    expect(existsSync(join(root, "OTHER.md"))).toBe(false);
   });
 
   test("a directory at a link target is removed and named, like at a copy", () => {
@@ -773,7 +775,6 @@ describe("applyMirrors with kind symlink", () => {
       failure("LICENSE.md", "skills/a/README.md", both),
       failure("LICENSE.md", "skills/a/LICENSE.md", both),
     ]);
-    // The literal pass wrote its copy; the glob pass wrote nothing.
     expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
     expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
   });
