@@ -5,14 +5,15 @@
 // repository is computed here and handed to the jobs as step outputs.
 //
 // `default` mode resolves what fleet-ci.yml's jobs key on: the selection in
-// canonical order, the visibility, the CodeQL languages, the tracking labels, and whether a scheduled run is the week's
-// CodeQL rescan; it also rejects a mirror declaration files.yml proves
-// unwritable (mirrors.ts). `site` mode resolves the site configuration the
-// pages-site action consumes (one JSON document: the site title, the docs
-// mount path or null for no docs half, the include roots, the link-rot
-// label) from the registration. Fail closed: an
-// unknown module or key, a malformed value, or a missing registration fails
-// the step; nothing here defaults an invalid registration into a green run.
+// canonical order, the visibility, the CodeQL languages, the tracking
+// labels, and whether a scheduled run is the week's CodeQL rescan; it also
+// rejects a mirror declaration files.yml proves unwritable (mirrors.ts).
+// `site` mode resolves the site configuration the pages-site action
+// consumes (one JSON document: the site title, the docs mount path or null
+// for no docs half, the include roots, the link-rot label) from the
+// registration. Fail closed: an unknown module or key, a malformed value,
+// or a missing registration fails the step; nothing here defaults an
+// invalid registration into a green run.
 //
 // Env: MODE (default|site), PRIVATE ("true"/"false"; empty asks the API
 // for GITHUB_REPOSITORY with GH_TOKEN), FILES_CONFIG (the build branch's

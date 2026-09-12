@@ -5,13 +5,13 @@ description: >-
   registration (.repo-platform.yml), checks it against the module data
   shipped beside this action on the build branch (files.yml, whose modules
   block is the vocabulary in canonical order), and publishes the result as
-  step outputs. Mode default resolves
-  what fleet-ci.yml's jobs key on (the module selection in canonical order,
-  the visibility, the CodeQL languages, the tracking labels); mode site resolves the site configuration the pages-site action
-  consumes as one JSON document (the site title, the docs mount path or
-  null for no docs half, the include roots, the link-rot label). Fails
-  closed on any invalid registration. Runs in
-  the caller's checkout; needs GH_TOKEN in the environment only when the
+  step outputs. Mode default resolves what fleet-ci.yml's jobs key on (the
+  module selection in canonical order, the visibility, the CodeQL languages,
+  the tracking labels); mode site resolves the site configuration the
+  pages-site action consumes as one JSON document (the site title, the docs
+  mount path or null for no docs half, the include roots, the link-rot
+  label). Fails closed on any invalid registration. Runs in the caller's
+  checkout; needs GH_TOKEN in the environment only when the
   private input is empty (the visibility is then read from the API).
 
 inputs:

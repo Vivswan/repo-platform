@@ -119,7 +119,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | `nightly` | `labels.nightly` | `nightly-failure` |
 | any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
 
-- A key change alone needs no sync: the site leg reads the registration at run time. `mirrors`, `labels.*`, and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), a `labels.*` value is rendered into `.github/settings.yml`, while an existing starter (`.github/settings.local.yml`, the plugin manifests) keeps its content, so edit it yourself.
+- A key change alone needs no sync: the site leg reads the registration at run time. `mirrors`, `labels.*`, and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), a `labels.*` value is rendered into `.github/settings.yml`, while an existing starter (`.github/settings.local.yml`) keeps its content, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.
 - Renaming a fuzz or nightly label never updates the repo-owned starter: change its two `label:` inputs in the same PR.
 

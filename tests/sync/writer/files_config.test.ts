@@ -110,14 +110,14 @@ describe("blockSources and verifySources", () => {
   const three = parseFilesConfig(
     BASE.replace(
       "  pages:",
-      "  node: { gitignore_sources: [Node] }\n  deno: { gitignore_sources: [Deno, Node] }\n  pages:",
+      "  uv: { gitignore_sources: [Node] }\n  deno: { gitignore_sources: [Deno, Node] }\n  pages:",
     ),
   );
   const tree = temp.dir("writer-files-blocks-tree-");
   writeTree(tree, {
     "bun/.block.Node.gitignore": "## Node\n*.log\n",
     "bun/.block.Bun.gitignore": "## Bun\n",
-    "node/.block.Node.gitignore": "## Node\n*.log\n",
+    "uv/.block.Node.gitignore": "## Node\n*.log\n",
     "deno/.block.Node.gitignore": "## Node\n*.log\n",
     "deno/.block.Deno.gitignore": "## Deno\n",
   });
@@ -131,13 +131,13 @@ describe("blockSources and verifySources", () => {
   });
 
   test("a block three selected modules declare with the same bytes lands once, from the first", () => {
-    expect(blockSources(three, three.files[1], ["bun", "node", "deno"], tree)).toEqual([
+    expect(blockSources(three, three.files[1], ["bun", "uv", "deno"], tree)).toEqual([
       "bun/.block.Node.gitignore",
       "bun/.block.Bun.gitignore",
       "deno/.block.Deno.gitignore",
     ]);
-    expect(blockSources(three, three.files[1], ["deno", "node"], tree)).toEqual([
-      "node/.block.Node.gitignore",
+    expect(blockSources(three, three.files[1], ["deno", "uv"], tree)).toEqual([
+      "uv/.block.Node.gitignore",
       "deno/.block.Deno.gitignore",
     ]);
   });
@@ -146,14 +146,14 @@ describe("blockSources and verifySources", () => {
     const agents = temp.dir("writer-files-blocks-agents-");
     writeTree(agents, {
       "bun/AGENTS.block.toolchain.md": "- bun\n",
-      "node/AGENTS.block.toolchain.md": "- node\n",
+      "deno/AGENTS.block.toolchain.md": "- deno\n",
     });
     const config = parseFilesConfig(
-      "placeholders: []\nmodules:\n  bun: { agents_toolchain: [toolchain] }\n  node: { agents_toolchain: [toolchain] }\nfiles:\n  - { path: AGENTS.md, class: split, region: html, blocks: agents_toolchain }\n",
+      "placeholders: []\nmodules:\n  bun: { agents_toolchain: [toolchain] }\n  deno: { agents_toolchain: [toolchain] }\nfiles:\n  - { path: AGENTS.md, class: split, region: html, blocks: agents_toolchain }\n",
     );
-    expect(blockSources(config, config.files[0], ["bun", "node"], agents)).toEqual([
+    expect(blockSources(config, config.files[0], ["bun", "deno"], agents)).toEqual([
       "bun/AGENTS.block.toolchain.md",
-      "node/AGENTS.block.toolchain.md",
+      "deno/AGENTS.block.toolchain.md",
     ]);
   });
 
@@ -327,7 +327,7 @@ describe("blockSources and verifySources", () => {
       "base/s.yml": "a\n{{blocks}}\nb\n",
       "base/plain.yml": "{{blocks}}\n",
       "bun/d.block.x.yml": "one\n",
-      "node/d.block.x.yml": "two\n",
+      "deno/d.block.x.yml": "two\n",
       "bun/s.block.x.yml": "{{blocks}}\n",
     });
     const config = parseFilesConfig(
@@ -335,7 +335,7 @@ describe("blockSources and verifySources", () => {
         "placeholders: []",
         "modules:",
         "  bun: { eco: [x] }",
-        "  node: { eco: [x] }",
+        "  deno: { eco: [x] }",
         "files:",
         "  - { path: d.yml, class: managed, blocks: eco }",
         "  - { path: s.yml, class: starter, blocks: eco, when: { modules: [bun] }, source: files/base/s.yml }",
@@ -353,7 +353,7 @@ describe("blockSources and verifySources", () => {
       "source files/base/d.yml mentions {{blocks}} mid-line; it must be a line of its own",
       "source files/base/plain.yml uses unlisted placeholder(s) {{blocks}}",
       "source files/bun/s.block.x.yml uses unlisted placeholder(s) {{blocks}}",
-      "source files/node/s.block.x.yml is missing from the tree",
+      "source files/deno/s.block.x.yml is missing from the tree",
     ]);
   });
 

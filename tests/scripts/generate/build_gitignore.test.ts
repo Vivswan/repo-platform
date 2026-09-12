@@ -111,14 +111,14 @@ describe("the source grammar", () => {
   });
 
   test("selfSources is the selection's sources once each in files.yml order: a registration without fuzzer gets no fuzzer section", () => {
-    const shared: [string, string[]][] = [...ENTRIES, ["node", ["Node.gitignore"]]];
-    expect(selfSources(shared, ["bun", "uv", "fuzzer", "node"])).toEqual([
+    const shared: [string, string[]][] = [...ENTRIES, ["deno", ["Node.gitignore"]]];
+    expect(selfSources(shared, ["bun", "uv", "fuzzer", "deno"])).toEqual([
       "Node.gitignore",
       "bun.gitignore",
       "Python.gitignore",
       "fuzzer",
     ]);
-    expect(selfSources(shared, ["node", "uv"])).toEqual(["Python.gitignore", "Node.gitignore"]);
+    expect(selfSources(shared, ["deno", "uv"])).toEqual(["Python.gitignore", "Node.gitignore"]);
     expect(selfSources(shared, ["pages"])).toEqual([]);
   });
 
@@ -238,7 +238,7 @@ describe("the offline topology check", () => {
       "files/uv/.block.Python.gitignore is not exactly its section plus one blank line",
       "no block file carries [bun.gitignore], so .gitignore cannot be checked against them",
     ]);
-    const shared: [string, string[]][] = [...ENTRIES, ["node", ["Node.gitignore"]]];
+    const shared: [string, string[]][] = [...ENTRIES, ["deno", ["Node.gitignore"]]];
     writeFileSync(
       join(filesDir, "bun/.block.bun.gitignore"),
       buildBlock(SECTIONS["bun.gitignore"]),
@@ -247,17 +247,17 @@ describe("the offline topology check", () => {
       join(filesDir, "uv/.block.Python.gitignore"),
       buildBlock(SECTIONS["Python.gitignore"]),
     );
-    mkdirSync(join(filesDir, "node"));
+    mkdirSync(join(filesDir, "deno"));
     writeFileSync(
-      join(filesDir, "node/.block.Node.gitignore"),
+      join(filesDir, "deno/.block.Node.gitignore"),
       buildBlock("## Node (github/gitignore Node.gitignore)\nnode_modules/\ndist/\n"),
     );
     expect(
-      topologyProblems({ entries: shared, modules: [...SELECTED, "node"], filesDir, selfText }).map(
+      topologyProblems({ entries: shared, modules: [...SELECTED, "deno"], filesDir, selfText }).map(
         (p) => p.split(";")[0],
       ),
     ).toEqual([
-      "files/node/.block.Node.gitignore differs from another module's copy of Node.gitignore",
+      "files/deno/.block.Node.gitignore differs from another module's copy of Node.gitignore",
       ".gitignore's managed region differs from files/base/.gitignore plus the block files",
     ]);
   });
