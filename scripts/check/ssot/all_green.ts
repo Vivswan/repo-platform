@@ -5,7 +5,7 @@ import { loadOverrideLayer } from "../../../.github/scripts/sync/writer/merge_se
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
-import { canonical, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
+import { canonical, escapeRegExp, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { DELIVERY_REF } from "./delivery_pins.ts";
 import { asRecord, ciJobs, packageScripts, REPO_ROOT, read, repoCi } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
@@ -26,68 +26,50 @@ export function declaredCheckName(source: string): string {
   });
 }
 
-export const ALL_GREEN_ACTION = "actions/all-green/action.yml";
-const JUDGE_STEP = "Judge every needed result";
+/** The parsed `uses:` is checked here as well as by the line-reading action-pins rule: a folded `uses: >-` scalar hides its ref from
+ *  that rule, and the required check may never ride a tag. The `with:` map is matched whole because alls-green accepts any result for
+ *  a job in allowed-failures and a skip for one in allowed-skips, so an entry beyond the jobs that skip by design softens the gate. */
+export const ALL_GREEN_JUDGE = "re-actors/alls-green";
+const JUDGE_USES = new RegExp(`^${escapeRegExp(ALL_GREEN_JUDGE)}@[0-9a-f]{40}$`);
+const NEEDS_AS_JSON = "${{ toJSON(needs) }}";
 
-export function judgeRunBlock(actionText: string): string {
-  const action = asRecord(parseYaml(actionText), ALL_GREEN_ACTION);
-  const steps = asRecord(action.runs ?? {}, `${ALL_GREEN_ACTION} runs`).steps;
-  const judge = (Array.isArray(steps) ? steps : [])
-    .map((step) => asRecord(step, `${ALL_GREEN_ACTION} step`))
-    .find((step) => step.name === JUDGE_STEP);
-  if (judge === undefined || typeof judge.run !== "string") {
-    throw new Error(`${ALL_GREEN_ACTION}: no '${JUDGE_STEP}' step with a run block - anchor lost`);
+export function judgeStepMismatches(
+  gate: Record<string, unknown>,
+  site: string,
+  allowedSkips: string | null,
+): Mismatch[] {
+  const steps = (gate.steps as Record<string, unknown>[] | undefined) ?? [];
+  const expectedWith = {
+    jobs: NEEDS_AS_JSON,
+    ...(allowedSkips === null ? {} : { "allowed-skips": allowedSkips }),
+  };
+  const judge = steps.length === 1 ? steps[0] : undefined;
+  if (
+    judge !== undefined &&
+    JUDGE_USES.test(String(judge.uses ?? "")) &&
+    judge.if === undefined &&
+    judge["continue-on-error"] === undefined &&
+    canonical(judge.with ?? null) === canonical(expectedWith)
+  ) {
+    return [];
   }
-  return judge.run;
-}
-
-/** Inside [ ], [[ ]], test, or case words a substitution is errexit-exempt, so a crashing probe reads as empty and the guard falls OPEN.
- *  `if ! var="$(...)"; then` is allowed because the status IS the tested thing; `$((...))` runs no command. */
-export function bannedSubstitutions(script: string): string[] {
-  const offenders: string[] = [];
-  script.split("\n").forEach((line, index) => {
-    if (/^[ \t]*#/.test(line)) return;
-    const count = line.replaceAll("$((", "").split("$(").length - 1;
-    if (count === 0) return;
-    let bad = count > 1 || !/^[ \t]*(if ! )?[A-Za-z_][A-Za-z0-9_]*="\$\(/.test(line);
-    const close = line.lastIndexOf(')"');
-    if (
-      close >= 0 &&
-      !/^( \|\| (return|exit) [1-9][0-9]*)?(; then)?$/.test(line.slice(close + 2))
-    ) {
-      bad = true;
-    }
-    if (bad) offenders.push(`${index + 1}:${line}`);
-  });
-  return offenders;
-}
-
-/** The substitution ban assumes errexit, so `set -euo pipefail` must come first. */
-export function judgeSubstitutionMismatches(actionText: string): Mismatch[] {
-  const file = `${ALL_GREEN_ACTION} step '${JUDGE_STEP}'`;
-  const run = judgeRunBlock(actionText);
-  const mismatches: Mismatch[] = [];
-  const first = run
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line !== "" && !line.startsWith("#"));
-  if (first !== "set -euo pipefail") {
-    mismatches.push({
-      file,
+  return [
+    {
+      file: site,
       expected:
-        "`set -euo pipefail` as the first command (a crashed jq must fail the step, not read as empty)",
-      got: first ?? "an empty run block",
-    });
-  }
-  for (const offender of bannedSubstitutions(run)) {
-    mismatches.push({
-      file,
-      expected:
-        "command substitution only opening a plain assignment (errexit-exempt inside [ ], [[ ]], test, or case words, where a crashed jq reads as empty and the gate falls open)",
-      got: offender,
-    });
-  }
-  return mismatches;
+        `exactly one unconditioned, unsoftened step, uses: ${ALL_GREEN_JUDGE}@<40-hex sha> with ${canonical(expectedWith)} ` +
+        "(a conditioned, softened, or extra step is a green check over an unjudged run; an allowed-failures entry or an " +
+        "allowed-skips entry beyond the jobs that skip by design lets a red or absent verdict pass)",
+      got: canonical(
+        steps.map((step) => ({
+          uses: step.uses ?? null,
+          with: step.with ?? null,
+          if: step.if ?? null,
+          "continue-on-error": step["continue-on-error"] ?? null,
+        })),
+      ),
+    },
+  ];
 }
 
 export function expandCheckChain(
@@ -114,7 +96,6 @@ export const ALL_GREEN_ROSTER = [
   "actionlint",
   "gitleaks",
   "dependency-review",
-  "allgreen-judgment",
   "yamllint",
   "biome",
   "typography",
@@ -248,41 +229,15 @@ export function allGreenGateMismatches(
       got: "a strategy key",
     });
   }
-  const steps = (gateRecord.steps as Record<string, unknown>[] | undefined) ?? [];
-  for (const step of steps) {
-    if (step.if !== undefined || step["continue-on-error"] !== undefined) {
-      mismatches.push({
-        file: `${site.jobsFile} job 'all-green'`,
-        expected:
-          "no if: or continue-on-error: on any gate step (a skipped or softened judgment is a green check over an unjudged run)",
-        got: canonical(step.uses ?? step.run ?? null),
-      });
-    }
-  }
-  const judge = steps.find((step) => String(step.uses ?? "") === "./actions/all-green");
-  if (judge === undefined) {
-    mismatches.push({
-      file: `${site.jobsFile} job 'all-green'`,
-      expected: "a step using ./actions/all-green (the shared judgment)",
-      got: "no such step",
-    });
-  } else if (
-    String(asRecord(judge.with ?? {}, "all-green with").needs ?? "") !== "${{ toJSON(needs) }}"
-  ) {
-    mismatches.push({
-      file: `${site.jobsFile} job 'all-green'`,
-      expected:
-        "the judgment step passing needs: toJSON(needs) (anything else judges a fiction of the run)",
-      got: canonical(judge.with ?? null),
-    });
-  }
+  // No gating job here may skip (the job-level if: ban below), so no allowed-skips entry is ever right.
+  mismatches.push(...judgeStepMismatches(gateRecord, `${site.jobsFile} job 'all-green'`, null));
   for (const name of gating) {
     const job = asRecord(jobs[name] ?? {}, name);
     if (job.if !== undefined) {
       mismatches.push({
         file: `${site.jobsFile} job '${name}'`,
         expected:
-          "no job-level if: on a gating job (a skipped job stands down in the all-green gate - put event conditions on the steps)",
+          "no job-level if: on a gating job (a skipped job fails the all-green gate - put event conditions on the steps)",
         got: "a job-level condition",
       });
     }
@@ -356,30 +311,7 @@ export function skeletonGateMismatches(
       got: gate.if === undefined ? "no condition" : String(gate.if),
     });
   }
-  const steps = (gate.steps as Record<string, unknown>[] | undefined) ?? [];
-  const judge = steps.find((step) =>
-    String(step.uses ?? "").endsWith(`/${PLATFORM_NAME}/actions/all-green@${DELIVERY_REF}`),
-  );
-  if (
-    steps.length !== 1 ||
-    judge === undefined ||
-    judge.if !== undefined ||
-    judge["continue-on-error"] !== undefined ||
-    String(asRecord(judge.with ?? {}, "all-green with").needs ?? "") !== "${{ toJSON(needs) }}"
-  ) {
-    mismatches.push({
-      file: at("all-green"),
-      expected: `one unconditioned, unsoftened step, uses: <owner>/${PLATFORM_NAME}/actions/all-green@${DELIVERY_REF} with needs: toJSON(needs)`,
-      got: canonical(
-        steps.map((step) => ({
-          uses: step.uses ?? null,
-          with: step.with ?? null,
-          if: step.if ?? null,
-          "continue-on-error": step["continue-on-error"] ?? null,
-        })),
-      ),
-    });
-  }
+  mismatches.push(...judgeStepMismatches(gate, at("all-green"), SKELETON_ALLOWED_SKIPS));
   const calls = (name: string, workflow: string) => {
     const uses = String(asRecord(jobs[name] ?? {}, name).uses ?? "");
     if (!uses.endsWith(`/${PLATFORM_NAME}/.github/workflows/${workflow}@${DELIVERY_REF}`)) {
@@ -395,7 +327,8 @@ export function skeletonGateMismatches(
   if (condition("ci") !== "") {
     mismatches.push({
       file: at("ci"),
-      expected: "no job-level if: (a skipped caller stands down in the gate)",
+      expected:
+        "no job-level if: (the gate never lets the ci caller skip, so a conditioned caller fails every run the condition misses)",
       got: condition("ci"),
     });
   }
@@ -446,6 +379,10 @@ export function skeletonGateMismatches(
   return mismatches;
 }
 
+/** `checks` is the one caller that skips by design (the schedule run, and a checks.yml whose every job skips); `ci` never may,
+ *  which is what keeps a schedule night's otherwise all-skipped run from passing. */
+const SKELETON_ALLOWED_SKIPS = "checks";
+
 const SKELETON_CLAUSES: readonly RegExp[] = [
   /^needs\.all-green\.result == 'success'$/,
   /^needs\.post-green\.result == 'success'$/,
@@ -487,7 +424,7 @@ export function fleetCiJobs(text: string): Record<string, unknown> {
 }
 
 /** On a schedule run the skeleton's `checks` job skips and every other fleet-ci job stands down (codeql excepted on its weekly day),
- *  so plan's success is the one result keeping the all-green gate from failing closed. A missing plan job is the roster rule's finding. */
+ *  so plan is what keeps the `ci` caller from skipping, and the gate never lets `ci` skip. A missing plan job is the roster rule's finding. */
 export function planUnconditionalMismatches(text: string): Mismatch[] {
   const plan = fleetCiJobs(text).plan;
   if (plan === undefined) return [];
@@ -497,7 +434,7 @@ export function planUnconditionalMismatches(text: string): Mismatch[] {
     {
       file: `${FLEET_CI_SOURCE} job 'plan'`,
       expected:
-        "no job-level if: (plan is the one fleet-ci job that runs on every schedule run, so its success is what keeps every managed repository's nightly all-green from failing closed on an all-skipped run)",
+        "no job-level if: (plan is the one fleet-ci job that runs on every schedule run, so it is what keeps the ci caller from skipping, which the all-green gate never allows)",
       got: `if: ${String(job.if)}`,
     },
   ];
@@ -693,10 +630,6 @@ export const allGreenRules: Rule[] = [
   {
     name: "skeleton-gate",
     run: () => skeletonGateMismatches(skeletonCi()),
-  },
-  {
-    name: "all-green-judge-substitutions",
-    run: () => judgeSubstitutionMismatches(read(ALL_GREEN_ACTION)),
   },
   {
     // Job-level `if:` is allowed here, unlike the operator's gating jobs: a skipped fleet-ci job leaves the caller green.

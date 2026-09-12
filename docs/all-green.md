@@ -5,28 +5,31 @@ group: Start here
 
 # All-green convention
 
-Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. [ci.yml](../.github/workflows/ci.yml)'s `all-green` job needs every gating job, runs on `if: always()`, and judges the results through the shared [actions/all-green](../actions/all-green/action.yml) composite (managed repos pin it `@stable`, this repo calls it by local path):
+Every repository in the fleet - repo-platform included - gates merges on a required status check named `all-green`: the check run of an ordinary CI job. [ci.yml](../.github/workflows/ci.yml)'s `all-green` job needs every gating job, runs on `if: always()`, and judges the results through [re-actors/alls-green](https://github.com/re-actors/alls-green), a third-party action pinned by sha like every other ([fleet-guidelines.md](fleet-guidelines.md#pinned-actions)):
 
 ```yaml
 all-green:
   needs: [checks, ci]        # every gating job - a managed repo's two caller jobs
   if: always()               # a failed dependency must FAIL the gate, not skip it
   steps:
-    - uses: Vivswan/repo-platform/actions/all-green@stable
+    - uses: re-actors/alls-green@<sha> # v1.3.0
       with:
-        needs: ${{ toJSON(needs) }}
+        jobs: ${{ toJSON(needs) }}
+        allowed-skips: checks  # the one caller that skips by design: the schedule run, or a checks.yml whose every job skips
 ```
 
-The judgment, whole: every needed result must be `success` or `skipped` (a module- or visibility-conditioned job stands down by skipping), with at least one `success` - an all-skipped run vouches for nothing. Anything else (`failure`, `cancelled`) fails the gate.
+The judgment, whole: every needed result must be `success`, or `skipped` for a job named in `allowed-skips`. Anything else (`failure`, `cancelled`, a skip the list does not name) fails the gate, and the step summary lists every job with its result. The managed skeleton names `checks` alone, so a schedule night passes on `ci` and an all-skipped run cannot pass; repo-platform's own ci.yml names nothing, since none of its gating jobs may skip.
+
+The judgment's own scenario tests are alls-green's; this repository pins the step's shape instead ([the rosters](#the-rosters-how-a-deleted-gate-stays-loud)). The pin under `files/base` is invisible to Dependabot: bumping alls-green is a hand edit of the skeleton, landed in the fleet by the next sync round.
 
 ## Quick triage: why is my PR red or waiting?
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `all-green` failed naming a job | That job's result was not success/skipped | Open the run, fix or re-run the failed job - the re-run re-judges. |
+| `all-green` failed; the step summary marks a job with a cross | That job's result was not success (or skipped, where the gate allows it) | Open the run, fix or re-run the failed job - the re-run re-judges. |
 | `all-green` shows "Expected" and never arrives | The CI run was cancelled or superseded before the gate ran | Push again or re-run the newest CI run at the head. |
-| `all-green` failed with "every gating job was cancelled" | The concurrency group cancelled this run for a newer one at the same head, or someone cancelled it | The newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head. |
-| `all-green` failed with "no gating job actually succeeded" | Everything the gate needs skipped | A run that verified nothing must not merge; check why the callers skipped. |
+| `all-green` failed with every job `cancelled` | The concurrency group cancelled this run for a newer one at the same head, or someone cancelled it | The newer run at the head carries the verdict; if none exists or the merge box still reads this run, re-run the newest CI run at the head. |
+| `all-green` failed with `ci` skipped | fleet-ci's `plan` job did not run, so the caller skipped and the gate never lets it | A run that verified nothing must not merge; check why the caller skipped. |
 | `pr-title` waiting (repos with the pr-title module) | Its own required check, outside this gate | Fix the title to a Conventional Commit; the workflow re-runs on open/edit/reopen/push ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
 
 ## What gates what
@@ -44,13 +47,12 @@ The gate judges only what its `needs` list names, so a job deleted from ci.yml A
 
 | Rule | What it pins |
 | --- | --- |
-| `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and `toJSON(needs)` wiring. |
-| `skeleton-gate` | The managed skeleton (`files/base/.github/workflows/ci.yml`): `all-green` needs exactly `checks` and `ci`, judges through the published action under `if: always()` with an unconditioned, unsoftened step, the `ci` caller calls fleet-ci.yml unconditionally, `checks` skips only on the schedule, `nightly` runs on the schedule alone and gates nothing, every later leg reaches the gate through its needs, and each leg needing `all-green` directly carries an `&&`-chain of the skeleton's leg clauses including `needs.all-green.result == 'success'`. |
+| `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and its one sha-pinned alls-green step passing `toJSON(needs)` with no allowed skips or failures. |
+| `skeleton-gate` | The managed skeleton (`files/base/.github/workflows/ci.yml`): `all-green` needs exactly `checks` and `ci`, judges through alls-green under `if: always()` with one unconditioned, unsoftened, sha-pinned step allowing exactly `checks` to skip, the `ci` caller calls fleet-ci.yml unconditionally, `checks` is conditioned on the schedule alone, `nightly` runs on the schedule alone and gates nothing, every later leg reaches the gate through its needs, and each leg needing `all-green` directly carries an `&&`-chain of the skeleton's leg clauses including `needs.all-green.result == 'success'`. |
 | `fleet-ci-roster` | fleet-ci.yml's job set (`plan`, `validate-managed-files`, `base-checks`, `dependency-review`, `zizmor`, `knip`, `semgrep`, `codeql`, `docs-check`, `release-freshness`, `release-health`, `trivy`), both directions - deleting `codeql` there would drop the gate for every managed repository at once - and no job-level `continue-on-error` (a softened fleet job would read green to every caller's gate; `file-size` softens its own step inside `base-checks`). |
-| `fleet-ci-plan-unconditional` | fleet-ci.yml's `plan` job carries no job-level `if:`: it is the one fleet-ci job that runs on every nightly schedule run (the skeleton's `checks` job skips there and `codeql` reruns only on its weekly day), so its success is what keeps every managed repository's nightly `all-green` from failing closed on an all-skipped run. |
+| `fleet-ci-plan-unconditional` | fleet-ci.yml's `plan` job carries no job-level `if:`: it is the one fleet-ci job that runs on every nightly schedule run (the skeleton's `checks` job skips there and `codeql` reruns only on its weekly day), so it is what keeps the `ci` caller from skipping, which the gate never allows. |
 | `fleet-nightly-roster` | fleet-nightly.yml's job set (`plan`, `trivy-nightly`), both directions: nothing judges the nightly caller's result, so a job deleted there would go quiet fleet-wide. |
 | `fleet-caller-ceilings` | Every job grant in fleet-ci.yml, fleet-nightly.yml, and reusable-site.yml under its skeleton caller's (`ci`, `nightly`, and `site` in the skeleton ci.yml under `files/base`, the one every managed repository receives), and every job grant in post-green.yml, sync-repos.yml, and settings-repos.yml under the operator job that calls it (ci.yml's `post-green`, then post-green.yml's `sync-fleet` and `settings-fleet`): GitHub checks a nested job's permissions against the caller's when the call is expanded, before the job's `if:` runs, so one scope over the ceiling fails every run of the caller at once. |
-| `all-green-judge-substitutions` | The judge block in [actions/all-green](../actions/all-green/action.yml): `set -euo pipefail` first, and every command substitution opening a plain assignment (inside `[ ]`, `test`, or `case` words a substitution is errexit-exempt, so a crashed jq would read as empty and the gate fall open). The judgment itself runs against scenario payloads in [tests/actions/all_green_judgment.test.ts](../tests/actions/all_green_judgment.test.ts). |
 | `all-green-name` | The check NAME, pinned once as data: the ruleset's required context (Actions-pinned by `integration_id`), the `all-green` job id at both sources, `all_green.ts`'s CHECK_NAME, and the sentence this page opens with. |
 
 The managed ci.yml is one source file under `files/base/` that the writer copies whole (its only substitution is the owner slug, in the header and the `uses:` lines), so every selection receives the same bytes: the `skeleton-gate` rule judges that one source, and validate-managed-files' parity check judges the copy in every repository.

@@ -2,18 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import {
-  ALL_GREEN_ACTION,
+  ALL_GREEN_JUDGE,
   ALL_GREEN_ROSTER,
   allGreenGateMismatches,
-  bannedSubstitutions,
   CHECK_RUN_LOOKUP,
   callerCeilingMismatches,
   declaredCheckName,
   expandCheckChain,
   FLEET_CALLERS,
   FLEET_CI_SOURCE,
-  judgeRunBlock,
-  judgeSubstitutionMismatches,
   OPERATOR_CALLERS,
   planUnconditionalMismatches,
   rosterMismatches,
@@ -148,6 +145,7 @@ describe("rosterMismatches and allGreenGateMismatches", () => {
   // red case below (the negative controls proving the judgment can fail
   // through the same path its green runs through).
   const doc = (yaml: string) => parseYaml(yaml) as Record<string, unknown>;
+  const JUDGE_LINE = `      - uses: ${ALL_GREEN_JUDGE}@0123456789012345678901234567890123456789 # v1.3.0`;
   const valid = `
 jobs:
   a:
@@ -161,10 +159,9 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./actions/all-green
+${JUDGE_LINE}
         with:
-          needs: \${{ toJSON(needs) }}
+          jobs: \${{ toJSON(needs) }}
   post-green:
     needs: [all-green]
     if: needs.all-green.result == 'success' && github.event_name == 'push'
@@ -200,17 +197,61 @@ jobs:
     }
   });
 
-  test("a lost judgment step or an unwired needs input goes red", () => {
-    const stepless = allGreenGateMismatches(
-      doc(valid.replace("./actions/all-green", "./actions/decoy")),
-      ["a", "b"],
+  test.each([
+    {
+      reason: "the judge is another action",
+      mutated: valid.replace(`${ALL_GREEN_JUDGE}@`, "other/judge@"),
+    },
+    {
+      reason: "the judge rides a tag instead of a sha",
+      mutated: valid.replace(/@[0-9a-f]{40}/, "@v1.3.0"),
+    },
+    {
+      // A folded scalar hides the ref from the line-reading action-pins rule, so this rule reads the parsed value.
+      reason: "the judge rides a tag folded onto the next line",
+      mutated: valid.replace(/- uses: \S+/, `- uses: >-\n          ${ALL_GREEN_JUDGE}@v1.3.0`),
+    },
+    {
+      reason: "the needs context is not what the judge reads",
+      mutated: valid.replace("jobs: ${{ toJSON(needs) }}", "jobs: '{}'"),
+    },
+    {
+      reason: "a checkout rides before the judge",
+      mutated: valid.replace(JUDGE_LINE, `      - uses: actions/checkout@v7\n${JUDGE_LINE}`),
+    },
+    {
+      reason: "the judge is conditioned",
+      mutated: valid.replace(JUDGE_LINE, `      - if: false\n${JUDGE_LINE.replace("- ", "  ")}`),
+    },
+    {
+      reason: "the judge is softened",
+      mutated: valid.replace(
+        JUDGE_LINE,
+        `      - continue-on-error: true\n${JUDGE_LINE.replace("- ", "  ")}`,
+      ),
+    },
+    {
+      reason: "a gating job is allowed to skip",
+      mutated: valid.replace(
+        "jobs: ${{ toJSON(needs) }}",
+        "jobs: ${{ toJSON(needs) }}\n          allowed-skips: a",
+      ),
+    },
+    {
+      reason: "a gating job is allowed to fail",
+      mutated: valid.replace(
+        "jobs: ${{ toJSON(needs) }}",
+        "jobs: ${{ toJSON(needs) }}\n          allowed-failures: a",
+      ),
+    },
+  ])("$reason goes red as the one judge-step mismatch", ({ mutated }) => {
+    expect(mutated).not.toBe(valid);
+    const found = allGreenGateMismatches(doc(mutated), ["a", "b"]);
+    expect(found).toHaveLength(1);
+    expect(found[0].file).toBe(".github/workflows/ci.yml job 'all-green'");
+    expect(found[0].expected).toContain(
+      `uses: ${ALL_GREEN_JUDGE}@<40-hex sha> with {"jobs":"\${{ toJSON(needs) }}"}`,
     );
-    expect(stepless.some((m) => m.expected.includes("./actions/all-green"))).toBe(true);
-    const unwired = allGreenGateMismatches(
-      doc(valid.replace("needs: ${{ toJSON(needs) }}", "needs: '{}'")),
-      ["a", "b"],
-    );
-    expect(unwired.some((m) => m.expected.includes("toJSON(needs)"))).toBe(true);
   });
 
   test("a renamed gate job, a conditioned gating job, or a renamed gating job goes red", () => {
@@ -293,29 +334,7 @@ jobs:
     expect(allGreenGateMismatches(doc(ordered), ["a", "b"])).toEqual([]);
   });
 
-  test("a conditioned or softened gate step, and a matrixed gate, go red", () => {
-    const conditionedStep = allGreenGateMismatches(
-      doc(
-        valid.replace(
-          "      - uses: ./actions/all-green",
-          "      - if: false\n        uses: ./actions/all-green",
-        ),
-      ),
-      ["a", "b"],
-    );
-    expect(conditionedStep.some((m) => m.expected.includes("no if: or continue-on-error:"))).toBe(
-      true,
-    );
-    const softened = allGreenGateMismatches(
-      doc(
-        valid.replace(
-          "      - uses: ./actions/all-green",
-          "      - continue-on-error: true\n        uses: ./actions/all-green",
-        ),
-      ),
-      ["a", "b"],
-    );
-    expect(softened.some((m) => m.expected.includes("no if: or continue-on-error:"))).toBe(true);
+  test("a matrixed gate goes red", () => {
     const matrixed = allGreenGateMismatches(
       doc(
         valid.replace(
@@ -337,49 +356,6 @@ jobs:
         ALL_GREEN_ROSTER,
       ),
     ).toEqual([]);
-  });
-});
-
-describe("the judge's substitution ban", () => {
-  // The ban's own controls: a regex regression that let a bracketed
-  // probe through, or refused the assignment shapes the judge is
-  // written in, would blind the rule silently.
-  test.each([
-    { line: 'if [ "$(probe)" -gt 0 ]; then', caught: true },
-    { line: 'if test "$(probe)" = x; then', caught: true },
-    { line: 'case "$(probe)" in', caught: true },
-    { line: 'x="$(probe)" trailing_command', caught: true },
-    { line: 'x="$(a)$(b)"', caught: true },
-    { line: 'count="$(jq length <<<"$x")"', caught: false },
-    { line: 'if ! parsed="$(jq -ce . <<<"$x")"; then', caught: false },
-    { line: 'x="$(probe)" || exit 1', caught: false },
-    // A `)"` inside the jq program is not the substitution's close.
-    { line: 'total="$(jq \'error("got \\(type)") end\' <<<"$NEEDS")"', caught: false },
-    { line: "n=$((count + 1))", caught: false },
-    { line: '# if [ "$(probe)" -gt 0 ]; then', caught: false },
-  ])("$line", ({ line, caught }) => {
-    expect(bannedSubstitutions(`echo first\n${line}\n`)).toEqual(caught ? [`2:${line}`] : []);
-  });
-
-  test("the live judge block is clean; a probe moved into a test bracket, a dropped errexit, or a renamed step goes red", () => {
-    const text = readFileSync(ALL_GREEN_ACTION, "utf-8");
-    expect(judgeSubstitutionMismatches(text)).toEqual([]);
-    const bracketed = text.replace(
-      'if [ "$total" -eq 0 ]; then',
-      'if [ "$(jq length <<<"$NEEDS")" -eq 0 ]; then',
-    );
-    expect(bracketed).not.toBe(text);
-    const moved = judgeSubstitutionMismatches(bracketed);
-    expect(moved).toHaveLength(1);
-    expect(moved[0].got).toEndWith(':if [ "$(jq length <<<"$NEEDS")" -eq 0 ]; then');
-    const unguarded = text.replace("        set -euo pipefail\n", "");
-    expect(judgeRunBlock(unguarded)).not.toContain("set -euo pipefail");
-    const dropped = judgeSubstitutionMismatches(unguarded);
-    expect(dropped).toHaveLength(1);
-    expect(dropped[0].expected).toContain("set -euo pipefail");
-    expect(() =>
-      judgeSubstitutionMismatches(text.replace("Judge every needed result", "Judge")),
-    ).toThrow("anchor lost");
   });
 });
 
@@ -524,6 +500,8 @@ describe("callerCeilingMismatches", () => {
 describe("skeletonGateMismatches", () => {
   const doc = skeletonCi;
   const jobs = (d: Record<string, unknown>) => d.jobs as Record<string, Record<string, unknown>>;
+  const withOf = (gate: Record<string, unknown>) =>
+    (gate.steps as Record<string, unknown>[])[0].with as Record<string, unknown>;
 
   test("the committed skeleton passes (the control)", () => {
     expect(skeletonGateMismatches(doc())).toEqual([]);
@@ -573,6 +551,27 @@ describe("skeletonGateMismatches", () => {
       reason: "the judgment step is softened",
       mutate: (j) => {
         (j["all-green"].steps as Record<string, unknown>[])[0]["continue-on-error"] = true;
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the gate stops letting checks skip (every schedule night would go red)",
+      mutate: (j) => {
+        delete withOf(j["all-green"])["allowed-skips"];
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the gate lets the ci caller skip too (an all-skipped night would pass)",
+      mutate: (j) => {
+        withOf(j["all-green"])["allowed-skips"] = "checks, ci";
+      },
+      job: "all-green",
+    },
+    {
+      reason: "the gate lets a caller fail",
+      mutate: (j) => {
+        withOf(j["all-green"])["allowed-failures"] = "checks";
       },
       job: "all-green",
     },

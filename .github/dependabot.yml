@@ -6,7 +6,6 @@ updates:
   - package-ecosystem: "github-actions"
     directories:
       - "/"
-      - "/actions/all-green"
       - "/actions/bun-setup"
       - "/actions/check-file-size"
       - "/actions/check-typography"
