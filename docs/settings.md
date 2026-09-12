@@ -56,7 +56,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 
 ### The green-commit gate
 
-Every run, on all three entries, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the build publisher and the sync enforce). The job has one checkout with no `ref:`, so the selector's code is the judged commit's (the `settings-green-gate` rule in scripts/check/ssot/post_green.ts pins the shape).
+Every run, on all three entries, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the build publisher and the sync enforce). Each job has one checkout with no `ref:`, so the selector's and the resolver's code is the judged commit's (the `settings-green-gate` rule in scripts/check/ssot/post_green.ts pins the shape).
 
 | Entry | The gate |
 | --- | --- |
@@ -67,7 +67,13 @@ The gate is ordering, not content: the apply reads nothing but the target list f
 
 ## How the apply works
 
-One job, one apply step. The selector ([fleet/select_settings_repos.ts](../.github/scripts/fleet/select_settings_repos.ts)) lists the targets; the pinned action applies them in `repos` mode, each from its own rendered `.github/settings.yml` on its default branch.
+A `plan` job, then one `apply (row <i>)` job per target, the shape the sync's operator uses ([sync.md](sync.md#the-operator)). The selector lists the targets and keys each row of the apply matrix; every apply job resolves its own target and runs the pinned action on it, in `repos` mode, from its rendered `.github/settings.yml` on its default branch.
+
+| Step | Script | What it does |
+| --- | --- | --- |
+| plan: select | [fleet/select_settings_repos.ts](../.github/scripts/fleet/select_settings_repos.ts) | the three probes below over every discovered repository the scope admits, sorted; the log names the public targets and counts the private ones; the outputs are `count` and `matrix`: one row per target, in the selection's order, each an index and the row's key, the sync operator's own `rowKeyOf` ([sync/resolve_row.ts](../.github/scripts/sync/resolve_row.ts): an HMAC of the slug under the fleet token and the run id), so a private target is identified without being named |
+| apply: resolve | [fleet/resolve_settings_target.ts](../.github/scripts/fleet/resolve_settings_target.ts) | lists the owner's writable repositories once and finds the one the row's key names; registers every form of the name with the runner's masker before anything else prints, and hands the slug to the action through `GITHUB_ENV` (`TARGET`); a key no listed repository carries (the grant moved mid-run) refuses, naming nothing |
+| apply: apply | the pinned action, `repos:` that one target | the action's own run over the target: the log, summary, and `repos-result` output are the job's |
 
 A target is selected when all three probes pass, in this order:
 
@@ -78,12 +84,13 @@ A target is selected when all three probes pass, in this order:
 | Rendered | `.github/settings.yml` on the default branch opens with the generator header's first line | skipped with the notice `not yet rendered; the sync PR carrying the rendered settings has not merged` |
 
 - The operator repository is selected like any other target: it carries `.repo-platform.yml` and a rendered file ([below](#repo-platform-itself-is-a-target)).
-- The selector's log names the public targets and counts the private ones (`settings targets: <public slugs> and <n> private repositories`); every form of a private slug is registered with the runner's masker before anything prints, and the list reaches the action as a step output in the same job.
-- The action runs the targets independently and one after another: one repository's failure never stops the rest, and the run exits red at the end when any target failed (or drifted under `check_only`). Nothing in this repository knows the outcome per target beyond the action's `repos-result` output and step summary.
-- A private target appears in the log, the summary, and the outputs as `private repository #N` (`private-repos: redact`), and its full report is a reused issue on the target itself, pinned by the `settings-as-code-report` label (`private-report: issue`): opened or refreshed when the target fails or drifts, closed when it is healthy, delivered in check mode too ([private repositories](sync.md#private-repositories)). The very first check on a private target can flag that marker label itself as drift; the label does not exist until the same run's delivery creates it, so the next run is clean.
+- The selector's log names the public targets and counts the private ones (`settings targets: <public slugs> and <n> private repositories`); every form of a private slug is registered with the runner's masker before anything prints. The matrix names no target: a job output holding a masked value is dropped by the runner, and an unmasked slug there would name a private repository in the run's job list, so each row carries the plan's key instead. The key binds the row to its repository: a repository adopted or revoked mid-run cannot move a row onto another one.
+- The apply job never re-runs the plan's probes: its resolver lists the owner's repositories once and matches the key, so a fleet of N targets costs N listings, not N selections.
+- One job per target, `fail-fast: false`: a broken target is its own row's red and never stops another row's apply; the run is red when any row is (a failure, or drift under `check_only`). Each apply job is bounded by one target's work (`timeout-minutes: 15`), so the fleet's size widens the matrix and never a timeout; the plan job's bound covers the green gate's wait plus the probes, which run one target after another.
+- A private target appears in its job's log, summary, and outputs as `private repository #1` (`private-repos: redact`; the job's name carries its index in the matrix, `apply (row 3)`, never the repository), and its full report is a reused issue on the target itself, pinned by the `settings-as-code-report` label (`private-report: issue`): opened or refreshed when the target fails or drifts, closed when it is healthy, delivered in check mode too ([private repositories](sync.md#private-repositories)). The very first check on a private target can flag that marker label itself as drift; the label does not exist until the same run's delivery creates it, so the next run is clean.
 - The un-rendered skip is what makes a repository's first sync safe: a hand-written `.github/settings.yml` still waiting for its sync PR is never applied on its own, since applying it in `repos` mode would delete every fleet label it does not declare.
 
-`check_only` runs the action in `mode: check`: no setting changes (the one write left is a private target's report issue and its marker label), one `drift:` line per difference names the section, the field, and the declared versus live values (hidden for a private target, whose detail goes to its report issue), and each target ends `clean`, `drift`, or `failed`. A fleet check reads clean only when three things hold together: every target is `clean` in `repos-result`, no target was `skipped`, and `gh search prs --state open --head automation/repo-platform` finds no sync PR touching `.github/settings.yml`. A stale rendered file behind a held sync PR is exactly what the second and third readings show.
+`check_only` runs every row's action in `mode: check`: no setting changes (the one write left is a private target's report issue and its marker label), one `drift:` line per difference names the section, the field, and the declared versus live values (hidden for a private target, whose detail goes to its report issue), and each row ends `clean`, `drift`, or `failed`. A fleet check reads clean only when three things hold together: every row's `repos-result` is `clean`, the plan skipped no target, and `gh search prs --state open --head automation/repo-platform` finds no sync PR touching `.github/settings.yml`. A stale rendered file behind a held sync PR is exactly what the second and third readings show.
 
 ## What the baseline contains
 

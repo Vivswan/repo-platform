@@ -1,6 +1,7 @@
-# One github-settings-as-code step in repos mode, each target applied from its own rendered
-# .github/settings.yml (docs/settings.md). No push trigger: a merge reaches the fleet only through
-# post-green.yml's call, behind the all-green gate.
+# A plan job selects the targets into a keyed matrix; one apply job per row resolves its target
+# and runs github-settings-as-code on it, from its own rendered .github/settings.yml
+# (docs/settings.md). No push trigger: a merge reaches the fleet only through post-green.yml's
+# call, behind the all-green gate.
 
 name: Settings Repos
 
@@ -51,10 +52,6 @@ on:
 
 permissions:
   contents: read
-  # For the green gate's verdict lookup (require_green_commit.ts):
-  # GITHUB_TOKEN reads this repository's own all-green check runs; the
-  # fleet PAT's grant carries no Checks read.
-  checks: read
 
 # A CALLED run takes a per-run group: its caller (post-green.yml's settings-fleet job) already holds
 # settings-repos, and a called workflow waiting on its caller's lane deadlocks.
@@ -63,11 +60,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  apply:
+  plan:
     runs-on: ubuntu-latest
-    # 30 for the green gate's bounded wait, plus about 5 per target run
-    # sequentially by the action; sized at the fleet's count (11 today).
-    timeout-minutes: 90
+    # The green gate's bounded wait (require_green_commit.ts) plus the selection: three short
+    # reads per target, run one after another, so a far larger fleet shows up here first.
+    timeout-minutes: 60
+    # Checks read: the green gate reads this repository's own all-green
+    # check runs with GITHUB_TOKEN; the fleet PAT's grant carries no Checks read.
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      count: ${{ steps.select.outputs.count }}
+      matrix: ${{ steps.select.outputs.matrix }}
     steps:
       # A narrowed token fails too: settings need Administration and Issues write, and
       # on-missing-permission below fails an unreachable section.
@@ -102,8 +107,8 @@ jobs:
         run: bun .github/scripts/fleet/require_green_commit.ts
 
       # The typed dispatch input is not passed as env: it may be a private slug, and the runner prints
-      # step env into this public log; the script reads the event payload instead. repos stays a STEP
-      # output: the runner drops a job output holding a masked value.
+      # step env into this public log; the script reads the event payload instead. The matrix output
+      # carries each row's index and the plan's opaque key (sync/resolve_row.ts), never a slug.
       - name: Select settings targets
         id: select
         env:
@@ -116,17 +121,59 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
-      # An empty selection is a no-op, not a failure - and never an empty
-      # repos input, which the action would read as single-repo mode.
+  # One job per matrix row: an index for the job name, which never carries a repository name, and
+  # the plan's opaque key for the resolver. An empty selection is a no-op, not a failure.
+  apply:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    permissions:
+      contents: read
+    strategy:
+      # One broken target is that row's red, never another's.
+      fail-fast: false
+      # Every row writes with the same PAT (labels, rulesets, report
+      # issues are content-creating, so secondary rate limits apply):
+      # bound the fleet's burst.
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: apply (row ${{ matrix.row }})
+    runs-on: ubuntu-latest
+    # One target's work: the install, one listing of the owner's repositories,
+    # then about five minutes of apply. The fleet's size is the matrix's width,
+    # never this bound.
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The only step that sees the name in the clear: resolve_settings_target.ts masks the target
+      # before anything else prints and hands it on as TARGET through GITHUB_ENV.
+      - name: Resolve the row's target
+        env:
+          ROW_KEY: ${{ matrix.key }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: bun .github/scripts/fleet/resolve_settings_target.ts
+
+      # Gated on the resolved name: an empty repos input is the action's single-repo mode over
+      # this checkout's own document.
       - name: Apply repository settings
-        if: steps.select.outputs.repos != ''
+        if: env.TARGET != ''
         uses: Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          repos: ${{ steps.select.outputs.repos }}
+          repos: ${{ env.TARGET }}
           # A private target appears in this public log as "private
-          # repository #N"; its failure or drift details land as a reused
+          # repository #1"; its failure or drift details land as a reused
           # issue on the target repository instead (needs the PAT's Issues
           # write).
           private-repos: redact

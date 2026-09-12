@@ -156,6 +156,7 @@ export function overlayMismatches(text: string): Mismatch[] {
 
 export const SETTINGS_WORKFLOW = ".github/workflows/settings-repos.yml";
 export const SETTINGS_SELECTOR = "bun .github/scripts/fleet/select_settings_repos.ts";
+export const SETTINGS_RESOLVER = "bun .github/scripts/fleet/resolve_settings_target.ts";
 export const SETTINGS_ACTION_USES =
   "Vivswan/github-settings-as-code@046adf3b24454f26f569850630809bcf481f8b84 # v2.0.0";
 
@@ -191,58 +192,221 @@ function applyUsesPins(text: string): string[] {
   return pins;
 }
 
-/** An empty repos input is the action's single-repo mode, so the apply is gated on the selector's non-empty output.
- *  The with: block is matched whole: `repository`, `settings-file`, `defaults-file`, or `repos-dir` would apply a document
- *  other than each target's own rendered file. */
+interface WorkflowJob {
+  name?: string;
+  needs?: string | string[];
+  if?: string;
+  strategy?: { "fail-fast"?: boolean; matrix?: unknown };
+  outputs?: Record<string, unknown>;
+  steps?: WorkflowStep[];
+}
+
+function jobsOf(text: string, rel: string): Record<string, WorkflowJob> {
+  const doc = asRecord(parseYaml(text), rel);
+  const jobs = asRecord(doc.jobs ?? {}, `${rel} jobs`);
+  return Object.fromEntries(
+    Object.entries(jobs).map(([name, job]) => [name, asRecord(job ?? {}, `${rel} job`)]),
+  ) as Record<string, WorkflowJob>;
+}
+
+const stepsIn = (job: WorkflowJob): WorkflowStep[] => (Array.isArray(job.steps) ? job.steps : []);
+const runOf = (step: WorkflowStep): string => String(step.run ?? "").trim();
+
+/** The apply is a matrix of one target per job, each row keyed by the selector and resolved in its own job:
+ *  a slug in the matrix or a re-selection in the apply job would name a private repository or re-run the plan's
+ *  probes per row, and an empty repos input is the action's single-repo mode over this checkout's document.
+ *  The with: block is matched whole: `repository`, `settings-file`, `defaults-file`, or `repos-dir` would apply
+ *  a document other than each target's own rendered file. */
 export function settingsApplyInputMismatches(text: string): Mismatch[] {
   const rel = SETTINGS_WORKFLOW;
-  const steps = stepsOf(text, rel);
-  const selectors = steps.filter((step) => String(step.run ?? "").trim() === SETTINGS_SELECTOR);
-  if (selectors.length !== 1)
-    throw new Error(`${rel}: no single target-selection step - anchor lost`);
-  const applies = steps.filter((step) =>
-    String(step.uses ?? "").includes("github-settings-as-code"),
+  const jobs = jobsOf(text, rel);
+  const selecting = Object.entries(jobs).filter(([, job]) =>
+    stepsIn(job).some((step) => runOf(step) === SETTINGS_SELECTOR),
   );
-  if (applies.length === 0)
+  if (selecting.length === 0) throw new Error(`${rel}: no target-selection step - anchor lost`);
+  const [planName, plan] = selecting[0];
+  const selectors = Object.values(jobs).flatMap((job) =>
+    stepsIn(job).filter((step) => runOf(step) === SETTINGS_SELECTOR),
+  );
+  const applying = Object.entries(jobs).filter(([, job]) =>
+    stepsIn(job).some((step) => String(step.uses ?? "").includes("github-settings-as-code")),
+  );
+  if (applying.length === 0)
     throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
   const mismatches: Mismatch[] = [];
+  if (selectors.length !== 1) {
+    mismatches.push({
+      file: rel,
+      expected:
+        "one selection step in the whole workflow (a re-selection could move a row onto another repository)",
+      got: `${selectors.length} steps running ${SETTINGS_SELECTOR}, in jobs ${selecting.map(([name]) => name).join(", ")}`,
+    });
+  }
+  if (applying.length !== 1) {
+    mismatches.push({
+      file: rel,
+      expected: "one job running github-settings-as-code (the matrix job, one target per row)",
+      got: `${applying.length} jobs`,
+    });
+  }
+  const [applyName, apply] = applying[0];
+  if (applyName === planName) {
+    mismatches.push({
+      file: rel,
+      expected: "the apply in a matrix job of its own, fed by the selecting job's outputs",
+      got: `the selector and the apply both in the ${planName} job`,
+    });
+  }
+
+  const selectId = String(selectors[0].id ?? "");
+  for (const [output, source] of [
+    ["count", `\${{ steps.${selectId}.outputs.count }}`],
+    ["matrix", `\${{ steps.${selectId}.outputs.matrix }}`],
+  ] as const) {
+    const got = plan.outputs?.[output];
+    if (got !== source) {
+      mismatches.push({
+        file: rel,
+        expected: `the ${planName} job's ${output} output wired to the selector's (${output}: ${source})`,
+        got: got === undefined ? `no ${output} output` : `${output}: ${String(got)}`,
+      });
+    }
+  }
+
+  const needs = Array.isArray(apply.needs) ? apply.needs : [apply.needs];
+  if (!needs.includes(planName)) {
+    mismatches.push({
+      file: rel,
+      expected: `the ${applyName} job needing ${planName}`,
+      got: apply.needs === undefined ? "no needs" : `needs: ${JSON.stringify(apply.needs)}`,
+    });
+  }
+  const gate = `needs.${planName}.outputs.count != '0'`;
+  if (String(apply.if ?? "").trim() !== gate) {
+    mismatches.push({
+      file: rel,
+      expected: `the ${applyName} job gated on if: ${gate} (an empty matrix is a no-op, not a failure)`,
+      got: apply.if === undefined ? "no condition" : `if: ${String(apply.if)}`,
+    });
+  }
+  const matrix = `\${{ fromJSON(needs.${planName}.outputs.matrix) }}`;
+  if (apply.strategy?.matrix !== matrix) {
+    mismatches.push({
+      file: rel,
+      expected: `the ${applyName} job's matrix the plan's row indexes and keys alone: matrix: ${matrix}`,
+      got:
+        apply.strategy?.matrix === undefined
+          ? "no matrix"
+          : `matrix: ${JSON.stringify(apply.strategy.matrix)}`,
+    });
+  }
+  if (apply.strategy?.["fail-fast"] !== false) {
+    mismatches.push({
+      file: rel,
+      expected: `fail-fast: false on the ${applyName} job (one target's failure is its own row's red)`,
+      got:
+        apply.strategy?.["fail-fast"] === undefined
+          ? "fail-fast unset (GitHub's default cancels the other rows)"
+          : `fail-fast: ${String(apply.strategy["fail-fast"])}`,
+    });
+  }
+  const jobName = `${applyName} (row \${{ matrix.row }})`;
+  if (String(apply.name ?? "") !== jobName) {
+    mismatches.push({
+      file: rel,
+      expected: `the ${applyName} job named ${jobName} - an index, never a repository`,
+      got: `name: ${String(apply.name ?? "(none)")}`,
+    });
+  }
+
+  const applySteps = stepsIn(apply);
+  const isApply = (step: WorkflowStep) =>
+    String(step.uses ?? "").includes("github-settings-as-code");
+  const applies = applySteps.filter(isApply);
   if (applies.length !== 1) {
     mismatches.push({
       file: rel,
-      expected: "one github-settings-as-code step (one repos-mode apply over the selected targets)",
+      expected: "one github-settings-as-code step in the apply job (one target per row)",
       got: `${applies.length} steps`,
     });
   }
-  const selectId = String(selectors[0].id ?? "");
-  const gate = `steps.${selectId}.outputs.repos != ''`;
   // The version comment is not in the parsed step, so the pin is read off
   // the document's own `uses` scalar (value plus trailing comment): text
   // elsewhere in the file can neither satisfy nor hide it.
   const usesLine = `uses: ${SETTINGS_ACTION_USES}`;
   const pins = applyUsesPins(text);
-  if (pins.length !== applies.length) {
+  const allApplies = Object.values(jobs).flatMap((job) => stepsIn(job).filter(isApply));
+  if (pins.length !== allApplies.length) {
     mismatches.push({
       file: rel,
       expected: `${usesLine} as a plain scalar on every apply step`,
-      got: `${pins.length} readable pin(s) for ${applies.length} step(s) (an alias or a non-scalar uses)`,
+      got: `${pins.length} readable pin(s) for ${allApplies.length} step(s) (an alias or a non-scalar uses)`,
     });
   }
   for (const pin of pins) {
     if (pin !== SETTINGS_ACTION_USES) mismatches.push({ file: rel, expected: usesLine, got: pin });
   }
+
+  // TARGET is job env, so only the step right before the apply may write it: a step between the
+  // resolver and the apply could rewrite it. Without a resolver the gate and the input read nothing.
+  const resolverAt = applySteps.findIndex((step) => runOf(step) === SETTINGS_RESOLVER);
+  const applyAt = applySteps.findIndex(isApply);
+  if (resolverAt === -1 || resolverAt !== applyAt - 1) {
+    mismatches.push({
+      file: rel,
+      expected: `a step running ${SETTINGS_RESOLVER} IMMEDIATELY BEFORE the apply step (it registers the target's masks and writes TARGET)`,
+      got:
+        resolverAt === -1
+          ? "no resolver step"
+          : resolverAt > applyAt
+            ? "the resolver after the apply step"
+            : `${applyAt - resolverAt - 1} step(s) between the resolver and the apply`,
+    });
+    if (resolverAt === -1) return mismatches;
+  }
+  const resolver = applySteps[resolverAt];
+  const resolverEnv = {
+    ROW_KEY: "${{ matrix.key }}",
+    PAT: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+    GH_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+    OWNER: "${{ github.repository_owner }}",
+  };
+  const env = resolver.env ?? {};
+  if (
+    JSON.stringify(env, Object.keys(env).sort()) !==
+    JSON.stringify(resolverEnv, Object.keys(resolverEnv).sort())
+  ) {
+    mismatches.push({
+      file: rel,
+      expected: `the resolver step's env exactly ${JSON.stringify(resolverEnv)} (the row's key, what keyed it, and the listing it resolves against)`,
+      got: JSON.stringify(env, Object.keys(env).sort()),
+    });
+  }
+  // The runner prints step env into the public log; the name rides GITHUB_ENV.
+  for (const step of applySteps) {
+    if ("TARGET" in (step.env ?? {})) {
+      mismatches.push({
+        file: rel,
+        expected:
+          "no TARGET in an apply step's env (the runner prints step env; the name rides GITHUB_ENV)",
+        got: `step "${String(step.name ?? step.id ?? step.uses)}" declares TARGET`,
+      });
+    }
+  }
+  const stepGate = "env.TARGET != ''";
   const wanted = {
     token: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     mode: "${{ inputs.check_only && 'check' || 'apply' }}",
-    repos: `\${{ steps.${selectId}.outputs.repos }}`,
+    repos: "${{ env.TARGET }}",
     "private-repos": "redact",
     "private-report": "issue",
     "on-missing-permission": "fail",
   };
-  for (const step of applies) {
-    if (String(step.if ?? "").trim() !== gate) {
+  for (const step of allApplies) {
+    if (String(step.if ?? "").trim() !== stepGate) {
       mismatches.push({
         file: rel,
-        expected: `the apply step gated on if: ${gate}`,
+        expected: `the apply step gated on if: ${stepGate}`,
         got: step.if === undefined ? "no condition" : `if: ${String(step.if)}`,
       });
     }
@@ -290,9 +454,9 @@ export const settingsWorkflowRules: Rule[] = [
   },
   {
     // The apply reconciles labels and rulesets on every target it is
-    // handed, so what it is handed is load-bearing: the selector's output
+    // handed, so what it is handed is load-bearing: the plan's keyed row
     // and nothing else, each target's own rendered document, under the
-    // tagged pin.
+    // tagged pin, one job per target.
     name: "settings-apply-input",
     run: () => settingsApplyInputMismatches(read(SETTINGS_WORKFLOW)),
   },
