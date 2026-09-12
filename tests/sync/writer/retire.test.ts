@@ -75,23 +75,44 @@ describe("keepReason", () => {
 });
 
 describe("keepReason on symbolic links", () => {
-  test("a link is judged by its target string under a link record, and by class under any other", () => {
-    const target = checkout({ "AGENTS.md": "agents\n", "as-file.md": "not a link\n" });
+  test("a link is judged by its target string under a link or symlink-mirror record, and by class under any other", () => {
+    // as-mirror-file.md holds the link target string itself, so only the record's kind can tell it from the link.
+    const target = checkout({
+      "AGENTS.md": "agents\n",
+      "as-file.md": "not a link\n",
+      "as-mirror-file.md": "AGENTS.md",
+    });
     symlinkSync("AGENTS.md", join(target, "CLAUDE.md"));
     symlinkSync("../AGENTS.md", join(target, "other.md"));
+    symlinkSync("AGENTS.md", join(target, "mirror-link.md"));
+    symlinkSync("AGENTS.md", join(target, "mirror-copy-as-link.md"));
+    symlinkSync("AGENTS.md", join(target, "mirror-odd-kind.md"));
     const records: Records = {
       "CLAUDE.md": { class: "managed", hash: sha256("AGENTS.md") },
       "other.md": { class: "link", hash: sha256("AGENTS.md") },
       "as-file.md": { class: "link", hash: sha256("AGENTS.md") },
+      "mirror-link.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
+      "as-mirror-file.md": { class: "mirror", kind: "symlink", hash: sha256("AGENTS.md") },
+      "mirror-copy-as-link.md": { class: "mirror", hash: sha256("AGENTS.md") },
+      "mirror-odd-kind.md": { class: "mirror", kind: "hardlink", hash: sha256("AGENTS.md") },
     };
     expect(keepReason(target, "CLAUDE.md", records)).toBe(
       "a symbolic link sits where the platform wrote a file",
     );
+    expect(keepReason(target, "mirror-link.md", records)).toBeNull();
     expect(keepReason(target, "other.md", records)).toBe(
       "the path is a symbolic link whose target is not the recorded one",
     );
-    expect(keepReason(target, "as-file.md", records)).toBe(
-      "a regular file sits where the platform wrote a link",
+    for (const path of ["as-file.md", "as-mirror-file.md"]) {
+      expect(keepReason(target, path, records)).toBe(
+        "a regular file sits where the platform wrote a link",
+      );
+    }
+    expect(keepReason(target, "mirror-copy-as-link.md", records)).toBe(
+      "a symbolic link sits where the platform wrote a file",
+    );
+    expect(keepReason(target, "mirror-odd-kind.md", records)).toBe(
+      "the mirror record names a kind the writer does not write",
     );
     expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toBe("agents\n");
   });

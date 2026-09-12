@@ -38,6 +38,9 @@ describe("parseRegistration", () => {
       "mirrors:",
       "  - source: AGENTS.md",
       "    targets: [CLAUDE.md]",
+      "  - source: LICENSE.md",
+      "    kind: symlink",
+      "    targets: [skills/*/LICENSE.md]",
     ].join("\n");
     expect(parseRegistration(text)).toEqual({
       registration: {
@@ -57,7 +60,10 @@ describe("parseRegistration", () => {
         },
         skills: { dir: "lib/skills" },
         labels: { fuzzer: "fuzz-nightly", site: "rot" },
-        mirrors: [{ source: "AGENTS.md", targets: ["CLAUDE.md"] }],
+        mirrors: [
+          { source: "AGENTS.md", targets: ["CLAUDE.md"], kind: "copy" },
+          { source: "LICENSE.md", targets: ["skills/*/LICENSE.md"], kind: "symlink" },
+        ],
       },
     });
   });
@@ -175,6 +181,11 @@ describe("parseRegistration", () => {
       reason: "a mirror without targets",
       text: "modules: []\nmirrors:\n  - source: a\n    targets: []\n",
       error: `${FILE}: mirrors.0.targets: Too small: expected array to have >=1 items`,
+    },
+    {
+      reason: "a mirror of a kind the writer cannot materialize",
+      text: "modules: []\nmirrors:\n  - source: a\n    targets: [b]\n    kind: hardlink\n",
+      error: `${FILE}: mirrors.0.kind: Invalid option: expected one of "copy"|"symlink"`,
     },
   ])("refuses $reason", ({ text, error }) => {
     const read = parseRegistration(text);

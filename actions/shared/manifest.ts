@@ -49,6 +49,8 @@ export type ManifestEntryShape = {
   hash?: unknown;
   grammar?: unknown;
   commit?: unknown;
+  /** A mirror's materialization: "symlink" when the path is a link to the source; absent for a copy. */
+  kind?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
 
 /** The closed entry-field vocabulary, the runtime twin of ManifestEntryShape: `satisfies` refuses
@@ -59,6 +61,7 @@ export const ENTRY_FIELDS = [
   "hash",
   "grammar",
   "commit",
+  "kind",
   ...MANAGED_REGION_WIRE_FIELDS,
 ] as const satisfies readonly (keyof ManifestEntryShape)[];
 /** Compile-time only. @public */

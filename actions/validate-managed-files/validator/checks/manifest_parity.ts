@@ -17,6 +17,16 @@ export function checkManifestParity(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
+    // Only a symlink mirror carries a kind, so any other kind field is a hand edit.
+    if ("kind" in entry && (entry.class !== "mirror" || entry.kind !== "symlink")) {
+      findings.push(
+        error(
+          `${where} carries kind ${JSON.stringify(entry.kind)} - the sync records a kind only on ` +
+            `a mirror, and only "symlink"; revert the edit (git history has the stamped original) or ${RESYNC}`,
+        ),
+      );
+      continue;
+    }
     // The self entry's invariant comes before any class dispatch: a
     // corrupted class (say, starter) must not slip past it. Its commit slot
     // holds the provenance stamp (null or a string; manifest_shape judges
@@ -80,9 +90,8 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
       continue;
     }
-    // A mirror is a byte copy the sync wrote, its hash the whole file's,
-    // so it is verified exactly like a managed file. A link is a symlink
-    // the sync placed, its hash the target string's.
+    // A mirror copy is verified like a managed file, its hash the whole file's; a link, and a mirror
+    // of kind symlink, is a symlink the sync placed, its hash the target string's.
     const hash = "hash" in entry ? entry.hash : undefined;
     if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
       findings.push(
@@ -156,14 +165,16 @@ export function checkManifestParity(ctx: Context): Finding[] {
       continue;
     }
     let actual: string;
-    if (entry.class === "link") {
+    const linkRecorded =
+      entry.class === "link" || (entry.class === "mirror" && entry.kind === "symlink");
+    if (linkRecorded) {
       if (!stat.isSymbolicLink()) {
         findings.push(
           error(
-            `${rel}: recorded as a link in ${MANIFEST_NAME} but is not a symbolic link - ` +
-              "the sync writes a relative symlink there and never reads through one, so " +
-              "a regular file at the path is a local replacement; restore the link from " +
-              "git history or re-run the sync",
+            `${rel}: recorded as ${entry.class === "link" ? "a link" : "a symlink mirror"} in ` +
+              `${MANIFEST_NAME} but is not a symbolic link - the sync writes a relative symlink ` +
+              "there and never reads through one, so a regular file at the path is a local " +
+              `replacement; restore the link from git history or ${RESYNC}`,
           ),
         );
         continue;
@@ -213,10 +224,15 @@ export function checkManifestParity(ctx: Context): Finding[] {
       }
     }
     if (actual !== hash) {
+      const what =
+        split !== null
+          ? "its managed region"
+          : stat.isSymbolicLink()
+            ? "its link target"
+            : "content";
       findings.push(
         error(
-          `${rel}: ${split !== null ? "its managed region does" : "content does"} ` +
-            `not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
+          `${rel}: ${what} does not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
             "drifted from the last sync; local edits to " +
             `${split !== null ? "the managed region" : "a managed file"} are ` +
             "replaced by the next sync (move them to a repo-owned " +

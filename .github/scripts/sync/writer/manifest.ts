@@ -3,6 +3,7 @@
 
 import { createHash } from "node:crypto";
 import type { RegionKind } from "../../../../actions/plan/files_config.ts";
+import type { MirrorKind } from "../../../../actions/plan/mirrors.ts";
 import {
   type AssertNever,
   HASH_REGION_MARKERS,
@@ -32,8 +33,23 @@ export type ManifestRecord =
   | { class: "managed"; hash: string | null }
   | { class: "split"; grammar: "managed-region"; begin: string; end: string; hash: string | null }
   | { class: "starter" }
-  | { class: "mirror"; hash: string | null }
+  | MirrorRecord
   | { class: "link"; hash: string | null };
+/** Silent means copy, in the record as in the registration; a symlink's hash covers its link target, a copy's the bytes. */
+export type MirrorRecord =
+  | { class: "mirror"; hash: string | null }
+  | { class: "mirror"; kind: "symlink"; hash: string | null };
+
+export function mirrorRecord(kind: MirrorKind, hash: string | null): MirrorRecord {
+  return kind === "symlink" ? { class: "mirror", kind, hash } : { class: "mirror", hash };
+}
+
+/** The kind a mirror record names, or null when the record is not a mirror the writer would write. */
+export function recordedMirrorKind(entry: ManifestEntryShape): MirrorKind | null {
+  if (entry.class !== "mirror") return null;
+  if (!("kind" in entry)) return "copy";
+  return entry.kind === "symlink" ? "symlink" : null;
+}
 /** The union and the shared RECORDED_CLASSES table name the same classes, both ways. Compile-time only. @public */
 export type RecordedClassesWritten = AssertNever<Exclude<RecordedClass, ManifestRecord["class"]>>;
 /** Compile-time only. @public */
@@ -77,7 +93,8 @@ const COMMENT =
   "class: managed (rewritten whole; hash is sha256 of the last written content), split (the " +
   "BEGIN/END-bounded region is rewritten and the repository owns everything outside it; the " +
   "hash covers the region from the BEGIN line through the END line), starter (written once, " +
-  "repo-owned from then on), mirror (a byte copy of a written file, declared in " +
+  "repo-owned from then on), mirror (a byte copy of a written file, or with kind symlink a " +
+  "relative symbolic link to it whose hash is sha256 of the link target, declared in " +
   `${REGISTRATION_PATH}), link (a relative symbolic link; hash is sha256 of its target). This ` +
   "file's own entry records the build commit that wrote the tree.";
 

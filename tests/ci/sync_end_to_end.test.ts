@@ -147,6 +147,8 @@ function seedTarget(): string {
       // target and a file where a directory must be, both replaced for review.
       "  - {source: LICENSE.md, targets: [skills/*/LICENSE.md, skills/new/LICENSE.md, plain, skills/alpha/README.md/LICENSE.md]}",
       "  - {source: AGENTS.md, targets: [skills/*/AGENTS.md]}",
+      // Links to the source: one over a hand-written file, one into an existing directory.
+      "  - {source: LICENSE.md, kind: symlink, targets: [template/LICENSE.md, docs/LICENSE.md]}",
       "",
     ].join("\n"),
     ".github/workflows/ci.yml": LOCAL_CI,
@@ -170,6 +172,7 @@ function seedTarget(): string {
     "skills/delta/README.md": "delta\n",
     "skills/delta/LICENSE.md": NEW_LICENSE,
     "docs/old-mirror.md": OLD_LICENSE,
+    "template/LICENSE.md": "a hand-written license\n",
     "plain/keep.md": "keep\n",
     "other/keep.md": "",
     ".editorconfig": OLD_EDITORCONFIG,
@@ -521,6 +524,8 @@ describe("sync.ts end to end", () => {
         "replaced",
         "a file stood at ancestor 'skills/alpha/README.md'",
       ),
+      mirror("LICENSE.md", "template/LICENSE.md", "replaced local edits"),
+      mirror("LICENSE.md", "docs/LICENSE.md", "written"),
       mirror("LICENSE.md", "skills/alpha/LICENSE.md", "written"),
       mirror("LICENSE.md", "skills/beta/LICENSE.md", "replaced local edits"),
       mirror("LICENSE.md", "skills/delta/LICENSE.md", "current"),
@@ -539,6 +544,11 @@ describe("sync.ts end to end", () => {
     expect(read("skills/new/AGENTS.md")).toBe(read("AGENTS.md"));
     for (const skill of ["alpha", "beta", "delta", "gamma", "new"]) {
       expect(read(`skills/${skill}/LICENSE.md`)).toBe(NEW_LICENSE);
+    }
+    // The symlink targets are relative links that resolve to the source.
+    for (const path of ["template/LICENSE.md", "docs/LICENSE.md"]) {
+      expect(readlinkSync(join(target, path))).toBe("../LICENSE.md");
+      expect(read(path)).toBe(NEW_LICENSE);
     }
     // The retired path was moved, never rewritten by its mirror.
     expect(existsSync(join(target, "SECURITY.md"))).toBe(false);
@@ -587,6 +597,8 @@ describe("sync.ts end to end", () => {
         ".github/workflows/release.yml",
         "skills/alpha/LICENSE.md",
         "skills/gamma/LICENSE.md",
+        "template/LICENSE.md",
+        "docs/LICENSE.md",
       ].sort(),
     );
     expect(manifest.files[MANIFEST]).toEqual({ class: "managed", hash: null, commit: BUILD });
@@ -640,6 +652,14 @@ describe("sync.ts end to end", () => {
     for (const path of ["skills/gamma/LICENSE.md", "skills/beta/LICENSE.md", "plain"]) {
       expect(manifest.files[path]).toEqual({ class: "mirror", hash: sha256(NEW_LICENSE) });
     }
+    // A symlink mirror records its kind and the link target's hash.
+    for (const path of ["template/LICENSE.md", "docs/LICENSE.md"]) {
+      expect(manifest.files[path]).toEqual({
+        class: "mirror",
+        kind: "symlink",
+        hash: sha256("../LICENSE.md"),
+      });
+    }
     const gitignore = read(".gitignore");
     const region = gitignore.slice(
       gitignore.indexOf(HASH_BEGIN),
@@ -689,6 +709,7 @@ describe("sync.ts end to end", () => {
       "constructor held: class changed from starter to managed, and a starter is repo-owned",
       ".dockerignore: the managed region was added above repository-owned content",
       "local edits replaced in .github/workflows/ci.yml",
+      "local edits replaced in template/LICENSE.md",
       "local edits replaced in skills/beta/LICENSE.md",
       "local edits replaced in skills/gamma/LICENSE.md",
       "retirement of .github/workflows/release.yml held: the content differs from the last write",

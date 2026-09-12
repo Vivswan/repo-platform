@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -157,7 +158,7 @@ describe("applyMirrors", () => {
     });
     const { rows, replaced } = applyMirrors(
       root,
-      [{ source: "LICENSE.md", targets: ["skills/*/LICENSE.md"] }],
+      [{ source: "LICENSE.md", kind: "copy", targets: ["skills/*/LICENSE.md"] }],
       bytes({ "LICENSE.md": "v2\n" }),
       owned(["LICENSE.md"]),
       {
@@ -195,8 +196,8 @@ describe("applyMirrors", () => {
     const { rows, replaced } = applyMirrors(
       root,
       [
-        { source: "L.md", targets: ["adir", "afile.txt/COPY.md"] },
-        { source: "N.md", targets: ["skills/*/LICENSE.md"] },
+        { source: "L.md", kind: "copy", targets: ["adir", "afile.txt/COPY.md"] },
+        { source: "N.md", kind: "copy", targets: ["skills/*/LICENSE.md"] },
       ],
       bytes({ "L.md": "L\n", "N.md": "N\n" }),
       owned(["L.md", "N.md"]),
@@ -220,10 +221,18 @@ describe("applyMirrors", () => {
       applyMirrors(
         root,
         [
-          { source: "LICENSE.md", targets: ["copies/a", "copies/a/b", "good/COPY.md"] },
-          { source: "LICENSE.md", targets: ["LICENSE.md", "SECURITY.md", "GONE.md", "docs/**/x"] },
-          { source: "LICENSE.md", targets: [".repo-platform.yml/copy.md"] },
-          { source: "README.md", targets: ["skills/*/README.md"] },
+          {
+            source: "LICENSE.md",
+            kind: "copy",
+            targets: ["copies/a", "copies/a/b", "good/COPY.md"],
+          },
+          {
+            source: "LICENSE.md",
+            kind: "copy",
+            targets: ["LICENSE.md", "SECURITY.md", "GONE.md", "docs/**/x"],
+          },
+          { source: "LICENSE.md", kind: "copy", targets: [".repo-platform.yml/copy.md"] },
+          { source: "README.md", kind: "copy", targets: ["skills/*/README.md"] },
         ],
         bytes({ "LICENSE.md": "L\n" }),
         owned(["LICENSE.md"], [], ["SECURITY.md"], ["GONE.md"]),
@@ -267,9 +276,10 @@ describe("applyMirrors", () => {
         [
           {
             source: "LICENSE.md",
+            kind: "copy",
             targets: ["skills/a/LICENSE.md", "linked/LICENSE.md", "good/COPY.md", "sub/*/L.md"],
           },
-          { source: "HELD.md", targets: ["copies/HELD.md", "sub/*/HELD.md"] },
+          { source: "HELD.md", kind: "copy", targets: ["copies/HELD.md", "sub/*/HELD.md"] },
         ],
         bytes({ "LICENSE.md": "v2\n" }),
         owned(["LICENSE.md", "HELD.md"]),
@@ -324,12 +334,17 @@ describe("applyMirrors", () => {
         applyMirrors(
           root,
           [
-            { source: "A.md", targets: ["skills/*/LICENSE.md", "skills/*/nope/LICENSE.md"] },
+            {
+              source: "A.md",
+              kind: "copy",
+              targets: ["skills/*/LICENSE.md", "skills/*/nope/LICENSE.md"],
+            },
             {
               source: "B.md",
+              kind: "copy",
               targets: ["nowhere/*/x", "skills/link/*.md", "real/a/x/*", "docs/*.md"],
             },
-            { source: "HELD.md", targets: ["skills/*/HELD.md"] },
+            { source: "HELD.md", kind: "copy", targets: ["skills/*/HELD.md"] },
           ],
           bytes({ "A.md": "A\n", "B.md": "B\n" }),
           owned(["A.md", "B.md", "HELD.md"]),
@@ -386,8 +401,8 @@ describe("applyMirrors", () => {
         root,
         [
           // A literal makes a directory that a glob then names as a file.
-          { source: "A.md", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
-          { source: "B.md", targets: ["skills/*/COPY.md"] },
+          { source: "A.md", kind: "copy", targets: ["skills/LICENSE.md/x", "*/LICENSE.md"] },
+          { source: "B.md", kind: "copy", targets: ["skills/*/COPY.md"] },
         ],
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
         owned(["A.md", "B.md"]),
@@ -422,8 +437,8 @@ describe("applyMirrors", () => {
       applyMirrors(
         root,
         [
-          { source: "LICENSE.md", targets: ["*.md", "skills/a/LICENSE.md"] },
-          { source: "AGENTS.md", targets: ["*.yml", "skills/*/LICENSE.md"] },
+          { source: "LICENSE.md", kind: "copy", targets: ["*.md", "skills/a/LICENSE.md"] },
+          { source: "AGENTS.md", kind: "copy", targets: ["*.yml", "skills/*/LICENSE.md"] },
         ],
         bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
         owned(["LICENSE.md", "AGENTS.md"]),
@@ -478,7 +493,7 @@ describe("applyMirrors", () => {
     const failures = failuresOf(() =>
       applyMirrors(
         root,
-        [{ source: "L.md", targets: ["skills/*/sub/L.md"] }],
+        [{ source: "L.md", kind: "copy", targets: ["skills/*/sub/L.md"] }],
         bytes({ "L.md": "L\n" }),
         owned(["L.md"]),
         {},
@@ -498,8 +513,8 @@ describe("applyMirrors", () => {
       applyMirrors(
         root,
         [
-          { source: "A.md", targets: ["skills/*/L.md"] },
-          { source: "B.md", targets: ["skills/a/*.md"] },
+          { source: "A.md", kind: "copy", targets: ["skills/*/L.md"] },
+          { source: "B.md", kind: "copy", targets: ["skills/a/*.md"] },
         ],
         bytes({ "A.md": "A\n", "B.md": "B\n" }),
         owned(["A.md", "B.md"]),
@@ -524,7 +539,7 @@ describe("applyMirrors", () => {
       failuresOf(() =>
         applyMirrors(
           root,
-          [{ source: "LICENSE.md", targets: [long, "skills/*/LICENSE.md"] }],
+          [{ source: "LICENSE.md", kind: "copy", targets: [long, "skills/*/LICENSE.md"] }],
           bytes({ "LICENSE.md": "L\n" }),
           owned(["LICENSE.md"]),
           {},
@@ -556,6 +571,7 @@ describe("applyMirrors", () => {
             [
               {
                 source: "LICENSE.md",
+                kind: "copy",
                 targets: [`${Array(levels).fill("*").join("/")}/LICENSE.md`, "skills/*/LICENSE.md"],
               },
             ],
@@ -584,8 +600,8 @@ describe("applyMirrors", () => {
     const { rows } = applyMirrors(
       root,
       [
-        { source: "AGENTS.md", targets: ["skills/*/AGENTS.md"] },
-        { source: "LICENSE.md", targets: ["skills/new/LICENSE.md"] },
+        { source: "AGENTS.md", kind: "copy", targets: ["skills/*/AGENTS.md"] },
+        { source: "LICENSE.md", kind: "copy", targets: ["skills/new/LICENSE.md"] },
       ],
       bytes({ "LICENSE.md": "L\n", "AGENTS.md": "A\n" }),
       owned(["LICENSE.md", "AGENTS.md"]),
@@ -604,8 +620,12 @@ describe("applyMirrors", () => {
     const { rows } = applyMirrors(
       root,
       [
-        { source: "LICENSE.md", targets: ["skills/a/LICENSE.md", "skills/*/LICENSE.md"] },
-        { source: "LICENSE.md", targets: ["skills/a/*.md"] },
+        {
+          source: "LICENSE.md",
+          kind: "copy",
+          targets: ["skills/a/LICENSE.md", "skills/*/LICENSE.md"],
+        },
+        { source: "LICENSE.md", kind: "copy", targets: ["skills/a/*.md"] },
       ],
       bytes({ "LICENSE.md": "L\n" }),
       owned(["LICENSE.md"]),
@@ -617,5 +637,144 @@ describe("applyMirrors", () => {
       row("LICENSE.md", "skills/a/LICENSE.md", "current"),
       row("LICENSE.md", "skills/a/README.md", "replaced local edits"),
     ]);
+  });
+});
+
+describe("applyMirrors with kind symlink", () => {
+  const link = (source: string, targets: string[]) => ({
+    source,
+    targets,
+    kind: "symlink" as const,
+  });
+  const copy = (source: string, targets: string[]) => ({ source, targets, kind: "copy" as const });
+
+  test("places a relative link to the source, reads a link as current, and replaces a file or a link elsewhere with a diff", () => {
+    const root = tree({
+      "LICENSE.md": "v2\n",
+      "skills/a/README.md": "",
+      "skills/b/README.md": "",
+      "skills/c/README.md": "",
+      "skills/c/LICENSE.md": "hand edited\n",
+      "skills/d/README.md": "",
+      "skills/d/LICENSE.md": "v1\n",
+      "skills/e/README.md": "",
+    });
+    symlinkSync("../../LICENSE.md", join(root, "skills/b/LICENSE.md"));
+    symlinkSync("../../OTHER.md", join(root, "skills/e/LICENSE.md"));
+    const { rows, replaced, records } = applyMirrors(
+      root,
+      [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])],
+      bytes({ "LICENSE.md": "v2\n" }),
+      owned(["LICENSE.md"]),
+      // A copy record vouches for the file the flip replaces.
+      { "skills/d/LICENSE.md": { class: "mirror", hash: sha256("v1\n") } },
+    );
+    expect(rows).toEqual([
+      row("LICENSE.md", "top/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/a/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/b/LICENSE.md", "current"),
+      row("LICENSE.md", "skills/c/LICENSE.md", "replaced local edits"),
+      row("LICENSE.md", "skills/d/LICENSE.md", "written"),
+      row("LICENSE.md", "skills/e/LICENSE.md", "replaced local edits"),
+    ]);
+    expect(replaced).toEqual([
+      { path: "skills/c/LICENSE.md", before: "hand edited\n", after: "../../LICENSE.md" },
+      { path: "skills/e/LICENSE.md", before: "../../OTHER.md", after: "../../LICENSE.md" },
+    ]);
+    expect(readlinkSync(join(root, "top/LICENSE.md"))).toBe("../LICENSE.md");
+    for (const skill of ["a", "b", "c", "d", "e"]) {
+      expect(readlinkSync(join(root, `skills/${skill}/LICENSE.md`))).toBe("../../LICENSE.md");
+      expect(readFileSync(join(root, `skills/${skill}/LICENSE.md`), "utf-8")).toBe("v2\n");
+    }
+    const record = { class: "mirror", kind: "symlink", hash: sha256("../../LICENSE.md") } as const;
+    expect(Object.fromEntries(records)).toEqual({
+      "top/LICENSE.md": { class: "mirror", kind: "symlink", hash: sha256("../LICENSE.md") },
+      "skills/a/LICENSE.md": record,
+      "skills/b/LICENSE.md": record,
+      "skills/c/LICENSE.md": record,
+      "skills/d/LICENSE.md": record,
+      "skills/e/LICENSE.md": record,
+    });
+    // Idempotent: the second run finds every link current and changes nothing.
+    const again = applyMirrors(
+      root,
+      [link("LICENSE.md", ["skills/*/LICENSE.md", "top/LICENSE.md"])],
+      bytes({ "LICENSE.md": "v2\n" }),
+      owned(["LICENSE.md"]),
+      Object.fromEntries(records),
+    );
+    expect(again.rows.map((r) => r.outcome)).toEqual(Array(6).fill("current"));
+    expect(again.replaced).toEqual([]);
+    expect(Object.fromEntries(again.records)).toEqual(Object.fromEntries(records));
+  });
+
+  test("a copy declared where the writer's own link stands replaces it; any other link still fails the run", () => {
+    const root = tree({ "skills/a/README.md": "", "skills/b/README.md": "" });
+    symlinkSync("../../LICENSE.md", join(root, "skills/a/LICENSE.md"));
+    symlinkSync("../../LICENSE.md", join(root, "skills/b/LICENSE.md"));
+    const records = {
+      "skills/a/LICENSE.md": { class: "mirror", kind: "symlink", hash: sha256("../../LICENSE.md") },
+    };
+    expect(
+      failuresOf(() =>
+        applyMirrors(
+          root,
+          [copy("LICENSE.md", ["skills/*/LICENSE.md"])],
+          bytes({ "LICENSE.md": "v2\n" }),
+          owned(["LICENSE.md"]),
+          records,
+        ),
+      ),
+    ).toEqual([failure("LICENSE.md", "skills/b/LICENSE.md", "the target is a symbolic link")]);
+    expect(readlinkSync(join(root, "skills/a/LICENSE.md"))).toBe("../../LICENSE.md");
+    const { rows, replaced } = applyMirrors(
+      root,
+      [copy("LICENSE.md", ["skills/a/LICENSE.md"])],
+      bytes({ "LICENSE.md": "v2\n" }),
+      owned(["LICENSE.md"]),
+      records,
+    );
+    expect(rows).toEqual([row("LICENSE.md", "skills/a/LICENSE.md", "written")]);
+    expect(replaced).toEqual([]);
+    expect(lstatSync(join(root, "skills/a/LICENSE.md")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("v2\n");
+  });
+
+  test("a directory at a link target is removed and named, like at a copy", () => {
+    const root = tree({ "adir/keep.md": "" });
+    const { rows, replaced } = applyMirrors(
+      root,
+      [link("L.md", ["adir"])],
+      bytes({ "L.md": "L\n" }),
+      owned(["L.md"]),
+      {},
+    );
+    expect(rows).toEqual([row("L.md", "adir", "replaced", "a directory stood at the target")]);
+    expect(replaced).toEqual([]);
+    expect(readlinkSync(join(root, "adir"))).toBe("L.md");
+  });
+
+  test("one path claimed as a copy and as a link fails both claims, in one pass or across the two", () => {
+    const root = tree({ "skills/a/README.md": "" });
+    const failures = failuresOf(() =>
+      applyMirrors(
+        root,
+        [
+          copy("LICENSE.md", ["skills/a/LICENSE.md", "skills/*/README.md"]),
+          link("LICENSE.md", ["skills/*/LICENSE.md", "skills/a/*.md"]),
+        ],
+        bytes({ "LICENSE.md": "L\n" }),
+        owned(["LICENSE.md"]),
+        {},
+      ),
+    );
+    const both = "the target is claimed as a copy and as a symbolic link";
+    expect(failures).toEqual([
+      failure("LICENSE.md", "skills/a/README.md", both),
+      failure("LICENSE.md", "skills/a/LICENSE.md", both),
+    ]);
+    // The literal pass wrote its copy; the glob pass wrote nothing.
+    expect(readFileSync(join(root, "skills/a/LICENSE.md"), "utf-8")).toBe("L\n");
+    expect(readFileSync(join(root, "skills/a/README.md"), "utf-8")).toBe("");
   });
 });

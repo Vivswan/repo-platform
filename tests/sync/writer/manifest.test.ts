@@ -35,6 +35,7 @@ describe("renderManifest", () => {
         },
         "s.yml": { class: "starter" },
         "m/copy.txt": { class: "mirror", hash: HASH },
+        "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
         "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       },
       BUILD,
@@ -53,6 +54,7 @@ describe("renderManifest", () => {
       "b.txt": { class: "managed", hash: HASH },
       "CLAUDE.md": { class: "link", hash: sha256("AGENTS.md") },
       "m/copy.txt": { class: "mirror", hash: HASH },
+      "m/link.txt": { class: "mirror", kind: "symlink", hash: sha256("../s.yml") },
       "s.yml": { class: "starter" },
     });
     expect(Object.keys(parsed.files ?? {})).toEqual([
@@ -61,6 +63,7 @@ describe("renderManifest", () => {
       "a.md",
       "b.txt",
       "m/copy.txt",
+      "m/link.txt",
       "s.yml",
     ]);
     const link = sha256("AGENTS.md");
@@ -73,6 +76,7 @@ describe("renderManifest", () => {
       `    "a.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- B -->", "end": "<!-- E -->", "hash": "${HASH}"},`,
       `    "b.txt": {"class": "managed", "hash": "${HASH}"},`,
       `    "m/copy.txt": {"class": "mirror", "hash": "${HASH}"},`,
+      `    "m/link.txt": {"class": "mirror", "kind": "symlink", "hash": "${sha256("../s.yml")}"},`,
       '    "s.yml": {"class": "starter"}',
       "  }",
       "}",

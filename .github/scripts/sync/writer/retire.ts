@@ -15,7 +15,7 @@ import { dirname } from "node:path";
 import type { RetiredEntry } from "../../../../actions/plan/files_config.ts";
 import { cleanManagedRegion } from "../../../../actions/shared/grammar.ts";
 import { capture } from "../../shared/proc.ts";
-import { type Records, recordedHash, sha256 } from "./manifest.ts";
+import { type Records, recordedHash, recordedMirrorKind, sha256 } from "./manifest.ts";
 import { insideTarget, probe, removeFile, writeFile } from "./target_files.ts";
 
 export type RetireOutcome = "deleted" | "region removed" | "moved" | "held" | "kept";
@@ -28,7 +28,8 @@ export interface RetireRow {
 
 /** What sits at a path against the writer's last write.
  *  `blank`: a split whose region is the last write with only blank lines around it, so nothing is worth handing over.
- *  A symbolic link is judged by its target string, never read through. */
+ *  A symbolic link is judged by its target string, never read through, under a `link` record or a `kind: symlink`
+ *  mirror record; under any other record it is foreign, as the mirror writer reads it. */
 export type Judgement =
   | { verdict: "own" }
   | { verdict: "blank" }
@@ -62,9 +63,13 @@ export function judge(target: string, path: string, records: Records): Judgement
   if (entry.class === "starter") return foreign("a starter is repo-owned");
   const hash = recordedHash(records, path);
   if (hash === null) return foreign("the record carries no hash");
+  if (entry.class === "mirror" && recordedMirrorKind(entry) === null) {
+    return foreign("the mirror record names a kind the writer does not write");
+  }
   const found = probe(target, path);
   if (found.kind === "absent") return { verdict: "own" };
-  if (entry.class === "link") {
+  const linkRecorded = entry.class === "link" || recordedMirrorKind(entry) === "symlink";
+  if (linkRecorded) {
     if (found.kind !== "link")
       return foreign("a regular file sits where the platform wrote a link");
     return sha256(found.target) === hash

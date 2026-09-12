@@ -30,9 +30,12 @@ import { blockSources, loadFilesConfig, type WriterFilesConfig } from "./files_c
 import {
   MANIFEST_NAME,
   type ManifestRecord,
+  type MirrorRecord,
+  mirrorRecord,
   type Records,
   readRecords,
   recordedHash,
+  recordedMirrorKind,
   regionMarkers,
   sha256,
   writeManifest,
@@ -87,7 +90,10 @@ function carriedRecord(entry: Records[string]): ManifestRecord | null {
   const hash = typeof entry.hash === "string" ? entry.hash : null;
   if (entry.class === "starter") return { class: "starter" };
   if (entry.class === "managed") return { class: "managed", hash };
-  if (entry.class === "mirror") return { class: "mirror", hash };
+  if (entry.class === "mirror") {
+    const kind = recordedMirrorKind(entry);
+    return kind === null ? null : mirrorRecord(kind, hash);
+  }
   if (entry.class === "link") return { class: "link", hash };
   if (entry.class === "split" && typeof entry.begin === "string" && typeof entry.end === "string") {
     return { class: "split", grammar: "managed-region", begin: entry.begin, end: entry.end, hash };
@@ -375,7 +381,7 @@ export function runSync(options: SyncOptions): SyncReport {
 
   const mirrors =
     registration.mirrors === undefined
-      ? { rows: [], replaced: [], hashes: new Map<string, string>() }
+      ? { rows: [], replaced: [], records: new Map<string, MirrorRecord>() }
       : applyMirrors(
           options.target,
           registration.mirrors,
@@ -383,7 +389,7 @@ export function runSync(options: SyncOptions): SyncReport {
           { ...owned, stale: new Set(stale) },
           records,
         );
-  for (const [path, hash] of mirrors.hashes) next.set(path, { class: "mirror", hash });
+  for (const [path, record] of mirrors.records) next.set(path, record);
   for (const { path, before, after } of mirrors.replaced) {
     replaced.push({ path, diff: unifiedDiff(path, before, after) });
   }
