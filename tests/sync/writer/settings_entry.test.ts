@@ -29,7 +29,7 @@ const FILES_YML = [
   "  override: files/settings/override.yml",
   "files:",
   "  - {path: .github/settings.local.yml, class: starter}",
-  "  - {path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}",
+  "  - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}",
   "",
 ].join("\n");
 
@@ -87,9 +87,9 @@ const OVERLAY = [
   "",
 ].join("\n");
 
-function tree(): string {
+function tree(layers: Record<string, string> = LAYERS): string {
   const root = temp.dir("settings-entry-");
-  for (const [rel, text] of Object.entries(LAYERS)) {
+  for (const [rel, text] of Object.entries(layers)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), text);
   }
@@ -309,6 +309,28 @@ describe("renderSettings", () => {
     );
   });
 
+  test("an overlay label without a name rides through for the apply to refuse", () => {
+    const { doc } = rendered({ overlay: `${OVERLAY}labels:\n  - {color: fff}\n` });
+    expect(doc.labels).toEqual([
+      { name: "bug", color: "d73a4a", description: "Something isn't working" },
+      { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+      { name: "javascript", color: "168700", description: "JS updates" },
+      { color: "fff" },
+    ]);
+  });
+
+  test("a layer naming one label twice is the operator's error: the render throws, naming the layer", () => {
+    // A hold would leave every target waiting on a fix only files/ can take.
+    const damaged = tree({
+      ...LAYERS,
+      "bun/settings.yml":
+        'labels:\n  - {name: javascript, color: "168700"}\n  - {name: JavaScript, color: "168700"}\n',
+    });
+    expect(() => renderSettings(input({ tree: damaged }))).toThrow(
+      `${join(damaged, "bun/settings.yml")}: labels "javascript" and "JavaScript" are one name to the merge; a layer declares each name once`,
+    );
+  });
+
   test("an alias reused without a cycle renders the shared value at both keys", () => {
     const { doc } = rendered({ overlay: "repository: &r {description: Mine}\ncopy: *r\n" });
     expect((doc.repository as Record<string, unknown>).description).toBe("Mine");
@@ -388,7 +410,7 @@ describe("renderSettings", () => {
         overlay: `${OVERLAY}labels:\n  - {name: Fuzz-Nightly, color: "000000", description: mine}\n`,
       },
       detail:
-        'the merged labels declare "Fuzz-Nightly" and "fuzz-nightly", which collide - two settings layers claim one name; rename one',
+        'the repository\'s .github/settings.local.yml declares label "Fuzz-Nightly", one name to GitHub with the tracking label "fuzz-nightly" (label names are case-insensitive); rename one',
     },
   ])("holds on $reason", ({ overrides, detail }) => {
     expect(held(overrides)).toBe(detail);

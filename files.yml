@@ -103,11 +103,10 @@ files:
   - {path: .github/actionlint.yaml, class: starter}
   - {path: .github/instructions/review.instructions.md, class: managed}
   # The overlay starters precede the rendered document, which reads the
-  # overlay they seed; the displacement moves a repository's pre-render
-  # settings.yml to the overlay path before either is written.
+  # overlay they seed in the same run.
   - {path: .github/settings.local.yml, class: starter, when: {private: false}}
   - {path: .github/settings.local.yml, class: starter, when: {private: true}, source: files/base/.github/settings.local.private.yml}
-  - {path: .github/settings.yml, class: managed, render: settings, displaces: .github/settings.local.yml}
+  - {path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml}
   - {path: .github/workflows/ci.yml, class: managed}
   - {path: .github/workflows/checks.yml, class: starter, blocks: toolchain_steps}
   - {path: .github/workflows/post-green.yml, class: starter}

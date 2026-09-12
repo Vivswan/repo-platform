@@ -293,6 +293,17 @@ describe("the layer topology fails CLOSED", () => {
       damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "# nothing\n"),
       problem: "files/site/settings.yml: not a YAML mapping",
     },
+    {
+      reason: "a layer naming one label twice",
+      config: CONFIG,
+      damage: (tree) =>
+        writeFileSync(
+          join(tree, "settings/baseline.yml"),
+          'labels:\n  - {name: bug, color: "d73a4a"}\n  - {name: BUG, color: "d73a4a"}\n',
+        ),
+      problem:
+        'files/settings/baseline.yml: labels "bug" and "BUG" are one name to the merge; a layer declares each name once',
+    },
   ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
     // The control: the committed declarations match the committed tree in
     // both directions, so the one problem below is the damage alone.

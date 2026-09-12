@@ -212,27 +212,6 @@ export function managedLabelNames(config: LayerConfig, tree: string): string[] {
   return allLayerLabels(config, tree).map((label) => label.name);
 }
 
-/** Two layers declaring one name is fine (the merge folds them); two
- *  declaring one name with DIFFERENT spellings is an authoring error the
- *  apply would fight over. */
-export function assertUniqueNames(
-  entries: { name: string }[],
-  what: string,
-  fold: (name: string) => string,
-): void {
-  const seen = new Map<string, string>();
-  for (const { name } of entries) {
-    const prior = seen.get(fold(name));
-    if (prior !== undefined) {
-      throw new Error(
-        `the merged ${what} declare ${JSON.stringify(prior)} and ${JSON.stringify(name)}, ` +
-          "which collide - two settings layers claim one name; rename one",
-      );
-    }
-    seen.set(fold(name), name);
-  }
-}
-
 /** The fleet's document for a selection: the layers of `layerPaths`
  *  folded in order, before the overlay, the override, and the tracking
  *  labels join. */

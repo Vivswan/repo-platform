@@ -212,9 +212,14 @@ class Delivery {
     return ["git", "-C", this.targetDir, ...args];
   }
 
+  /** An open report outranks an older closed one: it is the one being
+   *  watched, so a clean run closes it and a failure refreshes it. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
     if (login.exitCode !== 0) return null;
+    // gh refuses `--slurp` beside `--jq`, so the filter runs per page and
+    // prints one line per matching issue; created-ascending, the first
+    // line across the pages is the oldest.
     const list = this.run(
       [
         "gh",
@@ -223,7 +228,6 @@ class Delivery {
         "--method",
         "GET",
         "--paginate",
-        "--slurp",
         "-f",
         "state=all",
         "-f",
@@ -235,16 +239,20 @@ class Delivery {
         "-F",
         "per_page=100",
         "--jq",
-        `[.[][] | select(has("pull_request") | not) | select(.title == env.ISSUE_TITLE)] | first | if . == null then "" else "\\(.number) \\(.state)" end`,
+        `.[] | select(has("pull_request") | not) | select(.title == env.ISSUE_TITLE) | "\\(.number) \\(.state)"`,
       ],
       "gh api issues GET",
       { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
     );
     if (list.exitCode !== 0) return null;
-    const found = list.stdout.trim();
-    if (found === "") return "";
-    const [number, state] = found.split(" ");
-    return { number, state };
+    const reports = list.stdout
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => {
+        const [number, state] = line.split(" ");
+        return { number, state };
+      });
+    return reports.find((report) => report.state === "open") ?? reports[0] ?? "";
   }
 
   fileFailure(reason: string): never {

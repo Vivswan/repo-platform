@@ -30,6 +30,7 @@ const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
 
+// Like the real gh, the stub refuses `--slurp` beside `--jq` before any request.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
   'case "$*" in',
@@ -42,6 +43,7 @@ const GIT_LINES = [
 ];
 const GH_LINES = [
   'printf "gh %s\\n" "$*" >>"$STUB_SEQUENCE"',
+  'if [[ " $* " == *" --slurp "* && ( " $* " == *" --jq "* || " $* " == *" -q "* || " $* " == *" --template "* || " $* " == *" -t "* ) ]]; then echo "the \\`--slurp\\` option is not supported with \\`--jq\\` or \\`--template\\`" >&2; exit 1; fi',
   'case "$*" in',
   '  "${STUB_GH_FAIL:-<none>}"*) echo "gh: HTTP 502" >&2; exit 1 ;;',
   '  "api user "*) echo token-bot ;;',
@@ -348,6 +350,22 @@ describe("deliver.ts", () => {
     const patch = result.gh.find((argv) => argv[2] === `repos/${TARGET}/issues/41`);
     expect(patch).toContain("state=closed");
   });
+
+  test.each([
+    ["a clean delivery", {}, "opened", "state=closed"],
+    ["a failed delivery", { STUB_PUSH_FAIL: "1" }, "failed", "state=open"],
+  ])(
+    "%s addresses the open failure report, never the older closed one",
+    (_, stub, verdict, state) => {
+      const result = run({ stub: { STUB_DIRTY: "1", ...stub, STUB_ISSUE: "8 closed\n12 open\n" } });
+      silent(result);
+      expect(result.verdict).toBe(verdict);
+      const patches = result.gh
+        .filter((argv) => argv[1] === "api" && argv[4] === "PATCH")
+        .map((argv) => [argv[2], argv.find((word) => word.startsWith("state="))]);
+      expect(patches).toEqual([[`repos/${TARGET}/issues/12`, state]]);
+    },
+  );
 
   test("a failure the target cannot take (the issue write refused) leaves no verdict and exits red", () => {
     const result = run({ writer: "failure", stub: { STUB_ISSUE_FAIL: "1" } });

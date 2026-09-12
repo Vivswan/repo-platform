@@ -10,21 +10,23 @@
 
 import { readFileSync } from "node:fs";
 import {
+  duplicateNames,
+  entryName,
   isLayerMapping,
   isMapping,
   type LayerValue,
   type MergedSettings,
   type MergedValue,
-  parseSettingsDoc,
+  NAME_FOLDS,
+  parseLayerFile,
   rulesetLabel,
   ruleType,
   type SettingsLayer,
 } from "./settings_document.ts";
 
-/** The list sections merged as name-keyed unions. `fold` decides when two
- *  entries are the same entry (labels case-insensitive, like GitHub;
- *  rulesets exact). `combine` decides what a same-name collision means:
- *  a label is REPLACED wholesale by the higher layer, while a ruleset is
+/** The list sections merged as name-keyed unions, under the folds of
+ *  NAME_FOLDS. `combine` decides what a same-name collision means: a
+ *  label is REPLACED wholesale by the higher layer, while a ruleset is
  *  merged key by key so a lower layer cannot be erased by a higher one
  *  that only wants to add a rule. */
 const NAME_KEYED: Record<
@@ -34,8 +36,11 @@ const NAME_KEYED: Record<
     combine: (lower: LayerValue, higher: LayerValue) => LayerValue;
   }
 > = {
-  labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
-  rulesets: { fold: (name) => name, combine: (lower, higher) => mergeRulesetEntry(lower, higher) },
+  labels: { fold: NAME_FOLDS.labels, combine: (_lower, higher) => higher },
+  rulesets: {
+    fold: NAME_FOLDS.rulesets,
+    combine: (lower, higher) => mergeRulesetEntry(lower, higher),
+  },
 };
 
 /** A layer value that is present: what is left of LayerValue once the
@@ -175,11 +180,6 @@ export function mergeRulesetEntry(lower: LayerValue, higher: LayerValue): LayerV
   return merged;
 }
 
-function entryName(entry: unknown): string | null {
-  if (!isMapping(entry)) return null;
-  return typeof entry.name === "string" ? entry.name : null;
-}
-
 /** Lower-layer entries in order, each combined with the same-name
  *  higher-layer entry when one exists; higher-only entries (and nameless
  *  ones, which the apply will reject on its own terms) appended in higher
@@ -232,30 +232,12 @@ export function nameKeyedUnion(
  *  the rest ride through as extras, so the apply would fight itself over
  *  the label. Returned as texts for the render to hold on. */
 export function duplicateNameWarnings(repo: SettingsLayer, where: string): string[] {
-  const warnings: string[] = [];
-  for (const [section, { fold }] of Object.entries(NAME_KEYED)) {
-    const declared = repo[section];
-    // Undeclared, or the dialect's null opt-out; anything else the parse
-    // boundary guarantees is a list of mappings.
-    if (declared === undefined || declared === null) continue;
-    const entries = declared as LayerValue[];
-    const seen = new Map<string, string>();
-    for (const entry of entries) {
-      const name = entryName(entry);
-      if (name === null) continue;
-      const prior = seen.get(fold(name));
-      if (prior !== undefined) {
-        warnings.push(
-          `${where} declares ${section} ${JSON.stringify(prior)} and ${JSON.stringify(name)}, ` +
-            "which the apply treats as one name - only the first entry takes effect in the " +
-            "merge; remove the duplicate",
-        );
-      } else {
-        seen.set(fold(name), name);
-      }
-    }
-  }
-  return warnings;
+  return duplicateNames(repo).map(
+    ({ section, prior, name }) =>
+      `${where} declares ${section} ${JSON.stringify(prior)} and ${JSON.stringify(name)}, ` +
+      "which the apply treats as one name - only the first entry takes effect in the " +
+      "merge; remove the duplicate",
+  );
 }
 
 /** Two plain objects merged key by key, the higher winning; a higher
@@ -382,7 +364,7 @@ export const GITHUB_ACTIONS_APP_ID = 15368;
  *  ruleset must require ALL_GREEN_CONTEXT, and every required-check entry
  *  must pin integration_id to GitHub Actions. */
 export function loadOverrideLayer(path: string): SettingsLayer {
-  const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
+  const data = parseLayerFile(readFileSync(path, "utf-8"), path);
   const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];
   const main = rulesets.find((entry) => isMapping(entry) && entry.name === "main");
   const mainRules: unknown[] = isMapping(main) && Array.isArray(main.rules) ? main.rules : [];

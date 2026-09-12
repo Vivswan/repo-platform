@@ -109,7 +109,7 @@ export function keepReason(target: string, path: string, records: Records): stri
 
 /** `git mv` inside the target, so the rename lands in the sync commit as
  *  one; the destination's directory is made first. */
-export function gitMove(target: string, from: string, to: string): void {
+function gitMove(target: string, from: string, to: string): void {
   insideTarget(target, from);
   mkdirSync(dirname(insideTarget(target, to)), { recursive: true });
   const result = capture(["git", "-C", target, "mv", "--", from, to]);

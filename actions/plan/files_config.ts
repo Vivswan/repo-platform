@@ -35,18 +35,14 @@ interface SourcedEntry extends EntryBase {
 
 export interface ManagedEntry extends SourcedEntry {
   class: "managed";
-  /** The starter path the file at this entry's path moves to, verbatim,
-   *  before the write: the class flip of this path from starter to managed. */
-  displaces?: string;
 }
 
 /** A managed entry with no tree source: the writer renders the settings
- *  document from the layers and the overlay at `displaces`, the starter
- *  this path held before the render existed. */
+ *  document from the layers and the repository's overlay at `overlay`. */
 export interface RenderedEntry extends EntryBase {
   class: "managed";
   render: "settings";
-  displaces: string;
+  overlay: string;
 }
 
 export interface StarterEntry extends SourcedEntry {
@@ -104,7 +100,7 @@ const fileSchema = z.strictObject({
   blocks: z.string().min(1).optional(),
   target: z.string().min(1).optional(),
   render: z.enum(["settings"]).optional(),
-  displaces: z.string().min(1).optional(),
+  overlay: z.string().min(1).optional(),
 });
 
 const settingsSchema = z.strictObject({
@@ -342,19 +338,19 @@ export function whenKey(when: When | null): string {
   });
 }
 
-/** Whether the starters at a displaced path are selected exactly when the
- *  displacing entry is: an unconditional displacer over one unconditional
- *  starter or a private true/false pair, or a displacer whose condition
+/** Whether the starters at an overlay path are selected exactly when the
+ *  rendered entry is: an unconditional rendered entry over one unconditional
+ *  starter or a private true/false pair, or a rendered entry whose condition
  *  equals one starter's. Anything subtler is not proven and is refused. */
-export function starterCoverage(displacer: When | null, starters: (When | null)[]): boolean {
-  if (displacer === null) {
+export function starterCoverage(rendered: When | null, starters: (When | null)[]): boolean {
+  if (rendered === null) {
     if (starters.length === 1) return starters[0] === null;
     const visibilities = starters.map((when) =>
       when !== null && Object.keys(when).length === 1 ? when.private : undefined,
     );
     return starters.length === 2 && visibilities.includes(true) && visibilities.includes(false);
   }
-  const key = whenKey(displacer);
+  const key = whenKey(rendered);
   return starters.some((when) => whenKey(when) === key);
 }
 
@@ -400,19 +396,20 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.class !== "split" && entry.region !== undefined) {
       problems.push(`${where}: region applies to split entries only`);
     }
-    if (entry.class !== "managed") {
-      if (entry.render !== undefined)
-        problems.push(`${where}: render applies to managed entries only`);
-      if (entry.displaces !== undefined) {
-        problems.push(`${where}: displaces applies to managed entries only`);
-      }
+    if (entry.class !== "managed" && entry.render !== undefined) {
+      problems.push(`${where}: render applies to managed entries only`);
+    }
+    if (entry.render === undefined && entry.overlay !== undefined) {
+      problems.push(`${where}: overlay applies to rendered entries only`);
     }
     if (entry.render !== undefined) {
       if (entry.source !== undefined || entry.blocks !== undefined) {
         problems.push(`${where}: a rendered entry has no source or blocks`);
       }
-      if (entry.displaces === undefined) {
-        problems.push(`${where}: a rendered entry needs displaces, the overlay it renders from`);
+      if (entry.overlay === undefined) {
+        problems.push(
+          `${where}: a rendered entry needs overlay, the repository file it renders from`,
+        );
       }
     }
     if (entry.class === "link") {
@@ -430,16 +427,15 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.target !== undefined) {
       problems.push(`${where}: target applies to link entries only`);
     }
-    if (entry.class === "managed" && entry.render !== undefined && entry.displaces !== undefined) {
+    if (entry.class === "managed" && entry.render !== undefined && entry.overlay !== undefined) {
       return {
         path: entry.path,
         when,
         class: "managed",
         render: entry.render,
-        displaces: entry.displaces,
+        overlay: entry.overlay,
       };
     }
-    const displacing = entry.displaces === undefined ? {} : { displaces: entry.displaces };
     const source = entry.source ?? `${SOURCE_PREFIX}${when?.modules?.[0] ?? "base"}/${entry.path}`;
     if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
       problems.push(`${where}: source '${source}' must be a clean path under ${SOURCE_PREFIX}`);
@@ -450,7 +446,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       when,
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
     };
-    if (entry.class === "managed") return { ...base, class: "managed", ...displacing };
+    if (entry.class === "managed") return { ...base, class: "managed" };
     if (entry.class === "starter") return { ...base, class: "starter" };
     if (entry.region === undefined) {
       problems.push(`${where}: a split entry needs a region (hash or html)`);
@@ -469,24 +465,24 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   const filePaths = new Set(files.map((entry) => entry.path));
   const retiredPaths = new Set(data.retired.map((entry) => entry.path));
   for (const [index, entry] of files.entries()) {
-    if (entry.class !== "managed" || entry.displaces === undefined) continue;
+    if (!("render" in entry)) continue;
     const where = `files: ${entry.path}`;
-    const target = entry.displaces;
+    const target = entry.overlay;
     const problem = pathProblem(target);
-    if (problem !== null) problems.push(`${where}: displaces ${target}, which ${problem}`);
-    if (target === entry.path) problems.push(`${where}: displaces its own path`);
-    if (retiredPaths.has(target)) problems.push(`${where}: displaces ${target}, a retired path`);
-    if (target === MANIFEST_NAME) problems.push(`${where}: displaces the manifest`);
+    if (problem !== null) problems.push(`${where}: overlay ${target}, which ${problem}`);
+    if (target === entry.path) problems.push(`${where}: overlay names its own path`);
+    if (retiredPaths.has(target)) problems.push(`${where}: overlay ${target}, a retired path`);
+    if (target === MANIFEST_NAME) problems.push(`${where}: overlay names the manifest`);
     const atTarget = files.filter((other) => other.path === target);
     if (atTarget.length === 0 || atTarget.some((other) => other.class !== "starter")) {
       problems.push(
-        `${where}: displaces ${target}, which must be written by starter entries only - the displacement target is a starter of the same selection`,
+        `${where}: overlay ${target}, which must be written by starter entries only - the overlay is the repository's own file, seeded once`,
       );
     } else if (files.some((other, position) => other.path === target && position > index)) {
       // The write loop runs in files.yml order and a render reads the
       // starter's file the same run it is created.
       problems.push(
-        `${where}: displaces ${target}, whose starter entries must be listed before it - the writer writes them first so the render finds the overlay`,
+        `${where}: overlay ${target}, whose starter entries must be listed before it - the writer writes them first so the render finds the overlay`,
       );
     } else if (
       !starterCoverage(
@@ -495,7 +491,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       )
     ) {
       problems.push(
-        `${where}: displaces ${target}, whose starters are not selected exactly when this entry is - an unconditional displacer needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when`,
+        `${where}: overlay ${target}, whose starters are not selected exactly when this entry is - an unconditional rendered entry needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when`,
       );
     }
   }

@@ -12,7 +12,7 @@ const temp = tempDirs();
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
-const BUILD = "x".repeat(40);
+const BUILD = "0".repeat(40);
 
 function writtenAgents(label: string, modules: string[]): string {
   const target = temp.dir(`agents-tail-${label}-`);
