@@ -446,7 +446,6 @@ describe("spawnSyncHazard agrees with bun about a slot past stderr", () => {
 describe("asyncSpawnMismatches", () => {
   test("the enumeration pins the exact landed set, by name", () => {
     expect(Object.keys(ASYNC_SPAWN_FILES).sort()).toEqual([
-      "actions/fuzz-issue/fuzz-issue.ts",
       "actions/release-health/release-health.ts",
       "scripts/run_tests.ts",
       "tests/actions/pages-site/mermaid_labels.test.ts",

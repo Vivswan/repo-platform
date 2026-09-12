@@ -1,9 +1,19 @@
 /**
- * Knows nothing about any repo's fuzzer: the producer writes the replay command and this script only assembles the issue.
- * The failure-report layout it reads is the contract in docs/fuzzer.md ("The failure-report contract (v1)").
+ * Assembles the text the composite hands to the stock issue action - the issue body (report mode) or the close comment (resolve mode) -
+ * into a file under RUNNER_TEMP named by the `file` output; the gh and issue plumbing is action.yml's.
+ * Knows nothing about any repo's fuzzer: the producer writes the replay command, and the failure-report layout it reads
+ * is the contract in docs/fuzzer.md ("The failure-report contract (v1)").
  */
 
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join } from "node:path";
 
 const REPORT_LINES = 60;
@@ -13,28 +23,6 @@ const MAX_BODY = 60_000;
 const MAX_BLOCK_CHARS = 8_000;
 /** Contract v1: failure directory names are plain identifiers. */
 const DIR_NAME = /^[A-Za-z0-9._-]+$/;
-/** Must match the `title` input default in action.yml (the test asserts it). */
-export const DEFAULT_TITLE = "Nightly fuzz failures";
-/** Each must match its input default in action.yml (the test asserts it)
- *  and the fuzzer module's tracking_label in files.yml (the labels ssot rule pins it). */
-export const DEFAULT_LABEL_COLOR = "B60205";
-export const DEFAULT_LABEL_DESCRIPTION = "Automated nightly fuzz failure";
-
-/** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
-export type GhRunner = (args: string[]) => Promise<string>;
-
-const gh: GhRunner = async (args) => {
-  const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} failed (${code}): ${stderr.trim()}`);
-  }
-  return stdout;
-};
 
 export function failureDirs(root: string): string[] {
   if (!existsSync(root)) {
@@ -243,267 +231,64 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   return parts.join("\n");
 }
 
-/** gh issue list page size; resolve drains repeated listings, so this only
- * bounds one round trip, not how many issues a green night can close. */
-const OPEN_ISSUE_LIMIT = 100;
-
-/** gh lists newest first, so fileIssue's limit-1 read is the newest open issue.
- * Humans can label extra issues into the stream, so one open issue per label is a goal, not an invariant. */
-async function openIssues(
-  run: GhRunner,
-  repo: string,
-  label: string,
-  limit: number = OPEN_ISSUE_LIMIT,
-): Promise<Array<{ number: number; assignees: Array<{ login: string }> }>> {
-  // The nightly module's report job runs this action without a checkout,
-  // so gh has no working tree to infer a repository from; every invocation
-  // names it (same rule as release-health.ts).
-  const json = await run([
-    "issue",
-    "list",
-    "--repo",
-    repo,
-    "--label",
-    label,
-    "--state",
-    "open",
-    "--limit",
-    String(limit),
-    "--json",
-    "number,assignees",
-  ]);
-  return JSON.parse(json) as Array<{ number: number; assignees: Array<{ login: string }> }>;
-}
-
-/**
- * An issue created with a workflow token fires no issues:opened event, so the auto-assign module cannot catch it.
- * An org owner is not assignable, and the nightly pipeline must not gain a failure path over assignment,
- * so a failed assignment logs a notice and the filing stands.
- */
-export async function assignOwner(run: GhRunner, repo: string, issueNumber: number): Promise<void> {
-  const owner = repo.split("/")[0];
-  try {
-    await run(["issue", "edit", String(issueNumber), "--repo", repo, "--add-assignee", owner]);
-    console.log(`assigned @${owner} to #${issueNumber}`);
-  } catch {
-    console.log(
-      `::notice::could not assign @${owner} to #${issueNumber} (best-effort: an org owner is not assignable); the issue filing itself succeeded`,
-    );
-  }
-}
-
-export function issueNumberFromUrl(url: string): number | undefined {
-  const match = url.trim().match(/\/(\d+)\s*$/);
-  return match ? Number(match[1]) : undefined;
-}
-
-/** No leading dash (gh would parse it as a flag), within GitHub's 50-character label limit.
- * Hand-copied into actions/plan/registration.ts and actions/release-health/release-health.ts; the tracking-label-regex ssot rule pins the copies. */
-export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
-
-/** Case-insensitive, the way GitHub deduplicates labels. */
-async function labelExists(run: GhRunner, repo: string, label: string): Promise<boolean> {
-  // --search is best-match ordered but not contractually so; a high limit
-  // keeps an exact match from hiding past the default 30 in a label-heavy
-  // repo (a miss would send fileIssue into a doomed duplicate create).
-  const json = await run([
-    "label",
-    "list",
-    "--repo",
-    repo,
-    "--search",
-    label,
-    "--limit",
-    "1000",
-    "--json",
-    "name",
-  ]);
-  const labels = JSON.parse(json) as Array<{ name: string }>;
-  return labels.some((entry) => entry.name.toLowerCase() === label.toLowerCase());
-}
-
-/** An already-assigned open issue is left alone: a human may have deliberately reassigned it. */
-export async function fileIssue(
-  run: GhRunner,
-  repo: string,
-  body: string,
-  label: string,
-  title: string,
-  labelColor: string = DEFAULT_LABEL_COLOR,
-  labelDescription: string = DEFAULT_LABEL_DESCRIPTION,
-): Promise<number | undefined> {
-  // Create the label only when it is missing (checked by listing, not by
-  // sniffing create-failure messages): creating with --force would silently
-  // repaint a pre-existing label the repo owns (someone pointing this at
-  // `bug`), and any real create failure must propagate.
-  if (!(await labelExists(run, repo, label))) {
-    await run([
-      "label",
-      "create",
-      label,
-      "--repo",
-      repo,
-      "--color",
-      labelColor,
-      "--description",
-      labelDescription,
-    ]);
-  }
-
-  const existing = (await openIssues(run, repo, label, 1))[0];
-  if (existing !== undefined) {
-    await run(["issue", "comment", String(existing.number), "--repo", repo, "--body", body]);
-    console.log(`commented on existing #${existing.number}`);
-    if (existing.assignees.length === 0) {
-      await assignOwner(run, repo, existing.number);
-    }
-    return existing.number;
-  }
-  const url = await run([
-    "issue",
-    "create",
-    "--repo",
-    repo,
-    "--label",
-    label,
-    "--title",
-    title,
-    "--body",
-    body,
-  ]);
-  console.log(`opened ${url.trim()}`);
-  const number = issueNumberFromUrl(url);
-  if (number !== undefined) {
-    await assignOwner(run, repo, number);
-  } else {
-    // Same best-effort rule as a failed assignment: the filing succeeded,
-    // so an unparsable create URL must not become a failure - but it must
-    // not be silent either (the issue stays unassigned and the caller's
-    // issue-number output stays empty).
-    console.log(
-      "::notice::could not parse the created issue's number from gh's create URL; owner assignment skipped",
-    );
-  }
-  return number;
-}
-
-/**
- * Every open labeled issue is closed: the release-health gate blocks while any carries the label, so one left open
- * (a human labeling a related issue) would keep releases blocked under a log saying all was resolved.
- * The fuzz wording hedges on unpinned crashes, which one green night cannot prove; a test pins it for the fleet fuzzer starters that pass no STREAM.
- */
-export async function resolveIssue(
-  run: GhRunner,
-  repo: string,
-  label: string,
-  env: NodeJS.ProcessEnv,
-  stream: Stream = "fuzz",
-): Promise<void> {
-  const closed = new Set<number>();
-  let page = (await openIssues(run, repo, label)).map((issue) => issue.number);
-  if (page.length === 0) {
-    console.log(`no open ${label} issue to resolve`);
-    return;
-  }
+/** The fuzz wording hedges on unpinned crashes, which one green night cannot prove; a test pins it for the fleet fuzzer starters that pass no STREAM. */
+export function closeComment(env: NodeJS.ProcessEnv, stream: Stream = "fuzz"): string {
   const date = new Date().toISOString().slice(0, 10);
   const url = runUrl(env);
-  const body =
-    stream === "generic"
-      ? [
-          `Nightly run passed on ${date}.${url ? ` Run: ${url}` : ""}`,
-          "",
-          "Closing; the next failing night opens a fresh issue.",
-        ].join("\n")
-      : [
-          `Nightly fuzz passed on ${date}.${url ? ` Run: ${url}` : ""}`,
-          "",
-          "Closing. If the crashing inputs reported here were pinned as regression",
-          "seeds, this pass replayed them; for anything not pinned, a green night is",
-          "weaker evidence, and the next red night opens a fresh issue.",
-        ].join("\n");
-  // One listing is a single page, so drain until the listing comes back
-  // empty. A lagging listing can re-serve just-closed issues; retrying a
-  // few stale rounds keeps that lag from stranding issues on later pages,
-  // while the bound keeps a permanently stale listing from looping forever.
-  let staleRounds = 0;
-  while (page.length > 0) {
-    const fresh = page.filter((number) => !closed.has(number));
-    if (fresh.length === 0) {
-      staleRounds += 1;
-      if (staleRounds >= 3) {
-        console.log(
-          `::warning::issue listing for '${label}' kept re-serving already-closed issues; ` +
-            "some open issues may remain (the next green night retries)",
-        );
-        break;
-      }
-    } else {
-      staleRounds = 0;
-      for (const number of fresh) {
-        await run(["issue", "comment", String(number), "--repo", repo, "--body", body]);
-        await run(["issue", "close", String(number), "--repo", repo, "--reason", "completed"]);
-        closed.add(number);
-      }
-    }
-    page = (await openIssues(run, repo, label)).map((issue) => issue.number);
-  }
-  console.log(`closed ${[...closed].map((number) => `#${number}`).join(", ")}`);
+  const run = url ? ` Run: ${url}` : "";
+  return stream === "generic"
+    ? [
+        `Nightly run passed on ${date}.${run}`,
+        "",
+        "Closing; the next failing night opens a fresh issue.",
+      ].join("\n")
+    : [
+        `Nightly fuzz passed on ${date}.${run}`,
+        "",
+        "Closing. If the crashing inputs reported here were pinned as regression",
+        "seeds, this pass replayed them; for anything not pinned, a green night is",
+        "weaker evidence, and the next red night opens a fresh issue.",
+      ].join("\n");
 }
 
-async function main(): Promise<number> {
+function main(): number {
   const mode = process.env.MODE || "report";
-  const repo = process.env.GITHUB_REPOSITORY;
-  if (!repo) {
-    console.error("error: GITHUB_REPOSITORY is required");
+  if (mode !== "report" && mode !== "resolve") {
+    console.error(`error: unknown MODE '${mode}' (expected report or resolve)`);
     return 1;
   }
-  const label = process.env.LABEL;
-  if (!label || !LABEL_RE.test(label)) {
-    console.error(
-      "error: LABEL is required and must be a plain label (letters, digits, ._:- and spaces; no leading dash)",
-    );
-    return 1;
-  }
-  // Validated in every mode, symmetric with MODE itself.
   const stream = process.env.STREAM || "fuzz";
   if (stream !== "fuzz" && stream !== "generic") {
     console.error(`error: unknown STREAM '${stream}' (expected fuzz or generic)`);
     return 1;
   }
-  if (mode === "resolve") {
-    await resolveIssue(gh, repo, label, process.env, stream);
-    return 0;
-  }
-  if (mode !== "report") {
-    console.error(`error: unknown MODE '${mode}' (expected report or resolve)`);
+  const runnerTemp = process.env.RUNNER_TEMP;
+  const outputFile = process.env.GITHUB_OUTPUT;
+  if (!runnerTemp || !outputFile) {
+    console.error("error: RUNNER_TEMP and GITHUB_OUTPUT are required (the runner sets both)");
     return 1;
   }
-  const title = process.env.TITLE || DEFAULT_TITLE;
   const artifactsDir = process.env.ARTIFACTS_DIR;
-  const body = artifactsDir
-    ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "", stream)
-    : buildGenericBody(process.env);
-  const number = await fileIssue(
-    gh,
-    repo,
-    body,
-    label,
-    title,
-    process.env.LABEL_COLOR || DEFAULT_LABEL_COLOR,
-    process.env.LABEL_DESCRIPTION || DEFAULT_LABEL_DESCRIPTION,
-  );
-  const outputFile = process.env.GITHUB_OUTPUT;
-  if (number !== undefined && outputFile) {
-    appendFileSync(outputFile, `issue-number=${number}\n`);
+  let text: string;
+  if (mode === "resolve") {
+    text = closeComment(process.env, stream);
+  } else if (artifactsDir) {
+    text = buildBody(
+      failureDirs(artifactsDir),
+      process.env,
+      process.env.ARTIFACT_NAME || "",
+      stream,
+    );
+  } else {
+    text = buildGenericBody(process.env);
   }
+  // A fresh directory per run: one job can run the action once per stream.
+  const file = join(mkdtempSync(join(runnerTemp, "fuzz-issue-")), `${mode}.md`);
+  writeFileSync(file, text);
+  appendFileSync(outputFile, `file=${file}\n`);
   return 0;
 }
 
 if (import.meta.main) {
-  try {
-    process.exit(await main());
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
+  process.exit(main());
 }

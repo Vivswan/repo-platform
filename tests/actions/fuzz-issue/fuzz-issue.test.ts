@@ -1,4 +1,4 @@
-// The issue lifecycle runs through an injected fake gh runner; the real gh calls need a live GitHub and are not covered here.
+// The body assembly is covered whole, through the script the composite runs; the gh plumbing lives in action.yml and its own test.
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -8,23 +8,16 @@ import {
   buildBody,
   buildGenericBody,
   capChars,
-  DEFAULT_LABEL_COLOR,
-  DEFAULT_LABEL_DESCRIPTION,
-  DEFAULT_TITLE,
+  closeComment,
   failureDirs,
-  fileIssue,
-  type GhRunner,
   head,
-  issueNumberFromUrl,
-  LABEL_RE,
-  resolveIssue,
   runUrl,
   type Stream,
 } from "../../../actions/fuzz-issue/fuzz-issue.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
-const ACTION_DIR = resolve(import.meta.dir, "../../../actions/fuzz-issue");
 
 const env = {
   GITHUB_SERVER_URL: "https://github.com",
@@ -43,46 +36,57 @@ afterAll(() => setSystemTime());
 
 describe("head", () => {
   const five = ["1", "2", "3", "4", "5"].join("\n");
-  const cases: { text: string; lines: number; chars: number; expected: string; reason: string }[] =
-    [
-      { text: "a\nb\nc", lines: 5, chars: 100, expected: "a\nb\nc", reason: "within both limits" },
-      {
-        text: `${["1", "2", "3"].join("\n")}\n`,
-        lines: 3,
-        chars: 100,
-        expected: "1\n2\n3",
-        reason: "a single trailing newline is not a line",
-      },
-      {
-        text: five,
-        lines: 2,
-        chars: 100,
-        expected: "1\n2\n... (3 more lines)",
-        reason: "the line cap",
-      },
-      {
-        text: five,
-        lines: 10,
-        chars: 9,
-        expected: five,
-        reason: "text that exactly fills the character cap needs no marker",
-      },
-      {
-        text: Array(5).fill("abcdefghij").join("\n"),
-        lines: 10,
-        // Two lines (21 chars) plus the reserved "\n... (5 more lines)" marker (19) fit; a third would not.
-        chars: 45,
-        expected: "abcdefghij\nabcdefghij\n... (3 more lines)",
-        reason: "the character cap keeps whole lines and counts the cut ones",
-      },
-      {
-        text: `${"x".repeat(50)}\nshort`,
-        lines: 10,
-        chars: 20,
-        expected: `${"x".repeat(50)}\n... (1 more lines)`,
-        reason: "a first line over the cap is kept for capChars to cut",
-      },
-    ];
+  const cases: {
+    text: string;
+    lines: number;
+    chars: number;
+    expected: string;
+    reason: string;
+  }[] = [
+    {
+      text: "a\nb\nc",
+      lines: 5,
+      chars: 100,
+      expected: "a\nb\nc",
+      reason: "within both limits",
+    },
+    {
+      text: `${["1", "2", "3"].join("\n")}\n`,
+      lines: 3,
+      chars: 100,
+      expected: "1\n2\n3",
+      reason: "a single trailing newline is not a line",
+    },
+    {
+      text: five,
+      lines: 2,
+      chars: 100,
+      expected: "1\n2\n... (3 more lines)",
+      reason: "the line cap",
+    },
+    {
+      text: five,
+      lines: 10,
+      chars: 9,
+      expected: five,
+      reason: "text that exactly fills the character cap needs no marker",
+    },
+    {
+      text: Array(5).fill("abcdefghij").join("\n"),
+      lines: 10,
+      // Two lines (21 chars) plus the reserved "\n... (5 more lines)" marker (19) fit; a third would not.
+      chars: 45,
+      expected: "abcdefghij\nabcdefghij\n... (3 more lines)",
+      reason: "the character cap keeps whole lines and counts the cut ones",
+    },
+    {
+      text: `${"x".repeat(50)}\nshort`,
+      lines: 10,
+      chars: 20,
+      expected: `${"x".repeat(50)}\n... (1 more lines)`,
+      reason: "a first line over the cap is kept for capChars to cut",
+    },
+  ];
 
   test.each(cases)(
     "keeps the head within $lines lines and $chars chars ($reason)",
@@ -133,7 +137,10 @@ describe("failureDirs", () => {
 describe("blockTitle", () => {
   test.each([
     { report: "# fuzz: target crashed\n\nbody", reason: "an h1 first line" },
-    { report: "## fuzz: target crashed\n", reason: "every leading marker is stripped, not one" },
+    {
+      report: "## fuzz: target crashed\n",
+      reason: "every leading marker is stripped, not one",
+    },
   ])("uses the report's first heading ($reason)", ({ report }) => {
     expect(blockTitle("/x/target", report)).toBe("fuzz: target crashed");
   });
@@ -175,7 +182,11 @@ describe("buildBody", () => {
     utimesSync(orphan, new Date(2_000_000), new Date(2_000_000));
   });
 
-  const trailers: { artifactName: string; reason: string; trailer: string[] }[] = [
+  const trailers: {
+    artifactName: string;
+    reason: string;
+    trailer: string[];
+  }[] = [
     {
       artifactName: "fuzz-failures-1",
       reason: "names the uploaded artifact",
@@ -419,273 +430,12 @@ describe("buildGenericBody", () => {
   });
 });
 
-function fakeGh(
-  openNumber?: number,
-  labelTaken = false,
-  assignees: Array<{ login: string }> = [],
-): { run: GhRunner; calls: string[][] } {
-  const calls: string[][] = [];
-  const run: GhRunner = async (args) => {
-    calls.push(args);
-    if (args[0] === "label" && args[1] === "list") {
-      return JSON.stringify(labelTaken ? [{ name: args[args.indexOf("--search") + 1] }] : []);
-    }
-    if (args[0] === "issue" && args[1] === "list") {
-      return JSON.stringify(openNumber === undefined ? [] : [{ number: openNumber, assignees }]);
-    }
-    if (args[0] === "issue" && args[1] === "create") {
-      return "https://github.com/o/r/issues/7\n";
-    }
-    return "";
-  };
-  return { run, calls };
-}
-
-async function withCapturedLog(body: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...args: unknown[]) => {
-    lines.push(args.map(String).join(" "));
-  };
-  try {
-    await body();
-  } finally {
-    console.log = original;
-  }
-  return lines;
-}
-
-/** The exact `gh label list` argv fileIssue issues for `label`. */
-const labelListCall = (label: string): string[] => [
-  "label",
-  "list",
-  "--repo",
-  "o/r",
-  "--search",
-  label,
-  "--limit",
-  "1000",
-  "--json",
-  "name",
-];
-
-/** The exact `gh issue list` argv for `label` at page size `limit`. */
-const issueListCall = (label: string, limit: string): string[] => [
-  "issue",
-  "list",
-  "--repo",
-  "o/r",
-  "--label",
-  label,
-  "--state",
-  "open",
-  "--limit",
-  limit,
-  "--json",
-  "number,assignees",
-];
-
-describe("fileIssue", () => {
-  test.each([
-    {
-      reason: "the fuzz stream with the default title",
-      label: "fuzz-nightly",
-      title: DEFAULT_TITLE,
-      body: "body",
-    },
-    {
-      reason: "a no-artifacts stream passes its label, title, and generic body straight through",
-      label: "nightly-failure",
-      title: "Nightly CI failures",
-      body: buildGenericBody({ ...env, GITHUB_WORKFLOW: "Nightly" } as NodeJS.ProcessEnv),
-    },
-  ])(
-    "create path: creates the missing label, opens the labeled issue, assigns the owner ($reason)",
-    async ({ label, title, body }) => {
-      // A workflow-token issue fires no issues:opened event, so assignment
-      // must happen at creation - the filer itself owns it now.
-      const { run, calls } = fakeGh(undefined);
-      expect(await fileIssue(run, "o/r", body, label, title)).toBe(7);
-      expect(calls).toEqual([
-        labelListCall(label),
-        [
-          "label",
-          "create",
-          label,
-          "--repo",
-          "o/r",
-          "--color",
-          DEFAULT_LABEL_COLOR,
-          "--description",
-          DEFAULT_LABEL_DESCRIPTION,
-        ],
-        issueListCall(label, "1"),
-        ["issue", "create", "--repo", "o/r", "--label", label, "--title", title, "--body", body],
-        ["issue", "edit", "7", "--repo", "o/r", "--add-assignee", "o"],
-      ]);
-    },
-  );
-
-  test("comment path: comments on the open unassigned issue and assigns the owner, no create", async () => {
-    const { run, calls } = fakeGh(3, true);
-    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(3);
-    expect(calls).toEqual([
-      labelListCall("fuzz-nightly"),
-      issueListCall("fuzz-nightly", "1"),
-      ["issue", "comment", "3", "--repo", "o/r", "--body", "body"],
-      ["issue", "edit", "3", "--repo", "o/r", "--add-assignee", "o"],
-    ]);
-  });
-
-  test("an already-assigned open issue is left alone on the comment path", async () => {
-    // A human may have deliberately reassigned the tracking issue.
-    const { run, calls } = fakeGh(3, true, [{ login: "someone" }]);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
-  });
-
-  test("a failed assignment logs a notice and never fails the filing", async () => {
-    // An org-owned repo's owner is an org and not assignable; the filing
-    // must still succeed and return the number.
-    const calls: string[][] = [];
-    const run: GhRunner = async (args) => {
-      calls.push(args);
-      if (args[0] === "label" && args[1] === "list") return JSON.stringify([{ name: "l" }]);
-      if (args[0] === "issue" && args[1] === "list") return "[]";
-      if (args[0] === "issue" && args[1] === "create") return "https://github.com/o/r/issues/7\n";
-      if (args[0] === "issue" && args[1] === "edit") {
-        throw new Error("gh issue edit failed (1): could not assign user");
-      }
-      return "";
-    };
-    const logs = await withCapturedLog(async () => {
-      expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
-    });
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(true);
-    expect(logs.some((line) => line.startsWith("::notice::could not assign @o to #7"))).toBe(true);
-  });
-
-  test("an unparsable create URL logs a notice, skips assignment, never fails the filing", async () => {
-    const calls: string[][] = [];
-    const run: GhRunner = async (args) => {
-      calls.push(args);
-      if (args[0] === "label" && args[1] === "list") return JSON.stringify([{ name: "l" }]);
-      if (args[0] === "issue" && args[1] === "list") return "[]";
-      if (args[0] === "issue" && args[1] === "create") return "not a url\n";
-      return "";
-    };
-    const logs = await withCapturedLog(async () => {
-      expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBeUndefined();
-    });
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
-    expect(
-      logs.some((line) => line.startsWith("::notice::could not parse the created issue's number")),
-    ).toBe(true);
-  });
-
-  test("a caller-supplied label tuple reaches the create call", async () => {
-    const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(
-      run,
-      "o/r",
-      "body",
-      "nightly-failure",
-      "t",
-      "D93F0B",
-      "Automated nightly CI failure",
-    );
-    const create = calls.find((c) => c[0] === "label" && c[1] === "create");
-    expect(create?.[create.indexOf("--color") + 1]).toBe("D93F0B");
-    expect(create?.[create.indexOf("--description") + 1]).toBe("Automated nightly CI failure");
-  });
-
-  test("never touches a pre-existing label (no create, no repaint)", async () => {
-    // Someone pointing the action at `bug` must not get it repainted red.
-    const { run, calls } = fakeGh(9, true);
-    expect(await fileIssue(run, "o/r", "body", "bug", "t")).toBe(9);
-    expect(calls.some((c) => c[0] === "label" && c[1] === "create")).toBe(false);
-  });
-
-  test("a label-create failure propagates", async () => {
-    const run: GhRunner = async (args) => {
-      if (args[0] === "label" && args[1] === "list") return "[]";
-      if (args[0] === "label" && args[1] === "create") {
-        throw new Error("gh label create failed (4): auth required");
-      }
-      return "";
-    };
-    expect(fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).rejects.toThrow("auth required");
-  });
-});
-
-describe("repo naming", () => {
-  test("every gh invocation names the repo - report jobs have no checkout to infer from", async () => {
-    for (const openNumber of [undefined, 3] as const) {
-      const { run, calls } = fakeGh(openNumber);
-      await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-      await resolveIssue(run, "o/r", "fuzz-nightly", env);
-      for (const call of calls) {
-        expect(call[call.indexOf("--repo") + 1]).toBe("o/r");
-      }
-    }
-  });
-});
-
-describe("LABEL_RE", () => {
-  test("accepts plain labels including spaces and colons", () => {
-    for (const label of [
-      "fuzz-nightly",
-      "e2e-fuzz",
-      "autorelease: pending",
-      "python:uv",
-      "a.b_c",
-      "x".repeat(50),
-    ]) {
-      expect(LABEL_RE.test(label)).toBe(true);
-    }
-  });
-
-  test("rejects flag-like, empty, oversized, and structurally unsafe values", () => {
-    for (const label of [
-      "",
-      "-x",
-      "--help",
-      "#fuzz",
-      "a,b",
-      "a\nb",
-      "a\n",
-      'fuzz: nightly" x: y',
-      "x".repeat(51),
-    ]) {
-      expect(LABEL_RE.test(label)).toBe(false);
-    }
-  });
-});
-
-/**
- * A recording gh runner whose issue listings come from a queue, one page per
- * `issue list` call (empty once the queue drains), so a drain test sees the
- * close it just made instead of a permanently stale page.
- */
-function queuedGh(listings: number[][]): { run: GhRunner; calls: string[][] } {
-  const calls: string[][] = [];
-  const run: GhRunner = async (args) => {
-    calls.push(args);
-    if (args[0] === "issue" && args[1] === "list") {
-      return JSON.stringify((listings.shift() ?? []).map((number) => ({ number })));
-    }
-    return "";
-  };
-  return { run, calls };
-}
-
-describe("resolveIssue", () => {
+describe("closeComment", () => {
   test.each([
     {
       reason:
         "the omitted stream is the pre-input default, pinned verbatim for fleet fuzzer starters",
       stream: undefined,
-      label: "fuzz-nightly",
       comment: [
         `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
         "",
@@ -697,120 +447,113 @@ describe("resolveIssue", () => {
     {
       reason: "the generic stream names the run and carries no fuzz notions",
       stream: "generic" as Stream,
-      label: "nightly-failure",
       comment: [
         `Nightly run passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
         "",
         "Closing; the next failing night opens a fresh issue.",
       ],
     },
-  ])(
-    "comments then closes the open labeled issue, never assigns, and re-lists until empty ($reason)",
-    async ({ stream, label, comment }) => {
-      const { run, calls } = queuedGh([[5]]);
-      await resolveIssue(run, "o/r", label, env, stream);
-      expect(calls).toEqual([
-        issueListCall(label, "100"),
-        ["issue", "comment", "5", "--repo", "o/r", "--body", comment.join("\n")],
-        ["issue", "close", "5", "--repo", "o/r", "--reason", "completed"],
-        issueListCall(label, "100"),
-      ]);
-    },
-  );
-
-  test("no open issue is a silent no-op", async () => {
-    const { run, calls } = fakeGh(undefined);
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment")).toBe(false);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
+  ])("$reason", ({ stream, comment }) => {
+    expect(closeComment(env, stream)).toBe(comment.join("\n"));
   });
 
-  test("every open labeled issue is closed, not just the first", async () => {
-    // The release gate blocks while ANY open issue carries the label, so a
-    // green night must clear the whole set (a human can label extras in).
-    const calls: string[][] = [];
-    const run: GhRunner = async (args) => {
-      calls.push(args);
-      if (args[0] === "issue" && args[1] === "list") {
-        return JSON.stringify([{ number: 5 }, { number: 8 }]);
-      }
-      return "";
-    };
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    for (const number of ["5", "8"]) {
-      expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === number)).toBe(
-        true,
-      );
-      expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === number)).toBe(true);
-    }
-  });
-
-  test("a stale listing that re-serves closed issues does not strand later pages", async () => {
-    // Page 1 closes; the next listing lags, re-serving only just-closed
-    // numbers; the listing after that reveals the next page. The drain
-    // must push through the stale round and still close everything.
-    const listings = [
-      [{ number: 1 }, { number: 2 }],
-      [{ number: 1 }, { number: 2 }], // lagging: all already closed
-      [{ number: 3 }],
-      [],
-    ];
-    const calls: string[][] = [];
-    const run: GhRunner = async (args) => {
-      calls.push(args);
-      if (args[0] === "issue" && args[1] === "list") {
-        return JSON.stringify(listings.shift() ?? []);
-      }
-      return "";
-    };
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    for (const number of ["1", "2", "3"]) {
-      expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === number)).toBe(true);
-    }
-  });
-
-  test("a permanently stale listing terminates instead of looping", async () => {
-    const calls: string[][] = [];
-    const run: GhRunner = async (args) => {
-      calls.push(args);
-      if (args[0] === "issue" && args[1] === "list") {
-        return JSON.stringify([{ number: 4 }]); // never observes the close
-      }
-      return "";
-    };
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    expect(calls.filter((c) => c[0] === "issue" && c[1] === "close").length).toBe(1);
+  test("without a run URL the first line carries no link", () => {
+    expect(closeComment({} as NodeJS.ProcessEnv, "generic")).toStartWith(
+      `Nightly run passed on ${date}.\n`,
+    );
   });
 });
 
-describe("issueNumberFromUrl", () => {
-  test("parses the trailing number from a gh issue URL", () => {
-    expect(issueNumberFromUrl("https://github.com/o/r/issues/42\n")).toBe(42);
-  });
+describe("the script", () => {
+  const SCRIPT = resolve(import.meta.dir, "../../../actions/fuzz-issue/fuzz-issue.ts");
+  // The child keeps its own clock, so dates are matched by shape.
+  const DAY = String.raw`\d{4}-\d{2}-\d{2}`;
 
-  test("returns undefined when the URL has no trailing number", () => {
-    expect(issueNumberFromUrl("not a url")).toBeUndefined();
-  });
-});
-
-describe("action.yml input defaults", () => {
-  // No yaml dependency in this package: each default is a plain one-line
-  // scalar, so line extraction is exact enough.
-  const inputDefault = (name: string): string | undefined => {
-    const actionYml = readFileSync(join(ACTION_DIR, "action.yml"), "utf-8");
-    const re = new RegExp(`^ {2}${name}:\\n(?: {4}.+\\n)*? {4}default: (.+)$`, "m");
-    return actionYml.match(re)?.[1];
+  const run = (vars: Record<string, string | undefined>) => {
+    const root = temp.dir("fuzz-issue-script-");
+    const outputs = join(root, "outputs.txt");
+    writeFileSync(outputs, "");
+    const proc = boundedSpawnSync(["bun", SCRIPT], {
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME,
+        ...env,
+        RUNNER_TEMP: root,
+        GITHUB_OUTPUT: outputs,
+        ...vars,
+      },
+    });
+    const file = readFileSync(outputs, "utf8").match(/^file=(.+)$/m)?.[1];
+    return {
+      ...proc,
+      root,
+      file,
+      text: file === undefined ? undefined : readFileSync(file, "utf8"),
+    };
   };
 
+  test("report mode with an artifacts dir writes the failure-report body under RUNNER_TEMP and outputs its path", () => {
+    const failures = temp.dir("fuzz-issue-script-failures-");
+    mkdirSync(join(failures, "nm_frame"));
+    writeFileSync(
+      join(failures, "nm_frame", "report.md"),
+      "# fuzz: nm_frame crashed\n\n```bash\ncargo fuzz run nm_frame crash-abc\n```\n",
+    );
+    const result = run({
+      MODE: "report",
+      ARTIFACTS_DIR: failures,
+      ARTIFACT_NAME: "fuzz-failures-1",
+    });
+    expect([result.exitCode, result.stderr]).toEqual([0, ""]);
+    expect(result.file).toStartWith(join(result.root, "fuzz-issue-"));
+    expect(result.text).toMatch(
+      new RegExp(`^Nightly fuzz run on ${DAY} produced 1 failure report\\(s\\)\\.\n`),
+    );
+    expect(result.text).toContain(
+      "## fuzz: nm_frame crashed\n\n```bash\ncargo fuzz run nm_frame crash-abc\n```",
+    );
+    expect(result.text).toEndWith(
+      "\nThe full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.\nRun: https://github.com/o/r/actions/runs/42",
+    );
+  });
+
+  test("report mode without an artifacts dir writes the generic body", () => {
+    const result = run({
+      MODE: "report",
+      STREAM: "generic",
+      GITHUB_WORKFLOW: "Nightly",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.text).toMatch(new RegExp(`^\`Nightly\` failed on ${DAY}\\.\n`));
+    expect(result.text).toEndWith("\n\nRun: https://github.com/o/r/actions/runs/42");
+  });
+
+  test("resolve mode writes the stream's close comment", () => {
+    const result = run({ MODE: "resolve", STREAM: "generic" });
+    expect(result.exitCode).toBe(0);
+    expect(result.text).toMatch(
+      new RegExp(
+        `^Nightly run passed on ${DAY}\\. Run: https://github.com/o/r/actions/runs/42\n\nClosing; the next failing night opens a fresh issue\\.$`,
+      ),
+    );
+  });
+
   test.each([
-    { input: "title", expected: DEFAULT_TITLE, reason: "DEFAULT_TITLE" },
-    { input: "label-color", expected: `"${DEFAULT_LABEL_COLOR}"`, reason: "DEFAULT_LABEL_COLOR" },
     {
-      input: "label-description",
-      expected: DEFAULT_LABEL_DESCRIPTION,
-      reason: "DEFAULT_LABEL_DESCRIPTION",
+      vars: { MODE: "comment" },
+      error: "unknown MODE 'comment' (expected report or resolve)",
     },
-  ])("the `$input` input default matches $reason", ({ input, expected }) => {
-    expect(inputDefault(input)).toBe(expected);
+    {
+      vars: { MODE: "resolve", STREAM: "ci" },
+      error: "unknown STREAM 'ci' (expected fuzz or generic)",
+    },
+    {
+      vars: { MODE: "report", RUNNER_TEMP: undefined },
+      error: "RUNNER_TEMP and GITHUB_OUTPUT are required",
+    },
+  ])("refuses $vars and writes nothing", ({ vars, error }) => {
+    const result = run(vars);
+    expect([result.exitCode, result.file]).toEqual([1, undefined]);
+    expect(result.stderr).toContain(error);
   });
 });

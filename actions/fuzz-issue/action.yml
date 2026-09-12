@@ -1,15 +1,15 @@
 name: Nightly Issue
 description: >-
-  Files or updates a label-deduplicated tracking issue for any nightly
-  stream - fuzz or plain CI - (report mode), or comments on and closes
-  every open labeled issue after a green run (resolve mode). Report mode
-  assigns the repository owner at creation (best-effort: an unassignable
-  owner never fails the filing) - creation-time assignment guarantees the
-  owner regardless of token, and an issue created with the default
-  GITHUB_TOKEN additionally fires no issues:opened event for anything
-  downstream to catch. With an
-  artifacts-dir the issue body is built from nightly-fuzz failure reports
-  (the contract is documented in repo-platform's docs/fuzzer.md); without
+  The fleet's issue mechanism for any nightly stream (fuzz, plain CI,
+  security, link rot), the way the sticky PR comment is its comment
+  mechanism. Report mode files the stream's issue or refreshes the newest
+  open one carrying the label - the body is replaced, never appended to -
+  through peter-evans/create-issue-from-file, and assigns the repository
+  owner every time (an issue created with GITHUB_TOKEN fires no
+  issues:opened event for the auto-assign workflow to catch; GitHub drops a
+  login it cannot assign). Resolve mode closes every open labeled issue with
+  a comment after a green run. With an artifacts-dir the body is built from
+  failure reports (the contract is repo-platform's docs/fuzzer.md); without
   one it is a generic nightly-failure report (workflow, commit, run link).
   Needs issues: write and gh on the runner (preinstalled on GitHub-hosted
   runners).
@@ -23,7 +23,7 @@ inputs:
     description: Label identifying the issue stream; one open issue per label
     required: true
   title:
-    description: Title used when a new issue is created
+    description: Title of the issue; a refresh sets it again
     required: false
     default: Nightly fuzz failures
   artifacts-dir:
@@ -42,11 +42,11 @@ inputs:
     required: false
     default: ""
   label-color:
-    description: Color used only when report mode creates the label (existing labels are never repainted)
+    description: Color report mode creates the label with, or repaints an existing one to
     required: false
     default: "B60205"
   label-description:
-    description: Description used only when report mode creates the label
+    description: Description report mode creates the label with, or resets an existing one to
     required: false
     default: Automated nightly fuzz failure
   stream:
@@ -59,14 +59,14 @@ inputs:
     required: false
     default: fuzz
   token:
-    description: Token used by gh; needs issues write
+    description: Token used by gh and the issue action; needs issues write
     required: false
     default: ${{ github.token }}
 
 outputs:
   issue-number:
-    description: The issue commented on or created (empty in resolve mode)
-    value: ${{ steps.file.outputs.issue-number }}
+    description: The issue refreshed or created (empty in resolve mode)
+    value: ${{ steps.issue.outputs.issue-number }}
 
 runs:
   using: composite
@@ -80,18 +80,63 @@ runs:
       with:
         pin: ${{ github.action_path }}/.bun-version
 
-    - name: File, update, or resolve the fuzz issue
-      id: file
+    - name: Assemble the issue body or the close comment
+      id: body
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
         MODE: ${{ inputs.mode }}
-        LABEL: ${{ inputs.label }}
-        TITLE: ${{ inputs.title }}
         ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         ARTIFACT_NAME: ${{ inputs.artifact-name }}
-        LABEL_COLOR: ${{ inputs.label-color }}
-        LABEL_DESCRIPTION: ${{ inputs.label-description }}
         STREAM: ${{ inputs.stream }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/fuzz-issue.ts"'
+
+    # Every gh call names the repository: the nightly starter's report job
+    # runs this action without a checkout. gh lists newest first, and humans
+    # can label extra issues into the stream, so one open issue per label is
+    # a goal, not an invariant.
+    - name: Find the stream's open issue
+      if: inputs.mode == 'report'
+      id: open
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        LABEL: ${{ inputs.label }}
+      run: number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty') && echo "number=$number" >> "$GITHUB_OUTPUT"
+
+    # --force repaints an existing label to the stream's tuple, which is the
+    # tuple the module's settings layer declares; the plan refuses a stream
+    # label the fleet layers already manage, so no other label is touched.
+    - name: Create the stream's label
+      if: inputs.mode == 'report'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        LABEL: ${{ inputs.label }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+      run: gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color "$LABEL_COLOR" --description "$LABEL_DESCRIPTION" --force
+
+    - name: File or refresh the issue
+      if: inputs.mode == 'report'
+      id: issue
+      uses: peter-evans/create-issue-from-file@fca9117c27cdc29c6c4db3b86c48e4115a786710 # v6.0.0
+      with:
+        token: ${{ inputs.token }}
+        issue-number: ${{ steps.open.outputs.number }}
+        title: ${{ inputs.title }}
+        content-filepath: ${{ steps.body.outputs.file }}
+        labels: ${{ inputs.label }}
+        assignees: ${{ github.repository_owner }}
+
+    # Every open labeled issue, not only the newest: release-health blocks
+    # while any carries the label, so one left open would keep releases
+    # blocked under a log saying all was resolved.
+    - name: Close every open issue of the stream
+      if: inputs.mode == 'resolve'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        LABEL: ${{ inputs.label }}
+        COMMENT_FILE: ${{ steps.body.outputs.file }}
+      run: gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 100 --json number --jq '.[].number' | xargs -r -I{} gh issue close {} --repo "$GITHUB_REPOSITORY" --reason completed --comment "$(cat "$COMMENT_FILE")"

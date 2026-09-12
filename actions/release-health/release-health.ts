@@ -22,8 +22,8 @@ const gh: GhRunner = async (args) => {
   return stdout;
 };
 
-/** Same label shape the fuzz-issue action enforces: safe as a gh flag value
- * (no leading dash), within GitHub's 50-character label limit. */
+/** A hand copy of the registration grammar's LABEL_RE (actions/plan/registration.ts), pinned by the tracking-label-regex ssot rule:
+ * safe as a gh flag value (no leading dash), within GitHub's 50-character label limit. */
 export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;

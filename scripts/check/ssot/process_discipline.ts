@@ -302,8 +302,6 @@ export function spawnSyncHazard(options: string | null): string | null {
 //   an alias of Bun  -> escapes both scans
 //   Bun["spawn"]     -> escapes this one
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
-  "actions/fuzz-issue/fuzz-issue.ts":
-    "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "actions/release-health/release-health.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "tests/build-branches/publish_behavior.test.ts":

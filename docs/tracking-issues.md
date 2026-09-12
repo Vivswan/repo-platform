@@ -9,7 +9,7 @@ The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open Git
 
 ## The action
 
-Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
+Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `stable` delivery tag like every other managed action. It assembles the body in TypeScript and hands it to the fleet's standard issue action, `peter-evans/create-issue-from-file` (sha-pinned), the way `marocchino/sticky-pull-request-comment` is the fleet's PR-comment mechanism: the stream's one open issue is refreshed in place, never commented on. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
 
 Because the starters are repo-owned, the sync never rewrites them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New repositories get `@stable`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
 
@@ -28,10 +28,10 @@ The registration grammar and fleet-ci's `plan` job enforce:
 
 ## Issue lifecycle
 
-- One open issue per label. A failing night comments on the open issue if one exists, otherwise creates it - creating the label too when it is missing, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
-- A green night comments on and closes every open issue carrying the label, so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
+- One open issue per label. A failing night refreshes the newest open issue carrying the label - title and body replaced with the night's report; earlier nights survive in the edit history and their run links - otherwise creates it. The label is created, or an existing one repainted, with the color and description the module data declares (`tracking_label` under `modules.<module>` in `files.yml`, the same source the settings layer reads).
+- A green night comments on and closes every open issue carrying the label (up to 100 a night), so hand-labeling an issue into the stream makes the next green night close it. To block a release deliberately, use the `release-blocker` label instead ([all-green.md](all-green.md)).
 - A manual green dispatch also closes a fuzz or nightly issue (the site stream's link check runs on the nightly schedule alone, so its issue waits for the next clean night); the close comment links the run, so the provenance is visible.
-- The action assigns the repository owner at creation - issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them - and a comment on a still-unassigned open issue picks the owner up too. Assignment is best-effort (an org owner is not assignable) and never fails the filing; auto-assign's nightly catch-up sweep picks up any issue still unassigned. Once the owner is assigned, nothing else is: a repo-owned CODEOWNERS entry naming someone else reaches the issues humans open, and a tracking issue only through the sweep when the owner could not be assigned.
+- Every filing adds the repository owner as an assignee - issues created with `GITHUB_TOKEN` fire no `issues: opened` event, so the managed auto-assign workflow cannot catch them - and removes nobody. GitHub drops a login it cannot assign (an org owner), so assignment never fails the filing; auto-assign's nightly catch-up sweep picks up any issue still unassigned. Nothing else assigns: a repo-owned CODEOWNERS entry naming someone else reaches the issues humans open, and a tracking issue only through the sweep when the owner could not be assigned.
 
 ## Release gating
 
