@@ -46,10 +46,13 @@ export function checkManifestShape(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   // A key the sync would never write (`./x`, `a//b`) still resolves to the
   // declared file on disk while matching no declaration, so the class gate
-  // in manifest_parity never sees it; the sync ignores such a record.
+  // in manifest_parity never sees it; the sync ignores such a record, so
+  // nothing past the key is judged.
+  const refused = new Set<string>();
   for (const path of Object.keys(files)) {
     const problem = pathProblem(path);
     if (problem === null) continue;
+    refused.add(path);
     findings.push(
       error(
         `${MANIFEST_NAME}: entry '${path}' is not a repository path the sync writes (the path ${problem}) - ` +
@@ -61,6 +64,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
   // No emitter writes a field outside the vocabulary, so one is a hand
   // edit; the next sync drops it.
   for (const { path, fields } of unknownEntryFields(files)) {
+    if (refused.has(path)) continue;
     findings.push(
       error(
         `${MANIFEST_NAME}: entry '${path}' carries field(s) ${fields

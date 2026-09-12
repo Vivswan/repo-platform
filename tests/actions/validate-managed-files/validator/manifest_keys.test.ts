@@ -18,9 +18,9 @@ describe("manifest keys are the repository paths the sync writes", () => {
   const MANAGED = `{"class": "managed", "hash": "${"0".repeat(64)}"}`;
   // Every key breaks the path grammar; `./x` and `a//b` also resolve to the
   // declared file while string-matching no declaration, so without the rule
-  // the class gate never saw them. The managed row's hash is never checked:
-  // parity skips a refused key, or the traversal key would be read from
-  // outside the repository and add a content finding.
+  // the class gate never saw them. The record is never judged past its key:
+  // parity would read the traversal key's hash from outside the repository,
+  // and the field check would report the stray field a second time.
   test.each([
     [`./${CI}`, "carries an empty, '.', or '..' segment", STARTER],
     [".github//workflows/ci.yml", "carries an empty, '.', or '..' segment", STARTER],
@@ -28,6 +28,7 @@ describe("manifest keys are the repository paths the sync writes", () => {
     [".github/workflows/ci.yml/", "carries an empty, '.', or '..' segment", STARTER],
     [".github\\workflows\\ci.yml", "contains a backslash", STARTER],
     ["../../../../etc/passwd", "carries an empty, '.', or '..' segment", MANAGED],
+    [`./${CI}`, "carries an empty, '.', or '..' segment", '{"class": "starter", "extra": true}'],
   ])(
     "a refused key beside a deleted canonical entry is one error naming the key: %s",
     (key, problem, record) => {
