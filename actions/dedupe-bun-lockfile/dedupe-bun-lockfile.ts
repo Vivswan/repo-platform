@@ -24,10 +24,11 @@ const PUSH_DEADLINE_MS = 300_000;
 const COMMIT_SUBJECT = "build(deps): dedupe bun lockfile";
 /** Keeps Dependabot rebasing and updating the PR over this commit. */
 const COMMIT_TRAILER = "[dependabot skip]";
-/** The caller's sticky PR comment says the same: files/bun/.github/workflows/dependabot-bun-lockfile.yml. */
-const PUSHED_WARNING =
-  "lockfile fix pushed with github.token, which starts no workflows: the new head's pull_request run waits for approval. " +
-  "Open it in the Actions tab and choose Approve and run, or push an empty commit.";
+/** GitHub creates the pull_request run for a github.token push, but in an approval-required state (its GITHUB_TOKEN docs);
+ *  the caller posts this text as its sticky PR comment, so it stays one line and plain text. */
+const PUSHED_NOTICE =
+  "Lockfile dedupe commit pushed with the workflow token: GitHub holds the new head's pull_request run for approval, so its checks stay unreported. " +
+  "Approve the run from the PR's merge box or the Actions tab, or push a commit to this branch.";
 
 function exitCodeOf(exit: ChildExit): number {
   return exit.kind === "exited" ? exit.code : 1;
@@ -115,8 +116,8 @@ function main(): void {
     return;
   }
   commitAndPush(lockfiles, repository, headRef, token);
-  appendFileSync(requireEnv("GITHUB_OUTPUT"), "pushed=true\n");
-  warning(PUSHED_WARNING);
+  appendFileSync(requireEnv("GITHUB_OUTPUT"), `notice=${PUSHED_NOTICE}\n`);
+  warning(PUSHED_NOTICE);
 }
 
 main();

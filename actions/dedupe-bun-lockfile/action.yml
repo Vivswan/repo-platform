@@ -6,11 +6,11 @@ description: >-
   --frozen-lockfile` fails with mixed-version errors, and bun keeps a stale
   lockfile as a valid resolution, so only a delete-then-resolve drops them.
   Nothing changed is a no-op. The commit carries the `[dependabot skip]`
-  trailer so Dependabot keeps rebasing over it. A push made with
-  github.token starts no workflows, so after a push the action sets
-  `pushed` for the caller's sticky comment and warns, but stays green. The
-  calling job needs contents write and a checkout of the PR head with
-  persist-credentials off.
+  trailer so Dependabot keeps rebasing over it. GitHub holds the new head's
+  `pull_request` run for approval after a github.token push, so after a push
+  the action warns and sets `notice` to the text the caller posts as its
+  sticky comment, but stays green. The calling job needs contents write and
+  a checkout of the PR head with persist-credentials off.
 
 inputs:
   token:
@@ -21,9 +21,9 @@ inputs:
     required: true
 
 outputs:
-  pushed:
-    description: '"true" when a fix commit was pushed; empty otherwise.'
-    value: ${{ steps.dedupe.outputs.pushed }}
+  notice:
+    description: How to release the held run, when a fix commit was pushed; empty otherwise.
+    value: ${{ steps.dedupe.outputs.notice }}
 
 runs:
   using: composite
