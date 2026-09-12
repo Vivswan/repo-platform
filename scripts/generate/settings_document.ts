@@ -8,9 +8,8 @@ import { join, resolve } from "node:path";
 import { loadFilesConfig } from "../../.github/scripts/sync/writer/files_config.ts";
 import { readRegistration } from "../../.github/scripts/sync/writer/registration.ts";
 import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
-import { parseSettingsDoc } from "../../.github/scripts/sync/writer/settings_document.ts";
 import { renderSettings } from "../../.github/scripts/sync/writer/settings_entry.ts";
-import { declaredPrivate } from "../../.github/scripts/sync/writer/settings_layers.ts";
+import { declaredPrivate, readLayer } from "../../.github/scripts/sync/writer/settings_layers.ts";
 import { probe } from "../../.github/scripts/sync/writer/target_files.ts";
 import type { FilesConfig, RenderedEntry } from "../../actions/plan/files_config.ts";
 import { PLATFORM_OWNER, REGISTRATION_PATH } from "../../actions/shared/platform.ts";
@@ -49,7 +48,7 @@ export function renderOwnSettings(root: string): OwnSettings {
   const overlay = readFileSync(overlayAbs, "utf-8");
   // The sync falls back to its visibility fact when the overlay is silent.
   // The generator has no GitHub to ask, so the overlay must declare it.
-  const visibility = declaredPrivate(parseSettingsDoc(overlay, overlayPath));
+  const visibility = declaredPrivate(readLayer(overlay, overlayPath).doc);
   if (visibility === null) {
     throw new Error(
       `${overlayPath} must declare repository.private - the visibility layer is selected by it`,

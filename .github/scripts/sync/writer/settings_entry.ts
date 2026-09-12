@@ -1,11 +1,13 @@
 // The settings render: one repository's .github/settings.yml as the layers
 // folded (the fleet baseline, the layers files.yml's settings block selects
 // for the repository, the repository's own overlay, the fleet override) with
-// the registration's tracking labels appended. What the repository owns
-// (the overlay, the registration) holds the row when it is wrong; a layer
-// file the loader accepted but the fold refuses is the operator's error.
+// the registration's tracking labels folded in last. What the repository
+// owns (the overlay, the registration) holds the row when it is wrong; a
+// layer file the loader refuses, or fleet layers that fold to a document
+// the apply refuses, is the operator's error.
 
 import { join } from "node:path";
+import type { Layer } from "@vivswan/github-settings-as-code";
 import { stringify as stringifyYaml } from "yaml";
 import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
@@ -18,27 +20,30 @@ import {
 } from "../../../../actions/shared/platform.ts";
 import type { Selection } from "../../../../actions/shared/selection.ts";
 import type { WriterFilesConfig } from "./files_config.ts";
-import { duplicateNameWarnings, loadOverrideLayer, mergeLayers } from "./merge_settings_layers.ts";
-import {
-  entryName,
-  type MergedValue,
-  NAME_FOLDS,
-  parseSettingsDoc,
-  type SettingsLayer,
-} from "./settings_document.ts";
 import {
   declaredPrivate,
+  foldSettings,
+  isMapping,
   type Label,
+  labelClaims,
   layerConfig,
   layerPaths,
   loadLayer,
+  loadOverrideLayer,
   namedModules,
+  readLayer,
+  sectionEntries,
 } from "./settings_layers.ts";
 
 /** The first header line of a rendered document; the settings apply's
  *  selector (fleet/select_settings_repos.ts) reads it to tell a rendered
  *  file from a hand-written one. */
 export const RENDERED_HEADER = `# ${GENERATED_NOTICE}`;
+
+/** The library's re-layering directive. A repository must not declare it:
+ *  `_layering: replace` on `labels` drops the fleet roster and the apply
+ *  deletes every managed label, green either way. */
+const LAYERING_KEY = "_layering";
 
 export interface SettingsRenderInput {
   config: FilesConfig & Pick<WriterFilesConfig, "trackingTuples">;
@@ -92,79 +97,92 @@ function trackingLabelTuples(
   }));
 }
 
-/** The overlay parsed, or the hold its text earns: a malformed document
- *  or a duplicated name is the repository's to fix. */
-function parseOverlay(
-  input: SettingsRenderInput,
-  text: string,
-): { layer: SettingsLayer } | { held: string } {
-  let overlay: SettingsLayer;
-  try {
-    overlay = parseSettingsDoc(text, input.overlayPath);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    return { held: error.message };
-  }
-  const duplicates = duplicateNameWarnings(overlay, `the repository's ${input.overlayPath}`);
-  return duplicates.length > 0 ? { held: duplicates[0] } : { layer: overlay };
+/** The hold an overlay earns for re-layering a section, or null. */
+function layeringDirective(overlay: Layer, overlayPath: string): string | null {
+  if (!isMapping(overlay.doc)) return null;
+  const site =
+    LAYERING_KEY in overlay.doc
+      ? "at the top level"
+      : Object.entries(overlay.doc)
+          .filter(([, value]) => isMapping(value) && LAYERING_KEY in value)
+          .map(([section]) => `under ${section}`)[0];
+  if (site === undefined) return null;
+  return (
+    `the repository's ${overlayPath} declares ${LAYERING_KEY} ${site}; the fleet's sections ` +
+    "union by name and only labels: null opts out"
+  );
 }
 
-/** The hold a tracking label earns when the folded labels already carry
- *  its name, or null. Every layer's names are reserved before the plan
- *  names a tracking label, so the carrier can only be the overlay's own. */
-function trackingCollision(
-  folded: MergedValue[],
-  tracking: Label[],
-  overlayPath: string,
-): string | null {
-  const fold = NAME_FOLDS.labels;
-  const declared = new Map<string, string>();
-  for (const entry of folded) {
-    const name = entryName(entry);
-    if (name !== null) declared.set(fold(name), name);
+/** The hold a tracking label earns when an overlay label already claims
+ *  one of its names, or null: the union would replace the overlay's whole
+ *  entry with the tracking tuple. Every fleet layer's names are reserved
+ *  before the plan names a tracking label, so the overlay is the only
+ *  carrier left. */
+function trackingCollision(overlay: Layer, tracking: Label[], overlayPath: string): string | null {
+  const claimed = new Map<string, string>();
+  for (const entry of sectionEntries(overlay.doc, "labels")) {
+    for (const claim of labelClaims(entry)) claimed.set(claim, String(entry.name));
   }
   for (const label of tracking) {
-    const prior = declared.get(fold(label.name));
-    if (prior === undefined) continue;
-    return (
-      `the repository's ${overlayPath} declares label ${JSON.stringify(prior)}, one name to ` +
-      `GitHub with the tracking label ${JSON.stringify(label.name)} (label names are ` +
-      "case-insensitive); rename one"
-    );
+    for (const claim of labelClaims(label)) {
+      const prior = claimed.get(claim);
+      if (prior === undefined) continue;
+      return (
+        `the repository's ${overlayPath} declares label ${JSON.stringify(prior)}, one name to ` +
+        `GitHub with the tracking label ${JSON.stringify(label.name)} (label names are ` +
+        "case-insensitive, and a rename claims both its names); rename one"
+      );
+    }
   }
   return null;
 }
 
-/** Deterministic: the same inputs render the same bytes. A layer file the
- *  loader accepted that still fails here is the operator's error and
- *  throws; everything the repository owns holds instead. */
+/** Deterministic: the same inputs render the same bytes. The fleet layers
+ *  are judged on their own first, so a fold they alone fail is the
+ *  operator's error and throws; everything the repository owns holds. */
 export function renderSettings(input: SettingsRenderInput): SettingsRender {
   if (input.overlay === null) {
     return { held: `no overlay at ${input.overlayPath} (its starter is held or missing)` };
   }
-  const parsed = parseOverlay(input, input.overlay);
-  if ("held" in parsed) return parsed;
-  const overlay = parsed.layer;
+  let overlay: Layer;
+  try {
+    overlay = readLayer(input.overlay, input.overlayPath);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    return { held: error.message };
+  }
+  const directive = layeringDirective(overlay, input.overlayPath);
+  if (directive !== null) return { held: directive };
   const config = layerConfig(input.config);
   const selection: Selection = {
     modules: input.modules,
-    private: declaredPrivate(overlay) ?? input.private,
+    private: declaredPrivate(overlay.doc) ?? input.private,
   };
-  const layers = layerPaths(config, selection).map((rel) => loadLayer(join(input.tree, rel)));
-  const doc = mergeLayers([
-    ...layers,
-    overlay,
+  const fleet = [
+    ...layerPaths(config, selection).map((rel) => loadLayer(join(input.tree, rel))),
     loadOverrideLayer(join(input.tree, config.settings.override)),
-  ]);
+  ];
+  const fleetAlone = foldSettings(fleet, "the fleet settings layers");
+  if ("refused" in fleetAlone) throw new Error(fleetAlone.refused);
   const tracking = trackingLabelTuples(input, reservedLabelNames(config, input.tree));
   if ("held" in tracking) return tracking;
-  const folded = Array.isArray(doc.labels) ? doc.labels : [];
+  const collision = trackingCollision(overlay, tracking, input.overlayPath);
+  if (collision !== null) return { held: collision };
   // `labels: null` in the overlay is the repository's opt-out: it owns its
   // labels, and a roster of tracking labels alone would make the apply
   // delete every other label on the repository.
-  const labels = overlay.labels === null ? folded : [...folded, ...tracking];
-  if (labels.length > 0) doc.labels = labels;
-  const collision = trackingCollision(folded, tracking, input.overlayPath);
-  if (collision !== null) return { held: collision };
-  return { content: header(input) + stringifyYaml(doc, { lineWidth: 0 }) };
+  const optedOut = isMapping(overlay.doc) && overlay.doc.labels === null;
+  const folded = foldSettings(
+    [
+      ...fleet.slice(0, -1),
+      overlay,
+      ...fleet.slice(-1),
+      ...(optedOut || tracking.length === 0
+        ? []
+        : [{ name: `the ${REGISTRATION_PATH} tracking labels`, doc: { labels: tracking } }]),
+    ],
+    `the render of ${input.overlayPath} with the fleet layers`,
+  );
+  if ("refused" in folded) return { held: folded.refused };
+  return { content: header(input) + stringifyYaml(folded.settings, { lineWidth: 0 }) };
 }

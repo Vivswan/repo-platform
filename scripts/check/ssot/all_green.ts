@@ -1,8 +1,11 @@
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
-import { loadOverrideLayer } from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
+import {
+  loadOverrideLayer,
+  sectionEntries,
+} from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, escapeRegExp, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
@@ -794,10 +797,7 @@ export const allGreenRules: Rule[] = [
         ...setMismatch(
           "files/settings/override.yml main ruleset required checks",
           [gateName],
-          contexts(
-            (override.rulesets ?? []) as Record<string, unknown>[],
-            "files/settings/override.yml",
-          ),
+          contexts(sectionEntries(override.doc, "rulesets"), "files/settings/override.yml"),
         ),
       );
       return mismatches;
