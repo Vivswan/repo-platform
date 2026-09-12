@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import {
   deriveRewrites,
@@ -16,6 +23,7 @@ import {
   assertDocsLanding,
   copyInto,
   resolvePrebuilt,
+  setOutput,
   tierStrictLinks,
 } from "../../../actions/pages-site/build.ts";
 import { collectBroken, reportBody, walkHtml } from "../../../actions/pages-site/check_links.ts";
@@ -70,6 +78,16 @@ describe("parseSiteConfig", () => {
     ["a list", "[]", "must be a JSON object"],
     ["an unknown key", config({ docs_dir: "docs" }), "unknown keys: docs_dir"],
     ["a non-string title", config({ site_title: 3 }), "config.site_title must be a string"],
+    [
+      "a title with a line break",
+      config({ site_title: "Docs\npublish=false" }),
+      "config.site_title must be one line",
+    ],
+    [
+      "a label with a carriage return",
+      config({ link_rot_label: "rot\rx" }),
+      "config.link_rot_label must be one line",
+    ],
     [
       "a docs path with a slash",
       config({ docs_path: "a/b" }),
@@ -236,6 +254,18 @@ describe("resolvePrebuilt", () => {
     expect(resolvePrebuilt(ws, "apps/web/dist")).toBe(join(ws, "apps/web/dist"));
   });
 
+  // The lexical check sees only the link's path; the target decides.
+  test("a symlink dist is judged by where it resolves", () => {
+    const ws = workspace({ "site/index.html": "<html></html>" });
+    const outside = workspace({ "index.html": "<html></html>" });
+    symlinkSync(join(ws, "site"), join(ws, "dist"));
+    symlinkSync(outside, join(ws, "generated"));
+    expect(resolvePrebuilt(ws, "dist")).toBe(join(ws, "dist"));
+    expect(() => resolvePrebuilt(ws, "generated")).toThrow(
+      `the site-build hook named dist 'generated', which resolves to '${realpathSync(outside)}' outside the checkout`,
+    );
+  });
+
   // The hook contract's refusals (docs/site.md), each naming the path.
   test.each<[reason: string, dist: string, error: string]>([
     [
@@ -266,6 +296,30 @@ describe("resolvePrebuilt", () => {
   ])("refuses %s", (_reason, dist, error) => {
     const ws = workspace({ "dist/index.html": "<html></html>", "dist/assets/app.js": "js" });
     expect(() => resolvePrebuilt(ws, dist)).toThrow(error);
+  });
+});
+
+describe("setOutput", () => {
+  // A value's line break must not become a second output line.
+  test("writes every output as one delimited block", () => {
+    const file = join(temp.dir("output-"), "output");
+    writeFileSync(file, "");
+    const before = process.env.GITHUB_OUTPUT;
+    process.env.GITHUB_OUTPUT = file;
+    try {
+      setOutput("publish", "true");
+      setOutput("site-title", "Docs\npublish=false");
+    } finally {
+      if (before === undefined) delete process.env.GITHUB_OUTPUT;
+      else process.env.GITHUB_OUTPUT = before;
+    }
+    const outputs: Record<string, string> = {};
+    for (const block of readFileSync(file, "utf8").matchAll(
+      /^([^<\n]+)<<(ghadelim_\S+)\n([\s\S]*?)\n\2\n/gm,
+    )) {
+      outputs[block[1]] = block[3];
+    }
+    expect(outputs).toEqual({ publish: "true", "site-title": "Docs\npublish=false" });
   });
 });
 

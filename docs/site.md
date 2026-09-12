@@ -43,7 +43,7 @@ The hook is a universal starter: the sync seeds it once in every repository, mod
 | input `origin` | `https://<owner>.github.io`, or `https://<domain>` |
 | output `dist` | the built site's directory, relative to the repository root, with an `index.html`; empty (the seeded default) means no repository website |
 | runs as | a step of the deploy job, on the checked-out judged commit, under that job's token (contents read, pages and id-token write, issues write) |
-| refused | an absolute `dist`, one that leaves the repository (`..`), a missing directory, or one without `index.html`: the leg goes red naming the path |
+| refused | an absolute `dist`, one that leaves the repository (`..`, or a symlink resolving outside it), a missing directory, or one without `index.html`: the leg goes red naming the path |
 | declares no `dist` output | only the docs directory publishes, when there is one, with a notice that the hook named no directory |
 
 A bun website:

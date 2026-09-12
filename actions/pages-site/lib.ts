@@ -180,8 +180,12 @@ export function parseSiteConfig(json: string): SiteConfig {
   >;
   const extra = Object.keys(rest);
   if (extra.length > 0) throw new Error(`the config input has unknown keys: ${extra.join(", ")}`);
+  // The three reach the step outputs and the page title as one line each.
   for (const [key, text] of Object.entries({ site_title, docs_path, link_rot_label })) {
     if (typeof text !== "string") throw new Error(`config.${key} must be a string`);
+    if (/[\r\n]/.test(text)) {
+      throw new Error(`config.${key} must be one line - it contains a line break`);
+    }
   }
   if (!SEGMENT_RE.test(docs_path as string) || docs_path === "." || docs_path === "..") {
     throw new Error(

@@ -12,7 +12,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | empty |
 | `project.copyright_holder` | Licensor named in the fleet license's Required Notice; the one optional `project` key | the repository owner |
 | `site.path` | URL segment the docs mount at when the repo-owned site-build hook also builds a website | `docs` |
-| `site.include` | Extra source roots rendered into the docs site: `{path, mount, page?}` each, `page` naming the file that is a page (a skills tree uses `SKILL.md`) | none |
+| `site.include` | Extra source roots rendered into the docs site: `{path, mount, page}` each, all three required; `page` names the file that is a page in each child directory (a skills tree uses `SKILL.md`) | none |
 | `skills.dir` | The directory holding the repository's agent skills | `skills` |
 | `labels.fuzzer` | The fuzzer module's tracking-issue label | `fuzz-nightly` |
 | `labels.nightly` | The nightly module's tracking-issue label | `nightly-failure` |

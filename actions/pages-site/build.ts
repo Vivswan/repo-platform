@@ -19,6 +19,7 @@
 // The website is copied as the hook built it.
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -33,7 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
@@ -125,13 +126,19 @@ function writeExclusive(path: string, content: string, what: string): void {
   writeFileSync(path, content);
 }
 
-function setOutput(name: string, value: string): void {
+/** GitHub's delimited output form: a line break inside a value cannot set a second output.
+ *  Exported for its tests. */
+export function setOutput(name: string, value: string): void {
   const out = env("GITHUB_OUTPUT");
   if (out === "") {
     console.log(`(output) ${name}=${value}`);
     return;
   }
-  appendFileSync(out, `${name}=${value}\n`);
+  const delimiter = `ghadelim_${randomUUID()}`;
+  if (value.includes(delimiter)) {
+    throw new Error(`output ${name} contains its own delimiter '${delimiter}'`);
+  }
+  appendFileSync(out, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
 /** The docs landing page (docs/site.md, "Docs conventions"): README.md
@@ -270,6 +277,15 @@ export function resolvePrebuilt(workspace: string, dist: string): string {
     throw new Error(
       `the site-build hook named dist '${dist}', which is not a directory in the checkout - ` +
         "point dist at the directory the hook's build writes",
+    );
+  }
+  // A symlink at a lexically valid path can point anywhere on disk.
+  const root = realpathSync(workspace);
+  const real = realpathSync(dir);
+  if (real !== root && !real.startsWith(root + sep)) {
+    throw new Error(
+      `the site-build hook named dist '${dist}', which resolves to '${real}' outside the ` +
+        "checkout - point dist at a directory inside the repository",
     );
   }
   return assertTierIndex(dir, `the site-build hook's dist '${dist}'`);
