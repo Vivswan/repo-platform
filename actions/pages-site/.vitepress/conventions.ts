@@ -6,7 +6,7 @@
 //
 // It lives inside .vitepress/ and imports nothing: build.ts copies this
 // directory into every build root, where an import reaching outside it
-// resolves to nothing, and the plan action imports it before any install.
+// resolves to nothing, and the plan action imports it with none of pages-site's dependencies installed.
 
 /** ISO 639-1 primary language subtags: the locale-directory convention
  *  accepts exactly `<lang>` or `<lang>-<region>` with a two-letter primary

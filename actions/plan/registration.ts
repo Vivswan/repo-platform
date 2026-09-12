@@ -98,8 +98,6 @@ const slug = z
     /^[a-z0-9]+(-[a-z0-9]+)*$/,
     "must be kebab-case (lowercase letters and digits, dash-separated)",
   );
-/** A string the site's rules judge (conventions.ts): the problem they
- *  name is the issue's message. */
 const judged = (problem: (value: string) => string | null) =>
   z.string().superRefine((value, ctx) => {
     const message = problem(value);
