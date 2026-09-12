@@ -53,21 +53,40 @@ const calls = {
   renders: [] as string[],
   fontLoads: [] as [string, string][],
 };
-(globalThis as { document?: unknown }).document = {
+const fontsApi = {
+  load(font: string, text: string): Promise<unknown[]> {
+    calls.fontLoads.push([font, text]);
+    if (stub.failFonts) return Promise.reject(new Error("NetworkError"));
+    if (!stub.holdFonts) return Promise.resolve([]);
+    return new Promise((resolve, reject) =>
+      stub.heldFonts.push({ resolve: () => resolve([]), reject }),
+    );
+  },
+};
+const fakeDocument = {
   documentElement: html,
   querySelectorAll: () => mounts,
   createElement: (tag: string) => new FakeElement(tag),
-  fonts: {
-    load(font: string, text: string): Promise<unknown[]> {
-      calls.fontLoads.push([font, text]);
-      if (stub.failFonts) return Promise.reject(new Error("NetworkError"));
-      if (!stub.holdFonts) return Promise.resolve([]);
-      return new Promise((resolve, reject) =>
-        stub.heldFonts.push({ resolve: () => resolve([]), reject }),
-      );
-    },
-  },
+  fonts: fontsApi as typeof fontsApi | undefined,
 };
+(globalThis as { document?: unknown }).document = fakeDocument;
+
+async function withFakeTimers(body: (armed: Map<number, () => void>) => Promise<void>) {
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const armed = new Map<number, () => void>();
+  let handle = 0;
+  globalThis.setTimeout = ((callback: () => void) => {
+    handle += 1;
+    armed.set(handle, callback);
+    return handle;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id: number) => armed.delete(id)) as typeof clearTimeout;
+  try {
+    await body(armed);
+  } finally {
+    Object.assign(globalThis, real);
+  }
+}
 Bun.plugin({
   name: "mermaid-stub",
   setup(build) {
@@ -133,6 +152,7 @@ beforeEach(() => {
   stub.holdFonts = false;
   stub.heldFonts.length = 0;
   stub.failFonts = false;
+  fakeDocument.fonts = fontsApi;
 });
 
 // First, before any run has loaded the package: a load that fails is not
@@ -253,6 +273,56 @@ test("initializes and draws only once the theme's mono face has loaded for every
   expect(shapes(first)).toEqual([
     "pre.fleet-mermaid-source:graph LR\n  A --> B",
     'div.fleet-mermaid-diagram:<svg data-render="3">graph LR\n  A --> B</svg>',
+  ]);
+  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+});
+
+test("a face that settles disarms its deadline; one that never settles draws every mount in the fallback when the deadline fires", async () => {
+  const first = mount("graph LR");
+  const second = mount("graph TD");
+  stub.holdFonts = true;
+  await withFakeTimers(async (armed) => {
+    const settled = renderAll(true);
+    expect(armed.size).toBe(1);
+    stub.heldFonts[0].resolve();
+    await settled;
+    expect(armed.size).toBe(0);
+    expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+    const stalled = renderAll(false);
+    expect(armed.size).toBe(1);
+    for (const [handle, fire] of armed) {
+      armed.delete(handle);
+      fire();
+    }
+    await stalled;
+  });
+  expect(stub.heldFonts).toHaveLength(2);
+  expect(darkModes()).toEqual([true, false]);
+  expect(shapes(first)).toEqual([
+    "pre.fleet-mermaid-source:graph LR",
+    'div.fleet-mermaid-diagram:<svg data-render="3">graph LR</svg>',
+  ]);
+  expect(shapes(second)).toEqual([
+    "pre.fleet-mermaid-source:graph TD",
+    'div.fleet-mermaid-diagram:<svg data-render="4">graph TD</svg>',
+  ]);
+  expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
+});
+
+test("a document without the fonts API draws at once: no face request, one initialize, every mount rendered", async () => {
+  const first = mount("graph LR");
+  const second = mount("graph TD");
+  fakeDocument.fonts = undefined;
+  await renderAll(true);
+  expect(calls.fontLoads).toEqual([]);
+  expect(calls.initialize).toHaveLength(1);
+  expect(shapes(first)).toEqual([
+    "pre.fleet-mermaid-source:graph LR",
+    'div.fleet-mermaid-diagram:<svg data-render="1">graph LR</svg>',
+  ]);
+  expect(shapes(second)).toEqual([
+    "pre.fleet-mermaid-source:graph TD",
+    'div.fleet-mermaid-diagram:<svg data-render="2">graph TD</svg>',
   ]);
   expect([first.dataset.state, second.dataset.state]).toEqual(["rendered", "rendered"]);
 });

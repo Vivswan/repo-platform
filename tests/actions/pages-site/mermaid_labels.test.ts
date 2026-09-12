@@ -66,11 +66,6 @@ interface Label {
   height: number;
 }
 
-/** What a loaded page settled into: the mount states, whether the mono face
- *  is usable, the label of every node and edge that overflows its
- *  foreignObject or its node's shape (with the amounts), the reported
- *  node's line count, each node's drawn size, and whether the mono face
- *  was already usable when the first render landed. */
 interface Settled {
   states: string[];
   faceLoaded: boolean;
@@ -125,11 +120,11 @@ const MEASURE = `(() => {
   const labels = [];
   let foldLines = 0;
   for (const mount of mounts) {
-    for (const fo of mount.querySelectorAll("svg foreignObject")) {
-      const owner = fo.closest("g.node, g.edgeLabel");
-      const drawn = fo.firstElementChild;
+    for (const frame of mount.querySelectorAll("svg foreignObject")) {
+      const owner = frame.closest("g.node, g.edgeLabel");
+      const drawn = frame.firstElementChild;
       const text = drawn.textContent.trim();
-      const box = fo.getBoundingClientRect();
+      const box = frame.getBoundingClientRect();
       const ink = drawn.getBoundingClientRect();
       const past = [];
       if (ink.bottom - box.bottom > 0.5) past.push("foreignObject bottom by " + round(ink.bottom - box.bottom));

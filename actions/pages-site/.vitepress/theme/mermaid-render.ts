@@ -46,6 +46,25 @@ function fail(mount: HTMLElement, error: unknown): void {
   mount.dataset.state = "error";
 }
 
+/** A face still in flight at the deadline is drawn in the fallback, exactly as a failed one is; unbounded, a
+ *  request that never settles would leave every diagram on the page unrendered. */
+const FACE_DEADLINE_MS = 3_000;
+
+// The browser fetches a face only once laid-out text uses it, so the theme's mono face can still be in flight
+// when the pass starts, and mermaid would measure every label in the fallback face and draw it in the real one.
+function faceOrDeadline(font: string, text: string): Promise<void> {
+  const fonts: FontFaceSet | undefined = document.fonts;
+  if (fonts === undefined) return Promise.resolve();
+  return new Promise((resolve) => {
+    const deadline = setTimeout(resolve, FACE_DEADLINE_MS);
+    const settle = () => {
+      clearTimeout(deadline);
+      resolve();
+    };
+    fonts.load(font, text).then(settle, settle);
+  });
+}
+
 /** A run that a later one overtakes (a toggle mid-render, a navigation) stops at its next await, so the newest theme
  *  always lands last. */
 export async function renderAll(dark: boolean): Promise<void> {
@@ -57,16 +76,14 @@ export async function renderAll(dark: boolean): Promise<void> {
   );
   const slot = Number(document.documentElement.dataset.fleetHue);
   const themeVariables = mermaidThemeVariables(dark ? "dark" : "light", HUES[slot] ?? HUES[0]);
-  // The browser fetches a face only once laid-out text uses it, so the theme's mono face can
-  // still be in flight here, and mermaid would measure every label in the fallback face and
-  // draw it in the real one. A face that fails to load leaves the fallback in both.
-  const fonts = document.fonts
-    .load(`${themeVariables.fontSize} ${themeVariables.fontFamily}`, sources.join(""))
-    .catch(() => undefined);
+  const face = faceOrDeadline(
+    `${themeVariables.fontSize} ${themeVariables.fontFamily}`,
+    sources.join(""),
+  );
   let mermaid: Mermaid;
   try {
     mermaid = await loadMermaid();
-    await fonts;
+    await face;
     if (run !== generation) return;
     mermaid.initialize({
       startOnLoad: false,
