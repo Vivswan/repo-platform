@@ -17,7 +17,7 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 
 ## Decisions to keep
 
-- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` line in a merged PR body; a manual dispatch only when neither fits. Unsure which is right: ask the owner.
+- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` directive as the first line of a merged PR body; a manual dispatch only when neither fits. Unsure which is right: ask the owner.
 - The owner merges every PR of this repository.
 
 ## Where the contracts live
