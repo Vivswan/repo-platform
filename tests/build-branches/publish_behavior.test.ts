@@ -447,9 +447,10 @@ describe("publish.ts behavior (real git)", () => {
     "the ancestry question about the tip's stamp",
     "every rev-parse --verify --quiet",
   ] as const)("a git that errors on %s is fatal, never read as a no", (gitErrorsOn) => {
-    // The tip stamps M1 and this run publishes M2. Before the fix the ancestry question read as
-    // a no published (exit 0) and the source probe refused M2 as off main; the ls-remote row pins
-    // the branch probe to the same helper.
+    // The tip stamps M1 and this run publishes M2, so a git error on any question must stop the run:
+    //   ancestry question read as a no  -> publishes over the tip (exit 0)
+    //   rev-parse read as a no          -> refuses M2 as off main
+    //   ls-remote                       -> the branch probe rides the same helper
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, gitErrorsOn });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("could not answer (exit 128); refusing to guess: fatal: stubbed");
