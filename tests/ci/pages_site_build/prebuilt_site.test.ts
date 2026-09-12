@@ -43,7 +43,6 @@ function docs(repo: string): void {
   writeFileSync(join(repo, "docs", "README.md"), "# Site docs\n\nThe docs landing page.\n");
 }
 
-/** The stdout output rows, as the action step would record them. */
 function outputs(stdout: string): Record<string, string> {
   return Object.fromEntries(
     [...stdout.matchAll(/^\(output\) ([a-z-]+)=(.*)$/gm)].map((match) => [match[1], match[2]]),

@@ -1,10 +1,3 @@
-// The cutover derives a v2 registration from a v1 file and its recorded
-// answers: the project block always, each module value only where it
-// differs from the module defaults in files.yml, unknown modules dropped
-// and noted, the recorded site build noted for the hook, mirrors carried;
-// a repository already on v2 or without an answers file is left alone, and
-// an invalid derivation is refused.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,9 +22,6 @@ const temp = tempDirs();
 const FIXTURES = join(import.meta.dir, "fixtures/cutover");
 const REPOSITORY = { owner: "Vivswan", name: "demo" };
 
-/** The module data a files.yml carries for the modules the fixture selects,
- *  read the way the writer reads it: the grammar plus the placeholder
- *  defaults the module data declares. */
 const load = (yaml: string): WriterFilesConfig => {
   const config = parseFilesConfig(yaml);
   return {

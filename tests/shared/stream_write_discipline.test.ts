@@ -1,21 +1,11 @@
-// The executable scripts forward captured child streams with writeSync,
-// never process.stdout.write / process.stderr.write: those are async on
-// pipe-backed stdio (the Actions runner shape), and a process.exit
-// anywhere later in the run drops everything past the pipe buffer
-// (measured at 64 KiB on bun 1.3.14, 128 KiB on 1.4.0). Members of this
-// class kept surfacing one landing at a time; this guard makes the next
-// one loud at authoring time instead of silent at truncation time.
+// process.stdout.write and process.stderr.write are async on pipe-backed stdio (the Actions runner shape),
+// so a later process.exit drops everything past the pipe buffer; the executable scripts forward child streams with writeSync.
+//   bun 1.3.14  -> 64 KiB pipe buffer measured
+//   bun 1.4.0   -> 128 KiB
 //
-// ONE scanner on purpose: this suite drives the ssot checker's own
-// asyncStreamWriteMismatches (scripts/check/ssot/process_discipline.ts;
-// AST-read call sites, so strings and
-// comments never fire) over the same three roots its stream-write-sync
-// rule scans, instead of keeping a second implementation whose semantics
-// could silently diverge (the two guards previously carried same-named
-// stripComments locals with removal semantics). The scanner's own
-// fixture controls - fire shapes, the allowlist mechanism, stale entries
-// - live in tests/scripts/check_ssot/process_discipline.test.ts; what this suite adds is the
-// bun-test-side enforcement plus the reach control below.
+// ONE scanner on purpose: a second implementation could silently diverge from the ssot checker's semantics,
+// so this drives its asyncStreamWriteMismatches (scripts/check/ssot/process_discipline.ts) over the roots the stream-write-sync rule scans.
+// The scanner's fire shapes and allowlist controls live in tests/scripts/check_ssot/process_discipline.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";

@@ -1,5 +1,3 @@
-// The pr-title model (scripts/check/ssot/pr_title.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { prTitleWorkflowMismatches } from "../../../scripts/check/ssot/pr_title.ts";

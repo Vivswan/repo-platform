@@ -1,5 +1,3 @@
-// The settings workflow rules' pure helpers (scripts/check/ssot/settings_workflow.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
@@ -184,8 +182,6 @@ describe("stepOutputGateMismatches (step-output-gates)", () => {
     const doc = parseYaml(yaml) as { jobs: Record<string, { steps?: Record<string, unknown>[] }> };
     return Object.values(doc.jobs).flatMap((job) => job.steps ?? []);
   };
-  // A refresh-style workflow (not the settings workflow the rule once
-  // scanned alone) whose push step is gated on a step output.
   const refresh = (condition: string) => `
 on:
   schedule:

@@ -16,12 +16,8 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 
 const temp = tempDirs();
 
-// End-to-end harness for the selector against stub `gh`, `curl`, and no-op
-// `sleep` binaries on PATH (the retry loop costs no wall time). The stub
-// fleet covers every selection axis: enrollment (the push probe), adoption
-// (.repo-platform.yml), the rendered header on .github/settings.yml, dead
-// and flaky probes the retries must heal, and PRIVATE personas whose every
-// public line says "a private repository" while the masks cover the slug.
+// End-to-end harness against stub `gh` and `curl` on PATH; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
+// PRIVATE personas' every public line says "a private repository" while the masks cover the slug.
 const PERSONAS: { name: string; private: boolean }[] = [
   { name: "deadapi", private: false },
   { name: "deadprobe", private: false },
@@ -228,9 +224,6 @@ describe("select_settings_repos.ts", () => {
     };
   }
 
-  /** The step outputs the run wrote: `count`, and `repos` as its slug list
-   *  (one slug on a plain line, several in the runner's heredoc form) or
-   *  null when the run wrote none. */
   function outputsOf(result: Run): { count: string; repos: string[] | null } {
     const count = /^count=(.*)$/m.exec(result.output)?.[1];
     if (count === undefined) throw new Error(`no count= line in: ${result.output}`);
@@ -499,13 +492,8 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // The modules: filters, dispatched: every candidate the tokens admit is
-  // probed (all of them when only a filter constrains the fleet), an
-  // adopted one is judged over its declared list before its rendered
-  // document is read, and a repo the filter leaves out is counted, never
-  // named. Declared: nomodule [uv, release-please], hidden-server [uv,
-  // pages], repo-platform [bun, pr-title], the rest [settings-sync] (six
-  // adopted repos when a filter alone constrains the fleet).
+  // The modules: filters, dispatched. A repo the filter leaves out is counted, never named,
+  // so each exact count rests on the module lists the stub gh declares above.
   const LEFT_OUT = (count: number) =>
     `modules filter: ${count} adopted ${count === 1 ? "repo" : "repos"} left out (selecting none of the listed module sets)`;
   const FILTER_PROBES = [

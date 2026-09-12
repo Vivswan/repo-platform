@@ -1,6 +1,3 @@
-// The registration bridge: the placeholder values derived from a v1 and a
-// v2 registration plus the repository slug, and the slug grammar.
-
 import { describe, expect, test } from "bun:test";
 import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,7 +1,4 @@
-// The writer's side of files.yml: the placeholder defaults the module data
-// declares, source verification against a tree, block resolution, and the
-// retirement check against a previous data file. The grammar's own tests
-// sit beside the shared loader (tests/actions/plan/files_config.test.ts).
+// Only the writer's side of files.yml is here; the grammar's own tests sit beside the shared loader (tests/actions/plan/files_config.test.ts).
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";

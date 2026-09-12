@@ -1,15 +1,3 @@
-// The copy writer end to end: sync.ts as a subprocess over the fixture
-// files/ tree and a fixture git checkout carrying every state the writer
-// judges (a local edit in a managed file, a repo-owned tail in a split file,
-// an existing starter, a clean and an edited retired file, a retired split
-// file with repository-owned content around its region, a move, mirrors
-// over absent, current, edited, and blocked targets, an unknown module, a symlink recorded by the
-// previous pipeline at a link path and at a path nothing selects, a class
-// flip that matches its record and one that does not, a hand-written
-// settings.yml displaced by the rendered document). The written tree,
-// the manifest, the report sections, the summary, and idempotence are
-// asserted; the code under test is reached only through the subprocess.
-
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
@@ -95,7 +83,6 @@ const OWN_HOOK = "name: my own site build\r\nruns: {using: composite, steps: []}
 const OVERLAY = ".github/settings.local.yml";
 const MOVED_REASON = `${SETTINGS}: the repository's file moved to ${OVERLAY} and the rendered document replaced it`;
 
-/** The old pipeline's manifest layout for the seeded files. */
 function oldManifest(): string {
   const entries: Record<string, string> = {
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha256(OLD_CI)}"}`,
@@ -206,8 +193,6 @@ function seedTarget(): string {
   return target;
 }
 
-/** Every file under `root` (the .git directory aside) with its content
- *  hash, a symlink by its target: the idempotence oracle. */
 function snapshot(root: string, prefix = ""): Map<string, string> {
   const out = new Map<string, string>();
   for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {

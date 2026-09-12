@@ -1,9 +1,3 @@
-// The displacement pass over a fixture git checkout: the repository's own
-// file at a path whose class flipped from starter to managed moves
-// verbatim to the overlay path when that is free, its record following as
-// a starter; a taken overlay path holds; anything with another record, a
-// link, or nothing at the path is left alone.
-
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,

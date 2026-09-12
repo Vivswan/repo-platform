@@ -1,7 +1,4 @@
-// The plan action's resolution, judged on the REAL module data (the
-// checkout's files.yml, which the build branch ships verbatim) plus
-// synthetic rows for the fail-closed edges, and the script itself run as a
-// child the way the action runs it.
+// Judged on the REAL module data: the checkout's files.yml, which the build branch ships verbatim.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

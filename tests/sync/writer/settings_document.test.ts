@@ -1,9 +1,5 @@
-// Unit tests for the settings parse boundary: what a layer document is
-// allowed to declare, what it is rejected for, and how much context the
-// rejection carries. The merged-document half of the contract is a TYPE
-// (MergedValue has no null), so it is checked by tsc, not from here -
-// what is testable is that the boundary admits the full legal input space
-// and that its diagnostics name the layer and the position inside it.
+// The merged-document half of the contract is a TYPE (MergedValue has no null) that tsc checks;
+// only the parse boundary is testable here: the legal input space and the diagnostics naming the layer and the position inside it.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -84,13 +80,9 @@ describe("parseSettingsDoc", () => {
 });
 
 describe("the name-keyed sections must be lists of mappings", () => {
-  // A mapping or scalar here used to fall out of the name-keyed union
-  // into wholesale replace: an overlay declaring `labels:` as a mapping
-  // silently DISCARDED the managed roster (which the apply then deleted
-  // from the live repository), and a mapping `rulesets:` shipped a
-  // well-formed document missing the modules' protection rules. The
-  // refusal happens ONCE, here at the parse boundary, and names the
-  // file, the section, and the received shape.
+  // A mapping or scalar here fell out of the name-keyed union into wholesale replace, so the refusal happens ONCE, at this parse boundary.
+  //   a mapping `labels:`    -> the managed roster silently DISCARDED, then deleted from the live repository by the apply
+  //   a mapping `rulesets:`  -> a well-formed document missing the modules' protection rules
   test.each([
     {
       reason: "a mapping labels section, naming file, section, and shape",

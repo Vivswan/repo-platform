@@ -1,8 +1,4 @@
-// Unit tests for the settings layering dialect: deep merge with the higher
-// layer winning, explicit-null opt-outs, the name-keyed unions (labels
-// replace wholesale, same-name rulesets merge with their rules appending),
-// and the fleet override layer that no repository can beat - the exact
-// semantics docs/settings.md promises.
+// Pins the layering dialect exactly as docs/settings.md promises it; a semantics change here is a change to that guide.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";

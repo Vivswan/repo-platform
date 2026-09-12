@@ -1,6 +1,3 @@
-// The report: hold reasons from the rows alone, the bounded unified diff,
-// and the Markdown sections.
-
 import { describe, expect, test } from "bun:test";
 import {
   buildReport,

@@ -1,8 +1,4 @@
-/**
- * Unit tests for the fuzz-issue action's pure helpers and the issue
- * lifecycle (create/comment/resolve) through an injected fake gh runner.
- * The real gh calls are not tested here (they need a live GitHub).
- */
+// The issue lifecycle runs through an injected fake gh runner; the real gh calls need a live GitHub and are not covered here.
 
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -423,12 +419,6 @@ describe("buildGenericBody", () => {
   });
 });
 
-/**
- * A recording gh runner: captures every command, answers the label-list
- * query from `labelTaken`, and the issue-list query from `openNumber` (a
- * number opens the comment path, undefined the create path) with the given
- * `assignees` on the open issue.
- */
 function fakeGh(
   openNumber?: number,
   labelTaken = false,
@@ -451,7 +441,6 @@ function fakeGh(
   return { run, calls };
 }
 
-/** Run `body` with console.log captured; returns the captured lines. */
 async function withCapturedLog(body: () => Promise<void>): Promise<string[]> {
   const lines: string[] = [];
   const original = console.log;
