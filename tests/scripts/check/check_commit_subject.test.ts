@@ -33,7 +33,10 @@ function messageFile(message: string): string {
   return messagePath;
 }
 
-function runHook(message: string, env = HOOK_ENV): BoundedSpawnResult {
+function runHook(
+  message: string,
+  env: Record<string, string | undefined> = HOOK_ENV,
+): BoundedSpawnResult {
   return boundedSpawnSync([bunExe, "scripts/check/check_commit_subject.ts", messageFile(message)], {
     cwd: root,
     env,
@@ -52,7 +55,12 @@ const SCISSORS =
 
 // Both messages git could store are judged (the cleanup mode is unknowable in the hook): the comment-stripped one an
 // editor commit stores, the whitespace-cleaned one `commit -m` stores. The gate passes when either passes.
-const MESSAGES: [name: string, message: string, problems: string[], env?: typeof HOOK_ENV][] = [
+const MESSAGES: [
+  name: string,
+  message: string,
+  problems: string[],
+  env?: Record<string, string | undefined>,
+][] = [
   ["a Conventional Commit with a body", "feat(guards): close the gap\n\nbody\n", []],
   ["the editor template below the message", `feat: add setup flow\n\n${EDITOR_COMMENTS}`, []],
   [
@@ -64,6 +72,28 @@ const MESSAGES: [name: string, message: string, problems: string[], env?: typeof
     "a commit -v buffer: the diff below the scissors line is not the message, however large",
     `feat: verbose\n${SCISSORS}diff --git a/x b/x\n+fix: Nope.\n+${"z".repeat(2 * 1024 * 1024)}\n`,
     [],
+  ],
+  [
+    "a commit -v buffer under a letter as core.commentChar: git's scissors line still opens with that marker",
+    `feat: verbose\n${SCISSORS.replaceAll("# ", "f ")}diff --git a/x b/x\n+${"z".repeat(2 * 1024 * 1024)}\n`,
+    [],
+    { ...HOOK_ENV, GIT_CONFIG_VALUE_0: "f" },
+  ],
+  [
+    "a commit -v buffer under a three-character core.commentString: the diff is cut, not read as a body",
+    `wip: verbose\n${SCISSORS.replaceAll("# ", "### ")}diff --git a/x b/x\n+zzz\n`,
+    [TYPE_ENUM],
+    {
+      ...HOOK_ENV,
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_1: "core.commentString",
+      GIT_CONFIG_VALUE_1: "###",
+    },
+  ],
+  [
+    "a scissors line after a bare CR is not a line to git: the subject keeps it and CI refuses it",
+    "fix: valid\rf ------------------------ >8 ------------------------\n",
+    [SUBJECT_EMPTY, TYPE_EMPTY],
   ],
   [
     "a subject that is the scissors text itself",
