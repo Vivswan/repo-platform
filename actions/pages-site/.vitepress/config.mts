@@ -54,6 +54,7 @@ const srcDir = required("DOCS_SITE_SRC");
 const files = walkMarkdown(srcDir);
 const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRoot[];
 const indexPages = includeIndexPages(files, includes);
+const includePages = new Set(indexPages);
 const rewrites = deriveRewrites(files, indexPages);
 const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
@@ -204,7 +205,7 @@ export default async () => {
           ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
           : {}),
       };
-      if (!isLandingFile(pageData.filePath)) return source;
+      if (!isLandingFile(pageData.filePath, includePages)) return source;
       return {
         ...source,
         frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },

@@ -63,13 +63,30 @@ describe("include root routes", () => {
     "other/SKILL.md",
   ];
 
-  test("includeIndexPages lists exactly the child directories' page files", () => {
+  test("includeIndexPages lists exactly the child directories' page files; a nested root's own files are its, never the parent's child pages", () => {
     expect(includeIndexPages(files, [SKILLS])).toEqual([
       "skills/alpha/SKILL.md",
       "skills/beta/SKILL.md",
       "skills/gamma/SKILL.md",
     ]);
     expect(includeIndexPages(files, [])).toEqual([]);
+    const nested = [
+      { path: "manuals", mount: "manuals", page: "README.md" },
+      { path: "tools/agents", mount: "manuals/agents", page: "AGENT.md" },
+    ];
+    expect(
+      includeIndexPages(
+        [
+          "manuals/README.md",
+          "manuals/topic/README.md",
+          "manuals/agents/README.md",
+          "manuals/agents/AGENT.md",
+          "manuals/agents/x/AGENT.md",
+          "manuals/agents/x/README.md",
+        ],
+        nested,
+      ),
+    ).toEqual(["manuals/topic/README.md", "manuals/agents/x/AGENT.md"]);
   });
 
   test("the page serves at the directory URL; a README beside it keeps its own route; an index.md beside it wins", () => {
@@ -135,10 +152,22 @@ describe("source paths", () => {
     expect(sourcePathOf("site/manual", [], "skillset.md")).toBe("site/manual/skillset.md");
   });
 
-  test("landing files are README.md and index.md sources alone", () => {
-    expect(isLandingFile("README.md")).toBe(true);
-    expect(isLandingFile("guide/index.md")).toBe(true);
-    expect(isLandingFile("skills/alpha/SKILL.md")).toBe(false);
-    expect(isLandingFile("search-index.md")).toBe(false);
+  test("landing files are README.md and index.md sources, never an include root's page file, whatever it is named", () => {
+    const tree = [
+      "README.md",
+      "guide/index.md",
+      "search-index.md",
+      "skills/alpha/SKILL.md",
+      "manuals/README.md",
+      "manuals/topic/README.md",
+      "manuals/topic/detail.md",
+    ];
+    const includes = [SKILLS, { path: "manuals", mount: "manuals", page: "README.md" }];
+    const includePages = new Set(includeIndexPages(tree, includes));
+    expect(tree.filter((file) => isLandingFile(file, includePages))).toEqual([
+      "README.md",
+      "guide/index.md",
+      "manuals/README.md",
+    ]);
   });
 });

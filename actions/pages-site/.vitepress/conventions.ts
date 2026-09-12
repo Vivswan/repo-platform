@@ -50,6 +50,18 @@ export interface IncludeRoot {
   page: string;
 }
 
+/** The root a staged file belongs to: the longest mount containing it, so
+ *  a root mounted inside another's segment owns its own files (a nested
+ *  root's README is its landing, not the parent's child page). */
+export function owningRoot<T extends { mount: string }>(
+  roots: readonly T[],
+  filePath: string,
+): T | undefined {
+  return roots
+    .filter((root) => filePath.startsWith(`${root.mount}/`))
+    .sort((a, b) => b.mount.length - a.mount.length)[0];
+}
+
 /** The docs half of a site as configured: where it mounts, what it renders. */
 export interface DocsConfig {
   /** The URL segment the docs mount under beside a website. */

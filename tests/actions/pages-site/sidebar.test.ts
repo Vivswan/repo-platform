@@ -203,6 +203,46 @@ describe("deriveSidebar", () => {
     expect(deriveSidebar(files, pages, ROOT_SITE)[0]).toEqual({ text: "my-repo", link: "/" });
   });
 
+  test("an include root's page named README.md is an article: it honors its order and keeps its title, while the include's own README is the section's landing", () => {
+    const files = [
+      "README.md",
+      "manuals/README.md",
+      "manuals/topic/README.md",
+      "manuals/topic/detail.md",
+    ];
+    const pages = source({
+      "README.md": plain("my-repo"),
+      "manuals/README.md": plain("my-repo"),
+      "manuals/topic/README.md": ["my-repo", 20, null],
+      "manuals/topic/detail.md": ["Detail", 1, null],
+    });
+    const options = { siteTitle: "my-repo", indexPages: ["manuals/topic/README.md"] };
+    expect(deriveSidebar(files, pages, ROOT_SITE, options)).toEqual([
+      { text: "Overview", link: "/" },
+      {
+        text: "Manuals",
+        collapsed: false,
+        items: [
+          { text: "Overview", link: "/manuals/" },
+          {
+            text: "Topic",
+            collapsed: false,
+            items: [
+              { text: "Detail", link: "/manuals/topic/detail" },
+              { text: "my-repo", link: "/manuals/topic/" },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(sidebarOrder(files, pages, ROOT_SITE, options.indexPages)).toEqual([
+      "README.md",
+      "manuals/README.md",
+      "manuals/topic/detail.md",
+      "manuals/topic/README.md",
+    ]);
+  });
+
   // Every row kind (a plain page, a group member, a directory's landing and
   // its child) is spelled the way the launcher spells the same page, so a
   // `#` or `?` in a name never reads as a fragment or query.

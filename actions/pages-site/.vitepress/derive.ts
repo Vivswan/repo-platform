@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
-import { isLocaleDir, isUnwalkedEntry } from "./conventions.ts";
+import { isLocaleDir, isUnwalkedEntry, owningRoot } from "./conventions.ts";
 
 /** The locale directories present in a walked file list: top-level
  *  convention-named directories that actually carry markdown, sorted. */
@@ -51,20 +51,18 @@ export function isRegularFile(path: string): boolean {
 }
 
 /** The include roots' page files among `files`: `<mount>/<child>/<page>`,
- *  one per child directory of a root (an IncludeRoot of conventions.ts, the mounts
- *  input's contract). These are the exact paths deriveRewrites serves at
- *  the directory URL. */
+ *  one per child directory of the root owning the file (owningRoot). These
+ *  are the exact paths deriveRewrites serves at the directory URL. */
 export function includeIndexPages(
   files: string[],
   includes: { mount: string; page: string }[],
 ): string[] {
-  return files.filter((file) =>
-    includes.some((root) => {
-      const rest = file.startsWith(`${root.mount}/`) ? file.slice(root.mount.length + 1) : null;
-      const parts = rest?.split("/");
-      return parts?.length === 2 && parts[1] === root.page;
-    }),
-  );
+  return files.filter((file) => {
+    const root = owningRoot(includes, file);
+    if (root === undefined) return false;
+    const parts = file.slice(root.mount.length + 1).split("/");
+    return parts.length === 2 && parts[1] === root.page;
+  });
 }
 
 /** Route rewrites to each directory's index.md, one exact entry per source:
