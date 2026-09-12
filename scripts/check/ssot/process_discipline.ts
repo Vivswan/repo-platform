@@ -54,7 +54,7 @@ export function topLevelProperties(options: string): Map<string, string> | null 
 }
 
 /** A stream value is judged as what it evaluates to, read off the parsed node, never its text (measured on 1.4.0):
- *    undefined, (undefined), void 0, an elided slot  -> default: spawnSync pipes it
+ *    undefined, (undefined), void 0 in slots 1-2     -> default: spawnSync pipes it (an extra slot left undefined is a closed fd)
  *    "pipe", "p\x69pe"                               -> pipe
  *    null, "ignore", "inherit", an fd number         -> shaped
  *  An identifier or member path is trusted by its key (the recorded residual: a variable smuggling "pipe" escapes);
