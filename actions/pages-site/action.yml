@@ -55,7 +55,7 @@ outputs:
     description: The nightly external-link check's tracking label from the configuration ("" disables the check)
     value: ${{ steps.assemble.outputs.link-rot-label }}
   site-title:
-    description: The docs title as built (the repository name when the configuration leaves it empty)
+    description: The docs title as built, the configuration's site_title verbatim
     value: ${{ steps.assemble.outputs.site-title }}
 
 runs:

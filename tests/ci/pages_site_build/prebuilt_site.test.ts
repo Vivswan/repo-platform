@@ -15,6 +15,7 @@ import {
   isFile,
   readSite,
   runnerTemp,
+  SITE_TITLE,
   siteConfig,
   TEST_TIMEOUT_MS,
   versionLabels,
@@ -112,7 +113,7 @@ describe("the website and the docs together", () => {
   );
 
   test(
-    "the website alone: one copy at the root, no version layout, the title falling back to the repository name",
+    "the website alone: one copy at the root, no version layout, the configured title verbatim",
     () => {
       const workspace = temp.dir("pages-site-website-");
       website(workspace, null);
@@ -133,7 +134,7 @@ describe("the website and the docs together", () => {
         "publish": "true",
         "site-dir": runner.site,
         "link-rot-label": "",
-        "site-title": "site-repo",
+        "site-title": SITE_TITLE,
       });
     },
     TEST_TIMEOUT_MS,
@@ -158,7 +159,7 @@ describe("nothing to publish and a refused dist", () => {
         "publish": "false",
         "site-dir": "",
         "link-rot-label": "",
-        "site-title": "site-repo",
+        "site-title": SITE_TITLE,
       });
       expect(existsSync(runner.site)).toBe(false);
     },

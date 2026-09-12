@@ -110,7 +110,7 @@ Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints
 - A ```` ```mermaid ```` fence renders as a diagram in the site's colors in both appearance modes; the source stays as the fallback without JavaScript and beside a parse error.
 - A top-level table wider than the doc column scrolls horizontally inside the column.
 - Translations go in `docs/<lang>/` (`zh-cn/`, `ja/`) mirroring the root tree: detected directories become locales with the language switcher, the root tree is the default locale, and a tagged version serves its own translations.
-- Every page gets local full-text search, an "Edit this page" link on default-branch tiers, `llms.txt` and `llms-full.txt` per tier, the version dropdown, the project facts card on the landing page (read from the repository at build time), and a provenance line naming the ref, commit, and source file.
+- Every page gets local full-text search, an "Edit this page" link on default-branch tiers, `llms.txt` and `llms-full.txt` per tier, the version dropdown, the project facts card on the landing page (read from the repository at build time: the identity keys of `.github/settings.yml`, the toolchain pins, `LICENSE.md`), and a provenance line naming the ref, commit, and source file.
 - One file name cannot be linked from markdown: a `%` followed by two hex digits (`100%23b.md`); VitePress collapses the escape. Rename the file.
 
 ## Other roots on the site (`site.include`)
@@ -177,7 +177,7 @@ The nightly run crawls the deployed site's EXTERNAL links after publishing (inte
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
 | `labels.site` | the link-rot tracking issue's label | `docs-link-rot` |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand.
+The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 
 ## Pages enablement
 

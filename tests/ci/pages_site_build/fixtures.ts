@@ -27,6 +27,8 @@ export const BUILD_TS = resolve(import.meta.dir, "../../../actions/pages-site/bu
 export const BUILD_TIMEOUT_MS = 180_000;
 export const TEST_TIMEOUT_MS = harnessBound(200_000);
 
+export const SITE_TITLE = "Fixture Site";
+
 /** The CONFIG env the action step sets, from the plan or the caller. */
 export function siteConfig(
   overrides: Partial<{
@@ -37,7 +39,7 @@ export function siteConfig(
   }> = {},
 ): string {
   return JSON.stringify({
-    site_title: "",
+    site_title: SITE_TITLE,
     docs_path: "docs",
     include: [],
     link_rot_label: "",

@@ -262,7 +262,7 @@ describe("include roots: the registration and the pages-site config agree", () =
     const text = `modules: [site]\n${PROJECT}site:\n  include: ${JSON.stringify(include)}\n`;
     expect("registration" in parseRegistration(text)).toBe(accepted);
     const config = JSON.stringify({
-      site_title: "",
+      site_title: "Site",
       docs_path: "docs",
       include,
       link_rot_label: "",

@@ -446,7 +446,7 @@ function buildVitepressTier(
   run([process.execPath, join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root], {
     env: {
       DOCS_SITE_SRC: srcDir,
-      DOCS_SITE_TITLE: siteTitle(cfg),
+      DOCS_SITE_TITLE: cfg.siteTitle,
       DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
       DOCS_SITE_VERSIONS: JSON.stringify(versions),
       DOCS_SITE_CURRENT: tier.version,
@@ -463,12 +463,6 @@ function buildVitepressTier(
     ),
     buildDir: root,
   };
-}
-
-/** The title the docs build renders: the configured one, else the
- *  repository name. */
-function siteTitle(cfg: Config): string {
-  return cfg.siteTitle !== "" ? cfg.siteTitle : cfg.repository.split("/")[1];
 }
 
 /** Copy a build's entries into place, refusing overwrites: a collision is
@@ -560,7 +554,7 @@ function setSiteOutputs(cfg: Config, site: string | null): void {
   setOutput("publish", site === null ? "false" : "true");
   setOutput("site-dir", site ?? "");
   setOutput("link-rot-label", cfg.linkRotLabel);
-  setOutput("site-title", siteTitle(cfg));
+  setOutput("site-title", cfg.siteTitle);
 }
 
 async function main(): Promise<void> {

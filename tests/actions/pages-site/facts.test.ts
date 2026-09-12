@@ -93,11 +93,10 @@ describe("collectFacts", () => {
     });
   });
 
-  test("falls back to the registration's description when there is no settings file", () => {
+  test("the settings file is the description's only source: a registration alone adds none", () => {
     const tree = treeOf({ ".repo-platform.yml": REGISTRATION, ".bun-version": "1.4.0" });
     expect(collectFacts(tree, HEAD_INPUT)).toEqual({
       ...EMPTY_FACTS,
-      description: "A fixture repository",
       toolchains: [{ name: "Bun", version: "1.4.0" }],
     });
   });
@@ -105,21 +104,14 @@ describe("collectFacts", () => {
   test("degrades every missing or unparsable file to null or empty", () => {
     expect(collectFacts(treeOf({}), HEAD_INPUT)).toEqual(EMPTY_FACTS);
     expect(
-      collectFacts(
-        treeOf({
-          ".github/settings.yml": "- just\n- a list\n",
-          ".repo-platform.yml": ": [",
-        }),
-        HEAD_INPUT,
-      ),
+      collectFacts(treeOf({ ".github/settings.yml": "- just\n- a list\n" }), HEAD_INPUT),
     ).toEqual(EMPTY_FACTS);
   });
 
-  test.each<[string, string, Record<string, string>, Partial<ProjectFacts>]>([
+  test.each<[string, string, Partial<ProjectFacts>]>([
     [
-      "settings.yml wins over the registration's description",
+      "every identity key declared",
       SETTINGS,
-      { ".repo-platform.yml": REGISTRATION },
       {
         description: "Edited after the first render",
         homepage: "https://docs.example.test",
@@ -127,53 +119,24 @@ describe("collectFacts", () => {
       },
     ],
     [
-      "a declared-empty description means empty, not the registration's value",
+      "every identity key declared empty",
       "repository:\n  description: ''\n  homepage: ''\n  topics: ''\n",
-      { ".repo-platform.yml": REGISTRATION },
       { description: null, homepage: null, topics: [] },
     ],
     [
-      "a description the settings block lacks comes from the registration; homepage and topics never do",
+      "a repository block without the description key",
       "repository:\n  private: true\n  topics: settings\n",
-      { ".repo-platform.yml": REGISTRATION },
-      { description: "A fixture repository", homepage: null, topics: ["settings"] },
+      { description: null, homepage: null, topics: ["settings"] },
     ],
     [
       "a YAML-list topics value, as the settings apply accepts",
       "repository:\n  topics: [bun, ' docs ', '', 7]\n",
-      {},
       { topics: ["bun", "docs"] },
     ],
-    [
-      "a malformed settings.yml falls back to the registration's description",
-      "repository: [",
-      { ".repo-platform.yml": REGISTRATION },
-      { description: "A fixture repository" },
-    ],
-    [
-      "a settings.yml without a repository block falls back to the registration's description",
-      "labels:\n  - name: docs\n",
-      { ".repo-platform.yml": REGISTRATION },
-      { description: "A fixture repository" },
-    ],
-    [
-      "a registration without a project block adds nothing",
-      "labels:\n  - name: docs\n",
-      { ".repo-platform.yml": "modules: [bun]\n" },
-      {},
-    ],
-    [
-      "settings.yml alone, without a registration",
-      SETTINGS,
-      {},
-      {
-        description: "Edited after the first render",
-        homepage: "https://docs.example.test",
-        topics: ["settings", "first"],
-      },
-    ],
-  ])("reads identity with %s", (_case, settings, registration, identity) => {
-    const tree = treeOf({ ".github/settings.yml": settings, ...registration });
+    ["a malformed settings.yml", "repository: [", {}],
+    ["a settings.yml without a repository block", "labels:\n  - name: docs\n", {}],
+  ])("reads identity with %s", (_case, settings, identity) => {
+    const tree = treeOf({ ".github/settings.yml": settings, ".repo-platform.yml": REGISTRATION });
     expect(collectFacts(tree, HEAD_INPUT)).toEqual({ ...EMPTY_FACTS, ...identity });
   });
 

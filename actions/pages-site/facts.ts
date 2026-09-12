@@ -1,6 +1,5 @@
 // Every repository file arrives through the injected reader (build.ts hands it treeFile at the tier's own ref), so a tagged
-// version shows that tag's facts. A description the settings file lacks falls back to the registration's project.description,
-// so a tag from before the settings file existed still shows one.
+// version shows that tag's facts.
 //   an absent or malformed file       -> null or [], never a failed build
 //   a failed git read in the reader   -> still throws: a broken checkout is a build fault, not a missing fact
 
@@ -35,8 +34,6 @@ export interface FactsInput {
 }
 
 type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
-
-import { REGISTRATION_PATH } from "../shared/platform.ts";
 
 /** The file's content at the tier's ref, or null when absent. */
 export type FactsReader = (path: string) => string | null;
@@ -159,22 +156,10 @@ function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null
   return settings === null ? null : asRecord(settings.repository);
 }
 
-function readRegistrationDescription(read: FactsReader): unknown {
-  const text = read(REGISTRATION_PATH);
-  if (text === null) return undefined;
-  const registration = parseYamlRecord(text);
-  return registration === null ? undefined : asRecord(registration.project)?.description;
-}
-
-/** Each key from the settings block; the description falls back to the
- *  registration only when the block does not declare the key at all (an
- *  empty value there means empty). */
 function readIdentity(read: FactsReader): Identity {
   const settings = readSettingsIdentity(read) ?? {};
   return {
-    description: nonEmptyString(
-      "description" in settings ? settings.description : readRegistrationDescription(read),
-    ),
+    description: nonEmptyString(settings.description),
     homepage: homepageUrl(settings.homepage),
     topics: splitTopics(settings.topics),
   };
