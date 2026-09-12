@@ -57,4 +57,4 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, site, and security streams share: lifecycle, release gating, renaming.
 11. [Security scans](security-scans.md) - Trivy fleet-wide: the blocking gate (fixable HIGH-or-CRITICAL vulnerabilities, any HIGH-or-CRITICAL misconfiguration), the expiring bypass file, and the nightly scan that files one tracking issue per repository; semgrep on public repositories.
 12. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
-14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
