@@ -16,8 +16,8 @@ const OFFMAIN = "d".repeat(40);
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
+if [ "\${1:-}" = "\${GIT_ERRORS_ON:-}" ]; then echo 'fatal: stubbed' >&2; exit 128; fi
 if [ "\${1:-}" = "merge-base" ]; then
-  if [ -n "\${GIT_MERGE_BASE_ERR:-}" ]; then exit 2; fi
   a="\${@: -2:1}"; b="\${@: -1}"
   case " \${IS_ANCESTOR:-} " in *" $a:$b "*) exit 0 ;; *) exit 1 ;; esac
 fi
@@ -98,10 +98,8 @@ describe("verify_build_provenance.ts", () => {
   });
 
   test("rejects an unreachable stamped source, hinting BOTH remedies: dispatch and admin reset", () => {
-    // resolve_refs.ts pre-checks reachability, but the battery re-answers
-    // it here at the single owner (shared/stamp_checks.ts) - a direct
-    // invocation with a garbage SOURCE_SHA must not slip through to the
-    // rebuild, whose failure mode (a thrown worktree error) reads like an
+    // The battery is the one owner of reachability (shared/stamp_checks.ts): a direct invocation with a garbage
+    // SOURCE_SHA must not slip through to the rebuild, whose failure mode (a thrown worktree error) reads like an
     // infra problem instead of a verdict.
     const r = run({ resolvable: [] });
     expect(r.exitCode).not.toBe(0);
@@ -129,16 +127,19 @@ describe("verify_build_provenance.ts", () => {
     expect(r.output).toContain("replays an older build");
   });
 
-  test("an errored ancestry answer fails the sync closed - never a verdict, never the rebuild", () => {
-    // merge-base exit 2 is "could not look", not "not an ancestor":
-    // read as a verdict it would let the rollback walk skip a newer
-    // ancestral stamp and pass a replayed old build to the tree proof -
-    // which a replay PASSES, since its tree rebuilds cleanly from its
-    // old source. The gate must refuse to guess and stop before the
-    // rebuild.
-    const r = run({ env: { GIT_MERGE_BASE_ERR: "1" } });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.output).toContain("could not answer");
-    expect(r.calls.some((args) => args[1] === "worktree" && args[2] === "add")).toBe(false);
-  });
+  test.each(["merge-base", "rev-parse"])(
+    "a git %s that errors fails the sync closed with git's own words - never a verdict, never the rebuild",
+    (question) => {
+      // Read as a "no", an errored look during the rollback walk would skip a newer ancestral stamp and pass a replayed old
+      // build to the tree proof, which a replay PASSES (its tree rebuilds cleanly from its old source).
+      const r = run({ env: { GIT_ERRORS_ON: question } });
+      expect(r.exitCode).toBe(1);
+      expect(r.output).toContain(
+        `git ${question} could not answer (exit 128); refusing to guess: fatal: stubbed`,
+      );
+      expect(r.output).not.toContain("is not on main's history");
+      expect(r.output).not.toContain("is unreachable");
+      expect(r.calls.some((args) => args[1] === "worktree" && args[2] === "add")).toBe(false);
+    },
+  );
 });
