@@ -41,5 +41,41 @@
         "noTemplateCurlyInString": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["tests/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  },
+                  "node:fs/promises": {
+                    "importNames": ["mkdtemp", "mkdtempSync"],
+                    "message": "use tests/shared/temp_dir.ts"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/shared/temp_dir.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { boundedSpawnSync } from "./bounded_spawn";
 import { tempDirs } from "./temp_dir";
 
@@ -180,4 +180,68 @@ describe("tempDirs", () => {
       }
     },
   );
+});
+
+describe("the biome ban on bare mkdtemp under tests/", () => {
+  const repoRoot = join(import.meta.dir, "..", "..");
+  const helperSource = readFileSync(helper, "utf-8");
+  const helperImportLine =
+    helperSource.split("\n").findIndex((line) => line.includes('from "node:fs"')) + 1;
+  const bare = [
+    'import { mkdtempSync } from "node:fs";',
+    'import { mkdtemp } from "node:fs/promises";',
+    'export const sync = mkdtempSync("x");',
+    'export const async = mkdtemp("y");',
+    "",
+  ].join("\n");
+
+  test("a bare import reds under tests/ with the helper's path, the helper alone is exempt by path", () => {
+    // The repo's own biome.json, so the overrides under test are the shipped ones; vcs is off
+    // because the fixture root has no .git and biome refuses to read a gitignore it cannot find.
+    const lintRoot = join(root, "biome-ban");
+    const config = JSON.parse(readFileSync(join(repoRoot, "biome.json"), "utf-8"));
+    const files: Record<string, string> = {
+      "biome.json": JSON.stringify({ ...config, vcs: { enabled: false } }),
+      "tests/x/bare.test.ts": bare,
+      "tests/shared/temp_dir.ts": helperSource,
+      // The same bytes one file over: what the exemption is scoped by is the path, not the content.
+      "tests/shared/not_the_helper.ts": helperSource,
+      // Outside tests/ the override does not apply; the helper's discipline is the test tree's.
+      "scripts/outside.ts": bare,
+    };
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(lintRoot, rel)), { recursive: true });
+      writeFileSync(join(lintRoot, rel), content);
+    }
+    const r = boundedSpawnSync(
+      [join(repoRoot, "node_modules", ".bin", "biome"), "lint", "--reporter=json", "."],
+      { cwd: lintRoot },
+    );
+    const report = JSON.parse(r.stdout) as {
+      diagnostics: {
+        category: string;
+        message: string;
+        location: { path: string; start: { line: number } };
+      }[];
+    };
+    const seen = report.diagnostics
+      .map((d) => ({
+        at: `${d.location.path}:${d.location.start.line}`,
+        category: d.category,
+        message: d.message,
+      }))
+      .sort((a, b) => a.at.localeCompare(b.at));
+    const restriction = {
+      category: "lint/style/noRestrictedImports",
+      message: "use tests/shared/temp_dir.ts",
+    };
+    expect({ exitCode: r.exitCode, seen }, r.stderr).toEqual({
+      exitCode: 1,
+      seen: [
+        { at: `tests/shared/not_the_helper.ts:${helperImportLine}`, ...restriction },
+        { at: "tests/x/bare.test.ts:1", ...restriction },
+        { at: "tests/x/bare.test.ts:2", ...restriction },
+      ],
+    });
+  });
 });

@@ -352,49 +352,9 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
   return [];
 }
 
-export const TEMP_DIR_HELPER = "tests/shared/temp_dir.ts";
-
 /** Measured on bun 1.4.0: the .mts, .cts, and .mjs spellings run too, beyond the four extensions the docs list.
  *  JSX variants are included as well; one would fail the parse loudly rather than escape. */
 export const BUN_TEST_FILE = /[._](test|spec)\.[mc]?[jt]sx?$/;
-
-const SCRIPT_FILE = /\.[mc]?[jt]sx?$/;
-
-/** Any Identifier node spelling either name is a site; a template body is not one
- *  (the launcher test's generated probe source spells mkdtemp there). */
-export function mkdtempSites(source: string): number[] {
-  return parseTs(source)
-    .forEachDescendantAsArray()
-    .filter((node) => Node.isIdentifier(node) && /^mkdtemp(Sync)?$/.test(node.getText()))
-    .map((node) => node.getStartLineNumber());
-}
-
-export function tempDirFileMismatches(
-  file: { path: string; symlink: boolean },
-  source: () => string,
-): Mismatch[] {
-  if (file.symlink) {
-    return [
-      {
-        file: file.path,
-        expected: "a regular file (a symlink's target is not audited in place)",
-        got: "a symlink",
-      },
-    ];
-  }
-  return tempDirSiteMismatches(file.path, source());
-}
-
-export function tempDirTreeMismatches(
-  files: { path: string; symlink: boolean }[],
-  read: (rel: string) => string,
-): Mismatch[] {
-  const selected = files.filter((f) => f.path.startsWith("tests/") && SCRIPT_FILE.test(f.path));
-  if (!selected.some((f) => f.path === TEMP_DIR_HELPER && !f.symlink)) {
-    throw new Error(`${TEMP_DIR_HELPER}: the temp-dir helper is missing - anchor lost`);
-  }
-  return selected.flatMap((f) => tempDirFileMismatches(f, () => read(f.path)));
-}
 
 export function actionTestFileMismatches(files: { path: string }[]): Mismatch[] {
   return files
@@ -405,21 +365,6 @@ export function actionTestFileMismatches(files: { path: string }[]): Mismatch[] 
         "no test file under actions/ (tests live under tests/actions/<action>/, mirroring the action's tree)",
       got: "a bun-discoverable test file beside an action's sources",
     }));
-}
-
-export function tempDirSiteMismatches(rel: string, source: string): Mismatch[] {
-  const lines = mkdtempSites(source);
-  if (rel === TEMP_DIR_HELPER) {
-    if (lines.length === 0) {
-      throw new Error(`${rel}: no mkdtemp call in the temp-dir helper - anchor lost`);
-    }
-    return [];
-  }
-  return lines.map((line) => ({
-    file: `${rel}:${line}`,
-    expected: `a fixture from ${TEMP_DIR_HELPER} (tempDirs() at the file's top level, then temp.dir(prefix)) - the helper removes it after the file's tests`,
-    got: "a bare mkdtemp, which nothing removes when the test fails, throws, or forgets",
-  }));
 }
 
 /** The residual: an alias of the stream (`const out = process.stdout; out.write(x)`) escapes; nothing in house style writes that. */
@@ -581,13 +526,6 @@ export const processDisciplineRules: Rule[] = [
       }
       return mismatches;
     },
-  },
-  {
-    // No bare mkdtemp in the test tree: TEMP_DIR_HELPER owns fixtures
-    // and is the one file that may call it. Fixed-name writes under
-    // os.tmpdir() are the launcher's leftover check's to catch.
-    name: "temp-dirs-through-helper",
-    run: () => tempDirTreeMismatches(walkFiles("tests"), read),
   },
   {
     // Tests never sit beside an action's sources: the launcher runs

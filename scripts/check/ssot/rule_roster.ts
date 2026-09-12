@@ -56,7 +56,6 @@ export const RULE_ROSTER = [
   "settings-green-gate",
   "fleet-writers-ride-post-green",
   "spawn-sync-hang-bound",
-  "temp-dirs-through-helper",
   "no-tests-under-actions",
   "stream-write-sync",
   "ci-harness-imports",
