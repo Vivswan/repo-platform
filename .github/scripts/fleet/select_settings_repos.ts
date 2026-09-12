@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 // The log and step summary are public, so every discovered private slug is masked before anything
 // else prints. One repo's flaky probe never blocks the rest: exit 1 is reserved for failures that
-// invalidate the whole selection, and the nightly cron retries a skipped repo.
+// invalidate the whole selection, and the nightly cron retries a skipped repo. The targets leave
+// as the apply matrix's keyed rows (sync/resolve_row.ts): the job output that feeds it is public,
+// and a slug there would be dropped by the runner as masked or, unmasked, name a private repository.
 
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
@@ -9,6 +11,7 @@ import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { addMask, env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { moduleRoster } from "../sync/modules.ts";
+import { planMatrix, rowKeyOf } from "../sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../sync/writer/settings_entry.ts";
 import {
   captureNetwork,
@@ -35,6 +38,7 @@ import {
 
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
+const runId = requireEnv("GITHUB_RUN_ID");
 
 const scope = parseScope(readDispatchRepo(owner), new Set(moduleRoster()));
 if (scope.kind === "error") {
@@ -146,8 +150,7 @@ async function probe<T>(
 }
 
 const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
-// Before anything else prints: the masker covers what a scrub might miss,
-// and the apply step echoes the repos output into the log.
+// Before anything else prints: the masker covers what a scrub might miss.
 for (const row of discovered) {
   if (row.private) for (const form of maskForms(row.repo)) addMask(form);
 }
@@ -190,14 +193,11 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
 const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
 setOutput("count", String(targets.length));
+setOutput("matrix", JSON.stringify(planMatrix(targets, rowKeyOf(pat, runId))));
 const line = selectedLine(
   targets,
   "settings targets",
   "no settings targets selected; nothing to apply.",
 );
-if (targets.length === 0) {
-  notice(line);
-} else {
-  setOutput("repos", targets.map((target) => target.repo).join("\n"));
-  console.log(line);
-}
+if (targets.length === 0) notice(line);
+else console.log(line);

@@ -321,7 +321,11 @@ What a run still shows:
 - A step's exit status, and the red step's own error when a row failed before its target was resolved (nothing target-derived exists yet at that point).
 - The plan job's selection line, which names public repositories in the clear and counts the private ones.
 
-The settings apply ([settings-repos.yml](../.github/workflows/settings-repos.yml)) keeps its own model: its selector names public targets and counts private ones, masks every form of a private slug before anything prints, and hands the list to github-settings-as-code, which shows a private target as `private repository #N` (`private-repos: redact`) and delivers its full report to a reused issue on the target itself, pinned by the `settings-as-code-report` label ([settings.md](settings.md#how-the-apply-works)).
+The settings apply ([settings-repos.yml](../.github/workflows/settings-repos.yml)) runs the same shape, with its own delivery ([settings.md](settings.md#how-the-apply-works)):
+
+- The plan names public targets and counts private ones, and masks every form of a private slug before anything prints. Its matrix carries keyed rows: an HMAC of the slug under the fleet token and the run id.
+- Each apply row resolves its key against one listing of the owner's repositories and registers the name with the masker. Only then does the action run, on that one target.
+- The action shows a private target as `private repository #N` (`private-repos: redact`). Its full report goes to a reused issue on the target itself, pinned by the `settings-as-code-report` label.
 
 Limits, stated plainly:
 

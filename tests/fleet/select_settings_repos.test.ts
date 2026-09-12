@@ -9,6 +9,7 @@ import {
 } from "../../.github/scripts/fleet/discovery.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
+import { planMatrix, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -17,7 +18,8 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const temp = tempDirs();
 
 // End-to-end harness against stub `gh` and `curl` on PATH; PROBE_RETRY_DELAY_MS is zeroed so the retry loop costs no wall time.
-// PRIVATE personas' every public line says "a private repository" while the masks cover the slug.
+// PRIVATE personas' every public line says "a private repository" while the masks cover the slug,
+// and the matrix output names no target at all: each row rides as its index and the plan's key.
 const PERSONAS: { name: string; private: boolean }[] = [
   { name: "deadapi", private: false },
   { name: "deadprobe", private: false },
@@ -36,6 +38,8 @@ const PERSONAS: { name: string; private: boolean }[] = [
   { name: "unrendered", private: false },
 ];
 const PRIVATE_SLUGS = PERSONAS.filter((p) => p.private).map((p) => `Vivswan/${p.name}`);
+const RUN_ID = "4242";
+const keyOf = rowKeyOf("stub-token", RUN_ID);
 
 describe("select_settings_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
@@ -186,6 +190,7 @@ describe("select_settings_repos.ts", () => {
         PROBE_RETRY_DELAY_MS: "0",
         GH_TOKEN: "stub-token",
         OWNER: "Vivswan",
+        GITHUB_RUN_ID: RUN_ID,
         GITHUB_OUTPUT: outputFile,
         GITHUB_STEP_SUMMARY: summaryFile,
         STUB_STATE: join(work, "state"),
@@ -224,20 +229,30 @@ describe("select_settings_repos.ts", () => {
     };
   }
 
-  function outputsOf(result: Run): { count: string; repos: string[] | null } {
+  /** The whole output file read back: the count, and the matrix's rows read back to slugs the way
+   *  the resolver reads them (each key matched against the personas' keys under the stub token and
+   *  run id), in the selector's order. The matrix text names no target. */
+  function outputsOf(result: Run): { count: string; repos: (string | null)[] } {
     const count = /^count=(.*)$/m.exec(result.output)?.[1];
-    if (count === undefined) throw new Error(`no count= line in: ${result.output}`);
-    const single = /^repos=(.*)$/m.exec(result.output);
-    if (single !== null) return { count, repos: [single[1]] };
-    const heredoc = /^repos<<(ghadelimiter_[0-9a-f-]+)\n([\s\S]*?)\n\1\n/m.exec(result.output);
-    return { count, repos: heredoc === null ? null : heredoc[2].split("\n") };
+    const matrix = /^matrix=(.*)$/m.exec(result.output)?.[1];
+    if (count === undefined || matrix === undefined) {
+      throw new Error(`no count= and matrix= lines in: ${result.output}`);
+    }
+    expect(result.output).toBe(`count=${count}\nmatrix=${matrix}\n`);
+    for (const form of PRIVATE_SLUGS.flatMap(maskForms)) expect(matrix).not.toContain(form);
+    const rows = (JSON.parse(matrix) as { include: { row: number; key: string }[] }).include;
+    expect(rows.map((row) => row.row)).toEqual(rows.map((_, index) => index));
+    const slugs = PERSONAS.map((persona) => `Vivswan/${persona.name}`);
+    return {
+      count,
+      repos: rows.map((row) => slugs.find((slug) => keyOf(slug) === row.key) ?? null),
+    };
   }
 
-  /** The public channels a private slug may never reach: the log (masks
-   *  aside), stderr, and the step summary. The output file carries the real
-   *  slugs by design; the runner masks them in the log. */
+  /** The public channels a private slug may never reach: the log (masks aside), stderr, the step
+   *  summary, and the output file (its matrix becomes a job output, which the run's views show). */
   function publicChannels(result: Run): string[] {
-    return [result.stdout, result.stderr, result.summary];
+    return [result.stdout, result.stderr, result.summary, result.output];
   }
 
   let main: Run;
@@ -337,7 +352,7 @@ describe("select_settings_repos.ts", () => {
       ),
       masked: true,
       stderr: "",
-      output: expect.stringMatching(/^count=6\nrepos<<ghadelimiter_/),
+      output: expect.stringMatching(/^count=6\nmatrix=\{"include":\[\{"row":0,"key":"/),
       summary: summaryOf(...ALL_WARNINGS),
     });
     expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
@@ -360,6 +375,15 @@ describe("select_settings_repos.ts", () => {
     expect(main.stdout).not.toContain("description:");
   });
 
+  test("the matrix is the plan's keyed rows: N rows for N targets, each an index and the key its resolver matches, no slug in the text", () => {
+    const rows = ALL_TARGETS.map((repo) => ({ repo, private: repo.includes("/hidden-") }));
+    expect(main.output).toBe(`count=6\nmatrix=${JSON.stringify(planMatrix(rows, keyOf))}\n`);
+    expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
+    for (const persona of PERSONAS) {
+      expect(main.output.toLowerCase()).not.toContain(persona.name);
+    }
+  });
+
   test(
     "a private dispatch input arrives via the event payload and never prints",
     () => {
@@ -368,15 +392,14 @@ describe("select_settings_repos.ts", () => {
       const eventFile = join(root, "dispatch-event.json");
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
       const r = run("dispatch", { GITHUB_EVENT_PATH: eventFile });
-      expect({ ...r, masked: r.masked.length }).toEqual({
+      expect({ ...r, masked: r.masked.length, output: outputsOf(r) }).toEqual({
         exitCode: 0,
         stdout: lines("settings targets: 1 private repository"),
         masked: PRIVATE_SLUGS.flatMap(maskForms).length,
         stderr: "",
-        output: "count=1\nrepos=Vivswan/hidden-server\n",
+        output: { count: "1", repos: ["Vivswan/hidden-server"] },
         summary: "",
       });
-      expect(outputsOf(r)).toEqual({ count: "1", repos: ["Vivswan/hidden-server"] });
       for (const channel of publicChannels(r)) expect(channel).not.toContain("hidden-server");
     },
     TEST_TIMEOUT_MS,
@@ -659,11 +682,12 @@ describe("select_settings_repos.ts", () => {
       notice: notRenderedNotice("Vivswan/handwritten"),
     },
   ])(
-    "a scope selecting only $reason selects nothing: green, the notice, count 0, no repos output",
+    "a scope selecting only $reason selects nothing: green, the notice, count 0, an empty matrix",
     ({ scope, notice }) => {
       // A scoped run may legitimately select nothing: the settings apply
       // that follows a fleet sync must not go red for a target whose sync
-      // PR has not merged. No repos output means the apply step is skipped.
+      // PR has not merged. Count 0 skips the apply job; the empty matrix
+      // is still valid JSON for its fromJSON.
       const r = run(`none-${Bun.hash(scope).toString(16)}`, { ONLY_REPO: scope, SOURCE_SHA: SHA });
       expect({ ...r, masked: r.masked.length }).toEqual({
         exitCode: 0,
@@ -673,10 +697,10 @@ describe("select_settings_repos.ts", () => {
         ),
         masked: PRIVATE_SLUGS.flatMap(maskForms).length,
         stderr: "",
-        output: "count=0\n",
+        output: 'count=0\nmatrix={"include":[]}\n',
         summary: "",
       });
-      expect(outputsOf(r)).toEqual({ count: "0", repos: null });
+      expect(outputsOf(r)).toEqual({ count: "0", repos: [] });
     },
     TEST_TIMEOUT_MS,
   );
