@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
-import { planMatrix, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
+import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { ROWS_FILE } from "../../.github/scripts/sync/verdict.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -11,7 +11,7 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const RUN_ID = "4242";
 const keyOf = rowKeyOf("stub-token", RUN_ID);
 const outputFor = (rows: { repo: string; private: boolean }[]) =>
-  `count=${rows.length}\nmatrix=${JSON.stringify(planMatrix(rows, keyOf))}\n`;
+  `count=${rows.length}\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`;
 
 const temp = tempDirs();
 

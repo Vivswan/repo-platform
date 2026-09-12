@@ -1,7 +1,7 @@
 // The sync operator's log shape (docs/sync.md, "The operator"): the row
 // job's steps print nothing but the vocabulary, the matrix carries row
-// indexes and the plan's opaque keys, and the resolve step is the boundary
-// the target's name crosses behind a mask.
+// indexes and the plan's opaque keys, the row job runs no probe of its own,
+// and the resolve step is the boundary the target's name crosses behind a mask.
 
 import { parse as parseYaml } from "yaml";
 import { rowBudgetMinutes } from "../../../.github/scripts/sync/row_budget.ts";
@@ -22,6 +22,23 @@ export const REDIRECTED =
 /** The actions a row job may `uses:`; anything else runs code whose output
  *  the redirect rule cannot see. */
 export const ROW_ACTIONS = ["actions/checkout@", "oven-sh/setup-bun@"];
+/** Both fleet writers' row matrices: the `include` word in the workflow, the rows from the plan's
+ *  output alone (a literal could carry slugs; the word in the output could match a masked name). */
+export const keyedMatrix = (planJob: string) => ({
+  include: `\${{ fromJSON(needs.${planJob}.outputs.matrix) }}`,
+});
+/** Both fleet writers' resolver steps: the row's key, what keyed it, and the listing it resolves against. */
+export const RESOLVER_ENV = {
+  ROW_KEY: "${{ matrix.key }}",
+  PAT: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+  GH_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+  OWNER: "${{ github.repository_owner }}",
+};
+/** A mapping as the rules compare and report it: keys sorted, so declaration order never counts. */
+export const canonical = (value: unknown): string => {
+  const record = mapping(value);
+  return JSON.stringify(record, Object.keys(record).sort());
+};
 
 type Step = Record<string, unknown>;
 
@@ -35,15 +52,6 @@ const steps = (job: Record<string, unknown>): Step[] =>
 
 const runOf = (step: Step) => String(step.run ?? "").trim();
 
-function selectorEnv(job: Record<string, unknown>): string | null {
-  const step = steps(job).find((s) => runOf(s).startsWith(SELECTOR));
-  if (step === undefined) return null;
-  return Object.entries(mapping(step.env))
-    .map(([key, value]) => `${key}=${String(value)}`)
-    .sort()
-    .join("\n");
-}
-
 export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Mismatch[] {
   const mismatches: Mismatch[] = [];
   const jobs = mapping(mapping(parseYaml(text)).jobs);
@@ -53,11 +61,10 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
   if (rowSteps.length === 0) throw new Error(`${rel}: no sync job steps - anchor lost`);
 
   const matrix = mapping(sync.strategy).matrix;
-  if (matrix !== "${{ fromJSON(needs.plan.outputs.matrix) }}") {
+  if (canonical(matrix) !== canonical(keyedMatrix("plan"))) {
     mismatches.push({
       file: rel,
-      expected:
-        "the plan's matrix of row indexes and keys alone: matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+      expected: `the plan's matrix of row indexes and keys alone: matrix: ${JSON.stringify(keyedMatrix("plan"))}`,
       got: matrix === undefined ? "no matrix" : `matrix: ${JSON.stringify(matrix)}`,
     });
   }
@@ -123,6 +130,13 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
     }
     if (run === RESOLVER) {
       resolverAt = index;
+      if (canonical(step.env) !== canonical(RESOLVER_ENV)) {
+        mismatches.push({
+          file: rel,
+          expected: `the resolver step's env exactly ${JSON.stringify(RESOLVER_ENV)} (the row's key, what keyed it, and the listing it resolves against)`,
+          got: canonical(step.env),
+        });
+      }
       return;
     }
     if (run.startsWith(CHECKOUT)) checkoutAt = index;
@@ -165,28 +179,19 @@ export function syncOperatorMismatches(text: string, rel = SYNC_WORKFLOW): Misma
       got: "no plan printer step",
     });
   }
+  // The plan probed once; a row that probes again repeats the fleet-wide probes (N selections per
+  // run) and breaks row_budget.ts's one-listing bound.
   for (const [label, command] of [
     ["discovery", DISCOVERY],
-    ["selector", SELECTOR],
+    ["selection", SELECTOR],
   ] as const) {
-    if (!steps(sync).some((step) => runOf(step).startsWith(command))) {
+    if (rowSteps.some((step) => runOf(step).startsWith(command))) {
       mismatches.push({
         file: rel,
-        expected: `the sync job re-running the ${label} (${command}) so a row's key finds the plan's repository`,
-        got: `no ${label} step in the sync job`,
+        expected: `no ${label} in the sync job (${command} runs in the plan alone; the resolver lists once)`,
+        got: `a sync step running the ${label}`,
       });
     }
-  }
-  const planEnv = selectorEnv(plan);
-  const rowEnv = selectorEnv(sync);
-  if (planEnv === null) throw new Error(`${rel}: no plan selector step - anchor lost`);
-  if (rowEnv !== null && rowEnv !== planEnv) {
-    mismatches.push({
-      file: rel,
-      expected:
-        "the sync job's selector step carrying the plan's exact env (the scope inputs included)",
-      got: "a selector env that differs between the two jobs",
-    });
   }
   const writer = rowSteps.find((step) => runOf(step).startsWith(WRITER));
   if (writer === undefined) throw new Error(`${rel}: no writer step - anchor lost`);

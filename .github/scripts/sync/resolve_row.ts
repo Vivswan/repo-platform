@@ -1,76 +1,78 @@
 #!/usr/bin/env bun
-// The one step of a sync row that sees the target's name in the clear.
-// The row job re-runs discovery and selection (the same scripts the plan
-// job ran, their output in $RUNNER_TEMP files) and this step finds the row
-// carrying the plan's key in the selector's rows file. Before anything
-// else reaches stdout, every form of the name is registered with the
-// runner's masker; the name then leaves this step only through GITHUB_ENV
-// (TARGET, TARGET_PRIVATE), which the runner never echoes.
-//
-// Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the
-// key's inputs), RUNNER_TEMP (the rows file), GITHUB_ENV.
+// The row's transport and its resolver. A row rides the public matrix as an index and a key; the
+// resolver reads the key back against ONE listing of the owner's writable repositories, masks every
+// form of the name before anything else reaches stdout, and hands the name on through GITHUB_ENV
+// (TARGET, TARGET_PRIVATE), which the runner never echoes. fleet/resolve_settings_target.ts is the
+// settings apply's entry to the same resolver.
 
 import { createHmac } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { z } from "zod";
+import { appendFileSync } from "node:fs";
+import { type DiscoveredRepo, discoverOwnerRepos } from "../fleet/discovery.ts";
 import { addMask, fail, requireEnv } from "../shared/gha.ts";
-import { parseJson, parseWith } from "../shared/json.ts";
 import { maskForms } from "../shared/mask.ts";
-import { ROWS_FILE } from "./verdict.ts";
-
-/** A selector row: the repository and its visibility. */
-const planRowSchema = z.object({ repo: z.string().min(1), private: z.boolean() });
-export type PlanRow = z.infer<typeof planRowSchema>;
 
 /** A row's identity as the public matrix carries it: an HMAC of the slug under the fleet token and
  *  the run id. Without the token it names nothing, and the same repository keys differently in
- *  every run, so a private row rides the matrix and the step env unnamed. */
+ *  every run, so a private row rides the matrix and the step env unnamed.
+ *
+ *  The runner drops a job output that carries a masked value. The bare-name mask starts at
+ *  shared/mask.ts's four characters, and the slug and URL forms carry `/` or `:`, which the matrix
+ *  never does, so the digest rides in three-character groups behind a separator no slug, URL, or
+ *  base64 spelling of one contains.
+ *    private repository `beef`, raw digest `...becbeef8c...`  -> the whole matrix dropped, every row red */
 export function rowKeyOf(pat: string, runId: string): (repo: string) => string {
-  return (repo) => createHmac("sha256", pat).update(`${runId}\n${repo}`).digest("hex");
+  return (repo) =>
+    createHmac("sha256", pat)
+      .update(`${runId}\n${repo}`)
+      .digest("hex")
+      .replace(/.{3}(?=.)/g, "$&~");
 }
 
-/** The plan job's matrix: an index for the job name, a key for the resolver. */
-export function planMatrix(
-  rows: PlanRow[],
+/** The matrix's include rows: an index for the job name, a key for the resolver. The `include`
+ *  word itself stays in the workflow: seven letters a private name could match. */
+export function matrixRows(
+  rows: DiscoveredRepo[],
   keyOf: (repo: string) => string,
-): { include: { row: number; key: string }[] } {
-  return { include: rows.map((row, index) => ({ row: index, key: keyOf(row.repo) })) };
+): { row: number; key: string }[] {
+  return rows.map((row, index) => ({ row: index, key: keyOf(row.repo) }));
 }
 
-/** The re-run selection's row carrying the plan's key, or a refusal naming no repository: a
- *  repository that left the fleet or un-adopted since the plan has no row here, and the rows
- *  around it moving neither adds nor shifts one. */
 export function resolveRow(
-  rows: PlanRow[],
+  rows: DiscoveredRepo[],
   key: string,
   keyOf: (repo: string) => string,
-): { target: PlanRow } | { refusal: string } {
+): { target: DiscoveredRepo } | { refusal: string } {
   const target = rows.find((row) => keyOf(row.repo) === key);
   if (target === undefined) {
     return {
       refusal:
-        "the row no longer names a repository the plan selected: the selection changed since the plan job ran (the fleet or a repository's registration moved mid-run)",
+        "the row's key names no repository in the owner's listing: the fleet moved since the plan job ran (a repository revoked or renamed mid-run)",
     };
   }
   return { target };
 }
 
-function main(): void {
-  const runnerTemp = requireEnv("RUNNER_TEMP");
-  const rows = parseWith(
-    z.array(planRowSchema),
-    parseJson(readFileSync(join(runnerTemp, ROWS_FILE), "utf-8"), "resolve_row: rows"),
-    "resolve_row: rows",
-  );
+/** The listing is the check, not a re-selection: a repository the listing no longer names fails the
+ *  step naming nothing, and one still listed is this run's target whatever its registration or the
+ *  token's grant now says.
+ *
+ *  Env: ROW_KEY (the plan's key for this row), PAT and GITHUB_RUN_ID (the key's inputs), OWNER and
+ *  GH_TOKEN (the listing), GITHUB_ENV. */
+export function resolveTarget(script: string, handOn: (target: DiscoveredRepo) => string): void {
   const keyOf = rowKeyOf(requireEnv("PAT"), requireEnv("GITHUB_RUN_ID"));
-  const resolved = resolveRow(rows, requireEnv("ROW_KEY"), keyOf);
+  const rowKey = requireEnv("ROW_KEY");
+  const owner = requireEnv("OWNER");
+  const envFile = requireEnv("GITHUB_ENV");
+  const rows = discoverOwnerRepos(owner, `${script}: user/repos response`);
+  const resolved = resolveRow(rows, rowKey, keyOf);
   if ("refusal" in resolved) fail(`${resolved.refusal}; re-run the workflow`);
   for (const form of maskForms(resolved.target.repo)) addMask(form);
-  appendFileSync(
-    requireEnv("GITHUB_ENV"),
-    `TARGET=${resolved.target.repo}\nTARGET_PRIVATE=${resolved.target.private}\n`,
-  );
+  appendFileSync(envFile, handOn(resolved.target));
 }
 
-if (import.meta.main) main();
+if (import.meta.main) {
+  resolveTarget(
+    "resolve_row",
+    (target) => `TARGET=${target.repo}\nTARGET_PRIVATE=${target.private}\n`,
+  );
+}

@@ -125,7 +125,9 @@ jobs:
         run: bun .github/scripts/fleet/select_settings_repos.ts
 
   # One job per matrix row: an index for the job name, which never carries a repository name, and
-  # the plan's opaque key for the resolver. An empty selection is a no-op, not a failure.
+  # the plan's opaque key for the resolver. The `include` word lives here, not in the plan's output:
+  # the runner drops a job output that spells a masked name (sync/resolve_row.ts). An empty
+  # selection is a no-op, not a failure.
   apply:
     needs: plan
     if: needs.plan.outputs.count != '0'
@@ -138,7 +140,8 @@ jobs:
       # issues are content-creating, so secondary rate limits apply):
       # bound the fleet's burst.
       max-parallel: 5
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: apply (row ${{ matrix.row }})
     runs-on: ubuntu-latest
     # One target's work: the install, one listing of the owner's repositories,

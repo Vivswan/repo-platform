@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
-// sync-repos.yml's plan job runs this after discovery wrote $RUNNER_TEMP/discovered.json, and every
-// row job runs it again so a row's key finds the plan's repository. This log is public: the rows
-// file carries the real slugs, the job output only the count and the keyed matrix, and a private
-// repository is never named here.
+// sync-repos.yml's plan job runs this after discovery wrote $RUNNER_TEMP/discovered.json. This log
+// is public: the rows file carries the real slugs, the job output only the count and the keyed
+// matrix rows (sync/resolve_row.ts), and a private repository is never named here.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +10,7 @@ import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { moduleRoster } from "../sync/modules.ts";
-import { planMatrix, rowKeyOf } from "../sync/resolve_row.ts";
+import { matrixRows, rowKeyOf } from "../sync/resolve_row.ts";
 import { ROWS_FILE } from "../sync/verdict.ts";
 import {
   captureNetwork,
@@ -124,7 +123,7 @@ const leftOutLine = modulesLeftOutLine(scope, leftOut);
 if (leftOutLine !== null) console.log(leftOutLine);
 writeFileSync(join(runnerTemp, ROWS_FILE), JSON.stringify(rows));
 setOutput("count", String(rows.length));
-setOutput("matrix", JSON.stringify(planMatrix(rows, rowKeyOf(pat, runId))));
+setOutput("matrix", JSON.stringify(matrixRows(rows, rowKeyOf(pat, runId))));
 const line = selectedLine(rows, "syncing", "no adopted repos selected; nothing to sync.");
 if (rows.length === 0) notice(line);
 else console.log(line);

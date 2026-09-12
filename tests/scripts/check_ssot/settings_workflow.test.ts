@@ -308,7 +308,7 @@ describe("settingsApplyInputMismatches (settings-apply-input)", () => {
     "",
   ].join("\n");
   const APPLY_STEP = `      - name: Apply repository settings\n${STEP_GATE}${USES}        with:\n${APPLY_WITH}\n`;
-  const MATRIX = "      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}\n";
+  const MATRIX = "      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.matrix) }}\n";
   const JOB_NAME = "    name: apply (row ${{ matrix.row }})\n";
   const valid = `
 jobs:
@@ -331,7 +331,7 @@ ${RESOLVE}${APPLY_STEP}`;
     '"repos":"${{ env.TARGET }}","private-repos":"redact",' +
     '"private-report":"issue","on-missing-permission":"fail"}';
   const expectedMatrix =
-    "the apply job's matrix the plan's row indexes and keys alone: matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}";
+    'the apply job\'s matrix the plan\'s row indexes and keys alone: matrix: {"include":"${{ fromJSON(needs.plan.outputs.matrix) }}"}';
   const expectedResolver =
     "a step running bun .github/scripts/fleet/resolve_settings_target.ts IMMEDIATELY BEFORE the apply step (it registers the target's masks and writes TARGET)";
   const expectedResolverEnv =
@@ -657,7 +657,7 @@ ${SELECT}${APPLY_STEP.replace(STEP_GATE, "        if: steps.select.outputs.repos
       },
       {
         expected:
-          "the apply job's matrix the plan's row indexes and keys alone: matrix: ${{ fromJSON(needs.apply.outputs.matrix) }}",
+          'the apply job\'s matrix the plan\'s row indexes and keys alone: matrix: {"include":"${{ fromJSON(needs.apply.outputs.matrix) }}"}',
         got: "no matrix",
       },
       {
