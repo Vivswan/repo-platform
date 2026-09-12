@@ -126,7 +126,7 @@ A managed workflow (`files/<module>/.github/workflows/<name>.yml` and this repos
 
 1. Land the action change alone: its own PR against main, so the post-green run carries the new input to the delivery ref.
 2. Stack the workflow PR on the action branch while both are open. Once the action PR merges, rebase the workflow branch onto main with `--onto main <old action tip>` and retarget the PR: the squash made a new commit, so a plain retarget keeps the action commits in the workflow PR's diff.
-3. Re-run the workflow PR's check after the delivery ref has moved (the rebase push does it), then merge.
+3. Wait for the action merge's post-green run to move the delivery ref, then re-run the workflow PR's check and merge: a push before the move runs the old copy again, and the move itself starts no PR run.
 
 Example: the pr-title workflow PR feeding validate-commit-names a new `title` input, stacked on the action PR before that PR merged; its own `pr-title` check ran the delivery-ref copy, which ignored the input and judged a commit range in a checkout-less job (`fatal: not a git repository`).
 
