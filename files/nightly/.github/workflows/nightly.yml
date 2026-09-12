@@ -57,6 +57,7 @@ jobs:
           # The create tuple is anchored to files.yml's nightly tracking_label by check_ssot's labels rule.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
+          stream: generic
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success'
@@ -64,6 +65,4 @@ jobs:
         with:
           mode: resolve
           label: "{{nightly_label}}"
-          # The generic close wording; without it the action keeps the fuzz
-          # stream's regression-seed hedging.
           stream: generic

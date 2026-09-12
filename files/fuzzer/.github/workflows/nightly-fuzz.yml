@@ -81,11 +81,13 @@ jobs:
         with:
           mode: report
           label: "{{fuzzer_label}}"
-          # Explicit even though it matches the action's default: older
-          # renders rely on the default, so it can never change.
           title: Nightly fuzz failures
           artifacts-dir: .fuzz-failures
           artifact-name: fuzz-failures-${{ github.run_attempt }}
+          # The create tuple is anchored to files.yml's fuzzer tracking_label by check_ssot's labels rule.
+          label-color: "B60205"
+          label-description: Automated nightly fuzz failure
+          stream: fuzz
 
       - name: Close the fuzz issue on a green night
         if: success()
@@ -93,3 +95,4 @@ jobs:
         with:
           mode: resolve
           label: "{{fuzzer_label}}"
+          stream: fuzz

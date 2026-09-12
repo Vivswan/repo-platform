@@ -95,6 +95,11 @@ export const FUZZ_STARTER = "files/fuzzer/.github/workflows/nightly-fuzz.yml";
 export const NIGHTLY_STARTER = "files/nightly/.github/workflows/nightly.yml";
 /** The shared deploy carrying the site stream's create tuple. */
 export const REUSABLE_SITE = ".github/workflows/reusable-site.yml";
+const TRACKING_CARRIERS = [
+  { module: "fuzzer", carrier: FUZZ_STARTER },
+  { module: "nightly", carrier: NIGHTLY_STARTER },
+  { module: "site", carrier: REUSABLE_SITE },
+] as const;
 
 export const labelRules: Rule[] = [
   {
@@ -140,108 +145,27 @@ export const labelRules: Rule[] = [
         }
       }
 
-      // Tracking-label streams: files.yml's tracking_label block is the
-      // single source of each stream's create tuple; the carriers (the
-      // action's defaults for the fuzz stream, the starters' overrides for
-      // the nightly stream, the shared deploy for the site stream) are
-      // anchored back to it here.
+      // Tracking-label streams: files.yml's tracking_label block is the single source of each stream's create
+      // tuple, and each carrier (the two starters, the shared site deploy) passes the tuple to the fuzz-issue action.
       const streams = trackingStreams();
-      const fuzzTracking = streams.find((m) => m.module === "fuzzer");
-      if (!fuzzTracking) throw new Error("files.yml modules.fuzzer lost tracking_label");
-      const actionYml = read("actions/fuzz-issue/action.yml");
-      const inputDefault = (name: string) =>
-        mustMatch(
-          actionYml,
-          new RegExp(`^ {2}${name}:\n(?: {4}.+\n)*? {4}default: (.+)$`, "m"),
-          "actions/fuzz-issue/action.yml",
-          `${name} default`,
+      for (const { module, carrier } of TRACKING_CARRIERS) {
+        const tracking = streams.find((m) => m.module === module);
+        if (!tracking) throw new Error(`files.yml modules.${module} lost tracking_label`);
+        const text = read(carrier);
+        const color = mustMatch(text, /label-color: "([^"]+)"/, carrier, "label-color input")[1];
+        const description = mustMatch(
+          text,
+          /label-description: (.+)/,
+          carrier,
+          "label-description input",
         )[1];
-      const color = inputDefault("label-color");
-      const description = inputDefault("label-description");
-      if (color !== `"${fuzzTracking.color}"` || description !== fuzzTracking.description) {
-        mismatches.push({
-          file: "actions/fuzz-issue/action.yml label input defaults",
-          expected: `"${fuzzTracking.color}" / ${fuzzTracking.description} (files.yml modules.fuzzer.tracking_label)`,
-          got: `${color} / ${description}`,
-        });
-      }
-      const fuzzStarter = read(FUZZ_STARTER);
-      if (/label-(?:color|description):/.test(fuzzStarter)) {
-        mismatches.push({
-          file: FUZZ_STARTER,
-          expected:
-            "no label-color/label-description override (the fuzz tuple is anchored to the action's defaults)",
-          got: "an override - anchor this rule to it instead",
-        });
-      }
-      // The fuzz starter's explicit title must stay the action's title
-      // default: already-written fleet starters omit the input and depend
-      // on the default.
-      const titleDefault = inputDefault("title");
-      const starterTitle = mustMatch(
-        fuzzStarter,
-        /^ {10}title: (.+)$/m,
-        FUZZ_STARTER,
-        "title input",
-      )[1];
-      if (starterTitle !== titleDefault) {
-        mismatches.push({
-          file: `${FUZZ_STARTER} title`,
-          expected: `${titleDefault} (actions/fuzz-issue/action.yml title default)`,
-          got: starterTitle,
-        });
-      }
-
-      // The nightly stream's create tuple is passed by its starter.
-      const nightlyTracking = streams.find((m) => m.module === "nightly");
-      if (!nightlyTracking) throw new Error("files.yml modules.nightly lost tracking_label");
-      const starter = read(NIGHTLY_STARTER);
-      const starterColor = mustMatch(
-        starter,
-        /label-color: "([^"]+)"/,
-        NIGHTLY_STARTER,
-        "label-color input",
-      )[1];
-      const starterDescription = mustMatch(
-        starter,
-        /label-description: (.+)/,
-        NIGHTLY_STARTER,
-        "label-description input",
-      )[1];
-      if (
-        starterColor !== nightlyTracking.color ||
-        starterDescription !== nightlyTracking.description
-      ) {
-        mismatches.push({
-          file: `${NIGHTLY_STARTER} label overrides`,
-          expected: `${nightlyTracking.color} / ${nightlyTracking.description} (files.yml modules.nightly.tracking_label)`,
-          got: `${starterColor} / ${starterDescription}`,
-        });
-      }
-
-      // The site stream's create tuple is passed by the shared deploy
-      // (reusable-site.yml files the link-rot issue for every caller).
-      const siteTracking = streams.find((m) => m.module === "site");
-      if (!siteTracking) throw new Error("files.yml modules.site lost tracking_label");
-      const reusableSite = read(REUSABLE_SITE);
-      const rotColor = mustMatch(
-        reusableSite,
-        /label-color: "([^"]+)"/,
-        REUSABLE_SITE,
-        "label-color input",
-      )[1];
-      const rotDescription = mustMatch(
-        reusableSite,
-        /label-description: (.+)/,
-        REUSABLE_SITE,
-        "label-description input",
-      )[1];
-      if (rotColor !== siteTracking.color || rotDescription !== siteTracking.description) {
-        mismatches.push({
-          file: `${REUSABLE_SITE} label overrides`,
-          expected: `${siteTracking.color} / ${siteTracking.description} (files.yml modules.site.tracking_label)`,
-          got: `${rotColor} / ${rotDescription}`,
-        });
+        if (color !== tracking.color || description !== tracking.description) {
+          mismatches.push({
+            file: `${carrier} label tuple`,
+            expected: `${tracking.color} / ${tracking.description} (files.yml modules.${module}.tracking_label)`,
+            got: `${color} / ${description}`,
+          });
+        }
       }
 
       // The fleet-wide security stream is fleet data, not a module answer:

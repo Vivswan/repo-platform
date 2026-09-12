@@ -11,22 +11,22 @@ description: >-
   labeled issues, up to 100 a run, after a green run. With an artifacts-dir
   the body is built from failure reports (the contract is repo-platform's
   docs/fuzzer.md); without one it is a generic nightly-failure report
-  (workflow, commit, run link).
+  (workflow, commit, run link). The action carries no stream's wording as
+  a default: every caller names its mode and stream and, in report mode,
+  its title and label tuple.
   Needs issues: write and gh on the runner (preinstalled on GitHub-hosted
   runners).
 
 inputs:
   mode:
     description: report (file/update from artifacts-dir) or resolve (close after a green run)
-    required: false
-    default: report
+    required: true
   label:
     description: Label identifying the issue stream; one open issue per label
     required: true
   title:
-    description: Title of the issue; a refresh sets it again
+    description: Title of the issue, required in report mode; a refresh sets it again
     required: false
-    default: Nightly fuzz failures
   artifacts-dir:
     description: >-
       Directory of per-failure subdirectories (contract v1). Empty means the
@@ -43,22 +43,18 @@ inputs:
     required: false
     default: ""
   label-color:
-    description: Color report mode creates the label with, or repaints an existing one to
+    description: Color report mode creates the label with, or repaints an existing one to; required in report mode
     required: false
-    default: "B60205"
   label-description:
-    description: Description report mode creates the label with, or resets an existing one to
+    description: Description report mode creates the label with, or resets an existing one to; required in report mode
     required: false
-    default: Automated nightly fuzz failure
   stream:
     description: >-
       Which nightly stream the issue tracks - shapes the wording of the
-      report body and the resolve comment. fuzz (the default, what
-      pre-existing fuzz starters get) speaks of failure reports and crashing
-      inputs and hedges on unpinned regression seeds; generic carries no
-      fuzz notions.
-    required: false
-    default: fuzz
+      report body and the resolve comment. fuzz speaks of failure reports
+      and crashing inputs and hedges on unpinned regression seeds; generic
+      carries no fuzz notions.
+    required: true
   token:
     description: Token used by gh and the issue action; needs issues write
     required: false
@@ -81,6 +77,9 @@ runs:
       with:
         pin: ${{ github.action_path }}/.bun-version
 
+    # The report tuple rides along for the script's requirement check: a
+    # composite's `required: true` only documents, and the later steps would
+    # otherwise create a label with an empty color or an issue with no title.
     - name: Assemble the issue body or the close comment
       id: body
       shell: bash
@@ -89,6 +88,9 @@ runs:
         ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         ARTIFACT_NAME: ${{ inputs.artifact-name }}
         STREAM: ${{ inputs.stream }}
+        TITLE: ${{ inputs.title }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
         ACTION_BUN: ${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "${{ github.action_path }}/fuzz-issue.ts"'
 
