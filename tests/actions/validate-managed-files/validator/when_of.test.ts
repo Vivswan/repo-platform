@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import type { When } from "../../../../actions/shared/selection.ts";
 import { whenOf } from "../../../../actions/validate-managed-files/validator/when_of.ts";
 
-// The modules block the derived lists resolve against.
 const MODULES = { a: { codeql_language: "python" }, b: { pin: {} }, c: { codeql_language: "go" } };
 
 describe("whenOf", () => {

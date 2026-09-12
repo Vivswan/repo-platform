@@ -11,8 +11,7 @@ const isModuleList = (list: unknown): list is ModuleList =>
     typeof list.declaring === "string");
 
 /** Loose because the build branch's files.yml already passed the strict loader. An empty clause folds to null as the
- *  loader's whenSchema does, so `applies` meets one spelling of "always"; a derived list is expanded against `modules`
- *  as the loader expands it. */
+ *  loader's whenSchema does, so `applies` meets one spelling of "always". */
 export function whenOf(
   value: unknown,
   modules: Readonly<Record<string, unknown>>,

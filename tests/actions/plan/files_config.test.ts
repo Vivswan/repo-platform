@@ -195,6 +195,21 @@ describe("parseFilesConfig", () => {
       "unknown module 'nope'",
     ],
     [
+      "a when list holding a non-name",
+      "files:\n  - { path: a, class: managed, when: { any: [bun, 1] } }\nplaceholders: []\nmodules:\n  bun: {}",
+      "files.0.when.any.1: Invalid input: expected string, received number",
+    ],
+    [
+      "a when list mixing names with a derived list",
+      "files:\n  - { path: a, class: managed, when: { any: [bun, { declaring: codeql_language }] } }\nplaceholders: []\nmodules:\n  bun: {}",
+      "files.0.when.any.1: Invalid input: expected string, received object",
+    ],
+    [
+      "a derived when list whose key is not a string",
+      "files:\n  - { path: a, class: managed, when: { any: { declaring: 1 } } }\nplaceholders: []",
+      "files.0.when.any.declaring: Invalid input: expected string, received number",
+    ],
+    [
       "a path escaping the repository",
       "files:\n  - { path: ../a, class: managed }\nplaceholders: []",
       "'..' segment",

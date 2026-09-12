@@ -9,12 +9,12 @@ export interface When {
   private?: boolean;
 }
 
-/** A module-list position of a `when` clause as files.yml spells it: the names, or every module whose data declares
- *  `key`. A list that IS a module-data fact (the CodeQL toolchains) is spelled the second way, so the modules block
+/** A list that IS a module-data fact (the CodeQL toolchains) is spelled `{declaring: <key>}`, so the modules block
  *  stays its one source and a new module joins the list by declaring the key. */
 export type ModuleList = string[] | { declaring: string };
 
-/** The names a list position resolves to; a derived list comes out in the modules block's order. */
+/** files_config.ts derives an entry's default source from the first `modules` name, so a derived list keeps the
+ *  modules block's order. */
 export function moduleList(list: ModuleList, modules: Readonly<Record<string, unknown>>): string[] {
   if (Array.isArray(list)) return list;
   return Object.keys(modules).filter((name) => {

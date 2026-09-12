@@ -87,13 +87,17 @@ export interface RetiredEntry {
 
 const names = z.array(z.string().min(1)).min(1);
 
-/** A list position as written: the names, or `{declaring: <module-data key>}`, expanded against the modules block
- *  by resolveWhen so every reader past the loader sees plain names. */
-const listSchema: z.ZodType<ModuleList> = names.or(
-  z.strictObject({ declaring: z.string().min(1) }),
-);
+const derived = z.strictObject({ declaring: z.string().min(1) });
 
-/** A `when` clause before its lists are expanded. */
+/** Expanded once, by resolveWhen, so every reader past the loader sees plain names. The shape is picked before
+ *  parsing because a union of the two reports a failed element as "any: Invalid input", losing its index and type. */
+const listSchema: z.ZodType<ModuleList> = z.unknown().transform((value, ctx) => {
+  const parsed = (Array.isArray(value) ? names : derived).safeParse(value);
+  if (parsed.success) return parsed.data;
+  for (const issue of parsed.error.issues) ctx.addIssue({ ...issue, code: "custom" });
+  return z.NEVER;
+});
+
 interface WrittenWhen {
   modules?: ModuleList;
   any?: ModuleList;
@@ -342,8 +346,8 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   const data = result.data;
   const problems: string[] = [];
   const moduleNames = Object.keys(data.modules);
-  // A derived list resolving to no module is a typo'd key, and an explicit list holds only known names: either way a
-  // clause that can never hold is refused here instead of quietly deselecting its entry everywhere.
+  // A derived list naming no module is a typo'd key, and an unknown name in an explicit list is one too; both are
+  // refused here instead of silently selecting or deselecting the entry everywhere.
   const resolveWhen = (where: string, written: WrittenWhen | null): When | null => {
     if (written === null) return null;
     const when: When = { ...(written.private === undefined ? {} : { private: written.private }) };
