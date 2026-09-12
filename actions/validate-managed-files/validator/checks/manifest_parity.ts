@@ -5,7 +5,9 @@ import { cleanManagedRegion, knownGrammar } from "../../../shared/grammar.ts";
 import {
   isEntryField,
   isRecordedClass,
+  RECORD_FIELDS,
   RECORDED_CLASSES,
+  SELF_ENTRY_FIELDS,
   strayFields,
 } from "../../../shared/manifest.ts";
 import { MANIFEST_NAME } from "../../../shared/platform.ts";
@@ -22,25 +24,22 @@ export function checkManifestParity(ctx: Context): Finding[] {
   const findings: Finding[] = [];
   for (const [rel, entry] of Object.entries(ctx.manifest.files)) {
     const where = `${MANIFEST_NAME}: entry '${rel}'`;
-    // A key outside the vocabulary is manifest_shape's report; this names a vocabulary field on the wrong class.
-    const stray = isRecordedClass(entry.class)
-      ? strayFields(entry.class, entry).filter(isEntryField)
-      : [];
-    if (stray.length > 0) {
-      findings.push(
-        error(
-          `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
-            `sync never records on a ${entry.class} entry; revert the edit (git history has the ` +
-            `stamped original) or ${RESYNC}`,
-        ),
-      );
-      continue;
-    }
     // The self entry's invariant comes before any class dispatch: a
     // corrupted class (say, starter) must not slip past it. Its commit slot
     // holds the provenance stamp (null or a string; manifest_shape judges
     // the value).
     if (rel === MANIFEST_NAME) {
+      const stray = strayFields(SELF_ENTRY_FIELDS, entry).filter(isEntryField);
+      if (stray.length > 0) {
+        findings.push(
+          error(
+            `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
+              "sync never records on the manifest's own entry; revert the edit (git history has " +
+              `the stamped original) or ${RESYNC}`,
+          ),
+        );
+        continue;
+      }
       if (
         entry.class !== "managed" ||
         entry.hash !== null ||
@@ -55,6 +54,20 @@ export function checkManifestParity(ctx: Context): Finding[] {
           ),
         );
       }
+      continue;
+    }
+    // A key outside the vocabulary is manifest_shape's report; this names a vocabulary field on the wrong class.
+    const stray = isRecordedClass(entry.class)
+      ? strayFields(RECORD_FIELDS[entry.class], entry).filter(isEntryField)
+      : [];
+    if (stray.length > 0) {
+      findings.push(
+        error(
+          `${where} carries ${stray.map((field) => JSON.stringify(field)).join(", ")}, which the ` +
+            `sync never records on a ${entry.class} entry; revert the edit (git history has the ` +
+            `stamped original) or ${RESYNC}`,
+        ),
+      );
       continue;
     }
     if (!isRecordedClass(entry.class)) {
@@ -237,9 +250,9 @@ export function checkManifestParity(ctx: Context): Finding[] {
             : "content";
       findings.push(
         error(
-          `${rel}: ${what} does not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
-            "drifted from the last sync; local edits to " +
-            `${split !== null ? "the managed region" : "a managed file"} are ` +
+          `${rel}: ${what} does not match the sha256 recorded in ${MANIFEST_NAME} - the ` +
+            `${stat.isSymbolicLink() ? "link" : "file"} drifted from the last sync; local edits to ` +
+            `${split !== null ? "the managed region" : stat.isSymbolicLink() ? "the link" : "a managed file"} are ` +
             "replaced by the next sync (move them to a repo-owned " +
             "location), and platform-side updates restamp on that sync",
         ),

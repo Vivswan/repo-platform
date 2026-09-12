@@ -17,6 +17,7 @@ import {
   type JsonValue,
   type ManifestEntryShape,
   parseManifestFiles,
+  RECORD_FIELDS,
   type RecordedClass,
   strayFields,
 } from "../../../../actions/shared/manifest.ts";
@@ -58,7 +59,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
  *  so a shape refused here is a finding on the target side. */
 export function readRecord(entry: ManifestEntryShape | undefined): ManifestRecord | null {
   if (entry === undefined || !isRecordedClass(entry.class)) return null;
-  if (strayFields(entry.class, entry).length > 0) return null;
+  if (strayFields(RECORD_FIELDS[entry.class], entry).length > 0) return null;
   if (entry.class === "starter") return { class: "starter" };
   const hash =
     entry.hash === null

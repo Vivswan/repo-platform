@@ -68,6 +68,18 @@ describe("the manifest's shape", () => {
     expect(stderr).toContain("does not list itself");
   });
 
+  test("the self entry carries class, hash, and commit alone", () => {
+    const entries = {
+      ...stampedBaseline(),
+      [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}", "kind": "symlink"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr.split("\n").filter((line) => line.startsWith("error:"))).toEqual([
+      `error: ${MANIFEST}: entry '${MANIFEST}' carries "kind", which the sync never records on the manifest's own entry; revert the edit (git history has the stamped original) or ${RESYNC}`,
+    ]);
+  });
+
   test.each([
     { reason: "a null commit (before the first sync stamps it)", commit: "null", ok: true },
     { reason: "the build's full sha", commit: `"${COMMIT}"`, ok: true },
@@ -283,7 +295,10 @@ describe("byte parity, entry by entry", () => {
       { env: gitFreeEnv() },
     );
     expect(drifted.exitCode).toBe(1);
-    expect(drifted.stderr).toContain("CLAUDE.md: its link target does not match the sha256");
+    expect(drifted.stderr).toContain(
+      `CLAUDE.md: its link target does not match the sha256 recorded in ${MANIFEST} - the link ` +
+        "drifted from the last sync; local edits to the link are replaced by the next sync",
+    );
   });
 
   test("a link record on a regular file fails parity by class", () => {
@@ -528,6 +543,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/file-as-mirror-link.md": "../intact.md",
       "docs/kind-on-managed.md": "managed content\n",
       "docs/grammar-on-managed.md": "managed content\n",
+      "docs/commit-on-managed.md": "managed content\n",
       "docs/commit-on-mirror.md": "managed content\n",
     };
     for (const [rel, content] of Object.entries(files)) {
@@ -578,6 +594,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       "docs/mirror-odd-kind.md": `{"class": "mirror", "kind": "hardlink", "hash": "${sha("intact.md")}"}`,
       "docs/kind-on-managed.md": `{"class": "managed", "kind": "symlink", "hash": "${sha("managed content\n")}"}`,
       "docs/grammar-on-managed.md": `{"class": "managed", "grammar": "managed-region", "hash": "${sha("managed content\n")}"}`,
+      "docs/commit-on-managed.md": `{"class": "managed", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
       "docs/commit-on-mirror.md": `{"class": "mirror", "commit": "${COMMIT}", "hash": "${sha("managed content\n")}"}`,
     };
     writeFileSync(join(root, MANIFEST_NAME), manifestOf(entries));
@@ -610,6 +627,7 @@ describe("checkManifestParity over one tree walking every dispatch branch", () =
       `${MANIFEST_NAME}: entry 'docs/mirror-odd-kind.md' carries kind "hardlink"`,
       `${MANIFEST_NAME}: entry 'docs/kind-on-managed.md' carries "kind", which the sync never records on a managed entry`,
       `${MANIFEST_NAME}: entry 'docs/grammar-on-managed.md' carries "grammar", which the sync never records on a managed entry`,
+      `${MANIFEST_NAME}: entry 'docs/commit-on-managed.md' carries "commit", which the sync never records on a managed entry`,
       `${MANIFEST_NAME}: entry 'docs/commit-on-mirror.md' carries "commit", which the sync never records on a mirror entry`,
     ]);
     for (const finding of findings) expect(finding.message).not.toContain("template");

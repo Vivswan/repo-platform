@@ -103,10 +103,11 @@ describe("readRecord", () => {
       null,
     ],
     [
-      "the self entry, its commit left behind",
+      "the manifest's own entry, no record of a written file",
       { class: "managed", hash: null, commit: BUILD },
-      { class: "managed", hash: null },
+      null,
     ],
+    ["a commit on a managed record", { class: "managed", hash: HASH, commit: BUILD }, null],
     ["a starter", { class: "starter" }, { class: "starter" }],
     ["a starter carrying a hash", { class: "starter", hash: HASH }, null],
     ["a link", { class: "link", hash: HASH }, { class: "link", hash: HASH }],
