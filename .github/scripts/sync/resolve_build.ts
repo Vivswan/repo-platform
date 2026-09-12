@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { commitStampParse } from "../shared/commit_stamp.ts";
 import { fail, requireEnv, setOutput } from "../shared/gha.ts";
+import { gitAnswersYes } from "../shared/git_yes_no.ts";
 import { lastLine } from "../shared/lines.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 
@@ -36,11 +37,6 @@ if (source === "") {
     `the build tip ${tip.slice(0, 12)} carries no source stamp, so publish.ts did not push it. ${republish}`,
   );
 }
-if (capture(["git", "rev-parse", "--verify", "--quiet", `${source}^{commit}`]).exitCode !== 0) {
-  fail(
-    `the build tip's stamped source ${source.slice(0, 12)} is not in main's history. ${republish}`,
-  );
-}
 must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
   env: { TIP_SHA: tip, SOURCE_SHA: source },
 });
@@ -50,7 +46,9 @@ if (notGreen !== null) {
     `the build tip ${tip.slice(0, 12)} was built from ${source.slice(0, 12)}, which is not green: ${notGreen}. ${republish}`,
   );
 }
-if (capture(["git", "cat-file", "-e", `${tip}:${FILES_CONFIG}`]).exitCode !== 0) {
+// rev-parse, not cat-file -e: for a <rev>:<path> that names no blob, cat-file -e exits 128 like any error, so no exit code
+// could tell a missing file from a failed look. rev-parse --verify --quiet exits 1 for it.
+if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${tip}:${FILES_CONFIG}`])) {
   fail(
     `the build tip ${tip.slice(0, 12)} carries no ${FILES_CONFIG}: the writer's data file is not on the build branch yet, so there is nothing to sync from.`,
   );

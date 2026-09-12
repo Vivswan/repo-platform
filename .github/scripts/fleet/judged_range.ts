@@ -3,7 +3,7 @@
 
 import { commitStampParseAll } from "../shared/commit_stamp.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
-import { gitAnswersYes } from "../shared/git_yes_no.ts";
+import { gitAnswersYes, gitResolvedCommit } from "../shared/git_yes_no.ts";
 import { mustCapture } from "../shared/proc.ts";
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -51,9 +51,7 @@ export function resolveBase(cwd: string, sha: string, before: string): DiffBase 
 // tip stamped with a later commit, and so does a run whose neighbour published first (main runs
 // overlap); an older stamp is still a sound base for that commit.
 function stampedBase(cwd: string, sha: string): DiffBase | undefined {
-  if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${BUILD_REF}^{commit}`], { cwd })) {
-    return undefined;
-  }
+  if (gitResolvedCommit(BUILD_REF, { cwd }) === "") return undefined;
   const stamps = commitStampParseAll(
     mustCapture(["git", "-C", cwd, "log", "--format=%B", BUILD_REF]),
   );
@@ -78,14 +76,12 @@ function stampedBase(cwd: string, sha: string): DiffBase | undefined {
  *  reports it. */
 function publishedAtOrAfter(cwd: string, sha: string, stamped: string): boolean {
   if (stamped === sha) return true;
-  if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${stamped}^{commit}`], { cwd })) {
-    return false;
-  }
+  if (gitResolvedCommit(stamped, { cwd }) === "") return false;
   return gitAnswersYes(["merge-base", "--is-ancestor", sha, stamped], { cwd });
 }
 
 function requireInCheckout(cwd: string, what: string, commit: string): void {
-  if (!gitAnswersYes(["rev-parse", "--verify", "--quiet", `${commit}^{commit}`], { cwd })) {
+  if (gitResolvedCommit(commit, { cwd }) === "") {
     throw new Error(
       `${what} ${commit.slice(0, 12)} is not in this checkout: fetch the full history (actions/checkout fetch-depth: 0)`,
     );

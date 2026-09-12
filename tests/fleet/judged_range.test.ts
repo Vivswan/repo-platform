@@ -222,6 +222,47 @@ describe("resolveBase", () => {
     );
   });
 
+  test("a git that errors on the resolve question is fatal at the leg, never read as an absent commit", () => {
+    // The stub errors on the build ref's resolve alone and hands every other call to the real git: erroring on
+    // every quiet rev-parse would let a swallowed build-ref error pass, since the fallback's own resolve of
+    // BEFORE_SHA then throws the same words.
+    const real = Bun.which("git");
+    if (real === null) throw new Error("git is not on PATH");
+    const bin = join(root, "erroring-git-bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "git"),
+      [
+        "#!/usr/bin/env bash",
+        `if [ "$1" = rev-parse ] && [ "$4" = 'refs/remotes/origin/build^{commit}' ]; then echo 'fatal: stubbed' >&2; exit 128; fi`,
+        `exec ${JSON.stringify(real)} "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const script = join(import.meta.dir, "../../.github/scripts/fleet/fleet_sync_marker.ts");
+    const outputFile = join(root, "erroring-git-output.txt");
+    writeFileSync(outputFile, "");
+    const result = boundedSpawnSync(["bun", script], {
+      cwd: publishedC1,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        SOURCE_SHA: c3,
+        BEFORE_SHA: c2,
+        GITHUB_REPOSITORY: "o/r",
+        GITHUB_OUTPUT: outputFile,
+      },
+    });
+    expect({ ...result, output: readFileSync(outputFile, "utf-8") }).toEqual({
+      exitCode: 1,
+      stdout:
+        "::error::git rev-parse could not answer (exit 128); refusing to guess: fatal: stubbed\n",
+      stderr: "",
+      output: "",
+    });
+  });
+
   test("a malformed base is refused by the leg's entry point before any git read, with no output line", () => {
     // judgedRangeEnv fails the process, so the whole outcome is the leg's:
     // fleet_sync_marker.ts is the one script that reads the range env.

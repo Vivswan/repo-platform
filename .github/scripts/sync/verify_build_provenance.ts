@@ -6,6 +6,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fail, requireEnv } from "../shared/gha.ts";
+import { gitAnswersYes, gitResolvedCommit } from "../shared/git_yes_no.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
 import { stampUnhealthyReason } from "../shared/stamp_checks.ts";
@@ -27,31 +28,18 @@ const rebuildHint =
   `tree already matches main's composition under a healthy stamp), have an admin reset ` +
   `refs/heads/build, or land any change that moves the composed tree.`;
 
-// Fails closed: read as a "no", an errored look during the rollback walk would skip a newer ancestral stamp and pass a replayed old
-// build to the tree proof, which a replay PASSES (its tree rebuilds cleanly from its old source). The battery runs before any worktree
-// exists, so nothing is left to clean up.
-function verdictExit(probe: { exitCode: number; timedOut: boolean }, what: string): number {
-  if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {
-    fail(`${subject}: ${what} could not answer (exit ${probe.exitCode}); refusing to guess.`);
-  }
-  return probe.exitCode;
-}
-
-function isAncestor(ancestor: string, descendant: string): boolean {
-  const probe = capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]);
-  return verdictExit(probe, "git merge-base --is-ancestor") === 0;
-}
-
-function resolveCommit(revspec: string): string {
-  const probe = capture(["git", "rev-parse", "--verify", "--quiet", `${revspec}^{commit}`]);
-  return verdictExit(probe, "git rev-parse --verify") === 0 ? probe.stdout.trimEnd() : "";
-}
-
+// An errored look throws out of the battery, which runs before any worktree exists, so nothing is left to clean up. Read as a "no"
+// during the rollback walk, it would skip a newer ancestral stamp and pass a replayed old build to the tree proof, which a replay
+// PASSES (its tree rebuilds cleanly from its old source).
 const stampProblem = stampUnhealthyReason({
   sourceSha,
   history: mustCapture(["git", "log", "--format=%B", tipSha]),
   mainRef: "refs/remotes/origin/main",
-  git: { resolveCommit, isAncestor },
+  git: {
+    resolveCommit: gitResolvedCommit,
+    isAncestor: (ancestor, descendant) =>
+      gitAnswersYes(["merge-base", "--is-ancestor", ancestor, descendant]),
+  },
 });
 if (stampProblem !== "") {
   fail(`${subject} fails the stamp checks: ${stampProblem}. ${rebuildHint}`);
