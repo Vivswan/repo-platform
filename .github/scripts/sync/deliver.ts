@@ -219,7 +219,6 @@ class Delivery {
     return ["git", "-C", this.targetDir, ...args];
   }
 
-  /** A call the delivery cannot go on without. */
   must(argv: string[], reason: string, label = commandLabel(argv)): string {
     const call = this.run(argv, label);
     if (!call.ok) this.fileFailure(reason);
@@ -451,11 +450,14 @@ class Delivery {
       this.verdict("unchanged");
       return;
     }
-    const base = this.must(
-      this.git("rev-parse", "--abbrev-ref", "HEAD"),
-      "git rev-parse failed in the target",
+    // symbolic-ref reads HEAD's target by name; `rev-parse --abbrev-ref HEAD` abbreviates through ref lookup, so a tag named
+    // main answers heads/main and one named HEAD answers nothing.
+    const head = this.must(
+      this.git("symbolic-ref", "HEAD"),
+      "git symbolic-ref failed in the target",
     ).trim();
-    if (base === "HEAD") this.fileFailure("the target checkout is not on a branch");
+    if (!head.startsWith("refs/heads/")) this.fileFailure("the target checkout is not on a branch");
+    const base = head.slice("refs/heads/".length);
     this.must(
       this.git("checkout", "-q", "-B", AUTOMATION_BRANCH),
       "creating the automation branch failed",
