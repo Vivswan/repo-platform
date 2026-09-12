@@ -146,7 +146,7 @@ The `validate-managed-files` job judges the repository against the platform's cu
 | Release-please config | a `release-as` key in `release-please-config.json` ([the release pipeline](#the-release-pipeline-release-please)) |
 | YAML | a YAML file anywhere in the repository that does not parse |
 | Conflict markers | a merge's conflict markers left in a source, config, or markdown file (the validator's text suffixes) |
-| Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, or an entry carrying a field the vocabulary lacks |
+| Manifest shape | a missing, unparsable, or malformed `.github/repo-platform-manifest.json`, an entry carrying a field the vocabulary lacks, or an entry keyed by a path the sync never writes (`./x`, `a//b`, a trailing slash, a backslash: a respelling of a declared path that the parity check would not recognise) |
 | Manifest parity | an entry recorded under a class other than the one `files.yml` writes its path under for this repository's modules and visibility (a relabel to `starter` would switch parity off; a path no selected entry writes, a mirror target say, is judged as recorded), managed content whose hash differs from its record (an edit outside a sync), or a recorded managed file missing from the repo |
 
 - Errors block; advisories inform. The verdict is ONE per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment.

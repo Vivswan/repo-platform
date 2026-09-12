@@ -1,5 +1,6 @@
 import { unknownEntryFields } from "../../../shared/manifest.ts";
 import { MANIFEST_NAME, PLATFORM_NAME } from "../../../shared/platform.ts";
+import { pathProblem } from "../../../shared/repo_path.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
@@ -43,6 +44,20 @@ export function checkManifestShape(ctx: Context): Finding[] {
   }
   const files = ctx.manifest.files;
   const findings: Finding[] = [];
+  // A key the sync would never write (`./x`, `a//b`) still resolves to the
+  // declared file on disk while matching no declaration, so the class gate
+  // in manifest_parity never sees it; the sync ignores such a record.
+  for (const path of Object.keys(files)) {
+    const problem = pathProblem(path);
+    if (problem === null) continue;
+    findings.push(
+      error(
+        `${MANIFEST_NAME}: entry '${path}' is not a repository path the sync writes (the path ${problem}) - ` +
+          "a hand edit; the sync ignores such a record and no class can be judged for it; delete the entry " +
+          `(git history has the stamped original) or ${RESYNC}`,
+      ),
+    );
+  }
   // No emitter writes a field outside the vocabulary, so one is a hand
   // edit; the next sync drops it.
   for (const { path, fields } of unknownEntryFields(files)) {

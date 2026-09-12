@@ -15,14 +15,11 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  type FileEntry,
-  pathProblem,
-  selectEntries,
-} from "../../../../actions/plan/files_config.ts";
+import { type FileEntry, selectEntries } from "../../../../actions/plan/files_config.ts";
 import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
+import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
