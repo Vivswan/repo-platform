@@ -15,7 +15,8 @@ import {
   managedSettings,
   readLayers,
 } from "../../../.github/scripts/sync/writer/settings_layers";
-import { parseFilesConfig, type Selection } from "../../../actions/plan/files_config.ts";
+import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import type { Selection } from "../../../actions/shared/selection.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();

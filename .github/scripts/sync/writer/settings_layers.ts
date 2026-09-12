@@ -11,14 +11,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-  applies,
   type FilesConfig,
   type ModuleData,
   parseFilesConfig,
-  type Selection,
   type SettingsLayers,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
+import { applies, type Selection } from "../../../../actions/shared/selection.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 import {
   isMapping,

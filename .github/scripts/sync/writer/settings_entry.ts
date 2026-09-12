@@ -7,7 +7,7 @@
 
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import type { FilesConfig, Selection } from "../../../../actions/plan/files_config.ts";
+import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import {
@@ -15,6 +15,7 @@ import {
   PLATFORM_NAME,
   REGISTRATION_PATH,
 } from "../../../../actions/shared/platform.ts";
+import type { Selection } from "../../../../actions/shared/selection.ts";
 import type { WriterFilesConfig } from "./files_config.ts";
 import { duplicateNameWarnings, loadOverrideLayer, mergeLayers } from "./merge_settings_layers.ts";
 import {
