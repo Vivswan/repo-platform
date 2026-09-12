@@ -24,8 +24,8 @@ function diagnose(rel: string, text: string): Finding[] {
     error(`${rel}: does not parse as YAML (${m}); fix the syntax at the position shown`);
   const firstLine = (e: unknown) => (e instanceof Error ? e.message.split("\n")[0] : String(e));
   const docs = parseAllDocuments(text, { uniqueKeys: true });
-  // A directive with no document behind it composes zero documents and no stream error; only the forced single
-  // document reports it. An empty or comment-only file forces a document with no errors.
+  // A VALID directive with no document behind it composes zero documents and no stream error (a malformed one carries
+  // BAD_DIRECTIVE); only the forced single document reports it. An empty or comment-only file forces an error-free document.
   //   "%YAML 1.2\n"  -> Missing directives-end indicator line
   //   "%TAG\n"       -> %TAG directive should contain exactly two parts, and the missing indicator
   if (docs.length === 0) {
