@@ -13,7 +13,7 @@ import {
 import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
-import { capture, type RunResult, redactText } from "../shared/proc.ts";
+import { capture, redactText } from "../shared/proc.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING } from "./writer/report.ts";
 
@@ -182,6 +182,9 @@ function commandLabel(argv: string[]): string {
   return words.slice(0, 2).join(" ");
 }
 
+/** stdout exists only on exit 0 (a deadline expiry never is, proc.ts): an errored call has no answer to misread. */
+type Call = { ok: true; stdout: string } | { ok: false };
+
 class Delivery {
   readonly runnerTemp = requireEnv("RUNNER_TEMP");
   readonly target = requireEnv("TARGET");
@@ -202,25 +205,32 @@ class Delivery {
     writeFileSync(join(this.runnerTemp, VERDICT_FILE), `${value}\n`);
   }
 
-  run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): RunResult {
+  run(argv: string[], label = commandLabel(argv), extraEnv?: Record<string, string>): Call {
     const result = capture(argv, {
       timeoutMs: DELIVERY_CALL_BOUND_MS,
       ...(extraEnv === undefined ? {} : { env: extraEnv }),
     });
     this.log(`$ ${label} -> exit ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`);
     if (result.stderr !== "") this.log(result.stderr.replace(/\n$/, ""));
-    return result;
+    return result.exitCode === 0 ? { ok: true, stdout: result.stdout } : { ok: false };
   }
 
   git(...args: string[]): string[] {
     return ["git", "-C", this.targetDir, ...args];
   }
 
+  /** A call the delivery cannot go on without. */
+  must(argv: string[], reason: string, label = commandLabel(argv)): string {
+    const call = this.run(argv, label);
+    if (!call.ok) this.fileFailure(reason);
+    return call.stdout;
+  }
+
   /** An open report outranks an older closed one: it is the one being
    *  watched, so a clean run closes it and a failure refreshes it. */
   findFailureIssue(): { number: string; state: string } | "" | null {
     const login = this.run(["gh", "api", "user", "--jq", ".login"]);
-    if (login.exitCode !== 0) return null;
+    if (!login.ok) return null;
     // gh refuses `--slurp` beside `--jq`, so the filter runs per page and
     // prints one line per matching issue; created-ascending, the first
     // line across the pages is the oldest.
@@ -248,7 +258,7 @@ class Delivery {
       "gh api issues GET",
       { ISSUE_TITLE: FAILURE_ISSUE_TITLE },
     );
-    if (list.exitCode !== 0) return null;
+    if (!list.ok) return null;
     const reports = list.stdout
       .split("\n")
       .filter((line) => line !== "")
@@ -307,7 +317,7 @@ class Delivery {
             ],
             "gh api issues PATCH",
           );
-    if (write.exitCode !== 0) process.exit(1);
+    if (!write.ok) process.exit(1);
     this.verdict("failed");
     process.exit(0);
   }
@@ -339,7 +349,7 @@ class Delivery {
 
   /** `--head` matches the branch name in forks too, and a fork's PR is never the sync's. */
   openPr(): { number: string } | null {
-    const list = this.run(
+    const list = this.must(
       [
         "gh",
         "pr",
@@ -353,12 +363,12 @@ class Delivery {
         "--json",
         "number,isCrossRepository",
       ],
+      "listing the sync pull request failed",
       "gh pr list",
     );
-    if (list.exitCode !== 0) this.fileFailure("listing the sync pull request failed");
     let listed: { number: number; isCrossRepository: boolean }[];
     try {
-      listed = JSON.parse(list.stdout);
+      listed = JSON.parse(list);
     } catch {
       this.fileFailure("listing the sync pull request failed");
     }
@@ -368,7 +378,7 @@ class Delivery {
 
   /** A failed read or disarm files the failure: an armed PR could merge on its own. */
   disarm(number: string): void {
-    const armed = this.run(
+    const armed = this.must(
       [
         "gh",
         "pr",
@@ -381,17 +391,15 @@ class Delivery {
         "--jq",
         ".autoMergeRequest != null",
       ],
+      "reading the sync pull request's auto-merge state failed",
       "gh pr view",
     );
-    if (armed.exitCode !== 0)
-      this.fileFailure("reading the sync pull request's auto-merge state failed");
-    if (armed.stdout.trim() !== "true") return;
-    const disarm = this.run(
+    if (armed.trim() !== "true") return;
+    this.must(
       ["gh", "pr", "merge", number, "-R", this.target, "--disable-auto"],
+      "disarming the sync pull request's auto-merge failed",
       "gh pr merge --disable-auto",
     );
-    if (disarm.exitCode !== 0)
-      this.fileFailure("disarming the sync pull request's auto-merge failed");
   }
 
   /** A selection reverted on the default branch, say, leaves the open sync PR carrying stale files that must never merge. */
@@ -399,7 +407,7 @@ class Delivery {
     const existing = this.openPr();
     if (existing === null) return;
     this.disarm(existing.number);
-    const closed = this.run(
+    this.must(
       [
         "gh",
         "pr",
@@ -411,9 +419,9 @@ class Delivery {
         "--comment",
         `superseded: the target already matches build ${this.build}`,
       ],
+      "closing the obsolete sync pull request failed",
       "gh pr close",
     );
-    if (closed.exitCode !== 0) this.fileFailure("closing the obsolete sync pull request failed");
     this.log(`closed the obsolete sync pull request #${existing.number} and deleted its branch`);
   }
 
@@ -430,26 +438,29 @@ class Delivery {
       this.git("config", "user.email", SYNC_IDENTITY.email),
       this.git("add", "--all"),
     ]) {
-      if (this.run(argv).exitCode !== 0)
-        this.fileFailure(`${commandLabel(argv)} failed in the target`);
+      this.must(argv, `${commandLabel(argv)} failed in the target`);
     }
-    const status = this.run(this.git("status", "--porcelain"));
-    if (status.exitCode !== 0) this.fileFailure("reading the working tree status failed");
-    if (status.stdout.trim() === "") {
+    const status = this.must(
+      this.git("status", "--porcelain"),
+      "reading the working tree status failed",
+    );
+    if (status.trim() === "") {
       this.log("the tree already matches the build; nothing to deliver");
       this.closeObsoletePr();
       this.closeFailureIssue();
       this.verdict("unchanged");
       return;
     }
-    const base = this.run(this.git("rev-parse", "--abbrev-ref", "HEAD")).stdout.trim();
-    if (base === "" || base === "HEAD") this.fileFailure("the target checkout is not on a branch");
-    if (this.run(this.git("checkout", "-q", "-B", AUTOMATION_BRANCH)).exitCode !== 0) {
-      this.fileFailure("creating the automation branch failed");
-    }
-    if (this.run(this.git("commit", "-q", "-m", prTitle(this.build))).exitCode !== 0) {
-      this.fileFailure("committing the sync failed");
-    }
+    const base = this.must(
+      this.git("rev-parse", "--abbrev-ref", "HEAD"),
+      "git rev-parse failed in the target",
+    ).trim();
+    if (base === "HEAD") this.fileFailure("the target checkout is not on a branch");
+    this.must(
+      this.git("checkout", "-q", "-B", AUTOMATION_BRANCH),
+      "creating the automation branch failed",
+    );
+    this.must(this.git("commit", "-q", "-m", prTitle(this.build)), "committing the sync failed");
 
     // An armed PR is disarmed before the branch moves: the incoming
     // revision may need review; re-arming below is the clean path's call.
@@ -459,13 +470,13 @@ class Delivery {
     // The checkout kept no credentials; the push alone authenticates, with
     // a lease on the branch's remote tip so a concurrent writer fails loudly.
     const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${this.target}.git`;
-    const lease = this.run(
+    const lease = this.must(
       this.git("ls-remote", pushUrl, `refs/heads/${AUTOMATION_BRANCH}`),
+      "reading the automation branch's remote tip failed",
       "git ls-remote",
     );
-    if (lease.exitCode !== 0) this.fileFailure("reading the automation branch's remote tip failed");
-    const tip = lease.stdout.trim().split("\t")[0] ?? "";
-    const push = this.run(
+    const tip = lease.trim().split("\t")[0] ?? "";
+    this.must(
       this.git(
         "push",
         "--quiet",
@@ -473,9 +484,9 @@ class Delivery {
         pushUrl,
         `HEAD:refs/heads/${AUTOMATION_BRANCH}`,
       ),
+      "pushing the automation branch failed",
       "git push",
     );
-    if (push.exitCode !== 0) this.fileFailure("pushing the automation branch failed");
 
     const bodyFile = join(this.runnerTemp, "pr-body.md");
     writeFileSync(
@@ -490,7 +501,7 @@ class Delivery {
     let number: string;
     let outcome: DeliveryVerdict;
     if (existing === null) {
-      const created = this.run(
+      const created = this.must(
         [
           "gh",
           "pr",
@@ -506,15 +517,15 @@ class Delivery {
           "--body-file",
           bodyFile,
         ],
+        "creating the sync pull request failed",
         "gh pr create",
       );
-      if (created.exitCode !== 0) this.fileFailure("creating the sync pull request failed");
-      number = created.stdout.trim().split("/").pop() ?? "";
+      number = created.trim().split("/").pop() ?? "";
       outcome = "opened";
     } else {
       // The base follows the checkout: the default branch may have been
       // renamed while the PR was open.
-      const edited = this.run(
+      this.must(
         [
           "gh",
           "pr",
@@ -529,9 +540,9 @@ class Delivery {
           "--body-file",
           bodyFile,
         ],
+        "refreshing the sync pull request failed",
         "gh pr edit",
       );
-      if (edited.exitCode !== 0) this.fileFailure("refreshing the sync pull request failed");
       number = existing.number;
       outcome = "refreshed";
     }
