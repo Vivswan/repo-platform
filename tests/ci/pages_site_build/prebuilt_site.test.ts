@@ -43,6 +43,13 @@ function docs(repo: string): void {
   writeFileSync(join(repo, "docs", "README.md"), "# Site docs\n\nThe docs landing page.\n");
 }
 
+/** A docs/ with an article and no landing page: the shape a repository's
+ *  first tag carries when the listing came before the README. */
+function docsWithoutLanding(repo: string): void {
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  writeFileSync(join(repo, "docs", "store-listing.md"), "# Store listing\n\nBlurb.\n");
+}
+
 function outputs(stdout: string): Record<string, string> {
   return Object.fromEntries(
     [...stdout.matchAll(/^\(output\) ([a-z-]+)=(.*)$/gm)].map((match) => [match[1], match[2]]),
@@ -51,13 +58,16 @@ function outputs(stdout: string): Record<string, string> {
 
 describe("the website and the docs together", () => {
   test(
-    "the website at the root, the docs versioned under the docs path, versions.json only there, CNAME with the domain",
+    "the website at the root, the docs versioned under the docs path (a tag without a landing page skipped), versions.json only there, CNAME with the domain",
     () => {
       const workspace = temp.dir("pages-site-both-");
       website(workspace, { marker: "WEBSITE-ROOT", docsPath: "manual" });
-      docs(workspace);
+      docsWithoutLanding(workspace);
       initRepo(workspace);
-      commitAll(workspace, "site and docs");
+      commitAll(workspace, "site and a docs listing");
+      fixtureGit(workspace, ["tag", "v0.9.0"]);
+      docs(workspace);
+      commitAll(workspace, "the docs landing page");
       fixtureGit(workspace, ["tag", "v1.0.0"]);
       const runner = runnerTemp(temp);
       const result = buildSite(workspace, REPO, runner, {
@@ -82,6 +92,10 @@ describe("the website and the docs together", () => {
       // The docs are built at the domain's root base, under the docs path.
       expect(readSite(site, "manual/latest/index.html")).toContain('href="/manual/latest/');
       expect(versionLabels(join(site, "manual"))).toEqual(["latest", "v1.0.0"]);
+      expect(existsSync(join(site, "manual", "v0.9.0"))).toBe(false);
+      expect(result.stdout).toContain(
+        "::notice::docs version v0.9.0 skipped: docs/ has no landing page (README.md or index.md) at that tag",
+      );
       expect(existsSync(join(site, "versions.json"))).toBe(false);
       expect(readSite(site, "CNAME")).toBe("docs.example.com\n");
       expect(outputs(result.stdout)).toEqual({

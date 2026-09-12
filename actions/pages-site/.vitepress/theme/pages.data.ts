@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MarkdownEnv, SiteConfig } from "vitepress";
-import type { IncludeRoot } from "../../lib.ts";
+import type { IncludeRoot } from "../conventions.ts";
 import { includeIndexPages, isRegularFile, readPage, walkMarkdown } from "../derive.ts";
 import { fileSource, sidebarOrder } from "../sidebar.ts";
 import type { PageIndexEntry } from "./launcher-model.ts";

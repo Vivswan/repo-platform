@@ -331,25 +331,31 @@ describe("planSite", () => {
       "labels: { site: rot }",
     ].join("\n");
     expect(planSite(input(text))).toEqual({
-      docsPath: "manual",
       siteTitle: "My Project",
-      include,
+      docs: { path: "manual", include },
       linkRotLabel: "rot",
     });
     expect(outputsOf(planSite(input(text)))).toEqual({
-      docs_path: "manual",
-      site_title: "My Project",
-      include: JSON.stringify(include),
-      link_rot_label: "rot",
+      config: JSON.stringify({
+        site_title: "My Project",
+        docs_path: "manual",
+        include,
+        link_rot_label: "rot",
+      }),
     });
   });
 
   test("a bare selection takes every default: files.yml's path, an empty title (pages-site fills in the repository name), no include roots, the stream's default label", () => {
     expect(outputsOf(planSite(input("modules: [site]")))).toEqual({
-      docs_path: "docs",
-      site_title: "",
-      include: "[]",
-      link_rot_label: "docs-link-rot",
+      config: '{"site_title":"","docs_path":"docs","include":[],"link_rot_label":"docs-link-rot"}',
+    });
+  });
+
+  test("site.path: null plans no docs half: the config carries a null docs_path for the website alone", () => {
+    const plan = planSite(input("modules: [site]\nsite: { path: null }"));
+    expect(plan).toEqual({ siteTitle: "", docs: null, linkRotLabel: "docs-link-rot" });
+    expect(outputsOf(plan)).toEqual({
+      config: '{"site_title":"","docs_path":null,"include":[],"link_rot_label":"docs-link-rot"}',
     });
   });
 
@@ -434,7 +440,7 @@ describe("plan.ts as a child", () => {
     expect(result.stdout.trimEnd()).toBe(result.output.trimEnd());
   });
 
-  test("site mode writes the four docs rows without asking for the visibility", () => {
+  test("site mode writes the one config row without asking for the visibility", () => {
     const result = run(
       {
         ".repo-platform.yml":
@@ -444,13 +450,7 @@ describe("plan.ts as a child", () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.output).toBe(
-      [
-        "docs_path=docs",
-        "site_title=Site",
-        'include=[{"path":"skills","mount":"skills","page":"SKILL.md"}]',
-        "link_rot_label=docs-link-rot",
-        "",
-      ].join("\n"),
+      'config={"site_title":"Site","docs_path":"docs","include":[{"path":"skills","mount":"skills","page":"SKILL.md"}],"link_rot_label":"docs-link-rot"}\n',
     );
   });
 
@@ -578,9 +578,7 @@ describe("plan.ts as a child", () => {
     );
     expect(site.exitCode).toBe(0);
     expect(site.output).toBe(
-      ["docs_path=manual", "site_title=", "include=[]", "link_rot_label=docs-link-rot", ""].join(
-        "\n",
-      ),
+      'config={"site_title":"","docs_path":"manual","include":[],"link_rot_label":"docs-link-rot"}\n',
     );
     const missingPath = join(dir, "missing-path.yml");
     writeFileSync(missingPath, real.replace("    path: docs\n", ""));

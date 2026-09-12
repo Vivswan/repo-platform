@@ -87,7 +87,7 @@ The `plan` job of fleet CI parses `.repo-platform.yml` on the PR: an unknown key
 
 Two exceptions to "registration first", where a gate job the selection turns on reads a file of yours on that same PR:
 
-- `site` on a repo with a `docs/` directory: the `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red.
+- `site` on a repo with a `docs/` directory: the `docs-check` job builds `docs/` strictly and needs `docs/README.md` (the landing page). Add it in the same PR, or the PR is red. A repo whose own website renders `docs/` sets `site.path: null` instead: the website publishes alone and `docs-check` stands down.
 - `skills`: the `validate-skills` gate job reads `.claude-plugin/plugin.json`. Commit a minimal manifest in the PR (the sync reports it `unchanged` afterwards) or the gate stays red until the sync PR lands:
 
 ```json

@@ -11,7 +11,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `project.slug` | Kebab-case identifier (the skills plugin name) | the repository name |
 | `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | empty |
 | `project.copyright_holder` | Licensor named in the fleet license's Required Notice; the one optional `project` key | the repository owner |
-| `site.path` | URL segment the docs mount at when the repo-owned site-build hook also builds a website | `docs` |
+| `site.path` | URL segment the docs mount at when the repo-owned site-build hook also builds a website; `null` turns the docs half off (the website publishes alone and `docs-check` stands down), for a website that renders `docs/` itself | `docs` |
 | `site.include` | Extra source roots rendered into the docs site: `{path, mount, page}` each, all three required; `page` names the file that is a page in each child directory (a skills tree uses `SKILL.md`) | none |
 | `skills.dir` | The directory holding the repository's agent skills | `skills` |
 | `labels.fuzzer` | The fuzzer module's tracking-issue label | `fuzz-nightly` |
@@ -19,7 +19,7 @@ The registration is the only file a repository writes to be managed. The sync an
 | `labels.site` | The site module's link-rot tracking label | `docs-link-rot` |
 | `mirrors` | `{source, targets}` entries copying a `managed` or `split` file the sync writes here to other paths; single-segment `*` globs. The `plan` job rejects a target that nests with another, with a path the sync writes or retires, or under `.github/workflows/` | none |
 
-Shapes the schema pins: `project.slug` is kebab-case; `site.path` and every `mount` are one lowercase URL segment; `skills.dir` and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
+Shapes the schema pins: `project.slug` is kebab-case; `site.path` is one lowercase URL segment and every `mount` one or more joined by slashes (never a locale-shaped name like `de`, `node_modules`, or `public/`); every `page` is a plain markdown file name other than `index.md`; `skills.dir` and every `include.path` are relative paths with no `..`; a label is plain text of at most 50 characters not starting with a dash.
 
 ## Module roster
 

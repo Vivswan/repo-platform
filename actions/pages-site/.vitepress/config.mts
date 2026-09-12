@@ -6,7 +6,7 @@
 //   DOCS_SITE_VERSIONS           JSON [{label, link}] for the version dropdown
 //   DOCS_SITE_CURRENT            this tier's version label
 //   DOCS_SITE_FACTS              JSON ProjectFacts (facts.ts)
-//   DOCS_SITE_INCLUDES           JSON IncludeRoot[] (lib.ts), the other roots staged inside the docs tree
+//   DOCS_SITE_INCLUDES           JSON IncludeRoot[] (conventions.ts), the other roots staged inside the docs tree
 //   DOCS_SITE_EDIT_BASE          the repository's edit URL up to the repo root; set only where editing can change THIS content
 //   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead internal links are fatal on current content, but history cannot be fixed
 
@@ -20,8 +20,8 @@ import type { ThemeConfig } from "vitepress-carbon";
 // documents.
 import baseConfig from "vitepress-carbon/dist/theme/config/baseConfig.js";
 import type { ProjectFacts } from "../facts.ts";
-import type { IncludeRoot } from "../lib.ts";
 import { githubSlug, headingText } from "./anchors.ts";
+import type { IncludeRoot } from "./conventions.ts";
 import { alertTitlesRule, CUSTOM_BLOCK_LABELS } from "./custom-blocks.ts";
 import { deriveRewrites, includeIndexPages, untitledPageTitle, walkMarkdown } from "./derive.ts";
 import { inlineTextRule } from "./inline-text.ts";
@@ -54,6 +54,7 @@ const srcDir = required("DOCS_SITE_SRC");
 const files = walkMarkdown(srcDir);
 const includes = JSON.parse(process.env.DOCS_SITE_INCLUDES || "[]") as IncludeRoot[];
 const indexPages = includeIndexPages(files, includes);
+const includePages = new Set(indexPages);
 const rewrites = deriveRewrites(files, indexPages);
 const versions = JSON.parse(process.env.DOCS_SITE_VERSIONS || "[]") as {
   label: string;
@@ -204,7 +205,7 @@ export default async () => {
           ? { title: untitledPageTitle(pageData.filePath, pageData.frontmatter.name) }
           : {}),
       };
-      if (!isLandingFile(pageData.filePath)) return source;
+      if (!isLandingFile(pageData.filePath, includePages)) return source;
       return {
         ...source,
         frontmatter: { ...pageData.frontmatter, fleetLanding: true, outline: false },

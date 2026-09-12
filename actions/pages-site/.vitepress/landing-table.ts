@@ -8,7 +8,8 @@
 
 import type { Token } from "markdown-it";
 import type { MarkdownRenderer } from "vitepress";
-import { isLocaleDir, routeOf } from "./derive.ts";
+import { isLocaleDir } from "./conventions.ts";
+import { routeOf } from "./derive.ts";
 import { plainTextOf } from "./inline-text.ts";
 import type { CuratedRow } from "./theme/launcher-model.ts";
 

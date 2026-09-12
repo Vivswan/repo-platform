@@ -14,6 +14,7 @@ import {
 } from "./derive.ts";
 import { dirTitle } from "./dir-title.ts";
 import type { CuratedEnv } from "./landing-table.ts";
+import { isLandingFile } from "./source-path.ts";
 import { navigable, pageKey, resolveHref } from "./theme/launcher-model.ts";
 import { expandsIncludes, pageUrl, type SiteUrls } from "./theme/page-index.ts";
 
@@ -89,6 +90,7 @@ export function deriveSidebar(
   const context: LevelContext = {
     files,
     rewrites: deriveRewrites(files, options.indexPages),
+    includePages: new Set(options.indexPages),
     source,
     site,
   };
@@ -105,6 +107,7 @@ export function sidebarOrder(
     const context: LevelContext = {
       files: tree.files,
       rewrites: deriveRewrites(tree.files, indexPages),
+      includePages: new Set(indexPages),
       source,
       site,
     };
@@ -123,6 +126,8 @@ function levelOrder(prefix: string, context: LevelContext): string[] {
 interface LevelContext {
   files: string[];
   rewrites: Record<string, string>;
+  /** The include roots' page files: articles, whatever they are named. */
+  includePages: ReadonlySet<string>;
   source: PageSource;
   site: SiteUrls;
 }
@@ -167,8 +172,6 @@ interface Level {
   dirs: string[];
 }
 
-const LANDING_NAMES = new Set(["README.md", "index.md"]);
-
 /** The landing read is the one serving the directory route: index.md when both spellings exist. */
 function orderedLevel(prefix: string, context: LevelContext): Level {
   const here = context.files.filter((file) => file.startsWith(prefix));
@@ -184,7 +187,7 @@ function orderedLevel(prefix: string, context: LevelContext): Level {
       (file): LevelPage => ({
         file,
         meta: context.source.page(file),
-        landing: LANDING_NAMES.has(local(file)),
+        landing: isLandingFile(file, context.includePages),
       }),
     );
   const landings = pages.filter((page) => page.landing);

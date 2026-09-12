@@ -16,9 +16,11 @@ description: >-
   With check true it instead builds docs/ once, strictly (dead internal
   links fatal), with the same include roots and link check, as the docs PR
   check. The configuration is the config input, or the repository's
-  registration read through the plan action when the input is empty. A
-  deploy needs a full checkout (fetch-depth 0): version tags and per-ref
-  trees come from git history.
+  registration read through the plan action when the input is empty; a
+  null docs_path (the registration's site.path: null) turns the docs half
+  off, so the website publishes alone whatever docs/ carries and the check
+  stands down with a notice. A deploy needs a full checkout (fetch-depth
+  0): version tags and per-ref trees come from git history.
 
 inputs:
   site-dir:
@@ -26,7 +28,7 @@ inputs:
     required: false
     default: ""
   config:
-    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"}; empty reads the registration through the plan action'
+    description: 'The site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"} (docs_path null = no docs half); empty reads the registration through the plan action'
     required: false
     default: ""
   check:
@@ -83,19 +85,13 @@ runs:
       with:
         mode: site
 
-    # CONFIG is the caller's JSON, or the plan's four outputs folded into
-    # the same shape (toJSON quotes the strings; include is JSON already).
     - name: Build and assemble the site
       id: assemble
       shell: bash
       env:
         SITE_DIR: ${{ inputs.site-dir }}
         CHECK: ${{ inputs.check }}
-        CONFIG: >-
-          ${{ inputs.config != '' && inputs.config
-          || format('{{"site_title":{0},"docs_path":{1},"include":{2},"link_rot_label":{3}}}',
-          toJSON(steps.plan.outputs.site_title), toJSON(steps.plan.outputs.docs_path),
-          steps.plan.outputs.include, toJSON(steps.plan.outputs.link_rot_label)) }}
+        CONFIG: ${{ inputs.config != '' && inputs.config || steps.plan.outputs.config }}
         MAX_VERSIONS: ${{ inputs.max-versions }}
         CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

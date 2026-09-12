@@ -6,9 +6,11 @@
 # pages-site action lays the hook's website out at the root and the docs
 # versioned beside or under it, checks every internal link, and hands back
 # the directory to upload; a repository with neither ends green with a
-# notice and no deploy. A caller passing no `config` is configured from its
-# registration (the action runs the plan over .repo-platform.yml); this
-# repository's own ci.yml passes its configuration as JSON. On scheduled
+# notice and no deploy, and a registration with `site.path: null` publishes
+# the website alone (docs/ stays the repository's own). A caller passing no
+# `config` is configured from its registration (the action runs the plan
+# over .repo-platform.yml); this repository's own ci.yml passes its
+# configuration as JSON. On scheduled
 # runs with a link-rot label the deployed site's external links are checked
 # after the deploy and findings ride the fleet's tracking-issue stream
 # (fuzz-issue@build). Callers own `concurrency: pages`; this workflow
@@ -30,7 +32,7 @@ on:
         type: string
         default: ""
       config:
-        description: 'Registration-less callers only: the site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"}; empty reads the registration'
+        description: 'Registration-less callers only: the site configuration as JSON {"site_title", "docs_path", "include", "link_rot_label"} (docs_path null = no docs half); empty reads the registration'
         required: false
         type: string
         default: ""

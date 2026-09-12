@@ -75,7 +75,7 @@ mirrors:
     targets: [skills/*/LICENSE.md]
 ```
 
-Commit it to the default branch (or open a PR for an existing repository). The `plan` job of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync. With `site` selected and a `docs/` directory present, commit `docs/README.md` (the landing page) alongside: the `docs-check` gate job builds `docs/` on every PR from then on.
+Commit it to the default branch (or open a PR for an existing repository). The `plan` job of fleet CI parses this file on every PR, so a typo fails loudly there and in the sync. With `site` selected and a `docs/` directory present, commit `docs/README.md` (the landing page) alongside: the `docs-check` gate job builds `docs/` on every PR from then on (unless `site.path: null` turns the docs half off, for a website that renders `docs/` itself).
 
 ### 3. Grant the fleet token
 

@@ -35,10 +35,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import type { IncludeRoot } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
 import {
   type DocsMount,
-  type IncludeRoot,
   mountRel,
   parseSiteConfig,
   planMount,
@@ -496,22 +496,25 @@ export function copyInto(src: string, dest: string, what: string, reserved?: Set
   }
 }
 
-/** The version tags the docs mount can serve: kept tags whose tree carries
- *  the docs directory and no repo-local .vitepress (history cannot be
- *  fixed, so ineligible tags are excluded with a notice instead of failing
- *  every deploy). */
+/** The version tags the docs mount can serve. History cannot be fixed, so
+ *  a tag the build would refuse is excluded with a notice instead of
+ *  failing every deploy; a docs tree without a landing page is one (the
+ *  llms.txt plugin fails the build without an index page). */
 function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
+  const skip = (tag: string, why: string) => {
+    console.log(`::notice::docs version ${tag} skipped: ${why} at that tag`);
+    return false;
+  };
   return kept.filter((tag) => {
-    if (!treeHas(cfg, tag, DOCS_DIR)) {
-      console.log(`::notice::docs version ${tag} skipped: ${DOCS_DIR}/ does not exist at that tag`);
-      return false;
-    }
+    if (!treeHas(cfg, tag, DOCS_DIR)) return skip(tag, `${DOCS_DIR}/ does not exist`);
     if (treeHas(cfg, tag, `${DOCS_DIR}/.vitepress`)) {
-      console.log(
-        `::notice::docs version ${tag} skipped: ${DOCS_DIR}/.vitepress exists at that tag ` +
-          "(the theme is central; a repo-local one would be ignored)",
+      return skip(
+        tag,
+        `${DOCS_DIR}/.vitepress exists (the theme is central; a repo-local one would be ignored)`,
       );
-      return false;
+    }
+    if (!["README.md", "index.md"].some((name) => treeHas(cfg, tag, `${DOCS_DIR}/${name}`))) {
+      return skip(tag, `${DOCS_DIR}/ has no landing page (README.md or index.md)`);
     }
     return true;
   });
@@ -571,11 +574,17 @@ async function main(): Promise<void> {
     throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
   }
   if (check === "true") {
+    if (cfg.docs === null) {
+      console.log(
+        "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
+      );
+      return;
+    }
     // The docs PR check: one strict build of the working tree (a HEAD tier
     // derives strict dead links) with the same include roots the deploy
     // stages, then the link gate over it; no artifact.
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    const { dist } = buildVitepressTier(cfg, tier, [], cfg.include, { base: "/" });
+    const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
     // No origin: this build sits at "/", not at the deployed layout, so a
     // link spelled with the site's own origin stays external here.
     const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], null);
@@ -588,13 +597,14 @@ async function main(): Promise<void> {
   const { docs, website } = siteLayout({
     dist: cfg.siteDir,
     hasDocs: existsSync(join(cfg.workspace, DOCS_DIR)),
-    docsPath: cfg.docsPath,
-    include: cfg.include,
+    docs: cfg.docs,
   });
   if (docs === null && website === null) {
-    console.log(
-      `::notice::nothing to publish: the site-build hook named no directory and the repository has no ${DOCS_DIR}/`,
-    );
+    const why =
+      cfg.docs === null
+        ? "the docs half is off (site.path: null)"
+        : `the repository has no ${DOCS_DIR}/`;
+    console.log(`::notice::nothing to publish: the site-build hook named no directory and ${why}`);
     setSiteOutputs(cfg, null);
     return;
   }

@@ -8,15 +8,16 @@ description: >-
   step outputs. Mode default resolves
   what fleet-ci.yml's jobs key on (the module selection in canonical order,
   the visibility, the skills directory, the CodeQL languages, the tracking
-  labels); mode site resolves the docs configuration the pages-site action
-  consumes (the docs mount path, the site title, the include roots, the
-  link-rot label). Fails closed on any invalid registration. Runs in
+  labels); mode site resolves the site configuration the pages-site action
+  consumes as one JSON document (the site title, the docs mount path or
+  null for no docs half, the include roots, the link-rot label). Fails
+  closed on any invalid registration. Runs in
   the caller's checkout; needs GH_TOKEN in the environment only when the
   private input is empty (the visibility is then read from the API).
 
 inputs:
   mode:
-    description: default (the fleet-ci job outputs) or site (the pages-site docs configuration).
+    description: default (the fleet-ci job outputs) or site (the pages-site configuration).
     required: false
     default: default
   private:
@@ -44,18 +45,12 @@ outputs:
   weekly:
     description: '"true" on Mondays (UTC): the scheduled run that also reruns CodeQL (mode default).'
     value: ${{ steps.plan.outputs.weekly }}
-  docs_path:
-    description: The URL segment the docs mount under beside the repository's website (mode site).
-    value: ${{ steps.plan.outputs.docs_path }}
-  site_title:
-    description: The docs site's title; empty means the repository name (mode site).
-    value: ${{ steps.plan.outputs.site_title }}
-  include:
-    description: The registration's site.include roots, a compact JSON list (mode site).
-    value: ${{ steps.plan.outputs.include }}
-  link_rot_label:
-    description: Tracking label of the nightly external-link check (mode site).
-    value: ${{ steps.plan.outputs.link_rot_label }}
+  config:
+    description: >-
+      The site configuration as compact JSON {"site_title", "docs_path", "include", "link_rot_label"},
+      the pages-site action's config input; docs_path is null when the registration turns the
+      docs half off with site.path: null (mode site).
+    value: ${{ steps.plan.outputs.config }}
 
 runs:
   using: composite
