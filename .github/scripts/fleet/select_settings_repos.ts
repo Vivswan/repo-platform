@@ -53,9 +53,9 @@ function emitPlan(targets: DiscoveredRepo[]): void {
   setOutput("matrix", JSON.stringify(planMatrix(targets, rowKeyOf(pat, runId))));
 }
 
-// Newest wins (docs/settings.md): a run main moved past hands the apply an empty plan and exits green, since the tip's own run
-// applies. Asked before the first fleet read, so a superseded run names nothing and spins up no row; the row's resolver asks
-// again at the write, because a re-run of failed rows reuses this plan. The catch owns the exit for a failed look.
+// Newest wins (docs/settings.md): a run main moved past hands the apply an empty plan and exits green; the tip's own run or
+// the nightly applies. Asked before the first fleet read, so a superseded run names nothing and spins up no row; the row's
+// resolver asks again at the write, because a re-run of failed rows reuses this plan.
 let newer: string | null;
 try {
   newer = supersededBy(sha);

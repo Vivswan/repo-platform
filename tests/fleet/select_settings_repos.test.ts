@@ -476,9 +476,6 @@ describe("select_settings_repos.ts", () => {
     TEST_TIMEOUT_MS,
   );
 
-  // Newest wins: main's tip is read before discovery, so a superseded run
-  // prints nothing but its notice (no masks: no slug was ever read) and
-  // hands the apply an empty plan; a tip that cannot be read fails loud.
   test(
     "a run whose commit main moved past stands down with an empty plan, before any discovery",
     () => {

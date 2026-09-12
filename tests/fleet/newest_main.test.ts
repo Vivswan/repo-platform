@@ -10,7 +10,6 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const NEWER = "0f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4";
 const LS_REMOTE = ["git", "ls-remote", "--exit-code", "origin", MAIN_REF];
 
-/** A stubbed git: one answer, and the argv it was asked. */
 function gitAnswering(answer: Partial<RunResult>) {
   const asked: string[][] = [];
   const run = (command: string[]): RunResult => {
@@ -79,8 +78,8 @@ describe("supersededBy", () => {
   });
 });
 
-test("the stand-down notice names both commits short and says who owns the apply", () => {
+test("the stand-down notice names both commits short", () => {
   expect(supersededNotice(SHA, NEWER)).toBe(
-    "superseded by 0f1e2d3c4b5a: main moved past this run's 8096c4920f84, and that commit's own run owns the settings apply - nothing to apply here",
+    "superseded by 0f1e2d3c4b5a: main moved past this run's 8096c4920f84; the tip's own run or the nightly applies - nothing to apply here",
   );
 });

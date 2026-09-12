@@ -26,12 +26,11 @@ export function remoteMainTip(run: Capture = capture): string {
   return tip;
 }
 
-/** The commit main moved on to, or null while `sha` is still its tip. */
 export function supersededBy(sha: string, run?: Capture): string | null {
   const tip = remoteMainTip(run);
   return tip === sha ? null : tip;
 }
 
 export function supersededNotice(sha: string, tip: string): string {
-  return `superseded by ${tip.slice(0, 12)}: main moved past this run's ${sha.slice(0, 12)}, and that commit's own run owns the settings apply - nothing to apply here`;
+  return `superseded by ${tip.slice(0, 12)}: main moved past this run's ${sha.slice(0, 12)}; the tip's own run or the nightly applies - nothing to apply here`;
 }

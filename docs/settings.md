@@ -67,7 +67,7 @@ The gate is ordering, not content: the apply reads nothing but the target list f
 
 ### Newest wins
 
-The `settings-repos` lane runs one apply at a time in ARRIVAL order (post-green.yml's `settings-fleet` job holds it on a call, the cron and dispatch runs hold it themselves, `cancel-in-progress: false` on both), and CI durations vary, so an older commit's run can reach the lane after a newer one's. A run therefore asks whether main's tip is still its own commit ([fleet/newest_main.ts](../.github/scripts/fleet/newest_main.ts), one `git ls-remote`): when main moved on, it stands down GREEN with the notice `superseded by <sha>`, since that commit's own run applies.
+The `settings-repos` lane runs one apply at a time in ARRIVAL order (post-green.yml's `settings-fleet` job holds it on a call, the cron and dispatch runs hold it themselves, `cancel-in-progress: false` on both), and CI durations vary, so an older commit's run can reach the lane after a newer one's. A run therefore asks whether main's tip is still its own commit ([fleet/newest_main.ts](../.github/scripts/fleet/newest_main.ts), one `git ls-remote`): when main moved on, it stands down GREEN with the notice `superseded by <sha>`; the tip's own run or the nightly applies.
 
 | Where it asks | Why there |
 | --- | --- |
