@@ -125,9 +125,10 @@ describe("the source grammar", () => {
   test("ownModules reads the operator's registration through the writer's rule and refuses a module files.yml lacks", () => {
     const root = temp.dir("build-gitignore-registration-");
     const config = parseFilesConfig(FILES_YML);
-    writeFileSync(join(root, ".repo-platform.yml"), "modules: [pages, bun]\n");
+    const project = "project: {name: Demo, slug: demo, description: d}\n";
+    writeFileSync(join(root, ".repo-platform.yml"), `modules: [pages, bun]\n${project}`);
     expect(ownModules(root, config)).toEqual(["bun", "pages"]);
-    writeFileSync(join(root, ".repo-platform.yml"), "modules: [bun, rust]\n");
+    writeFileSync(join(root, ".repo-platform.yml"), `modules: [bun, rust]\n${project}`);
     expect(() => ownModules(root, config)).toThrow(
       ".repo-platform.yml selects module(s) files.yml does not know: rust",
     );

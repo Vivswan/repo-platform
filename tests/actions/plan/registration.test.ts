@@ -5,15 +5,18 @@ import {
   declaredModules,
   parseRegistration,
   readModules,
-  registrationSchema,
 } from "../../../actions/plan/registration.ts";
 
 const FILE = ".repo-platform.yml";
+const PROJECT = "project: {name: My Project, slug: my-project, description: One line}\n";
 
 describe("parseRegistration", () => {
-  test("today's shape: a bare module list", () => {
-    expect(parseRegistration("modules: [uv, site]\n")).toEqual({
-      registration: { modules: ["uv", "site"] },
+  test("the smallest document: the module list and the project block", () => {
+    expect(parseRegistration(`modules: [uv, site]\n${PROJECT}`)).toEqual({
+      registration: {
+        modules: ["uv", "site"],
+        project: { name: "My Project", slug: "my-project", description: "One line" },
+      },
     });
   });
 
@@ -70,18 +73,28 @@ describe("parseRegistration", () => {
   test.each<{ reason: string; text: string; error: string }>([
     {
       reason: "an unknown top-level key",
-      text: "modules: []\nextra: 1\n",
+      text: `modules: []\n${PROJECT}extra: 1\n`,
       error: `${FILE}: (top level): Unrecognized key: "extra"`,
     },
     {
       reason: "an unknown nested key",
-      text: "modules: []\nsite:\n  serve: true\n",
+      text: `modules: []\n${PROJECT}site:\n  serve: true\n`,
       error: `${FILE}: site: Unrecognized key: "serve"`,
     },
     {
       reason: "a wrong type",
       text: "modules: []\nproject:\n  name: 3\n  slug: x\n  description: y\n",
       error: `${FILE}: project.name: Invalid input: expected string, received number`,
+    },
+    {
+      reason: "no project block",
+      text: "modules: [bun]\n",
+      error: `${FILE}: project: Invalid input: expected object, received undefined`,
+    },
+    {
+      reason: "a project block without its name",
+      text: "modules: [bun]\nproject:\n  slug: x\n  description: y\n",
+      error: `${FILE}: project.name: Invalid input: expected string, received undefined`,
     },
     {
       reason: "a non-list modules key",
@@ -131,57 +144,57 @@ describe("parseRegistration", () => {
     },
     {
       reason: "a docs path with a slash",
-      text: "modules: []\nsite:\n  path: a/b\n",
+      text: `modules: []\n${PROJECT}site:\n  path: a/b\n`,
       error: `${FILE}: site.path: must be one plain lowercase URL segment (letters, digits, dashes, underscores)`,
     },
     {
       reason: "an include root escaping the repo",
-      text: "modules: []\nsite:\n  include: [{ path: ../x, mount: x, page: X.md }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: ../x, mount: x, page: X.md }]\n`,
       error: `${FILE}: site.include.0.path: must be a plain relative path inside the repository`,
     },
     {
       reason: "an include root on a locale-shaped mount",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: de, page: X.md }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: de, page: X.md }]\n`,
       error: `${FILE}: site.include.0.mount: reads as a locale directory`,
     },
     {
       reason: "an include root whose page is a path",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, page: x/SKILL.md }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x, page: x/SKILL.md }]\n`,
       error: `${FILE}: site.include.0.page: must be a plain markdown file name`,
     },
     {
       reason: "two include roots on one mount",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: m, page: X.md }, { path: y, mount: m, page: Y.md }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: m, page: X.md }, { path: y, mount: m, page: Y.md }]\n`,
       error: `${FILE}: site.include: lists one mount twice`,
     },
     {
       reason: "one include root staged twice",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: m, page: X.md }, { path: x, mount: n, page: X.md }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: m, page: X.md }, { path: x, mount: n, page: X.md }]\n`,
       error: `${FILE}: site.include: lists one path twice`,
     },
     {
       reason: "an include entry with an unknown key",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: x, page: X.md, title: T }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x, page: X.md, title: T }]\n`,
       error: `${FILE}: site.include.0: Unrecognized key: "title"`,
     },
     {
       reason: "an include entry without its page file",
-      text: "modules: []\nsite:\n  include: [{ path: x, mount: x }]\n",
+      text: `modules: []\n${PROJECT}site:\n  include: [{ path: x, mount: x }]\n`,
       error: `${FILE}: site.include.0.page: Invalid input: expected string, received undefined`,
     },
     {
       reason: "a label starting with a dash",
-      text: "modules: []\nlabels:\n  fuzzer: -x\n",
+      text: `modules: []\n${PROJECT}labels:\n  fuzzer: -x\n`,
       error: `${FILE}: labels.fuzzer: must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters`,
     },
     {
       reason: "a mirror without targets",
-      text: "modules: []\nmirrors:\n  - source: a\n    targets: []\n",
+      text: `modules: []\n${PROJECT}mirrors:\n  - source: a\n    targets: []\n`,
       error: `${FILE}: mirrors.0.targets: Too small: expected array to have >=1 items`,
     },
     {
       reason: "a mirror of a kind the writer cannot materialize",
-      text: "modules: []\nmirrors:\n  - source: a\n    targets: [b]\n    kind: hardlink\n",
+      text: `modules: []\n${PROJECT}mirrors:\n  - source: a\n    targets: [b]\n    kind: hardlink\n`,
       error: `${FILE}: mirrors.0.kind: Invalid option: expected one of "copy"|"symlink"`,
     },
   ])("refuses $reason", ({ text, error }) => {
@@ -191,11 +204,15 @@ describe("parseRegistration", () => {
   });
 
   test("site.path: null turns the docs half off, and is refused beside include roots that would need it", () => {
-    expect(parseRegistration("modules: [site]\nsite:\n  path: null\n")).toEqual({
-      registration: { modules: ["site"], site: { path: null } },
+    expect(parseRegistration(`modules: [site]\n${PROJECT}site:\n  path: null\n`)).toEqual({
+      registration: {
+        modules: ["site"],
+        project: { name: "My Project", slug: "my-project", description: "One line" },
+        site: { path: null },
+      },
     });
     const read = parseRegistration(
-      "modules: [site]\nsite:\n  path: null\n  include: [{ path: skills, mount: skills, page: SKILL.md }]\n",
+      `modules: [site]\n${PROJECT}site:\n  path: null\n  include: [{ path: skills, mount: skills, page: SKILL.md }]\n`,
     );
     expect(read).toEqual({
       errors: [
@@ -214,14 +231,6 @@ describe("parseRegistration", () => {
         project: { name: "Vivswan's tools", slug: "tools", description: "Tools: for things, 100%" },
       },
     });
-  });
-
-  test("the schema is strict at the top level and in every section", () => {
-    // The control for the unknown-key rows: a shape that IS accepted by the
-    // same schema object the parser uses.
-    expect(registrationSchema.safeParse({ modules: [] }).success).toBe(true);
-    expect(registrationSchema.safeParse({ modules: [], site: {} }).success).toBe(true);
-    expect(registrationSchema.safeParse({ modules: [], site: { x: 1 } }).success).toBe(false);
   });
 });
 
@@ -250,7 +259,7 @@ describe("include roots: the registration and the pages-site config agree", () =
     ],
     ["one root staged twice", [skills, { ...skills, mount: "tools" }], false],
   ])("%s", (_reason, include, accepted) => {
-    const text = `modules: [site]\nsite:\n  include: ${JSON.stringify(include)}\n`;
+    const text = `modules: [site]\n${PROJECT}site:\n  include: ${JSON.stringify(include)}\n`;
     expect("registration" in parseRegistration(text)).toBe(accepted);
     const config = JSON.stringify({
       site_title: "",

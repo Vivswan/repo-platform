@@ -264,7 +264,6 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
  *  the website itself is the repo-owned hook's, so nothing about it is
  *  planned here. */
 export interface SitePlan {
-  /** Empty stays empty: pages-site then titles the site by repository name. */
   siteTitle: string;
   /** The docs half (its include roots the registration's, verbatim), or
    *  null when the registration turns it off (site.path: null). */
@@ -283,7 +282,7 @@ export function planSite(input: PlanInput): SitePlan {
   const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
   const site = input.registration.site;
   return {
-    siteTitle: input.registration.project?.name ?? "",
+    siteTitle: input.registration.project.name,
     docs:
       site?.path === null
         ? null

@@ -117,7 +117,7 @@ A module's settings live next to the selection, in `.repo-platform.yml`, and are
 | `site` | `site.path`, `site.include`, `labels.site` | `docs`, none, `docs-link-rot` |
 | `fuzzer` | `labels.fuzzer` | `fuzz-nightly` |
 | `nightly` | `labels.nightly` | `nightly-failure` |
-| any | `project` (`name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | the repository name, the name, empty, the owner; none |
+| any | `project` (required: `name`, `slug`, `description` together; `copyright_holder` optional), `mirrors` | none (`copyright_holder`: the owner); none |
 
 - A key change alone needs no sync: the site leg reads the registration at run time. `mirrors`, `labels.*`, and `project.*` land with the next sync: `project.*` values are substituted into every managed file and split region (`AGENTS.md`, `LICENSE.md`), a `labels.*` value is rendered into `.github/settings.yml`, while an existing starter (`.github/settings.local.yml`) keeps its content, so edit it yourself.
 - Tracking labels (`fuzzer`, `nightly`, `site`) must pairwise differ, case-insensitively: every stream dedups and auto-closes by label. A `labels.*` key whose module is not selected fails the plan.

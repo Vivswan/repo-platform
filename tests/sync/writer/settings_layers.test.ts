@@ -7,7 +7,6 @@ import { join, resolve } from "node:path";
 import {
   allLayerLabels,
   declaredPrivate,
-  type LayerSelection,
   type LayerSources,
   layerConfig,
   layerPaths,
@@ -16,7 +15,7 @@ import {
   managedSettings,
   readLayers,
 } from "../../../.github/scripts/sync/writer/settings_layers";
-import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import { parseFilesConfig, type Selection } from "../../../actions/plan/files_config.ts";
 import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
@@ -37,17 +36,17 @@ const BASELINE_LABELS = [
   "security-nightly",
 ];
 
-function selection(overrides: Partial<LayerSelection> = {}): LayerSelection {
+function selection(overrides: Partial<Selection> = {}): Selection {
   return { modules: [], private: false, ...overrides };
 }
 
-const labelNames = (s: LayerSelection) =>
+const labelNames = (s: Selection) =>
   ((managedSettings(CONFIG, TREE, s).labels ?? []) as { name: string }[]).map((l) => l.name);
-const rulesets = (s: LayerSelection) =>
+const rulesets = (s: Selection) =>
   (managedSettings(CONFIG, TREE, s).rulesets ?? []) as Record<string, unknown>[];
 
 describe("the managed labels", () => {
-  test.each<{ reason: string; selection: LayerSelection; labels: string[] }>([
+  test.each<{ reason: string; selection: Selection; labels: string[] }>([
     {
       reason: "a bare selection gets the baseline's unconditional roster alone",
       selection: selection(),
@@ -85,12 +84,12 @@ describe("the managed labels", () => {
 });
 
 describe("the managed rulesets", () => {
-  const rulesetNames = (s: LayerSelection) => rulesets(s).map((r) => r.name);
-  const mainRules = (s: LayerSelection) => {
+  const rulesetNames = (s: Selection) => rulesets(s).map((r) => r.name);
+  const mainRules = (s: Selection) => {
     const main = rulesets(s).find((r) => r.name === "main");
     return (main?.rules ?? []) as { type: string; parameters?: Record<string, unknown> }[];
   };
-  const mainRuleTypes = (s: LayerSelection) => mainRules(s).map((r) => r.type);
+  const mainRuleTypes = (s: Selection) => mainRules(s).map((r) => r.type);
 
   test("the fleet protection rulesets are NOT in these layers", () => {
     // The main and non-bypassable PROTECTION rules live in the override, which merges above these layers;
@@ -103,7 +102,7 @@ describe("the managed rulesets", () => {
   });
 
   test("the pr-title module flips the baseline's disabled required-check ruleset active", () => {
-    const enforcement = (s: LayerSelection) =>
+    const enforcement = (s: Selection) =>
       rulesets(s).find((r) => r.name === "pr-title")?.enforcement;
     expect(enforcement(selection())).toBe("disabled");
     expect(enforcement(selection({ modules: ["pr-title"] }))).toBe("active");
@@ -154,10 +153,10 @@ describe("the managed rulesets", () => {
 
   test("code_scanning renders exactly for a public repo with a CodeQL toolchain", () => {
     // EVERY CodeQL toolchain module, with the exact threshold tuple: a
-    // stale module layer or a misspelled enum value would otherwise pass
-    // on types alone and weaken (or 422) that module's repos at apply time.
-    // The tuple is the fleet's high-or-critical bar: a non-security warning
-    // or a medium security alert never blocks a merge.
+    // layer selection missing a toolchain or a misspelled enum value would
+    // otherwise pass on types alone and weaken (or 422) that module's repos
+    // at apply time. The tuple is the fleet's high-or-critical bar: a
+    // non-security warning or a medium security alert never blocks a merge.
     const codeqlModules = loadModules()
       .filter((m) => m.codeql_language !== undefined)
       .map((m) => m.name);
@@ -182,7 +181,7 @@ describe("the managed rulesets", () => {
     expect(mainRuleTypes(selection({ modules: ["rust"] }))).not.toContain("code_scanning");
   });
 
-  test("two analyzable toolchains contribute code_scanning once", () => {
+  test("two analyzable toolchains select the one CodeQL layer, so code_scanning renders once", () => {
     expect(mainRuleTypes(selection({ modules: ["bun", "uv"] }))).toEqual([
       "code_quality",
       "copilot_code_review",
@@ -192,7 +191,7 @@ describe("the managed rulesets", () => {
 });
 
 describe("layerPaths", () => {
-  test.each<{ reason: string; selection: LayerSelection; paths: string[] }>([
+  test.each<{ reason: string; selection: Selection; paths: string[] }>([
     {
       reason: "a bare public selection is the baseline plus the public overlay",
       selection: selection(),
@@ -204,17 +203,22 @@ describe("layerPaths", () => {
       paths: ["settings/baseline.yml", "settings/private.yml"],
     },
     {
-      // Precedence: a module's visibility overlay must be able to win
-      // over any module's base layer, so the two groups cannot interleave.
-      reason: "all module base layers come before all module visibility layers",
+      // Declared order is fold order: the CodeQL layer is declared after
+      // every module layer so it wins over any of them.
+      reason: "the module layers in declared order, then the CodeQL layer",
       selection: selection({ modules: ["bun", "release-please"] }),
       paths: [
         "settings/baseline.yml",
         "settings/public.yml",
         "bun/settings.yml",
         "release-please/settings.yml",
-        "bun/settings-public.yml",
+        "settings/codeql-public.yml",
       ],
+    },
+    {
+      reason: "a private CodeQL toolchain gets no CodeQL layer",
+      selection: selection({ modules: ["uv"], private: true }),
+      paths: ["settings/baseline.yml", "settings/private.yml", "uv/settings.yml"],
     },
     {
       reason: "a module with no layer files contributes none",
@@ -237,7 +241,8 @@ describe("the layer topology fails CLOSED", () => {
   // files/uv/settings.yml would vanish from the stack, the roster come out
   // short but valid-looking, and the apply's delete-undeclared pass remove
   // the module's labels from live repos. The declaration lives in
-  // files.yml (settings_layers) and the load holds it against the tree.
+  // files.yml (settings.layers) and the load holds the tree to it; the
+  // writer's tree walk refuses the other direction (files_config.test.ts).
   const scratchTree = () => {
     const tree = join(temp.dir("settings-layers-tree-"), "files");
     cpSync(TREE, tree, { recursive: true });
@@ -247,11 +252,15 @@ describe("the layer topology fails CLOSED", () => {
   test("selection follows the declaration, never the tree", () => {
     const undeclared = {
       ...CONFIG,
-      modules: { ...CONFIG.modules, uv: { ...CONFIG.modules.uv, settings_layers: undefined } },
+      settings: {
+        ...CONFIG.settings,
+        layers: CONFIG.settings.layers.filter((layer) => layer.source !== "uv/settings.yml"),
+      },
     };
     expect(layerPaths(undeclared, selection({ modules: ["uv"] }))).toEqual([
       "settings/baseline.yml",
       "settings/public.yml",
+      "settings/codeql-public.yml",
     ]);
   });
 
@@ -274,21 +283,6 @@ describe("the layer topology fails CLOSED", () => {
       problem: "settings layer files/uv/settings.yml is missing from the tree",
     },
     {
-      // Dropping modules.uv.settings_layers while files/uv/settings.yml
-      // stays on disk would silently shorten the stack.
-      reason: "a present MODULE layer file no declaration names",
-      config: {
-        ...CONFIG,
-        modules: {
-          ...CONFIG.modules,
-          uv: { ...CONFIG.modules.uv, settings_layers: ["settings-public.yml"] },
-        },
-      },
-      damage: () => {},
-      problem:
-        "files/uv/settings.yml is a settings layer file files.yml modules.uv.settings_layers does not declare",
-    },
-    {
       reason: "a layer that is not a mapping",
       config: CONFIG,
       damage: (tree) => writeFileSync(join(tree, "site/settings.yml"), "# nothing\n"),
@@ -306,16 +300,23 @@ describe("the layer topology fails CLOSED", () => {
         'files/settings/baseline.yml: labels "bug" and "BUG" are one name to the merge; a layer declares each name once',
     },
   ])("$reason is a load problem naming the file", ({ config, damage, problem }) => {
-    // The control: the committed declarations match the committed tree in
-    // both directions, so the one problem below is the damage alone.
+    // The control: every committed declaration has its file, so the one
+    // problem below is the damage alone.
     const committed = readLayers(CONFIG, TREE);
     expect(committed.problems).toEqual([]);
-    expect([...committed.layers.keys()].slice(0, 5)).toEqual([
+    expect([...committed.layers.keys()]).toEqual([
       "settings/baseline.yml",
       "settings/public.yml",
       "settings/private.yml",
-      "settings/override.yml",
       "bun/settings.yml",
+      "deno/settings.yml",
+      "uv/settings.yml",
+      "rust/settings.yml",
+      "site/settings.yml",
+      "release-please/settings.yml",
+      "pr-title/settings.yml",
+      "settings/codeql-public.yml",
+      "settings/override.yml",
     ]);
     const tree = scratchTree();
     damage(tree);

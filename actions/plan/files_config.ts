@@ -62,13 +62,20 @@ export interface LinkEntry extends EntryBase {
 
 export type FileEntry = ManagedEntry | RenderedEntry | StarterEntry | SplitEntry | LinkEntry;
 
-/** The tree-relative paths of the four fleet settings layers (the
- *  `settings` block): the baseline, the visibility overlays, and the
+/** One settings layer between the baseline and the override, folded for
+ *  a repository when its `when` holds; a null `when` is always. */
+export interface SettingsLayerEntry {
+  /** The layer file, relative to the files/ tree. */
+  source: string;
+  when: When | null;
+}
+
+/** The `settings` block, tree-relative: the baseline every repository
+ *  starts from, the layers `when` selects in declared order, and the
  *  override that merges above every repository's own overlay. */
-export interface SettingsLayerPaths {
+export interface SettingsLayers {
   baseline: string;
-  public: string;
-  private: string;
+  layers: SettingsLayerEntry[];
   override: string;
 }
 
@@ -105,8 +112,7 @@ const fileSchema = z.strictObject({
 
 const settingsSchema = z.strictObject({
   baseline: z.string().min(1),
-  public: z.string().min(1),
-  private: z.string().min(1),
+  layers: z.array(z.strictObject({ source: z.string().min(1), when: whenSchema.optional() })),
   override: z.string().min(1),
 });
 
@@ -118,20 +124,10 @@ const retiredSchema = z.strictObject({
 /** A module name is one path segment of the files/ tree. */
 const moduleName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "not a module name");
 
-/** The settings layer files a module may declare, in stack order: the
- *  unconditional layer, then the visibility overlays. */
-export const SETTINGS_LAYER_ORDER = [
-  "settings.yml",
-  "settings-public.yml",
-  "settings-private.yml",
-] as const;
-export type SettingsLayerName = (typeof SETTINGS_LAYER_ORDER)[number];
-
 /** The module-data keys a reader resolves a repository's configuration
  *  from; every other key rides along untyped (block lists). A tracking
  *  label's `key` names the registration's `labels` key and the
- *  `<key>_label` placeholder; `settings_layers` names the layer files
- *  beside the module's sources under files/. */
+ *  `<key>_label` placeholder. */
 const moduleDataSchema = z.looseObject({
   description: z.string().min(1).optional(),
   codeql_language: z.string().min(1).optional(),
@@ -153,13 +149,6 @@ const moduleDataSchema = z.looseObject({
   dependabot_label: z
     .strictObject({ name: z.string().min(1), color: z.string().min(1) })
     .optional(),
-  settings_layers: z
-    .array(z.enum(SETTINGS_LAYER_ORDER))
-    .min(1)
-    .refine((layers) => layers.every((name, index) => layers.indexOf(name) === index), {
-      message: "each settings layer file at most once",
-    })
-    .optional(),
 });
 
 export type ModuleData = z.infer<typeof moduleDataSchema>;
@@ -178,7 +167,7 @@ export interface FilesConfig {
   modules: Record<string, ModuleData>;
   /** The fleet settings layers, present exactly when a `render: settings`
    *  entry exists. */
-  settings: SettingsLayerPaths | null;
+  settings: SettingsLayers | null;
   files: FileEntry[];
   retired: RetiredEntry[];
 }
@@ -383,15 +372,18 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   const data = result.data;
   const problems: string[] = [];
   const moduleNames = Object.keys(data.modules);
+  const checkWhen = (where: string, when: When | null) => {
+    for (const name of [...(when?.modules ?? []), ...(when?.any ?? []), ...(when?.without ?? [])]) {
+      if (!moduleNames.includes(name))
+        problems.push(`${where}: when names unknown module '${name}'`);
+    }
+  };
   const files: FileEntry[] = data.files.map((entry) => {
     const where = `files: ${entry.path}`;
     const problem = pathProblem(entry.path);
     if (problem !== null) problems.push(`${where}: path ${problem}`);
     const when = entry.when ?? null;
-    for (const name of [...(when?.modules ?? []), ...(when?.any ?? []), ...(when?.without ?? [])]) {
-      if (!moduleNames.includes(name))
-        problems.push(`${where}: when names unknown module '${name}'`);
-    }
+    checkWhen(where, when);
     if (entry.class !== "split" && entry.region !== undefined) {
       problems.push(`${where}: region applies to split entries only`);
     }
@@ -496,26 +488,33 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   }
   const rendered = data.files.some((entry) => entry.render !== undefined);
   if (rendered && data.settings === undefined) {
-    problems.push(
-      "settings: missing - a render: settings entry reads the four fleet layers from it",
-    );
+    problems.push("settings: missing - a render: settings entry reads its layers from it");
   }
   if (!rendered && data.settings !== undefined) {
     problems.push("settings: present, but no render: settings entry reads it");
   }
-  let settings: SettingsLayerPaths | null = null;
-  if (data.settings !== undefined) {
-    const stripped = {} as Record<keyof SettingsLayerPaths, string>;
-    for (const [layer, path] of Object.entries(data.settings) as [
-      keyof SettingsLayerPaths,
-      string,
-    ][]) {
+  let settings: SettingsLayers | null = null;
+  const declared = data.settings;
+  if (declared !== undefined) {
+    const layerSource = (where: string, path: string): string => {
       if (!path.startsWith(SOURCE_PREFIX) || pathProblem(path) !== null) {
-        problems.push(`settings: ${layer} '${path}' must be a clean path under ${SOURCE_PREFIX}`);
+        problems.push(`settings: ${where} '${path}' must be a clean path under ${SOURCE_PREFIX}`);
       }
-      stripped[layer] = path.slice(SOURCE_PREFIX.length);
-    }
-    settings = stripped;
+      return path.slice(SOURCE_PREFIX.length);
+    };
+    settings = {
+      baseline: layerSource("baseline", declared.baseline),
+      layers: declared.layers.map((layer, index) => {
+        const where = `layers[${index}]`;
+        const when = layer.when ?? null;
+        checkWhen(`settings: ${where}`, when);
+        if (declared.layers.findIndex((other) => other.source === layer.source) !== index) {
+          problems.push(`settings: ${where} '${layer.source}' is declared twice`);
+        }
+        return { source: layerSource(where, layer.source), when };
+      }),
+      override: layerSource("override", declared.override),
+    };
   }
   for (const entry of data.retired) {
     for (const path of [entry.path, ...(entry.moved_to === undefined ? [] : [entry.moved_to])]) {

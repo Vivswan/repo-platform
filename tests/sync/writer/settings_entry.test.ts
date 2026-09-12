@@ -17,15 +17,19 @@ const temp = tempDirs();
 const FILES_YML = [
   "placeholders: []",
   "modules:",
-  "  bun: {settings_layers: [settings.yml, settings-public.yml]}",
-  "  rust: {settings_layers: [settings.yml]}",
+  "  bun: {}",
+  "  rust: {}",
   "  fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}",
   "  nightly: {tracking_label: {key: nightly, default: nightly-failure, color: D93F0B, description: Automated nightly CI failure}}",
   "  site: {tracking_label: {key: site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}}",
   "settings:",
   "  baseline: files/settings/baseline.yml",
-  "  public: files/settings/public.yml",
-  "  private: files/settings/private.yml",
+  "  layers:",
+  "    - {source: files/settings/public.yml, when: {private: false}}",
+  "    - {source: files/settings/private.yml, when: {private: true}}",
+  "    - {source: files/bun/settings.yml, when: {modules: [bun]}}",
+  "    - {source: files/rust/settings.yml, when: {modules: [rust]}}",
+  "    - {source: files/settings/codeql-public.yml, when: {private: false, any: [bun]}}",
   "  override: files/settings/override.yml",
   "files:",
   "  - {path: .github/settings.local.yml, class: starter}",
@@ -67,9 +71,9 @@ const LAYERS: Record<string, string> = {
     "",
   ].join("\n"),
   "bun/settings.yml": 'labels:\n  - {name: javascript, color: "168700", description: JS updates}\n',
-  "bun/settings-public.yml":
-    "rulesets:\n  - {name: main, rules: [{type: code_scanning, parameters: {code_scanning_tools: []}}]}\n",
   "rust/settings.yml": 'labels:\n  - {name: rust, color: "000000", description: Rust updates}\n',
+  "settings/codeql-public.yml":
+    "rulesets:\n  - {name: main, rules: [{type: code_scanning, parameters: {code_scanning_tools: []}}]}\n",
 };
 
 const OVERLAY = [
@@ -102,8 +106,9 @@ const CONFIG = (() => {
   return { ...config, trackingTuples: trackingTuples(config).tuples };
 })();
 
+/** Every registration carries the required project block; the tests vary the rest. */
 function registration(text: string) {
-  const read = parseRegistration(text);
+  const read = parseRegistration(`${text}project: {name: Demo, slug: demo, description: Mine}\n`);
   if ("errors" in read) throw new Error(read.errors.join("\n"));
   return read.registration;
 }
@@ -142,7 +147,7 @@ const ruleset = (doc: Record<string, unknown>, name: string) =>
   (doc.rulesets as Record<string, unknown>[]).find((entry) => entry.name === name);
 
 describe("renderSettings", () => {
-  test("folds the six layers low to high for a public selection, the override last", () => {
+  test("folds the layers low to high for a public selection, the override last", () => {
     const { text, doc } = rendered({ modules: ["bun", "rust"] });
     expect(
       text.startsWith(`${RENDERED_HEADER}\n# Rendered by the sync from the fleet settings layers`),

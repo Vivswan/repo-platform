@@ -223,8 +223,10 @@ describe("render, overlay, and the settings block", () => {
   const SETTINGS = [
     "settings:",
     "  baseline: files/settings/baseline.yml",
-    "  public: files/settings/public.yml",
-    "  private: files/settings/private.yml",
+    "  layers:",
+    "    - { source: files/settings/public.yml, when: { private: false } }",
+    "    - { source: files/settings/private.yml, when: { private: true } }",
+    "    - { source: files/bun/settings.yml, when: { modules: [bun] } }",
     "  override: files/settings/override.yml",
   ].join("\n");
   const doc = (files: string[], extra: string[] = [SETTINGS]) =>
@@ -255,8 +257,11 @@ describe("render, overlay, and the settings block", () => {
     });
     expect(config.settings).toEqual({
       baseline: "settings/baseline.yml",
-      public: "settings/public.yml",
-      private: "settings/private.yml",
+      layers: [
+        { source: "settings/public.yml", when: { private: false } },
+        { source: "settings/private.yml", when: { private: true } },
+        { source: "bun/settings.yml", when: { modules: ["bun"] } },
+      ],
       override: "settings/override.yml",
     });
     // The two selection shapes the overlay check accepts: a private pair
@@ -294,7 +299,7 @@ describe("render, overlay, and the settings block", () => {
       "files: a: render applies to managed entries only",
       "files: a: a rendered entry has no source or blocks",
       "files: a: a rendered entry needs overlay, the repository file it renders from",
-      "settings: missing - a render: settings entry reads the four fleet layers from it",
+      "settings: missing - a render: settings entry reads its layers from it",
     ]);
     expect(
       checked.config.files.map((entry) => ("render" in entry ? "rendered" : entry.class)),
@@ -416,7 +421,7 @@ describe("render, overlay, and the settings block", () => {
     [
       "a rendered entry without the settings block",
       doc([STARTER, RENDERED], []),
-      "settings: missing - a render: settings entry reads the four fleet layers from it",
+      "settings: missing - a render: settings entry reads its layers from it",
     ],
     [
       "a settings block without a rendered entry",
@@ -429,7 +434,23 @@ describe("render, overlay, and the settings block", () => {
         [STARTER, RENDERED],
         [SETTINGS.replace("files/settings/private.yml", "settings/private.yml")],
       ),
-      "settings: private 'settings/private.yml' must be a clean path under files/",
+      "settings: layers[1] 'settings/private.yml' must be a clean path under files/",
+    ],
+    [
+      "a layer whose when names a module the data file lacks",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("when: { modules: [bun] }", "when: { modules: [bun, node] }")],
+      ),
+      "settings: layers[2]: when names unknown module 'node'",
+    ],
+    [
+      "a layer source declared twice",
+      doc(
+        [STARTER, RENDERED],
+        [SETTINGS.replace("files/bun/settings.yml", "files/settings/public.yml")],
+      ),
+      "settings: layers[2] 'files/settings/public.yml' is declared twice",
     ],
   ])("refuses %s", (_reason, text, fragment) => {
     expect(problemsOf(text).join("\n")).toContain(fragment);

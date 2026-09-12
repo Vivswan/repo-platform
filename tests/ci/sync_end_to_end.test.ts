@@ -860,10 +860,13 @@ describe("sync.ts over a repository whose settings or overlay path is taken", ()
   });
 });
 
-describe("sync.ts over a modules-only registration", () => {
+describe("sync.ts over a registration with an empty description", () => {
   test("an entry needing a placeholder with no value is held, noted, and never written empty", () => {
     const target = temp.dir("sync-e2e-bare-target-");
-    writeFileSync(join(target, ".repo-platform.yml"), "modules: [bun, fuzzer]\n");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      'modules: [bun, fuzzer]\nproject: {name: Demo, slug: demo, description: ""}\n',
+    );
     // Both fixture starters need {{description}}: the present one is the
     // repository's own and is not rendered, the absent one is held. The
     // hook the repository already carries stays byte for byte.
@@ -873,7 +876,7 @@ describe("sync.ts over a modules-only registration", () => {
     writeFileSync(join(target, HOOK), OWN_HOOK);
     fixtureGit(target, ["init", "-q", "-b", "main"]);
     const { summary } = runSync(target, join(temp.dir("sync-e2e-bare-summary-"), "summary.json"));
-    // project_name and copyright_holder fall back to the slug; description has no fallback.
+    // An empty description is no value: a placeholder is never written blank.
     const held = (path: string, cls: string) => ({
       path,
       class: cls,

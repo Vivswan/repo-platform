@@ -2,7 +2,7 @@
 // fleet grammar (actions/plan/registration.ts), and the placeholder values
 // the writer derives from it plus the repository slug the operator passes
 // (the registration never names its own owner) and the module-declared
-// defaults files.yml carries for what the registration may leave unset.
+// defaults files.yml carries for the tracking labels it may leave unset.
 
 import { parseRegistration, type Registration } from "../../../../actions/plan/registration.ts";
 import { REGISTRATION_PATH } from "../../../../actions/shared/platform.ts";
@@ -57,12 +57,12 @@ export function placeholderValues(
   const project = registration.project;
   const labels = registration.labels ?? {};
   const values: PlaceholderValues = {
-    project_name: project?.name ?? repository.name,
-    project_slug: project?.slug ?? repository.name,
-    description: project?.description ?? "",
+    project_name: project.name,
+    project_slug: project.slug,
+    description: project.description,
     github_username: repository.owner,
     github_username_lower: repository.owner.toLowerCase(),
-    copyright_holder: project?.copyright_holder ?? repository.owner,
+    copyright_holder: project.copyright_holder ?? repository.owner,
     year: String(now.getUTCFullYear()),
   };
   const optional: Partial<Record<PlaceholderName, string | undefined>> = {

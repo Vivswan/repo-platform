@@ -21,7 +21,6 @@ modules:
     gitignore_sources: [Node, bun]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
-    settings_layers: [settings.yml, settings-public.yml]
   deno:
     description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
     codeql_language: javascript-typescript
@@ -31,7 +30,6 @@ modules:
     gitignore_sources: [Deno, Node]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
-    settings_layers: [settings.yml, settings-public.yml]
   uv:
     description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
     codeql_language: python
@@ -40,25 +38,20 @@ modules:
     gitignore_sources: [Python]
     agents_toolchain: [toolchain]
     toolchain_steps: [toolchain]
-    settings_layers: [settings.yml, settings-public.yml]
   rust:
     description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
     dependabot_ecosystems: [cargo]
     dependabot_label: {name: rust, color: "000000"}
     gitignore_sources: [Rust]
     agents_toolchain: [toolchain]
-    settings_layers: [settings.yml]
   site:
     description: one GitHub Pages site per repository (the repo-owned site-build hook's website at the root, docs/ rendered under the central fleet theme)
-    settings_layers: [settings.yml]
     path: docs
     tracking_label: {key: site, default: docs-link-rot, color: D4A72C, description: Automated docs-site link-rot report}
   release-please:
     description: release-please releases through the fleet's release pipeline, plus autorelease labels
-    settings_layers: [settings.yml]
   pr-title:
     description: Conventional Commit PR title check, its own required workflow
-    settings_layers: [settings.yml]
   fuzzer:
     description: nightly fuzz starter with issue filing, replay inputs, auto-close
     gitignore_sources: [fuzzer]
@@ -69,13 +62,25 @@ modules:
   custom-license:
     description: repo carries its own license in LICENSE.md; the fleet license is not written
 
-# The four fleet settings layers (docs/settings.md), folded under each
-# repository's .github/settings.local.yml overlay into its rendered
-# .github/settings.yml; the override merges above the overlay.
+# The settings layers (docs/settings.md): the baseline, then each layer whose
+# `when` holds in this order, folded under the repository's
+# .github/settings.local.yml overlay into its rendered .github/settings.yml;
+# the override merges above the overlay. A layer file is DECLARED here, never
+# discovered from the tree.
 settings:
   baseline: files/settings/baseline.yml
-  public: files/settings/public.yml
-  private: files/settings/private.yml
+  layers:
+    - {source: files/settings/public.yml, when: {private: false}}
+    - {source: files/settings/private.yml, when: {private: true}}
+    - {source: files/bun/settings.yml, when: {modules: [bun]}}
+    - {source: files/deno/settings.yml, when: {modules: [deno]}}
+    - {source: files/uv/settings.yml, when: {modules: [uv]}}
+    - {source: files/rust/settings.yml, when: {modules: [rust]}}
+    - {source: files/site/settings.yml, when: {modules: [site]}}
+    - {source: files/release-please/settings.yml, when: {modules: [release-please]}}
+    - {source: files/pr-title/settings.yml, when: {modules: [pr-title]}}
+    # code_scanning where CodeQL runs: the auto-assign.codeql.yml entry's selection.
+    - {source: files/settings/codeql-public.yml, when: {private: false, any: [bun, deno, uv]}}
   override: files/settings/override.yml
 
 files:

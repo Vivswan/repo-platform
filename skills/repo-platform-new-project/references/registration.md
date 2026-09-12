@@ -1,15 +1,15 @@
 # The registration file: `.repo-platform.yml`
 
-The registration is the only file a repository writes to be managed. The sync and fleet CI read it and never rewrite it. Unknown keys, wrong types, and a missing `modules` list are refused by the `plan` job on every PR and by the sync.
+The registration is the only file a repository writes to be managed. The sync and fleet CI read it and never rewrite it. Unknown keys, wrong types, a missing `modules` list, and a missing `project` block are refused by the `plan` job on every PR and by the sync.
 
 ## Keys
 
 | Key | Meaning | Default |
 |---|---|---|
 | `modules` | The selected modules, a list of names from the roster below. Required: an absent key is refused. An empty list is accepted and deselects every module, so the next sync retires their files | - |
-| `project.name` | Human-readable project name (`AGENTS.md`, the docs site title). `project` is all-or-nothing: `name`, `slug`, and `description` are required together whenever the block is present. Values are substituted into every managed file and split region on each sync; an existing starter keeps its content | the repository name |
-| `project.slug` | Kebab-case identifier | the repository name |
-| `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | empty |
+| `project.name` | Human-readable project name (`AGENTS.md`, the docs site title). `project` is required, with `name`, `slug`, and `description` together: an absent block or key is refused. Values are substituted into every managed file and split region on each sync; an existing starter keeps its content | - |
+| `project.slug` | Kebab-case identifier | - |
+| `project.description` | One-line repository description, written into the settings overlay starter (`.github/settings.local.yml`); required, and while it is empty the writer holds that starter (`no value for {{description}}`) and the rendered `.github/settings.yml` with it (`no overlay at .github/settings.local.yml (its starter is held or missing)`), and the PR waits | - |
 | `project.copyright_holder` | Licensor named in the fleet license's Required Notice; the one optional `project` key | the repository owner |
 | `site.path` | URL segment the docs mount at when the repo-owned site-build hook also builds a website; `null` turns the docs half off (the website publishes alone and `docs-check` stands down), for a website that renders `docs/` itself | `docs` |
 | `site.include` | Extra source roots rendered into the docs site: `{path, mount, page}` each, all three required; `page` names the file that is a page in each child directory (a skills tree uses `SKILL.md`) | none |

@@ -14,7 +14,6 @@ modules:
     gitignore_sources: [Node, Bun]
     dependabot_ecosystems: [bun]
     checks_examples: [bun]
-    settings_layers: [settings.yml]
   deno:
     gitignore_sources: [Node]
     dependabot_ecosystems: [deno]
@@ -25,8 +24,10 @@ modules:
     tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}
 settings:
   baseline: files/settings/baseline.yml
-  public: files/settings/public.yml
-  private: files/settings/private.yml
+  layers:
+    - {source: files/settings/public.yml, when: {private: false}}
+    - {source: files/settings/private.yml, when: {private: true}}
+    - {source: files/bun/settings.yml, when: {modules: [bun]}}
   override: files/settings/override.yml
 files:
   - path: .github/workflows/ci.yml

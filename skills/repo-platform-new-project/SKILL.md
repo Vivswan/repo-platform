@@ -43,12 +43,16 @@ For an existing repository, skip this step and work on a branch of the repo as i
 
 ### 2. Write `.repo-platform.yml`
 
-Only `modules` is required, but write `project` too: the settings overlay starter (`.github/settings.local.yml`) and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the overlay starter while it is still absent (the rendered `.github/settings.yml` is held with it, having no overlay to read), with a Registration note until the key is set. `project` is all-or-nothing: when present it needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The full key table is in [references/registration.md](references/registration.md).
+`modules` and `project` are both required; `project` needs `name`, `slug`, and `description` together (`copyright_holder` stays optional). The settings overlay starter (`.github/settings.local.yml`) and the managed region of `AGENTS.md` both render `{{description}}`, and the writer treats an empty value as missing, so an empty `project.description` holds `AGENTS.md` on every sync, and the overlay starter while it is still absent (the rendered `.github/settings.yml` is held with it, having no overlay to read), with a Registration note until the key is set. The full key table is in [references/registration.md](references/registration.md).
 
 Minimal:
 
 ```yaml
 modules: [uv, release-please, pr-title]
+project:
+  name: My Project
+  slug: my-project
+  description: One sentence GitHub shows as the repository description
 ```
 
 Full:
