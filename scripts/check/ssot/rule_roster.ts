@@ -56,6 +56,7 @@ export const RULE_ROSTER = [
   "no-tests-under-actions",
   "stream-write-sync",
   "ci-harness-imports",
+  "harness-bounds-scale",
   "operator-verdict-only",
   "site-config-parity",
 ] as const;
