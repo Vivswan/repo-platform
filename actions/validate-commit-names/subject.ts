@@ -20,9 +20,27 @@ export const allowedTypes = [
 // One scope only: the class has no comma, so a comma-scoped subject like `docs(all-green,build-provenance): ...` is refused.
 export const scopeCharacterClass = "[A-Za-z0-9._/-]";
 
-export const conventionalSubject = new RegExp(
-  `^(${allowedTypes.join("|")})(\\(${scopeCharacterClass}+\\))?!?: .+`,
-);
+const oneScope = `${scopeCharacterClass}+`;
+
+function subjectGrammar(scope: string): RegExp {
+  return new RegExp(`^(${allowedTypes.join("|")})(\\(${scope}\\))?!?: .+`);
+}
+
+export const conventionalSubject = subjectGrammar(oneScope);
+
+// A committer who wrote `style(contract,tests): ...` read the generic refusal as a validator bug, so a subject the
+// grammar accepts with a comma list of scopes is refused by name of the one-scope rule.
+const commaScopedSubject = subjectGrammar(`${oneScope}(?:\\s*,\\s*${oneScope})+`);
+
+export const oneScopeRule =
+  "one scope per subject: split the change or pick the scope that names it";
+
+/** Why `value` is refused; undefined when the grammar accepts it. */
+export function refusal(value: string): string | undefined {
+  if (conventionalSubject.test(value)) return undefined;
+  if (commaScopedSubject.test(value)) return oneScopeRule;
+  return "not of the shape <type>(<scope>)?!?: <description>";
+}
 
 export function subject(message: unknown): string {
   return String(message ?? "")

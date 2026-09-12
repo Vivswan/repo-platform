@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { conventionalSubject, isMergeSubject, subject } from "./subject.ts";
+import { isMergeSubject, refusal, subject } from "./subject.ts";
 
 const zeroSha = /^0{40}$/;
 
@@ -101,12 +101,17 @@ function listCommits(): Commit[] {
 function validateCommitNames(): void {
   const commits = listCommits();
   const checked = commits.filter((commit) => !isMergeSubject(commit.subject));
-  const failures = checked.filter((commit) => !conventionalSubject.test(commit.subject));
+  const failures = checked.flatMap((commit) => {
+    const reason = refusal(commit.subject);
+    return reason === undefined ? [] : [{ ...commit, reason }];
+  });
 
   console.log(`Checked ${checked.length} non-merge commit subject(s).`);
 
   if (failures.length > 0) {
-    const lines = failures.map((commit) => `- ${commit.sha.slice(0, 7)} ${commit.subject}`);
+    const lines = failures.map(
+      (commit) => `- ${commit.sha.slice(0, 7)} ${commit.subject}\n  ${commit.reason}`,
+    );
     console.error(
       [
         "Commit subjects must be Conventional Commits.",
