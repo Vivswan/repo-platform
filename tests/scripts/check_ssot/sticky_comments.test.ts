@@ -12,13 +12,13 @@ import {
 describe("sticky-pr-comments", () => {
   const SHA = "5770ad5eb8f42dd2c4f34da00c94c5381e49af88";
   const PIN = `${STICKY_COMMENT_ACTION}@${SHA} # v3.0.5`;
-  const WORKFLOW = "files/bun/.github/workflows/dependabot-bun-lockfile.yml";
+  const WORKFLOW = "files/deno/.github/workflows/deno-audit.yml";
   const VARIANT = "files/base/.github/workflows/auto-assign.codeql.yml";
   const BLOCK = "files/bun/.github/workflows/auto-format.block.toolchain.yml";
   const REPO_WORKFLOW = ".github/workflows/protect-build-branches.yml";
   const ACTION = "actions/check-file-size/action.yml";
   const SCRIPT = "actions/validate-managed-files/src/report.ts";
-  const HOST = "dependabot-bun-lockfile";
+  const HOST = "deno-audit";
   const HEADER = `repo-platform/${HOST}`;
   const strict = (...hosts: string[]): StickyScope => ({ hosts, postMayFail: false });
   const lenient = (host: string): StickyScope => ({ hosts: [host], postMayFail: true });

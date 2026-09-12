@@ -42,8 +42,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          # One string for the run warning and the sticky comment; after the seam it says
-          # what the dedupe-bun-lockfile action's notice says.
           NOTICE: >-
             Formatting commit pushed with the workflow token: GitHub holds the new head's pull_request run
             for approval, so its checks stay unreported. Approve the run from the PR's merge box or the
