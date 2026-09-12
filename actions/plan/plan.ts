@@ -1,5 +1,5 @@
 // The fleet's plan: resolves one managed repository's CI configuration at
-// run time from the repository's registration (.repo-platform.yml) and
+// run time from the repository's registration and
 // files.yml, the module data shipped at the build branch root beside this
 // action. Every managed ci.yml is byte-identical; what differs per
 // repository is computed here and handed to the jobs as step outputs.
@@ -35,6 +35,7 @@ import {
   requireEnv,
   succeeded,
 } from "../shared/action_runtime.ts";
+import { REGISTRATION_PATH } from "../shared/platform.ts";
 import {
   type FileEntry,
   type FilesConfig,
@@ -44,12 +45,7 @@ import {
   type RetiredEntry,
 } from "./files_config.ts";
 import { describeMirrorProblem, mirrorDeclarationProblems, ownedPaths } from "./mirrors.ts";
-import {
-  LABEL_RE,
-  parseRegistration,
-  REGISTRATION_PATH,
-  type Registration,
-} from "./registration.ts";
+import { LABEL_RE, parseRegistration, type Registration } from "./registration.ts";
 
 export const MODES = ["default", "site"] as const;
 export type Mode = (typeof MODES)[number];

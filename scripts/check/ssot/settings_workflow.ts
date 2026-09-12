@@ -87,7 +87,7 @@ export function stepOutputGateMismatches(rel: string, steps: WorkflowStep[]): Mi
   return mismatches;
 }
 
-/** repo-platform's own overlay: the writer renders the root
+/** This repository's own overlay: the writer renders the root
  *  .github/settings.yml from it, so its identity keys are judged here on
  *  the same contract (identityKeyIssues) the merge dialect applies. */
 export const OWN_OVERLAY = ".github/settings.local.yml";

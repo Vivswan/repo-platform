@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
+import { PLATFORM_NAME, PLATFORM_OWNER, PLATFORM_SLUG } from "../../../actions/shared/platform.ts";
 import { callCarriesLiteral, constNumberValue, constRegexSource } from "../../lib/ts_extract.ts";
 import { SKELETON_SOURCE } from "./all_green.ts";
 import { canonical, type Mismatch, mustMatch, stripGeneratedRegions } from "./comparison.ts";
@@ -8,7 +9,6 @@ import {
   ciJobs,
   managedLabelRoster,
   modules,
-  OWNER,
   read,
   repoSlug,
   trackedFiles,
@@ -93,7 +93,7 @@ export function releaseCutWiringMismatches(files: {
   const job = asRecord(jobs["release-please"] ?? {}, `${workflowRel} release-please`);
   const steps = (job.steps ?? []) as Record<string, unknown>[];
   const health = steps.find((step) =>
-    String(step.uses ?? "").startsWith("Vivswan/repo-platform/actions/release-health@"),
+    String(step.uses ?? "").startsWith(`${PLATFORM_SLUG}/actions/release-health@`),
   );
   if (health === undefined || health.id !== "health") {
     mismatches.push({
@@ -212,6 +212,36 @@ export function isOwnPagesOrigin(
   // makes it a subdomain - neither is this repository's Pages origin.
   const boundary = before.charAt(before.length - origin.length - 1);
   return boundary === "" || !/[a-z0-9.-]/.test(boundary);
+}
+
+const PLATFORM_NAME_SOURCE = "actions/shared/platform.ts";
+const PLATFORM_NAME_CODE_DIRS = [".github/scripts/", "actions/", "scripts/"];
+/** The two spellings no import can replace: a skill directory's name, and docs_check.ts's SITE_CONFIG, which the
+ *  site-config-parity rule extracts as a plain string literal. */
+const PLATFORM_NAME_ALLOWED_FORMS = [
+  `skills/${PLATFORM_NAME}-`,
+  `"site_title": "${PLATFORM_NAME}"`,
+];
+
+/** Code spells the platform's name through PLATFORM_NAME_SOURCE; a literal that reappears is a second source. Matched
+ *  case-insensitively so a marker label or a heading built by hand trips too. */
+export function platformNameLiteralMismatches(files: Record<string, string>): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const needle = PLATFORM_NAME.toLowerCase();
+  for (const [rel, text] of Object.entries(files)) {
+    text.split("\n").forEach((line, index) => {
+      let rest = line;
+      for (const form of PLATFORM_NAME_ALLOWED_FORMS) rest = rest.replaceAll(form, "");
+      if (rest.toLowerCase().includes(needle)) {
+        mismatches.push({
+          file: `${rel}:${index + 1}`,
+          expected: `the platform's name imported from ${PLATFORM_NAME_SOURCE}`,
+          got: line.trim(),
+        });
+      }
+    });
+  }
+  return mismatches;
 }
 
 export const literalAnchorRules: Rule[] = [
@@ -381,26 +411,40 @@ export const literalAnchorRules: Rule[] = [
       for (const rel of files) {
         const text = read(rel);
         for (const match of text.matchAll(slugRe)) {
-          // <something>/repo-platform.<ext> is a filename inside a path
-          // (say, a scratch repo-platform.yml), not an owner slug.
+          // <something>/<name>.<ext> is a filename inside a path (say, a
+          // scratch registration), not an owner slug.
           if (/^\.[A-Za-z0-9]/.test(text.slice(match.index + match[0].length))) continue;
           // The sync branch name is not an owner slug either.
           if (match[1] === "automation") continue;
-          if (isOwnPagesOrigin(text, match.index, match[1], OWNER)) continue;
-          if (match[1].toLowerCase() === OWNER.toLowerCase()) {
+          if (isOwnPagesOrigin(text, match.index, match[1], PLATFORM_OWNER)) continue;
+          if (match[1].toLowerCase() === PLATFORM_OWNER.toLowerCase()) {
             sawExpected = true;
             continue;
           }
           mismatches.push({
             file: rel,
-            expected: `${OWNER}/${slug} (the fleet owner)`,
+            expected: `${PLATFORM_OWNER}/${slug} (the fleet owner)`,
             got: match[0],
           });
         }
       }
       if (!sawExpected)
-        throw new Error(`no '${OWNER}/${slug}' literal found anywhere - anchor lost`);
+        throw new Error(`no '${PLATFORM_OWNER}/${slug}' literal found anywhere - anchor lost`);
       return mismatches;
+    },
+  },
+  {
+    name: "platform-name-once",
+    run: () => {
+      const code = trackedFiles().filter(
+        (rel) =>
+          PLATFORM_NAME_CODE_DIRS.some((dir) => rel.startsWith(dir)) &&
+          /\.m?ts$/.test(rel) &&
+          !rel.endsWith(".test.ts") &&
+          rel !== PLATFORM_NAME_SOURCE,
+      );
+      if (code.length === 0) throw new Error("no platform code files found - anchor lost");
+      return platformNameLiteralMismatches(Object.fromEntries(code.map((rel) => [rel, read(rel)])));
     },
   },
   {

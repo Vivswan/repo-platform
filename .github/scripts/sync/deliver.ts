@@ -4,15 +4,19 @@
 
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  AUTOMATION_BRANCH,
+  FAILURE_ISSUE_TITLE,
+  PLATFORM_NAME,
+  SYNC_PR_TITLE_PREFIX,
+} from "../../../actions/shared/platform.ts";
 import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
 import { env, requireEnv } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, type RunResult, redactText } from "../shared/proc.ts";
-import { AUTOMATION_BRANCH } from "./automation_branch.ts";
 import { type DeliveryVerdict, VERDICT_FILE } from "./verdict.ts";
 import { REPLACED_HEADING, REVIEW_HEADING } from "./writer/report.ts";
 
-export const FAILURE_ISSUE_TITLE = "[repo-platform] sync failed";
 export const CHECKOUT_LOG = "checkout.log";
 export const SYNC_LOG = "sync.log";
 export const DELIVER_LOG = "deliver.log";
@@ -30,7 +34,7 @@ export const DELIVERY_CALL_BOUND_MS = NETWORK_TIMEOUT_MS;
 export const DELIVERY_CALLS = 17;
 
 export function prTitle(build: string): string {
-  return `chore: sync repo-platform build ${build.slice(0, 12)}`;
+  return `${SYNC_PR_TITLE_PREFIX} ${build.slice(0, 12)}`;
 }
 
 export function tail(path: string, bytes = TAIL_BYTES): string {
@@ -60,7 +64,7 @@ export function failureBody(input: {
     return ["", `## ${title}`, "", `${fence}text`, text.replace(/\n$/, ""), fence];
   };
   return [
-    `The repo-platform sync for this repository failed: ${input.reason}.`,
+    `The ${PLATFORM_NAME} sync for this repository failed: ${input.reason}.`,
     "",
     `Run: ${input.runUrl}`,
     `Build: \`${input.build}\``,
@@ -314,7 +318,7 @@ class Delivery {
     const bodyFile = join(this.runnerTemp, "failure-issue-close.md");
     writeFileSync(
       bodyFile,
-      `Healthy again: the repo-platform sync delivered cleanly as of ${this.runUrl}. The last failure report is in this issue's edit history.\n`,
+      `Healthy again: the ${PLATFORM_NAME} sync delivered cleanly as of ${this.runUrl}. The last failure report is in this issue's edit history.\n`,
     );
     this.run(
       [

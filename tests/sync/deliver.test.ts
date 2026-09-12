@@ -6,7 +6,6 @@ import {
   boundedReport,
   closedFences,
   DELIVERY_CALLS,
-  FAILURE_ISSUE_TITLE,
   failureBody,
   fenceFor,
   prBody,
@@ -18,6 +17,7 @@ import {
   renderReport,
   type SyncOutcome,
 } from "../../.github/scripts/sync/writer/report.ts";
+import { FAILURE_ISSUE_TITLE } from "../../actions/shared/platform.ts";
 import { argvStub } from "../shared/argv_stub";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";

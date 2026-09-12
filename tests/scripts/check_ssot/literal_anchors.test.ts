@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   inlineFunctionCopies,
   isOwnPagesOrigin,
+  platformNameLiteralMismatches,
   releaseCutWiringMismatches,
 } from "../../../scripts/check/ssot/literal_anchors.ts";
 
@@ -275,5 +276,47 @@ ${lane}
   ];
   test.each(drifts)("$reason", ({ files, expected }) => {
     expect(releaseCutWiringMismatches(files)).toEqual([expected]);
+  });
+});
+
+describe("platformNameLiteralMismatches", () => {
+  const imported = [
+    'import { PLATFORM_NAME } from "../shared/platform.ts";',
+    "const branch = `automation/${PLATFORM_NAME}`;",
+    '"skills/repo-platform-sync-pr/references/file-ownership.md",',
+    `'{"site_title": "repo-platform", "docs_path": "docs"}'`,
+    'const token = requireEnv("REPO_PLATFORM_TOKEN");',
+  ].join("\n");
+
+  test("imported spellings and the two allowed literal forms yield nothing (the control)", () => {
+    expect(platformNameLiteralMismatches({ "scripts/a.ts": imported })).toEqual([]);
+  });
+
+  test("a literal in a string, a comment, or a hand-built marker names its file and line", () => {
+    const drifted = [
+      'export const BRANCH = "automation/repo-platform";',
+      "// pushed by Vivswan/repo-platform",
+      'const begin = "# BEGIN REPO-PLATFORM MANAGED";',
+      "const fine = PLATFORM_NAME;",
+    ].join("\n");
+    expect(
+      platformNameLiteralMismatches({ "scripts/a.ts": imported, "actions/b.ts": drifted }),
+    ).toEqual([
+      {
+        file: "actions/b.ts:1",
+        expected: "the platform's name imported from actions/shared/platform.ts",
+        got: 'export const BRANCH = "automation/repo-platform";',
+      },
+      {
+        file: "actions/b.ts:2",
+        expected: "the platform's name imported from actions/shared/platform.ts",
+        got: "// pushed by Vivswan/repo-platform",
+      },
+      {
+        file: "actions/b.ts:3",
+        expected: "the platform's name imported from actions/shared/platform.ts",
+        got: 'const begin = "# BEGIN REPO-PLATFORM MANAGED";',
+      },
+    ]);
   });
 });

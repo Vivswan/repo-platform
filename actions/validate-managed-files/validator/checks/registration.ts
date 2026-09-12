@@ -1,4 +1,5 @@
-import { type Context, REGISTRATION_PATH } from "../context.ts";
+import { REGISTRATION_PATH } from "../../../shared/platform.ts";
+import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
 export function checkRegistration(ctx: Context): Finding[] {

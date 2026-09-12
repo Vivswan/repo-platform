@@ -5,6 +5,8 @@
 // actions before their own installs), so node builtins and zone-internal relative imports only;
 // tests/actions/shared_zone.test.ts enforces it.
 
+import { MANAGED_REGION_LABEL } from "./platform.ts";
+
 export interface ManagedRegionSplit {
   grammar: "managed-region";
   begin: string;
@@ -20,13 +22,13 @@ export type GrammarId = keyof SplitShapes;
 export type RegionMarkers = Omit<ManagedRegionSplit, "grammar">;
 
 export const HASH_REGION_MARKERS: RegionMarkers = {
-  begin: "# BEGIN REPO-PLATFORM MANAGED",
-  end: "# END REPO-PLATFORM MANAGED",
+  begin: `# BEGIN ${MANAGED_REGION_LABEL}`,
+  end: `# END ${MANAGED_REGION_LABEL}`,
 };
 
 export const HTML_REGION_MARKERS: RegionMarkers = {
-  begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-  end: "<!-- END REPO-PLATFORM MANAGED -->",
+  begin: `<!-- BEGIN ${MANAGED_REGION_LABEL} -->`,
+  end: `<!-- END ${MANAGED_REGION_LABEL} -->`,
 };
 
 /** A type that compiles only when `T` is never: the exhaustiveness pin for

@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FLEET_WORKFLOWS } from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { PLATFORM_NAME, PLATFORM_OWNER } from "../../../actions/shared/platform.ts";
 import { actionManifestPaths } from "../../lib/action_steps.ts";
 import { constStringValue } from "../../lib/ts_extract.ts";
 import { escapeRegExp, type Mismatch, sortedSet } from "./comparison.ts";
-import { OWNER, REPO_ROOT, read, walkFiles } from "./inputs.ts";
+import { REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 export interface Pin {
@@ -51,7 +52,7 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
 
 /** A moving tag or branch would let upstream change what the fleet runs without a PR here; `@<sha> # vX.Y.Z` is the shape Dependabot bumps.
- *  The owner's own actions are exempt: the repo-platform self-pins under files/ are judged by the fleet-refs-ride-build rule,
+ *  The owner's own actions are exempt: the platform's self-pins under files/ are judged by the fleet-refs-ride-build rule,
  *  and the settings apply's pin by the settings-apply-input rule. */
 export function pinShapeMismatches(
   pins: Pin[],
@@ -132,18 +133,18 @@ export const DELIVERY_REF = "build";
 
 export interface SelfPin {
   file: string;
-  /** The pin's stem after the owner: repo-platform/<path>. */
+  /** The pin's stem after the owner: <name>/<path>. */
   stem: string;
   ref: string;
 }
 
 /** A self pin is a `uses:` naming this repository; the owner slot is the `github_username` placeholder in either case
- *  in the writer's sources and OWNER itself in this repository's own workflows, manifests, and doc examples.
- *  Only the `uses:` keyword marks a pin: prose spells the shape with an ellipsis (`Vivswan/repo-platform/...@<ref>`). */
+ *  in the writer's sources and PLATFORM_OWNER itself in this repository's own workflows, manifests, and doc examples.
+ *  Only the `uses:` keyword marks a pin: prose spells the shape with an ellipsis (`<owner>/<name>/...@<ref>`). */
 export function sourceSelfPins(text: string, file: string): SelfPin[] {
-  const ownerSlot = String.raw`(?:\{\{\s*github_username(?:_lower)?\s*\}\}|${escapeRegExp(OWNER)})`;
+  const ownerSlot = String.raw`(?:\{\{\s*github_username(?:_lower)?\s*\}\}|${escapeRegExp(PLATFORM_OWNER)})`;
   const token = new RegExp(
-    String.raw`uses:\s*['"]?${ownerSlot}/(repo-platform/[A-Za-z0-9_./-]+)@([^\s"'\x60]*)`,
+    String.raw`uses:\s*['"]?${ownerSlot}/(${escapeRegExp(PLATFORM_NAME)}/[A-Za-z0-9_./-]+)@([^\s"'\x60]*)`,
     "gi",
   );
   return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
@@ -153,7 +154,7 @@ export function sourceSelfPins(text: string, file: string): SelfPin[] {
 function anchoredSelfPins(pins: SelfPin[]): SelfPin[] {
   if (pins.length === 0) {
     throw new Error(
-      "no repo-platform self-reference found in the scanned content - anchor lost " +
+      `no ${PLATFORM_NAME} self-reference found in the scanned content - anchor lost ` +
         "(the writer's sources always pin their own actions and reusables)",
     );
   }
@@ -189,7 +190,7 @@ export function fleetWorkflowPinMismatches(
   pins: SelfPin[],
   shipped: readonly string[],
 ): Mismatch[] {
-  const prefix = "repo-platform/.github/workflows/";
+  const prefix = `${PLATFORM_NAME}/.github/workflows/`;
   return pins
     .filter(
       (pin) => pin.stem.startsWith(prefix) && !shipped.includes(pin.stem.slice(prefix.length)),
@@ -206,7 +207,7 @@ export function fleetWorkflowPinMismatches(
  *  GitHub's resolution: a `.github/workflows/` stem is the file itself, any other stem is a directory read by either manifest spelling. */
 export function stemMismatches(pins: SelfPin[], exists: (rel: string) => boolean): Mismatch[] {
   return anchoredSelfPins(pins).flatMap((pin) => {
-    const path = pin.stem.slice("repo-platform/".length);
+    const path = pin.stem.slice(`${PLATFORM_NAME}/`.length);
     const wanted = path.startsWith(".github/workflows/")
       ? [path]
       : [`${path}/action.yml`, `${path}/action.yaml`];
@@ -250,7 +251,7 @@ export const deliveryPinRules: Rule[] = [
       const pins = pinSites().flatMap((rel) => extractUsesPins(read(rel), rel));
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
-      return [...pinMismatches(pins), ...pinShapeMismatches(pins, OWNER, BRANCH_PINNED)];
+      return [...pinMismatches(pins), ...pinShapeMismatches(pins, PLATFORM_OWNER, BRANCH_PINNED)];
     },
   },
   {

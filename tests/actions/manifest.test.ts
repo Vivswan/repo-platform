@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   entryBody,
-  MANIFEST_NAME,
   type ManifestEntryShape,
   parseManifestFiles,
   unknownEntryFields,
 } from "../../actions/shared/manifest";
+import { MANIFEST_NAME } from "../../actions/shared/platform";
 
 describe("parseManifestFiles problem strings are value-free", () => {
   // Problem strings reach public logs (the sync's warnings and thrown errors, the validator's findings), so no branch may quote manifest bytes.

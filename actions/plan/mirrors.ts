@@ -4,9 +4,9 @@
 // The writer adds the rules only the checkout can answer (mirrors.ts).
 
 import { dirname } from "node:path";
-import { MANIFEST_NAME } from "../shared/manifest.ts";
+import { MANIFEST_NAME, REGISTRATION_PATH } from "../shared/platform.ts";
 import { type FilesConfig, pathProblem, type Selection, selectEntries } from "./files_config.ts";
-import { REGISTRATION_PATH, type Registration } from "./registration.ts";
+import type { Registration } from "./registration.ts";
 
 export type Mirrors = NonNullable<Registration["mirrors"]>;
 
@@ -101,7 +101,7 @@ export function literalPrefix(pattern: string): string {
 /** The writer lists directories through this and the plan matches known paths with it, so the two agree. */
 export function segmentPattern(segment: string): RegExp {
   const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // A mirror glob segment from the repository's .repo-platform.yml, escaped.
+  // A mirror glob segment from the repository's registration, escaped.
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return new RegExp(`^${segment.split("*").map(literal).join("[^/]*")}$`);
 }

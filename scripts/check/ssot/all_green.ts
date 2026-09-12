@@ -3,6 +3,7 @@ import { parse as parseYaml } from "yaml";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
 import { loadOverrideLayer } from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
+import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, escapeRegExp, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
 import { asRecord, ciJobs, packageScripts, REPO_ROOT, read, repoCi } from "./inputs.ts";
@@ -356,7 +357,7 @@ export function skeletonGateMismatches(
   }
   const steps = (gate.steps as Record<string, unknown>[] | undefined) ?? [];
   const judge = steps.find((step) =>
-    /\/repo-platform\/actions\/all-green@build$/.test(String(step.uses ?? "")),
+    new RegExp(`/${PLATFORM_NAME}/actions/all-green@build$`).test(String(step.uses ?? "")),
   );
   if (
     steps.length !== 1 ||
@@ -367,8 +368,7 @@ export function skeletonGateMismatches(
   ) {
     mismatches.push({
       file: at("all-green"),
-      expected:
-        "one unconditioned, unsoftened step, uses: <owner>/repo-platform/actions/all-green@build with needs: toJSON(needs)",
+      expected: `one unconditioned, unsoftened step, uses: <owner>/${PLATFORM_NAME}/actions/all-green@build with needs: toJSON(needs)`,
       got: canonical(
         steps.map((step) => ({
           uses: step.uses ?? null,
@@ -384,12 +384,12 @@ export function skeletonGateMismatches(
     // The workflow file name is one of this rule's own literals below, escaped; the rest is literal.
     // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     const pinned = new RegExp(
-      `/repo-platform/\\.github/workflows/${escapeRegExp(workflow)}@build$`,
+      `/${PLATFORM_NAME}/\\.github/workflows/${escapeRegExp(workflow)}@build$`,
     );
     if (!pinned.test(uses)) {
       mismatches.push({
         file: at(name),
-        expected: `uses: <owner>/repo-platform/.github/workflows/${workflow}@build`,
+        expected: `uses: <owner>/${PLATFORM_NAME}/.github/workflows/${workflow}@build`,
         got: uses || "no uses:",
       });
     }
