@@ -60,6 +60,7 @@ export const RULE_ROSTER = [
   "ci-harness-imports",
   "operator-verdict-only",
   "site-config-parity",
+  "root-twin-parity",
 ] as const;
 
 /** Not a rule itself: it runs unconditionally in main(), before the loop it audits,

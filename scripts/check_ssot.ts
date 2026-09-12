@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 // Facts this repo states in more than one INDEPENDENTLY-authored place are compared here so drift fails CI instead of rotting silently.
-// Nothing here compares a copy to the source it was copied from: the writer copies files whole, and the end-to-end sync test proves that copy.
+// The one copy held to its source is the operator's own root copy of a shipped file (root-twin-parity, twin_copies.ts): the fleet's copies are the writer's, proven by the end-to-end sync test.
 //
 // Every rule's extraction fails loudly when its anchor disappears, never vacuously:
 //   grep-shaped text    -> mustMatch() (scripts/check/ssot/comparison.ts)
@@ -26,6 +26,7 @@ import { skillRules } from "./check/ssot/skills.ts";
 import { stickyCommentRules } from "./check/ssot/sticky_comments.ts";
 import { syncOperatorRules } from "./check/ssot/sync_operator.ts";
 import { toolchainRules } from "./check/ssot/toolchain.ts";
+import { twinCopyRules } from "./check/ssot/twin_copies.ts";
 
 const rules: Rule[] = [
   ...toolchainRules,
@@ -42,6 +43,7 @@ const rules: Rule[] = [
   ...harnessImportRules,
   ...syncOperatorRules,
   ...siteConfigRules,
+  ...twinCopyRules,
 ];
 
 function main(): number {

@@ -1,4 +1,4 @@
-# This repo's copy of the fleet's shared yamllint configuration.
+# This repository's own yamllint configuration; the fleet's is files/base/.yamllint.
 extends: default
 
 ignore:
