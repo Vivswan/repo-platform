@@ -161,5 +161,5 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - What the fleet configs settle before a repository's bypass applies:
   - typos accepts `unparseable` and the hyphenated `mis-` prefix (`mis-parses`, `mis-set`) everywhere and skips lockfiles, minified bundles, SVGs, `node_modules/`, and a root `dist/` (committed build output). A root `lib/` is source in a Node repository, so a repository that generates it excludes it in its own file.
-  - semgrep runs the registry's `p/default` rule set at ERROR severity with two rules excluded, one permanently and one until the fleet cutover; WARNING and INFO rules do not run, so their findings appear nowhere, and what to mark on an ERROR finding is the repository's own call ([security-scans.md](security-scans.md#semgrep)).
+  - semgrep runs the registry's `p/default` rule set at ERROR severity with one rule excluded, permanently; WARNING and INFO rules do not run, so their findings appear nowhere, and what to mark on an ERROR finding is the repository's own call ([security-scans.md](security-scans.md#semgrep)).
 - Enforced by: review of the diff that carries the bypass; the sync overwrites a managed file, so a bypass in one is lost on the next sync PR.

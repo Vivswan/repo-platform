@@ -11,14 +11,9 @@ description: >-
   The only bypass is semgrep's own `// nosemgrep: rule-id` comment on the
   finding, with a reason; semgrep keeps a marked finding in its SARIF as a
   suppressed result and code scanning shows a suppressed result as an open
-  alert, so the upload drops suppressed results first. Two registry rules
-  are excluded from the scan: mutable-action-tag duplicates zizmor's
-  unpinned-uses (one tool owns each finding class), permanently;
-  secrets-inherit only until the fleet cutover, because managed repositories
-  still run the old rendered ci.yml and release.yml, whose `secrets: inherit`
-  lines carry no nosemgrep marker (the writer's ci.yml marks each one with
-  its reason), and the rule would fail every fleet repository until the
-  writer replaces them.
+  alert, so the upload drops suppressed results first. One registry rule is
+  excluded, permanently: mutable-action-tag duplicates zizmor's
+  unpinned-uses, and one tool owns each finding class.
 
 runs:
   using: composite
@@ -36,7 +31,6 @@ runs:
       run: |
         semgrep scan --config p/default --metrics=off --severity ERROR \
           --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag \
-          --exclude-rule=yaml.github-actions.security.secrets-inherit.secrets-inherit \
           --sarif-output="$RUNNER_TEMP/semgrep.sarif" --json-output="$RUNNER_TEMP/semgrep.json" . \
           && status=0 || status=$?
         echo "status=$status" >>"$GITHUB_OUTPUT"

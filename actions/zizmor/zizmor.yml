@@ -8,10 +8,6 @@ rules:
         # (docs/build-provenance.md): a moving ref on purpose.
         Vivswan/repo-platform/*: ref-pin
         "*": hash-pin
-    # A tag pin is a medium finding while the fleet still pins by tag.
-    # Both passes run at high, so it neither blocks nor surfaces.
-    remap:
-      severity: medium
   dangerous-triggers:
     # The managed auto-assign.yml's workflow_run trigger only calls the
     # reusable assigners, which never check out or run the triggering code.
