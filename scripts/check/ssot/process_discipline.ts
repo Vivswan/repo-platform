@@ -53,17 +53,58 @@ export function topLevelProperties(options: string): Map<string, string> | null 
   return props;
 }
 
-/** A spread can shift or inject stream slots, so a spread-carrying array is unauditable; any non-array value
- *  is trusted whole like a variable value (house style writes a named constant there), so a call or a literal escapes too: a recorded residual.
- *  Parentheses and type dressing unwrap first: `(["pipe"])` is still the array it is. */
+/** A stream value is judged as what it evaluates to, read off the parsed node, never its text (measured on 1.4.0):
+ *    undefined, (undefined), void 0, an elided slot  -> default: spawnSync pipes it
+ *    "pipe", "p\x69pe"                               -> pipe
+ *    null, "ignore", "inherit", an fd number         -> shaped
+ *  An identifier or member path is trusted by its key (the recorded residual: a variable smuggling "pipe" escapes);
+ *  a call, an operator expression, or a string bun-types does not list is refused. */
+type StreamState = "default" | "pipe" | "shaped" | "unauditable";
+
+function streamState(text: string | undefined): StreamState {
+  if (text === undefined || text === "") return "default";
+  const node = parsedExpression(text);
+  if (node === null) return "unauditable";
+  if (Node.isVoidExpression(node)) return "default";
+  if (Node.isIdentifier(node)) return node.getText() === "undefined" ? "default" : "shaped";
+  if (Node.isNullLiteral(node) || Node.isNumericLiteral(node)) return "shaped";
+  if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node)) {
+    const value = node.getLiteralValue();
+    if (value === "pipe") return "pipe";
+    return value === "ignore" || value === "inherit" ? "shaped" : "unauditable";
+  }
+  return isMemberPath(node) ? "shaped" : "unauditable";
+}
+
+/** `a.b.c` and nothing else: a call or computed step anywhere in the chain is an expression, not a name. */
+function isMemberPath(node: Node): boolean {
+  let current: Node = node;
+  while (Node.isPropertyAccessExpression(current))
+    current = unwrapExpression(current.getExpression());
+  return Node.isIdentifier(current);
+}
+
+/** bun-types declares stdio as a [stdin, stdout, stderr] tuple, so only an array literal shows the slots; a call, a variable,
+ *  or a scalar is refused rather than trusted whole. Parentheses and type dressing unwrap first: `(["pipe"])` is still the array it is. */
 function stdioShape(
-  text: string,
-): { kind: "slots"; slots: string[] } | { kind: "unauditable" } | { kind: "scalar" } {
+  text: string | undefined,
+): { kind: "absent" } | { kind: "slots"; slots: string[] } | { kind: "unauditable"; why: string } {
+  if (text === undefined) return { kind: "absent" };
   const literal = parsedExpression(text);
-  if (literal === null) return { kind: "unauditable" };
-  if (!Node.isArrayLiteralExpression(literal)) return { kind: "scalar" };
+  if (literal === null) return { kind: "unauditable", why: "a stdio value the parser cannot read" };
+  if (
+    Node.isVoidExpression(literal) ||
+    (Node.isIdentifier(literal) && literal.getText() === "undefined")
+  ) {
+    return { kind: "absent" };
+  }
+  if (!Node.isArrayLiteralExpression(literal)) {
+    return { kind: "unauditable", why: "not an array literal, so its stream slots cannot be read" };
+  }
   const elements = literal.getElements();
-  if (elements.some(Node.isSpreadElement)) return { kind: "unauditable" };
+  if (elements.some(Node.isSpreadElement)) {
+    return { kind: "unauditable", why: "a spread can shift or inject stream slots" };
+  }
   return {
     kind: "slots",
     slots: elements.map((element) =>
@@ -215,29 +256,37 @@ export function spawnSyncHazard(options: string | null): string | null {
   }
   if (bounded) return null;
   const why = timeout === undefined ? "no timeout" : `timeout: ${timeout} is not a provable bound`;
-  const pipes = (value: string | undefined) => value !== undefined && /["'`]pipe["'`]/.test(value);
-  if (pipes(props.get("stdio")) || pipes(props.get("stdout")) || pipes(props.get("stderr"))) {
-    return `explicitly piped stdio with ${why}`;
-  }
-  const unset = (value: string | undefined) =>
-    value === undefined || value === "" || value === "undefined" || value === "null";
-  // An omitted, elided, or undefined/null stdio slot leaves that stream on the piped default; slot 1 is stdout, slot 2 stderr.
-  const stdio = props.get("stdio");
-  const stdioTrimmed = stdio?.trim();
-  const shape = stdioTrimmed === undefined ? { kind: "scalar" as const } : stdioShape(stdioTrimmed);
+  // bun-types: the stdio tuple overrides the stdout/stderr keys (measured: `stdio: ["inherit"]` beside `stdout: "ignore"` still pipes),
+  // so the keys are read only when no tuple is given. Slot 1 is stdout, slot 2 stderr.
+  const shape = stdioShape(props.get("stdio"));
   if (shape.kind === "unauditable") {
-    return `a stdio value the scanner cannot audit (a spread or non-literal shape) with ${why}`;
+    return `a stdio value the scanner cannot audit (${shape.why}) with ${why}`;
   }
-  const slots = shape.kind === "slots" ? shape.slots : null;
-  const shaped = (stream: "stdout" | "stderr", slot: number) => {
-    const viaStdio = slots !== null ? slots[slot] : stdioTrimmed;
-    return !unset(viaStdio) || !unset(props.get(stream));
-  };
-  const unshaped = (["stdout", "stderr"] as const).filter(
-    (stream, index) => !shaped(stream, index + 1),
-  );
-  if (unshaped.length > 0) {
-    return `${unshaped.join(" and ")} left to the piped default with ${why}`;
+  const states: { stream: string; state: StreamState }[] = [];
+  if (shape.kind === "slots") {
+    for (let index = 1; index < Math.max(3, shape.slots.length); index++) {
+      const state = streamState(shape.slots[index]);
+      // spawnSync never drains a slot past 2, so a "pipe" there wedges once the pipe buffer fills (measured: a 1 MiB
+      // writer into fd 3 hangs until the deadline), while an undefined or null extra slot is a closed fd, not a pipe.
+      const closed = index > 2 && state === "default";
+      states.push({
+        stream: index === 1 ? "stdout" : index === 2 ? "stderr" : `stdio[${index}]`,
+        state: closed ? "shaped" : state,
+      });
+    }
+  } else {
+    for (const stream of ["stdout", "stderr"] as const) {
+      states.push({ stream, state: streamState(props.get(stream)) });
+    }
+  }
+  if (states.some(({ state }) => state === "pipe")) return `explicitly piped stdio with ${why}`;
+  const unauditable = states.filter(({ state }) => state === "unauditable");
+  if (unauditable.length > 0) {
+    return `${unauditable.map(({ stream }) => stream).join(" and ")} shaped by a value the scanner cannot audit (a call or expression) with ${why}`;
+  }
+  const defaulted = states.filter(({ state }) => state === "default");
+  if (defaulted.length > 0) {
+    return `${defaulted.map(({ stream }) => stream).join(" and ")} left to the piped default with ${why}`;
   }
   return null;
 }
@@ -281,9 +330,9 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
     return lines.map((line) => ({
       file: `${rel}:${line}`,
       expected:
-        "no async Bun.spawn outside ASYNC_SPAWN_FILES (async sites are deadline-or-enumerated: " +
-        "no timeout option exists there, so each site's bound is a recorded rationale; a sync " +
-        "site rewritten async exits the sync gate and must land here, by name)",
+        "no async Bun.spawn outside ASYNC_SPAWN_FILES (an async site draining its pipes has no pipe-EOF " +
+        "deadlock for a timeout to bound, so its bound is a recorded rationale rather than a checked option; " +
+        "a sync site rewritten async exits the sync gate and must land here, by name)",
       got: "an unenumerated async Bun.spawn",
     }));
   }
