@@ -5,7 +5,6 @@ ignore:
   - .venv
   - node_modules
   - files # the sync writer's sources: `{{placeholder}}` tokens are not YAML before substitution
-  - tests/sync/fixtures/cutover # a captured pre-cutover tree, pyyaml-shaped
 
 rules:
   document-start: disable # no --- preamble required

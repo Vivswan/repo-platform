@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Repo Platform: Sync PR",
     "shortDescription": "Review and repair repo-platform sync PRs.",
-    "longDescription": "The playbook for the sync PRs repo-platform pushes into managed repositories: the report sections and hold reasons, the manual review cases (replaced local edits, held retirements, replaced mirrors, registration notes, a cutover), the repo-owned tail of a split file, where a local change lives, and the sync-failed issue a red run files.",
+    "longDescription": "The playbook for the sync PRs repo-platform pushes into managed repositories: the report sections and hold reasons, the manual review cases (replaced local edits, held retirements, replaced mirrors, registration notes), the repo-owned tail of a split file, where a local change lives, and the sync-failed issue a red run files.",
     "developerName": "Vivswan",
     "category": "Developer Tools",
     "capabilities": ["Read", "Edit", "Review"],

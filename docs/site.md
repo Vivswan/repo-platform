@@ -200,7 +200,7 @@ To go back, undo all three together (in particular, remove the variable AND clea
 
 - The repository's website is one unversioned build of the judged commit; the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
 - The hook runs under the deploy job's token (`pages: write`, `id-token: write`, `issues: write`, the same exposure the release hooks have), so it runs only code from the judged commit.
-- A repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report); the fleet passes it `base-path` and `origin`, which an unrelated action may not declare. The sync-pr skill's triage row covers it.
+- A repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report); the fleet passes it `base-path` and `origin`, which an unrelated action may not declare: check that it takes those two inputs and sets the `dist` output (the table above).
 - A repository with a `docs/` directory but no `docs/README.md` is red on every PR (`docs-check`) until the landing page exists, unless the docs half is off.
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans: selecting the module is the opt-in to that, per repository.
 - Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.

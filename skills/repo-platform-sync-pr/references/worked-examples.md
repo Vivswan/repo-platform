@@ -15,7 +15,7 @@ Resolution: expected. `ci.yml` is the same file in every repository. Move the jo
 
 ## 2. `region removed` retirement of a split file
 
-The platform retired a split file (`.github/SECURITY.md` in the cutover) and the repo had written below its END marker. The region still matched the recorded hash, so the Retired row reads `region removed`: the markers and the platform's region went, your text stayed as a plain file, and the PR holds once.
+The platform retired a split file (`.github/SECURITY.md`) and the repo had written below its END marker. The region still matched the recorded hash, so the Retired row reads `region removed`: the markers and the platform's region went, your text stayed as a plain file, and the PR holds once.
 
 Resolution: the file is now yours. Keep it or delete it; the record left with the region, so no row returns for it. A region that no longer matches the recorded hash reads `held` instead, and that row returns every sync until the file is gone.
 
