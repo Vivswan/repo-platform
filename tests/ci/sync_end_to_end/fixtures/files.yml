@@ -49,6 +49,10 @@ files:
   - path: .github/agents.md
     class: link
     target: ../AGENTS.md
+  - path: .github/copilot-instructions.md
+    class: link
+    target: ../AGENTS.md
+    when: {modules: [pages]}
   - path: .github/dependabot.yml
     class: managed
     blocks: dependabot_ecosystems

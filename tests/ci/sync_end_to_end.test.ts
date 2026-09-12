@@ -61,6 +61,10 @@ const OLD_YAMLLINT = "rules: {}\n";
 const LOCAL_CONSTRUCTOR = "local notes\n";
 const LOCAL_DOCKERIGNORE = "dist/\n";
 const UNHASHED = "# unhashed notes\n";
+const HANDMADE = "# my own notes, recorded by hand\n";
+const noWriterNote = (path: string) =>
+  `manifest record for \`${path}\` had no writer: no files.yml entry declares the path, so no sync ` +
+  "recorded it; it is retired as a stale record (the Retired row has the outcome)";
 const NEW_LICENSE = `MIT License\n\nCopyright (c) ${YEAR} OwnerOrg\n`;
 // The repository's overlay: identity keys, a ruleset of its own, comment
 // lines, a CRLF line, and no trailing newline, so the starter's hands-off
@@ -122,12 +126,19 @@ function oldManifest(): string {
     // like any local edit; the path is named like an inherited object
     // property to keep every record lookup honest.
     constructor: `{"class": "starter"}`,
-    // A hash-less managed record for a path nothing selects or retires: held
-    // every run, its record carried, never a silent orphan.
+    // A hash-less managed record for a path nothing declares or retires:
+    // held every run, its record carried, never a silent orphan, and noted
+    // as no sync's every run.
     "UNHASHED.md": `{"class": "managed", "hash": null}`,
     // A class the writer does not record: the record is dropped with a note.
     "BESPOKE.md": `{"class": "bespoke", "hash": "${sha256("b\n")}"}`,
     "../escape.txt": `{"class": "managed", "hash": "${sha256("x")}"}`,
+    // A hand-added record with the file's true hash, at a path no files.yml
+    // entry declares: retired as stale, and noted as no sync's.
+    "HANDMADE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
+    // The same with nothing at the path: nothing to review, so no note; the
+    // record leaves the manifest like any other stale record of an absent file.
+    "HANDMADE-GONE.md": `{"class": "managed", "hash": "${sha256(HANDMADE)}"}`,
     [MANIFEST]: `{"class": "managed", "hash": null, "commit": "1111111111111111111111111111111111111111"}`,
   };
   const lines = Object.entries(entries).map(
@@ -183,6 +194,7 @@ function seedTarget(): string {
     ".dockerignore": LOCAL_DOCKERIGNORE,
     "UNHASHED.md": UNHASHED,
     "BESPOKE.md": "b\n",
+    "HANDMADE.md": HANDMADE,
     [MANIFEST]: oldManifest(),
   };
   for (const [rel, content] of Object.entries(files)) {
@@ -274,8 +286,10 @@ describe("sync.ts end to end", () => {
     expect(summary.modules).toEqual(["bun", "deno", "docs-site", "fuzzer"]);
     expect(summary.notes).toEqual([
       "dropped unknown module `uv` (files.yml does not know it)",
+      noWriterNote("UNHASHED.md"),
       "manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
+      noWriterNote("HANDMADE.md"),
       droppedMirrorNote("docs/old-mirror.md"),
       droppedMirrorNote("other/loop/sub/x.md"),
     ]);
@@ -494,8 +508,11 @@ describe("sync.ts end to end", () => {
         detail: "no longer selected",
       },
       { path: "UNHASHED.md", outcome: "held", detail: "the record carries no hash" },
+      { path: "HANDMADE.md", outcome: "deleted", detail: "no longer selected" },
     ]);
     expect(read("UNHASHED.md")).toBe(UNHASHED);
+    expect(existsSync(join(target, "HANDMADE.md"))).toBe(false);
+    expect(summary.notes).not.toContainEqual(expect.stringContaining("HANDMADE-GONE.md"));
     expect(summary.retired.map((row) => row.path)).not.toContain("CLAUDE.md");
     expect(existsSync(join(target, ".github/old-tool.yml"))).toBe(false);
     // The destination is gated on an unselected module: nothing moves there.
@@ -641,6 +658,7 @@ describe("sync.ts end to end", () => {
       hash: sha256("platform notes\n"),
     });
     expect(manifest.files["UNHASHED.md"]).toEqual({ class: "managed", hash: null });
+    expect(manifest.files["HANDMADE-GONE.md"]).toBeUndefined();
     expect(manifest.files[".editorconfig"]).toMatchObject({
       class: "split",
       hash: sha256(read(".editorconfig")),
@@ -727,8 +745,10 @@ describe("sync.ts end to end", () => {
       "mirror plain replaced: a directory stood at the target",
       "mirror skills/alpha/README.md/LICENSE.md replaced: a file stood at ancestor 'skills/alpha/README.md'",
       "registration: dropped unknown module `uv` (files.yml does not know it)",
+      `registration: ${noWriterNote("UNHASHED.md")}`,
       "registration: manifest record for `BESPOKE.md` dropped: its class or shape is not one the writer records",
       "registration: manifest record for `../escape.txt` ignored: the path carries an empty, '.', or '..' segment",
+      `registration: ${noWriterNote("HANDMADE.md")}`,
       `registration: ${droppedMirrorNote("docs/old-mirror.md")}`,
       `registration: ${droppedMirrorNote("other/loop/sub/x.md")}`,
     ]);
@@ -765,14 +785,15 @@ describe("sync.ts end to end", () => {
       expect.stringContaining("CONTRIBUTING.md"),
     );
     // The local edits are gone, the replaced mirrors are current, and the
-    // unsafe record left the manifest; the other reasons stand until a
-    // human acts.
+    // unsafe, hand-added, and dropped records left the manifest; the other
+    // reasons stand until a human acts, the carried UNHASHED.md record's note
+    // among them.
     expect(again.summary.holdReasons).toEqual(
       summary.holdReasons.filter(
         (r) =>
           !r.startsWith("local edits") &&
           !r.startsWith("mirror ") &&
-          !r.includes("manifest record") &&
+          (!r.includes("manifest record") || r.includes("`UNHASHED.md`")) &&
           !r.endsWith("the managed region was added above repository-owned content") &&
           !r.startsWith("retirement of CONTRIBUTING.md"),
       ),

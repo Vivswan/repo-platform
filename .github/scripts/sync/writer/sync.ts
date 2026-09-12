@@ -268,6 +268,10 @@ export function runSync(options: SyncOptions): SyncReport {
   const entries = selectEntries(config, { modules: selected, private: options.private });
   const entryPaths = new Set(entries.map((entry) => entry.path));
   const owned = ownedPaths(config, { modules: selected, private: options.private });
+  // Every path files.yml writes for any selection: a sync's record names
+  // one of these or a retired path, so a stale record at any other path was
+  // added by hand and its retirement is noted, which holds the PR.
+  const declared = new Set(config.files.map((entry) => entry.path));
   // Manifest keys are target-repo content: a stale record is retired only
   // when its path is one the writer could have written.
   const stale: string[] = [];
@@ -283,8 +287,18 @@ export function runSync(options: SyncOptions): SyncReport {
     if (entryPaths.has(path) || owned.retires.has(path)) continue;
     if (record.class !== "managed" && record.class !== "split" && record.class !== "link") continue;
     const problem = pathProblem(path);
-    if (problem === null) stale.push(path);
-    else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+    if (problem !== null) {
+      notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
+      continue;
+    }
+    stale.push(path);
+    // Absent, there is nothing to review: the record leaves silently.
+    if (!declared.has(path) && occupant(options.target, path) !== null) {
+      notes.push(
+        `manifest record for \`${path}\` had no writer: no files.yml entry declares the path, so no sync ` +
+          "recorded it; it is retired as a stale record (the Retired row has the outcome)",
+      );
+    }
   }
   const retired = retire(options.target, config.retired, stale, entryPaths, records);
 
