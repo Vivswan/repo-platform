@@ -58,6 +58,7 @@ describe("renderOwnSettings", () => {
       "bug",
       "enhancement",
       "fix-lint",
+      "merge-when-green",
       "security-nightly",
       "javascript",
       "docs-link-rot",
