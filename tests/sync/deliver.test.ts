@@ -36,7 +36,12 @@ const GIT_LINES = [
   'case "$*" in',
   '  *" add --all") if [ "${STUB_ADD_FAIL:-}" = 1 ]; then echo "fatal: unable to stage" >&2; exit 128; fi ;;',
   '  *" status --porcelain") if [ -n "${STUB_DIRTY:-}" ]; then echo " M x"; fi ;;',
-  '  *" rev-parse --abbrev-ref HEAD") echo main ;;',
+  '  *" symbolic-ref HEAD") case "${STUB_HEAD:-refs/heads/main}" in',
+  '    error) echo "fatal: not a git repository: target" >&2; exit 128 ;;',
+  '    detached) echo "fatal: ref HEAD is not a symbolic ref" >&2; exit 128 ;;',
+  "    empty) ;;",
+  '    *) echo "${STUB_HEAD:-refs/heads/main}" ;;',
+  "  esac ;;",
   '  *" ls-remote "*) if [ -n "${STUB_TIP:-}" ]; then printf "%s\\trefs/heads/automation/repo-platform\\n" "$STUB_TIP"; fi ;;',
   '  *" push "*) if [ "${STUB_PUSH_FAIL:-}" = 1 ]; then echo "fatal: unable to access \'https://x-access-token:${STUB_PAT}@github.com/o/r.git/\': 403" >&2; exit 1; fi ;;',
   "esac",
@@ -321,6 +326,52 @@ describe("deliver.ts", () => {
     expect(calls(result.git, "commit")).toEqual([]);
     expect(calls(result.git, "push")).toEqual([]);
   });
+
+  test.each([
+    {
+      read: "errors",
+      head: "error",
+      reason: "git symbolic-ref failed in the target",
+      logged: "$ git symbolic-ref -> exit 128\nfatal: not a git repository: target",
+    },
+    {
+      read: "finds HEAD detached",
+      head: "detached",
+      reason: "git symbolic-ref failed in the target",
+      logged: "$ git symbolic-ref -> exit 128\nfatal: ref HEAD is not a symbolic ref",
+    },
+    {
+      read: "answers a ref outside refs/heads/",
+      head: "refs/remotes/origin/main",
+      reason: "the target checkout is not on a branch",
+      logged: "$ git symbolic-ref -> exit 0",
+    },
+    {
+      read: "answers nothing on exit 0",
+      head: "empty",
+      reason: "the target checkout is not on a branch",
+      logged: "$ git symbolic-ref -> exit 0",
+    },
+  ])(
+    "a checkout whose branch read $read files that failure, with git's words, before any branch or commit",
+    ({ head, reason, logged }) => {
+      const result = run({ stub: { STUB_DIRTY: "1", STUB_HEAD: head } });
+      silent(result);
+      expect(result.verdict).toBe("failed");
+      expect(result.issueBody).toContain(
+        `The repo-platform sync for this repository failed: ${reason}.`,
+      );
+      expect(result.issueBody).toContain(`## Delivery log\n\n\`\`\`\`text\n`);
+      expect(result.issueBody).toContain(`${logged}\nfiling the failure report: ${reason}`);
+      expect(result.git.map((argv) => argv[3])).toEqual([
+        "config",
+        "config",
+        "add",
+        "status",
+        "symbolic-ref",
+      ]);
+    },
+  );
 
   test("a refused push files the issue with git's redacted error and reopens an existing report", () => {
     const result = run({
