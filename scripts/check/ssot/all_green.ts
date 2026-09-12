@@ -124,6 +124,8 @@ export const ALL_GREEN_ROSTER = [
   "invariants",
   "build-tree",
   "script-tests",
+  "validate-skills",
+  "skills-discovery",
   "docs-check",
   "pages-site-build",
   "codeql-javascript",

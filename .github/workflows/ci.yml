@@ -250,6 +250,26 @@ jobs:
           TYPOS_REQUIRED: "1"
         run: bun run test
 
+  # This repository's own skills catalog, judged by the action Vivswan/skills carries (it pins its
+  # own bun). Skills publishes no release tags, so the pin's comment names its branch.
+  validate-skills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Vivswan/skills/.github/actions/validate-skills@33556be3f64d91a1ae2aba1c39f7378ba238ac5f # main
+
+  # Discovery runs the real `npx skills add --list` against the checkout, so it reaches the npm
+  # registry: its own job, so a registry hiccup names itself instead of the structure check.
+  skills-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Vivswan/skills/.github/actions/validate-skills@33556be3f64d91a1ae2aba1c39f7378ba238ac5f # main
+        with:
+          mode: discovery
+
   # The config is the site job's, byte for byte: a dead internal link fails here instead of the deploy.
   docs-check:
     runs-on: ubuntu-latest
@@ -393,6 +413,8 @@ jobs:
       - invariants
       - build-tree
       - script-tests
+      - validate-skills
+      - skills-discovery
       - docs-check
       - pages-site-build
       - codeql-javascript
