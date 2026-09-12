@@ -31,7 +31,6 @@ describe("the yamllint action", () => {
     expect(parsed.inputs).toBeUndefined();
   });
 
-  // One version literal: the pin file is the only home, and the local lint script reads the same file.
   test("the pin file holds exactly one pinned yamllint and the lint:yaml script installs from it", () => {
     expect(readFileSync(join(REPO_ROOT, PIN_FILE), "utf8")).toMatch(/^yamllint==\d+\.\d+\.\d+\n$/);
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
