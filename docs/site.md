@@ -99,7 +99,7 @@ The website is one build of the judged commit: version navigation belongs to the
 | `vX.Y.Z/` | that tag's docs, one directory per served tag |
 | `versions.json` | the version index the theme's dropdown reads |
 
-Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest `PAGES_MAX_VERSIONS` of them (a repository Actions variable; unset means 5). Every deploy rebuilds every tier, so a theme or pipeline change restyles the whole site on the next run. A tag whose tree has no `docs/` is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
+Versions are the repository's plain `vX.Y.Z` git tags (what release-please mints), newest first, the newest `PAGES_MAX_VERSIONS` of them (a repository Actions variable; unset means 5). Every deploy rebuilds every tier, so a theme or pipeline change restyles the whole site on the next run. A tag whose tree has no `docs/`, or a `docs/` with no landing page (`README.md` or `index.md`), is skipped with a notice, and dead links inside old tags never fail the deploy: history cannot be fixed.
 
 ## Docs conventions
 
