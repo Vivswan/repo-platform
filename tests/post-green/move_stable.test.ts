@@ -1,9 +1,3 @@
-// move_stable.ts run for real against a bare origin - real git, a stubbed gh
-// - so every move decision is proven behaviorally: the first move, a forward
-// move (lightweight and annotated previous, to the tip and to an older main
-// commit), the two no-move cases (a replay, a stale source under newest-green
-// wins), every refusal, and the lease losing a race with the tag untouched.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,25 +25,15 @@ function verdict(conclusion: string): string {
 }
 
 interface Scenario {
-  /** Where the tag sits on origin before the run: absent, or at one of the
-   * fixture commits, lightweight unless `annotated`. */
   tag?: "m1" | "m2" | "m3";
   annotated?: boolean;
-  /** The SOURCE_SHA under the move: m3 (main's tip) unless named. */
   source?: "m1" | "m2" | "m3" | "side";
-  /** The all-green conclusion the gh stub reports. */
   conclusion?: string;
   ref?: string;
-  /** Points origin at a path that is no repository: every remote read fails. */
   brokenOrigin?: boolean;
-  /** A git on PATH whose ls-remote reports the tag at this commit whatever
-   * origin holds: the stale read a racing mover would push its lease from. */
+  /** The stale read a racing mover would push its lease from. */
   staleReadAt?: "m1" | "m2";
-  /** A git on PATH whose ancestry probe against the tag's commit errors
-   * (exit 128) instead of answering: the look that must never read as a no. */
   ancestryProbeErrors?: boolean;
-  /** A git on PATH whose commit probe of the source errors (exit 128)
-   * instead of answering: an errored look, not a source off main. */
   sourceProbeErrors?: boolean;
 }
 
@@ -57,7 +41,6 @@ interface Outcome {
   exitCode: number;
   output: string;
   outputs: Record<string, string>;
-  /** Every gh invocation the run made, one argv line each. */
   ghCalls: string[];
   originTag: () => string;
   m1: string;
@@ -228,10 +211,9 @@ describe("move_stable.ts behavior (real git)", () => {
   });
 
   test("a STALE source never moves the tag back - newest-green wins, and the directives read stays on", () => {
-    // A re-run of this commit's jobs after a newer main commit moved the tag
-    // (the recovery of a failed sync): the tag stays, and the empty base hands
-    // the directives read its fallback - the newer run's range, exclusive at
-    // a base that can be this commit, need not have held it.
+    // A re-run of this commit's jobs after a newer main commit moved the tag (the recovery of a
+    // failed sync). The empty base hands the directives read its fallback: the newer run's range,
+    // exclusive at its base, may have excluded this commit.
     const r = run({ tag: "m3", source: "m2" });
     expect(r.exitCode).toBe(0);
     expect(r.outputs).toEqual({ previous: "" });

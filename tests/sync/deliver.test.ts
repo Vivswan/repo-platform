@@ -1,11 +1,3 @@
-// deliver.ts run as the workflow runs it, with gh and git stubbed on PATH:
-// the three clean outcomes and the failure path each write their verdict,
-// the PR is armed only for a clean report on a non-manual run, an armed PR
-// is disarmed before the branch moves, an unchanged tree closes the PR it
-// makes obsolete, a fork's PR from a same-named branch is never taken for
-// the sync's, the failure issue carries the log tails, and nothing ever
-// reaches stdout or stderr.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,10 +30,6 @@ const BUILD = "abcdef0123456789abcdef0123456789abcdef01";
 const REPORT = "## Sync report\n\n| Build |\n| --- |\n| x |\n";
 const PR_URL = `https://github.com/${TARGET}/pull/7`;
 
-// git answers the tree, branch, lease, and push questions from STUB_*
-// knobs; gh answers the issue lookup, the PR lookup (STUB_PR is the
-// target's own open PR, STUB_PR_LIST the whole listing), the arm state,
-// and the create.
 const GIT_LINES = [
   'printf "git %s\\n" "$*" >>"$STUB_SEQUENCE"',
   'case "$*" in',
@@ -84,7 +72,6 @@ interface Run {
   git: string[][];
   gh: string[][];
   issueBody: string | null;
-  /** Every git and gh call in the order they happened, one line each. */
   sequence: string[];
 }
 
@@ -138,7 +125,6 @@ function run(options: Options = {}): Run {
   };
 }
 
-/** The recorded calls whose words after the program (and git's `-C <dir>`) open with `lead`. */
 const calls = (list: string[][], ...lead: string[]) =>
   list.filter((argv) => {
     const words = argv[1] === "-C" ? argv.slice(3) : argv.slice(1);
@@ -421,7 +407,6 @@ describe("boundedReport", () => {
     "\n### Review\n\nHold for review: **yes**\n\n- local edits replaced in README.md\n";
   const MARKER = "\n\n> [!WARNING]\n> ";
   const CUT = / characters of this section were cut to fit GitHub's body limit\.\n/;
-  /** The omitted count each cut marker in `text` names, in order. */
   const omitted = (text: string) =>
     [...text.matchAll(/> (\d+) characters of this section were cut/g)].map((m) => Number(m[1]));
   const longLine = `+${"x".repeat(70_000)}`;
@@ -440,7 +425,6 @@ describe("boundedReport", () => {
     // The cut fell inside the diff's fence, so the fence is closed before the
     // marker and the Review section render as Markdown.
     expect(bounded).toContain("```diff\n```\n\n> [!WARNING]");
-    // The marker counts the long line and the fence line the cut removed.
     expect(omitted(bounded)).toEqual([`\n${longLine}\n\`\`\``.length]);
     expect(bounded.endsWith(review)).toBe(true);
     const body = prBody({ operator: "o/r", build: BUILD, runUrl: "u", report });

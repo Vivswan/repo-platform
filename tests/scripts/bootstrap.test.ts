@@ -1,8 +1,3 @@
-// The bootstrap's discovery, pinned two ways: the live tree's whole list
-// (an action gaining or dropping a bun.lock moves it), and a planted tree
-// whose controls are a directory without a bun.lock, a bun.lock under
-// node_modules, and a nested lock directory.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -51,8 +46,7 @@ describe("bunLockDirs", () => {
   });
 });
 
-/** The name a bun.lock records for the package that owns it (its root
- *  workspace). bun.lock is JSON with trailing commas, so they go first. */
+/** bun.lock is JSON with trailing commas, so they go before the parse. */
 function lockedName(dir: string): string {
   const lock = JSON.parse(
     readFileSync(join(root, dir, "bun.lock"), "utf-8").replace(/,(\s*[}\]])/g, "$1"),

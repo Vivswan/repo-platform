@@ -1,5 +1,3 @@
-// The skills' twin ownership-table rule (scripts/check/ssot/skills.ts).
-
 import { describe, expect, test } from "bun:test";
 import { ownershipTableMismatches } from "../../../scripts/check/ssot/skills.ts";
 

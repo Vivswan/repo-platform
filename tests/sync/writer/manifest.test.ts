@@ -1,6 +1,3 @@
-// The writer's manifest: the record layout the previous pipeline's stamp
-// already wrote, read back as records, and the hash lookup's refusals.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +41,6 @@ describe("renderManifest", () => {
     );
     const parsed = parseManifestFiles(text);
     expect(parsed.problem).toBeNull();
-    // toEqual on the whole mapping pins key order (sorted) and every record.
     expect(parsed.files).toEqual({
       [MANIFEST_NAME]: { class: "managed", hash: null, commit: BUILD },
       "a.md": {
@@ -67,7 +63,6 @@ describe("renderManifest", () => {
       "m/copy.txt",
       "s.yml",
     ]);
-    // The one-line wire layout, per class, exactly as the stamp hook writes it.
     const link = sha256("AGENTS.md");
     expect(text.split("\n")).toEqual([
       "{",
@@ -126,7 +121,6 @@ describe("readRecords and recordedHash", () => {
     expect(read[PROTO]).toEqual({ class: "managed", hash: HASH });
     expect(read[CTOR]).toEqual({ class: "starter" });
     expect(recordedHash(read, PROTO)).toBe(HASH);
-    // Unrecorded, the same paths read as absent instead of as Object.prototype.
     const empty = readRecords(temp.dir("writer-manifest-proto-none-")).records;
     expect(empty[PROTO]).toBeUndefined();
     expect(empty[CTOR]).toBeUndefined();

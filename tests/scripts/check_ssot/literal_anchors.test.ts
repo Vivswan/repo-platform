@@ -1,5 +1,3 @@
-// The literal-anchor rules' pure helpers (scripts/check/ssot/literal_anchors.ts).
-
 import { describe, expect, test } from "bun:test";
 import {
   inlineFunctionCopies,
@@ -23,11 +21,7 @@ describe("inlineFunctionCopies", () => {
   ])(
     "extracts every copy byte-exactly, closing at the declaration's own indent ($reason)",
     ({ indent }) => {
-      // Three copies, two of them identical, compared as an exact list: this
-      // covers the early-close path (a nested `}` would truncate a copy),
-      // body fidelity (a dropped byte would compare unequal), that each copy
-      // carries its own bytes rather than the first one's, and that
-      // identical copies are all kept (a deduplicating extractor fails).
+      // Two of the three copies are identical, so a deduplicating extractor fails the exact list.
       const a = copy(indent, "a();");
       const b = copy(indent, "b();");
       expect(inlineFunctionCopies(`head\n${a}\ntail\n${b}\n${a}\n`, "resolve")).toEqual([a, b, a]);
@@ -62,7 +56,6 @@ describe("isOwnPagesOrigin", () => {
     expect(isOwnPagesOrigin(nearMiss, at(nearMiss), "io", "Vivswan")).toBe(false);
     const otherOwner = "https://someone.github.io/repo-platform/";
     expect(isOwnPagesOrigin(otherOwner, at(otherOwner), "io", "Vivswan")).toBe(false);
-    // A subdomain of the origin is not the origin either.
     const subdomain = "https://other.vivswan.github.io/repo-platform/";
     expect(isOwnPagesOrigin(subdomain, at(subdomain), "io", "Vivswan")).toBe(false);
     const bareIo = "evil.io/repo-platform";
@@ -73,7 +66,6 @@ describe("isOwnPagesOrigin", () => {
 });
 
 describe("releaseCutWiringMismatches", () => {
-  // The four files as wired, reduced to the keys the rule reads.
   const workflow = ({
     healthId = "health",
     mode = "release",

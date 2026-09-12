@@ -1,11 +1,8 @@
-// The label rules' pure helpers (scripts/check/ssot/labels.ts).
-
 import { describe, expect, test } from "bun:test";
 import { LABEL_RE_COPIES, labelRegexCopyMismatches } from "../../../scripts/check/ssot/labels.ts";
 
 describe("labelRegexCopyMismatches", () => {
   const LABEL_RE = "^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$";
-  // One fixture source per copy, the pattern spelled by the caller.
   const source = (copy: (typeof LABEL_RE_COPIES)[number], pattern: string) =>
     `export const ${copy.name} = /${pattern}/;\n`;
   const reader = (drifted?: string) => (rel: string) => {

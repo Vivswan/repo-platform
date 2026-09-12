@@ -1,8 +1,3 @@
-// The settings apply's green gate: the bounded wait for the tip's verdict,
-// the fail-closed halt on a red tip (every trigger alike), and the CALLED
-// run's own-commit check. The gh probe and the sleep are injected; the CLI
-// cases run the real script over a gh stub on PATH.
-
 import { describe, expect, test } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -108,8 +103,6 @@ describe("waitForGreen", () => {
   });
 
   test("a missing verdict is retried (CI and its verdict land after the push), then green", () => {
-    // An EMPTY check_runs page must read as pending, not green: the probe
-    // count and the sleep prove the gate polled once before passing.
     const { gh, calls } = ghAnswering([], [{}]);
     const sleeps: number[] = [];
     const result = waitForGreen("o/r", SHA, {
@@ -155,9 +148,8 @@ describe("waitForGreen", () => {
   });
 });
 
-/** The whole halt for a red tip, the fix included: the gate reads no event
- *  name, so the nightly heal and a dispatch hit this same wall and the one
- *  way past it is a green main. */
+/** The gate reads no event name, so the nightly heal and a dispatch hit this
+ *  same wall; the one way past it is a green main. */
 const RED_TIP_HALT =
   "refusing the settings apply: commit 000000000000 is not green - its all-green verdict " +
   "concluded 'failure'. This workflow writes settings fleet-wide from this checkout's layer " +
@@ -307,8 +299,6 @@ describe("the CLI", () => {
     expect(proc.stdout).toContain("GITHUB_REF must be set");
   });
 
-  // The script end to end over a gh stub: the halt is exit 1 plus an
-  // ::error::, and the gate publishes NO step output on either path.
   test.each([
     {
       reason: "a red tip exits 1 with the halt as an error annotation",

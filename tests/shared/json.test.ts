@@ -1,10 +1,6 @@
-// parseJson/parseJsonWith exit the process on failure.
-// So the failure modes run behind a subprocess entry file.
-// Load-bearing assertion: malformed JSON must never echo the input text.
-// Bun's raw SyntaxError quotes the offending fragment ('Unexpected identifier "..."').
-// That fragment can be target-derived (private repo names, descriptions).
-// The entry lives under the OS temp dir, outside the repo tree.
-// A bare "zod" there would auto-install from the global cache and the network.
+// parseJson/parseJsonWith exit the process on failure, so their failure modes run behind a subprocess
+// entry file. Bun's raw SyntaxError quotes the offending fragment ('Unexpected identifier "..."'), which
+// can be target-derived (private repo names, descriptions): malformed JSON must never echo the input.
 
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
@@ -22,6 +18,8 @@ import { tempDirs } from "./temp_dir";
 const temp = tempDirs();
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
+// The entry lives under the OS temp dir, outside the repo tree: a bare "zod" there would
+// auto-install from the global cache and the network.
 const zodPath = fileURLToPath(import.meta.resolve("zod"));
 
 const root = temp.dir("json-proc-");
@@ -73,7 +71,6 @@ describe("parseJsonWith", () => {
 });
 
 describe("hasDuplicateJsonKeys", () => {
-  // Rows are [reason, text, expected verdict].
   const cases: [string, string, boolean][] = [
     [
       "a duplicated key in one object is caught (JSON.parse would keep only the last)",

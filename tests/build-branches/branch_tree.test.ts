@@ -35,14 +35,12 @@ const temp = tempDirs();
 const REPO = "/home/user/repo-platform";
 const REPO_ROOT = join(import.meta.dir, "../..");
 
-/** Every path under dir (directories included), symlinks not followed. */
 const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     return entry.isDirectory() && !entry.isSymbolicLink() ? [path, ...walk(path)] : [path];
   });
 
-/** The files under dir as sorted paths relative to it. */
 const listing = (dir: string): string[] => {
   const files = (sub: string): string[] =>
     readdirSync(sub, { withFileTypes: true }).flatMap((entry) =>
@@ -78,8 +76,6 @@ describe("parseArgs", () => {
 });
 
 describe("destOverlapsRepo", () => {
-  // The three clauses of the guard - root, ancestor, descendant - each keep
-  // a row, and the false rows pin the edges a naive prefix test gets wrong.
   test.each([
     [REPO, true, "the repository root itself"],
     ["/", true, "the filesystem root is an ancestor ('/' + '/' must not read as '//')"],
@@ -112,9 +108,6 @@ describe("canonicalize", () => {
   });
 });
 
-// actions/ on the build branch is what lets the fleet pin an action @build:
-// sources and dependency manifests ship, every EXCLUDED_DIRS name is cut, and
-// a tree with nothing to publish fails here rather than 404ing every fleet run.
 function actionsFixture(): string {
   const root = temp.dir("branch-actions-");
   const action = join(root, "actions", "check-typography");
@@ -141,9 +134,7 @@ describe("copyActions", () => {
     const dest = temp.dir("branch-actions-dest-");
     const files = copyActions(root, dest);
 
-    // The whole published tree: the manifests ship because the action
-    // installs from them when it runs, nested source survives the filter,
-    // and nothing under an EXCLUDED_DIRS name or ending in .test.ts lands.
+    // The manifests ship because the action installs from them when it runs.
     expect(listing(join(dest, "actions", "check-typography"))).toEqual([
       "action.yml",
       "bun.lock",
@@ -175,8 +166,6 @@ describe("copyActions", () => {
     const dest = temp.dir("branch-actions-dest-");
     expect(() => copyActions(root, dest)).toThrow("actions/orphaned-action");
     expect(() => copyActions(root, dest)).toThrow("no action.yml");
-    // The guard fires before the first copy: even the VALID sibling action
-    // must not have landed.
     expect(existsSync(join(dest, "actions"))).toBe(false);
   });
 
@@ -199,9 +188,6 @@ describe("copyActions", () => {
   });
 
   test("an action's subdirectories ship whole, excluded directories filtered at every depth", () => {
-    // The exclusion filter applies wherever an excluded name sits, not only
-    // at the action root: a subdirectory's sources publish, a node_modules
-    // planted inside it does not.
     const root = actionsFixture();
     const nested = join(root, "actions", "check-typography", "validator");
     mkdirSync(join(nested, "node_modules", "yaml"), { recursive: true });
@@ -221,7 +207,7 @@ describe("copyActions", () => {
   test("a directory holding only ignored leftovers is invisible; one tracked stray file is the broken state", () => {
     // After a pull that retired an action, its ignored node_modules/ stays
     // behind in every checkout that had installed it: not an action, not an
-    // error. The control: one real file there and the manifest guard fires.
+    // error.
     const root = actionsFixture();
     const ghost = join(root, "actions", "ghost");
     mkdirSync(join(ghost, "node_modules", "yaml"), { recursive: true });
@@ -229,7 +215,6 @@ describe("copyActions", () => {
     mkdirSync(join(ghost, "dist"));
     writeFileSync(join(ghost, "dist", "bundle.js"), "module.exports={};\n");
     writeFileSync(join(ghost, `run${TEST_FILE_SUFFIX}`), "export {};\n");
-    // A top-level excluded name is never an action root, whatever it holds.
     mkdirSync(join(root, "actions", "node_modules", "pkg"), { recursive: true });
     writeFileSync(join(root, "actions", "node_modules", "pkg", "index.js"), "module.exports={};\n");
     expect(actionDirNames(root)).toEqual(["check-typography"]);
@@ -244,8 +229,6 @@ describe("copyActions", () => {
   });
 
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
-    // The exclusion filter tests segments relative to the action root: a
-    // checkout parked under some node_modules/ ancestor must still publish.
     const parent = temp.dir("branch-actions-ancestor-");
     const root = join(parent, "node_modules", "repo");
     mkdirSync(join(root, "actions", "demo"), { recursive: true });
@@ -271,10 +254,7 @@ describe("assembleBranchTree", () => {
       "files.yml",
       "reserved-labels.yml",
     ]);
-    // Every action directory of this checkout ships (the shared zone
-    // included) and nothing else does.
     expect(readdirSync(join(dest, "actions")).sort()).toEqual(actionDirNames(REPO_ROOT));
-    // No installed dependency or build output under any action.
     const excluded = walk(join(dest, "actions")).filter((path) =>
       relative(dest, path)
         .split("/")
@@ -397,8 +377,7 @@ describe("copyFleetWorkflows", () => {
   // The other direction of the shipping guard: the branch is pushed with a
   // PAT (whose pushes CAN trigger workflows), so "nothing can run on the
   // build branch" holds only while every shipped workflow is
-  // workflow_call-only. A non-inert trigger must fail the assembly loudly,
-  // naming the file and the trigger.
+  // workflow_call-only.
   /** A checkout whose rostered workflows each carry distinct content (so a
    *  copy that swaps or rewrites one is visible), fleet-ci's given. */
   function fixture(fleetCiContent: string): { root: string; contents: Record<string, string> } {

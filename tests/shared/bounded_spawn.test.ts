@@ -34,9 +34,6 @@ describe("boundedSpawnSync", () => {
   });
 
   test("FORCED RED: a clean exit behind a pipe-holding descendant still throws, never exit 0", () => {
-    // The pipe-EOF arm: the child exits 0 but a descendant inherits the
-    // pipes, so only the deadline unblocks the caller - and that expiry
-    // must never surface as the child's clean exit code.
     const fixture = `Bun.spawn(["sleep", "${BACKSTOP_MS / 1000}"], { stdout: "inherit", stderr: "inherit" }); process.exit(0);`;
     expect(() => boundedSpawnSync([bunExe, "-e", fixture], { timeoutMs: 250 })).toThrow(
       /exceeded the 250ms harness bound/,

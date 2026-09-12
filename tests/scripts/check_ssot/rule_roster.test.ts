@@ -1,12 +1,9 @@
-// The checker's own rule-roster audit (scripts/check/ssot/rule_roster.ts).
-
 import { describe, expect, test } from "bun:test";
 import { RULE_ROSTER, ruleRosterMismatches } from "../../../scripts/check/ssot/rule_roster.ts";
 
 describe("ruleRosterMismatches", () => {
   test("a matching roster and rule list pass", () => {
     expect(ruleRosterMismatches(["a", "b"], ["a", "b"])).toEqual([]);
-    // Set semantics: authoring order is not part of the contract.
     expect(ruleRosterMismatches(["b", "a"], ["a", "b"])).toEqual([]);
   });
 

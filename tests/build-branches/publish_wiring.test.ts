@@ -1,16 +1,3 @@
-// The build-publish wiring the provenance path depends on, pinned where a
-// silent edit would reintroduce the regression: the publisher's
-// SOURCE_SHA must track the sha input on both ways in (github.sha in
-// ci.yml's post-green caller - same run, so it IS the judged commit - and
-// the operator's sha on a dispatch, never a re-derived ref), a dispatch
-// must run the two delivery legs (publish-build and move-stable) ALONE,
-// each delivery lane must stay one literal repo-scoped group (and NO lane
-// on the caller), and a publish must COMMIT exactly when the composed tree
-// changed or the tip's stamp needs recovery - never an empty commit in
-// normal operation (no content-free fleet _commit bumps), never a silent
-// skip that strands a broken stamp (the stamp-health guard keeps dispatch
-// as a real escape hatch).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,10 +26,7 @@ interface Job {
   }[];
 }
 
-/** Evaluates the subset of the Actions expression grammar post-green.yml's
- * job conditions use - string literals, `==`/`!=`, `&&`/`||`, parentheses,
- * `!cancelled()`, and dotted context reads - against `context` (a missing
- * context read is the empty string, as an unrun job's output is). */
+/** A missing context read is the empty string, as an unrun job's output is in Actions. */
 function evaluateCondition(expression: string, context: Record<string, string>): boolean {
   const tokens = expression.match(/'[^']*'|[A-Za-z_][\w.-]*(?:\(\))?|==|!=|&&|\|\||[()!]/g) ?? [];
   if (tokens.join("").replace(/\s/g, "") !== expression.replace(/\s/g, "")) {
@@ -94,19 +78,15 @@ function evaluateCondition(expression: string, context: Record<string, string>):
   return result;
 }
 
-/** The jobs that run under `event`, by GitHub's rules: a job's condition
- * is evaluated against its needs' results (an unrun need is `skipped`
- * with empty outputs), and a condition without a status function carries
- * the implicit success(), read over the WHOLE ancestry: "a failure or skip
- * applies to all jobs in the dependency chain from the point of failure
- * or skip onwards", through a job that a status function let continue.
- * `outputs` stands in for the step outputs of every job that ran. */
+/** Simulates GitHub's own rules, which the body mirrors; `outputs` stands in for the step outputs
+ * of every job that ran. "A failure or skip applies to all jobs in the dependency chain from the
+ * point of failure or skip onwards", even through a job a status function let continue.
+ *   an unrun need                       -> result `skipped`, empty outputs
+ *   a condition with no status function -> implicit success() over the WHOLE ancestry */
 function jobsRunning(
   jobs: Record<string, Job>,
   event: string,
   outputs: Record<string, string>,
-  // Jobs that run and go red: their dependents see result failure and
-  // empty outputs, and only a status-function condition lets them run.
   failed: string[] = [],
 ): string[] {
   const ran = new Set<string>();
@@ -195,12 +175,9 @@ describe("post-green publish wiring", () => {
   });
 
   test("a dispatch runs the two delivery legs ALONE; the call runs every leg", () => {
-    // Evaluated by GitHub's own rules on the parsed job graph (a
-    // condition without a status function implies success() over the
-    // needs; an unrun need is skipped with empty outputs), so a reworded
-    // condition that lets a call-only leg fire on a dispatch fails here
-    // whatever its spelling. The call arm is the moved control: with the
-    // caller's push event and every output armed, every leg runs.
+    // Simulated on the parsed job graph, so a reworded condition that lets a
+    // call-only leg fire on a dispatch fails here whatever its spelling. The
+    // call arm is the moved control: every output armed, every leg runs.
     const jobs = postGreenDoc.jobs;
     const armed = { armed: "true", previous: "a".repeat(40) };
     expect(jobsRunning(jobs, "workflow_dispatch", armed).sort()).toEqual([
@@ -216,13 +193,10 @@ describe("post-green publish wiring", () => {
       "read-directives",
       "settings-fleet",
     ]);
-    // A mover that moved nothing reports no base - a replay at the tag's own
-    // commit, or a re-run of this commit's jobs after a newer commit moved
-    // the tag past it - and the read still runs and syncs on its fallback
-    // base: re-running every job after a failed sync must recover it, and a
-    // newer run's range (exclusive at its base, which can be this commit)
-    // need not have held it. The mover has no word that stands the read
-    // down, so its condition reads none of the mover's outputs.
+    // A mover that moved nothing reports no base, and the read still syncs on its fallback base;
+    // the mover has no word that stands the read down.
+    //   a replay at the tag's own commit                 -> re-running every job after a failed sync must recover it
+    //   a re-run after a newer commit moved the tag past -> the newer run's range, exclusive at its base, may have excluded this commit
     expect(jobsRunning(jobs, "push", { armed: "true", previous: "" }).sort()).toEqual(
       Object.keys(jobs).sort(),
     );
@@ -255,7 +229,6 @@ describe("post-green publish wiring", () => {
       "read-directives",
       "settings-fleet",
     ]);
-    // And the two delivery legs have no condition to get wrong.
     for (const leg of ["publish-build", "move-stable"]) {
       expect(jobs[leg].if).toBeUndefined();
       expect(jobs[leg].needs).toBeUndefined();
@@ -289,12 +262,11 @@ describe("post-green publish wiring", () => {
       "sync-fleet",
       "settings-fleet",
     ]);
-    // move-stable's own verification is move_stable.ts's (main history,
-    // the all-green check at the sha, the lease). Its wiring: the sha
-    // input as the one source, the default token as the push credential
-    // (contents: write, under ci.yml's caller ceiling), a full-history
-    // checkout for the ancestry reads, and the one output the directives
-    // leg consumes.
+    // move-stable's own verification is move_stable.ts's; its wiring is pinned whole. The tag push
+    // rides the checkout's persisted default token: contents: write, under ci.yml's caller ceiling.
+    //   GH_TOKEN: github.token  -> the gh check-run lookup
+    //   fetch-depth: 0          -> the ancestry reads
+    //   outputs.previous        -> the one output the directives leg consumes
     const moveSteps = jobs["move-stable"].steps ?? [];
     const moveStep = moveSteps.find((step) =>
       (step.run ?? "").includes("post-green/move_stable.ts"),
@@ -321,9 +293,9 @@ describe("post-green publish wiring", () => {
     });
     // A called job cannot exceed its caller's grant, so ci.yml's post-green
     // job carries the ceiling of every post-green.yml job.
-    // contents write: move-stable's tag push with the run token (the build publish pushes with its own PAT and reads only).
-    // checks read: the green gate's check-run lookup.
-    // pull-requests read: read-directives' merged pull request lookup.
+    //   contents: write      -> move-stable's tag push with the run token (the build publish pushes with its own PAT)
+    //   checks: read         -> the green gate's check-run lookup
+    //   pull-requests: read  -> read-directives' merged pull request lookup
     const ci = parseYaml(ciYml) as {
       jobs: Record<string, { permissions?: unknown }>;
     };
@@ -332,16 +304,11 @@ describe("post-green publish wiring", () => {
       checks: "read",
       "pull-requests": "read",
     });
-    // read-directives mutates nothing; it reads every commit since the last
-    // published build (never a re-derived ref) into the two outputs
-    // sync-fleet consumes. The whole wiring of that range read is pinned as
-    // one shape: the judged sha and the base (the commit the tag named
-    // before this run moved it, else the push's `before` - judged_range.ts's
-    // fallback base) as the step's env, the read token its pull request
-    // lookups need (the squash commit carries the title alone), a
-    // full-history checkout, since the stamped base can sit many commits
-    // below the judged one, and a condition that stands down for no mover
-    // result (the scenarios above).
+    // read-directives mutates nothing, so its wiring is its verification, pinned whole. BEFORE_SHA is
+    // the commit the tag named before this run moved it, else the push's `before` (judged_range.ts's
+    // fallback base).
+    //   GH_TOKEN: github.token  -> the pull request lookups; the squash commit carries the title alone
+    //   fetch-depth: 0          -> the stamped base can sit many commits below the judged one
     const readSteps = jobs["read-directives"].steps ?? [];
     const readStep = readSteps.find((step) =>
       (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
@@ -371,10 +338,8 @@ describe("post-green publish wiring", () => {
         repos: "${{ steps.directives.outputs.repos }}",
       },
     });
-    // sync-fleet's own verification is the called sync's (green source +
-    // provenance gates in resolve_refs.ts); its wiring is pinned: gated
-    // on the opt-in output, ordered behind the publish, fed the scope,
-    // and given the PAT the sync writes with.
+    // sync-fleet's own verification is the called sync's (the green source and
+    // provenance gates in resolve_refs.ts).
     const syncFleet = jobs["sync-fleet"];
     expect(syncFleet.needs).toEqual(["publish-build", "read-directives"]);
     expect(syncFleet.if).toBe(
@@ -397,8 +362,7 @@ describe("post-green publish wiring", () => {
       REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
     // settings-fleet's own verification is the called workflow's gate
-    // (require_green_commit.ts's called path). Its wiring: every target on
-    // every called run, no changed flag anywhere, ordered behind the sync.
+    // (require_green_commit.ts's called path).
     const settingsFleet = jobs["settings-fleet"];
     expect(settingsFleet.needs).toEqual(["sync-fleet"]);
     expect(settingsFleet.if).toBe("github.event_name != 'workflow_dispatch' && !cancelled()");
@@ -468,9 +432,9 @@ describe("post-green publish wiring", () => {
   });
 
   test("ci.yml keys a push run by its commit and never cancels it; only pull-request lanes cancel", () => {
-    // A ref-keyed group keeps one pending run and cancels the older one: a burst of merges leaves the tip unjudged.
-    // Keyed by the commit, every push run completes; PR pushes keep cancelling their stale runs.
-    // The skeleton every fleet repository runs carries the same block (its only placeholder is the owner).
+    // A ref-keyed group keeps one pending run and cancels the older one, so a burst of merges leaves
+    // the tip unjudged; keyed by the commit, every push run completes. The skeleton every fleet
+    // repository runs carries the same block (its only placeholder is the owner).
     const skeleton = read("files/base/.github/workflows/ci.yml").replaceAll(
       "{{github_username}}",
       "owner",
@@ -514,23 +478,19 @@ describe("post-green publish wiring", () => {
     // Delivery legs never cancel a running one: an interrupted publish
     // between commit and push is exactly the wedge the CAS exists for.
     expect(postGreen).not.toContain("cancel-in-progress: true");
-    // No self-deadlock: ci.yml's post-green job holds no job-level lane at all.
-    // A caller must never hold the resource its called workflow requires, above all the publisher lane the called job waits for.
-    // Asserted structurally on the parsed job: comments may NAME the lane while explaining this very rule.
+    // A caller must never hold the resource its called workflow requires (the publisher lane above
+    // all), so ci.yml's post-green job holds no job-level lane. Asserted on the parsed job:
+    // comments may NAME the lane while explaining this rule.
     const doc = parseYaml(ciYml) as { jobs: Record<string, Record<string, unknown>> };
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
   });
 
   test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {
-    // The no-empty-commits rule and its one exception, pinned as source
-    // shape (publish_behavior.test.ts proves it against real git). The skip
-    // needs an unchanged tree AND a healthy tip stamp: health gating keeps
-    // a dispatch able to heal a broken stamp instead of skipping forever.
-    // Nothing between the note and the push may be an `if` or `return` (an
-    // `if (staged)` around the commit would bring a diff-gate back), and
-    // --allow-empty appears EXACTLY once, ternary-scoped to the unstaged
-    // recovery case, so a regression to blanket empty commits fails here.
+    // Pinned as source shape; publish_behavior.test.ts proves it against real git. Health gating
+    // keeps a dispatch able to heal a broken stamp instead of skipping forever.
+    //   no `if` or `return` between the note and the push -> an `if (staged)` around the commit would bring a diff-gate back
+    //   --allow-empty EXACTLY once, ternary-scoped         -> a regression to blanket empty commits fails here
     const publish = read(".github/scripts/build-branches/publish.ts");
     expect(publish).toContain('if (branchExists && !staged && stampProblem === "") {');
     const body = publish.slice(

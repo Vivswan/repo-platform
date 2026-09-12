@@ -16,9 +16,6 @@ import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
 
-// captureNetwork is the fleet's hang backstop: every gh/curl subprocess in
-// the plan jobs goes through it, so a stalled network fails the run at the
-// deadline instead of blocking until the runner's own job timeout.
 describe("captureNetwork", () => {
   test("passes the deadline through to the proc layer: a hung command dies at expiry", () => {
     const started = Date.now();
@@ -77,9 +74,8 @@ describe("captureNetwork", () => {
   });
 });
 
-// scrubSlug is the redaction-critical piece: it keeps a private repo's
-// slug and bare name out of captured error text that both selectors print
-// into publicly readable logs. Its tests are adversarial on purpose.
+// scrubSlug keeps a private repo's slug and bare name out of captured error
+// text that both selectors print into publicly readable logs.
 describe("scrubSlug", () => {
   const SLUG = "Vivswan/hidden-server";
   const HINT = "h**-s**r";
@@ -161,8 +157,6 @@ describe("scrubSlug", () => {
   });
 });
 
-// The notice builders are the selectors' shared literals; these pin the
-// emitted text byte-for-byte.
 describe("notice builders", () => {
   test("pushProbeSkipNotice names a discovered-but-unpushable repo a non-member, hint first", () => {
     expect(pushProbeSkipNotice("h**-l**d")).toBe(

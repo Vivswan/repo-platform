@@ -1,11 +1,3 @@
-// Unit tests for build_gitignore's pure pieces: the source grammar (a
-// files.yml name is a github/gitignore root stem, block files are named
-// after it), the three outputs derived from one section map, and the
-// offline topology check that every copy of a section agrees. The argv
-// tests pin the two-mode shape: the script takes only --topology, and any
-// other flag is rejected before any network call. The CI workspace tests
-// prove the section's patterns against git itself.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -62,8 +54,6 @@ const ENTRIES: [string, string[]][] = [
   ["uv", ["Python.gitignore"]],
 ];
 
-/** A files/ tree holding every output the generator writes for ENTRIES,
- *  plus this repository's .gitignore beside it. */
 function generated(): { filesDir: string; selfPath: string } {
   const root = temp.dir("build-gitignore-");
   const filesDir = join(root, "files");
@@ -220,12 +210,10 @@ describe("the offline topology check", () => {
     expect(
       topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
     ).toEqual(["files/base/.gitignore lacks the section(s) [Global/Windows.gitignore]"]);
-    // The self copy alone dropping it is named too.
     writeFileSync(join(filesDir, "base/.gitignore"), buildFilesBase(SECTIONS));
     expect(
       topologyProblems({ entries: ENTRIES, filesDir, selfText }).map((p) => p.split(";")[0]),
     ).toEqual([".gitignore's managed region lacks the section(s) [Global/Windows.gitignore]"]);
-    // A block file gone: the self comparison cannot run and says so.
     rmSync(join(filesDir, "bun/.block.bun.gitignore"));
     expect(
       topologyProblems({ entries: ENTRIES, filesDir, selfText: readSelf(selfPath) }).map(
@@ -274,8 +262,7 @@ describe("the offline topology check", () => {
 });
 
 describe("argument parsing", () => {
-  /** main() with unknown arguments never reaches the fetch, so this stays
-   *  offline; the returned message is captured rather than printed. */
+  /** Unknown arguments are rejected before the fetch, so this stays offline. */
   async function reject(argv: string[]): Promise<{ code: number; message: string }> {
     const original = console.error;
     let message = "";
@@ -301,8 +288,6 @@ describe("argument parsing", () => {
 });
 
 describe("CI workspace section", () => {
-  /** A fresh repository whose .gitignore is exactly the section, holding
-   *  one path of the given kind; returns git's ignore verdict for it. */
   function ignoredByGit(rel: string, kind: "dir" | "file"): boolean {
     const repo = temp.dir("gitignore-ci-workspace-");
     expect(capture(["git", "-C", repo, "init", "-q"], {}).exitCode).toBe(0);

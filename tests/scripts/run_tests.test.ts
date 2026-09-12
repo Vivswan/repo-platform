@@ -1,8 +1,3 @@
-// The launcher's TMPDIR scoping and leftover verdict, end to end: a probe
-// reports where os.tmpdir() pointed and where its fixture landed. Negative
-// control: dropping the launcher's TMPDIR entry makes the nested run report
-// the outer temp directory, and the not-equal assertion reds.
-
 import { describe, expect, test } from "bun:test";
 import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,10 +30,6 @@ function probeSource(ending: string): string {
 const LEFTOVER_NOTICE = /^run_tests: 1 entry left in the per-run TMPDIR/m;
 const LEAKING_PASS = "expect(true).toBe(true);";
 
-/** Runs the launcher on a probe with the given ending and flags; asserts
- * the run had its own TMPDIR, the fixture lived inside it, and the
- * scratch is gone; returns the exit code, whether the leftover notice
- * appeared, and whether it named the fixture. */
 function runLauncher(ending: string, flags: string[] = []) {
   const probe = join(temp.dir("run-tests-probe-"), "probe.test.ts");
   writeFileSync(probe, probeSource(ending));
@@ -76,7 +67,6 @@ describe("run_tests launcher", () => {
       leaked: false,
     },
     { probe: "leaking failing", ending: "expect(false).toBe(true);", exitCode: 1, leaked: true },
-    // A red run keeps its own code: the leak is named, not re-coded.
     { probe: "leaking exit-7", ending: "process.exit(7);", exitCode: 7, leaked: true },
     {
       // The probe runs inside the launcher's `bun test` child, so its
@@ -88,8 +78,6 @@ describe("run_tests launcher", () => {
       leaked: false,
     },
     {
-      // Filtered, so not judged: the same leak that fails the unfiltered
-      // run above passes here, scratch still removed.
       probe: "name-filtered leaking",
       ending: LEAKING_PASS,
       flags: ["-t", "probe"],

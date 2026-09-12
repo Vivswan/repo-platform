@@ -1,7 +1,3 @@
-// gitAnswersYes against a real repository: exit 0 is yes, exit 1 is no, and any other exit
-// (git's 128 for an unknown revision) or a deadline expiry throws the whole message instead of
-// reading as a no.
-
 import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,8 +23,8 @@ describe("gitAnswersYes", () => {
   const repo = fixtureRepo();
   const env = fixtureGitEnv();
 
-  // Rows are [question, the args, the answer]; every question runs in the fixture through the
-  // cwd option, from a process whose own cwd is another repository.
+  // The test process's own cwd is another repository, so a cwd option the helper ignored would
+  // fail every row that names a fixture commit.
   test.each([
     ["an ancestor is a yes", ["merge-base", "--is-ancestor", repo.first, repo.second], true],
     ["a descendant is a no", ["merge-base", "--is-ancestor", repo.second, repo.first], false],

@@ -1,17 +1,3 @@
-// Pins the timeout contract on capture and mustCapture: every piped run
-// is bounded - an explicit timeoutMs wins, and without one the default
-// hang bound applies (bun >= 1.4.0 waits for piped-stdio EOF rather than
-// child exit, so an unbounded piped run can hang forever on an orphaned
-// pipe holder). A run cut off by its deadline is a FAILURE: capture
-// reports timedOut with a nonzero exitCode, mustCapture names the
-// deadline and exits nonzero - even when the child itself exited 0 and
-// only an orphan wedged the pipe until the deadline.
-//
-// Also pins the environment contract: every spawn is handed live
-// process.env (merged under any explicit options.env), because bun's
-// default is a process-start snapshot that silently ignores later
-// process.env mutations - see the "spawn env" describe below.
-
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   capture,
@@ -24,14 +10,9 @@ import {
 } from "../../.github/scripts/shared/proc";
 
 describe("spawn env is live process.env", () => {
-  // Bun.spawnSync WITHOUT `env:` hands children a snapshot of the
-  // environment taken at PROCESS START (bun 1.4.0, both directions), so a
-  // test or script mutating process.env before calling through proc.ts
-  // would get a silently inert pin. proc.ts closes the class at the
-  // chokepoint by handing every spawn `{ ...process.env, ...options.env }`;
-  // these tests pin that for all three wrappers plus the two merge
-  // properties: an explicit entry wins over the ambient value, and an
-  // undefined-valued entry deletes the key.
+  // Bun.spawnSync WITHOUT `env:` hands children a snapshot of the environment
+  // taken at PROCESS START (bun 1.4.0), so a test or script mutating
+  // process.env before calling through proc.ts would get a silently inert pin.
 
   test("a key added to process.env after start reaches capture's child", () => {
     process.env.PROC_ENV_PROBE_ADDED = "live";
@@ -94,8 +75,6 @@ describe("spawn env is live process.env", () => {
     }
   });
 
-  // The merge's two properties over one ambient value. Rows are [reason,
-  // options.env, the child's echo].
   test.each([
     [
       "an explicit options.env entry wins over the ambient value",
@@ -203,7 +182,6 @@ describe("capture timeoutMs", () => {
 });
 
 describe("timeoutExitCode", () => {
-  // Rows are [reason, the child's exit tuple, the reported code].
   test.each([
     [
       "a child that exited 0 before the deadline still maps to failure (124)",
@@ -218,7 +196,6 @@ describe("timeoutExitCode", () => {
 });
 
 describe("redactCommand", () => {
-  // Rows are [reason, argv, the rendered log line].
   test.each([
     [
       "masks URL userinfo, keeping scheme and host",
@@ -256,10 +233,8 @@ describe("redactCommand", () => {
 });
 
 describe("redactText", () => {
-  // Child output re-emitted to a public log, whole: git 401/403 errors
-  // quote the push URL back, credentials included - redactCommand covers
-  // our argv lines, this covers the child's output. Rows are [reason,
-  // text, redacted text].
+  // git 401/403 errors quote the push URL back, credentials included:
+  // redactCommand covers our argv lines, this covers the child's output.
   test.each([
     [
       "masks the credentialed URL git's own error text quotes back",
@@ -289,13 +264,9 @@ describe("mustCapture timeoutMs", () => {
     expect(mustCapture(["echo", "ok"], { timeoutMs: 2000 })).toBe("ok");
   });
 
-  // The expiry path exits the calling process, so these tests run
-  // mustCapture in a child bun: process.execPath, never a bare "bun"
-  // (PATH's bun can be a DIFFERENT version than the runner, hiding
-  // version-specific semantics from a version-gated run), and the outer
-  // capture bound plus the elapsed guards stay well under bun-test's
-  // 5000ms per-test limit, so a wedged chain fails with capture's own
-  // diagnostics (timedOut true) instead of an opaque test timeout.
+  // The expiry path exits the calling process, so these tests run mustCapture in a child bun.
+  //   process.execPath, never a bare "bun"     -> PATH's bun can be a different version than the runner
+  //   outer bound and elapsed guards < 5000ms  -> a wedged chain fails with capture's own diagnostics, not an opaque test timeout
 
   test("an expiring deadline names it and exits nonzero", () => {
     const snippet = [
@@ -313,14 +284,11 @@ describe("mustCapture timeoutMs", () => {
   });
 
   test("the expiry line redacts credentials carried in argv", () => {
-    // The sync push passes mustCapture an argv holding the fleet PAT inside
-    // the push URL, and the deadline-expiry line is reachable for every
-    // call, so it must never echo the token into the public Actions log. A
-    // shell is the only child whose argv can carry the URL past the
-    // deadline, and it must EXEC its sleep with fds detached: a forked
-    // sleeper surviving the kill would hold this test's outer stderr pipe,
-    // which bun >= 1.4.0 waits on to EOF (a plain `sh -c "sleep 5"` hung
-    // this test for the full 5s on Linux); /dev/null fds close that too.
+    // An argv can carry a credentialed push URL, and the expiry line is reachable for every call, so
+    // it must never echo the token into the public Actions log.
+    //   `sh ... url` as the argv     -> a child whose argv carries the URL and outlives the deadline
+    //   exec sleep, fds on /dev/null -> a forked sleeper would hold the outer stderr pipe, which bun >= 1.4.0 waits on to EOF
+    // A plain `sh -c "sleep 5"` hung this test for the full 5s on Linux.
     const url = "https://x-access-token:ghp_SUPERSECRET@github.com/octo/repo.git";
     const stalled = ["sh", "-c", "exec sleep 5 </dev/null >/dev/null 2>&1", "sh", url];
     const snippet = [

@@ -1,5 +1,3 @@
-// The comparison primitives every ssot rule is built from (scripts/check/ssot/comparison.ts).
-
 import { describe, expect, test } from "bun:test";
 import {
   canonical,

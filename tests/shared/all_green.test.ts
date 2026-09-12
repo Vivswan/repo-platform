@@ -1,10 +1,3 @@
-// Unit tests for the green-commit predicate both enforcement points share
-// (build-branches/publish.ts and sync/resolve_refs.ts). The gh call is
-// injected; nothing here touches the network, and the poll's clock is
-// zeroed (deadlineMs: 0) except where the poll itself is under test.
-// Fail-closed throughout: only a completed, successful all-green verdict
-// check run returns null.
-
 import { describe, expect, test } from "bun:test";
 import {
   allGreenFailure,
@@ -59,8 +52,6 @@ describe("allGreenFailure", () => {
     ]);
   });
 
-  // The only green: a completed success among the vouching checks. Rows
-  // are [reason, check rows].
   test.each([
     ["a completed successful verdict is green", [{}]],
     [
@@ -71,10 +62,9 @@ describe("allGreenFailure", () => {
     expect(allGreenFailure("o/r", SHA, ghReturning(checks), NO_WAIT)).toBeNull();
   });
 
-  // Every refusal at a zeroed deadline, pinned as the WHOLE reason string:
-  // the prose is what verdictPending matches and what lands in the sync
-  // and publish logs, so a reworded fragment fails here rather than
-  // drifting. Rows are [reason, gh, expected reason].
+  // Pinned as the WHOLE reason string: the prose is what verdictPending matches
+  // and what lands in the sync and publish logs, so a reworded fragment fails
+  // here rather than drifting.
   const NO_CHECK =
     "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist";
   const API_FAILURE = (detail: string) =>
@@ -133,9 +123,8 @@ describe("allGreenFailure", () => {
   });
 
   test("job-created checks (opaque or empty external_id) vouch - the current shape", () => {
-    // The all-green JOB's own check run carries an opaque external_id
-    // (so did the pre-inversion aggregate's); the event filter is a
-    // blocklist so these stay green.
+    // The all-green job's own check run carries an opaque external_id, so the
+    // event filter is a blocklist.
     for (const externalId of [null, "", "7452900668-check-run"]) {
       const gh = ghReturning([{ external_id: externalId }]);
       expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBeNull();

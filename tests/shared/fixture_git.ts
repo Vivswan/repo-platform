@@ -11,9 +11,8 @@ export const FIXTURE_GITCONFIG = join(import.meta.dir, "fixture.gitconfig");
  * global file, so an ambient one could re-enable maintenance. */
 const COMMAND_SCOPE_CONFIG = /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)$/;
 
-/** The live process env (test files may mutate it) minus command-scope
- * git config, with the pinned global config; also the base for any
- * script under test that runs git against a fixture. */
+/** Read at call time because test files mutate process.env; also the env
+ * for any script under test that runs git against a fixture. */
 export function fixtureGitEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -23,8 +22,6 @@ export function fixtureGitEnv(): Record<string, string | undefined> {
   return env;
 }
 
-/** Runs `git -C cwd ...args` under fixtureGitEnv(), throws on a nonzero
- * exit, and returns stdout without its trailing newline. */
 export function fixtureGit(cwd: string, args: string[]): string {
   const proc = boundedSpawnSync(["git", "-C", cwd, ...args], { env: fixtureGitEnv() });
   if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);

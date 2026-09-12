@@ -9,9 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export interface TempDirs {
-  /** A fresh empty directory `${os.tmpdir()}/${prefix}XXXXXX`, removed
-   * after the file's last test. The prefix names the suite in the
-   * launcher's leftover listing, so keep it specific. */
+  /** The prefix names the suite in the launcher's leftover listing, so keep it specific. */
   dir(prefix: string): string;
 }
 

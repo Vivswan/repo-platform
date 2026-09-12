@@ -30,10 +30,7 @@ describe("commit stamp", () => {
   });
 
   test("the run line is write-only: a breadcrumb, never parsed as the stamp", () => {
-    // The retired run-proof check was the run line's last reader; the
-    // writer stays so humans can jump from a build commit to the run
-    // that pushed it, and the stamp parser must never mistake it for a
-    // source line.
+    // The writer stays so humans can jump from a build commit to the run that pushed it.
     const line = commitRunWrite("https://github.com/Vivswan/repo-platform/actions/runs/8675309");
     expect(line).toBe("run: https://github.com/Vivswan/repo-platform/actions/runs/8675309");
     expect(commitStampParse(line)).toBe("");

@@ -1,9 +1,3 @@
-// Unit tests for the AST extraction module the SSOT rules read TypeScript
-// sources through: each helper's positive shape, and the decoy classes
-// the AST makes unrepresentable - a look-alike in a comment, a string, or
-// a template is not a node, so it can neither satisfy an anchor nor mask
-// a lost one.
-
 import { describe, expect, test } from "bun:test";
 import {
   callCarriesLiteral,
@@ -104,7 +98,6 @@ describe("constNumberValue", () => {
 describe("constRegexSource", () => {
   test("returns the pattern body between the slashes", () => {
     expect(constRegexSource("const RE = /^[a-z]+$/;\n", "RE", anchor)).toBe("^[a-z]+$");
-    // A slash inside a character class stays part of the body.
     expect(constRegexSource("const RE = /a[/]b/;\n", "RE", anchor)).toBe("a[/]b");
   });
 
@@ -132,8 +125,6 @@ describe("templateCarries", () => {
     expect(
       templateCarries("const t = `repos/x/contents/\\u0024{path}?ref=\\u0024{ref}`;\n", needle),
     ).toBe(false);
-    // The same decoy inside a template WITH real interpolations rides a
-    // middle token's raw text and still cannot match.
     expect(
       templateCarries(
         "const t = `repos/${repo}/contents/\\u0024{path}?ref=\\u0024{ref}`;\n",
@@ -156,7 +147,6 @@ describe("templateCarries", () => {
     expect(templateCarries('const doc = `${"contents/${path}?ref=${ref}"}`;\n', needle)).toBe(
       false,
     );
-    // A property access is not the pinned identifier shape either.
     expect(templateCarries("const t = `x/contents/${a.path}?ref=${ref}`;\n", needle)).toBe(false);
     // A NESTED template inside a discarded interpolation is that
     // interpolation's code, not standalone wiring.

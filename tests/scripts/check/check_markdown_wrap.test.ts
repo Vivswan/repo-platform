@@ -1,7 +1,3 @@
-// Unit tests for the markdown wrap checker's pure pieces: the line
-// classifier, the continuation scanner, and the scan-scope predicates.
-// The live-repo pass is proven by `bun run wrap:check`, not here.
-
 import { describe, expect, test } from "bun:test";
 import {
   classify,
@@ -20,7 +16,6 @@ describe("classify", () => {
     expect(classify("====")).toBe("structural");
     expect(classify("<details>")).toBe("structural");
     expect(classify("</details>")).toBe("structural");
-    // Autolinks are prose, not HTML tag lines.
     expect(classify("<https://example.com>")).toBe("prose");
     expect(classify("<user@example.com>")).toBe("prose");
     expect(classify("[ref]: https://example.com")).toBe("structural");
@@ -218,7 +213,6 @@ describe("scanMarkdown", () => {
       expected: clean([2]),
     },
     {
-      // A trailing thematic break is not a frontmatter closer.
       reason: "frontmatter must close before the first blank line",
       text: "---\nparagraph\n\nprose\nwrapped\n---",
       expected: clean([5]),

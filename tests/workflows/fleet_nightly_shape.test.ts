@@ -1,11 +1,3 @@
-// The fleet's nightly leg's shape contract: fleet-nightly.yml is the
-// schedule-only twin of fleet-ci.yml that carries the one job whose grant
-// (issues: write, to file the tracking issue) exceeds the skeleton's `ci`
-// caller ceiling. Its plan job mirrors fleet-ci's, the scan job is a thin
-// caller of the trivy, fuzz-issue, and upload-sarif steps, and nothing
-// here gates: the skeleton's `nightly` caller sits outside all-green's
-// needs, so a red job here reaches no merge.
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -61,7 +53,6 @@ describe("fleet-nightly.yml", () => {
     expect(steps[1]?.id).toBe("plan");
     expect(steps[1]?.with).toEqual({ private: "${{ github.event.repository.private }}" });
     expect(steps[1]?.env).toEqual({ GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" });
-    // The SARIF upload keys on the visibility alone.
     expect(job?.outputs).toEqual({ private: "${{ steps.plan.outputs.private }}" });
   });
 

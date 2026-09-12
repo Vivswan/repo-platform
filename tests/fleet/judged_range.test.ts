@@ -1,7 +1,3 @@
-// The post-green range's base resolution on real git: the stamped source over the push's own
-// `before` (the coalescing case), the no-stamp fallbacks, every refusal, and the env refusal
-// through the read-directives leg's entry point.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,9 +20,8 @@ describe("resolveBase", () => {
     return fixtureGit(cwd, ["-c", "user.name=t", "-c", "user.email=t@x.test", ...args]);
   }
 
-  // main's history plus a side branch off the root (a base that is no ancestor of main's tip);
-  // each scenario is a clone of a bare origin carrying (or lacking) a build branch, which the
-  // leg's checkout sees as refs/remotes/origin/build.
+  // Each scenario is a clone of a bare origin, so the build branch sits where the leg reads it:
+  // refs/remotes/origin/build.
   const source = join(root, "source");
   mkdirSync(source);
   git(source, ["init", "-q", "-b", "main"]);
@@ -43,9 +38,6 @@ describe("resolveBase", () => {
   const side = commit("side");
   git(source, ["checkout", "-q", "main"]);
 
-  /** A clone whose origin carries main plus, when `stamps` is given, a
-   *  build branch of one orphan commit per stamp (oldest first), each
-   *  stamped like publish.ts stamps; an empty entry is an unstamped one. */
   function cloneWithBuild(name: string, stamps: string[] | null): string {
     const bare = join(root, `${name}.git`);
     git(root, ["clone", "-q", "--bare", source, bare]);
@@ -71,20 +63,15 @@ describe("resolveBase", () => {
   const publishedC1 = cloneWithBuild("published-c1", [c1]);
   const publishedC1C3 = cloneWithBuild("published-c1-c3", [c1, c3]);
   const publishedC0C1 = cloneWithBuild("published-c0-c1", [c0, c1]);
-  // A later commit published after the judged one (its legs re-run, or a neighbouring run's publish
-  // landed first: main runs overlap): a tip stamped with a descendant, with and without the judged
-  // commit's own publish between, and with no older stamp at all.
   const publishedC1C3C4 = cloneWithBuild("published-c1-c3-c4", [c1, c3, c4]);
   const publishedC1C4 = cloneWithBuild("published-c1-c4", [c1, c4]);
   const publishedC4 = cloneWithBuild("published-c4", [c4]);
-  // A long unstamped run above the one real stamp: the walk must reach it.
   const deepStamp = cloneWithBuild("deep", [c1, ...Array.from({ length: 30 }, () => "")]);
   const tamperedStamp = cloneWithBuild("tampered", [side]);
   const stampless = cloneWithBuild("stampless", [""]);
 
   const short = (sha: string) => sha.slice(0, 12);
 
-  /** The whole read: the resolved base, the commits it spans, and the label the notices carry. */
   function read(cwd: string, sha: string, before: string) {
     const base = resolveBase(cwd, sha, before);
     return { base, commits: rangeCommits(cwd, sha, base), label: rangeLabel(sha, base) };
@@ -228,8 +215,6 @@ describe("resolveBase", () => {
   });
 
   test("a base the checkout cannot see is refused, never read as an empty or a full range", () => {
-    // A depth-1 checkout lacks the fallback base; reading against a missing
-    // commit must fail loudly rather than degrade either way.
     const shallow = join(root, "shallow");
     git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
     expect(() => resolveBase(shallow, c4, c2)).toThrow(

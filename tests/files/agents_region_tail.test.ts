@@ -1,5 +1,4 @@
-// The writer over an empty checkout, judged on the real files/ tree: the
-// owned tail below END nests under the region's last heading, so that
+// The owned tail below END nests under the region's last heading, so that
 // heading must be the repository-specific one with or without blocks.
 
 import { expect, test } from "bun:test";
@@ -15,7 +14,6 @@ const SYNC = join(REPO_ROOT, ".github/scripts/sync/writer/sync.ts");
 const FILES_TREE = join(REPO_ROOT, "files");
 const BUILD = "x".repeat(40);
 
-/** sync.ts over an empty checkout registered with `modules`; the written AGENTS.md. */
 function writtenAgents(label: string, modules: string[]): string {
   const target = temp.dir(`agents-tail-${label}-`);
   writeFileSync(
