@@ -192,6 +192,20 @@ describe("parseRegistration", () => {
     if ("errors" in read) expect(read.errors[0]).toStartWith(error);
   });
 
+  test("site.path: null turns the docs half off, and is refused beside include roots that would need it", () => {
+    expect(parseRegistration("modules: [site]\nsite:\n  path: null\n")).toEqual({
+      registration: { modules: ["site"], site: { path: null } },
+    });
+    const read = parseRegistration(
+      "modules: [site]\nsite:\n  path: null\n  include: [{ path: skills, mount: skills, page: SKILL.md }]\n",
+    );
+    expect(read).toEqual({
+      errors: [
+        `${FILE}: site.include: names roots to render into the docs, but a null docs path turns the docs half off - drop the list or set a path`,
+      ],
+    });
+  });
+
   test("a name and description of plain text with apostrophes and colons pass", () => {
     const read = parseRegistration(
       "modules: []\nproject:\n  name: Vivswan's tools\n  slug: tools\n  description: 'Tools: for things, 100%'\n",

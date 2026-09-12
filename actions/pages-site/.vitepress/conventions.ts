@@ -50,6 +50,23 @@ export interface IncludeRoot {
   page: string;
 }
 
+/** The docs half of a site as configured: where it mounts, what it renders. */
+export interface DocsConfig {
+  /** The URL segment the docs mount under beside a website. */
+  path: string;
+  include: IncludeRoot[];
+}
+
+/** The site configuration document the plan action emits and the
+ *  pages-site action reads (its `config` input); a registration-less
+ *  caller writes it by hand. `docs_path` null is the docs half turned off. */
+export interface SiteConfigJson {
+  site_title: string;
+  docs_path: string | null;
+  include: IncludeRoot[];
+  link_rot_label: string;
+}
+
 const PATH_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 const URL_SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -118,6 +135,18 @@ export function includePageProblem(page: string): string | null {
     return "is index.md, which is a directory's page already - name the file the include renames to it";
   }
   return null;
+}
+
+/** Why include roots cannot ride beside a null docs path, or null: with
+ *  the docs half off there is nothing to render them into (an unset path
+ *  is the default mount, which renders them). */
+export function includeWithoutDocsProblem(
+  docsPath: string | null | undefined,
+  include: readonly unknown[],
+): string | null {
+  return docsPath === null && include.length > 0
+    ? "names roots to render into the docs, but a null docs path turns the docs half off - drop the list or set a path"
+    : null;
 }
 
 /** Why the include list as a whole cannot stage, or null: two roots on

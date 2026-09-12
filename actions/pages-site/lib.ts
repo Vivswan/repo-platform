@@ -15,23 +15,24 @@
 // website is one copy of the hook's dist at the site root, unversioned.
 
 import {
+  type DocsConfig,
   type IncludeRoot,
   includeListProblem,
   includeMountProblem,
   includePageProblem,
+  includeWithoutDocsProblem,
   relPathProblem,
   urlSegmentProblem,
 } from "./.vitepress/conventions.ts";
 
-/** The docs configuration the action consumes: the plan action's site
- *  mode resolves it from the registration, a registration-less caller
- *  passes it as JSON. */
+/** The configuration the action consumes (conventions.ts's SiteConfigJson
+ *  parsed): the plan action's site mode resolves it from the registration,
+ *  a registration-less caller passes it as JSON. */
 export interface SiteConfig {
   /** Empty means the repository name. */
   siteTitle: string;
-  /** The URL segment the docs mount under beside a website. */
-  docsPath: string;
-  include: IncludeRoot[];
+  /** Null is the docs half turned off: docs/ is left out even when it exists. */
+  docs: DocsConfig | null;
   /** "" disables the nightly external-link check. */
   linkRotLabel: string;
 }
@@ -136,39 +137,47 @@ export function parseSiteConfig(json: string): SiteConfig {
   >;
   const extra = Object.keys(rest);
   if (extra.length > 0) throw new Error(`the config input has unknown keys: ${extra.join(", ")}`);
-  // The three reach the step outputs and the page title as one line each.
-  for (const [key, text] of Object.entries({ site_title, docs_path, link_rot_label })) {
+  // The two reach the step outputs and the page title as one line each.
+  for (const [key, text] of Object.entries({ site_title, link_rot_label })) {
     if (typeof text !== "string") throw new Error(`config.${key} must be a string`);
     if (/[\r\n]/.test(text)) {
       throw new Error(`config.${key} must be one line - it contains a line break`);
     }
   }
-  const pathProblem = urlSegmentProblem(docs_path as string);
-  if (pathProblem !== null) throw new Error(`config.docs_path '${docs_path}' ${pathProblem}`);
+  if (docs_path !== null && typeof docs_path !== "string") {
+    throw new Error("config.docs_path must be a string, or null for no docs half");
+  }
+  const roots = parseIncludes(include, "config.include");
+  const docsProblem = includeWithoutDocsProblem(docs_path, roots);
+  if (docsProblem !== null) throw new Error(`config.include ${docsProblem}`);
+  if (docs_path !== null) {
+    const pathProblem = urlSegmentProblem(docs_path);
+    if (pathProblem !== null) throw new Error(`config.docs_path '${docs_path}' ${pathProblem}`);
+  }
   return {
     siteTitle: site_title as string,
-    docsPath: docs_path as string,
-    include: parseIncludes(include, "config.include"),
+    docs: docs_path === null ? null : { path: docs_path, include: roots },
     linkRotLabel: link_rot_label as string,
   };
 }
 
-/** The layout, one row per (hook dist, docs/) combination (docs/site.md,
- *  "Layout"): the docs move under `docsPath` only beside a website. */
+/** The layout, one row per (hook dist, docs/, docs half) combination
+ *  (docs/site.md, "Layout"): the docs move under their path only beside a
+ *  website, and a docs half turned off leaves docs/ out. */
 export function siteLayout(input: {
   dist: string;
   hasDocs: boolean;
-  docsPath: string;
-  include: readonly IncludeRoot[];
+  docs: DocsConfig | null;
 }): Layout {
   return {
-    docs: input.hasDocs
-      ? {
-          kind: "docs",
-          path: input.dist === "" ? "/" : `/${input.docsPath}/`,
-          include: input.include,
-        }
-      : null,
+    docs:
+      input.hasDocs && input.docs !== null
+        ? {
+            kind: "docs",
+            path: input.dist === "" ? "/" : `/${input.docs.path}/`,
+            include: input.docs.include,
+          }
+        : null,
     website: input.dist === "" ? null : { kind: "prebuilt", path: "/", dist: input.dist },
   };
 }

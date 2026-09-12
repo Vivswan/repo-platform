@@ -17,8 +17,8 @@ const config = (include: unknown) =>
 
 describe("parseSiteConfig include roots", () => {
   test("the include list is carried as written", () => {
-    expect(parseSiteConfig(config([SKILLS])).include).toEqual([SKILLS]);
-    expect(parseSiteConfig(config([])).include).toEqual([]);
+    expect(parseSiteConfig(config([SKILLS])).docs).toEqual({ path: "docs", include: [SKILLS] });
+    expect(parseSiteConfig(config([])).docs).toEqual({ path: "docs", include: [] });
   });
 
   test.each([

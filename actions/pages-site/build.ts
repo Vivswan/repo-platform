@@ -574,11 +574,17 @@ async function main(): Promise<void> {
     throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
   }
   if (check === "true") {
+    if (cfg.docs === null) {
+      console.log(
+        "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
+      );
+      return;
+    }
     // The docs PR check: one strict build of the working tree (a HEAD tier
     // derives strict dead links) with the same include roots the deploy
     // stages, then the link gate over it; no artifact.
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    const { dist } = buildVitepressTier(cfg, tier, [], cfg.include, { base: "/" });
+    const { dist } = buildVitepressTier(cfg, tier, [], cfg.docs.include, { base: "/" });
     // No origin: this build sits at "/", not at the deployed layout, so a
     // link spelled with the site's own origin stays external here.
     const checked = await checkSiteLinks(dist, "/", [{ rel: "", strict: true }], null);
@@ -591,13 +597,14 @@ async function main(): Promise<void> {
   const { docs, website } = siteLayout({
     dist: cfg.siteDir,
     hasDocs: existsSync(join(cfg.workspace, DOCS_DIR)),
-    docsPath: cfg.docsPath,
-    include: cfg.include,
+    docs: cfg.docs,
   });
   if (docs === null && website === null) {
-    console.log(
-      `::notice::nothing to publish: the site-build hook named no directory and the repository has no ${DOCS_DIR}/`,
-    );
+    const why =
+      cfg.docs === null
+        ? "the docs half is off (site.path: null)"
+        : `the repository has no ${DOCS_DIR}/`;
+    console.log(`::notice::nothing to publish: the site-build hook named no directory and ${why}`);
     setSiteOutputs(cfg, null);
     return;
   }

@@ -8,7 +8,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { isLocaleDir } from "../../../actions/pages-site/.vitepress/conventions.ts";
+import {
+  type DocsConfig,
+  isLocaleDir,
+} from "../../../actions/pages-site/.vitepress/conventions.ts";
 import {
   deriveRewrites,
   detectLocales,
@@ -58,18 +61,21 @@ describe("parseSiteConfig", () => {
       ...overrides,
     });
 
-  test("reads the four keys, the include roots parsed to their three keys", () => {
+  test("reads the four keys, the docs half as one value: its path and include roots, or null when the path is", () => {
     expect(parseSiteConfig(config())).toEqual({
       siteTitle: "Site",
-      docsPath: "docs",
-      include: [skills],
+      docs: { path: "docs", include: [skills] },
       linkRotLabel: "docs-link-rot",
     });
     expect(parseSiteConfig(config({ site_title: "", include: [], link_rot_label: "" }))).toEqual({
       siteTitle: "",
-      docsPath: "docs",
-      include: [],
+      docs: { path: "docs", include: [] },
       linkRotLabel: "",
+    });
+    expect(parseSiteConfig(config({ docs_path: null, include: [] }))).toEqual({
+      siteTitle: "Site",
+      docs: null,
+      linkRotLabel: "docs-link-rot",
     });
   });
 
@@ -104,6 +110,11 @@ describe("parseSiteConfig", () => {
       "config.docs_path '..' must be one plain lowercase URL segment",
     ],
     ["a non-list include", config({ include: {} }), "config.include must be a list"],
+    [
+      "include roots beside a null docs path",
+      config({ docs_path: null }),
+      "config.include names roots to render into the docs, but a null docs path turns the docs half off",
+    ],
     [
       "an include root escaping the tree",
       config({ include: [{ ...skills, path: "../x" }] }),
@@ -183,28 +194,22 @@ describe("layout helpers", () => {
     expect(() => validateRelPath("a/b-c.d_e", "x")).not.toThrow();
   });
 
-  // The four layout rows of docs/site.md, whole: the docs move under the
-  // configured segment only beside a website, and neither part is the
-  // nothing-to-publish row.
+  // The layout rows of docs/site.md, whole: the docs move under the
+  // configured segment only beside a website, a docs half turned off
+  // (site.path: null) leaves docs/ out even when it exists, and neither
+  // part is the nothing-to-publish row.
   const include = [{ path: "skills", mount: "skills", page: "SKILL.md" }];
-  test.each<[dist: string, hasDocs: boolean, layout: Layout]>([
-    [
-      "apps/web/dist",
-      true,
-      {
-        docs: { kind: "docs", path: "/manual/", include },
-        website: { kind: "prebuilt", path: "/", dist: "apps/web/dist" },
-      },
-    ],
-    [
-      "apps/web/dist",
-      false,
-      { docs: null, website: { kind: "prebuilt", path: "/", dist: "apps/web/dist" } },
-    ],
-    ["", true, { docs: { kind: "docs", path: "/", include }, website: null }],
-    ["", false, { docs: null, website: null }],
-  ])("siteLayout with dist %p and docs %p", (dist, hasDocs, layout) => {
-    expect(siteLayout({ dist, hasDocs, docsPath: "manual", include })).toEqual(layout);
+  const manual = { path: "manual", include };
+  const website = { kind: "prebuilt", path: "/", dist: "apps/web/dist" } as const;
+  test.each<[dist: string, hasDocs: boolean, docs: DocsConfig | null, layout: Layout]>([
+    ["apps/web/dist", true, manual, { docs: { kind: "docs", path: "/manual/", include }, website }],
+    ["apps/web/dist", false, manual, { docs: null, website }],
+    ["", true, manual, { docs: { kind: "docs", path: "/", include }, website: null }],
+    ["", false, manual, { docs: null, website: null }],
+    ["apps/web/dist", true, null, { docs: null, website }],
+    ["", true, null, { docs: null, website: null }],
+  ])("siteLayout with dist %p, docs/ %p, docs half %p", (dist, hasDocs, docs, layout) => {
+    expect(siteLayout({ dist, hasDocs, docs })).toEqual(layout);
   });
 });
 
@@ -557,6 +562,35 @@ describe("strict check build", () => {
     },
     200_000,
   );
+});
+
+describe("check mode with the docs half off", () => {
+  test("stands down green with a notice and builds nothing, whatever docs/ carries", () => {
+    const root = temp.dir("pages-site-check-off-");
+    const docs = join(root, "ws", "docs");
+    mkdirSync(docs, { recursive: true });
+    mkdirSync(join(root, "runner-temp"));
+    writeFileSync(join(docs, "README.md"), "# Home\n\nSee [gone](missing.md).\n");
+    const result = boundedSpawnSync([process.execPath, join(ACTION_DIR, "build.ts")], {
+      env: {
+        ...process.env,
+        GITHUB_WORKSPACE: join(root, "ws"),
+        GITHUB_REPOSITORY: "o/r",
+        RUNNER_TEMP: join(root, "runner-temp"),
+        CHECK: "true",
+        SITE_DIR: "",
+        CONFIG: '{"site_title": "t", "docs_path": null, "include": [], "link_rot_label": ""}',
+      },
+      timeoutMs: 60_000,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "::notice::docs-check stood down: the registration turns the docs half off (site.path: null)",
+    );
+    expect(existsSync(join(realpathSync(join(root, "runner-temp")), "pages-site", "build-0"))).toBe(
+      false,
+    );
+  });
 });
 
 describe("link-rot reporting", () => {

@@ -12,6 +12,7 @@ import {
   includeListProblem,
   includeMountProblem,
   includePageProblem,
+  includeWithoutDocsProblem,
   relPathProblem,
   urlSegmentProblem,
 } from "../pages-site/.vitepress/conventions.ts";
@@ -134,9 +135,11 @@ export const registrationSchema = z.strictObject({
       copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
     })
     .optional(),
+  // `path: null` turns the docs half off (docs/site.md, "Turning the docs
+  // half off"): the site is the hook's website alone.
   site: z
     .strictObject({
-      path: urlSegment.optional(),
+      path: urlSegment.nullable().optional(),
       include: z
         .array(
           z.strictObject({
@@ -150,6 +153,10 @@ export const registrationSchema = z.strictObject({
           if (message !== null) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
+    })
+    .superRefine((site, ctx) => {
+      const message = includeWithoutDocsProblem(site.path, site.include ?? []);
+      if (message !== null) ctx.addIssue({ code: "custom", message, path: ["include"] });
     })
     .optional(),
   skills: z.strictObject({ dir: relativePath.optional() }).optional(),

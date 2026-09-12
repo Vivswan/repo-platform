@@ -8,9 +8,10 @@
 // canonical order, the visibility, the skills directory, the CodeQL
 // languages, the tracking labels, and whether a scheduled run is the week's
 // CodeQL rescan; it also rejects a mirror declaration files.yml proves
-// unwritable (mirrors.ts). `site` mode resolves the docs configuration the
-// pages-site action consumes (the docs mount path, the site title, the
-// include roots, the link-rot label) from the registration. Fail closed: an
+// unwritable (mirrors.ts). `site` mode resolves the site configuration the
+// pages-site action consumes (one JSON document: the site title, the docs
+// mount path or null for no docs half, the include roots, the link-rot
+// label) from the registration. Fail closed: an
 // unknown module or key, a malformed value, or a missing registration fails
 // the step; nothing here defaults an invalid registration into a green run.
 //
@@ -25,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import type { DocsConfig, SiteConfigJson } from "../pages-site/.vitepress/conventions.ts";
 import {
   capture,
   env,
@@ -268,16 +270,15 @@ export function planCi(input: PlanInput, now: Date = new Date()): CiPlan {
   };
 }
 
-/** The docs configuration the pages-site action consumes (docs/site.md):
+/** The site configuration the pages-site action consumes (docs/site.md):
  *  the website itself is the repo-owned hook's, so nothing about it is
  *  planned here. */
 export interface SitePlan {
-  /** The URL segment the docs mount under beside a website. */
-  docsPath: string;
   /** Empty stays empty: pages-site then titles the site by repository name. */
   siteTitle: string;
-  /** The registration's site.include, verbatim; [] when none are declared. */
-  include: { path: string; mount: string; page: string }[];
+  /** The docs half (its include roots the registration's, verbatim), or
+   *  null when the registration turns it off (site.path: null). */
+  docs: DocsConfig | null;
   linkRotLabel: string;
 }
 
@@ -290,23 +291,28 @@ export function planSite(input: PlanInput): SitePlan {
   }
   const labels = trackingLabels(input, selected);
   const streams = selected.flatMap((m) => (m.tracking_label ? [m.name] : []));
+  const site = input.registration.site;
   return {
-    docsPath: input.registration.site?.path ?? input.defaults.docsPath,
     siteTitle: input.registration.project?.name ?? "",
-    include: input.registration.site?.include ?? [],
+    docs:
+      site?.path === null
+        ? null
+        : { path: site?.path ?? input.defaults.docsPath, include: site?.include ?? [] },
     linkRotLabel: labels[streams.indexOf("site")],
   };
 }
 
-/** The step outputs of a plan, by output name (include as compact JSON). */
+/** The step outputs of a plan, by output name; a site plan is one row,
+ *  the config document pages-site reads. */
 export function outputsOf(plan: CiPlan | SitePlan): Record<string, string> {
-  if ("docsPath" in plan) {
-    return {
-      docs_path: plan.docsPath,
+  if ("docs" in plan) {
+    const config: SiteConfigJson = {
       site_title: plan.siteTitle,
-      include: JSON.stringify(plan.include),
+      docs_path: plan.docs === null ? null : plan.docs.path,
+      include: plan.docs === null ? [] : plan.docs.include,
       link_rot_label: plan.linkRotLabel,
     };
+    return { config: JSON.stringify(config) };
   }
   return {
     "modules": JSON.stringify(plan.modules),

@@ -10,7 +10,7 @@ Selecting the `site` module arms the managed ci.yml's `site` leg: ONE GitHub Pag
 | Part | Built by | Served at |
 |---|---|---|
 | The repository's own website | the repo-owned hook `.github/actions/site-build/action.yml` | `/` (one unversioned build of the judged commit) |
-| The docs: `docs/` markdown under the central fleet theme | the fleet (VitePress, config and theme live in repo-platform; the repository carries only markdown) | `/<site.path>/` beside a website, else `/` (versioned by tag) |
+| The docs: `docs/` markdown under the central fleet theme | the fleet (VitePress, config and theme live in repo-platform; the repository carries only markdown) | `/<site.path>/` beside a website, else `/` (versioned by tag); off with `site.path: null` ([below](#turning-the-docs-half-off-sitepath-null)) |
 
 repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the site at <https://vivswan.github.io/repo-platform/>.
 
@@ -83,12 +83,14 @@ Map the two inputs onto whatever the tool expects (`ASTRO_BASE`/`ASTRO_SITE`, `v
 
 ## Layout
 
-| hook `dist` | `docs/` exists | The site |
-|---|---|---|
-| set | yes | the website at `/`, the docs versioned at `/<site.path>/` (default `docs`), one link check over both |
-| set | no | the website at `/` alone |
-| empty | yes | the docs versioned at `/` |
-| empty | no | nothing published; the leg is green with a notice |
+| hook `dist` | `docs/` exists | `site.path` | The site |
+|---|---|---|---|
+| set | yes | a segment (default `docs`) | the website at `/`, the docs versioned at `/<site.path>/`, one link check over both |
+| set | no | any | the website at `/` alone |
+| empty | yes | a segment | the docs versioned at `/` |
+| set | yes | `null` | the website at `/` alone; `docs/` is the website's own business |
+| empty | any | `null` | nothing published; the leg is green with a notice |
+| empty | no | any | nothing published; the leg is green with a notice |
 
 The website is one build of the judged commit: version navigation belongs to the docs. The docs mount carries the tag rules:
 
@@ -136,9 +138,27 @@ site:
 - A `SKILL.md`-style page with neither a `title` nor an h1 is titled by its `name` frontmatter key, its `description` becomes the meta description, and its "Edit this page" link names the real source path.
 - Links resolve from the page's own repository path: `../repo-platform-sync-pr/SKILL.md` on a skill page is that skill's directory URL; `.codex-plugin/plugin.json` is the file on GitHub at the tier's ref.
 
+## Turning the docs half off (`site.path: null`)
+
+A repository whose own website already renders `docs/` (an Astro site serving it at `/docs/`, an MkDocs build of the same tree) has no use for the fleet's copy: the two would claim the same URLs, and `docs-check` would judge markdown by the fleet's link rules instead of the website's. One registration line turns the docs half off:
+
+```yaml
+site:
+  path: null
+```
+
+| With `site.path: null` | Behavior |
+|---|---|
+| the deploy | publishes the hook's `dist` alone, whatever `docs/` carries; no `dist` means nothing published |
+| `docs-check` | stands down with a notice on every PR (the job still runs, and passes) |
+| `site.include` | refused by the plan: there is no docs mount to render the roots into |
+| the plan's `config` output | `docs_path` is `null` |
+
+The registration is read on every run, so the flip needs no sync. Use it when the website renders the docs itself: with `path: null` the hook's `dist` is the whole site, and an empty hook publishes nothing.
+
 ## The docs PR check
 
-fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory, with the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy. It is one of the gating jobs behind `all-green`: the deploy would go red on the same link after the merge, and a job inside the `ci` call can never hang as an expected check the way a paths-filtered workflow could. A PR that changes no docs still runs it, quickly, over the unchanged tree. A `docs/` without `docs/README.md` fails it, naming the missing landing page.
+fleet-ci.yml's `docs-check` job builds `docs/` strictly on every pull request of a repository selecting `site` that carries a `docs/` directory (and has not turned the docs half off), with the same include roots the deploy reads from the registration, so a dead link fails the PR instead of the deploy. It is one of the gating jobs behind `all-green`: the deploy would go red on the same link after the merge, and a job inside the `ci` call can never hang as an expected check the way a paths-filtered workflow could. A PR that changes no docs still runs it, quickly, over the unchanged tree. A `docs/` without `docs/README.md` fails it, naming the missing landing page.
 
 Internal links are checked across the whole assembled site, served the way GitHub Pages serves it: an extensionless path is its `.html`, a directory is its `index.html`. Every same-site link on a page built from the default branch must resolve, wherever the target lives (a website page into the docs, a docs page to a staged skill, a `#fragment` naming a heading, an emitted asset, a link spelled with the site's own URL). A broken one fails with a `page -> link (reason)` list:
 
@@ -156,11 +176,11 @@ The nightly run crawls the deployed site's EXTERNAL links after publishing (inte
 
 | Key in `.repo-platform.yml` | Meaning | Default |
 |---|---|---|
-| `site.path` | the URL segment the docs mount under when the hook also builds a website | `docs` (`modules.site.path` in `files.yml`) |
+| `site.path` | the URL segment the docs mount under when the hook also builds a website; `null` turns the docs half off ([above](#turning-the-docs-half-off-sitepath-null)) | `docs` (`modules.site.path` in `files.yml`) |
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
 | `labels.site` | the link-rot tracking issue's label | `docs-link-rot` |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml`. A registration still carrying a `pages:` or `docs_site:` block fails the plan with a message naming this module and the hook.
+The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand. A registration still carrying a `pages:` or `docs_site:` block fails the plan with a message naming this module and the hook.
 
 ## Pages enablement
 
@@ -181,7 +201,7 @@ To go back, undo all three together (in particular, remove the variable AND clea
 - The repository's website is one unversioned build of the judged commit; the `vX.Y.Z/` tiers exist only under the docs mount. A repository that wants versioned website builds puts them in its own hook output.
 - The hook runs under the deploy job's token (`pages: write`, `id-token: write`, `issues: write`, the same exposure the release hooks have), so it runs only code from the judged commit.
 - A repository that already had its own `.github/actions/site-build/action.yml` keeps it (`unchanged` in the sync report); the fleet passes it `base-path` and `origin`, which an unrelated action may not declare. The sync-pr skill's triage row covers it.
-- A repository with a `docs/` directory but no `docs/README.md` is red on every PR (`docs-check`) until the landing page exists.
+- A repository with a `docs/` directory but no `docs/README.md` is red on every PR (`docs-check`) until the landing page exists, unless the docs half is off.
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans: selecting the module is the opt-in to that, per repository.
 - Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.
 - The theme is one for the whole fleet (dark by default with a light variant, one accent hue per repository derived from its name), owned by [actions/pages-site/.vitepress/theme/](../actions/pages-site/.vitepress/theme/README.md), which says which file controls what. Nothing is configured per repository, and the docs build strips the theme's remote font imports, so the docs never load a font from a third party (the hook's website is copied as built).
