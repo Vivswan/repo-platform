@@ -13,7 +13,7 @@
 //     --build <full sha> --repository <owner/name> --private <true|false>
 //     [--previous-files <files.yml>] [--summary <path>]
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FileEntry, selectEntries } from "../../../../actions/plan/files_config.ts";
 import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
@@ -23,7 +23,7 @@ import { pathProblem } from "../../../../actions/shared/repo_path.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
-import { blockSources, loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
+import { loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
@@ -36,13 +36,7 @@ import {
   writeManifest,
 } from "./manifest.ts";
 import { applyMirrors, blockedAncestor, MirrorFailure } from "./mirrors.ts";
-import {
-  missingPlaceholders,
-  type PlaceholderName,
-  type PlaceholderValues,
-  spliceBlocks,
-  substitute,
-} from "./placeholders.ts";
+import type { PlaceholderName, PlaceholderValues } from "./placeholders.ts";
 import {
   PLACEHOLDER_SOURCE,
   parseRepositorySlug,
@@ -50,6 +44,7 @@ import {
   type RepositorySlug,
   readRegistration,
 } from "./registration.ts";
+import { renderSourced } from "./render_source.ts";
 import {
   buildReport,
   renderReport,
@@ -63,7 +58,7 @@ import { renderSettings } from "./settings_entry.ts";
 import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
 import { writeLink } from "./write_link.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
-import { renderRegion, writeSplit } from "./write_split.ts";
+import { writeSplit } from "./write_split.ts";
 import { writeStarter } from "./write_starter.ts";
 
 export interface SyncOptions {
@@ -140,13 +135,7 @@ function render(
       write: (recorded) => writeManaged(target, entry.path, rendered.content, recorded),
     };
   }
-  const raw = (rel: string) => readFileSync(join(options.tree, rel), "utf-8");
-  const text = (): string | { missing: string[] } => {
-    const blocks = blockSources(config, entry, modules, options.tree).map(raw);
-    const spliced = spliceBlocks(raw(entry.source), blocks);
-    const missing = missingPlaceholders(spliced, values);
-    return missing.length > 0 ? { missing } : substitute(spliced, values);
-  };
+  const text = () => renderSourced(config, options.tree, entry, modules, values);
   if (entry.class === "starter") {
     return {
       content: "",
@@ -158,11 +147,10 @@ function render(
   if (typeof body !== "string") return body;
   if (entry.class === "split") {
     const markers = regionMarkers(entry.region);
-    const region = renderRegion(body, markers);
     return {
-      content: region,
-      record: { class: "split", grammar: "managed-region", ...markers, hash: sha256(region) },
-      write: (recorded) => writeSplit(target, entry.path, region, markers, recorded),
+      content: body,
+      record: { class: "split", grammar: "managed-region", ...markers, hash: sha256(body) },
+      write: (recorded) => writeSplit(target, entry.path, body, markers, recorded),
     };
   }
   return {

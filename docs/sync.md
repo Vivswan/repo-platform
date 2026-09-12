@@ -278,6 +278,10 @@ Every row's target is recorded as class `mirror` with the copy's hash, or with `
 
 The PR body stays under GitHub's 65,536-character limit (`BODY_CAP` in [sync/deliver.ts](../.github/scripts/sync/deliver.ts)): the header and the Review section take their room first, then the tables and notes, then the replaced-edit diffs; a section the room runs out on ends in a warning naming how many characters were cut, and one with no room left is dropped.
 
+## This repository's own copies
+
+The sync never targets this repository, yet it carries root copies of the files it ships. The `root-twin-parity` rule ([scripts/check/ssot/twin_copies.ts](../scripts/check/ssot/twin_copies.ts)) renders every entry `.repo-platform.yml` selects the way the writer would and holds the copy to it: a managed file whole, a split file's region, a link's target; starters are repo-owned here as everywhere, and the settings document is `bun run settings`'s. The files at a managed path that are this repository's own (its `ci.yml`, `dependabot.yml`, `.yamllint`, `AGENTS.md`) are listed in the rule with the reason each cannot be the fleet's.
+
 ## The operator
 
 [sync-repos.yml](../.github/workflows/sync-repos.yml) runs the writer against every managed repository: a `plan` job, then one `sync (row <i>)` job per row. It wakes on the Tuesday cron (the weekly heal), on a dispatch, or as the called leg of a merge's post-green run ([all-green.md](all-green.md#after-the-gate)). The job shape is the redaction: the public log carries row indexes and the vocabulary below, nothing else, and every detail lands in the target repository ([private repositories](#private-repositories)).
