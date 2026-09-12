@@ -1,7 +1,8 @@
 // A github.token push onto a PR leaves the new head's pull_request run held for approval (GitHub's GITHUB_TOKEN
 // docs), so every source that pushes so tells the PR one notice: what it pushed, then the fact and the way out.
 // The two halves meet at the first ": "; the second half is compared across the sources, and a workflow is
-// judged on its wiring, so its run warning and its sticky comment can only ever say the one string.
+// judged on its wiring: the push step carries the pinned output and warning lines and the one sticky step
+// posts the output.
 //
 //   script    -> the PUSHED_NOTICE const, one declaration by extraction; the calling workflow posts its output
 //   workflow  -> the push step's NOTICE env, echoed as the warning and the `notice` output the sticky step posts
