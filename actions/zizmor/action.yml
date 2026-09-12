@@ -2,16 +2,15 @@ name: Zizmor
 description: >-
   The fleet's GitHub Actions security audit: zizmor over every workflow and
   action.yml in the caller's checkout, under the fleet policy shipped
-  beside this action unless the repository carries its own
-  .github/zizmor.yml. Two passes of the pinned upstream action, both at
-  high severity: the first uploads the high findings to code scanning as
-  SARIF (public repositories only, as private personal repositories have no
-  code scanning), the second fails the step on any high finding. A medium
-  or low finding neither blocks nor surfaces. zizmor
-  exits non-zero alike on an audit error and on a finding, so a failed
-  attempt of either pass runs once more and only the retry's result counts.
-  The only bypass is zizmor's own: an inline `# zizmor: ignore[rule]`
-  comment or a config ignore entry, in the repository, with a reason.
+  beside this action (a repository's own zizmor config is not read). Two
+  passes of the pinned upstream action, both at high severity: the first
+  uploads the high findings to code scanning as SARIF (public repositories
+  only, as private personal repositories have no code scanning), the second
+  fails the step on any high finding. A medium or low finding neither
+  blocks nor surfaces. zizmor exits non-zero alike on an audit error and on
+  a finding, so a failed attempt of either pass runs once more and only the
+  retry's result counts. The only bypass is zizmor's own inline
+  `# zizmor: ignore[rule]` comment, in the repository, with a reason.
 
 inputs:
   upload-sarif:
@@ -24,19 +23,20 @@ inputs:
 runs:
   using: composite
   steps:
-    # --config suppresses zizmor's own discovery, so the repository's file
-    # is passed explicitly when it exists. The upstream action runs zizmor
-    # in a container that mounts only the workspace, so the fleet policy
-    # (outside it, under the action path) is copied to a workspace dotfile
-    # that zizmor's collection never audits, and removed after the passes.
-    - name: Resolve the policy
+    # The upstream action runs zizmor in a container that mounts only the
+    # workspace, so the fleet policy (outside it, under the action path) is
+    # rendered to a workspace dotfile that zizmor's collection never audits,
+    # and removed after the passes. --config also suppresses zizmor's own
+    # discovery of a repository config.
+    - name: Render the fleet policy
       id: policy
       shell: bash
       env:
         FLEET_POLICY: ${{ github.action_path }}/zizmor.yml
+        OWNER: ${{ github.repository_owner }}
       run: |
-        if [ -f .github/zizmor.yml ]; then path=.github/zizmor.yml; else path=.zizmor-fleet-policy.yml; cp "$FLEET_POLICY" "$path"; fi
-        echo "path=$path" >>"$GITHUB_OUTPUT"
+        sed "s|{{github_username}}|$OWNER|g" "$FLEET_POLICY" > .zizmor-fleet-policy.yml
+        echo "path=.zizmor-fleet-policy.yml" >>"$GITHUB_OUTPUT"
 
     # SARIF mode never fails the step on a finding (zizmor suppresses its
     # finding exit codes there), hence the judging pass below. A retry keys

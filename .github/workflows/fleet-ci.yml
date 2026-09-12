@@ -152,9 +152,9 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@stable
 
-  # The fleet policy applies unless the repository carries .github/zizmor.yml. SARIF uploads on
-  # public repositories only (a private personal repository has no code scanning); != 'true' so an
-  # empty visibility output uploads, where a private repository fails loudly instead of skipping silently.
+  # SARIF uploads on public repositories only (a private personal repository has no code scanning);
+  # != 'true' so an empty visibility output uploads, where a private repository fails loudly
+  # instead of skipping silently.
   zizmor:
     needs: [plan]
     if: github.event_name != 'schedule'

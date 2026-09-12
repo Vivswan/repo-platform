@@ -1,12 +1,13 @@
-# The fleet's zizmor policy: actions/zizmor applies it to every managed
-# repository that carries no .github/zizmor.yml of its own.
+# The fleet's zizmor policy: actions/zizmor renders it into every managed
+# repository's workspace, filling {{github_username}} with the caller's
+# repository owner.
 rules:
   unpinned-uses:
     config:
       policies:
         # The stable tag is the fleet's green-gated delivery channel
         # (docs/build-provenance.md): a moving ref on purpose.
-        Vivswan/repo-platform/*: ref-pin
+        "{{github_username}}/repo-platform/*": ref-pin
         "*": hash-pin
   dangerous-triggers:
     # The managed auto-assign.yml's workflow_run trigger only calls the
