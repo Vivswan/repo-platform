@@ -1,6 +1,5 @@
-// The one assembly of a sourced entry's text: the writer renders every target's copy through here, and the
-// operator's root copies are held to the same call (scripts/check/ssot/twin_copies.ts), so the file this
-// repository runs and the file it ships can only be the same bytes.
+// The one assembly of a sourced entry's text: the writer and the parity rule (scripts/check/ssot/twin_copies.ts)
+// share this render, so the copy the rule holds a root file to is the writer's own, not a second reading.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,11 +19,9 @@ import {
 } from "./placeholders.ts";
 import { renderRegion } from "./write_split.ts";
 
-export type SourcedEntry = ManagedEntry | StarterEntry | SplitEntry;
+type SourcedEntry = ManagedEntry | StarterEntry | SplitEntry;
 
-/** What the entry writes for one repository: the source with its blocks spliced and its placeholders
- *  substituted, wrapped in the region markers for a split entry; or the placeholders that have no value
- *  (nothing is rendered then: an empty value is never written). */
+/** A placeholder without a value stops the render: an empty value is never written. */
 export function renderSourced(
   config: FilesConfig,
   tree: string,

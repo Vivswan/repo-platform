@@ -1,6 +1,6 @@
 // The sync never targets this repository (its files are the sources), yet it carries root copies of what
-// it ships, so each copy is held to the writer's own render of its source for this repository's
-// registration: what the fleet receives and what the operator runs are then the same bytes.
+// it ships, so the content each copy holds is judged against the writer's own render of its source for
+// this repository's registration.
 //
 //   managed  -> the whole file
 //   split    -> the region between its markers; the halves outside are this repository's own
