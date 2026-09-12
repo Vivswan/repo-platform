@@ -10,7 +10,7 @@ import {
 import { supersededNotice } from "../../.github/scripts/fleet/newest_main.ts";
 import { maskForms } from "../../.github/scripts/shared/mask.ts";
 import { moduleRoster } from "../../.github/scripts/sync/modules.ts";
-import { planMatrix, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
+import { matrixRows, rowKeyOf } from "../../.github/scripts/sync/resolve_row.ts";
 import { RENDERED_HEADER } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { tempDirs } from "../shared/temp_dir";
 
@@ -260,7 +260,7 @@ describe("select_settings_repos.ts", () => {
     }
     expect(result.output).toBe(`count=${count}\nmatrix=${matrix}\n`);
     for (const form of PRIVATE_SLUGS.flatMap(maskForms)) expect(matrix).not.toContain(form);
-    const rows = (JSON.parse(matrix) as { include: { row: number; key: string }[] }).include;
+    const rows = JSON.parse(matrix) as { row: number; key: string }[];
     expect(rows.map((row) => row.row)).toEqual(rows.map((_, index) => index));
     const slugs = PERSONAS.map((persona) => `Vivswan/${persona.name}`);
     return {
@@ -372,7 +372,7 @@ describe("select_settings_repos.ts", () => {
       ),
       masked: true,
       stderr: "",
-      output: expect.stringMatching(/^count=6\nmatrix=\{"include":\[\{"row":0,"key":"/),
+      output: expect.stringMatching(/^count=6\nmatrix=\[\{"row":0,"key":"/),
       summary: summaryOf(...ALL_WARNINGS),
     });
     expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
@@ -397,7 +397,7 @@ describe("select_settings_repos.ts", () => {
 
   test("the matrix is the plan's keyed rows: N rows for N targets, each an index and the key its resolver matches, no slug in the text", () => {
     const rows = ALL_TARGETS.map((repo) => ({ repo, private: repo.includes("/hidden-") }));
-    expect(main.output).toBe(`count=6\nmatrix=${JSON.stringify(planMatrix(rows, keyOf))}\n`);
+    expect(main.output).toBe(`count=6\nmatrix=${JSON.stringify(matrixRows(rows, keyOf))}\n`);
     expect(outputsOf(main)).toEqual({ count: "6", repos: ALL_TARGETS });
     for (const persona of PERSONAS) {
       expect(main.output.toLowerCase()).not.toContain(persona.name);
@@ -485,7 +485,7 @@ describe("select_settings_repos.ts", () => {
         stdout: lines(`::notice::${supersededNotice(SHA, NEWER_SHA)}`),
         masked: [],
         stderr: "",
-        output: `count=0\nmatrix=${JSON.stringify(planMatrix([], keyOf))}\n`,
+        output: `count=0\nmatrix=${JSON.stringify(matrixRows([], keyOf))}\n`,
         summary: "",
       });
     },
@@ -751,7 +751,7 @@ describe("select_settings_repos.ts", () => {
         ),
         masked: PRIVATE_SLUGS.flatMap(maskForms).length,
         stderr: "",
-        output: 'count=0\nmatrix={"include":[]}\n',
+        output: "count=0\nmatrix=[]\n",
         summary: "",
       });
       expect(outputsOf(r)).toEqual({ count: "0", repos: [] });

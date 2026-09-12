@@ -9,21 +9,18 @@ import { NETWORK_TIMEOUT_MS } from "../fleet/discovery.ts";
 import { DEFAULT_HANG_BOUND_MS } from "../shared/proc.ts";
 import { DELIVERY_CALL_BOUND_MS, DELIVERY_CALLS } from "./deliver.ts";
 
-export const PROBE_FLEET_SIZE = 10;
-/** Discovery's two listings, then a push probe and an adoption read per
- *  repository, each under the fleet network bound. */
-export const PROBE_BUDGET_MS = (2 + 2 * PROBE_FLEET_SIZE) * NETWORK_TIMEOUT_MS;
+/** The resolver's one listing of the owner's repositories (resolve_row.ts), under the fleet network bound. */
+export const LISTING_BUDGET_MS = NETWORK_TIMEOUT_MS;
 /** The target checkout (checkout_target.ts): the clone and the credential
  *  strip, two git calls under the hang bound. */
 export const CHECKOUT_BUDGET_MS = 2 * DEFAULT_HANG_BOUND_MS;
 export const DELIVERY_BUDGET_MS = DELIVERY_CALLS * DELIVERY_CALL_BOUND_MS;
 /** The steps outside those bounds: this repository's checkout, bun's
- *  setup and install, the resolver, and the printer, all local or the
- *  runner's own. */
+ *  setup and install, and the printer, all local or the runner's own. */
 export const SETUP_MINUTES = 5;
 
 /** The writer's git calls are local to the clone, so its step's own timeout-minutes is its bound. */
 export function rowBudgetMinutes(writerMinutes: number): number {
-  const bounded = PROBE_BUDGET_MS + CHECKOUT_BUDGET_MS + DELIVERY_BUDGET_MS;
+  const bounded = LISTING_BUDGET_MS + CHECKOUT_BUDGET_MS + DELIVERY_BUDGET_MS;
   return Math.ceil(bounded / 60_000) + writerMinutes + SETUP_MINUTES;
 }

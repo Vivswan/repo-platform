@@ -11,8 +11,7 @@ export type DeliveryVerdict = (typeof DELIVERY_VERDICTS)[number];
 
 export const VERDICT_FILE = "verdict.txt";
 
-/** The selector's rows ({repo, private}, real slugs) in RUNNER_TEMP: the
- *  plan counts them, the row resolver reads its own. */
+/** The selector's rows ({repo, private}, real slugs) in RUNNER_TEMP, which the plan counts. */
 export const ROWS_FILE = "rows.json";
 
 export const UNRESOLVED = "failed before the target was resolved; re-run the workflow";

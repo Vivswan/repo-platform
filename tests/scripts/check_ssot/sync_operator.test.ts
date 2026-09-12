@@ -26,8 +26,8 @@ describe("syncOperatorMismatches", () => {
     {
       reason: "a run step that prints (its redirect dropped)",
       text: mutate(
-        'run: bun .github/scripts/fleet/discover_repos.ts > "$RUNNER_TEMP/discover.log" 2>&1',
-        "run: bun .github/scripts/fleet/discover_repos.ts",
+        'run: bun .github/scripts/sync/checkout_target.ts > "$RUNNER_TEMP/checkout-stdio.log" 2>&1',
+        "run: bun .github/scripts/sync/checkout_target.ts",
       ),
       expected: "redirected to a $RUNNER_TEMP file",
     },
@@ -39,10 +39,18 @@ describe("syncOperatorMismatches", () => {
     {
       reason: "a matrix carrying repository slugs",
       text: mutate(
-        "      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+        "      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.matrix) }}",
         "      matrix:\n        repo: ${{ fromJSON(needs.plan.outputs.repos) }}",
       ),
       expected: "row indexes and keys alone",
+    },
+    {
+      reason: "the include word carried in the plan's output (a masked name could match it)",
+      text: mutate(
+        "      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+        "      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}",
+      ),
+      expected: 'matrix: {"include":"${{ fromJSON(needs.plan.outputs.matrix) }}"}',
     },
     {
       reason: "a plan matrix output built anywhere but the selector (a literal could carry slugs)",
@@ -93,18 +101,34 @@ describe("syncOperatorMismatches", () => {
       expected: "no repository: on a checkout action",
     },
     {
-      reason: "the row job's selector losing the call scope the plan's selector reads",
+      reason: "a re-selection in the row job (N selections per run, and a row that could move)",
       text: mutate(
-        "          TARGET_SHA: ${{ inputs.sha }}\n        run: bun .github/scripts/fleet/select_sync_repos.ts > ",
-        "        run: bun .github/scripts/fleet/select_sync_repos.ts > ",
+        "      - name: Resolve the row's target\n",
+        '      - run: bun .github/scripts/fleet/select_sync_repos.ts > "$RUNNER_TEMP/select.log" 2>&1\n      - name: Resolve the row\'s target\n',
       ),
-      expected: "the plan's exact env",
+      expected: "no selection in the sync job",
+    },
+    {
+      reason: "a discovery in the row job",
+      text: mutate(
+        "      - name: Resolve the row's target\n",
+        '      - run: bun .github/scripts/fleet/discover_repos.ts > "$RUNNER_TEMP/discover.log" 2>&1\n      - name: Resolve the row\'s target\n',
+      ),
+      expected: "no discovery in the sync job",
+    },
+    {
+      reason: "the resolver without the listing's owner",
+      text: mutate(
+        "          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}\n          OWNER: ${{ github.repository_owner }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+        "          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      ),
+      expected: "the resolver step's env exactly",
     },
     {
       reason:
         "a row timeout under its budget (the runner would kill the row before the failure report is filed)",
       text: mutate(
-        `    timeout-minutes: 105\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
+        `    timeout-minutes: 65\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
         `    timeout-minutes: 60\n    steps:\n${CHECKOUT}\n\n${SETUP_BUN}`,
       ),
       expected: `timeout-minutes at least ${rowBudgetMinutes(10)}`,
@@ -139,10 +163,10 @@ describe("syncOperatorMismatches", () => {
     expect(got[0]).toContain(expected);
   });
 
-  test("the resolver's own env is judged too: a TARGET there names that step", () => {
+  test("the resolver's own env is judged too: a TARGET there names that step and breaks the exact env", () => {
     const text = mutate(
-      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n        run: bun .github/scripts/sync/resolve_row.ts",
-      "          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          OWNER: ${{ github.repository_owner }}\n        run: bun .github/scripts/sync/resolve_row.ts",
+      "          OWNER: ${{ github.repository_owner }}\n          TARGET: ${{ steps.target.outputs.repo }}\n        run: bun .github/scripts/sync/resolve_row.ts",
     );
     expect(syncOperatorMismatches(text)).toEqual([
       {
@@ -150,6 +174,18 @@ describe("syncOperatorMismatches", () => {
         expected:
           "no TARGET in a sync step's env (the runner prints step env; the name rides GITHUB_ENV)",
         got: 'sync step "Resolve the row\'s target" declares TARGET',
+      },
+      {
+        file: SYNC_WORKFLOW,
+        expected:
+          "the resolver step's env exactly " +
+          '{"ROW_KEY":"${{ matrix.key }}","PAT":"${{ secrets.REPO_PLATFORM_TOKEN }}",' +
+          '"GH_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}","OWNER":"${{ github.repository_owner }}"}' +
+          " (the row's key, what keyed it, and the listing it resolves against)",
+        got:
+          '{"GH_TOKEN":"${{ secrets.REPO_PLATFORM_TOKEN }}","OWNER":"${{ github.repository_owner }}",' +
+          '"PAT":"${{ secrets.REPO_PLATFORM_TOKEN }}","ROW_KEY":"${{ matrix.key }}",' +
+          '"TARGET":"${{ steps.target.outputs.repo }}"}',
       },
     ]);
   });

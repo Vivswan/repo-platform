@@ -127,7 +127,8 @@ jobs:
         run: bun .github/scripts/sync/verdict.ts plan
 
   # One job per matrix row: an index for the job name, which never carries a repository name, and
-  # the plan's opaque key for the resolver.
+  # the plan's opaque key for the resolver. The `include` word lives here, not in the plan's output:
+  # the runner drops a job output that spells a masked name (sync/resolve_row.ts).
   # The target checkout and the writer continue on error so deliver.ts can
   # file the failure in the target; the job is red only before that point.
   sync:
@@ -140,14 +141,15 @@ jobs:
       # Every row writes with the same PAT, and PR creation is
       # content-creating (secondary rate limits): bound the fleet's burst.
       max-parallel: 5
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: sync (row ${{ matrix.row }})
     runs-on: ubuntu-latest
     # At least the budget row_budget.ts sums from the steps' bounds (the
     # operator-verdict-only rule judges it): every bound a step can hit
     # before deliver.ts files a failure counts, since a row the runner kills
     # at its timeout files nothing.
-    timeout-minutes: 105
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -164,29 +166,16 @@ jobs:
           ref: ${{ needs.plan.outputs.build }}
           path: build
 
-      # The plan, recomputed: the same discovery and selection the plan job
-      # ran, so the row's key finds its repository among the rows.
-      - name: Discover repos
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bun .github/scripts/fleet/discover_repos.ts > "$RUNNER_TEMP/discover.log" 2>&1
-
-      - name: Select repos and check adoption
-        id: select
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-          ONLY_REPO: ${{ inputs.repos }}
-          TARGET_SHA: ${{ inputs.sha }}
-        run: bun .github/scripts/fleet/select_sync_repos.ts > "$RUNNER_TEMP/select.log" 2>&1
-
-      # The only step that sees the name in the clear: resolve_row.ts masks the target before anything else prints.
+      # The only step that sees the name in the clear: resolve_row.ts lists the owner's repositories
+      # once (no re-selection: the plan's probes ran once, in the plan), masks the target before
+      # anything else prints, and hands it on through GITHUB_ENV.
       - name: Resolve the row's target
         id: target
         env:
           ROW_KEY: ${{ matrix.key }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
         run: bun .github/scripts/sync/resolve_row.ts
 
       # A captured clone, not actions/checkout: git quotes target file text

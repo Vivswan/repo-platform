@@ -17,6 +17,7 @@ import type { Mismatch } from "./comparison.ts";
 import { asRecord, REPO_ROOT, read } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
+import { canonical, keyedMatrix, RESOLVER_ENV } from "./sync_operator.ts";
 
 interface WorkflowStep {
   id?: string;
@@ -319,11 +320,11 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
       got: apply.if === undefined ? "no condition" : `if: ${String(apply.if)}`,
     });
   }
-  const matrix = `\${{ fromJSON(needs.${planName}.outputs.matrix) }}`;
-  if (apply.strategy?.matrix !== matrix) {
+  const matrix = keyedMatrix(planName);
+  if (canonical(apply.strategy?.matrix) !== canonical(matrix)) {
     mismatches.push({
       file: rel,
-      expected: `the ${applyName} job's matrix the plan's row indexes and keys alone: matrix: ${matrix}`,
+      expected: `the ${applyName} job's matrix the plan's row indexes and keys alone: matrix: ${JSON.stringify(matrix)}`,
       got:
         apply.strategy?.matrix === undefined
           ? "no matrix"
@@ -395,21 +396,11 @@ export function settingsApplyInputMismatches(text: string): Mismatch[] {
     if (resolverAt === -1) return mismatches;
   }
   const resolver = applySteps[resolverAt];
-  const resolverEnv = {
-    ROW_KEY: "${{ matrix.key }}",
-    PAT: "${{ secrets.REPO_PLATFORM_TOKEN }}",
-    GH_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
-    OWNER: "${{ github.repository_owner }}",
-  };
-  const env = resolver.env ?? {};
-  if (
-    JSON.stringify(env, Object.keys(env).sort()) !==
-    JSON.stringify(resolverEnv, Object.keys(resolverEnv).sort())
-  ) {
+  if (canonical(resolver.env) !== canonical(RESOLVER_ENV)) {
     mismatches.push({
       file: rel,
-      expected: `the resolver step's env exactly ${JSON.stringify(resolverEnv)} (the row's key, what keyed it, and the listing it resolves against)`,
-      got: JSON.stringify(env, Object.keys(env).sort()),
+      expected: `the resolver step's env exactly ${JSON.stringify(RESOLVER_ENV)} (the row's key, what keyed it, and the listing it resolves against)`,
+      got: canonical(resolver.env),
     });
   }
   // The runner prints step env into the public log; the name rides GITHUB_ENV.
