@@ -13,17 +13,11 @@ const SCRIPTS_ROOT = ".github/scripts";
 const SOURCE_EXTENSION = /\.[mc]?[jt]sx?$/;
 
 export interface InProcessScriptImport {
-  /** The importing test, repo-relative. */
   readonly importer: string;
-  /** The imported script, repo-relative without its extension. */
   readonly script: string;
   readonly reason: string;
 }
 
-/** The unit tests under tests/ci that import a CI script's pure helpers
- *  in-process, one line each with why. Every entry must be observed by
- *  the scan, so a moved test or a dropped import cannot leave a stale
- *  excuse. */
 export const IN_PROCESS_SCRIPT_IMPORTS: readonly InProcessScriptImport[] = [
   {
     importer: "tests/ci/bun_setup_smoke.test.ts",
@@ -37,17 +31,13 @@ export const IN_PROCESS_SCRIPT_IMPORTS: readonly InProcessScriptImport[] = [
   },
 ];
 
-/** `specifier` as a repo-relative, extensionless path when it is a relative
- *  import from `importer`; null for packages and node:/bun: builtins. */
 export function resolvedImport(importer: string, specifier: string): string | null {
   if (!specifier.startsWith("./") && !specifier.startsWith("../")) return null;
   const resolved = posix.normalize(posix.join(posix.dirname(importer), specifier));
   return resolved.replace(SOURCE_EXTENSION, "");
 }
 
-/** Every reach from a tests/ci file into .github/scripts that is not an
- *  allowlisted in-process import, a non-literal specifier (unauditable, so
- *  closed), and every allowlist entry the scan never observed. */
+/** A non-literal specifier cannot be audited, so it counts as a reach. */
 export function harnessImportMismatches(
   files: Record<string, string>,
   allowed: readonly InProcessScriptImport[] = IN_PROCESS_SCRIPT_IMPORTS,
@@ -92,7 +82,6 @@ export function harnessImportMismatches(
   return mismatches;
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const harnessImportRules: Rule[] = [
   {
     name: "ci-harness-imports",

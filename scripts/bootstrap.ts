@@ -1,10 +1,6 @@
 #!/usr/bin/env bun
 
-// Installs the pinned dependencies a fresh worktree lacks: a frozen
-// `bun install` in the repo root and in every directory under actions/
-// that commits a bun.lock (nested ones included, node_modules skipped),
-// one line per directory. Idempotent, so `bun run check` runs it first
-// with --if-missing: nothing happens while every node_modules exists.
+// `bun run check` runs this first with --if-missing (package.json), so a fresh worktree needs no manual install.
 //
 // Usage: bun scripts/bootstrap.ts [--if-missing]
 
@@ -14,8 +10,6 @@ import { must } from "../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
-/** Every directory committing a bun.lock, repo-relative and sorted: the
- * root itself as ".", then the actions/ tree walked recursively. */
 export function bunLockDirs(root: string): string[] {
   const found: string[] = [];
   const walk = (dir: string) => {
@@ -29,7 +23,6 @@ export function bunLockDirs(root: string): string[] {
   return found.sort();
 }
 
-/** The subset of `dirs` with no node_modules yet. */
 export function missingNodeModules(root: string, dirs: string[]): string[] {
   return dirs.filter((dir) => !existsSync(join(root, dir, "node_modules")));
 }

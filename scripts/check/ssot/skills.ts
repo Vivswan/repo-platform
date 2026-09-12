@@ -1,6 +1,3 @@
-// The skills' twin file-ownership tables: two hand-written copies of one
-// roster, compared row for row.
-
 import { firstDiff, type Mismatch } from "./comparison.ts";
 import { read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
@@ -30,12 +27,8 @@ export const SKILL_OWNERSHIP_TABLES = [
   "skills/repo-platform-sync-pr/references/file-ownership.md",
 ] as const;
 
-/** The ownership table's header row, the anchor the roster is read from. */
 export const OWNERSHIP_TABLE_HEADER = "| Class | Files |";
 
-/** The ownership table's Class and Files cells, header and separator
- *  included: the contiguous rows from OWNERSHIP_TABLE_HEADER on. Any other
- *  table in the file is not the roster, so a missing header is a lost anchor. */
 export function ownershipTableRoster(file: string, markdown: string): string[] {
   const lines = markdown.split("\n");
   const start = lines.findIndex((line) => line.startsWith(OWNERSHIP_TABLE_HEADER));
@@ -56,8 +49,6 @@ export function ownershipTableRoster(file: string, markdown: string): string[] {
   );
 }
 
-/** The first roster row where the second table's Class and Files cells
- *  differ from the first's (a row present in one only included). */
 export function ownershipTableMismatches(
   tables: readonly { file: string; markdown: string }[],
 ): Mismatch[] {
@@ -73,13 +64,8 @@ export function ownershipTableMismatches(
   );
 }
 
-/** The rules this module contributes to the checker's run (check_ssot.ts). */
 export const skillRules: Rule[] = [
   {
-    // The skills' twin file-ownership tables share their Class and Files
-    // columns row for row; a path added or reclassified in one table
-    // without the other is the drift the old "keep in sync" comment
-    // could only ask for.
     name: "skill-ownership-tables",
     run: () =>
       ownershipTableMismatches(

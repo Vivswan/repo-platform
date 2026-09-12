@@ -1,21 +1,8 @@
 #!/usr/bin/env bun
-// Builds the gitignore files from the latest github/gitignore content:
-// files/base/.gitignore (the region body every repository receives: the
-// agent and CI workspace sections, then the OS sections), one block file
-// per module and source under files/<module>/ (the writer splices the
-// selected modules' blocks into the region), and this repository's own
-// .gitignore (every source once; content outside the managed region is
-// preserved). files.yml's modules.<module>.gitignore_sources names each
-// source by its github/gitignore stem.
-//
-// Every regeneration resolves github/gitignore's current HEAD and fetches
-// every section from that one commit; nothing records the SHA, so the
-// outputs change only when consumed upstream content changes and the
-// refresh-gitignore PR diff stays worth reading. --topology is the offline
-// gate: the block files match files.yml's sources, and every copy of a
-// section (block, base, this repository's region) carries the same bytes.
-// Content drift inside a block against upstream is ungated until the next
-// refresh regenerates over it.
+// Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
+// so the refresh-gitignore PR diff stays worth reading.
+// --topology is the offline gate: the block files match files.yml's sources, and every copy of a section carries the same bytes;
+// content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 
@@ -35,7 +22,6 @@ const FILES_CONFIG = join(REPO_ROOT, "files.yml");
 const GITIGNORE = ".gitignore";
 const BASE_REL = `base/${GITIGNORE}`;
 
-/** The OS sections every repository receives, github/gitignore paths. */
 export const ALWAYS = [
   "Global/Windows.gitignore",
   "Global/macOS.gitignore",
@@ -47,9 +33,7 @@ const DEFAULT_LOCAL_BODY =
   "# here (above BEGIN), or below the END marker where last-match-wins\n" +
   "# can override managed patterns.\n";
 
-// Not from github/gitignore: agent local state (worktree directories and
-// the machine-local settings file). Both .claude spellings are deliberate:
-// the documented .claude/worktrees/ location plus the dotted variant.
+// Both .claude spellings are deliberate: the documented .claude/worktrees/ location plus the dotted variant.
 const AGENT_SECTION =
   "## Agent local state (repo-platform)\n" +
   ".claude/worktrees/\n" +
@@ -58,37 +42,26 @@ const AGENT_SECTION =
   ".worktrees/\n" +
   ".claude/settings.local.json\n";
 
-// Not from github/gitignore: only the paths a fleet workflow step creates
-// INSIDE a checked-out workspace (the secret scan's SARIF report, the fuzz
-// starter's failure reports), because only those can collide with a
-// committed path of the same name; a job that never checks the repository
-// out cannot collide, so its paths are not listed. Anchored to the root so
-// a nested source folder of the same name is not swallowed.
+// Only paths a fleet step creates inside a checked-out workspace are listed: only those can collide with a committed path of the same name.
+// Root-anchored so a nested source folder of the same name is not swallowed.
 export const CI_WORKSPACE_SECTION =
   "## CI workspace paths (repo-platform)\n" + "/results.sarif\n" + "/.fuzz-failures/\n";
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
 
-/** The github/gitignore path a files.yml source name stands for: the
- *  repository-root file of that stem. */
 export function upstreamPath(name: string): string {
   return `${name}.gitignore`;
 }
 
-/** The name a github/gitignore path takes in its section heading and as
- *  its block file's value: the file's stem. */
 export function blockName(path: string): string {
   return (path.split("/").pop() as string).replace(/\.gitignore$/, "");
 }
 
-/** The files/-relative block file the writer reads for one module's source. */
 export function blockRel(module: string, path: string): string {
   return `${module}/${blockSourcePath(GITIGNORE, blockName(path))}`;
 }
 
-/** Each module's github/gitignore source paths, in files.yml order, from
- *  the modules that declare gitignore_sources. */
 export function gitignoreSources(filesText: string, label = "files.yml"): [string, string[]][] {
   const config = parseFilesConfig(filesText, label);
   return Object.entries(config.modules).flatMap(([module, data]): [string, string[]][] => {
@@ -101,17 +74,11 @@ export function gitignoreSources(filesText: string, label = "files.yml"): [strin
   });
 }
 
-/** Every distinct source across all modules, in first-declaration order:
- *  what this repository's own .gitignore (which carries every toolchain)
- *  emits. */
 export function selfSources(entries: [string, string[]][]): string[] {
   return [...new Set(entries.flatMap(([, sources]) => sources))];
 }
 
-/** Block files under files/ that no files.yml source names: a dropped or
- *  renamed source leaves the old block behind, and the writer would keep
- *  splicing it. Returned (for run() to throw on) rather than deleted: the
- *  missing name may be the typo to fix, not the block. */
+/** Returned rather than deleted: the missing name may be the typo to fix, not the block. */
 export function strayBlockFiles(entries: [string, string[]][], filesDir: string): string[] {
   const expected = new Set(
     entries.flatMap(([module, sources]) => sources.map((path) => blockRel(module, path))),
@@ -128,9 +95,8 @@ export function strayBlockFiles(entries: [string, string[]][], filesDir: string)
   return strays;
 }
 
-/** Declared sources whose block file is missing: a module newly declaring
- *  a source has no block until the generator runs, and the writer would
- *  fail on the missing source. */
+/** A module newly declaring a source has no block until the generator runs, and the writer fails on the missing source
+ *  (.github/scripts/sync/writer/files_config.ts, blockSources). */
 export function missingBlockFiles(entries: [string, string[]][], filesDir: string): string[] {
   return entries.flatMap(([module, sources]) =>
     sources
@@ -140,9 +106,6 @@ export function missingBlockFiles(entries: [string, string[]][], filesDir: strin
   );
 }
 
-/** The github/gitignore sections a generated text carries, by source
- *  path: each heading through the line before the next heading, the
- *  trailing blank line dropped, so the text is what section() produced. */
 export function sectionsIn(text: string): Record<string, string> {
   const headings = [...text.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)];
   const sections: Record<string, string> = {};
@@ -166,21 +129,17 @@ async function upstreamHead(): Promise<string> {
 
 async function section(sha: string, path: string): Promise<string> {
   const name = blockName(path);
-  // Upstream files may carry CRLF line endings (Windows.gitignore does), and
-  // macOS.gitignore spells CR-suffixed filename patterns as a character
-  // class holding a raw CR byte (`Icon[\r]`); normalize to LF and rewrite
-  // those classes to the CR-free `?` glob so outputs stay ASCII. Upstream
-  // comment lines also carry trailing spaces, which fail downstream repos'
-  // whitespace linters; strip them.
+  // Upstream quirks, each normalized so the outputs stay ASCII and lint-clean downstream:
+  //   Windows.gitignore  -> CRLF line endings
+  //   macOS.gitignore    -> `Icon[\r]`, a character class holding a raw CR byte, rewritten to the CR-free `?` glob
+  //   comment lines      -> trailing spaces, which fail downstream repos' whitespace linters
   const body = (await fetchText(`${RAW}/${sha}/${path}`))
     .replaceAll("\r\n", "\n")
     .replaceAll("[\r]", "?")
     .replace(/[ \t]+$/gm, "")
     .trim();
-  // Enforced, not just claimed: the outputs are written latin1 so the self
-  // file's byte-owned sides round-trip exactly, and that encoding is only
-  // identity for ASCII generated text - a non-ASCII upstream section must
-  // fail here, named, rather than corrupt silently on write.
+  // The outputs are written latin1 (the self file's sides are byte-owned), which is identity only for ASCII,
+  // so a non-ASCII section must fail here rather than corrupt silently on write.
   // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range check is this regex's whole job
   if (!/^[\x00-\x7f]*$/.test(body)) {
     throw new Error(
@@ -197,12 +156,8 @@ const HEADER_COMMENT =
   "# (above BEGIN, or below END where last-match-wins can override).\n" +
   "\n";
 
-/** Current content outside the managed region (above BEGIN and below END),
- *  the default seed when the file does not exist yet, or a loud error when
- *  the file exists but has no exactly-once clean region (cleanManagedRegion,
- *  the same accept/reject the writer applies). Regenerating around a
- *  malformed region would silently drop local content or duplicate
- *  markers; the fix is a hand edit, not a guess. */
+/** Regenerating around a malformed region would silently drop local content or duplicate markers, so it throws;
+ *  cleanManagedRegion is the same accept/reject the writer applies. */
 export function existingLocalSides(output: string): { above: string; below: string } {
   if (!existsSync(output)) return { above: `${DEFAULT_LOCAL_BODY}\n`, below: "" };
   // latin1, not utf-8: the sides are repo-owned bytes, and a utf-8 decode
@@ -216,9 +171,7 @@ export function existingLocalSides(output: string): { above: string; below: stri
   return { above: slice.above, below: slice.below };
 }
 
-/** The region body every repository receives: the header comment, the
- *  agent and CI workspace sections, and the OS sections. The writer adds
- *  the markers and splices the selected modules' blocks after it. */
+/** The writer adds the markers and splices the selected modules' blocks after this body. */
 export function buildFilesBase(sections: Record<string, string>): string {
   const parts = [HEADER_COMMENT, AGENT_SECTION, "\n", CI_WORKSPACE_SECTION, "\n"];
   for (const path of ALWAYS) {
@@ -227,15 +180,11 @@ export function buildFilesBase(sections: Record<string, string>): string {
   return parts.join("");
 }
 
-/** A block file: the section plus the blank line that separates it from
- *  the next block once the writer has spliced them. */
+/** The trailing blank line separates this block from the next once the writer has spliced them. */
 export function buildBlock(section: string): string {
   return `${section}\n`;
 }
 
-/** This repository's own .gitignore: the sides ride through verbatim from
- *  the existing file (both are repo-owned) and the region is regenerated
- *  as the base body plus every module source once. */
 export function buildSelf(
   sections: Record<string, string>,
   sources: string[],
@@ -249,13 +198,6 @@ export function buildSelf(
   return parts.join("");
 }
 
-/** The offline comparison of every copy of a section: the block files are
- *  files.yml's sources block for block, the base body opens with the two
- *  local sections and carries exactly the OS sections, and this repository's
- *  region is the base body plus every block's section once, so a refresh
- *  that regenerated one copy and not another (or a hand edit on one side)
- *  is named. Sections are compared by content, so the problems name the
- *  fix rather than the diff. */
 export function topologyProblems(input: {
   entries: [string, string[]][];
   filesDir: string;
