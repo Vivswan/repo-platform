@@ -36,7 +36,7 @@ bun .github/scripts/sync/writer/sync.ts \
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the name is the fallback project name and slug.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a directory or a symlinked ancestor at a path the writer touches, a symlink at the manifest or registration path, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
+- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
 
 ## files.yml
 
@@ -182,7 +182,7 @@ A module with no files still appears under `modules` (`issue-templates`, `custom
 | `starter` | once, when the path is absent (a link there counts as present) | never touched again | no hash |
 | `link` | a relative symlink, every sync | a link elsewhere is re-pointed and reported like a local edit (the old target is the replaced text); a regular file at the path is held | `hash` = sha256 of the target string, the hash the previous pipeline already recorded for its symlinks |
 
-Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there.
+Change verdicts per written row: `created` (absent before), `updated` (was exactly the recorded content), `unchanged` (already the new content), `replaced local edits` (was neither), `region added` (a split region placed above repository-owned content), `held` (not written; the Detail column says why). A managed or split entry finding a symlink at its path is held: the writer never reads through a link and has no record of writing one there. An entry of any class finding a directory (or anything else that is neither a file nor a link) at its path is held with `<what> sits at the path, and the writer will not replace it`. A rendered entry whose overlay path holds anything but a regular file is held too; the displacement that would free its path is held when the overlay path is taken, with the detail naming what sits there.
 
 ## Class flips
 

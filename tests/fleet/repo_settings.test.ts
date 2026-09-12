@@ -1,20 +1,23 @@
 // Pins this repository's OWN build-branch and stable-tag protection in
-// .github/settings.yml, the same way merge_settings_layers.test.ts pins
-// the override layer's protection policy. The `build` ref is executable
-// fleet-wide - rendered workflows pin `uses: ...@build` and run its
-// actions/ subtree directly - so a settings edit that drops it from the
-// append-only ruleset must fail here, loudly. (The retired
-// `template`/`actions` refs were deleted 2026-08-29, user-ordered, in
-// the same change that dropped them from the ruleset and from this
-// pin.) Also pins, fleet-wide: no settings layer may
-// declare an Integration bypass actor, because GitHub rejects one on a
-// user-owned repository's ruleset (POST /rulesets, 422 "Actor GitHub
-// Actions integration must be part of the ruleset source or owner
+// its settings overlay, the same way merge_settings_layers.test.ts pins the override
+// layer's protection policy. The `build` ref is executable fleet-wide -
+// rendered workflows pin `uses: ...@build` and run its actions/ subtree
+// directly - so a settings edit that drops it from the append-only
+// ruleset must fail here, loudly. Also pins, fleet-wide: no settings
+// layer may declare an Integration bypass actor, because GitHub rejects
+// one on a user-owned repository's ruleset (POST /rulesets, 422 "Actor
+// GitHub Actions integration must be part of the ruleset source or owner
 // organization") and the settings apply dies at ruleset creation.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
+
+/** The overlay once this repository renders its own settings document;
+ *  its hand-written settings.yml until then. */
+const OWN_OVERLAY = existsSync(".github/settings.local.yml")
+  ? ".github/settings.local.yml"
+  : ".github/settings.yml";
 
 type Ruleset = {
   name: string;
@@ -32,14 +35,10 @@ function readRulesets(path: string): Ruleset[] {
 
 describe("the repo's own build-branch ruleset", () => {
   test("the executable build ref stays append-only for everyone", () => {
-    const buildBranches = readRulesets(".github/settings.yml").find(
-      (r) => r.name === "build-branches",
-    );
+    const buildBranches = readRulesets(OWN_OVERLAY).find((r) => r.name === "build-branches");
     expect(buildBranches).toBeDefined();
     expect(buildBranches?.target).toBe("branch");
     expect(buildBranches?.enforcement).toBe("active");
-    // template and actions were retired 2026-08-29 (user-ordered): the
-    // refs were deleted in the same change that dropped them here, so
     // build is the sole delivery ref this ruleset protects.
     expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual(["build"]);
     expect(buildBranches?.conditions?.ref_name?.exclude).toEqual([]);
@@ -72,13 +71,13 @@ describe("the repo's own stable-tag ruleset", () => {
 describe("every settings layer", () => {
   test("no ruleset declares an Integration bypass actor", () => {
     const layerFiles = [
-      // dot: true, or the glob silently skips the dotted .github/ paths.
-      ...new Bun.Glob(".github/settings*.yml").scanSync({ dot: true }),
+      ...new Bun.Glob("files/settings/*.yml").scanSync(),
       ...new Bun.Glob("files/*/settings*.yml").scanSync(),
+      OWN_OVERLAY,
     ].sort();
     // Controls: the scan must reach the layers known to carry bypass
     // actors, or an empty glob would pass vacuously.
-    expect(layerFiles).toContain(".github/settings-override.yml");
+    expect(layerFiles).toContain("files/settings/override.yml");
     expect(layerFiles).toContain("files/release-please/settings.yml");
     let actorsSeen = 0;
     const violations = layerFiles.flatMap((file) =>

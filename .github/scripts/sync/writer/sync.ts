@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 // The copy writer's entry point: files.yml plus the files/ tree in, one
 // target checkout rewritten, the Markdown report on stdout and a JSON
-// summary beside it. No merge anywhere: managed content is copied whole,
-// split regions are copied between the repository-owned halves, starters
-// are copied once. Exit 0 whether or not the report holds the PR; a
-// nonzero exit is a data or environment error the operator must fix.
+// summary beside it. Managed content is copied whole, split regions are
+// copied between the repository-owned halves, starters are copied once;
+// the one rendered entry, the settings document, folds the settings layers
+// with the repository's overlay (settings_entry.ts). Exit 0 whether or not
+// the report holds the PR; a nonzero exit is a data or environment error
+// the operator must fix.
 //
 // Usage:
 //   bun sync.ts --files <files.yml> --tree <files dir> --target <checkout>
@@ -15,17 +17,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type FileEntry,
-  type FilesConfig,
   pathProblem,
   selectEntries,
 } from "../../../../actions/plan/files_config.ts";
 import { describeMirrorProblem, ownedPaths } from "../../../../actions/plan/mirrors.ts";
-import { REGISTRATION_PATH } from "../../../../actions/plan/registration.ts";
+import { REGISTRATION_PATH, type Registration } from "../../../../actions/plan/registration.ts";
 import { parseFlags } from "../../shared/flags.ts";
 import { lstatOrNull } from "../../shared/fs_probe.ts";
 import { fail } from "../../shared/gha.ts";
 import { cutover } from "./cutover.ts";
-import { blockSources, loadFilesConfig } from "./files_config.ts";
+import { type Displacement, displace } from "./displace.ts";
+import { blockSources, loadFilesConfig, type WriterFilesConfig } from "./files_config.ts";
 import {
   MANIFEST_NAME,
   type ManifestRecord,
@@ -48,6 +50,7 @@ import {
   PLACEHOLDER_SOURCE,
   parseRepositorySlug,
   placeholderValues,
+  type RepositorySlug,
   readRegistration,
 } from "./registration.ts";
 import {
@@ -59,7 +62,8 @@ import {
 } from "./report.ts";
 import { keepReason, retire } from "./retire.ts";
 import { resolveModules } from "./select.ts";
-import { type Found, probe, removeFile, writeFile } from "./target_files.ts";
+import { renderSettings } from "./settings_entry.ts";
+import { type Found, occupant, probe, removeFile, writeFile } from "./target_files.ts";
 import { writeLink } from "./write_link.ts";
 import { type WriteOutcome, writeManaged } from "./write_managed.ts";
 import { renderRegion, writeSplit } from "./write_split.ts";
@@ -105,22 +109,58 @@ interface Rendered {
   write: (recorded: string | null) => WriteOutcome | { missing: string[] };
 }
 
+/** What one run renders every entry against: the registration and the
+ *  slug the operator passed, beside the placeholder values. */
+interface Facts {
+  registration: Registration;
+  slug: RepositorySlug;
+  values: PlaceholderValues;
+}
+
 /** The entry's content and record, and its class writer bound to them; or
  *  the placeholders its text needs that have no value, in which case
- *  nothing is rendered (an empty value is never written). */
+ *  nothing is rendered (an empty value is never written); or the reason a
+ *  rendered entry holds. */
 function render(
   options: SyncOptions,
-  config: FilesConfig,
+  config: WriterFilesConfig,
   entry: FileEntry,
   modules: string[],
-  values: PlaceholderValues,
-): Rendered | { missing: string[] } {
+  facts: Facts,
+): Rendered | { missing: string[] } | { held: string } {
   const { target } = options;
+  const { values } = facts;
   if (entry.class === "link") {
     return {
       content: entry.target,
       record: { class: "link", hash: sha256(entry.target) },
       write: (recorded) => writeLink(target, entry.path, entry.target, recorded),
+    };
+  }
+  if ("render" in entry) {
+    // The overlay is the starter this entry displaces, written earlier in
+    // the same loop when absent; only a regular file there is read.
+    const overlayPath = entry.displaces;
+    const what = occupant(target, overlayPath);
+    if (what !== null && what !== "a regular file") {
+      return { held: `${overlayPath} is ${what}, which the render does not read through` };
+    }
+    const overlay = probe(target, overlayPath);
+    const rendered = renderSettings({
+      config,
+      tree: options.tree,
+      modules,
+      private: options.private,
+      registration: facts.registration,
+      overlay: overlay.kind === "file" ? overlay.bytes.toString("utf-8") : null,
+      overlayPath,
+      owner: facts.slug.owner,
+    });
+    if ("held" in rendered) return rendered;
+    return {
+      content: rendered.content,
+      record: { class: "managed", hash: sha256(rendered.content) },
+      write: (recorded) => writeManaged(target, entry.path, rendered.content, recorded),
     };
   }
   const raw = (rel: string) => readFileSync(join(options.tree, rel), "utf-8");
@@ -177,14 +217,14 @@ interface Written {
  *  over and is never held). */
 function writeEntry(
   options: SyncOptions,
-  config: FilesConfig,
+  config: WriterFilesConfig,
   entry: FileEntry,
   modules: string[],
-  values: PlaceholderValues,
+  facts: Facts,
   records: Records,
-): Written | { missing: string[] } {
-  const rendered = render(options, config, entry, modules, values);
-  if ("missing" in rendered) return rendered;
+): Written | { missing: string[] } | { held: string } {
+  const rendered = render(options, config, entry, modules, facts);
+  if ("missing" in rendered || "held" in rendered) return rendered;
   const record = records[entry.path];
   const previous = record === undefined ? null : carriedRecord(record)?.class;
   const flipped = previous != null && previous !== entry.class && entry.class !== "starter";
@@ -228,7 +268,11 @@ export function runSync(options: SyncOptions): SyncReport {
   const slug = parseRepositorySlug(options.repository);
   const notes = options.cutover === true ? cutover(options.target, config, slug) : [];
   const registration = readRegistration(options.target);
-  const values = placeholderValues(registration, slug, config.defaults);
+  const facts: Facts = {
+    registration,
+    slug,
+    values: placeholderValues(registration, slug, config.defaults),
+  };
   const { selected, dropped } = resolveModules(config, registration.modules);
   notes.push(
     ...dropped.map((name) => `dropped unknown module \`${name}\` (files.yml does not know it)`),
@@ -256,6 +300,9 @@ export function runSync(options: SyncOptions): SyncReport {
     else notes.push(`manifest record for \`${path}\` ignored: the path ${problem}`);
   }
   const retired = retire(options.target, config.retired, stale, entryPaths, records);
+  const displaced = new Map<string, Displacement>(
+    displace(options.target, entries, records).map((row) => [row.path, row]),
+  );
 
   // A Map, so a path named like an inherited property (constructor) is
   // looked up like any other.
@@ -273,13 +320,42 @@ export function runSync(options: SyncOptions): SyncReport {
   // record stays too, so a later retirement still reads it as kept.
   for (const [path, entry] of Object.entries(records)) {
     if (entry.class !== "starter" || entryPaths.has(path) || pathProblem(path) !== null) continue;
-    if (probe(options.target, path).kind !== "absent") carry(path);
+    if (occupant(options.target, path) !== null) carry(path);
   }
   const written = new Map<string, Buffer>();
   const rows: WrittenRow[] = [];
   const replaced: SyncReport["replaced"] = [];
   for (const entry of entries) {
-    const result = writeEntry(options, config, entry, selected, values, records);
+    const displacement = displaced.get(entry.path);
+    if (displacement?.outcome === "held") {
+      carry(entry.path);
+      rows.push({
+        path: entry.path,
+        class: entry.class,
+        change: "held",
+        detail: displacement.detail,
+      });
+      continue;
+    }
+    // The class writers hold a file or a link in the way; anything else
+    // they refuse loudly, and the sync must still end in a report.
+    const taken = occupant(options.target, entry.path);
+    if (taken === "a directory" || taken === "something that is not a regular file") {
+      carry(entry.path);
+      rows.push({
+        path: entry.path,
+        class: entry.class,
+        change: "held",
+        detail: `${taken} sits at the path, and the writer will not replace it`,
+      });
+      continue;
+    }
+    const result = writeEntry(options, config, entry, selected, facts, records);
+    if ("held" in result) {
+      carry(entry.path);
+      rows.push({ path: entry.path, class: entry.class, change: "held", detail: result.held });
+      continue;
+    }
     if ("missing" in result) {
       for (const name of result.missing) {
         const note = `placeholder \`{{${name}}}\` has no value: set ${PLACEHOLDER_SOURCE[name as PlaceholderName]} in ${REGISTRATION_PATH}`;
@@ -295,7 +371,13 @@ export function runSync(options: SyncOptions): SyncReport {
       });
       continue;
     }
-    const { outcome, record, content } = result;
+    const { record, content } = result;
+    // A displaced file's path was free, so the write created the content;
+    // the row says where the repository's file went instead.
+    const outcome: WriteOutcome =
+      displacement?.outcome === "moved" && result.outcome.change === "created"
+        ? { change: "moved", to: displacement.to }
+        : result.outcome;
     // A held path keeps its previous record: the file is still that write.
     if (outcome.change === "held") carry(entry.path);
     else next.set(entry.path, record);
@@ -303,7 +385,12 @@ export function runSync(options: SyncOptions): SyncReport {
       path: entry.path,
       class: entry.class,
       change: outcome.change,
-      detail: outcome.change === "held" ? outcome.reason : "",
+      detail:
+        outcome.change === "held"
+          ? outcome.reason
+          : outcome.change === "moved"
+            ? `to ${outcome.to}`
+            : "",
     });
     if (outcome.change === "replaced local edits") {
       replaced.push({ path: entry.path, diff: unifiedDiff(entry.path, outcome.replaced, content) });

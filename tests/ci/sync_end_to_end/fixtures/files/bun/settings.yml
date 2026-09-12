@@ -1,0 +1,4 @@
+labels:
+  - name: javascript
+    color: "168700"
+    description: Pull requests that update javascript code

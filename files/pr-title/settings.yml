@@ -3,7 +3,7 @@
 # docs/settings.md): merged for every repository that selects the module.
 #
 # One key on purpose: this flips the baseline's DISABLED pr-title ruleset
-# (.github/settings-baseline.yml, which carries the full shape - the
+# (files/settings/baseline.yml, which carries the full shape - the
 # required `pr-title` check the managed pr-title.yml workflow creates) to
 # active. A same-name ruleset merges key by key across layers, so
 # selection activates the requirement and deselection lets the baseline's

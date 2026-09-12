@@ -5,12 +5,14 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { capture } from "../../../.github/scripts/shared/proc.ts";
 import {
   allLayerLabels,
+  layerConfig,
   loadModules,
   type Module,
-} from "../../../.github/scripts/fleet/render_managed_settings.ts";
-import { capture } from "../../../.github/scripts/shared/proc.ts";
+} from "../../../.github/scripts/sync/writer/settings_layers.ts";
+import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
 
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 
@@ -71,6 +73,9 @@ function memoize<T>(compute: () => T): () => T {
 
 /** files.yml's modules in canonical order, with their data. */
 export const modules = memoize((): Module[] => loadModules(join(REPO_ROOT, "files.yml")));
+
+/** files.yml parsed whole: the module data beside the settings block. */
+export const filesConfig = memoize(() => parseFilesConfig(read("files.yml")));
 
 export function asRecord(value: unknown, where: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -163,5 +168,5 @@ export interface Label {
  *  repository's registration). The single roster the doc-constant rules
  *  key on. */
 export function managedLabelRoster(): Label[] {
-  return allLayerLabels(modules());
+  return allLayerLabels(layerConfig(filesConfig()), join(REPO_ROOT, "files"));
 }

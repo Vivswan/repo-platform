@@ -1,7 +1,7 @@
 // Rules over the label rosters: the managed labels' sites, the release
 // guard's literals, dependabot's tuples, and the hand-copied label regex.
 
-import { loadLayer } from "../../../.github/scripts/fleet/render_managed_settings.ts";
+import { loadLayer } from "../../../.github/scripts/sync/writer/settings_layers.ts";
 import { constRegexSource, constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, mustMatch } from "./comparison.ts";
 import { managedLabelRoster, modules, read, trackingStreams } from "./inputs.ts";

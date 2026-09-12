@@ -50,6 +50,24 @@ export function probe(target: string, path: string): Found {
   return { kind: "file", bytes: readFileSync(abs) };
 }
 
+/** What sits at a path, in the words a report row uses. */
+export type Occupant =
+  | "a regular file"
+  | "a symbolic link"
+  | "a directory"
+  | "something that is not a regular file";
+
+/** What sits at `path`, or null when nothing does. Nothing is read through,
+ *  so a directory or a device is named for a hold instead of refused. */
+export function occupant(target: string, path: string): Occupant | null {
+  const stat = lstatOrNull(insideTarget(target, path));
+  if (stat === null) return null;
+  if (stat.isSymbolicLink()) return "a symbolic link";
+  if (stat.isDirectory()) return "a directory";
+  if (stat.isFile()) return "a regular file";
+  return "something that is not a regular file";
+}
+
 /** The bytes at `path`, null when nothing is there; a directory or symlink
  *  at the path is refused loudly rather than read through or written over.
  *  For the files the writer must be able to trust as files (the manifest,

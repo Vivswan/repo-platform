@@ -44,7 +44,11 @@ export function undeliveredPins(config: FilesConfig): string[] {
   return pinsOf(config).flatMap((pin) => {
     const source = `${pin.module}/${pin.file}`;
     const delivered = config.files.some(
-      (entry) => entry.path === pin.file && entry.class !== "link" && entry.source === source,
+      (entry) =>
+        entry.path === pin.file &&
+        entry.class !== "link" &&
+        !("render" in entry) &&
+        entry.source === source,
     );
     return delivered
       ? []

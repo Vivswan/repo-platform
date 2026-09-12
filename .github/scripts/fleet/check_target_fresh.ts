@@ -19,7 +19,27 @@
 // a hide-details target (docs/settings.md, the private-target bullet).
 
 import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
-import { resolveTargetRef } from "./render_managed_settings.ts";
+import { captureNetwork } from "./discovery.ts";
+
+/** The commit every read for a target pins to: its default branch's head. */
+function resolveTargetRef(repo: string): string {
+  const branchProc = captureNetwork(["gh", "api", `repos/${repo}`, "--jq", ".default_branch"]);
+  if (branchProc.exitCode !== 0) {
+    throw new Error(
+      `${repo}: cannot read the default branch (${branchProc.stderr.trim().split("\n")[0]})`,
+    );
+  }
+  const branch = branchProc.stdout.trim();
+  const head = captureNetwork(["gh", "api", `repos/${repo}/commits/${branch}`, "--jq", ".sha"]);
+  if (head.exitCode !== 0) {
+    throw new Error(`${repo}: cannot resolve ${branch} (${head.stderr.trim().split("\n")[0]})`);
+  }
+  const sha = head.stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`${repo}: ${branch} resolved to no commit sha`);
+  }
+  return sha;
+}
 
 const target = requireEnv("TARGET");
 // Read UNSET rather than required: an absent pin is a specific failure

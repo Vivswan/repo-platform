@@ -2,13 +2,14 @@
 // rosters for ci.yml and fleet-ci.yml, the gate check's name, and the local
 // check chain that mirrors CI.
 
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadOverrideLayer } from "../../../.github/scripts/fleet/merge_settings_layers.ts";
 import { CHECK_NAME } from "../../../.github/scripts/shared/all_green.ts";
+import { loadOverrideLayer } from "../../../.github/scripts/sync/writer/merge_settings_layers.ts";
 import { substitute } from "../../../.github/scripts/sync/writer/placeholders.ts";
 import { constStringValue, templateCarries } from "../../lib/ts_extract.ts";
 import { canonical, escapeRegExp, type Mismatch, mustMatch, setMismatch } from "./comparison.ts";
-import { asRecord, ciJobs, packageScripts, read, repoCi } from "./inputs.ts";
+import { asRecord, ciJobs, packageScripts, REPO_ROOT, read, repoCi } from "./inputs.ts";
 import { FLEET_WRITERS, POST_GREEN_REL } from "./post_green.ts";
 import type { Rule } from "./rule_roster.ts";
 
@@ -992,7 +993,7 @@ export const allGreenRules: Rule[] = [
       // pr-title module's context rides its own baseline ruleset), and
       // loadOverrideLayer separately refuses an override that drops the
       // context or its Actions integration pin.
-      const override = loadOverrideLayer();
+      const override = loadOverrideLayer(join(REPO_ROOT, "files/settings/override.yml"));
       mismatches.push(
         ...setMismatch(
           ".github/settings-override.yml main ruleset required checks",

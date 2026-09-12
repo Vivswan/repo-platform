@@ -36,7 +36,7 @@ describe("selectEntries", () => {
   test("picks one docs.yml variant per selection and honours visibility", () => {
     const paths = (modules: string[], isPrivate: boolean) =>
       selectEntries(CONFIG, { modules, private: isPrivate }).map(
-        (e) => `${e.path}<${e.class === "link" ? e.target : e.source}`,
+        (e) => `${e.path}<${e.class === "link" ? e.target : "render" in e ? e.render : e.source}`,
       );
     expect(paths(["docs-site"], false)).toEqual(["ci.yml<base/ci.yml", "docs.yml<docs-site/a.yml"]);
     expect(paths(["docs-site", "pages", "bun"], true)).toEqual([

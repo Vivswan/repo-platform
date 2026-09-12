@@ -2,9 +2,9 @@
 # split, a managed, and a starter entry (two modules declaring one block
 # value), a same-path pair split by module conditions, a visibility-gated
 # entry, two links, three class flips (one from a hash-less record, which
-# is held), and the retirements: clean, edited, moved, a starter, a move to
-# an unselected home, and a split file with repository-owned content around
-# its region.
+# is held), the rendered settings document over its overlay starters, and
+# the retirements: clean, edited, moved, a starter, a move to an unselected
+# home, and a split file with repository-owned content around its region.
 placeholders:
   - project_name
   - project_slug
@@ -20,15 +20,21 @@ modules:
     gitignore_sources: [Node, Bun]
     dependabot_ecosystems: [bun]
     checks_examples: [bun]
+    settings_layers: [settings.yml]
   node:
     gitignore_sources: [Node]
     dependabot_ecosystems: [npm]
   pages: {}
   docs-site: {}
   fuzzer:
-    tracking_label: {key: fuzzer, default: fuzz-nightly}
+    tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}
   skills:
     skills_dir: {default: skills}
+settings:
+  baseline: files/settings/baseline.yml
+  public: files/settings/public.yml
+  private: files/settings/private.yml
+  override: files/settings/override.yml
 files:
   - path: .github/workflows/ci.yml
     class: managed
@@ -57,6 +63,17 @@ files:
   - path: .github/workflows/checks.yml
     class: starter
     blocks: checks_examples
+  - path: .github/settings.local.yml
+    class: starter
+    when: {private: false}
+  - path: .github/settings.local.yml
+    class: starter
+    when: {private: true}
+    source: files/base/.github/settings.local.private.yml
+  - path: .github/settings.yml
+    class: managed
+    render: settings
+    displaces: .github/settings.local.yml
   - path: .editorconfig
     class: split
     region: hash

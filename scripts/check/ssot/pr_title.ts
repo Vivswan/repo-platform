@@ -25,7 +25,7 @@ export function prTitleWorkflowMismatches(
   moduleLayerText: string,
 ): Mismatch[] {
   const wfRel = PR_TITLE_WORKFLOW;
-  const baselineRel = ".github/settings-baseline.yml";
+  const baselineRel = "files/settings/baseline.yml";
   const moduleRel = PR_TITLE_LAYER;
   const mismatches: Mismatch[] = [];
   const lines = workflowText.split("\n");
@@ -181,7 +181,7 @@ export const prTitleRules: Rule[] = [
     run: () =>
       prTitleWorkflowMismatches(
         read(PR_TITLE_WORKFLOW),
-        read(".github/settings-baseline.yml"),
+        read("files/settings/baseline.yml"),
         read(PR_TITLE_LAYER),
       ),
   },

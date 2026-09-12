@@ -1,0 +1,14 @@
+# The fixture's override: main requires all-green, pinned to the Actions app.
+repository:
+  allow_merge_commit: false
+rulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    rules:
+      - type: deletion
+      - type: required_status_checks
+        parameters:
+          required_status_checks:
+            - context: all-green
+              integration_id: 15368

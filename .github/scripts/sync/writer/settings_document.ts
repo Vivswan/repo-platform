@@ -1,6 +1,6 @@
 // The two settings-document types and the YAML parse boundary that produces
-// the first. Every settings layer enters the fleet's scripts here, and the
-// types carry what each stage has established, so no later stage re-checks.
+// the first. Every settings layer enters the writer here, and the types
+// carry what each stage has established, so no later stage re-checks.
 //
 // SettingsLayer is INPUT: one layer file's document as a human wrote it.
 // Nulls are legal and load bearing (the dialect's opt-out marker), so the
@@ -10,7 +10,8 @@
 // `labels` or `rulesets` section that is not a list of mappings (the merge
 // unions those by name; any other shape would fall into wholesale replace
 // and silently discard the managed roster - the apply then deletes every
-// undeclared label, green either way).
+// undeclared label, green either way), and an alias that names its own
+// ancestor (the merge walks the document and would never end).
 //
 // MergedSettings is OUTPUT: the finished document the apply hands to GitHub.
 // `null` is ABSENT from MergedValue, so a merged document still carrying the
@@ -33,7 +34,7 @@ export type LayerScalar = string | number | boolean;
 export type LayerValue = LayerScalar | null | LayerValue[] | { [key: string]: LayerValue };
 
 /** One layer document as authored (a fleet layer, a module layer, a
- *  repository's own settings.yml, the fleet override). */
+ *  repository's own overlay, the fleet override). */
 export type SettingsLayer = { [key: string]: LayerValue };
 
 /** The same value space MINUS null: what survives the merge. */
@@ -172,8 +173,37 @@ function parseYamlText(text: string, where: string): unknown {
   }
 }
 
+/** The path of the first value that is one of its own ancestors, or null.
+ *  The yaml parser resolves `&r {self: *r}` into a structure that contains
+ *  itself; a subtree merely shared between two keys leaves the ancestor
+ *  set on the way back up and is legal. */
+function cyclePath(
+  value: unknown,
+  ancestors: Set<object>,
+  path: PropertyKey[],
+): PropertyKey[] | null {
+  if (typeof value !== "object" || value === null) return null;
+  if (ancestors.has(value)) return path;
+  ancestors.add(value);
+  for (const [step, child] of Object.entries(value)) {
+    const found = cyclePath(child, ancestors, [
+      ...path,
+      Array.isArray(value) ? Number(step) : step,
+    ]);
+    if (found !== null) return found;
+  }
+  ancestors.delete(value);
+  return null;
+}
+
 function asSettingsLayer(data: unknown, where: string): SettingsLayer {
   if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
+  const cycle = cyclePath(data, new Set(), []);
+  if (cycle !== null) {
+    throw new Error(
+      `${where}: a cyclic alias at ${issuePath(cycle)} - the document contains itself and cannot be merged`,
+    );
+  }
   const result = settingsLayerSchema.safeParse(data);
   if (result.success) return result.data;
   const issue = result.error.issues[0];
@@ -185,9 +215,8 @@ function asSettingsLayer(data: unknown, where: string): SettingsLayer {
 
 /** THE parse boundary for a settings document: YAML text in, a typed
  *  layer out, or a throw naming `where` and the path inside it. An empty
- *  document is an empty LAYER (a repository whose settings.yml declares
- *  nothing still declares that it is onboarded - absence is the skip, and
- *  merge_settings_layers.ts owns that distinction). */
+ *  document is an empty LAYER (a repository whose overlay declares nothing
+ *  still has one; its absence is the render's hold). */
 export function parseSettingsDoc(text: string, where: string): SettingsLayer {
   const data = parseYamlText(text, where);
   if (data === null || data === undefined) return {};
@@ -200,14 +229,4 @@ export function parseSettingsDoc(text: string, where: string): SettingsLayer {
  *  from the roster already expresses. */
 export function parseLayerFile(text: string, where: string): SettingsLayer {
   return asSettingsLayer(parseYamlText(text, where), where);
-}
-
-/** A YAML mapping that is NOT a settings document (.repo-platform.yml):
- *  same location-carrying diagnostics, none of
- *  the layer schema, and the values stay `unknown` because each caller reads
- *  one key and validates it for itself. */
-export function parseYamlMapping(text: string, where: string): Record<string, unknown> {
-  const data = parseYamlText(text, where);
-  if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
-  return data;
 }

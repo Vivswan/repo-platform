@@ -9,6 +9,7 @@
 import { dirname, normalize } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { MANIFEST_NAME } from "../shared/manifest.ts";
 
 export type FileClass = "managed" | "split" | "starter" | "link";
 export type RegionKind = "hash" | "html";
@@ -32,6 +33,26 @@ interface SourcedEntry extends EntryBase {
   blocks?: string;
 }
 
+export interface ManagedEntry extends SourcedEntry {
+  class: "managed";
+  /** The starter path the file at this entry's path moves to, verbatim,
+   *  before the write: the class flip of this path from starter to managed. */
+  displaces?: string;
+}
+
+/** A managed entry with no tree source: the writer renders the settings
+ *  document from the layers and the overlay at `displaces`, the starter
+ *  this path held before the render existed. */
+export interface RenderedEntry extends EntryBase {
+  class: "managed";
+  render: "settings";
+  displaces: string;
+}
+
+export interface StarterEntry extends SourcedEntry {
+  class: "starter";
+}
+
 export interface SplitEntry extends SourcedEntry {
   class: "split";
   region: RegionKind;
@@ -43,7 +64,17 @@ export interface LinkEntry extends EntryBase {
   target: string;
 }
 
-export type FileEntry = (SourcedEntry & { class: "managed" | "starter" }) | SplitEntry | LinkEntry;
+export type FileEntry = ManagedEntry | RenderedEntry | StarterEntry | SplitEntry | LinkEntry;
+
+/** The tree-relative paths of the four fleet settings layers (the
+ *  `settings` block): the baseline, the visibility overlays, and the
+ *  override that merges above every repository's own overlay. */
+export interface SettingsLayerPaths {
+  baseline: string;
+  public: string;
+  private: string;
+  override: string;
+}
 
 export interface RetiredEntry {
   path: string;
@@ -67,6 +98,15 @@ const fileSchema = z.strictObject({
   region: z.enum(["hash", "html"]).optional(),
   blocks: z.string().min(1).optional(),
   target: z.string().min(1).optional(),
+  render: z.enum(["settings"]).optional(),
+  displaces: z.string().min(1).optional(),
+});
+
+const settingsSchema = z.strictObject({
+  baseline: z.string().min(1),
+  public: z.string().min(1),
+  private: z.string().min(1),
+  override: z.string().min(1),
 });
 
 const retiredSchema = z.strictObject({
@@ -129,6 +169,7 @@ export type ModuleData = z.infer<typeof moduleDataSchema>;
 const configSchema = z.strictObject({
   placeholders: z.array(z.string().min(1)),
   modules: z.record(moduleName, moduleDataSchema).default({}),
+  settings: settingsSchema.optional(),
   files: z.array(fileSchema),
   retired: z.array(retiredSchema).default([]),
 });
@@ -137,6 +178,9 @@ export interface FilesConfig {
   placeholders: string[];
   /** Per-module data in files.yml order, which is the canonical module order. */
   modules: Record<string, ModuleData>;
+  /** The fleet settings layers, present exactly when a `render: settings`
+   *  entry exists. */
+  settings: SettingsLayerPaths | null;
   files: FileEntry[];
   retired: RetiredEntry[];
 }
@@ -280,6 +324,37 @@ export function mutuallyExclusive(a: When | null, b: When | null): boolean {
   );
 }
 
+/** One spelling per selection: fixed key order and sorted module lists,
+ *  so `{modules: [a, b], private: false}` and `{private: false, modules: [b, a]}`
+ *  compare equal. */
+export function whenKey(when: When | null): string {
+  if (when === null) return "null";
+  const sorted = (list: string[] | undefined) =>
+    list === undefined ? undefined : [...list].sort();
+  return JSON.stringify({
+    modules: sorted(when.modules),
+    any: sorted(when.any),
+    without: sorted(when.without),
+    private: when.private,
+  });
+}
+
+/** Whether the starters at a displaced path are selected exactly when the
+ *  displacing entry is: an unconditional displacer over one unconditional
+ *  starter or a private true/false pair, or a displacer whose condition
+ *  equals one starter's. Anything subtler is not proven and is refused. */
+export function starterCoverage(displacer: When | null, starters: (When | null)[]): boolean {
+  if (displacer === null) {
+    if (starters.length === 1) return starters[0] === null;
+    const visibilities = starters.map((when) =>
+      when !== null && Object.keys(when).length === 1 ? when.private : undefined,
+    );
+    return starters.length === 2 && visibilities.includes(true) && visibilities.includes(false);
+  }
+  const key = whenKey(displacer);
+  return starters.some((when) => whenKey(when) === key);
+}
+
 export interface CheckedFilesConfig {
   config: FilesConfig;
   /** Every cross-check the document fails; the config is complete anyway. */
@@ -322,6 +397,21 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.class !== "split" && entry.region !== undefined) {
       problems.push(`${where}: region applies to split entries only`);
     }
+    if (entry.class !== "managed") {
+      if (entry.render !== undefined)
+        problems.push(`${where}: render applies to managed entries only`);
+      if (entry.displaces !== undefined) {
+        problems.push(`${where}: displaces applies to managed entries only`);
+      }
+    }
+    if (entry.render !== undefined) {
+      if (entry.source !== undefined || entry.blocks !== undefined) {
+        problems.push(`${where}: a rendered entry has no source or blocks`);
+      }
+      if (entry.displaces === undefined) {
+        problems.push(`${where}: a rendered entry needs displaces, the overlay it renders from`);
+      }
+    }
     if (entry.class === "link") {
       if (entry.source !== undefined || entry.blocks !== undefined) {
         problems.push(`${where}: a link entry has a target, not a source or blocks`);
@@ -337,6 +427,16 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     if (entry.target !== undefined) {
       problems.push(`${where}: target applies to link entries only`);
     }
+    if (entry.class === "managed" && entry.render !== undefined && entry.displaces !== undefined) {
+      return {
+        path: entry.path,
+        when,
+        class: "managed",
+        render: entry.render,
+        displaces: entry.displaces,
+      };
+    }
+    const displacing = entry.displaces === undefined ? {} : { displaces: entry.displaces };
     const source = entry.source ?? `${SOURCE_PREFIX}${when?.modules?.[0] ?? "base"}/${entry.path}`;
     if (!source.startsWith(SOURCE_PREFIX) || pathProblem(source) !== null) {
       problems.push(`${where}: source '${source}' must be a clean path under ${SOURCE_PREFIX}`);
@@ -347,7 +447,8 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       when,
       ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
     };
-    if (entry.class !== "split") return { ...base, class: entry.class };
+    if (entry.class === "managed") return { ...base, class: "managed", ...displacing };
+    if (entry.class === "starter") return { ...base, class: "starter" };
     if (entry.region === undefined) {
       problems.push(`${where}: a split entry needs a region (hash or html)`);
     }
@@ -363,6 +464,61 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     }
   }
   const filePaths = new Set(files.map((entry) => entry.path));
+  const retiredPaths = new Set(data.retired.map((entry) => entry.path));
+  for (const [index, entry] of files.entries()) {
+    if (entry.class !== "managed" || entry.displaces === undefined) continue;
+    const where = `files: ${entry.path}`;
+    const target = entry.displaces;
+    const problem = pathProblem(target);
+    if (problem !== null) problems.push(`${where}: displaces ${target}, which ${problem}`);
+    if (target === entry.path) problems.push(`${where}: displaces its own path`);
+    if (retiredPaths.has(target)) problems.push(`${where}: displaces ${target}, a retired path`);
+    if (target === MANIFEST_NAME) problems.push(`${where}: displaces the manifest`);
+    const atTarget = files.filter((other) => other.path === target);
+    if (atTarget.length === 0 || atTarget.some((other) => other.class !== "starter")) {
+      problems.push(
+        `${where}: displaces ${target}, which must be written by starter entries only - the displacement target is a starter of the same selection`,
+      );
+    } else if (files.some((other, position) => other.path === target && position > index)) {
+      // The write loop runs in files.yml order and a render reads the
+      // starter's file the same run it is created.
+      problems.push(
+        `${where}: displaces ${target}, whose starter entries must be listed before it - the writer writes them first so the render finds the overlay`,
+      );
+    } else if (
+      !starterCoverage(
+        entry.when,
+        atTarget.map((other) => other.when),
+      )
+    ) {
+      problems.push(
+        `${where}: displaces ${target}, whose starters are not selected exactly when this entry is - an unconditional displacer needs one unconditional starter or a private true/false pair, a conditional one a starter with the same when`,
+      );
+    }
+  }
+  const rendered = data.files.some((entry) => entry.render !== undefined);
+  if (rendered && data.settings === undefined) {
+    problems.push(
+      "settings: missing - a render: settings entry reads the four fleet layers from it",
+    );
+  }
+  if (!rendered && data.settings !== undefined) {
+    problems.push("settings: present, but no render: settings entry reads it");
+  }
+  let settings: SettingsLayerPaths | null = null;
+  if (data.settings !== undefined) {
+    const stripped = {} as Record<keyof SettingsLayerPaths, string>;
+    for (const [layer, path] of Object.entries(data.settings) as [
+      keyof SettingsLayerPaths,
+      string,
+    ][]) {
+      if (!path.startsWith(SOURCE_PREFIX) || pathProblem(path) !== null) {
+        problems.push(`settings: ${layer} '${path}' must be a clean path under ${SOURCE_PREFIX}`);
+      }
+      stripped[layer] = path.slice(SOURCE_PREFIX.length);
+    }
+    settings = stripped;
+  }
   for (const entry of data.retired) {
     for (const path of [entry.path, ...(entry.moved_to === undefined ? [] : [entry.moved_to])]) {
       const problem = pathProblem(path);
@@ -378,6 +534,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
     config: {
       placeholders: data.placeholders,
       modules: data.modules,
+      settings,
       files,
       retired: data.retired,
     },
