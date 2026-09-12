@@ -10,7 +10,7 @@ Sources on `main`, a moving `stable` tag, sync PRs into each repo:
 
 - [files.yml](files.yml) is the file list: every path the platform writes, its ownership class (`managed`, `split`, `starter`, `link`), the module or visibility condition it lands under, and its source under `files/`. The `modules` section holds each module's data (toolchain pin, dependabot ecosystems, gitignore sources, tracking label); the `settings` section declares the settings layers and the condition each lands under.
 - Every green `main` commit moves the `stable` tag, the one delivery channel: the written workflows pin `@stable` and read `files.yml` and `files/` (the writer), `actions/` (the composite actions), and the fleet-facing reusable workflows straight from that commit. Every path is extraction-safe.
-- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a merge directive, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
+- [sync-repos.yml](.github/workflows/sync-repos.yml) copies the files at the `stable` commit into each managed repo on a dispatch, a labeled merge, or the weekly cron, then pushes a branch and PR into it with the fleet PAT ([docs/sync.md](docs/sync.md)). A report that holds nothing arms squash auto-merge and lands once the repo's `all-green` check passes; anything a human should see (replaced local edits, a held retirement, a refused mirror, a registration note) stays for review.
 
 Fleet settings are rendered into every managed repo: the sync writes a managed `.github/settings.yml` as a merge of plain YAML documents - the fleet baseline, the layers `files.yml` selects for the repo (its visibility, its modules, CodeQL where it runs), the repo's own `.github/settings.local.yml` (a starter written once, for its identity keys and its own labels), then a fleet override layer no repo can weaken - and [settings-repos.yml](.github/workflows/settings-repos.yml) applies each rendered file in a github-settings-as-code job of its own ([docs/settings.md](docs/settings.md)).
 
@@ -42,16 +42,14 @@ The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO
 
 ## Shipping a change
 
-Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to the merged commit and the fleet picks it up on the next weekly sync. To sync right after the merge, put a directive line first in the PR body:
+Merge to `main`; once CI's `all-green` gate passes, the `stable` tag moves to the merged commit and the fleet picks it up on the next weekly sync. To sync right after the merge, put one label on the PR before it merges:
 
-| Line | Syncs |
+| Label | Syncs |
 | --- | --- |
-| `[fleet-sync: public]` | the public repos (the default) |
-| `[fleet-sync: private]` | the private repos |
-| `[fleet-sync: public, Vivswan/a]` | public repos plus the slugs listed |
-| `[fleet-sync: all] <why every repo needs this now>` | the whole fleet; the justification is required and the line is written bare |
+| `fleet-sync:public` | the public repos (the default) |
+| `fleet-sync:all` | the whole fleet |
 
-Post-green reads the directive from the merged PR's title and body ([docs/all-green.md](docs/all-green.md) has the exact grammar). A bare `[fleet-sync` anywhere else in the body, even inside a fenced example, turns the read-directives leg red and nothing syncs.
+Post-green reads the label off the merged PR ([docs/all-green.md](docs/all-green.md)). Two fleet-sync labels on the merged PR turn its own run's read-directives leg red and nothing syncs from it. The `private` token, slugs, and module filters are dispatch-only, below.
 
 The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_scope.ts) owns the grammar; settings-repos.yml's `repo=` reads the same):
 
@@ -65,7 +63,7 @@ The dispatch `repo=` value ([fleet/sync_scope.ts](.github/scripts/fleet/sync_sco
 | `all` or empty | the whole fleet |
 
 - A module name outside `files.yml` fails the plan before any repository is probed, naming the roster; a repo whose `.repo-platform.yml` has no readable `modules` list is reported as a warning and left out, and the plan prints how many repos the filter left out.
-- The filter is dispatch-only: a `[fleet-sync: ...]` directive carrying it turns the read-directives leg red, since the leg unions the entries of every commit in its range and an intersecting token would misread there.
+- The filter, `private`, and slugs are dispatch-only: the merge label carries `public` or `all` alone, since the read-directives leg unions the labels of every commit in its range and an intersecting token would misread there.
 
 ## Credentials
 

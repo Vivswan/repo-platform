@@ -1,4 +1,4 @@
-// One owner for the directive parser and both selectors. Only the plans know visibility and module selections, so the tokens are
+// One owner for the scope grammar: the dispatch input, the post-green leg's output, and both selectors. Only the plans know visibility and module selections, so the tokens are
 // expanded there, not here.
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
@@ -95,8 +95,8 @@ export function parseScope(
   return { kind: "list", visibility, slugs, modules };
 }
 
-/** Where the scope came from: the workflow_call input (ONLY_REPO, public text off the merged
- *  pull requests and direct pushes in the judged range) or the typed dispatch input (may be a
+/** Where the scope came from: the workflow_call input (ONLY_REPO, the fleet-sync labels of the merged
+ *  pull requests in the judged range) or the typed dispatch input (may be a
  *  private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 

@@ -60,7 +60,7 @@ describe("renderOwnSettings", () => {
       allow_merge_commit: false,
       squash_merge_commit_title: "PR_TITLE",
     });
-    // The baseline roster, the bun module's dependabot label, the site tracking label.
+    // The baseline roster, the bun module's dependabot label, the overlay's fleet-sync labels, the site tracking label.
     expect(names(doc.labels)).toEqual([
       "dependencies",
       "github_actions",
@@ -70,6 +70,8 @@ describe("renderOwnSettings", () => {
       "merge-when-green",
       "security-nightly",
       "javascript",
+      "fleet-sync:public",
+      "fleet-sync:all",
       "docs-link-rot",
     ]);
     // The baseline's pr-title (activated by the module), the override's two, the overlay's own.

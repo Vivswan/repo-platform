@@ -17,12 +17,12 @@ repo-platform manages standards files, CI, and settings across the owner's repos
 
 ## Decisions to keep
 
-- Sync triggers, in order of preference: the weekly schedule; a `[fleet-sync: <scope>]` directive as the first line of a merged PR body; a manual dispatch only when neither fits. Unsure which is right: ask the owner.
+- Sync triggers, in order of preference: the weekly schedule; a `fleet-sync:public` or `fleet-sync:all` label on the merged PR; a manual dispatch only when neither fits. Unsure which is right: ask the owner.
 - The owner merges every PR of this repository.
 
 ## Where the contracts live
 
 - What the fleet receives and how the writer applies it: docs/sync.md
-- Gates, post-green legs, the PR-body directive: docs/all-green.md
+- Gates, post-green legs, the fleet-sync label: docs/all-green.md
 - Delivery trust model: docs/build-provenance.md
 - Settings layers: docs/settings.md

@@ -10,6 +10,16 @@ repository:
   # Declared so the apply heals an out-of-band flip to private.
   private: false
 
+# A merged pull request's fleet-sync label opts it into an immediate sync (docs/all-green.md); fleet_sync_marker.ts reads these
+# names and check_ssot's fleet-sync-labels rule holds the two rosters together. One label per pull request.
+labels:
+  - name: fleet-sync:public
+    color: "0052cc"
+    description: Sync the public managed repos from this merge's green run
+  - name: fleet-sync:all
+    color: "b60205"
+    description: Sync the whole fleet from this merge's green run
+
 rulesets:
   # A publish-only ruleset is not expressible (docs/settings.md), and GitHub rejects an Integration bypass actor on a user-owned repository.
   - name: build-branches

@@ -40,7 +40,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 ## Editing your settings
 
 - Edit `.github/settings.local.yml`, never the rendered `.github/settings.yml`. The next sync re-renders the managed file from the new overlay; a hand edit of the rendered file is replaced on that sync, reported under Replaced local edits with the diff, and holds the PR. Before that, the [managed files check](new-repo.md#the-managed-files-check) reds the PR that edits it (manifest parity).
-- An overlay edit is two PRs: the overlay PR in the repository, then the sync PR carrying the re-render (the Tuesday cron brings it, a `[fleet-sync: <scope>]` directive on a merged platform PR brings it from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)), and `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` brings it at once). The rendered file stays stale in between, and the apply (the nightly cron plus every green main run, [below](#when-it-runs)) keeps applying the old render until the sync PR merges.
+- An overlay edit is two PRs: the overlay PR in the repository, then the sync PR carrying the re-render (the Tuesday cron brings it, a `fleet-sync:public` or `fleet-sync:all` label on a merged platform PR brings it from that merge's green run ([all-green.md](all-green.md#opting-a-pr-into-an-immediate-fleet-sync)), and `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<name> -f manual=true` brings it at once). The rendered file stays stale in between, and the apply (the nightly cron plus every green main run, [below](#when-it-runs)) keeps applying the old render until the sync PR merges.
 - An overlay that names one label twice, or that does not parse, holds the rendered row with the reason; the overlay itself is never rewritten.
 - A fleet or module layer that names one label or ruleset twice fails the whole run once, naming the layer file: it is operator data, never a per-repository hold. An overlay label without a `name` rides through to the apply, which refuses it by name.
 
@@ -50,7 +50,7 @@ One implementation ([sync/writer/merge_settings_layers.ts](../.github/scripts/sy
 
 | Entry | Effect |
 |---|---|
-| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | every target is applied on every green main run, after the run's fleet sync when a directive armed one - the apply is idempotent, so no diff decides it |
+| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | every target is applied on every green main run, after the run's fleet sync when a label armed one - the apply is idempotent, so no diff decides it |
 | Nightly cron | heals out-of-band drift |
 | Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift and changes no settings; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), the visibility tokens `public` and `private`, `modules:<a>+<b>` (the targets whose `.repo-platform.yml` selects every listed module; a visibility token intersects with it), a comma list of them, or `all` - an entry naming no discovered fleet repository or no module of `files.yml` fails the run; a discovered repository whose push probe is refused, that is not adopted, has no `.repo-platform.yml`, or has no rendered `.github/settings.yml` is skipped with a notice |
 

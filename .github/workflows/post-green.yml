@@ -121,7 +121,7 @@ jobs:
         run: bun .github/scripts/post-green/move_stable.ts
 
   # Ordered behind the mover for its fallback base, and run on every mover result: only this run is sure to read
-  # this commit's directives (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
+  # this commit's fleet-sync label (fleet_sync_marker.ts; docs/all-green.md, "Opting a PR into an immediate fleet sync").
   read-directives:
     needs: [move-stable]
     if: github.event_name != 'workflow_dispatch' && !cancelled()
@@ -147,7 +147,7 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      - name: Read the directives blocks since the last published green main
+      - name: Read the fleet-sync labels of the merges since the last published green main
         id: directives
         env:
           GH_TOKEN: ${{ github.token }}
