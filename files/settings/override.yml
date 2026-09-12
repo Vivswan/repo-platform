@@ -22,7 +22,7 @@ rulesets:
   #
   #   bypass actor 5 (RepositoryRole admin)   -> direct pushes to main keep working
   #   integration_id 15368 (GitHub Actions)    -> no other app and no plain commit status can satisfy the context by name
-  #   module settings-public.yml layers         -> append rules keyed by `type` (code_scanning); none can remove or weaken a rule declared here
+  #   files/settings/codeql-public.yml          -> appends the code_scanning rule keyed by `type`; no layer can remove or weaken a rule declared here
   - name: main
     target: branch
     enforcement: active

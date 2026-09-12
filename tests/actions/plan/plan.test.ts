@@ -54,8 +54,10 @@ function stagedReservedLabels(): string {
 }
 const RESERVED = readReservedLabels(stagedReservedLabels());
 
+const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo }\n";
+
 function registration(text: string): Registration {
-  const read = parseRegistration(text);
+  const read = parseRegistration(`${text}\n${PROJECT}`);
   if ("errors" in read) throw new Error(read.errors.join("\n"));
   return read.registration;
 }
@@ -317,7 +319,6 @@ describe("planSite", () => {
     ];
     const text = [
       "modules: [bun, site, fuzzer]",
-      "project: { name: My Project, slug: my-project, description: d }",
       "site:",
       "  path: manual",
       "  include:",
@@ -326,13 +327,13 @@ describe("planSite", () => {
       "labels: { site: rot }",
     ].join("\n");
     expect(planSite(input(text))).toEqual({
-      siteTitle: "My Project",
+      siteTitle: "Demo Project",
       docs: { path: "manual", include },
       linkRotLabel: "rot",
     });
     expect(outputsOf(planSite(input(text)))).toEqual({
       config: JSON.stringify({
-        site_title: "My Project",
+        site_title: "Demo Project",
         docs_path: "manual",
         include,
         link_rot_label: "rot",
@@ -340,17 +341,19 @@ describe("planSite", () => {
     });
   });
 
-  test("a bare selection takes every default: files.yml's path, an empty title (pages-site fills in the repository name), no include roots, the stream's default label", () => {
+  test("a bare selection takes every default: the project name as the title, files.yml's path, no include roots, the stream's default label", () => {
     expect(outputsOf(planSite(input("modules: [site]")))).toEqual({
-      config: '{"site_title":"","docs_path":"docs","include":[],"link_rot_label":"docs-link-rot"}',
+      config:
+        '{"site_title":"Demo Project","docs_path":"docs","include":[],"link_rot_label":"docs-link-rot"}',
     });
   });
 
   test("site.path: null plans no docs half: the config carries a null docs_path for the website alone", () => {
     const plan = planSite(input("modules: [site]\nsite: { path: null }"));
-    expect(plan).toEqual({ siteTitle: "", docs: null, linkRotLabel: "docs-link-rot" });
+    expect(plan).toEqual({ siteTitle: "Demo Project", docs: null, linkRotLabel: "docs-link-rot" });
     expect(outputsOf(plan)).toEqual({
-      config: '{"site_title":"","docs_path":null,"include":[],"link_rot_label":"docs-link-rot"}',
+      config:
+        '{"site_title":"Demo Project","docs_path":null,"include":[],"link_rot_label":"docs-link-rot"}',
     });
   });
 
@@ -417,7 +420,7 @@ describe("plan.ts as a child", () => {
 
   test("default mode writes the five fleet-ci rows and echoes them", () => {
     const result = run(
-      { ".repo-platform.yml": "modules: [bun, fuzzer, release-please]\n" },
+      { ".repo-platform.yml": `modules: [bun, fuzzer, release-please]\n${PROJECT}` },
       { PRIVATE: "false" },
     );
     expect(result.exitCode).toBe(0);
@@ -451,7 +454,7 @@ describe("plan.ts as a child", () => {
   test("a missing or invalid files.yml, or an unknown module, fails as a workflow error naming the file", () => {
     const missing = join(temp.dir("plan-files-missing-"), "files.yml");
     const noFile = run(
-      { ".repo-platform.yml": "modules: [bun]\n" },
+      { ".repo-platform.yml": `modules: [bun]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: missing },
     );
     expect(noFile.exitCode).toBe(1);
@@ -460,13 +463,16 @@ describe("plan.ts as a child", () => {
     const invalid = join(temp.dir("plan-files-invalid-"), "files.yml");
     writeFileSync(invalid, "placeholders: []\nfiles: []\nmodules: [bun]\n");
     const badBlock = run(
-      { ".repo-platform.yml": "modules: [bun]\n" },
+      { ".repo-platform.yml": `modules: [bun]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: invalid },
     );
     expect(badBlock.exitCode).toBe(1);
     expect(badBlock.stdout).toContain(`::error::${invalid}: modules: `);
     expect(badBlock.output).toBe("");
-    const unknown = run({ ".repo-platform.yml": "modules: [bun, agents]\n" }, { PRIVATE: "false" });
+    const unknown = run(
+      { ".repo-platform.yml": `modules: [bun, agents]\n${PROJECT}` },
+      { PRIVATE: "false" },
+    );
     expect(unknown.exitCode).toBe(1);
     expect(unknown.stdout).toContain(
       '::error::.repo-platform.yml: module "agents" is not a module files.yml offers',
@@ -477,8 +483,7 @@ describe("plan.ts as a child", () => {
   test("an impossible mirror declaration fails as one workflow error per target and writes no row", () => {
     const result = run(
       {
-        ".repo-platform.yml":
-          "modules: [bun]\nmirrors:\n  - {source: LICENSE.md, targets: [copies/a, copies/a/b, skills/*/LICENSE.md]}\n",
+        ".repo-platform.yml": `modules: [bun]\n${PROJECT}mirrors:\n  - {source: LICENSE.md, targets: [copies/a, copies/a/b, skills/*/LICENSE.md]}\n`,
       },
       { PRIVATE: "false" },
     );
@@ -496,14 +501,14 @@ describe("plan.ts as a child", () => {
     expect(missing.stdout).toContain("::error::.repo-platform.yml: missing");
     expect(missing.output).toBe("");
     const invalid = run(
-      { ".repo-platform.yml": "modules: [bun]\nnope: 1\n" },
+      { ".repo-platform.yml": `modules: [bun]\nnope: 1\n${PROJECT}` },
       { PRIVATE: "false" },
     );
     expect(invalid.exitCode).toBe(1);
     expect(invalid.stdout).toContain(
       '::error::.repo-platform.yml: (top level): Unrecognized key: "nope"',
     );
-    const mode = run({ ".repo-platform.yml": "modules: []\n" }, { MODE: "pages" });
+    const mode = run({ ".repo-platform.yml": `modules: []\n${PROJECT}` }, { MODE: "pages" });
     expect(mode.exitCode).toBe(1);
     expect(mode.stdout).toContain("::error::MODE must be one of default, site; got 'pages'");
   });
@@ -512,7 +517,7 @@ describe("plan.ts as a child", () => {
   test("an unknown registration key fails in both modes", () => {
     for (const env of [{ PRIVATE: "false" }, { MODE: "site" }] as Record<string, string>[]) {
       const result = run(
-        { ".repo-platform.yml": "modules: [site]\npages: { build: bun run build }\n" },
+        { ".repo-platform.yml": `modules: [site]\npages: { build: bun run build }\n${PROJECT}` },
         env,
       );
       expect(result.exitCode).toBe(1);
@@ -535,7 +540,7 @@ describe("plan.ts as a child", () => {
     const otherPath = join(dir, "files.yml");
     writeFileSync(otherPath, other);
     const ci = run(
-      { ".repo-platform.yml": "modules: [site]\n" },
+      { ".repo-platform.yml": `modules: [site]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: otherPath },
     );
     expect(ci.exitCode).toBe(0);
@@ -550,17 +555,17 @@ describe("plan.ts as a child", () => {
       ].join("\n"),
     );
     const site = run(
-      { ".repo-platform.yml": "modules: [bun, site]\n" },
+      { ".repo-platform.yml": `modules: [bun, site]\n${PROJECT}` },
       { MODE: "site", FILES_CONFIG: otherPath },
     );
     expect(site.exitCode).toBe(0);
     expect(site.output).toBe(
-      'config={"site_title":"","docs_path":"manual","include":[],"link_rot_label":"docs-link-rot"}\n',
+      'config={"site_title":"Demo Project","docs_path":"manual","include":[],"link_rot_label":"docs-link-rot"}\n',
     );
     const missingPath = join(dir, "missing-path.yml");
     writeFileSync(missingPath, real.replace("    path: docs\n", ""));
     const missing = run(
-      { ".repo-platform.yml": "modules: [bun]\n" },
+      { ".repo-platform.yml": `modules: [bun]\n${PROJECT}` },
       { PRIVATE: "false", FILES_CONFIG: missingPath },
     );
     expect(missing.exitCode).toBe(1);
@@ -569,7 +574,7 @@ describe("plan.ts as a child", () => {
   });
 
   test("a private registration plans without CodeQL", () => {
-    const result = run({ ".repo-platform.yml": "modules: [uv]\n" }, { PRIVATE: "true" });
+    const result = run({ ".repo-platform.yml": `modules: [uv]\n${PROJECT}` }, { PRIVATE: "true" });
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("private=true\ncodeql-languages=[]\n");
   });

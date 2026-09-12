@@ -124,14 +124,12 @@ const label = z
  *  plan action); the schema pins the shapes. */
 export const registrationSchema = z.strictObject({
   modules: z.array(z.unknown()),
-  project: z
-    .strictObject({
-      name: plainText("project.name").pipe(z.string().min(1)),
-      slug,
-      description: plainText("project.description"),
-      copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
-    })
-    .optional(),
+  project: z.strictObject({
+    name: plainText("project.name").pipe(z.string().min(1)),
+    slug,
+    description: plainText("project.description"),
+    copyright_holder: plainText("project.copyright_holder").pipe(z.string().min(1)).optional(),
+  }),
   // `path: null` turns the docs half off (docs/site.md, "Turning the docs
   // half off"): the site is the hook's website alone.
   site: z

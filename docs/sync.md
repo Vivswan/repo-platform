@@ -35,7 +35,7 @@ bun .github/scripts/sync/writer/sync.ts \
 
 - `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
 - `--build` is the build commit's full sha, 40 lowercase hex characters (`git rev-parse origin/build`), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
-- `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the name is the fallback project name and slug.
+- `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the default `copyright_holder`.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
 - Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
@@ -45,13 +45,14 @@ bun .github/scripts/sync/writer/sync.ts \
 ```yaml
 placeholders: [project_name, project_slug, description, github_username, github_username_lower, copyright_holder, year, fuzzer_label]
 modules:
-  bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun], settings_layers: [settings.yml, settings-public.yml]}
+  bun: {codeql_language: javascript-typescript, gitignore_sources: [Node, Bun], dependabot_ecosystems: [bun]}
   fuzzer: {tracking_label: {key: fuzzer, default: fuzz-nightly, color: B60205, description: Automated nightly fuzz failure}}
   release-please: {}
 settings:
   baseline: files/settings/baseline.yml
-  public: files/settings/public.yml
-  private: files/settings/private.yml
+  layers:
+    - {source: files/settings/public.yml, when: {private: false}}
+    - {source: files/bun/settings.yml, when: {modules: [bun]}}
   override: files/settings/override.yml
 files:
   - {path: .github/workflows/ci.yml, class: managed}
@@ -82,9 +83,9 @@ retired:
 | `files[].region` | Split entries only: `hash` for `#` comment markers, `html` for `<!-- -->` markers. |
 | `files[].blocks` | Managed, split, and starter entries: a module-data key. For each selected module carrying it, in `modules` order, each listed value names the block file `files/<module>/<path with .block.<value> between its stem and its extension>` (`.github/dependabot.block.bun.yml`; an extension-only dotfile keeps its suffix: `.block.Node.gitignore`), so every tool parses a block file by its real extension. Byte-identical block files land once, from the first selected module declaring them (a gitignore source two toolchains share); files that differ are each their module's own block even under one value name (each toolchain's `AGENTS.md` bullets). |
 | `files[].target` | Link entries only: the symlink target, relative to the link's own directory (`../AGENTS.md` from `.github/`). It must resolve to a clean repository path other than the link itself. |
-| `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers, the selected modules' `settings_layers` files, and the repository's overlay at `overlay` ([settings.md](settings.md)). |
+| `files[].render` | Managed entries only, one value: `settings`. The entry has no source; the writer renders the settings document from the `settings` layers and the repository's overlay at `overlay` ([settings.md](settings.md)). |
 | `files[].overlay` | Rendered entries only, required: the repository-owned file the render folds in (`.github/settings.local.yml`). The path must be written by starter entries only, listed before this entry, and selected exactly when this entry is. |
-| `settings.baseline`, `settings.public`, `settings.private`, `settings.override` | The four fleet settings layers, clean paths under `files/`; present exactly when a `render: settings` entry exists. |
+| `settings.baseline`, `settings.layers`, `settings.override` | The settings layers ([settings.md](settings.md)), clean paths under `files/`, present exactly when a `render: settings` entry exists: the baseline, then each `{source, when}` layer whose `when` holds (absent means always) in declared order, then the override above the repository's overlay. |
 | `retired[].path` | A path the platform no longer writes. The entry leaves the roster only after a live probe (`gh api repos/<owner>/<repo>/contents/<path>` over every fleet repository) shows that no repository carries the path. |
 | `retired[].moved_to` | The path the file moves to (`git mv`) when that path is absent. |
 
@@ -100,8 +101,8 @@ The loader refuses, all problems at once:
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
 - an `overlay` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
-- a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`
-- a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice; a `settings.yml`, `settings-public.yml`, or `settings-private.yml` in a module directory that its `settings_layers` does not declare
+- a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules`
+- a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
 - a `files` entry at `.github/repo-platform-manifest.json`, the manifest the writer itself writes last
@@ -146,7 +147,6 @@ The three links carry no `when`: every repository gets them.
 | `agents_toolchain` | the AGENTS.md block list (`[toolchain]`) | the writer |
 | `toolchain_steps` | the block list (`[toolchain]`) of the three starter workflows that carry per-toolchain steps | the writer |
 | `path` | the `site` module only: the URL segment the docs mount under when the repository's site-build hook also builds a website, unless the registration sets `site.path` | the fleet plan |
-| `settings_layers` | the settings layer files the module contributes (`settings.yml`, `settings-public.yml`, `settings-private.yml`), read from `files/<module>/` | the writer's settings render |
 | `tracking_label` | `{key, default, color, description}` of the module's tracking-issue label; `key` is the registration's `labels` key and `default` backs the `<key>_label` placeholder; `color` and `description` are the tuple the render writes the label with | the fleet plan, the writer's settings render, and the placeholder defaults |
 
 Placeholders in use beyond the project block: `fuzzer_label` in `nightly-fuzz.yml`, `nightly_label` in `nightly.yml`. No committed source names `site_label`: the site leg does not pass the link-rot label (the plan action resolves it from the registration), so it is not listed.
@@ -157,9 +157,9 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 
 | Name | Value |
 | --- | --- |
-| `project_name` | `project.name` from the registration, else the repository name |
-| `project_slug` | `project.slug`, else the repository name |
-| `description` | `project.description`, else empty |
+| `project_name` | `project.name` from the registration |
+| `project_slug` | `project.slug` |
+| `description` | `project.description` |
 | `github_username` | the repository owner |
 | `github_username_lower` | the owner, lower-cased |
 | `copyright_holder` | `project.copyright_holder`, else the owner |
@@ -170,7 +170,7 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 - A `$` before the braces marks a GitHub Actions expression, left untouched.
 - Substitution runs on source files only. A literal double brace in a repository-owned tail is never touched.
 - A value lands inside quoted YAML scalars verbatim, so a value carrying a double quote, a backslash, or a control character is refused twice: the registration grammar (`actions/plan/registration.ts`) rejects such a `project.name`, `project.description`, or `project.copyright_holder`, and `substitute` fails the run on any such value.
-- An absent or empty value is never written: an entry whose text needs it is `held` with `no value for <token>`, a Registration note names the registration key to set, and the PR holds. A registration carrying only `modules:` (no `project:` block) holds every entry that uses `description`.
+- An absent or empty value is never written: an entry whose text needs it is `held` with `no value for <token>`, a Registration note names the registration key to set, and the PR holds. An empty `project.description` holds every entry that uses `description`.
 
 ## Selection
 

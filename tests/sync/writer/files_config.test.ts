@@ -19,7 +19,7 @@ const BASE = `
 placeholders: [project_name, year]
 modules:
   bun: { gitignore_sources: [Node, Bun] }
-  pages: { settings_layers: [settings.yml] }
+  pages: {}
   docs-site: {}
   fuzzer: {}
 files:
@@ -198,8 +198,9 @@ describe("blockSources and verifySources", () => {
       problems = error.problems;
     }
     expect(problems).toEqual([
-      "files/bun/.gitignore.block.Node is read by no entry or block name",
-      "files/bun/settings.yml is a settings layer file files.yml modules.bun.settings_layers does not declare - the render never reads an undeclared layer, so its labels would leave the roster and the apply delete them; declare it or delete the file",
+      "files/bun/.gitignore.block.Node is read by no entry, block name, or settings layer",
+      "files/bun/settings.yml is read by no entry, block name, or settings layer",
+      "files/pages/settings.yml is read by no entry, block name, or settings layer",
     ]);
   });
 
@@ -224,7 +225,6 @@ describe("blockSources and verifySources", () => {
       "source files/base/.github/workflows/ci.yml uses unlisted placeholder(s) {{owner}}",
       "source files/bun/.block.Node.gitignore mentions the hash region markers the writer adds itself",
       "source files/fuzzer/.github/workflows/nightly-fuzz.yml is missing from the tree",
-      "settings layer files/pages/settings.yml is missing from the tree - a deleted layer file must leave the declaration in the same change, or the render would silently drop its labels and the apply delete them",
     ]);
   });
 
@@ -232,12 +232,14 @@ describe("blockSources and verifySources", () => {
     const SETTINGS = [
       "placeholders: []",
       "modules:",
-      "  bun: { settings_layers: [settings.yml] }",
+      "  bun: {}",
       "  pages: {}",
       "settings:",
       "  baseline: files/settings/baseline.yml",
-      "  public: files/settings/public.yml",
-      "  private: files/settings/private.yml",
+      "  layers:",
+      "    - { source: files/settings/public.yml, when: { private: false } }",
+      "    - { source: files/settings/private.yml, when: { private: true } }",
+      "    - { source: files/bun/settings.yml, when: { modules: [bun] } }",
       "  override: files/settings/override.yml",
       "files:",
       "  - { path: .github/settings.local.yml, class: starter }",
@@ -298,10 +300,11 @@ describe("blockSources and verifySources", () => {
         "settings layer files/bun/settings.yml is missing from the tree - a deleted layer file must leave the declaration in the same change, or the render would silently drop its labels and the apply delete them",
       ],
       [
-        "an undeclared module layer present",
+        // Dropping a layer from the declaration while its file stays on
+        // disk would otherwise silently shorten the stack.
+        "a layer file no declaration names",
         { ...LAYERS, "bun/settings-public.yml": "repository: {}\n" },
-        "files/bun/settings-public.yml is a settings layer file files.yml modules.bun.settings_layers does not declare - " +
-          "the render never reads an undeclared layer, so its labels would leave the roster and the apply delete them; declare it or delete the file",
+        "files/bun/settings-public.yml is read by no entry, block name, or settings layer",
       ],
       [
         "a layer that is not a mapping",

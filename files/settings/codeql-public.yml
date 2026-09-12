@@ -1,0 +1,15 @@
+---
+# Layer 4 of the settings merge (docs/settings.md): the code_scanning rule for a PUBLIC repository whose toolchain runs CodeQL.
+# GitHub rejects the rule on a private repository, and a repository with no CodeQL run would block every merge on results that never arrive, so files.yml selects this layer by both facts.
+# Rules of a same-name ruleset append across layers keyed by `type`: this adds to the main ruleset files/settings/override.yml declares.
+
+rulesets:
+  - name: main
+    rules:
+      - type: code_scanning
+        parameters:
+          code_scanning_tools:
+            - tool: CodeQL
+              # The fleet's severity bar, shared with semgrep (ERROR) and trivy (HIGH, CRITICAL): a warning-level alert or a medium security alert never blocks a merge.
+              security_alerts_threshold: high_or_higher
+              alerts_threshold: errors

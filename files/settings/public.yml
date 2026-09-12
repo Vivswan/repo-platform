@@ -10,7 +10,7 @@ repository:
       status: enabled
 
 rulesets:
-  # Code quality results are required on every public repository whatever its toolchain, so the rule lives in this layer, not beside code_scanning in the toolchain layers.
+  # Code quality results are required on every public repository whatever its toolchain, so the rule lives in this layer, not beside code_scanning in files/settings/codeql-public.yml.
   # Rules of a same-name ruleset append across layers keyed by `type`, so this joins the main ruleset in files/settings/override.yml.
   - name: main
     rules:

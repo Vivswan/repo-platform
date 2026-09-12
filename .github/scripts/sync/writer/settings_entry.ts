@@ -1,13 +1,13 @@
-// The settings render: one repository's .github/settings.yml as the six
-// layers folded (the fleet baseline, its visibility overlay, the selected
-// modules' layers, the repository's own overlay, the fleet override) with
+// The settings render: one repository's .github/settings.yml as the layers
+// folded (the fleet baseline, the layers files.yml's settings block selects
+// for the repository, the repository's own overlay, the fleet override) with
 // the registration's tracking labels appended. What the repository owns
 // (the overlay, the registration) holds the row when it is wrong; a layer
 // file the loader accepted but the fold refuses is the operator's error.
 
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
-import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
+import type { FilesConfig, Selection } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
 import {
@@ -27,7 +27,6 @@ import {
 import {
   declaredPrivate,
   type Label,
-  type LayerSelection,
   layerConfig,
   layerPaths,
   loadLayer,
@@ -146,7 +145,7 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
   if ("held" in parsed) return parsed;
   const overlay = parsed.layer;
   const config = layerConfig(input.config);
-  const selection: LayerSelection = {
+  const selection: Selection = {
     modules: input.modules,
     private: declaredPrivate(overlay) ?? input.private,
   };

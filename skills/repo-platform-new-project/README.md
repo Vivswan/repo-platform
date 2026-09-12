@@ -10,7 +10,7 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 
 ## What It Does
 
-- Writes `.repo-platform.yml`: the module list plus only the keys whose defaults are wrong, with a minimal and a full example and the key reference
+- Writes `.repo-platform.yml`: the module list and the project block, plus only the other keys whose defaults are wrong, with a minimal and a full example and the key reference
 - Enrolls the repo (the fleet token's write grant is the membership) and dispatches the first sync with `manual=true`
 - Reads the sync PR's report section by section (Written, Replaced local edits, Retired, Registration notes, Mirrors, Review) before merging
 - Names the repo-owned starters to fill in, the CI jobs every repo shares, and the owner actions (token grant, Pages, the bun Dependabot secret)

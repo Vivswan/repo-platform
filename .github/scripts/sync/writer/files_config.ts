@@ -15,7 +15,6 @@ import {
   type ModuleData,
   parseFilesConfig,
   type RegionKind,
-  SETTINGS_LAYER_ORDER,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
 import {
@@ -195,8 +194,8 @@ interface SourceUse {
 /** Every source the config can ever read from the tree exists and carries
  *  only listed placeholders, and the tree carries nothing else: a file no
  *  entry, block name, or layer declaration reads (a block file under a
- *  retired name) would otherwise sit there unnoticed. The settings layers
- *  are held against their declaration in both directions
+ *  retired name, a layer file dropped from the declaration) would
+ *  otherwise sit there unnoticed. Every declared layer must exist in turn
  *  (settings_layers.ts). */
 export function verifySources(config: FilesConfig, tree: string, label = "files.yml"): void {
   const problems: string[] = [];
@@ -252,22 +251,11 @@ export function verifySources(config: FilesConfig, tree: string, label = "files.
       }
     }
   }
-  // Layer-named files in a module directory are judged by the layer check
-  // below, declared or not, so an undeclared one is reported once.
   const layers = new Set(declaredLayers(config));
-  const layerNamed = (rel: string) => {
-    const [module, name, ...rest] = rel.split("/");
-    return (
-      rest.length === 0 &&
-      module !== undefined &&
-      module in config.modules &&
-      (SETTINGS_LAYER_ORDER as readonly string[]).includes(name ?? "")
-    );
-  };
   // A missing tree has each source reported missing above.
   for (const rel of existsSync(tree) ? walkFiles(tree) : []) {
-    if (!sources.has(rel) && !layers.has(rel) && !layerNamed(rel)) {
-      problems.push(`${SOURCE_PREFIX}${rel} is read by no entry or block name`);
+    if (!sources.has(rel) && !layers.has(rel)) {
+      problems.push(`${SOURCE_PREFIX}${rel} is read by no entry, block name, or settings layer`);
     }
   }
   problems.push(...readLayers(config, tree).problems);
