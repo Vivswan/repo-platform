@@ -76,8 +76,8 @@ export function renderOwnSettings(root: string): OwnSettings {
   return { path: entry.path, overlayPath, content: rendered.content };
 }
 
-/** The committed document's text, or null when nothing is there. Probed as the writer probes a managed path, so a
- *  link whose target reads as the render is refused rather than read through (or written through). */
+/** Probed as the writer probes a managed path, so a link whose target reads as the render is refused rather than
+ *  read through (or written through). */
 function committedRender(root: string, path: string): string | null {
   const found = probe(root, path);
   if (found.kind === "link") {
