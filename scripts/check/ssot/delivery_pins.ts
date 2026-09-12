@@ -43,6 +43,26 @@ export function actionManifestFiles(): string[] {
   return actionManifestPaths(join(REPO_ROOT, "actions"));
 }
 
+/** True when pinact settles the line itself: a full version it verifies against the commit, or no version comment at
+ *  all, which it refuses (code 005). False is the gap: a comment pinact reads as a version but leaves unverified, sha
+ *  included (`actions/checkout@<no such commit> # v999` exits 0). The branches follow pinact's classifier order. */
+export function pinactJudgesComment(comment: string): boolean {
+  const version = comment.replace(/^tag=/, "");
+  if (!/^v?\d/.test(version)) return true;
+  if (/\b[0-9a-f]{40}\b/.test(version)) return false;
+  return /^v?\d+\.\d+\.\d+\S*$/.test(version);
+}
+
+export function unverifiableVersionCommentMismatches(pins: Pin[]): Mismatch[] {
+  return pins
+    .filter((pin) => pin.version !== null && !pinactJudgesComment(pin.version))
+    .map((pin) => ({
+      file: pin.file,
+      expected: `${pin.action}@${pin.ref} # v<major>.<minor>.<patch> (pinact verifies a full version against its commit; any other numeric comment passes unverified, sha included)`,
+      got: `# ${pin.version}`,
+    }));
+}
+
 /** A twin of move_stable.ts's TAG, pinned against it by the fleet-refs-ride-stable rule so a delivery-tag rename updates both.
  *  Starters are written once, so a rename reaches fresh writes only, never a pin an already-written starter carries. */
 export const DELIVERY_REF = "stable";
@@ -211,6 +231,13 @@ export const deliveryPinRules: Rule[] = [
         ...fleetWorkflowPinMismatches(pins, callableWorkflowNames(workflowFiles())),
       ];
     },
+  },
+  {
+    name: "version-comments-verifiable",
+    run: () =>
+      unverifiableVersionCommentMismatches(
+        pinSites().flatMap((rel) => extractUsesPins(read(rel), rel)),
+      ),
   },
   {
     name: "delivery-pin-stems",

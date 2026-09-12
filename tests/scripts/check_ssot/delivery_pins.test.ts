@@ -5,8 +5,10 @@ import {
   deliveryRefTwinMismatches,
   extractUsesPins,
   fleetWorkflowPinMismatches,
+  type Pin,
   sourceSelfPins,
   stemMismatches,
+  unverifiableVersionCommentMismatches,
   workflowFiles,
 } from "../../../scripts/check/ssot/delivery_pins.ts";
 
@@ -35,6 +37,58 @@ describe("extractUsesPins", () => {
     const pins = extractUsesPins('      - uses: "actions/checkout@v8"', "f");
     expect(pins).toEqual([{ file: "f", action: "actions/checkout", ref: "v8", version: null }]);
   });
+});
+
+describe("unverifiableVersionCommentMismatches (version-comments-verifiable)", () => {
+  const pin = (version: string | null): Pin => ({
+    file: "a.yml",
+    action: "actions/checkout",
+    ref: SHA,
+    version,
+  });
+
+  // A full version pinact resolves against the commit, a suffixed or `tag=`-prefixed one included; a comment outside its
+  // `v?<digit>` grammar (`main`, `V7.0.1`) and no comment at all are pinact's own refusals (code 005), so the rule leaves them to it.
+  test("passes every comment pinact judges itself", () => {
+    const judged = [
+      "v7.0.1",
+      "7.0.1",
+      "v7.0.1-rc",
+      "v9.0.0.0",
+      "tag=v7.0.1",
+      "main",
+      "tag=main",
+      `main-${SHA}`,
+      "V7.0.1",
+      null,
+    ];
+    expect(unverifiableVersionCommentMismatches(judged.map(pin))).toEqual([]);
+  });
+
+  // The last two ride pinact's classifier order: `tag=` is dropped before classifying, and a 40-hex word anywhere makes
+  // the comment a sha before the full-version shape is even tried.
+  test.each([
+    "v999",
+    "v7",
+    "v7.0",
+    "999",
+    "7",
+    "v999-beta",
+    "2024-01",
+    "tag=v999-beta",
+    `v7.0.1-${SHA}`,
+  ])(
+    "a `# %s` comment reds: pinact reads it as a version but verifies only the full shape, so the line passes unverified",
+    (version) => {
+      expect(unverifiableVersionCommentMismatches([pin(version)])).toEqual([
+        {
+          file: "a.yml",
+          expected: `actions/checkout@${SHA} # v<major>.<minor>.<patch> (pinact verifies a full version against its commit; any other numeric comment passes unverified, sha included)`,
+          got: `# ${version}`,
+        },
+      ]);
+    },
+  );
 });
 
 describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-stable)", () => {

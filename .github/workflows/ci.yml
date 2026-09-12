@@ -55,8 +55,9 @@ jobs:
           echo "$RUNNER_TEMP/pinact-bin" >>"$GITHUB_PATH"
       # Networked, so outside `bun run check`: a dangling pin passes every offline gate and fails at job start, fleet-wide
       # once synced. Every third-party pin is a full sha whose comment names the tag GitHub resolves to that sha (pinact
-      # codes 001 and 005); the config names the two refs that are not release pins by design, and reaches the written
-      # trees only through the variable (pinact discovers a config relative to its working directory).
+      # codes 001 and 005; the version-comments-verifiable ssot rule refuses the `# v7` comment shapes pinact would pass
+      # unverified); the config names the two refs that are not release pins by design, and reaches the written trees
+      # only through the variable (pinact discovers a config relative to its working directory).
       - name: Verify every pin in the checkout and the written workflows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
