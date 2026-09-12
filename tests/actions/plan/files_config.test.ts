@@ -8,6 +8,7 @@ import {
   linkTargetProblem,
   mutuallyExclusive,
   parseFilesConfig,
+  selectEntries,
   starterCoverage,
 } from "../../../actions/plan/files_config.ts";
 
@@ -517,6 +518,71 @@ describe("render, overlay, and the settings block", () => {
       ).toEqual(problems);
     },
   );
+});
+
+describe("a module list declared by module data", () => {
+  // Three CodeQL toolchains, one of them new, and one toolchain without CodeQL: the entries name the data key, never
+  // the modules, so the new toolchain is selected by the layer and the workflow variant with no list edited.
+  const doc = (layerWhen: string, codeqlWhen: string, plainWhen: string) =>
+    [
+      "placeholders: []",
+      "modules:",
+      "  bun: { codeql_language: javascript-typescript }",
+      "  deno: { codeql_language: javascript-typescript }",
+      "  rust: {}",
+      "  extra: { codeql_language: python }",
+      "settings:",
+      "  baseline: files/settings/baseline.yml",
+      "  layers:",
+      `    - { source: files/settings/codeql-public.yml, when: ${layerWhen} }`,
+      "  override: files/settings/override.yml",
+      "files:",
+      "  - { path: .github/settings.local.yml, class: starter }",
+      "  - { path: .github/settings.yml, class: managed, render: settings, overlay: .github/settings.local.yml }",
+      `  - { path: auto-assign.yml, class: managed, when: ${codeqlWhen}, source: files/base/auto-assign.codeql.yml }`,
+      `  - { path: auto-assign.yml, class: managed, when: ${plainWhen} }`,
+    ].join("\n");
+
+  test("the loader expands the list from the modules block, and selection reads the expanded list", () => {
+    const config = parseFilesConfig(
+      doc(
+        "{ private: false, any: { declaring: codeql_language } }",
+        "{ private: false, any: { declaring: codeql_language } }",
+        "{ private: false, without: { declaring: codeql_language } }",
+      ),
+    );
+    expect(config.settings?.layers).toEqual([
+      {
+        source: "settings/codeql-public.yml",
+        when: { private: false, any: ["bun", "deno", "extra"] },
+      },
+    ]);
+    expect(config.files.slice(2).map((entry) => entry.when)).toEqual([
+      { private: false, any: ["bun", "deno", "extra"] },
+      { private: false, without: ["bun", "deno", "extra"] },
+    ]);
+    const variant = (modules: string[]) =>
+      selectEntries(config, { modules, private: false })
+        .filter((entry) => entry.path === "auto-assign.yml")
+        .map(sourceOf);
+    expect(variant(["extra"])).toEqual(["base/auto-assign.codeql.yml"]);
+    expect(variant(["rust"])).toEqual(["base/auto-assign.yml"]);
+  });
+
+  test("a key no module declares is a load error at every position that names it", () => {
+    expect(
+      problemsOf(
+        doc(
+          "{ any: { declaring: tracking_label } }",
+          "{ private: false, any: { declaring: tracking_label } }",
+          "{ private: false, without: [bun, deno, extra] }",
+        ),
+      ),
+    ).toEqual([
+      "files: auto-assign.yml: when declaring 'tracking_label' names no module",
+      "settings: layers[0]: when declaring 'tracking_label' names no module",
+    ]);
+  });
 });
 
 describe("starterCoverage", () => {

@@ -94,14 +94,14 @@ Blocks land at the anchor line: the word `blocks` inside double braces, alone on
 The loader refuses, all problems at once:
 
 - a placeholder the writer cannot derive, or a source file using a token outside `placeholders`
-- a `when` naming a module absent from `modules`
+- a `when` naming a module absent from `modules`, or declaring a key no module carries
 - a `split` without `region`; `region` on a non-split entry; `target` on a non-link entry; a link with a `source` or `blocks`, without a `target`, or with a target that is absolute, leaves the repository, or is the link itself
 - a `source` outside `files/`, or one missing from the tree (block files included)
 - a `blocks` anchor mentioned twice or mid-line, in a source whose entries do not all declare `blocks`, or inside a block file
 - a listed `<key>_label` placeholder no module declares a default for; a default declared by two modules; a `tracking_label` without `key` and `default`, or without `color` and `description` while the data file renders settings
 - `render` on an entry that is not managed; `overlay` on an entry that is not rendered; a rendered entry with a `source` or `blocks`, or without `overlay`
 - an `overlay` path that is not clean, is the entry's own path, a retired path, or the manifest; one that any non-starter entry writes or no entry writes; overlay starters listed after the rendered entry; overlay starters not selected exactly when the rendered entry is (an unconditional rendered entry needs one unconditional starter or a `private: true` / `private: false` pair; a conditional one a starter with the same `when`)
-- a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules`
+- a `settings` block missing while a `render: settings` entry exists, or present with none; a layer path that is not a clean path under `files/`; a layer source declared twice; a layer `when` naming a module absent from `modules` or declaring a key no module carries
 - a declared settings layer missing from the tree, not a YAML mapping, or naming one label (case-insensitively) or one ruleset twice
 - two entries for one `path` whose conditions can both hold (below)
 - a path listed under both `files` and `retired`
@@ -123,8 +123,9 @@ What the committed `files.yml` uses today, so a reader knows which forms are liv
 | `when` form | Used by |
 | --- | --- |
 | `modules: [x]` | every module-owned file |
-| `any: [...]` | `auto-format.yml` and the CodeQL variant of `auto-assign.yml` (any toolchain with a formatter), the Toolchain variant of `AGENTS.md` (any toolchain) |
-| `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variants of `.typography-allow`, `AGENTS.md`, and `auto-assign.yml` |
+| `any: {declaring: <key>}` | the CodeQL variant of `auto-assign.yml` and the CodeQL settings layer (`codeql_language`), `auto-format.yml` (`toolchain_steps`), the Toolchain variant of `AGENTS.md` (`agents_toolchain`) |
+| `without: [...]` | `LICENSE.md` (not `custom-license`), the plain variant of `.typography-allow` |
+| `without: {declaring: <key>}` | the plain variants of `AGENTS.md` (`agents_toolchain`) and `auto-assign.yml` (`codeql_language`) |
 | `private: true` / `false` | the two `.github/settings.local.yml` starters, the `auto-assign.yml` variants (code scanning exists on public repositories only) |
 
 The three links carry no `when`: every repository gets them.
@@ -180,6 +181,8 @@ A module with no files still appears under `modules` (`custom-license`) so a reg
 | `any: [a, b]` | at least one listed module is selected |
 | `without: [a]` | none of the listed modules is selected |
 | `private: true` | the repository's visibility matches |
+
+A list position may name a module-data key instead of the modules: `any: {declaring: codeql_language}` is the list of every module whose data carries `codeql_language`, in `modules` order. The loader expands it, so a list spelled this way follows the modules block and a new module joins it by declaring the key; a key no module declares is a loader error.
 
 - The selected modules are the registration's `modules` filtered to the names `files.yml` knows, in `files.yml` order. Unknown names are dropped and listed under Registration notes, which holds the PR.
 - Two entries for one path must be provably exclusive: a module one requires and the other forbids, an `any` list the other forbids entirely, or opposite `private` values. Anything subtler is a loader error.

@@ -11,7 +11,13 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { MANIFEST_NAME } from "../shared/platform.ts";
 import { pathProblem } from "../shared/repo_path.ts";
-import { applies, type Selection, type When } from "../shared/selection.ts";
+import {
+  applies,
+  type ModuleList,
+  moduleList,
+  type Selection,
+  type When,
+} from "../shared/selection.ts";
 
 export type FileClass = "managed" | "split" | "starter" | "link";
 export type RegionKind = "hash" | "html";
@@ -81,17 +87,33 @@ export interface RetiredEntry {
 
 const names = z.array(z.string().min(1)).min(1);
 
+/** A list position as written: the names, or `{declaring: <module-data key>}`, expanded against the modules block
+ *  by resolveWhen so every reader past the loader sees plain names. */
+const listSchema: z.ZodType<ModuleList> = names.or(
+  z.strictObject({ declaring: z.string().min(1) }),
+);
+
+/** A `when` clause before its lists are expanded. */
+interface WrittenWhen {
+  modules?: ModuleList;
+  any?: ModuleList;
+  without?: ModuleList;
+  private?: boolean;
+}
+
 // `when: {}` is unconditional, and parses to the same null an absent
 // when does: every reader, starterCoverage included, compares one
 // spelling of "always".
 const whenSchema = z
   .strictObject({
-    modules: names.optional(),
-    any: names.optional(),
-    without: names.optional(),
+    modules: listSchema.optional(),
+    any: listSchema.optional(),
+    without: listSchema.optional(),
     private: z.boolean().optional(),
   })
-  .transform((when): When | null => (Object.keys(when).length === 0 ? null : when));
+  .transform((when): WrittenWhen | null => (Object.keys(when).length === 0 ? null : when));
+
+const LIST_KEYS = ["modules", "any", "without"] as const;
 
 const fileSchema = z.strictObject({
   path: z.string().min(1),
@@ -320,18 +342,32 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
   const data = result.data;
   const problems: string[] = [];
   const moduleNames = Object.keys(data.modules);
-  const checkWhen = (where: string, when: When | null) => {
-    for (const name of [...(when?.modules ?? []), ...(when?.any ?? []), ...(when?.without ?? [])]) {
-      if (!moduleNames.includes(name))
-        problems.push(`${where}: when names unknown module '${name}'`);
+  // A derived list resolving to no module is a typo'd key, and an explicit list holds only known names: either way a
+  // clause that can never hold is refused here instead of quietly deselecting its entry everywhere.
+  const resolveWhen = (where: string, written: WrittenWhen | null): When | null => {
+    if (written === null) return null;
+    const when: When = { ...(written.private === undefined ? {} : { private: written.private }) };
+    for (const key of LIST_KEYS) {
+      const list = written[key];
+      if (list === undefined) continue;
+      const resolved = moduleList(list, data.modules);
+      if (Array.isArray(list)) {
+        for (const name of list) {
+          if (!moduleNames.includes(name))
+            problems.push(`${where}: when names unknown module '${name}'`);
+        }
+      } else if (resolved.length === 0) {
+        problems.push(`${where}: when declaring '${list.declaring}' names no module`);
+      }
+      when[key] = resolved;
     }
+    return when;
   };
   const files: FileEntry[] = data.files.map((entry) => {
     const where = `files: ${entry.path}`;
     const problem = pathProblem(entry.path);
     if (problem !== null) problems.push(`${where}: path ${problem}`);
-    const when = entry.when ?? null;
-    checkWhen(where, when);
+    const when = resolveWhen(where, entry.when ?? null);
     if (entry.class !== "split" && entry.region !== undefined) {
       problems.push(`${where}: region applies to split entries only`);
     }
@@ -457,8 +493,7 @@ export function checkFilesConfig(text: string, label = "files.yml"): CheckedFile
       baseline: layerSource("baseline", declared.baseline),
       layers: declared.layers.map((layer, index) => {
         const where = `layers[${index}]`;
-        const when = layer.when ?? null;
-        checkWhen(`settings: ${where}`, when);
+        const when = resolveWhen(`settings: ${where}`, layer.when ?? null);
         if (sources.indexOf(layer.source) !== index + 1 || layer.source === declared.override) {
           problems.push(`settings: ${where} '${layer.source}' is declared twice`);
         }
