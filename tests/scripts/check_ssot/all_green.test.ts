@@ -34,7 +34,9 @@ describe("the all-green name pins", () => {
       "verdict check name",
     );
     expect(() => declaredCheckName(`const doc = '${active}';\n`)).toThrow("verdict check name");
-    expect(() => declaredCheckName('export const CHECK_NAME = "all-green" + "-spoof";\n')).toThrow(
+    // A chain of literals reads whole; a chain with an identifier in it does not.
+    expect(declaredCheckName('export const CHECK_NAME = "all-" + "green";\n')).toBe("all-green");
+    expect(() => declaredCheckName('export const CHECK_NAME = "all-green" + suffix;\n')).toThrow(
       "verdict check name",
     );
     // A neighbouring same-shaped constant is a different anchor.

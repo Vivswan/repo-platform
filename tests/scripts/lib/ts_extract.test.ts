@@ -64,13 +64,19 @@ describe("constStringValue", () => {
     );
   });
 
-  test("let/var and non-string-literal initializers are lost anchors", () => {
+  test("let/var and non-literal initializers are lost anchors; a + chain of literals reads whole", () => {
     expect(() => constStringValue('let BRANCH = "build";\n', "BRANCH", anchor)).toThrow("found 0");
-    expect(() => constStringValue('const BRANCH = "bu" + "ild";\n', "BRANCH", anchor)).toThrow(
-      "not a plain string literal",
+    expect(constStringValue('const BRANCH =\n  "bu" +\n  "il" +\n  "d";\n', "BRANCH", anchor)).toBe(
+      "build",
+    );
+    expect(() => constStringValue('const BRANCH = "bu" + ild;\n', "BRANCH", anchor)).toThrow(
+      "not a plain string literal or a + chain of them",
+    );
+    expect(() => constStringValue('const BRANCH = "bu" + `ild`;\n', "BRANCH", anchor)).toThrow(
+      "not a plain string literal or a + chain of them",
     );
     expect(() => constStringValue("const BRANCH = `build`;\n", "BRANCH", anchor)).toThrow(
-      "not a plain string literal",
+      "not a plain string literal or a + chain of them",
     );
   });
 
