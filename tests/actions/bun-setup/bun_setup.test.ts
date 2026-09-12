@@ -1,7 +1,3 @@
-// The shared bun-setup action, run the way the runner runs it: each bash
-// step's script with the action's expressions filled from a test-owned
-// PATH and pin, judged on the outputs it writes and its exit code.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,8 +19,6 @@ const stepById = (id: string): Step => {
   return step;
 };
 
-/** A directory holding a fake `bun` that prints `version`, or exits 1 when
- *  `version` is null; PATH-first, so `command -v bun` finds it. */
 function fakeBun(root: string, name: string, version: string | null): string {
   const dir = join(root, name);
   mkdirSync(dir);
@@ -42,9 +36,6 @@ function toolsDir(root: string): string {
   return dir;
 }
 
-/** Run one bash step with its `${{ ... }}` expressions replaced from
- *  `fills` and its env from the step's own env: block; returns the exit
- *  code, stderr, and the GITHUB_OUTPUT key/values it wrote. */
 function runStep(
   step: Step,
   fills: Record<string, string>,
@@ -147,9 +138,6 @@ describe("actions/bun-setup", () => {
     expect([result.exitCode, result.outputs]).toEqual([0, { pinned }]);
   });
 
-  // The resolver records only an absolute path printing the pin; a decoy
-  // first on PATH or no bun at all yields no path, and `required` decides
-  // whether that ends the action or is left to the caller as ready=false.
   test.each<{
     reason: string;
     onPath: "real" | "decoy" | "none";

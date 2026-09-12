@@ -18,8 +18,6 @@ type Step = Record<string, unknown>;
 const stepsOf = (file: string): Step[] =>
   parseYaml(readFileSync(join(REPO_ROOT, file), "utf8")).runs.steps;
 
-/** Text as the runner would resolve it with the action path pointed at
- *  `actionPath`; any other expression is refused. */
 function fill(text: string, actionPath: string): string {
   const filled = text.replaceAll("${{ github.action_path }}", actionPath);
   if (filled.includes("${{")) throw new Error(`unresolved expression in ${filled}`);
@@ -27,8 +25,6 @@ function fill(text: string, actionPath: string): string {
 }
 
 describe("the actions' recorded bun path", () => {
-  // A later step runs the recorded path even when another bun sits first
-  // on PATH by then; the same line spelled `bun ...` runs the decoy.
   test("a later step runs the recorded bun, not a decoy placed first on PATH after the probe", () => {
     const root = temp.dir("recorded-bun-decoy-");
     const actionPath = join(root, "action");

@@ -1,9 +1,3 @@
-// The knip action's contract: the repository's own configuration is
-// discovered by knip itself and the fleet default only fills the gap, the
-// run is the pinned knip over that flag alone, and the fleet default names
-// the fleet's layout (tests, hooks, scripts directories) as entry files on
-// top of knip's own discovery, whose limits the end-to-end controls pin.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -102,14 +96,8 @@ describe("actions/knip", () => {
     });
   });
 
-  // End to end with the pinned knip, run as the action runs it, on a
-  // repository of the fleet shape: the default finds a root cli.ts, the
-  // package.json bin, the workflow-run script and the .github action script
-  // (github-actions plugin), and the fleet layout the entry globs name: test
-  // files run through a launcher script (not `bun test`, so the bun plugin
-  // misses them), their helpers, a git hook, and a skill's scripts directory.
-  // The controls pin the shapes it misses, which the fleet guidelines send
-  // to a repository knip.json.
+  // Run as the action runs it, on a fleet-shaped repository whose tests run through a launcher script, not `bun test`.
+  // knip's bun plugin misses those, so the entry globs must name them; the controls pin the shapes the default misses.
   const knip = (repo: string) =>
     boundedSpawnSync(
       [join(REPO_ROOT, "node_modules/.bin/knip"), "--config", FLEET_CONFIG, "--no-config-hints"],

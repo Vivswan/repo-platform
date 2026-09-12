@@ -1,8 +1,4 @@
-// The render pass over the mounts, driven against a document that holds
-// only what the pass touches (bun has no DOM): the mermaid package is a
-// stub the test can make fail or hold mid-render, recording every
-// initialize and render, so each case pins the whole mount afterwards (its
-// children, their text, the state) plus what mermaid was asked to do.
+// bun has no DOM, so the document holds only what the render pass touches.
 
 import { beforeEach, expect, test } from "bun:test";
 import { HUES } from "../../../actions/pages-site/.vitepress/theme/tokens.ts";
@@ -29,7 +25,6 @@ class FakeElement {
     if (match === null) throw new Error(`unsupported selector ${selector}`);
     return this.children.find((child) => child.className.split(" ").includes(match[1])) ?? null;
   }
-  /** The mount as one comparable value: tag.class, then text or markup. */
   get shape(): string {
     const content = this.tag === "div" && this.innerHTML !== "" ? this.innerHTML : this.textContent;
     return `${this.tag}.${this.className}:${content}`;
@@ -49,10 +44,7 @@ interface Held {
   reject: (error: Error) => void;
 }
 
-/** The stub's knobs: `failLoad` makes the package import reject, `hold`
- *  parks every render until the test releases it (`held`, in call order);
- *  a source ending in `-->` is the parse error. Each render's SVG carries
- *  its ordinal, so a stale result landing is visible. */
+/** Each render's SVG carries its ordinal, so a stale result landing is visible. */
 const stub = { failLoad: false, hold: false, held: [] as Held[] };
 const calls = { loads: 0, initialize: [] as Record<string, unknown>[], renders: [] as string[] };
 Bun.plugin({
@@ -103,7 +95,6 @@ const shapes = (element: FakeElement) => element.children.map((child) => child.s
 const darkModes = () =>
   calls.initialize.map((config) => (config.themeVariables as { darkMode: boolean }).darkMode);
 
-/** Waits until the stub holds `count` renders. */
 async function heldRenders(count: number): Promise<void> {
   for (let i = 0; i < 100 && stub.held.length < count; i += 1) await Bun.sleep(1);
   expect(stub.held).toHaveLength(count);

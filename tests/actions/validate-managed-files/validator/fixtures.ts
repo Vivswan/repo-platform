@@ -1,7 +1,3 @@
-// Fixtures shared by the validator suites: the smallest passing managed
-// tree, the manifest builders, and the validator runner (bound to each
-// file's TempDirs).
-
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";
@@ -20,8 +16,6 @@ export const HE = "# END REPO-PLATFORM MANAGED";
 // The build commit a sync records: the writer stamps the full sha.
 export const COMMIT = "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01";
 
-/** The module data file the registration is judged against: files.yml
- *  reduced to the modules the fixtures select. */
 export const FILES_YML = [
   "placeholders: []",
   "modules:",
@@ -33,8 +27,6 @@ export const FILES_YML = [
   "",
 ].join("\n");
 
-// The smallest tree the validator accepts: the registration, the marked
-// split files, and a ci.yml.
 export const BASELINE: Record<string, string> = {
   ".repo-platform.yml": "modules: [uv]\n",
   ".gitignore": `# local patterns go here\n\n${HB}\nnode_modules/\n${HE}\n`,
@@ -49,8 +41,6 @@ export const MANIFEST = ".github/repo-platform-manifest.json";
 export const shaLatin1 = (text: string) =>
   new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
 
-/** The managed region from the first BEGIN marker line through the first
- *  END marker line after it (newline included). */
 export function regionOf(content: string, begin: string, end: string): string | null {
   const lines = content.split("\n");
   let offset = 0;
@@ -85,7 +75,6 @@ export function manifestOf(entries: Record<string, string>): string {
     .join(",\n")}\n  }\n}\n`;
 }
 
-/** The entries the writer would record for the BASELINE tree. */
 export function stampedBaseline(): Record<string, string> {
   return {
     [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
@@ -118,10 +107,7 @@ export interface RunValidatorOptions {
   env?: Record<string, string>;
   noManifest?: boolean;
   omit?: string[];
-  /** The module data file text; the fixture's FILES_YML by default, null
-   *  for no --files at all. */
   filesYml?: string | null;
-  /** An explicit --files path instead of a written data file. */
   filesPath?: string;
 }
 
@@ -131,14 +117,8 @@ export interface ValidatorResult {
   stderr: string;
 }
 
-/** The runner bound to one file's TempDirs (tests/shared/temp_dir.ts
- *  binds its afterAll to the registering file, so this module never calls
- *  tempDirs() itself). The returned function writes BASELINE plus `extra`
- *  into a fresh temp repo and runs the validator against it, with any extra
- *  CLI `args` (e.g. --self). `opts.gitInit` makes the tree a real git
- *  checkout first, so the --self gitignore skip has ignore rules to consult;
- *  `opts.gitAddForce` force-tracks paths despite matching an ignore pattern;
- *  `opts.omit` drops BASELINE files from the tree. */
+/** tests/shared/temp_dir.ts binds its afterAll to the registering file, so each suite hands in its own TempDirs
+ *  and this module never calls tempDirs() itself. */
 export function validatorRunner(temp: TempDirs) {
   return function runValidator(
     extra: Record<string, string> = {},

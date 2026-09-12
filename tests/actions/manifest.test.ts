@@ -1,7 +1,3 @@
-// Unit tests for the shared manifest module: the value-free parse every
-// consumer reads through, and the closed entry-field vocabulary the
-// validator judges unknown fields against.
-
 import { describe, expect, test } from "bun:test";
 import {
   entryBody,
@@ -12,12 +8,8 @@ import {
 } from "../../actions/shared/manifest";
 
 describe("parseManifestFiles problem strings are value-free", () => {
-  // Manifest text is target-repo content on updates and the problem
-  // strings reach PUBLIC logs (the sync's warnings and thrown errors, the
-  // validator's findings), so no branch may quote manifest bytes - a
-  // private repo's path in a duplicated key included. Every rejecting
-  // branch is proven here against a SECRET sentinel, next to a well-formed
-  // control proving the probe is not simply always-erroring.
+  // Problem strings reach public logs (the sync's warnings and thrown errors, the validator's findings), so no branch may quote manifest bytes.
+  // That includes the key a duplicated-key report would name: a private repo's path.
   const SENTINEL = "SECRET-private-repo/path/to/leak.ts";
   const rejecting: [string, string][] = [
     ["invalid JSON", `{ not json "${SENTINEL}"`],

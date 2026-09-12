@@ -44,8 +44,6 @@ function git(root: string, ...args: string[]): void {
   if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr}`);
 }
 
-/** A git checkout holding `tracked` (added to the index) and `untracked`
- *  (on disk only). */
 function checkout(tracked: Record<string, string>, untracked: Record<string, string> = {}): string {
   const root = temp.dir("check-file-size-");
   git(root, "init", "-q");
@@ -321,8 +319,6 @@ describe("judgeFile line width", () => {
       "a".repeat(each - (i < tokens - 1 ? 1 : 0)),
     ).join(" ");
   };
-  /** Expected rows as [tier, line, width, cap]; expanded to whole width
-   *  findings before comparing. */
   const widthFinding = (
     path: string,
     kind: Kind,
@@ -464,9 +460,6 @@ describe("judgeFile line width", () => {
     judgeWidth(path, text, expected);
   });
 
-  // Each line is warn-wide (WARN.width < width <= HARD.width) and
-  // breakable; a literal line yields no finding, anything else the whole
-  // warn width finding.
   const F = "a ".repeat(110).trim();
   test.each<[string, string, string, boolean]>([
     ["a typed exported declaration", "f.ts", `export const x: Readonly<T[]> = "${F}";`, true],
@@ -542,12 +535,8 @@ describe("judgeFile comment blocks", () => {
     `${Array.from({ length: count }, (_, i) => `// c${i}`).join("\n")}\n`;
   const hashes = (count: number): string =>
     `${Array.from({ length: count }, (_, i) => `# c${i}`).join("\n")}\n`;
-  /** A `/* ... *\/` comment of `count` lines including both delimiter lines. */
   const starred = (count: number, open = "/*"): string =>
     `${open}\n${Array.from({ length: count - 2 }, (_, i) => ` * c${i}`).join("\n")}\n */\n`;
-  /** Expected rows: an over-cap block, or a bare marker line; every comment
-   *  finding is a warning, so the tier is implied and the cap follows the
-   *  scope. */
   type Row = [line: number, length: number, scope: CommentScope] | [marker: number];
   const commentFinding = (path: string, kind: Kind, row: Row): Finding =>
     row.length === 1
@@ -757,7 +746,6 @@ describe("judgeFile comment blocks", () => {
       `x\n/*\n${"a\n".repeat(BLOCK)}`,
       [],
     ],
-    // Comment syntax inside literals is a literal: the grammar, not a prefix, decides.
     [
       "a string holding // is a string, so the run is code",
       "f.ts",
@@ -818,7 +806,6 @@ describe("judgeFile comment blocks", () => {
       `fn f() {}\n${"/// d\n".repeat(BLOCK + 1)}fn g() {}\n`,
       [[2, BLOCK + 1, "block"]],
     ],
-    // The exemption marker: a comment line inside the block, reason required.
     [
       "an exempted block over the cap produces nothing",
       "f.ts",
@@ -974,7 +961,6 @@ describe("judgeFile comment blocks", () => {
 
 describe("grammars", () => {
   const { block: BLOCK } = COMMENT_CAPS;
-  /** One comment line and one code line per judged extension. */
   const SAMPLES: [path: string, comment: string, code: string][] = [
     ["f.ts", "// c", "const x = 1;"],
     ["f.mts", "// c", "const x = 1;"],
@@ -1011,16 +997,15 @@ describe("grammars", () => {
     expect([...grammars.keys()].sort()).toEqual(
       [...SAMPLES.map(([path]) => path.slice(path.lastIndexOf(".") + 1)), "swift"].sort(),
     );
-    // No comment judgement and no literal exemption, whatever the file holds.
     const chatty = `${"// c\n".repeat(BLOCK + 1)}let x = "${"a ".repeat(115)}"\n`;
     expect(judgeFile("f.swift", "source", chatty, grammars).map(describeFinding)).toEqual([
       `f.swift:${BLOCK + 2}: 240 chars (cap ${WARN.width})`,
     ]);
   });
 
-  // A grammar wasm importing a libc symbol the runtime does not export loads fine.
-  // It then crashes the parse on the first input reaching the symbol (tree-sitter-wasms' bash build imports isalpha).
-  // The two assertion sinks are reached only by a grammar bug, a crash either way.
+  // A wasm importing a libc symbol the runtime does not export loads fine, then crashes the parse on the first input reaching it.
+  //   tree-sitter-wasms' bash build  -> imports isalpha, the control below
+  //   abort, __assert_fail           -> exempted: only a grammar bug reaches them, a crash either way
   test("every grammar wasm imports only symbols the runtime provides; the tree-sitter-wasms bash build is the control", async () => {
     const runtime = await WebAssembly.compile(
       readFileSync(join(ACTION_DIR, "node_modules", "web-tree-sitter", "tree-sitter.wasm")),
@@ -1074,7 +1059,6 @@ describe("grammars", () => {
     },
   );
 
-  /** Every comment form of every grammar: how it opens, and how it closes when the reason does not run to the line end. */
   const STYLES: [path: string, open: string, close: string][] = [
     ["f.ts", "//", ""],
     ["f.ts", "/*", "*/"],
@@ -1108,7 +1092,6 @@ describe("grammars", () => {
     if (grammar === undefined || "reason" in grammar) throw new Error(`${path} has no grammar`);
     return grammar;
   };
-  /** The node type the grammar gives a comment written in this style. */
   const commentType = (grammar: Grammar, text: string): string => {
     const tree = grammar.parser.parse(text);
     if (tree === null) throw new Error("tree-sitter returned no tree");
@@ -1130,7 +1113,6 @@ describe("grammars", () => {
       const run = `${open} c ${close}`.trimEnd();
       const header = `${marker}\n${`${run}\n`.repeat(COMMENT_CAPS.header)}`;
       expect(judgeFile(path, kind, header, grammars)).toEqual([]);
-      // The control: the same block with a bare marker warns twice.
       expect(
         judgeFile(
           path,
@@ -1195,7 +1177,6 @@ describe("grammars", () => {
     const none: Grammars = new Map([["ts", { reason: "no grammar maps this extension" }]]);
     const wide = `const x = "${"a ".repeat(115)}";\n`;
     const chatty = `${"// c\n".repeat(BLOCK + 1)}x\n\n${"// c\n".repeat(BLOCK + 1)}${wide}`;
-    // Control: with the grammar, the block warns and the literal is left alone.
     expect(judgeFile("f.ts", "source", chatty, grammars).map(describeFinding)).toEqual([
       `f.ts:${BLOCK + 4}: ${BLOCK + 1} comment lines (cap ${BLOCK})`,
     ]);

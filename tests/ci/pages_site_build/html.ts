@@ -1,8 +1,5 @@
-// CSS-selector reads over built HTML through Bun's HTMLRewriter, so the
-// build asserts pin elements (their attributes and text, in document
-// order) instead of grepping markup. Text is collected up to each match's
-// own end tag; a match nested inside another match takes the text from
-// there on, so callers select leaves (or use the child combinator).
+// CSS-selector reads over built HTML, so the build asserts pin elements instead of grepping markup.
+// Text is collected up to each match's own end tag and a nested match takes it from there on, so callers select leaves or use the child combinator.
 
 export interface MatchedElement {
   attrs: Record<string, string>;

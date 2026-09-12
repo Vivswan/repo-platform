@@ -16,9 +16,7 @@ import { SITE, vitepressRenderer } from "./vitepress_renderer.ts";
 const temp = tempDirs();
 const ROOT_SITE = { base: "/", cleanUrls: false };
 
-/** A source over literal pages: `[title, order, group]` per file, and the
- *  landing table's hrefs per landing file, spelled the way VitePress's link
- *  rule leaves them. */
+/** Table hrefs are spelled the way VitePress's link rule leaves them (`./b.html`, `/repo/ja/c.html`). */
 function source(
   pages: Record<string, [string, number | null, string | null]>,
   tables: Record<string, string[]> = {},
@@ -78,12 +76,10 @@ describe("deriveSidebar", () => {
     ]);
   });
 
-  // The whole ordering rule in one tree: the landing (first whatever its
-  // table says), the ranked pages by order then title (the table names
-  // zulu first, order still wins), the table's pages in the order it first
-  // names them (alpha is named last and would come first alphabetically;
-  // an anchor, a repeat, the landing itself, an external href and a
-  // directory place nothing), then the pages nobody placed in file order.
+  // Each table entry proves one piece of the ordering rule.
+  //   ./zulu.html#deep, named first                       -> zulu still ranks by order, and by title among equals ("Aardvark" before "Gamma")
+  //   ./alpha.html, named last                            -> placed last by the table, though first alphabetically
+  //   ./index.html, a repeat, an external href, ./guide/  -> place nothing
   const RANKED_TREE = [
     "README.md",
     "alpha.md",

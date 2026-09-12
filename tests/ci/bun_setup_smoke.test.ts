@@ -27,7 +27,6 @@ describe("smokeProblems", () => {
     second: { path: "/opt/bun/1.3.0/bun", ready: "true", installed: "true", version: "1.3.0" },
   };
 
-  // Each row is one reading and the WHOLE problem list it earns.
   test.each<{ reason: string; reading: SmokeReading; problems: string[] }>([
     { reason: "the current bun reused, the previous one installed", reading: good, problems: [] },
     {

@@ -1,17 +1,7 @@
-// The theme's token layer is a set of --vp-* values carbon reads; a token
-// nobody reads is a customization point that cannot affect rendering. This
-// pins every token tokens.ts declares, and every custom property the
-// hand-written CSS declares, to at least one live var() consumer: one in
-// the theme's own files, or one in carbon's shipped theme that the theme's
-// own declarations do not outrank. Carbon's :root and .dark token
-// declarations lose to the theme's redeclaration of the same property
-// (tokens.css loads after carbon at equal specificity), so
-// `--vp-button-alt-bg: var(--vp-c-default-3)` in carbon's vars.css stops
-// reading --vp-c-default-3 once tokens.css sets --vp-button-alt-bg itself;
-// a scoped redeclaration such as carbon's `.result.selected { ... }` still
-// wins over :root and keeps reading. The code palette (--fleet-code-*) has
-// one more reader: the shiki css-variables theme config.mts installs, whose
-// token colors are var() reads of those names in the highlighted HTML.
+// A token nobody reads is a customization point that cannot affect rendering, so every declared custom property needs a live var() reader.
+// Carbon's :root and .dark reads of a property the theme redeclares are dead: tokens.css loads after carbon at equal specificity and wins.
+//   carbon vars.css `:root { --vp-button-alt-bg: var(--vp-c-default-3) }`  -> dead once tokens.css sets --vp-button-alt-bg
+//   carbon `.result.selected { ... }` reads                                -> live, a scoped rule still beats :root
 
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -51,9 +41,6 @@ function tokens(text: string, pattern: RegExp): string[] {
   return [...text.matchAll(pattern)].map((match) => match[1]);
 }
 
-/** The var() reads in carbon's `text` that survive the theme's overrides:
- *  every read except those inside a :root or .dark declaration of a
- *  property the theme redeclares. */
 function liveCarbonReads(text: string, overridden: Set<string>): string[] {
   const live: string[] = [];
   for (const block of text.split("}")) {
@@ -72,14 +59,10 @@ function liveCarbonReads(text: string, overridden: Set<string>): string[] {
   return live;
 }
 
-/** The var() reads shiki emits for the prefix config.mts hands it: the
- *  theme is built the way config.mts builds it, so a renamed prefix or a
- *  token shiki stopped reading shows up here as an unread declaration.
- *  `colored` is the subset every highlighted span can carry (the token
- *  colors and the default foreground) and so must be declared per mode.
- *  The editor background never reaches a page (VitePress strips the pre's
- *  style), and the terminal palette only through an ansi fence, whose
- *  undeclared var() reads fall back to the code foreground. */
+/** Built the way config.mts builds it, so a renamed prefix or a token shiki stopped reading shows up as an unread declaration.
+ *  `colored` is what a highlighted span can carry and so must be declared per mode; the rest of the theme need not be.
+ *    editor background  -> never reaches a page (VitePress strips the pre's style)
+ *    terminal palette   -> only inside an ansi fence, whose undeclared var() reads fall back to the code foreground */
 function shikiReads(): { all: string[]; colored: string[] } {
   const prefix = readFileSync(CONFIG, "utf-8").match(/variablePrefix:\s*"(--[a-z0-9-]+)"/)?.[1];
   if (prefix === undefined) throw new Error("config.mts declares no shiki variablePrefix");
@@ -96,8 +79,6 @@ function shikiReads(): { all: string[]; colored: string[] } {
   };
 }
 
-/** Every custom property the theme declares: the token layer's names from
- *  tokens.ts, plus the component-scoped ones the hand-written CSS sets. */
 function themeDeclarations(): Set<string> {
   const declared = new Set<string>(tokenNames());
   for (const file of filesUnder(THEME, [".css"])) {

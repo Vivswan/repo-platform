@@ -1,8 +1,3 @@
-// Ownership-manifest shape and byte parity: the document itself (absence,
-// malformed text, the self entry, unknown fields, duplicate keys), then
-// every entry against the file on disk (managed and mirror hashes, split
-// regions, links), plus the symlink and marker-slicing fixtures.
-
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

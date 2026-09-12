@@ -32,10 +32,6 @@ interface Scenario {
   html: string;
 }
 
-/** The card, section by section: the repository and homepage split at
- *  their slashes, topics as chips, each counted group with its items
- *  nested in its value cell, the version being read marked by aria-current
- *  and the note, the license linked at the tier's own ref. */
 const FULL_CARD =
   '<aside class="fleet-facts" aria-label="About">' +
   '<p class="fleet-facts-description">A fixture repository</p>' +
@@ -76,7 +72,6 @@ const FULL_CARD =
   "</dl>" +
   "</div></aside>";
 
-/** Only what the repository always has: no optional row renders empty. */
 const BARE_CARD =
   '<aside class="fleet-facts" aria-label="About">' +
   "<!---->" +

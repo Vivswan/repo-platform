@@ -1,8 +1,4 @@
-// VitePress's shared markdown renderer with the fleet's rules, as
-// config.mts installs them, for tests that need VitePress's own parse (its
-// containers, its link normalization). createMarkdownRenderer keeps one
-// instance per process, so every test file goes through this one helper
-// and its one set of options.
+// createMarkdownRenderer keeps one instance per process, so every test file goes through this one helper and its one set of options.
 
 import { join, resolve } from "node:path";
 import { githubSlug, headingText } from "../../../actions/pages-site/.vitepress/anchors.ts";
@@ -20,14 +16,10 @@ export type Md = Parameters<typeof landingTableRule>[0];
 
 export const ACTION_DIR = resolve(import.meta.dir, "../../../actions/pages-site");
 
-/** A docs tree indexed by READMEs at the root and in ja/, with a guide/
- *  directory that carries both spellings (its README keeps its own route). */
 export const REWRITES = { "README.md": "index.md", "ja/README.md": "ja/index.md" };
 
-/** The site the renderer writes links for. */
 export const SITE = { base: "/repo/", cleanUrls: false };
 
-/** The repository the docs tree comes from, for links that leave it. */
 export const LINK_SCOPE = {
   docsDir: "docs",
   includes: [],

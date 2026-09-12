@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { rewriteLink } from "../../../actions/pages-site/.vitepress/rewrite-links.ts";
 import { LINK_SCOPE, vitepressRenderer } from "./vitepress_renderer.ts";
 
-/** A docs tree with the skills/ root staged at skills/. */
 const SCOPE = {
   docsDir: "docs",
   includes: [{ path: "skills", mount: "skills", page: "SKILL.md" }],

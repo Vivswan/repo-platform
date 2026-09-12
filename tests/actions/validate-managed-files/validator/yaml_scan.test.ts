@@ -1,7 +1,3 @@
-// The YAML scan: duplicate keys (strict under .github/, advisory elsewhere),
-// syntax errors, multi-document streams, conflict markers, and which paths
-// a --self walk visits.
-
 import { describe, expect, test } from "bun:test";
 import { tempDirs } from "../../../shared/temp_dir.ts";
 import { BASELINE, validatorRunner } from "./fixtures";
@@ -67,9 +63,7 @@ describe("duplicate mapping keys", () => {
 });
 
 describe("YAML syntax errors", () => {
-  // Composer-stage errors (doc.errors), reported per document. Outside the
-  // strict set a duplicate key is only an advisory, so the masking row pins
-  // that a duplicate in the same document cannot hide the syntax error.
+  // Outside the strict set a duplicate key is only an advisory, so the masking row pins that it cannot hide a syntax error in the same document.
   test.each([
     {
       reason: "an unterminated flow sequence in the first document",
