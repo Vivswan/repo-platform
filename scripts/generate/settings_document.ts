@@ -11,6 +11,7 @@ import { resolveModules } from "../../.github/scripts/sync/writer/select.ts";
 import { parseSettingsDoc } from "../../.github/scripts/sync/writer/settings_document.ts";
 import { renderSettings } from "../../.github/scripts/sync/writer/settings_entry.ts";
 import { declaredPrivate } from "../../.github/scripts/sync/writer/settings_layers.ts";
+import { probe } from "../../.github/scripts/sync/writer/target_files.ts";
 import type { FilesConfig, RenderedEntry } from "../../actions/plan/files_config.ts";
 import { PLATFORM_OWNER, REGISTRATION_PATH } from "../../actions/shared/platform.ts";
 
@@ -75,6 +76,18 @@ export function renderOwnSettings(root: string): OwnSettings {
   return { path: entry.path, overlayPath, content: rendered.content };
 }
 
+/** Probed as the writer probes a managed path, so a link whose target reads as the render is refused rather than
+ *  read through (or written through). */
+function committedRender(root: string, path: string): string | null {
+  const found = probe(root, path);
+  if (found.kind === "link") {
+    throw new Error(
+      `${path} is a symbolic link to ${found.target.toString("utf-8")}; the rendered document is a regular file, as the writer requires at every managed path`,
+    );
+  }
+  return found.kind === "file" ? found.bytes.toString("utf-8") : null;
+}
+
 function parseArgs(argv: string[]): { check: boolean; root: string } | { error: string } {
   let check = false;
   let root = REPO_ROOT;
@@ -98,14 +111,14 @@ function main(argv: string[]): number {
   }
   const { check, root } = args;
   let own: OwnSettings;
+  let current: string | null;
   try {
     own = renderOwnSettings(root);
+    current = committedRender(root, own.path);
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
-  const abs = join(root, own.path);
-  const current = existsSync(abs) ? readFileSync(abs, "utf-8") : null;
   if (current === own.content) {
     console.log(
       `${own.path} matches the settings layers, the registration, and ${own.overlayPath}`,
@@ -118,7 +131,7 @@ function main(argv: string[]): number {
     );
     return 1;
   }
-  writeFileSync(abs, own.content);
+  writeFileSync(join(root, own.path), own.content);
   console.log(`rewrote ${own.path}`);
   return 0;
 }

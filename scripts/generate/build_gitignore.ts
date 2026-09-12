@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 // Nothing records the upstream SHA on purpose: the outputs change only when consumed upstream content changes,
 // so the refresh-gitignore PR diff stays worth reading.
-// --topology is the offline gate: the block files match files.yml's sources, every copy of a section carries the same bytes,
-// and the operator's own region carries exactly the sections its registration selects;
-// content drift inside a block against upstream is ungated until the next refresh regenerates over it.
+// --topology is the offline gate over the block files: they match files.yml's sources and every copy of a section carries
+// the same bytes; the operator's own .gitignore region is the ssot rule root-twin-parity's (scripts/check/ssot/twin_copies.ts).
+// Content drift inside a block against upstream is ungated until the next refresh regenerates over it.
 //
 // Usage: bun scripts/generate/build_gitignore.ts [--topology]
 
@@ -233,9 +233,7 @@ export function buildSelf(
 
 export function topologyProblems(input: {
   entries: [string, string[]][];
-  modules: string[];
   filesDir: string;
-  selfText: string;
 }): string[] {
   const problems: string[] = [];
   const rerun = "run 'bun scripts/generate/build_gitignore.ts' to regenerate every copy";
@@ -283,37 +281,6 @@ export function topologyProblems(input: {
         `files/${BASE_REL} is not the header, the agent and CI workspace sections, and exactly the OS sections [${ALWAYS.join(", ")}]; ${rerun}`,
       );
     }
-    const slice = cleanManagedRegion(input.selfText, HASH_REGION_MARKERS);
-    if (slice === null) {
-      problems.push(`.gitignore has no single clean ${MANAGED_REGION_LABEL} region`);
-    } else {
-      const sources = selfSources(input.entries, input.modules);
-      const sectionsMissing = sources.filter((path) => !blockSections.has(path));
-      if (sectionsMissing.length > 0) {
-        problems.push(
-          `no block file carries [${sectionsMissing.join(", ")}], so .gitignore cannot be checked against them; ${rerun}`,
-        );
-        return problems;
-      }
-      const expected = buildSelf(
-        { ...baseSections, ...Object.fromEntries(blockSections) },
-        sources,
-        { above: "", below: "" },
-      );
-      if (slice.region !== expected) {
-        const present = sectionsIn(slice.region);
-        const wanted = [...ALWAYS, ...sources];
-        const missing = wanted.filter((path) => !(path in present));
-        const unselected = Object.keys(present).filter((path) => !wanted.includes(path));
-        problems.push(
-          missing.length > 0
-            ? `.gitignore's managed region lacks the section(s) [${missing.join(", ")}]; ${rerun}`
-            : unselected.length > 0
-              ? `.gitignore's managed region carries the section(s) [${unselected.join(", ")}] no module in ${REGISTRATION_PATH} declares; ${rerun}`
-              : `.gitignore's managed region differs from files/base/.gitignore plus the block files; ${rerun}`,
-        );
-      }
-    }
   }
   return problems;
 }
@@ -340,7 +307,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 async function run(topology: boolean): Promise<number> {
   const config = parseFilesConfig(readFileSync(FILES_CONFIG, "utf-8"));
   const entries = gitignoreSources(config);
-  const modules = ownModules(REPO_ROOT, config);
   const strays = strayBlockFiles(entries, FILES_DIR);
   if (strays.length > 0) {
     throw new Error(
@@ -356,20 +322,16 @@ async function run(topology: boolean): Promise<number> {
           "run 'bun scripts/generate/build_gitignore.ts' to generate them (or drop the source)",
       );
     }
-    const problems = topologyProblems({
-      entries,
-      modules,
-      filesDir: FILES_DIR,
-      selfText: readFileSync(OUTPUT_SELF).toString("latin1"),
-    });
+    const problems = topologyProblems({ entries, filesDir: FILES_DIR });
     if (problems.length > 0) {
       throw new Error(`the gitignore copies disagree:\n  - ${problems.join("\n  - ")}`);
     }
     console.log(
-      "gitignore topology OK: the block files match files.yml's sources, every copy of a section agrees, and .gitignore carries this repository's selection.",
+      "gitignore topology OK: the block files match files.yml's sources and every copy of a section agrees.",
     );
     return 0;
   }
+  const modules = ownModules(REPO_ROOT, config);
   // Before any fetch: a malformed self output must abort while every
   // output still stands as committed, rather than behind a half-written
   // set.
