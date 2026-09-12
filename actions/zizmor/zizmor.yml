@@ -4,7 +4,7 @@ rules:
   unpinned-uses:
     config:
       policies:
-        # The build branch is the fleet's green-gated delivery channel
+        # The stable tag is the fleet's green-gated delivery channel
         # (docs/build-provenance.md): a moving ref on purpose.
         Vivswan/repo-platform/*: ref-pin
         "*": hash-pin

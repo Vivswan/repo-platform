@@ -1,9 +1,8 @@
-// Judged on the REAL module data: the checkout's files.yml, which the build branch ships verbatim.
+// Judged on the REAL module data: the checkout's files.yml, the one the delivery commit carries.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { reservedLabelNames } from "../../../.github/scripts/build-branches/branch_tree.ts";
 import {
   codeqlLanguages,
   loadModuleData,
@@ -15,19 +14,20 @@ import {
   planCi,
   planSite,
   REQUIRED_DEFAULTS,
-  readReservedLabels,
   resolvePrivate,
   selectModules,
   trackingLabels,
   weekly,
 } from "../../../actions/plan/plan.ts";
 import { parseRegistration, type Registration } from "../../../actions/plan/registration.ts";
+import { reservedLabelNames } from "../../../actions/plan/reserved_labels.ts";
 import { boundedSpawnSync } from "../../shared/bounded_spawn.ts";
 import { tempDirs } from "../../shared/temp_dir.ts";
 
 const temp = tempDirs();
 const REPO_ROOT = join(import.meta.dir, "../../..");
 const FILES_CONFIG = join(REPO_ROOT, "files.yml");
+const FILES_TREE = join(REPO_ROOT, "files");
 
 const FILES_DATA = loadModuleData(readFileSync(FILES_CONFIG, "utf-8"));
 const MODULES = FILES_DATA.modules;
@@ -41,18 +41,7 @@ const MINIMAL_FILES = [
   "",
 ].join("\n");
 
-/** The reserved label roster as the build branch ships it. */
-function stagedReservedLabels(): string {
-  const path = join(temp.dir("plan-reserved-"), "reserved-labels.yml");
-  writeFileSync(
-    path,
-    reservedLabelNames(REPO_ROOT)
-      .map((name) => `- ${JSON.stringify(name)}\n`)
-      .join(""),
-  );
-  return path;
-}
-const RESERVED = readReservedLabels(stagedReservedLabels());
+const RESERVED = reservedLabelNames(FILES_DATA.layers, FILES_TREE);
 
 const PROJECT = "project: { name: Demo Project, slug: demo, description: A demo }\n";
 
@@ -296,9 +285,6 @@ describe("planCi", () => {
     expect(RESERVED.has("bug")).toBe(true);
     expect(RESERVED.has("autorelease: pending")).toBe(true);
     expect(RESERVED.has("fuzz-nightly")).toBe(false);
-    const bad = join(temp.dir("plan-reserved-bad-"), "reserved-labels.yml");
-    writeFileSync(bad, "labels: [bug]\n");
-    expect(() => readReservedLabels(bad)).toThrow("must be a YAML list of label names");
   });
 
   test("trackingLabels keeps canonical stream order whatever the selection order", () => {
@@ -385,7 +371,7 @@ describe("resolvePrivate", () => {
 });
 
 // The script as the action runs it: a caller checkout with its
-// registration, the checkout's files.yml as the build branch ships it, and
+// registration, the checkout's files.yml as the delivery commit carries it, and
 // GITHUB_OUTPUT collecting the rows.
 describe("plan.ts as a child", () => {
   function run(
@@ -405,7 +391,7 @@ describe("plan.ts as a child", () => {
         PATH: process.env.PATH ?? "",
         HOME: process.env.HOME ?? "",
         FILES_CONFIG,
-        RESERVED_LABELS_FILE: stagedReservedLabels(),
+        FILES_TREE,
         GITHUB_OUTPUT: output,
         GITHUB_REPOSITORY: "o/r",
         ...env,
@@ -435,6 +421,18 @@ describe("plan.ts as a child", () => {
       ].join("\n"),
     );
     expect(result.stdout.trimEnd()).toBe(result.output.trimEnd());
+  });
+
+  test("a tracking label naming a label the settings layers manage is refused, the roster derived from the files/ tree at run time", () => {
+    const result = run(
+      { ".repo-platform.yml": `modules: [fuzzer]\nlabels: { fuzzer: Bug }\n${PROJECT}` },
+      { PRIVATE: "false" },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      '::error::tracking label "Bug" (fuzzer) is a label the platform already manages',
+    );
+    expect(result.output).toBe("");
   });
 
   test("site mode writes the one config row without asking for the visibility", () => {

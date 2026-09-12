@@ -1,5 +1,6 @@
-// The `build` ref is executable fleet-wide (rendered workflows pin `uses: ...@build` and run its actions/ subtree directly),
-// so a settings edit that drops it from the append-only ruleset must fail here, loudly.
+// The `stable` tag is executable fleet-wide (rendered workflows pin `uses: ...@stable` and run its actions/ subtree directly)
+// and the `build` branch is still published beside it, so a settings edit that drops the tag's deletion-only ruleset or the
+// branch's append-only ruleset must fail here, loudly.
 // No settings layer may declare an Integration bypass actor: GitHub rejects one on a user-owned repository's ruleset
 // (POST /rulesets, 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization")
 // and the settings apply dies at ruleset creation.

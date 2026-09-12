@@ -7,7 +7,7 @@ import { must } from "../shared/proc.ts";
 export function refreshBody(bumps: string, major: string): string {
   const summary =
     `Automated toolchain pin refresh: bump ${bumps} (fleet-wide via the managed version dotfiles - ` +
-    "see docs/toolchains.md). Merging this rebuilds the build branch; the next sync pushes it to the fleet.";
+    "see docs/toolchains.md). Merging this moves the stable tag once green; the next sync pushes it to the fleet.";
   if (major === "") return summary;
   return `**MAJOR VERSION JUMP: ${major} - review before merging.**\n\n${summary}`;
 }

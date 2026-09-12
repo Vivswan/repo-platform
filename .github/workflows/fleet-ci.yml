@@ -2,7 +2,7 @@
 # trail; this repository's own gate is the counterweight. The caller judges the call's one RESULT:
 # a job that fails here fails the call, a SKIPPED job leaves it green, and no job is name-addressed.
 #
-#   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@build
+#   `./` ACTION path   -> the CALLER's checkout, so action refs stay Vivswan/repo-platform/actions/<name>@stable
 #   `./` WORKFLOW ref  -> this repository (reusable-codeql.yml)
 #   job permissions    -> checked against the skeleton ci.yml's caller grant BEFORE the job's `if` runs (the fleet-caller-ceilings rule)
 # A job needing more than that grant lives in fleet-nightly.yml behind its own caller.
@@ -38,7 +38,7 @@ jobs:
         with:
           sparse-checkout: .repo-platform.yml
           sparse-checkout-cone-mode: false
-      - uses: Vivswan/repo-platform/actions/plan@build
+      - uses: Vivswan/repo-platform/actions/plan@stable
         id: plan
         with:
           private: ${{ github.event.repository.private }}
@@ -59,7 +59,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/validate-managed-files@build
+      - uses: Vivswan/repo-platform/actions/validate-managed-files@stable
         id: validate
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -91,24 +91,24 @@ jobs:
       # Step ids are the check names the judge reports.
       - id: typography
         if: ${{ !cancelled() }}
-        uses: Vivswan/repo-platform/actions/check-typography@build
+        uses: Vivswan/repo-platform/actions/check-typography@stable
       - id: file-size
         if: ${{ !cancelled() }}
         continue-on-error: true
-        uses: Vivswan/repo-platform/actions/check-file-size@build
+        uses: Vivswan/repo-platform/actions/check-file-size@stable
       - id: commit-names
         if: ${{ !cancelled() }}
-        uses: Vivswan/repo-platform/actions/validate-commit-names@build
+        uses: Vivswan/repo-platform/actions/validate-commit-names@stable
       - id: actionlint
         if: ${{ !cancelled() }}
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
       - id: yamllint
         if: ${{ !cancelled() }}
-        uses: Vivswan/repo-platform/actions/yamllint@build
+        uses: Vivswan/repo-platform/actions/yamllint@stable
       # Allowlist in the repo-owned _typos.toml, layered under the fleet's.
       - id: typos
         if: ${{ !cancelled() }}
-        uses: Vivswan/repo-platform/actions/typos@build
+        uses: Vivswan/repo-platform/actions/typos@stable
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
@@ -151,7 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: Vivswan/repo-platform/actions/dependency-review@build
+      - uses: Vivswan/repo-platform/actions/dependency-review@stable
 
   # The fleet policy applies unless the repository carries .github/zizmor.yml. SARIF uploads on
   # public repositories only (a private personal repository has no code scanning); != 'true' so an
@@ -167,7 +167,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/zizmor@build
+      - uses: Vivswan/repo-platform/actions/zizmor@stable
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
@@ -187,7 +187,7 @@ jobs:
       - id: bun-install
         if: hashFiles('package.json') != ''
         run: bun install --frozen-lockfile
-      - uses: Vivswan/repo-platform/actions/knip@build
+      - uses: Vivswan/repo-platform/actions/knip@stable
         if: steps.bun-install.outcome == 'success'
       - if: steps.bun-install.outcome == 'skipped'
         run: echo "::notice::knip stood down, this repository has no package.json to install from"
@@ -204,7 +204,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/semgrep@build
+      - uses: Vivswan/repo-platform/actions/semgrep@stable
 
   # On the nightly schedule it runs on the week's Monday alone (the plan's weekly output).
   codeql:
@@ -232,7 +232,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - if: hashFiles('docs/**') != ''
-        uses: Vivswan/repo-platform/actions/pages-site@build
+        uses: Vivswan/repo-platform/actions/pages-site@stable
         with:
           check: "true"
       - if: hashFiles('docs/**') == ''
@@ -281,7 +281,7 @@ jobs:
       pull-requests: read
       vulnerability-alerts: read
     steps:
-      - uses: Vivswan/repo-platform/actions/release-health@build
+      - uses: Vivswan/repo-platform/actions/release-health@stable
         with:
           mode: pull-request
           # Empty disables the tracking gates (no stream module selected).
@@ -298,4 +298,4 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Vivswan/repo-platform/actions/trivy@build
+      - uses: Vivswan/repo-platform/actions/trivy@stable

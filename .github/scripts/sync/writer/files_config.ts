@@ -17,6 +17,7 @@ import {
   type RegionKind,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
+import { declaredLayers } from "../../../../actions/plan/reserved_labels.ts";
 import {
   HASH_REGION_MARKERS,
   HTML_REGION_MARKERS,
@@ -32,7 +33,7 @@ import {
   type PlaceholderValues,
   unknownPlaceholders,
 } from "./placeholders.ts";
-import { declaredLayers, readLayers } from "./settings_layers.ts";
+import { readLayers } from "./settings_layers.ts";
 
 /** The color and description a tracking stream's label is written with. */
 export interface TrackingTuple {

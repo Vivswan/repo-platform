@@ -37,7 +37,7 @@ git commit -m "chore: initialize"
 
 `modules` is any combination of `bun`, `deno`, `uv`, `rust`, `site`, `release-please`, `pr-title`, `fuzzer`, `nightly`, and `custom-license` (the `modules` section of [files.yml](../files.yml) is the roster); modules with parameters read them from the same file (see [docs/site.md](site.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)). Nothing else is asked: the owner is the repository's, visibility is read from GitHub, and the copyright holder defaults to the owner.
 
-The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the published `build` branch, whose tip is provenance-verified against a rebuild from its stamped main commit before any row consumes it ([build provenance](build-provenance.md#the-provenance-proof)).
+The files themselves arrive as the first sync PR ([step 4](#4-publish-and-register)): the writer copies them from the main commit the `stable` tag names, re-verified as green main history before any row consumes it ([build provenance](build-provenance.md#provenance-is-the-commit-itself)).
 
 Four files matter later:
 
@@ -50,7 +50,7 @@ Four files matter later:
 
 ### What the sync writes
 
-Every path below comes from `files.yml` on the build branch ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on, `link` is a relative symlink placed and repaired on every sync. A path listed more than once has one variant per condition.
+Every path below comes from `files.yml` at the commit the `stable` tag names ([sync.md](sync.md) has the writer's contract). Class `managed` is rewritten whole on every sync, `split` rewrites only the BEGIN/END-bounded region and keeps what the repository wrote around it, `starter` is written once and repo-owned from then on, `link` is a relative symlink placed and repaired on every sync. A path listed more than once has one variant per condition.
 
 <!-- BEGIN GENERATED: files-table (scripts/files_table.ts - edit files.yml, not this block) -->
 | File | Class | When |
@@ -126,7 +126,7 @@ CI is split so the platform can keep improving its half while each repo keeps it
 
 | File | Owner | Contents |
 |---|---|---|
-| `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@build` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
+| `.github/workflows/ci.yml` | managed - sync updates it, don't edit; one byte-identical file for the whole fleet | a `checks` job calling checks.yml, a `ci` job calling repo-platform's [fleet-ci.yml](../.github/workflows/fleet-ci.yml)`@stable` (which reads the module selection from `.repo-platform.yml`), the `all-green` gate, and the static legs after it ([all-green.md](all-green.md#after-the-gate)) |
 | `.github/workflows/checks.yml` | repo-owned (a starter, written once) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 | `.github/workflows/post-green.yml` | repo-owned (a starter, written once) | the repository's own green-gated work (applying settings, refreshing generated artifacts): the managed `post-green` job calls it on every push to main whose gate passed, with the judged sha, before the release leg ([after the gate](all-green.md#after-the-gate)). The caller grants `contents: write` (a fast-forward branch push) and `id-token: write` (OIDC trusted publishing), the ceiling for every hook job. Seeded as a no-op |
 | `.github/workflows/update-release.yml`, `update-release-pr.yml` | repo-owned (a starter, written once) | the release hooks ci.yml's release legs call; seeded as no-ops in every repository, module or not, because GitHub resolves a called `./` workflow at run creation ([the release pipeline](#the-release-pipeline-release-please)) |
@@ -138,7 +138,7 @@ The `ci` job runs the standard checks (typography, file-size ([the caps](fleet-g
 
 ### The managed files check
 
-The `validate-managed-files` job judges the repository against the platform's current shape, in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action with the build branch's `files.yml` as its vocabulary and the plan job's resolved visibility as the repository's side of every `when`:
+The `validate-managed-files` job judges the repository against the platform's current shape, in one sticky PR comment plus the step summary, run by the [validate-managed-files](../actions/validate-managed-files/action.yml) action with the delivery commit's `files.yml` as its vocabulary and the plan job's resolved visibility as the repository's side of every `when`:
 
 | Check | Blocks on |
 |---|---|
@@ -163,7 +163,7 @@ A module change is two PRs in the managed repository: the registration edit, the
 
 ```text
 PR edits modules: in .repo-platform.yml
-  -> plan reads the registration and checks it against the build's module data (an unknown module or a malformed file fails the job)
+  -> plan reads the registration and checks it against the module data at the `stable` commit's root (an unknown module or a malformed file fails the job)
   -> validate-managed-files stays green: it judges the files the manifest records, and the new module's are not recorded yet (unless the edit flips a recorded path's class: see the table)
   -> merge the registration edit (the files cannot precede it: the sync reads the default branch), then
              gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=<owner>/<repo> -f manual=true
@@ -173,7 +173,7 @@ PR edits modules: in .repo-platform.yml
 
 | | |
 |---|---|
-| What the PR check judges | The `plan` job runs on every event and reads `.repo-platform.yml`, checking it against the module data the build branch ships beside the plan action: every module name must exist and the file must parse. It fails closed, so an unknown module or a malformed registration never merges through a PR (a registration the sync does meet with an unknown name has that name dropped and the sync PR held with a Registration note). |
+| What the PR check judges | The `plan` job runs on every event and reads `.repo-platform.yml`, checking it against the module data at the delivery commit's root beside the plan action: every module name must exist and the file must parse. It fails closed, so an unknown module or a malformed registration never merges through a PR (a registration the sync does meet with an unknown name has that name dropped and the sync PR held with a Registration note). |
 | What the PR check does not judge | `validate-managed-files` reads the edited registration for its module names and for the class each recorded path now falls under, but its parity check walks the manifest the LAST sync recorded, so the new module's missing files are not findings. Nothing on the PR compares the tree against the new selection; the sync PR brings the files, and the manifest with them. One edit does fail the PR: a selection that flips a recorded path's class (dropping `custom-license` while a mirror still targets `LICENSE.md`, say), because the sync that restamps the record reads the default branch. Stage it: drop the mirror declaration first, let a sync drop its record, then change the modules. |
 | Enforced by | [actions/plan](../actions/plan/action.yml), called by fleet-ci.yml's `plan` job. The sync side is a manual run of sync-repos.yml ([the manual run](#the-manual-run)). |
 
@@ -195,7 +195,7 @@ Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.m
 | --- | --- |
 | pr-title | A managed `pr-title.yml` workflow checking the PR title is a Conventional Commit with at most one scope, the grammar the `commit-names` job holds squash subjects to (titles become squash-commit subjects), with its own `pr-title` required check installed by the module's settings layer ([the pr-title ruleset](settings.md#the-pr-title-ruleset)). |
 | release-please | Arms the managed ci.yml's static `release` legs and lands the repo-owned release-please configuration - [the release pipeline](#the-release-pipeline-release-please) below. |
-| bun | A managed `dependabot-bun-lockfile.yml` that calls repo-platform's `dedupe-bun-lockfile` action at `@build` to regenerate `bun.lock` from scratch on Dependabot's PRs and push the fix to the PR branch (Dependabot's own lockfile edits can leave stale nested entries that fail `bun install --frozen-lockfile`; the regeneration also refreshes every in-range pin, so most Dependabot PRs get a fix commit). [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
+| bun | A managed `dependabot-bun-lockfile.yml` that calls repo-platform's `dedupe-bun-lockfile` action at `@stable` to regenerate `bun.lock` from scratch on Dependabot's PRs and push the fix to the PR branch (Dependabot's own lockfile edits can leave stale nested entries that fail `bun install --frozen-lockfile`; the regeneration also refreshes every in-range pin, so most Dependabot PRs get a fix commit). [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
 | deno | A managed `deno-audit.yml` that runs `deno audit` weekly, on lockfile-touching PRs, and on pushes to main that change `deno.lock`, failing when any locked dependency (JSR or npm, transitive included) has a high or critical advisory. Every tracked `deno.lock` is audited, nested workspace lockfiles included; a repository with no tracked `deno.lock` fails the run. |
 | any toolchain with a formatter (every one except rust) | A repo-owned `auto-format.yml` starter: label a PR `fix-lint` to get a formatting commit pushed to it, prefilled with each selected toolchain's formatter. Width limits apply to code only: the deno step runs `deno fmt --prose-wrap preserve`, so markdown prose keeps its line breaks. [Re-triggering CI](#fix-commits-and-re-triggering-ci) applies. |
 | fuzzer | A repo-owned `nightly-fuzz.yml` starter - placeholder fuzz step, seeded replay inputs, failure artifact upload, [tracking-issue](tracking-issues.md) filing, auto-close on green. Replace the placeholder with your fuzzer; [fuzzer.md](fuzzer.md) has the contract. |
@@ -211,11 +211,11 @@ Two of those workflows push fix commits to PR branches with the default token (`
 
 ### The release pipeline (release-please)
 
-The `release` leg in the managed ci.yml - needing the gate and the repo-owned post-green hook, released only by a green gate and a green hook on a push to main with the judged commit passed through, and armed only where `.repo-platform.yml` selects the module ([all-green.md](all-green.md#after-the-gate)) - calls repo-platform's [fleet-release.yml](../.github/workflows/fleet-release.yml)`@build`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
+The `release` leg in the managed ci.yml - needing the gate and the repo-owned post-green hook, released only by a green gate and a green hook on a push to main with the judged commit passed through, and armed only where `.repo-platform.yml` selects the module ([all-green.md](all-green.md#after-the-gate)) - calls repo-platform's [fleet-release.yml](../.github/workflows/fleet-release.yml)`@stable`. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
 
 1. release-please cuts the release as a draft with its tag already forced.
 2. ci.yml's `update-release` job calls the repo-owned `update-release.yml` hook with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
-3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@build`, which attests build provenance for every asset on the draft - a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
+3. ci.yml's `publish-release` job calls [fleet-release-publish.yml](../.github/workflows/fleet-release-publish.yml)`@stable`, which attests build provenance for every asset on the draft - a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
 
 Around the cut itself:
 

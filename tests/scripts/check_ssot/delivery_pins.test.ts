@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Mismatch } from "../../../scripts/check/ssot/comparison.ts";
 import {
   BRANCH_PINNED,
+  callableWorkflowNames,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
   extractUsesPins,
@@ -11,6 +12,7 @@ import {
   pinShapeMismatches,
   sourceSelfPins,
   stemMismatches,
+  workflowFiles,
 } from "../../../scripts/check/ssot/delivery_pins.ts";
 
 const SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1";
@@ -20,7 +22,7 @@ describe("extractUsesPins", () => {
     "      - uses: actions/checkout@v7",
     `      # - uses: astral-sh/setup-uv@${SHA} # v10.0.1`,
     "      - uses: ./actions/check-typography",
-    "    uses: {{github_username}}/repo-platform/actions/x@build",
+    "    uses: {{github_username}}/repo-platform/actions/x@stable",
     `    uses: github/codeql-action/init@${SHA} # v4.38.0`,
     `    uses: "actions/cache@${SHA}" # v6.1.0`,
   ].join("\n");
@@ -228,17 +230,18 @@ describe("pinMismatches", () => {
   });
 });
 
-describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () => {
-  test("DELIVERY_REF must equal the branch publish.ts advances, either rename alone reds", () => {
-    expect(deliveryRefTwinMismatches("build", "build")).toEqual([]);
-    for (const [published, deliveryRef] of [
-      ["build2", "build"],
-      ["build", "build2"],
+describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-stable)", () => {
+  test("DELIVERY_REF must be the tag move_stable.ts moves, either rename alone reds", () => {
+    expect(deliveryRefTwinMismatches("refs/tags/stable", "stable")).toEqual([]);
+    for (const [moved, deliveryRef] of [
+      ["refs/tags/stable2", "stable"],
+      ["refs/tags/stable", "stable2"],
+      ["refs/heads/stable", "stable"],
     ]) {
-      expect(deliveryRefTwinMismatches(published, deliveryRef)).toEqual([
+      expect(deliveryRefTwinMismatches(moved, deliveryRef)).toEqual([
         {
           file: "scripts/check/ssot/delivery_pins.ts DELIVERY_REF",
-          expected: `'${published}' (publish.ts's BRANCH - the branch the fleet's pins execute from)`,
+          expected: `the tag of move_stable.ts's TAG '${moved}' (the ref the fleet's pins execute from)`,
           got: `'${deliveryRef}'`,
         },
       ]);
@@ -247,11 +250,11 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
 
   test("extracts the sources' delivery pins - actions and reusable workflows alike", () => {
     const text = [
-      "      - uses: {{github_username}}/repo-platform/actions/fuzz-issue@build",
+      "      - uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable",
       "    uses: {{github_username}}/repo-platform/.github/workflows/reusable-pages.yml@main",
     ].join("\n");
     expect(sourceSelfPins(text, "f")).toEqual([
-      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "stable" },
       { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
     ]);
   });
@@ -288,20 +291,22 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
     const planted =
       "    uses: {{github_username}}/repo-platform/.github/workflows/reusable-pages.yml@main";
     const file = "files/pages/.github/workflows/pages.yml";
-    const mismatches = deliveryRefMismatches(sourceSelfPins(planted, file), "build");
+    const mismatches = deliveryRefMismatches(sourceSelfPins(planted, file), "stable");
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].file).toBe(file);
     expect(mismatches[0].expected).toContain(
-      "repo-platform/.github/workflows/reusable-pages.yml@build",
+      "repo-platform/.github/workflows/reusable-pages.yml@stable",
     );
     expect(mismatches[0].got).toBe("@main");
-    const restored = planted.replace("@main", "@build");
-    expect(deliveryRefMismatches(sourceSelfPins(restored, file), "build")).toEqual([]);
+    const restored = planted.replace("@main", "@stable");
+    expect(deliveryRefMismatches(sourceSelfPins(restored, file), "stable")).toEqual([]);
   });
 
-  test("any non-delivery ref reds, not just @main - a tag or sha forks the channel too", () => {
-    const pins = [{ file: "f", stem: "repo-platform/actions/x", ref: "v2" }];
-    expect(deliveryRefMismatches(pins, "build")[0].got).toBe("@v2");
+  test("any non-delivery ref reds, not just @main - the retired build branch, a tag, or a sha forks the channel too", () => {
+    for (const ref of ["build", "v2"]) {
+      const pins = [{ file: "f", stem: "repo-platform/actions/x", ref }];
+      expect(deliveryRefMismatches(pins, "stable")[0].got).toBe(`@${ref}`);
+    }
   });
 
   test("the lowered-username placeholder is scanned too, in any spacing - it substitutes a working owner", () => {
@@ -311,7 +316,7 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
     expect(pins).toEqual([
       { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
     ]);
-    expect(deliveryRefMismatches(pins, "build")).toHaveLength(1);
+    expect(deliveryRefMismatches(pins, "stable")).toHaveLength(1);
     for (const owner of [
       "{{ github_username }}",
       "{{github_username_lower}}",
@@ -323,28 +328,65 @@ describe("sourceSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () 
     }
   });
 
-  test("a reusable-workflow pin off the FLEET_WORKFLOWS roster reds - right ref, still a 404", () => {
+  test("a reusable-workflow pin on a workflow that is not callable reds - right ref, still a failed call", () => {
     const offRoster = [
-      { file: "f", stem: "repo-platform/.github/workflows/reusable-ghost.yml", ref: "build" },
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-ghost.yml", ref: "stable" },
     ];
     const mismatches = fleetWorkflowPinMismatches(offRoster, ["fleet-ci.yml"]);
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].got).toBe("repo-platform/.github/workflows/reusable-ghost.yml");
-    expect(mismatches[0].expected).toContain("FLEET_WORKFLOWS");
-    // A rostered pin and an action pin both pass - actions ship whole.
+    expect(mismatches[0].expected).toContain(
+      "workflow_call workflow under .github/workflows [fleet-ci.yml]",
+    );
+    // A callable pin and an action pin both pass: an action directory at the delivery commit always resolves.
     expect(
       fleetWorkflowPinMismatches(
         [
-          { file: "f", stem: "repo-platform/.github/workflows/fleet-ci.yml", ref: "build" },
-          { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+          { file: "f", stem: "repo-platform/.github/workflows/fleet-ci.yml", ref: "stable" },
+          { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "stable" },
         ],
         ["fleet-ci.yml"],
       ),
     ).toEqual([]);
   });
 
+  test("the callable roster is every workflow_call workflow under .github/workflows and nothing else", () => {
+    const callable = callableWorkflowNames(workflowFiles());
+    // Every workflow the skeleton and the managed workflows pin, plus the one fleet-ci calls by `./` path.
+    for (const name of [
+      "fleet-ci.yml",
+      "fleet-nightly.yml",
+      "fleet-release.yml",
+      "fleet-release-publish.yml",
+      "reusable-auto-assign.yml",
+      "reusable-auto-assign-alerts.yml",
+      "reusable-codeql.yml",
+      "reusable-site.yml",
+      "post-green.yml",
+    ]) {
+      expect(callable).toContain(name);
+    }
+    // Workflows with no workflow_call trigger are not callable, whatever ref a pin names.
+    expect(callable).not.toContain("ci.yml");
+    expect(callable).not.toContain("protect-build-branches.yml");
+  });
+
+  test("the callable roster takes every workflow_call spelling, only directly under .github/workflows", () => {
+    const at = (name: string, text: string) => ({ path: `.github/workflows/${name}`, text });
+    expect(
+      callableWorkflowNames([
+        at("mapping.yml", "on:\n  workflow_call:\n    inputs: {}\n"),
+        at("string.yaml", "on: workflow_call\n"),
+        at("list.yml", "on: [push, workflow_call]\n"),
+        at("push.yml", "on: push\n"),
+        at("nested/call.yml", "on: workflow_call\n"),
+        at("notes.md", "on: workflow_call\n"),
+      ]),
+    ).toEqual(["list.yml", "mapping.yml", "string.yaml"]);
+  });
+
   test("an empty scan throws - anchor lost, never a silently green rule", () => {
-    expect(() => deliveryRefMismatches([], "build")).toThrow("anchor lost");
+    expect(() => deliveryRefMismatches([], "stable")).toThrow("anchor lost");
   });
 });
 

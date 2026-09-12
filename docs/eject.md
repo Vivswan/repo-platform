@@ -9,7 +9,7 @@ Detaching is cheap by design: managed repos degrade to normal repos, not broken 
 
 | Reference | Pinned at |
 |---|---|
-| every reusable-workflow call (fleet CI, auto-assign, the site deploy), the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
+| every reusable-workflow call (fleet CI, auto-assign, the site deploy), the [all-green gate action](all-green.md), every composite-action step | `@stable` (repo-platform's green-gated delivery tag - [build-provenance.md](build-provenance.md)) |
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 

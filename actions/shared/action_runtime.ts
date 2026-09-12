@@ -1,5 +1,5 @@
-// Dependency-free on purpose: a composite action runs from its own directory on the build branch,
-// where nothing else of the repository tree exists to import from.
+// Dependency-free on purpose: a composite action runs from its own directory at the delivery commit,
+// where only its own pinned dependencies are installed.
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;

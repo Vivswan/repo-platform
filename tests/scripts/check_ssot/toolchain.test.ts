@@ -212,7 +212,7 @@ ${RUN_STEP}`;
       reason: "the shared step at @main under another id, the recorded path bound to it",
       text: canonical
         .replace("id: action-bun", "id: other")
-        .replace("@build", "@main")
+        .replace("@stable", "@main")
         .replace("steps.action-bun.outputs.path", "steps.other.outputs.path"),
       expected: [shapeMismatch(`0 steps with id 'action-bun'`)],
     },
@@ -227,8 +227,8 @@ ${RUN_STEP}`;
     },
     {
       reason: "the step at another ref",
-      text: canonical.replace("@build", "@main"),
-      expected: [shapeMismatch(`uses '${BUN_SETUP_USES.replace("@build", "@main")}'`)],
+      text: canonical.replace("@stable", "@main"),
+      expected: [shapeMismatch(`uses '${BUN_SETUP_USES.replace("@stable", "@main")}'`)],
     },
     {
       reason: "the step by a relative path",

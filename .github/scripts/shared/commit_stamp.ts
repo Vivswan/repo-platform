@@ -1,4 +1,4 @@
-// The source line's shape is parsed back by build-branches/publish.ts, sync/resolve_build.ts, fleet/judged_range.ts, and shared/stamp_checks.ts.
+// The source line's shape is parsed back by build-branches/publish.ts, fleet/judged_range.ts, and shared/stamp_checks.ts.
 // The run line is a human breadcrumb to the publishing run; nothing parses it.
 
 export function commitStampWrite(serverUrl: string, repository: string, sha: string): string {

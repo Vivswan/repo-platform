@@ -124,7 +124,7 @@ function main(argv: string[]): number {
     ...strayActionPinFiles(join(REPO_ROOT, "actions")).map(
       (rel) =>
         `stray action .bun-version dotfile ${rel} whose action.yml calls no bun-setup step - the ` +
-        "stale pin keeps shipping on the build branch; delete the file (or restore the action's bun-setup step)",
+        "stale pin keeps shipping at the stable tag; delete the file (or restore the action's bun-setup step)",
     ),
   ];
   if (problems.length > 0) {

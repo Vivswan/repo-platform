@@ -37,7 +37,7 @@ describe("the trivy action", () => {
 
   test("the bypass check runs unconditionally, after the action's own bun and before every scan", () => {
     const bunSetup = steps.findIndex((step) =>
-      (step.uses ?? "").includes("repo-platform/actions/bun-setup@build"),
+      (step.uses ?? "").includes("repo-platform/actions/bun-setup@stable"),
     );
     const bypass = steps.findIndex((step) => step.id === "bypass");
     expect(bunSetup).toBe(0);

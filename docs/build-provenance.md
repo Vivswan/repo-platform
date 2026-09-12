@@ -5,26 +5,39 @@ group: Fleet operations
 
 # Build provenance
 
-How the `build` branch gets published, how a sync verifies the tip before consuming it, and which trusts remain. This document states the contract; each invariant is owned by exactly one script, named per section, whose header carries only what the code alone cannot show.
+How the `stable` tag gets moved, how a sync verifies the commit it names before consuming it, and which trusts remain. This document states the contract; each invariant is owned by exactly one script, named per section, whose header carries only what the code alone cannot show.
 
 | Question | Owner |
 | --- | --- |
-| When does a publish happen, and what gates it? | [build-branches/publish.ts](../.github/scripts/build-branches/publish.ts) |
-| How does a sync verify the tip's content before consuming it? | [sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) |
-| Why do producer and verifier hash the same tree? | [shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) and [shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts) |
-| Which workflows drive the flow? | [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + the post-green caller), [post-green.yml](../.github/workflows/post-green.yml) (the publish, on the call and on a dispatch) |
+| When does a move happen, and what gates it? | [post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts) |
+| How does a sync verify the commit before consuming it? | [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) |
+| Which workflows drive the flow? | [ci.yml](../.github/workflows/ci.yml) (the [all-green gate](all-green.md) + the post-green caller), [post-green.yml](../.github/workflows/post-green.yml) (the move, on the call and on a dispatch) |
 
-## Who can write `refs/heads/build`?
+## The delivery ref is a tag on main
+
+`refs/tags/stable` names a commit on `main` whose own CI run passed. Every fleet `uses:` pins it (`Vivswan/repo-platform/actions/<name>@stable`, `.../.github/workflows/<name>.yml@stable`) and the sync operator checks it out, so the fleet reads main's own committed tree at that commit:
+
+| What the fleet reads | Where it sits at the commit | Who reads it |
+| --- | --- | --- |
+| `files.yml` and `files/` | the repository root | the sync writer ([sync.md](sync.md)), the plan action (`files.yml`'s modules block, and the settings layers under `files/` for the labels no tracking stream may reuse: [actions/plan/reserved_labels.ts](../actions/plan/reserved_labels.ts)), validate-managed-files |
+| `actions/<name>/` | the repository root; each action installs its own pinned dependencies at run time | every managed workflow's `uses:` |
+| `.github/workflows/<name>.yml` with a `workflow_call` trigger | the repository root | every managed workflow's reusable-workflow `uses:` (the `fleet-refs-ride-stable` ssot rule pins each fleet pin to a callable workflow) |
+
+Nothing the fleet reads is generated: what a `uses:` fetches is what CI judged. Two constraints follow for every path on `main`: a `uses:` ref downloads the whole repository tarball at the tag, so no path may carry a name extraction cannot write (conditional landing is `files.yml`'s `when` clauses, never a filename), and a composite action must resolve from its own directory alone, since nothing installs the repository's root dependencies on the caller's runner.
+
+Every self pin resolves: the `delivery-pin-stems` ssot rule ([delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts)) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, whatever the ref, so a renamed or deleted action fails CI here instead of the next fleet run.
+
+## Who can write `refs/tags/stable`?
 
 | Writer | When | What gates the write |
 | --- | --- | --- |
-| post-green.yml's publish-build job, called | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and publish.ts re-verifies the check at the source before any mutation. |
-| post-green.yml's publish-build job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | publish.ts's verification at the source - main history, completed successful `all-green` - is the SOLE gate there. |
-| Anyone with push access, out of band | Any time | Nothing at write time: a user-repo ruleset blocks only force-pushes and deletion, so plain fast-forwards stay possible. Sync consumption is provenance-verified below; `uses:` execution trusts the ref (the residuals table). |
+| post-green.yml's move-stable job, called | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and move_stable.ts re-verifies main history and the check at the commit before the push. |
+| post-green.yml's move-stable job, dispatched | A manual `workflow_dispatch` naming a green main commit's sha (the self-heal) | move_stable.ts's verification - main history, completed successful `all-green` - is the SOLE gate there. |
+| Anyone with push access, out of band | Any time | Nothing at write time: the `stable-tag` ruleset ([.github/settings.local.yml](../.github/settings.local.yml)) blocks deletion only. Sync consumption re-verifies below; `uses:` execution trusts the ref (the residuals table). |
 
-Nothing writes the branch on a push before the gate: the tree is assembled inside the post-green run, after `all-green`.
+The ruleset blocks deletion only because git classifies every update of an existing tag as a forced update, so a `non_fast_forward` or `update` rule would block the mover itself; rollback protection is the mover's ancestry skip plus the lease.
 
-## The delivery flow: push to publish
+## The delivery flow: push to move
 
 A change merges to main as commit S. What happens, in order:
 
@@ -32,93 +45,38 @@ A change merges to main as commit S. What happens, in order:
 | --- | --- | --- |
 | 1. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check ([all-green.md](all-green.md)). |
 | 2. Gate green on a main push | ci.yml's post-green job | Calls [post-green.yml](../.github/workflows/post-green.yml) with `github.sha` (same run - the judged commit by construction). |
-| 3. Publish | post-green.yml's publish-build job | [publish.ts](../.github/scripts/build-branches/publish.ts) assembles S's tree with S's own script (a worktree at S, its frozen dependencies, `branch_tree.ts`) and chains a stamped commit onto the branch tip. |
-| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the publish, so the site built from `@build` ships the theme that publish landed ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()`: a red post-green never holds the site back, and its own failure shows as its own red job. |
+| 3. Move | post-green.yml's move-stable job | [move_stable.ts](../.github/scripts/post-green/move_stable.ts) verifies S is main history with a green check, reads where the tag sits, and moves it to S with a lease push. |
+| 4. Deploy this repository's docs | ci.yml's `site` job, ordered behind post-green | The site module's leg, carried by hand in this repository's ci.yml: calls reusable-site.yml with `github.sha` after the mover, so a green move's theme is what `@stable` serves the build ([all-green.md](all-green.md#after-the-gate)). Gated on the all-green result alone under `!cancelled()`: a red or skipped post-green never holds the site back (the site then deploys from the tag as it stands), and its own failure shows as its own red job. |
 
-The source assembled and stamped is always SOURCE_SHA - the judged run's own commit on the call, the operator's sha input on a dispatch - never a read of origin/main, which can already be a newer, even red, commit (publish.ts's header owns this discipline).
+The commit moved to is always SOURCE_SHA - the judged run's own commit on the call, the operator's sha input on a dispatch - never a read of origin/main, which can already be a newer, even red, commit (move_stable.ts's header owns this discipline).
 
-publish.ts hard-verifies SOURCE_SHA before any mutation: main history (the sync's stamp check 1 refuses anything else, so a dispatch naming a PR head would wedge every sync), then the `all-green` check run at that sha ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)) - defense in depth on the call, where the needs edge already gated entry, and the sole gate on a dispatch.
+A missing move (a failed or evicted post-green run after a green gate) heals two ways: the next push to main moves the tag to the newer commit, or an operator dispatches post-green.yml with the green commit's sha. Until the heal, a sync copies from the commit the tag names as it stands (the residuals table; a sync PR, when one opens, records that commit). Anything without a green `all-green` check is not deliverable - re-run that commit's CI first (the gate job posts the check), then dispatch.
 
-A missing publish (a failed or evicted post-green run after a green gate) and a stamp that needs recovery heal two ways: the next push to main publishes the newer tree, or an operator dispatches post-green.yml with the green commit's sha. Until the heal, a sync copies from the tip as it stands - the previous tree after a missing publish (the residuals table; a sync PR, when one opens, records the build commit it copied) - or fails resolve_build.ts's stamp checks over a broken stamp. Anything without a green `all-green` check at the source is not publishable - re-run that commit's CI first (the gate job posts the check), then dispatch.
+## Newest-green wins, one mover at a time
 
-The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded build, the `commit` of its manifest's own entry - stay reachable forever.
-
-## The stable tag, beside the branch
-
-The same post-green run also moves the lightweight tag `refs/tags/stable` to the judged commit ([post-green/move_stable.ts](../.github/scripts/post-green/move_stable.ts), the `move-stable` job): the delivery ref the fleet's pins will move to, existing beside the `build` branch until they do, and consumed by nothing yet.
-
-- **Provenance is the commit itself.** The tag names a main commit whose own CI run the mover judged (main history, then the `all-green` check at that sha through [shared/all_green.ts](../.github/scripts/shared/all_green.ts)), so there is no generated tree to prove and no stamp to parse.
-- **Newest-green wins.** A mover whose sha the tag already names, or has moved past, moves nothing; otherwise the move is a `--force-with-lease` push naming the value just read, so two movers racing leaves the loser red and the tag untouched.
-- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it.
-- **The ruleset blocks deletion only.** Git classifies every update of an existing tag as a forced update, so a `non_fast_forward` or `update` rule in the `stable-tag` ruleset ([.github/settings.local.yml](../.github/settings.local.yml)) would block the mover itself; rollback protection is the mover's ancestry skip plus the lease.
+- **One lane.** Every workflow mover serializes in the repo-scoped concurrency lane `stable-tag-move`, held by post-green.yml's move-stable job as a literal string: a called run and a dispatched run are runs of DIFFERENT workflows, and a group derived from `github.workflow` would silently split the lane between them (post-green.yml's header).
+- **Ancestry skip.** A mover whose sha the tag already names, or has moved past (the tag's commit descends from the sha), moves nothing and exits green: a re-run of an older commit's legs after a newer main commit moved the tag never rolls the fleet back.
+- **The lease.** The push is `--force-with-lease` naming the value just read (the tag object for an annotated tag, an empty lease when the tag is absent), so two movers racing leaves the loser red and the tag untouched.
+- **The output.** `previous`, the commit the tag named before a move (empty when nothing moved), is the `read-directives` leg's base ahead of the push's `before`. On a call that leg reads on every mover result: a newer run's range starts after its own base, which can be this very commit, so only this commit's run is sure to read it ([all-green.md](all-green.md#after-the-gate)).
 - **The credential.** The push uses the run's `GITHUB_TOKEN` with `contents: write` (ci.yml's post-green job grants that ceiling), the way GitHub's own actions/publish-action moves an action's major tag with the default token.
 - **The open question, settled by the first live move.** The docs list the ref-update endpoints as possibly needing the `workflows` permission too, with no stated condition, and no official page says whether a ref update to a commit already on the server can trip the workflow-file refusal. If GitHub refuses the push, the fallback is the `REPO_PLATFORM_TOKEN` the workflow already receives for the publisher, passed as the mover checkout's `token`, with no new secret.
 
-The recorded build is the full 40-hex build commit sha: the writer takes it from the operator's `--build` argument (the tip resolve_build.ts resolved for the whole run) and writes it into the manifest's own entry ([sync.md](sync.md#the-manifest)), so every repository names the exact build its files came from.
+## Provenance is the commit itself
 
-## One publisher at a time
-
-Every workflow publisher of `refs/heads/build` serializes in one repo-scoped concurrency lane, `build-branches-publish`, held by post-green.yml's publish job as a literal string: a called run and a dispatched run are runs of DIFFERENT workflows (the caller's and post-green.yml's), and a group derived from `github.workflow` would silently split the lane between them (post-green.yml's header).
-
-The lane serializes only the workflows; out-of-band pushes are the residuals section's problem. Two mechanisms make the survivor rollback-proof anyway (publish.ts): a newest-green-wins staleness preflight against the tip's stamped source, decided before anything is assembled, and the plain - never force - push, which doubles as the compare-and-swap on the exact tip the preflight read. The residual is staleness-only (an out-of-order eviction leaves the branch one push behind, never rolled back), healed by the next push or a dispatch with the newer commit's sha.
-
-## The no-empty-commit law
-
-In normal operation a publish commits only on a content change (publish.ts owns the law; the one exception closes the table):
-
-| Event | Assembled tree vs tip | Tip stamp | Result |
-| --- | --- | --- | --- |
-| A docs-only landing | identical | healthy | Nothing staged, nothing published. |
-| Rerun of an already-published source | identical | healthy | Nothing published. |
-| A content change lands green | differs | any | A new stamped commit. |
-| A stale queued publisher runs after a newer main already published | any | healthy | Skip - newest-green wins (the staleness preflight reads the tip's stamp, before any assembly or tree comparison). |
-| Dispatch over a tampered or unparsable stamp | identical | broken | Stamp recovery: a freshly stamped, tree-identical commit. |
-
-No commit means no recorded-build bump in the fleet and no content-free sync PRs.
-
-Stamp recovery is the one exception that commits an identical tree, and the only reason `--allow-empty` appears in publish.ts: the no-change skip is guarded by the tip's stamp health ([shared/stamp_checks.ts](../.github/scripts/shared/stamp_checks.ts)), so a tree-identical tip with a broken stamp gets healed by dispatch instead of wedging every sync until the next content change.
-
-## The provenance proof
-
-[sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) (invoked by [sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts) after parsing the tip's source stamp) verifies the tip's content is exactly what the builder produces from its stamped source - the strongest claim available, since the ruleset model cannot pin the ref to one workflow and the stamp lines are plain text anyone can write. Three checks anchor them, all hard failures:
+The tag names a main commit whose own CI run passed, so there is no generated tree to prove and no stamp to parse. Two facts anchor everything, verified at the move and re-verified at every sync ([sync/resolve_build.ts](../.github/scripts/sync/resolve_build.ts)), both hard failures:
 
 | # | Check | What it catches |
 | --- | --- | --- |
-| 1 | The stamped source is main history ([shared/stamp_checks.ts](../.github/scripts/shared/stamp_checks.ts)). | A stamp naming anything else was not the builder. |
-| 2 | No rollback: no stamp in the tip's ancestry is strictly newer than the tip's own (`shared/stamp_checks.ts`). | A replayed old build, whose tree rebuilds cleanly from its old source. |
-| 3 | Tree proof: rebuild from the stamped source with that commit's own script and require tree-hash equality with the tip. | Content the builder never produced from that source. |
+| 1 | The commit is `main` history (`git merge-base --is-ancestor`, through [shared/git_yes_no.ts](../.github/scripts/shared/git_yes_no.ts), so an errored look is fatal, never a "no"). | A tag pointed at a PR head, a side branch, or a foreign commit. |
+| 2 | The commit carries a completed successful `all-green` check run ([shared/all_green.ts](../.github/scripts/shared/all_green.ts)). | A red or unjudged commit. |
 
-Checks 1 and 2 are the same battery publish.ts's no-change skip guard runs, shared so the two can never drift.
+The sync also requires `files.yml` at the commit's root, since a commit without the writer's data file has nothing to sync from, and resolves the tag through `^{commit}` so a hand-made annotated tag names its commit, never the tag object.
 
-A fourth check - proving the stamped run a green publish run via the Actions API - existed and was retired: a tree that rebuilds byte-identically from a main-history, non-rollback stamp IS the builder's output of that source, and greenness is proven independently (resolve_build.ts runs the all-green gate on the stamped source), so it anchored no content of its own while adding live-state trust (runs age out, workflows get renamed, so a valid tip could wedge every sync on a dead run id). The documented cost of its removal: actor provenance degraded from verified to advisory - the commit's `run:` line is a human breadcrumb, and a hand-pushed byte-identical tip is no longer distinguishable. A forensics loss, never a content-injection gain.
+The recorded delivery is the full 40-hex sha of that main commit: the writer takes it from the operator's `--build` argument (the commit resolve_build.ts resolved for the whole run) and writes it into the manifest's own entry ([sync.md](sync.md#the-manifest)), so every repository names the exact commit its files came from. Old delivery commits stay reachable forever: they are main history.
 
-## Hermetic staging: one function of the bytes
+## The build branch, until its deletion
 
-The tree proof compares a scratch rebuild's hash against the tip's, so producers and verifier must stage identically - or the skew reads as a false tamper accusation.
-
-[shared/stage_tree.ts](../.github/scripts/shared/stage_tree.ts) owns the one staging argv every site runs (`publish.ts`, and `rebuild_tree.ts` for the verifier). It neutralizes two config vectors:
-
-| Vector | Neutralizer |
-| --- | --- |
-| Ignore rules silently dropping staged files: an in-tree `.gitignore`, a machine-global excludesFile, a planted `info/exclude`, the producer checkout's own exclude. | `add -A --force` |
-| Blob rewriting at add time: a global `* text` attributes filter, a machine-global `core.autocrlf`. | `-c core.attributesFile=/dev/null -c core.autocrlf=false` |
-
-`$GIT_DIR/info/attributes` is the one axis no flag can close (git reads it regardless of `core.attributesFile`); no site plants one, fresh checkouts and scratch repos carry none, so it stays a documented residual, not a covered vector. Any further rewrite axis git grows lands in this same class until a flag pins it: `core.autocrlf` sat here, measured live, before its override landed.
-
-Hooks an `init.templateDir` plants are a residual of the same kind: `init` fires none, `add` and `write-tree` fire only `post-index-change` once the index is written, and no site plants one, so they stay documented, not neutralized.
-
-Guards of this class - defenses against environmental hazards a hermetic test can never trip by accident - each ship with a hostile-fixture test that stages the hazard and forces the guard's failure branch, so a guard that stopped guarding goes red in the suite rather than silently passing.
-
-[shared/rebuild_tree.ts](../.github/scripts/shared/rebuild_tree.ts) reproduces the builder exactly - the source commit's own script and frozen-lockfile dependencies - and hashes through a scratch index's write-tree, so file modes join the comparison too.
-
-## Extraction safety: one branch, every consumer
-
-The branch is both the writer's source and the fleet's executable channel (`uses: ...@build`). Its root, assembled by [branch_tree.ts](https://github.com/Vivswan/repo-platform/blob/main/.github/scripts/build-branches/branch_tree.ts): `files.yml` and `files/` (byte copies of this repository's), `actions/` (sources and dependency manifests, no `node_modules`; the dependency-free `actions/shared/` library ships with them so the tarball stays install-free), `.github/workflows/` (the fleet-facing reusable workflows the written workflows call `@build`; a `uses:` fetches the file at the named ref, so a branch without them 404s every caller), `reserved-labels.yml` (the label names the settings layers manage, derived from `files.yml`, which the plan action refuses as tracking labels), and a static `README.md`. Being one branch for both consumers constrains every path on it:
-
-- Plain filenames only: a `uses:` ref downloads the whole branch tarball, so nothing on the branch may carry a name extraction cannot write; conditional landing is `files.yml`'s `when` clauses, never a filename.
-- Nothing the builder publishes can run on the branch: [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) hard-fails assembly if any shipped workflow carries a trigger other than `workflow_call` alone. PAT pushes can trigger workflows, so the safety is pinned by construction, not carried by omission; an out-of-band push bypasses the assembly guard entirely - the residuals section.
-- The writer runs from this repository's checkout, never from the branch: the branch carries data the writer reads (`files.yml`, `files/`) and code the fleet's workflows execute (`actions/`, the reusable workflows), and the provenance proof covers both.
-- Every self pin resolves: the `delivery-pin-stems` ssot rule ([delivery_pins.ts](../scripts/check/ssot/delivery_pins.ts)) checks each `uses: <owner>/repo-platform/<stem>@<ref>` in the writer's sources, this repository's workflows and action manifests, and the docs' examples against the checkout, whatever the ref, so a renamed or deleted action fails CI here instead of the next fleet run.
+The same post-green run still publishes the orphan `build` branch beside the tag, behind a green move (the directives read prefers its stamps to the mover's base, so a red move must not see the stamps advance): [build-branches/publish.ts](../.github/scripts/build-branches/publish.ts) assembles the judged commit's tree with [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) (`files.yml` and `files/`, `actions/`, the fleet-facing reusable workflows, a derived `reserved-labels.yml`) and chains a stamped commit onto the branch tip in the `build-branches-publish` lane, with [sync/verify_build_provenance.ts](../.github/scripts/sync/verify_build_provenance.ts) as the tree proof a consumer would run. No source under `files/` pins the branch and no sync reads it; the only readers left are the starters already written into repositories (nightly and fuzzer workflows, never rewritten by the sync), which keep their `@build` pin until a migration moves it. The directives leg's range read ([fleet/judged_range.ts](../.github/scripts/fleet/judged_range.ts)) still takes its stamps as the base ahead of the mover's `previous`. Deleting the publisher, the branch, and the stamp machinery is the next change.
 
 ## A new action input lands as a stack
 
@@ -134,6 +92,6 @@ Example: the pr-title workflow PR feeding validate-commit-names a new `title` in
 
 | Residual | Why it stands | What bounds it |
 | --- | --- | --- |
-| `uses: ...@build` execution trusts the ref. | A user-repo ruleset cannot restrict other writers - plain fast-forwards stay possible; only force-pushes and deletion are blocked. | Sync consumption is provenance-verified; repo-platform's own CI gates every builder-published change to the executable channel (an out-of-band push bypasses both, the ref-trust residual in full). |
-| Actor provenance is advisory. | The run-proof check was retired as live-state trust (above). | Checks 1-3 anchor the content; the `run:` line stays a breadcrumb. |
-| A sync copies from the build tip as it stands: a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, copies the previous build, as does any sync while a publish is missing. | No freshness wait exists. The post-green call is needs-ordered behind the publish in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag. | resolve_build.ts runs the green gate and provenance checks on that tip, and a sync PR, when one opens, records the build commit it copied; the next sync (the weekly cron, or a `[fleet-sync: public]` directive on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the publish once it lands, and a publish that never landed is healed by the next push or a dispatch with the green commit's sha. |
+| `uses: ...@stable` execution trusts the ref. | A user-repo ruleset cannot restrict other writers to one workflow; it blocks deletion only. | Sync consumption re-verifies main history and the green check at the commit; the tag can only ever name a commit that exists on the server, and repo-platform's own CI gates every commit on `main` (an out-of-band move to a red or off-main commit bypasses the fleet's `uses:` execution, the ref-trust residual in full). |
+| Actor provenance is advisory. | Nothing records which run moved the tag; a lightweight tag carries no message. | The check at the commit is the anchor, not the mover's identity. |
+| A sync copies from the commit the tag names as it stands: a hand dispatch seconds after a merge, or the Tuesday cron firing while a merge shortly before it is still in CI, copies the previous commit, as does any sync while a move is missing. | No freshness wait exists. The post-green call is needs-ordered behind the mover in the same run, so only a sync that wakes on its own (dispatch or cron) can meet the lag. | resolve_build.ts runs the green gate and the ancestry check on that commit, and a sync PR, when one opens, records the commit it copied; the next sync (the weekly cron, or a `[fleet-sync: public]` directive on the next merge - [all-green.md](all-green.md#after-the-gate)) consumes the move once it lands, and a move that never landed is healed by the next push or a dispatch with the green commit's sha. |

@@ -1,7 +1,7 @@
 // ONE grammar exists, managed-region: [repo-owned above] BEGIN line, managed content, END line, [repo-owned below];
 // sync owns the bounded region only.
 //
-// DEPENDENCY-FREE ZONE: actions/shared/ ships on the build branch and runs where no node_modules exist (composite
+// DEPENDENCY-FREE ZONE: actions/shared/ runs from the delivery commit where no node_modules exist (composite
 // actions before their own installs), so node builtins and zone-internal relative imports only;
 // tests/actions/shared_zone.test.ts enforces it.
 

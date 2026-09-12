@@ -23,7 +23,7 @@ export const RULE_ROSTER = [
   "actions-bun-guard",
   "local-bun-runtime",
   "action-pins",
-  "fleet-refs-ride-build",
+  "fleet-refs-ride-stable",
   "delivery-pin-stems",
   "sticky-pr-comments",
   "held-run-notice",

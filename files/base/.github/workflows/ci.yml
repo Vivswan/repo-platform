@@ -2,7 +2,7 @@
 # Local edits are replaced on the next sync.
 #
 # The same file in every repository: the legs after the gate are static jobs gated on the plan's module output,
-# so a change to fleet-ci.yml@build changes this repository's CI with no PR here.
+# so a change to fleet-ci.yml@stable changes this repository's CI with no PR here.
 
 name: CI
 
@@ -36,7 +36,7 @@ jobs:
   # This caller's permissions are the ceiling for every called job and
   # must stay UNCONDITIONAL: GitHub validates skipped jobs' grants too.
   ci:
-    uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-ci.yml@stable
     permissions:
       contents: read
       # validate-managed-files posts its sticky findings comment.
@@ -56,7 +56,7 @@ jobs:
   # not in all-green's needs and stays green whatever it finds.
   nightly:
     if: github.event_name == 'schedule'
-    uses: {{github_username}}/repo-platform/.github/workflows/fleet-nightly.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-nightly.yml@stable
     permissions:
       contents: read
       issues: write
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: {{github_username}}/repo-platform/actions/all-green@build
+      - uses: {{github_username}}/repo-platform/actions/all-green@stable
         with:
           needs: ${{ toJSON(needs) }}
 
@@ -116,7 +116,7 @@ jobs:
       pull-requests: write
       issues: read
       vulnerability-alerts: read
-    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release.yml@stable
     with:
       sha: ${{ github.sha }}
       tracking-labels: ${{ needs.ci.outputs.tracking-labels }}
@@ -149,7 +149,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release-publish.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release-publish.yml@stable
     with:
       tag: ${{ needs.release.outputs.tag_name }}
 
@@ -192,7 +192,7 @@ jobs:
       pages: write
       id-token: write
       issues: write
-    uses: {{github_username}}/repo-platform/.github/workflows/reusable-site.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/reusable-site.yml@stable
     with:
       sha: ${{ github.sha }}
       custom_domain: ${{ vars.CUSTOM_DOMAIN }}

@@ -11,12 +11,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-  type FilesConfig,
   type ModuleData,
   parseFilesConfig,
   type SettingsLayers,
   SOURCE_PREFIX,
 } from "../../../../actions/plan/files_config.ts";
+import { declaredLayers, type LayerSources } from "../../../../actions/plan/reserved_labels.ts";
 import { applies, type Selection } from "../../../../actions/shared/selection.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 import {
@@ -37,11 +37,6 @@ export type Label = {
 
 /** One module of files.yml, named. */
 export type Module = ModuleData & { name: string };
-
-/** What the loader judges of files.yml: the module data in canonical
- *  order and the `settings` block, which a data file with no rendered
- *  entry lacks. */
-export type LayerSources = Pick<FilesConfig, "modules" | "settings">;
 
 /** The same, once the settings block is known to exist: what selecting
  *  and folding layers requires. */
@@ -70,14 +65,6 @@ export function loadModules(path: string = FILES_CONFIG): Module[] {
 
 export function namedModules(config: LayerSources): Module[] {
   return Object.entries(config.modules).map(([name, data]) => ({ ...data, name }));
-}
-
-/** Every layer file the config declares, tree-relative and in stack
- *  order; none when the settings block is absent. */
-export function declaredLayers(config: LayerSources): string[] {
-  const { settings } = config;
-  if (settings === null) return [];
-  return [settings.baseline, ...settings.layers.map((layer) => layer.source), settings.override];
 }
 
 export interface ReadLayers {
@@ -142,8 +129,8 @@ export function loadLayer(path: string): SettingsLayer {
 
 /** Every label tuple any layer can emit, for ANY module selection and
  *  either visibility, the override included; tracking labels excluded
- *  (those come from each repository's registration). The single roster
- *  the reserved-label derivation keys on. */
+ *  (those come from each repository's registration). The NAMES alone are
+ *  actions/plan/reserved_labels.ts's reading, shared with the plan action. */
 export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
   const labels: Label[] = [];
   for (const layer of loadLayers(config, tree).values()) {
@@ -160,12 +147,6 @@ export function allLayerLabels(config: LayerConfig, tree: string): Label[] {
     }
   }
   return labels;
-}
-
-/** Every label NAME any layer can emit: the roster no tracking label may
- *  reuse (the plan action refuses one, from the build branch's copy). */
-export function managedLabelNames(config: LayerConfig, tree: string): string[] {
-  return allLayerLabels(config, tree).map((label) => label.name);
 }
 
 /** The fleet's document for a selection: the layers of `layerPaths`

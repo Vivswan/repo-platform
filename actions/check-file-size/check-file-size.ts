@@ -44,7 +44,7 @@ export const WARN: Caps = {
 };
 /** Maximum comment block length, in lines, by scope: one annotating tier,
  *  never a failure, so not derived from any hard cap. Fleet-wide, like every
- *  cap here: the fleet takes the action from `@build`. */
+ *  cap here: the fleet takes the action from `@stable`. */
 export const COMMENT_CAPS: Readonly<Record<CommentScope, number>> = { block: 10, header: 25 };
 /** The per-block exemption, on a comment line inside the block (a comment
  *  line directly above it is part of it); the reason after it is mandatory. */

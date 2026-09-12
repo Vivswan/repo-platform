@@ -25,7 +25,7 @@ const skeleton = parseYaml(
 ) as {
   jobs: Record<string, CallerJob>;
 };
-const platformCall = /^owner\/repo-platform\/(\.github\/workflows\/[^@]+)@build$/;
+const platformCall = /^owner\/repo-platform\/(\.github\/workflows\/[^@]+)@stable$/;
 
 describe("the release workflows' secrets", () => {
   test("every secret the skeleton passes to a platform workflow is one it declares", () => {

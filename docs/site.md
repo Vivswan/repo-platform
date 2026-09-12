@@ -16,7 +16,7 @@ repo-platform dogfoods the docs half: this guide and the rest of `docs/` are the
 
 ## The leg and its triggers
 
-The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed: a push, the nightly schedule (the rebuild), and a manual dispatch (the manual deploy). There is no workflow of its own and no tag trigger: a tag created without a push lands on the nightly rebuild, or right away via dispatch. The job calls reusable-site.yml`@build` with `github.sha` (the judged commit, so a red main never reaches the site) and `vars.CUSTOM_DOMAIN`, and holds the `pages` concurrency lane.
+The `site` job in the managed ci.yml needs `ci`, `all-green`, `post-green`, and `publish-release`, and runs on every run of ci.yml on main whose gate passed: a push, the nightly schedule (the rebuild), and a manual dispatch (the manual deploy). There is no workflow of its own and no tag trigger: a tag created without a push lands on the nightly rebuild, or right away via dispatch. The job calls reusable-site.yml`@stable` with `github.sha` (the judged commit, so a red main never reaches the site) and `vars.CUSTOM_DOMAIN`, and holds the `pages` concurrency lane.
 
 The release legs sit before it as an ORDER, not a gate: the condition leads with `!cancelled()`, so the deploy waits for the release chain and then runs whatever its result, and a release commit's own deploy serves its new tag. Without the release-please module the release legs skip and the deploy follows the repo-owned post-green hook directly ([all-green.md](all-green.md#after-the-gate)).
 
@@ -177,7 +177,7 @@ The nightly run crawls the deployed site's EXTERNAL links after publishing (inte
 | `site.include` | extra source roots staged into the docs ([above](#other-roots-on-the-site-siteinclude)) | none |
 | `labels.site` | the link-rot tracking issue's label | `docs-link-rot` |
 
-The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the build branch's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
+The plan action ([actions/plan](../actions/plan/action.yml), mode `site`) resolves them on every run from the registration and the delivery commit's `files.yml` into one `config` output, the JSON document the pages-site action reads (`site_title`, `docs_path`, `include`, `link_rot_label`); a registration-less caller such as this repository's own ci.yml passes the same document by hand, and its `site_title` must be non-empty like the registration's `project.name`.
 
 ## Pages enablement
 

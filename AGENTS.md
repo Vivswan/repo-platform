@@ -4,7 +4,7 @@
 
 ## What this is
 
-repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the `build` branch. Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret.
+repo-platform manages standards files, CI, and settings across the owner's repositories: a file writer (`files.yml` + `files/`), reusable workflows, and composite actions, delivered to the fleet from the moving `stable` tag, which names a green main commit. Only this repository pushes to the fleet; managed repositories hold no sync workflow and no sync secret.
 
 ## Principles
 

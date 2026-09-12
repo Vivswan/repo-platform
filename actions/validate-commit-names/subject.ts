@@ -1,6 +1,6 @@
 // Shared by the CI action (validate-commit-names.ts) and this repo's commit-msg hook (scripts/check/check_commit_subject.ts);
 // tests/scripts/check/check_commit_subject.test.ts proves the two judge identically.
-//   lives INSIDE the action directory  -> the build branch ships actions/ but not scripts/; a repo-root import would break every fleet `uses:` ref
+//   lives INSIDE the action directory  -> a fleet `uses:` runs the action from the delivery commit with nothing installed; a repo-root import would break every ref
 //   dependency-free                    -> the action runs it with no install step
 
 export const allowedTypes = [

@@ -1,7 +1,7 @@
 name: All Green
 description: >-
   The gate's judgment, shared by repo-platform's own ci.yml and every
-  rendered fleet ci.yml (pinned @build): every needed job's result must
+  rendered fleet ci.yml (pinned @stable): every needed job's result must
   be success or skipped - a skipped job stands down - with at least one
   success, because an all-skipped run vouches for nothing. The calling
   job is named all-green and carries `if: always()` plus a needs list of

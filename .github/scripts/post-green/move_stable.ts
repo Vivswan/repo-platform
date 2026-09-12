@@ -4,10 +4,10 @@
 // Output `previous` is the base the directives read takes from the tag: the commit it named before this run moved it, "" when
 // nothing moved (the first move included).
 
-import { allGreenFailure } from "../shared/all_green.ts";
+import { allGreenFailure, PROBE_TIMEOUT_MS } from "../shared/all_green.ts";
 import { env, fail, notice, requireEnv, setOutput } from "../shared/gha.ts";
-import { gitAnswersYes } from "../shared/git_yes_no.ts";
-import { capture, must, mustCapture } from "../shared/proc.ts";
+import { answered, gitAnswersYes } from "../shared/git_yes_no.ts";
+import { must, mustCapture } from "../shared/proc.ts";
 
 const TAG = "refs/tags/stable";
 const repository = requireEnv("GITHUB_REPOSITORY");
@@ -21,16 +21,15 @@ if (ref !== "" && ref !== "refs/heads/main") {
   );
 }
 
-/** For an annotated tag the value is the tag object, which is what the lease must name. ls-remote --exit-code returns 2 for an
- * absent tag; any other failure is fatal, since read as a first move it would misreport the tag in the outputs. */
+/** For an annotated tag the value is the tag object, which is what the lease must name. ls-remote --exit-code's 2 is the
+ * "no tag" answer; the helper makes every other exit and a deadline expiry fatal, since read as a first move either would
+ * misreport the tag in the outputs. */
 function remoteTag(): string {
-  const probe = capture(["git", "ls-remote", "--exit-code", "origin", TAG]);
+  const probe = answered(["ls-remote", "--exit-code", "origin", TAG], {
+    noExit: 2,
+    timeoutMs: PROBE_TIMEOUT_MS,
+  });
   if (probe.exitCode === 2) return "";
-  if (probe.exitCode !== 0) {
-    fail(
-      `git ls-remote for ${TAG} failed (exit ${probe.exitCode}): ${probe.stderr.trim()} - an operational failure, not an absent tag; re-run the job`,
-    );
-  }
   const line = probe.stdout.split("\n").find((entry) => entry.endsWith(`\t${TAG}`));
   if (line === undefined) fail(`git ls-remote listed no ${TAG} line:\n${probe.stdout}`);
   return line.slice(0, line.indexOf("\t"));

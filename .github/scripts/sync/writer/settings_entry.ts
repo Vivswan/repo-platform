@@ -10,6 +10,7 @@ import { stringify as stringifyYaml } from "yaml";
 import type { FilesConfig } from "../../../../actions/plan/files_config.ts";
 import { PlanError, trackingLabels } from "../../../../actions/plan/plan.ts";
 import type { Registration } from "../../../../actions/plan/registration.ts";
+import { reservedLabelNames } from "../../../../actions/plan/reserved_labels.ts";
 import {
   GENERATED_NOTICE,
   PLATFORM_NAME,
@@ -31,7 +32,6 @@ import {
   layerConfig,
   layerPaths,
   loadLayer,
-  managedLabelNames,
   namedModules,
 } from "./settings_layers.ts";
 
@@ -156,8 +156,7 @@ export function renderSettings(input: SettingsRenderInput): SettingsRender {
     overlay,
     loadOverrideLayer(join(input.tree, config.settings.override)),
   ]);
-  const reserved = new Set(managedLabelNames(config, input.tree).map((name) => name.toLowerCase()));
-  const tracking = trackingLabelTuples(input, reserved);
+  const tracking = trackingLabelTuples(input, reservedLabelNames(config, input.tree));
   if ("held" in tracking) return tracking;
   const folded = Array.isArray(doc.labels) ? doc.labels : [];
   // `labels: null` in the overlay is the repository's opt-out: it owns its

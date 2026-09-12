@@ -38,8 +38,9 @@ on:
         type: string
       sha:
         description: >-
-          The judged main commit (its publish precedes this call in the
-          same run) - never main's live HEAD, which a later merge queued
+          The judged main commit (the mover ran on it before this call in
+          the same run; the delivery commit is what the plan reads from
+          the stable tag) - never main's live HEAD, which a later merge queued
           behind this run may already have moved; a private-slug
           refusal of the called scope names it (fleet/sync_scope.ts)
         required: true
@@ -60,11 +61,11 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    # The provenance rebuild plus the probe bounds at ten adopted repos:
-    # discovery 2 x 120 s, selection's two 300 s stages, 10 x 2 x 120 s.
+    # The probe bounds at ten adopted repos: discovery 2 x 120 s,
+    # selection's two 300 s stages, 10 x 2 x 120 s.
     timeout-minutes: 60
-    # Checks read: the green gate reads the all-green verdict at the build
-    # tip's stamped source (shared/all_green.ts).
+    # Checks read: the green gate reads the all-green verdict at the commit
+    # the stable tag names (shared/all_green.ts).
     permissions:
       contents: read
       checks: read
@@ -85,8 +86,7 @@ jobs:
             exit 1
           fi
 
-      # Full history: the provenance check walks main for the build's
-      # stamped source and rebuilds the tree from that commit.
+      # Full history: the resolve proves the tagged commit is main history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

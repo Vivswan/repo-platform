@@ -60,7 +60,7 @@ describe("collectRefs", () => {
           path: "d.yml",
           text: [
             "      - uses: ./actions/check-typography",
-            "      - uses: {{github_username}}/repo-platform/actions/fuzz-issue@build",
+            "      - uses: {{github_username}}/repo-platform/actions/fuzz-issue@stable",
             "      - uses: gitleaks/gitleaks-action@v3",
           ].join("\n"),
         },
@@ -168,7 +168,7 @@ describe("resolve_action_refs.ts over a scratch tree", () => {
         "actions/checkout": `${SHA} # v7.0.1`,
         "github/codeql-action/init": `${OTHER} # v4.38.0`,
         "dtolnay/rust-toolchain": `${DEAD} # master`,
-        "Vivswan/repo-platform/actions/plan": "build",
+        "Vivswan/repo-platform/actions/plan": "stable",
       },
       {
         [`actions/checkout@${SHA}`]: SHA,
@@ -176,7 +176,7 @@ describe("resolve_action_refs.ts over a scratch tree", () => {
         [`github/codeql-action@${OTHER}`]: OTHER,
         "github/codeql-action@v4.38.0": OTHER,
         [`dtolnay/rust-toolchain@${DEAD}`]: DEAD,
-        "Vivswan/repo-platform@build": OTHER,
+        "Vivswan/repo-platform@stable": OTHER,
       },
     );
     expect(result).toEqual({

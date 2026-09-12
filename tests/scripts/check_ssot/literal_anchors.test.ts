@@ -85,7 +85,7 @@ jobs:
       group: ${lane}
       cancel-in-progress: ${cancel}
     steps:
-      - uses: Vivswan/repo-platform/actions/release-health@build
+      - uses: Vivswan/repo-platform/actions/release-health@stable
         id: ${healthId}
         with:
           mode: ${mode}
@@ -122,7 +122,7 @@ jobs:
   release:
     needs: [ci, all-green, post-green]
 ${lane}
-    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release.yml@build
+    uses: {{github_username}}/repo-platform/.github/workflows/fleet-release.yml@stable
 `;
   const wired = { workflow: workflow(), action: action(), script: script(), skeleton: skeleton() };
 

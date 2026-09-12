@@ -75,7 +75,7 @@ jobs:
       # The release PR's CI health check can be stale by merge time, so
       # the same gate re-runs here; release mode self-scopes to
       # release-cut pushes.
-      - uses: Vivswan/repo-platform/actions/release-health@build
+      - uses: Vivswan/repo-platform/actions/release-health@stable
         id: health
         with:
           mode: release

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-// The grammar and the refusal words live in actions/validate-commit-names/subject.ts, not here: the build branch
-// ships actions/ but not scripts/, so the shared module sits inside the action, and a committer reads locally the
-// reason CI's commit-names job would print after the push.
+// The grammar and the refusal words live in actions/validate-commit-names/subject.ts, not here: an action resolves
+// imports from its own directory alone (nothing installs the root's), so the shared module sits inside the action, and a
+// committer reads locally the reason CI's commit-names job would print after the push.
 // Motivating failure: `docs(all-green,build-provenance): ...`, a comma in the scope,
 // passed every local gate (pre-commit runs before the message exists) and reddened main.
 //

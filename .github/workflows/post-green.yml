@@ -51,8 +51,11 @@ permissions: {}
 
 jobs:
   # publish.ts owns the publish invariants and re-verifies the all-green check at the source before any mutation:
-  # defense in depth on the call, the sole gate on a dispatch.
+  # defense in depth on the call, the sole gate on a dispatch. Ordered behind the mover: the directives read takes
+  # a build stamp over the mover's base, so a publish beside a red move would carry the base past a commit whose
+  # directive no later range reads.
   publish-build:
+    needs: [move-stable]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # LITERAL on purpose: github.workflow inside a called workflow is the CALLER's name, which would split the lane
@@ -152,14 +155,15 @@ jobs:
           BEFORE_SHA: ${{ needs.move-stable.outputs.previous || inputs.before }}
         run: bun .github/scripts/fleet/fleet_sync_marker.ts
 
-  # Ordered behind the publish so the sync renders from the tip it left (a red publish skips the sync rather than
-  # ship the previous build); judged by name, so a red mover upstream of the directives read does not swallow it.
+  # Ordered behind the mover so the sync renders from the tag as this run's mover or a newer one left it (a red
+  # mover skips the sync rather than ship the previous commit); judged by name, since the directives read runs on
+  # every mover result.
   # This job holds the sync-repos lane the weekly cron also holds; the called run keys a per-run group instead.
   sync-fleet:
-    needs: [publish-build, read-directives]
+    needs: [move-stable, read-directives]
     if: >-
       !cancelled() &&
-      needs.publish-build.result == 'success' &&
+      needs.move-stable.result == 'success' &&
       needs.read-directives.outputs.armed == 'true'
     concurrency:
       group: sync-repos

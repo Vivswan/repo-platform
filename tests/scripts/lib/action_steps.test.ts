@@ -12,7 +12,7 @@ import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
-const SHARED = `runs:\n  steps:\n    - id: action-bun\n      uses: Vivswan/repo-platform/${BUN_SETUP_ACTION}@build\n      with:\n        pin: \${{ github.action_path }}/.bun-version\n`;
+const SHARED = `runs:\n  steps:\n    - id: action-bun\n      uses: Vivswan/repo-platform/${BUN_SETUP_ACTION}@stable\n      with:\n        pin: \${{ github.action_path }}/.bun-version\n`;
 const OWN_SETUP =
   "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ inputs.pin }}\n";
 
@@ -76,7 +76,7 @@ describe("action steps", () => {
     mkdirSync(join(dir, "gate"));
     writeFileSync(
       join(dir, "gate", "action.yml"),
-      "runs:\n  steps:\n    # - uses: Vivswan/repo-platform/actions/bun-setup@build\n    - run: echo ok\n",
+      "runs:\n  steps:\n    # - uses: Vivswan/repo-platform/actions/bun-setup@stable\n    - run: echo ok\n",
     );
     // The shared setup action sets up bun for its callers' pins, and an
     // inline setup-bun of its own is the same shape: neither is pinned.
