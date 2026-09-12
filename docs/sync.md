@@ -27,17 +27,18 @@ The sync writer copies the platform's files into a managed repository. It reads 
 ```text
 bun .github/scripts/sync/writer/sync.ts \
   --files files.yml --tree files \
-  --target <checkout> --build <sha> \
+  --target <checkout> --build <full sha> \
   --repository <owner/name> --private <true|false> \
   [--previous-files <files.yml of the build being replaced>] \
   [--summary <path for the JSON summary>]
 ```
 
 - `--tree` is the `files/` directory itself; every `source` in `files.yml` starts with `files/` and resolves under it.
+- `--build` is the build commit's full sha, 40 lowercase hex characters (`git rev-parse origin/build`), stamped into the manifest's `commit` field, which the fleet validator reads as a full sha; a short or uppercase one is refused before anything is written.
 - `--repository` names the GitHub repository; the owner is the `github_username` placeholder and the name is the fallback project name and slug.
 - `--previous-files` turns on the retirement check (below).
 - The Markdown report goes to stdout. The JSON summary carries the same rows plus `hold` and `holdReasons`.
-- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
+- Exit 0 whether or not the report holds the PR. A nonzero exit is a data or environment error: a `--build` that is not a full sha, a bad `files.yml`, an unreadable registration, a symlinked ancestor at a path the writer touches, a directory or a symlink at the manifest or registration path, a directory at a retired path or at a `moved_to` destination, a split file whose marker text is duplicated or buried mid-line, a placeholder value carrying a double quote, backslash, or control character, a mirror declaration the writer cannot honour ([Mirrors](#mirrors)).
 
 ## files.yml
 

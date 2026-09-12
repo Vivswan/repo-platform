@@ -219,7 +219,7 @@ interface Summary {
   notes: string[];
 }
 
-function spawnSync(target: string, summaryPath: string) {
+function spawnSync(target: string, summaryPath: string, build = BUILD) {
   return boundedSpawnSync(
     [
       "bun",
@@ -231,7 +231,7 @@ function spawnSync(target: string, summaryPath: string) {
       "--target",
       target,
       "--build",
-      BUILD,
+      build,
       "--repository",
       "OwnerOrg/demo",
       "--private",
@@ -935,6 +935,29 @@ describe("sync.ts over a modules-only registration", () => {
     };
     expect(manifest.files["AGENTS.md"]).toBeUndefined();
     expect(manifest.files[HOOK]).toEqual({ class: "starter" });
+  });
+});
+
+describe("sync.ts over a --build that is not the build commit's full sha", () => {
+  test.each([
+    { reason: "a short sha", build: BUILD.slice(0, 12) },
+    { reason: "an uppercase sha", build: BUILD.toUpperCase() },
+  ])("$reason is refused at the command line, before anything is written", ({ build }) => {
+    const target = temp.dir("sync-e2e-build-target-");
+    writeFileSync(
+      join(target, ".repo-platform.yml"),
+      "modules: [bun]\nproject: {name: Demo, slug: demo, description: A demo}\n",
+    );
+    fixtureGit(target, ["init", "-q", "-b", "main"]);
+    const summary = join(temp.dir("sync-e2e-build-summary-"), "summary.json");
+    expect(spawnSync(target, summary, build)).toEqual({
+      exitCode: 1,
+      stdout: `::error::--build must be the build commit's full sha (40 lowercase hex characters), got "${build}"\n`,
+      stderr: "",
+    });
+    expect(existsSync(join(target, MANIFEST))).toBe(false);
+    expect(existsSync(join(target, "LICENSE.md"))).toBe(false);
+    expect(existsSync(summary)).toBe(false);
   });
 });
 

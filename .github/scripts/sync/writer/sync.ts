@@ -10,7 +10,7 @@
 //
 // Usage:
 //   bun sync.ts --files <files.yml> --tree <files dir> --target <checkout>
-//     --build <sha> --repository <owner/name> --private <true|false>
+//     --build <full sha> --repository <owner/name> --private <true|false>
 //     [--previous-files <files.yml>] [--summary <path>]
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -451,6 +451,14 @@ function main(argv: string[]): number {
   );
   if (flags["--private"] !== "true" && flags["--private"] !== "false") {
     fail("--private must be true or false");
+  }
+  // The manifest's commit field is read as a full sha by the fleet's
+  // validator (manifest_shape.ts), so a short one would fail every
+  // all-green in the target after the sync merges.
+  if (!/^[0-9a-f]{40}$/.test(flags["--build"])) {
+    fail(
+      `--build must be the build commit's full sha (40 lowercase hex characters), got ${JSON.stringify(flags["--build"])}`,
+    );
   }
   let report: SyncReport;
   try {
