@@ -10,9 +10,9 @@ const SCRIPT = join(import.meta.dir, "../../../actions/dedupe-bun-lockfile/dedup
 const TOKEN = "ghs_secret_token_value";
 const REPO = "Vivswan/managed";
 const HEAD_REF = "dependabot/npm_and_yarn/zod-4.4.3";
-const WARNING =
-  "::warning::lockfile fix pushed with github.token, which starts no workflows: the new head's pull_request run waits for approval. " +
-  "Open it in the Actions tab and choose Approve and run, or push an empty commit.";
+const NOTICE =
+  "Lockfile dedupe commit pushed with the workflow token: GitHub holds the new head's pull_request run for approval, so its checks stay unreported. " +
+  "Approve the run from the PR's merge box or the Actions tab, or push a commit to this branch.";
 
 const LS_FILES = ["git", "ls-files", "-z", "--", "bun.lock", "*/bun.lock"];
 const DIFF = ["git", "diff", "--quiet", "--", "bun.lock", "*/bun.lock"];
@@ -71,13 +71,13 @@ const SCENARIOS: Scenario[] = [
     lockfiles: REGENERATED,
   },
   {
-    name: "changed: commit and push, then the pushed output and the warning",
+    name: "changed: commit and push, then the notice as the output and as the run warning",
     env: { STUB_DIFF_EXIT: "1" },
     exitCode: 0,
     git: [LS_FILES, DIFF, ...CONFIG, ADD, COMMIT, PUSH],
     bun: [install("."), install("pkg")],
-    output: "pushed=true\n",
-    stdoutHas: [WARNING],
+    output: `notice=${NOTICE}\n`,
+    stdoutHas: [`::warning::${NOTICE}`],
     stdoutLacks: ["::error::", "lockfiles already deduped"],
     lockfiles: REGENERATED,
   },
@@ -104,7 +104,7 @@ const SCENARIOS: Scenario[] = [
     lockfiles: { "bun.lock": "regenerated\n", "pkg/bun.lock": "old\n" },
   },
   {
-    name: "a failed push fails the run with no pushed output",
+    name: "a failed push fails the run with no notice output",
     env: { STUB_DIFF_EXIT: "1", STUB_PUSH_EXIT: "128" },
     exitCode: 128,
     git: [LS_FILES, DIFF, ...CONFIG, ADD, COMMIT, PUSH],

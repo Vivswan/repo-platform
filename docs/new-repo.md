@@ -202,10 +202,10 @@ Every repository receives the agent instructions (`AGENTS.md` with its `CLAUDE.m
 
 ### Fix commits and re-triggering CI
 
-Two of those workflows push fix commits to PR branches, and a push made with the default token (`github.token` / `GITHUB_TOKEN`) starts no workflows - the required `all-green` check would sit unreported on the new head. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning naming the way out.
+Two of those workflows push fix commits to PR branches with the default token (`github.token` / `GITHUB_TOKEN`). GitHub creates the new head's `pull_request` run for such a push but holds it in an approval-required state ([its GITHUB_TOKEN docs](https://docs.github.com/en/actions/concepts/security/github_token)), so the required `all-green` check sits unreported until someone approves the run from the PR's merge box or the Actions tab, or pushes a commit to the branch. Both jobs post one sticky PR comment (edited in place on later runs) and a run warning saying so.
 
-- auto-format: the new head's `pull_request` run sits at "awaiting approval". Open it in the Actions tab and choose "Approve and run", or push an empty commit. A PAT with Contents:RW would re-trigger them, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
-- bun lockfile fixes, unblocking the PR it pushed to: the new head's `pull_request` run sits at "awaiting approval". Open it in the Actions tab and choose "Approve and run", or push an empty commit. On a public repository, whose ruleset carries the code-scanning rule, a hand `workflow_dispatch` run does not unblock the merge: it wants the PR-event CodeQL analysis.
+- auto-format: a PAT with Contents:RW would start the run outright, but any same-repo PR's formatter tooling runs next to that token, so the starter deliberately does not wire one in.
+- bun lockfile fixes: on a public repository, whose ruleset carries the code-scanning rule, a hand `workflow_dispatch` run does not unblock the merge: it wants the PR-event CodeQL analysis.
 - Known limitation, accepted: Dependabot's bun runner reads `bun.lock` lockfileVersion 1 only, while bun 1.4 writes version 2. A Dependabot bun PR that cannot be rebased is closed and the bump made by hand.
 
 ### The release pipeline (release-please)
