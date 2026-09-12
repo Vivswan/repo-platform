@@ -52,17 +52,28 @@ export async function renderAll(dark: boolean): Promise<void> {
   const run = ++generation;
   const mounts = [...document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS}`)];
   if (mounts.length === 0) return;
+  const sources = mounts.map(
+    (mount) => directChild(mount, MERMAID_SOURCE_CLASS)?.textContent ?? "",
+  );
+  const slot = Number(document.documentElement.dataset.fleetHue);
+  const themeVariables = mermaidThemeVariables(dark ? "dark" : "light", HUES[slot] ?? HUES[0]);
+  // The browser fetches a face only once laid-out text uses it, so the theme's mono face can
+  // still be in flight here, and mermaid would measure every label in the fallback face and
+  // draw it in the real one. A face that fails to load leaves the fallback in both.
+  const fonts = document.fonts
+    .load(`${themeVariables.fontSize} ${themeVariables.fontFamily}`, sources.join(""))
+    .catch(() => undefined);
   let mermaid: Mermaid;
   try {
     mermaid = await loadMermaid();
+    await fonts;
     if (run !== generation) return;
-    const slot = Number(document.documentElement.dataset.fleetHue);
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
       theme: "base",
-      themeVariables: mermaidThemeVariables(dark ? "dark" : "light", HUES[slot] ?? HUES[0]),
+      themeVariables,
     });
   } catch (error) {
     // Not cached: an import that failed offline gets another try next run.
@@ -72,9 +83,11 @@ export async function renderAll(dark: boolean): Promise<void> {
     return;
   }
   for (const [index, mount] of mounts.entries()) {
-    const source = directChild(mount, MERMAID_SOURCE_CLASS)?.textContent ?? "";
     try {
-      const { svg, bindFunctions } = await mermaid.render(`fleet-mermaid-${run}-${index}`, source);
+      const { svg, bindFunctions } = await mermaid.render(
+        `fleet-mermaid-${run}-${index}`,
+        sources[index],
+      );
       if (run !== generation) return;
       const diagram = ensureChild(mount, "div", MERMAID_DIAGRAM_CLASS);
       diagram.innerHTML = svg;
