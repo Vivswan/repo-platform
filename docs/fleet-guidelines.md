@@ -135,11 +135,12 @@ Conventions every managed repository follows, whether the file is managed by syn
 
 - Rule: a blocking check is bypassed only through its tool's own per-finding mechanism, in the repository, visible in the diff, with a reason beside it. No job-level switch, environment variable, or label skips a check.
 - Why: a per-finding bypass records what was accepted and why, beside the code it excuses, and covers only that finding; a switch hides every future finding too.
-- How: the table below, one row per check fleet-ci.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults plus the repo-owned `knip.json`; `_typos.toml` extends the fleet allowlist.
+- How: the table below, one row per check fleet-ci.yml runs. zizmor runs the fleet policy alone; knip runs on its own defaults, which the repo-owned `knip.json` overrides where it sets a key; `_typos.toml` extends the fleet allowlist.
 - knip finds on its own: package.json `main`, `bin`, and scripts; the scripts that workflow `run:` steps and `.github/**/action.yml` files invoke; what its plugins read (a bunfig `preload`); `index`, `cli`, and `main` at the root or under `src/`.
 - A repo-owned `knip.json` names, under `entry` and `ignoreBinaries`, what knip would otherwise report as unused files and unlisted binaries:
   - entrypoints anywhere else: tests run by name through a launcher script, git hooks, scripts run by path, composite actions outside `.github/`
   - package.json scripts that run a tool CI installs itself
+  - a configured `entry` list replaces knip's default `index`, `cli`, and `main` patterns rather than extending them, so a repo that keeps one of those repeats it
 
 | Check | Where it runs | Blocks on | Bypass |
 |---|---|---|---|

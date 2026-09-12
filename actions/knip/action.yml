@@ -2,8 +2,9 @@ name: Knip
 description: >-
   The fleet's dead-code gate for JavaScript toolchains: knip (unused files,
   exports, and dependencies) over the caller's installed checkout, on
-  knip's own defaults plus whatever configuration the repository carries
-  (any of knip's config file names, or a knip key in package.json). The
+  knip's own defaults, overridden by whatever configuration the repository
+  carries (any of knip's config file names, or a knip key in package.json;
+  a configured entry or project list replaces the default list). The
   caller installs the toolchain and the dependencies first (knip resolves
   imports through node_modules). A finding fails the step; the only bypass
   is an ignore entry in the repository's own knip configuration, with a

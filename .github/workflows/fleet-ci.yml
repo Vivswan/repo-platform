@@ -170,8 +170,9 @@ jobs:
         with:
           upload-sarif: ${{ needs.plan.outputs.private != 'true' }}
 
-  # knip resolves imports through node_modules, so the repository's own bun installs first; it runs on its
-  # own defaults plus whatever knip configuration the repository carries. A repository committed right after
+  # knip resolves imports through node_modules, so the repository's own bun installs first; it runs knip's
+  # defaults, overridden by whatever knip configuration the repository carries (a configured entry or
+  # project list replaces the default list, it does not extend it). A repository committed right after
   # selecting the module has no package.json yet, so the job stands down then.
   knip:
     needs: [plan]
