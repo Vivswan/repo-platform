@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import { PLATFORM_NAME } from "../../../actions/shared/platform.ts";
 import { canonical, type Mismatch } from "./comparison.ts";
 import { asRecord, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
@@ -24,6 +25,10 @@ export function prTitleWorkflowMismatches(
       "opened/edited/reopened re-judge the title; synchronize keeps the required check present at every pushed head",
     ],
     ["  pr-title:", "the job id IS the check-run name the ruleset requires"],
+    [
+      "          title: ${{ github.event.pull_request.title }}",
+      "the action judges the title it is given; without the input it judges the commit range, which is not the title",
+    ],
   ];
   for (const [line, why] of pins) {
     const count = lines.filter((candidate) => candidate === line).length;
@@ -58,12 +63,12 @@ export function prTitleWorkflowMismatches(
       got: "a continue-on-error key",
     });
   }
-  const actionUses = "      - uses: amannn/action-semantic-pull-request@";
+  const actionUses = `      - uses: {{github_username}}/${PLATFORM_NAME}/actions/validate-commit-names@`;
   const actionCount = lines.filter((line) => line.startsWith(actionUses)).length;
   if (actionCount !== 1) {
     mismatches.push({
       file: wfRel,
-      expected: `exactly one step whose uses: starts ${JSON.stringify(actionUses.trim())} (the judgment itself - without it the required check is a green no-op)`,
+      expected: `exactly one step whose uses: starts ${JSON.stringify(actionUses.trim())} (the commit-names gate's own judge, so a title this check passes cannot land red there; without it the required check is a green no-op)`,
       got: `${actionCount} occurrences`,
     });
   }
