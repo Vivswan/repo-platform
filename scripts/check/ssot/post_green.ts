@@ -1,8 +1,9 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { PLATFORM_NAME, PLATFORM_OWNER } from "../../../actions/shared/platform.ts";
 import { escapeRegExp, type Mismatch } from "./comparison.ts";
-import { OWNER, REPO_ROOT, read } from "./inputs.ts";
+import { REPO_ROOT, read } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 export function settingsGreenGateMismatches(text: string): Mismatch[] {
@@ -123,7 +124,7 @@ export const POST_GREEN_REL = ".github/workflows/post-green.yml";
 
 /** A workflow job calling one of this repository's workflows: where it
  *  sits and whether it calls the LOCAL `./path` spelling - the same-commit
- *  call - or the canonical `<owner>/repo-platform/path@ref`, which runs
+ *  call - or the canonical `<owner>/<name>/path@ref`, which runs
  *  whatever that ref holds. */
 export interface WorkflowCaller {
   site: string;
@@ -141,7 +142,7 @@ export function callersOf(
   }
   // Built from the validated owner and an escaped path, never from input.
   // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  const canonical = new RegExp(`^${owner}/repo-platform/${escapeRegExp(rel)}@`, "i");
+  const canonical = new RegExp(`^${owner}/${PLATFORM_NAME}/${escapeRegExp(rel)}@`, "i");
   const mapping = (value: unknown): Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -411,10 +412,10 @@ export const postGreenRules: Rule[] = [
           .map((name) => [`.github/workflows/${name}`, read(`.github/workflows/${name}`)]),
       );
       return [
-        ...postGreenCallerMismatches(workflows, OWNER),
+        ...postGreenCallerMismatches(workflows, PLATFORM_OWNER),
         ...fleetTokenHolderMismatches(workflows),
         ...Object.keys(FLEET_WRITERS).flatMap((rel) =>
-          fleetWriterMismatches(rel, read(rel), workflows, OWNER),
+          fleetWriterMismatches(rel, read(rel), workflows, PLATFORM_OWNER),
         ),
       ];
     },

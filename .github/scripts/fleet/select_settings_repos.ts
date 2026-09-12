@@ -5,6 +5,7 @@
 
 import { appendFileSync } from "node:fs";
 import { declaredModules } from "../../../actions/plan/registration.ts";
+import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { addMask, env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { maskForms } from "../shared/mask.ts";
 import { moduleRoster } from "../sync/modules.ts";
@@ -87,7 +88,7 @@ function readRepoFile(slug: string, path: string) {
 // Only a 404 means "not adopted"; any other failure is a no-answer, so an outage never reads as an
 // opt-out.
 function probeAdoption(slug: string, display: string): ProbeResult<{ modules: string[] | null }> {
-  const probe = readRepoFile(slug, ".repo-platform.yml");
+  const probe = readRepoFile(slug, REGISTRATION_PATH);
   if (probe.exitCode === 0) {
     return { kind: "pass", value: { modules: declaredModules(probe.stdout) } };
   }
@@ -173,7 +174,7 @@ for (const row of [...discovered].sort((a, b) => (a.repo < b.repo ? -1 : 1))) {
   if (filters !== null) {
     if (adopted.modules === null) {
       warn(
-        `${display}: its .repo-platform.yml has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
+        `${display}: its ${REGISTRATION_PATH} has no readable top-level modules list, so the modules filter cannot judge it - left out of this run; fix the file (the sync would fail on it too), then dispatch the repo by slug or re-run.`,
       );
       continue;
     }

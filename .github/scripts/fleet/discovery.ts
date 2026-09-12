@@ -3,6 +3,7 @@
 
 import { readFileSync, writeSync } from "node:fs";
 import { z } from "zod";
+import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, type RunResult } from "../shared/proc.ts";
@@ -172,7 +173,7 @@ export function pushProbeSkipNotice(display: string): string {
 
 export function notAdoptedNotice(display: string, consequence?: string): string {
   const inserted = consequence === undefined ? "" : `${consequence} `;
-  return `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the platform. ${inserted}Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.`;
+  return `${display}: skipped - no ${REGISTRATION_PATH} on its default branch, so it has not adopted the platform. ${inserted}Register it (docs/new-repo.md) to opt in, or revoke the fleet token's write access to leave the fleet.`;
 }
 
 /** A hand-written settings.yml applied alone would delete every fleet label it does not list, so

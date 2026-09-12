@@ -35,6 +35,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
+import { PLATFORM_NAME } from "../shared/platform.ts";
 import type { IncludeRoot } from "./.vitepress/conventions.ts";
 import { collectFacts } from "./facts.ts";
 import {
@@ -155,7 +156,7 @@ export function assertDocsLanding(docsTree: string): void {
 }
 
 /** The central-theme invariant: fleet repositories carry ONLY markdown, and
- *  the theme comes from repo-platform alone. A caller-shipped .vitepress
+ *  the theme comes from the platform alone. A caller-shipped .vitepress
  *  directory would silently NOT apply (the build root is the action's, not
  *  the caller's), so it is refused loudly instead of shipping a site that
  *  ignores it. Historical tags carrying one are excluded from the version
@@ -165,9 +166,9 @@ export function assertCentralTheme(docsTree: string): void {
   if (existsSync(join(docsTree, ".vitepress"))) {
     throw new Error(
       `${docsTree} contains a .vitepress directory, but the docs site's config and theme ` +
-        "are central (repo-platform's actions/pages-site) - a repo-local .vitepress would " +
+        `are central (${PLATFORM_NAME}'s actions/pages-site) - a repo-local .vitepress would ` +
         "be silently ignored, so it is refused instead. Remove it from the docs tree; theme " +
-        "changes belong in repo-platform.",
+        `changes belong in ${PLATFORM_NAME}.`,
     );
   }
 }

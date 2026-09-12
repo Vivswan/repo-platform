@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { passthrough } from "../.github/scripts/shared/proc.ts";
+import { PLATFORM_NAME, PLATFORM_SLUG } from "../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -22,13 +23,13 @@ function main(): number {
   // process ahead of the finally; the build shares the terminal's process
   // group, takes the signal, and returns its exit code the normal way.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => {});
-  const scratch = mkdtempSync(join(tmpdir(), "repo-platform-docs-check-"));
+  const scratch = mkdtempSync(join(tmpdir(), `${PLATFORM_NAME}-docs-check-`));
   try {
     return passthrough(["bun", join(REPO_ROOT, "actions", "pages-site", "build.ts")], {
       cwd: REPO_ROOT,
       env: {
         GITHUB_WORKSPACE: REPO_ROOT,
-        GITHUB_REPOSITORY: "Vivswan/repo-platform",
+        GITHUB_REPOSITORY: PLATFORM_SLUG,
         RUNNER_TEMP: scratch,
         CHECK: "true",
         SITE_DIR: "",

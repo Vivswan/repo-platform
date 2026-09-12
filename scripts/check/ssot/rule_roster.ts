@@ -46,6 +46,7 @@ export const RULE_ROSTER = [
   "pins-and-identities",
   "docs-constants",
   "owner-slug",
+  "platform-name-once",
   "release-gate-predicates",
   "release-cut-wiring",
   "auto-assign-codeowners-parity",

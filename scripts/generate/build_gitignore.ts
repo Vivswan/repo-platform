@@ -18,6 +18,7 @@ import {
   parseFilesConfig,
 } from "../../actions/plan/files_config.ts";
 import { cleanManagedRegion, HASH_REGION_MARKERS } from "../../actions/shared/grammar.ts";
+import { MANAGED_REGION_LABEL, PLATFORM_NAME } from "../../actions/shared/platform.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
@@ -39,7 +40,7 @@ const DEFAULT_LOCAL_BODY =
 
 // Both .claude spellings are deliberate: the documented .claude/worktrees/ location plus the dotted variant.
 const AGENT_SECTION =
-  "## Agent local state (repo-platform)\n" +
+  `## Agent local state (${PLATFORM_NAME})\n` +
   ".claude/worktrees/\n" +
   ".claude/.worktrees/\n" +
   ".codex/worktrees/\n" +
@@ -48,12 +49,12 @@ const AGENT_SECTION =
 
 // Only paths a fleet step creates inside every checked-out workspace are listed: only those can collide with a committed path of the same name.
 // Root-anchored so a nested source folder of the same name is not swallowed.
-export const CI_WORKSPACE_SECTION = "## CI workspace paths (repo-platform)\n" + "/results.sarif\n";
+export const CI_WORKSPACE_SECTION = `## CI workspace paths (${PLATFORM_NAME})\n/results.sarif\n`;
 
 // Sections the platform authors itself, keyed by the files.yml source name a module lists beside its github/gitignore stems.
 // The fuzz failure directory rides the fuzzer module because only its starter produces it.
 export const PLATFORM_SECTIONS: Record<string, string> = {
-  fuzzer: "## Fuzzer workspace paths (repo-platform fuzzer)\n" + "/.fuzz-failures/\n",
+  fuzzer: `## Fuzzer workspace paths (${PLATFORM_NAME} fuzzer)\n/.fuzz-failures/\n`,
 };
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
@@ -132,7 +133,9 @@ export function missingBlockFiles(entries: [string, string[]][], filesDir: strin
 }
 
 export function sectionsIn(text: string): Record<string, string> {
-  const headings = [...text.matchAll(/^## .+ \((?:github\/gitignore|repo-platform) (.+)\)$/gm)];
+  const headings = [
+    ...text.matchAll(new RegExp(`^## .+ \\((?:github/gitignore|${PLATFORM_NAME}) (.+)\\)$`, "gm")),
+  ];
   const sections: Record<string, string> = {};
   headings.forEach((match, index) => {
     const end = index + 1 < headings.length ? headings[index + 1].index : text.length;
@@ -191,7 +194,7 @@ export function existingLocalSides(output: string): { above: string; below: stri
   const slice = cleanManagedRegion(readFileSync(output).toString("latin1"), HASH_REGION_MARKERS);
   if (slice === null) {
     throw new Error(
-      `${output} has no single clean REPO-PLATFORM MANAGED region (markers missing, duplicated, out of order, or marker text outside the region); fix its markers by hand, then rerun`,
+      `${output} has no single clean ${MANAGED_REGION_LABEL} region (markers missing, duplicated, out of order, or marker text outside the region); fix its markers by hand, then rerun`,
     );
   }
   return { above: slice.above, below: slice.below };
@@ -278,7 +281,7 @@ export function topologyProblems(input: {
     }
     const slice = cleanManagedRegion(input.selfText, HASH_REGION_MARKERS);
     if (slice === null) {
-      problems.push(".gitignore has no single clean REPO-PLATFORM MANAGED region");
+      problems.push(`.gitignore has no single clean ${MANAGED_REGION_LABEL} region`);
     } else {
       const sources = selfSources(input.entries, input.modules);
       const sectionsMissing = sources.filter((path) => !blockSections.has(path));

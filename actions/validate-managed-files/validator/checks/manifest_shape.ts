@@ -1,11 +1,11 @@
-import { MANIFEST_NAME, unknownEntryFields } from "../../../shared/manifest.ts";
+import { unknownEntryFields } from "../../../shared/manifest.ts";
+import { MANIFEST_NAME, PLATFORM_NAME } from "../../../shared/platform.ts";
 import type { Context } from "../context.ts";
 import { error, type Finding } from "../findings.ts";
 
-export const RESYNC =
-  "re-run the sync (dispatch sync-repos.yml in repo-platform with repo=<owner>/<name>), which replaces platform files whole";
+export const RESYNC = `re-run the sync (dispatch sync-repos.yml in ${PLATFORM_NAME} with repo=<owner>/<name>), which replaces platform files whole`;
 
-/** The manifest is itself a managed file, so managed repositories carry it and repo-platform itself must NOT (self mode
+/** The manifest is itself a managed file, so managed repositories carry it and the platform itself must NOT (self mode
  *  inverts). The guarantee is VISIBILITY, not tamper-proofing, and nothing lists the selection's paths against the keys.
  *    caught here or at parity  -> a field outside the vocabulary, a damaged self entry, a class other than the one
  *                                 files.yml writes the path under for this repository, a hash or marker pair the file

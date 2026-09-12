@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseFilesConfig } from "../../../actions/plan/files_config.ts";
+import { REGISTRATION_PATH } from "../../../actions/shared/platform.ts";
 import { must } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -48,7 +49,7 @@ export function writeTargets(dest: string): Record<string, string[]> {
     // actionlint reads a project's .github/actionlint.yaml (the starter the
     // writer lands) only under a git root.
     must(["git", "init", "-q", target]);
-    writeFileSync(join(target, ".repo-platform.yml"), registrationFor(modules));
+    writeFileSync(join(target, REGISTRATION_PATH), registrationFor(modules));
     must(
       [
         "bun",

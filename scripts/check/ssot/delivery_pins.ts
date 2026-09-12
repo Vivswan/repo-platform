@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { FLEET_WORKFLOWS } from "../../../.github/scripts/build-branches/branch_tree.ts";
+import { PLATFORM_NAME, PLATFORM_OWNER } from "../../../actions/shared/platform.ts";
 import { actionManifestPaths } from "../../lib/action_steps.ts";
 import { constStringValue } from "../../lib/ts_extract.ts";
 import { type Mismatch, sortedSet } from "./comparison.ts";
-import { OWNER, REPO_ROOT, read, walkFiles } from "./inputs.ts";
+import { REPO_ROOT, read, walkFiles } from "./inputs.ts";
 import type { Rule } from "./rule_roster.ts";
 
 export interface Pin {
@@ -50,7 +51,7 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_COMMENT_RE = /^v\d+\.\d+\.\d+$/;
 
 /** A moving tag or branch would let upstream change what the fleet runs without a PR here; `@<sha> # vX.Y.Z` is the shape Dependabot bumps.
- *  The owner's own actions are exempt: the repo-platform self-pins under files/ are judged by the fleet-refs-ride-build rule,
+ *  The owner's own actions are exempt: the platform's self-pins under files/ are judged by the fleet-refs-ride-build rule,
  *  and the settings apply's pin by the settings-apply-input rule. */
 export function pinShapeMismatches(
   pins: Pin[],
@@ -131,7 +132,7 @@ export const DELIVERY_REF = "build";
 
 export interface SelfPin {
   file: string;
-  /** The pin's stem after the owner: repo-platform/<path>. */
+  /** The pin's stem after the owner: <name>/<path>. */
   stem: string;
   ref: string;
 }
@@ -141,8 +142,10 @@ export interface SelfPin {
  *  this owner, GitHub resolves owners case-insensitively), so the slot is
  *  matched by placeholder name, never by enumerating spellings. */
 export function sourceSelfPins(text: string, file: string): SelfPin[] {
-  const token =
-    /(?<![A-Za-z0-9-])\{\{\s*github_username(?:_lower)?\s*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
+  const token = new RegExp(
+    `(?<![A-Za-z0-9-])\\{\\{\\s*github_username(?:_lower)?\\s*\\}\\}/(${PLATFORM_NAME}/[A-Za-z0-9_./-]+)@([^\\s"']*)`,
+    "g",
+  );
   return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
 }
 
@@ -162,7 +165,7 @@ export function deliveryRefTwinMismatches(published: string, deliveryRef: string
 export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mismatch[] {
   if (pins.length === 0) {
     throw new Error(
-      "no repo-platform self-reference found in the scanned content - anchor lost " +
+      `no ${PLATFORM_NAME} self-reference found in the scanned content - anchor lost ` +
         "(the writer's sources always pin their own actions and reusables)",
     );
   }
@@ -182,7 +185,7 @@ export function fleetWorkflowPinMismatches(
   pins: SelfPin[],
   shipped: readonly string[],
 ): Mismatch[] {
-  const prefix = "repo-platform/.github/workflows/";
+  const prefix = `${PLATFORM_NAME}/.github/workflows/`;
   return pins
     .filter(
       (pin) => pin.stem.startsWith(prefix) && !shipped.includes(pin.stem.slice(prefix.length)),
@@ -210,7 +213,7 @@ export const deliveryPinRules: Rule[] = [
       const pins = files.flatMap((rel) => extractUsesPins(read(rel), rel));
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
-      return [...pinMismatches(pins), ...pinShapeMismatches(pins, OWNER, BRANCH_PINNED)];
+      return [...pinMismatches(pins), ...pinShapeMismatches(pins, PLATFORM_OWNER, BRANCH_PINNED)];
     },
   },
   {

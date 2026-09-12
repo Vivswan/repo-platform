@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { MANIFEST_NAME } from "../../../../actions/shared/manifest.ts";
+import { MANIFEST_NAME } from "../../../../actions/shared/platform.ts";
 import { checkManifestParity } from "../../../../actions/validate-managed-files/validator/checks/manifest_parity.ts";
 import { loadContext } from "../../../../actions/validate-managed-files/validator/context.ts";
 import { boundedSpawnSync } from "../../../shared/bounded_spawn.ts";

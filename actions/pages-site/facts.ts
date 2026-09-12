@@ -36,12 +36,12 @@ export interface FactsInput {
 
 type Identity = Pick<ProjectFacts, "description" | "homepage" | "topics">;
 
+import { REGISTRATION_PATH } from "../shared/platform.ts";
+
 /** The file's content at the tier's ref, or null when absent. */
 export type FactsReader = (path: string) => string | null;
 
 const SETTINGS_FILE = ".github/settings.yml";
-
-const REGISTRATION_FILE = ".repo-platform.yml";
 
 const LICENSE_FILE = "LICENSE.md";
 const LICENSE_HEAD_LINES = 20;
@@ -160,7 +160,7 @@ function readSettingsIdentity(read: FactsReader): Record<string, unknown> | null
 }
 
 function readRegistrationDescription(read: FactsReader): unknown {
-  const text = read(REGISTRATION_FILE);
+  const text = read(REGISTRATION_PATH);
   if (text === null) return undefined;
   const registration = parseYamlRecord(text);
   return registration === null ? undefined : asRecord(registration.project)?.description;
